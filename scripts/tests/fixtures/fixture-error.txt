@@ -1,0 +1,9 @@
+@test_fixture(scope: file)
+fn setup(harness: Harness) -> Result<nil, string> {
+  return Err("fixture failure")
+}
+
+@test(fixture: setup)
+pipeline test_case(value: unknown) {
+  throw "a failed fixture must not reach the test body"
+}

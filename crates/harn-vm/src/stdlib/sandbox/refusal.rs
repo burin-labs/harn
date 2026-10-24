@@ -21,9 +21,12 @@ use super::{
 
 #[path = "refusal_mechanism.rs"]
 mod refusal_mechanism;
+#[path = "refusal_network.rs"]
+mod refusal_network;
 pub use refusal_mechanism::{
     infer_process_sandbox_mechanism, ProcessSandboxGrants, ProcessSandboxMechanism,
 };
+pub use refusal_network::{ProcessSandboxNetwork, ProcessSandboxReport};
 
 /// How a child-process refusal was determined, and therefore how much its
 /// `refused_paths` can be trusted.
@@ -272,6 +275,7 @@ impl ProcessSandboxRefusal {
 pub struct ProcessSandboxReportingContext {
     pub backend: String,
     pub reporting: ProcessSandboxDenialReporting,
+    pub network: ProcessSandboxNetwork,
     /// The policy that confined the spawn, captured on the spawning thread so
     /// a refusal classified later (on a waiter thread) still names the grants
     /// that were actually in force.
@@ -281,20 +285,34 @@ pub struct ProcessSandboxReportingContext {
 impl ProcessSandboxReportingContext {
     pub fn current() -> Self {
         let policy = super::active_sandbox_policy();
+        let inherited = super::self_confinement::current_process_confinement().is_some();
         let reporting = match policy {
             Some(_) if ActiveBackend::available() => ProcessSandboxDenialReporting::InferredOnly,
             Some(_) => ProcessSandboxDenialReporting::BackendUnavailable,
             // A child of a confined process runs under that process's
             // profile, so its permission errors are the kernel's too.
-            None if super::self_confinement::current_process_confinement().is_some() => {
-                ProcessSandboxDenialReporting::InferredOnly
-            }
+            None if inherited => ProcessSandboxDenialReporting::InferredOnly,
             None => ProcessSandboxDenialReporting::NotEnforced,
         };
+        let network_inherited = inherited || ActiveBackend::inherits_network_grants();
         Self {
             backend: super::active_backend_filesystem_mechanism().to_string(),
             reporting,
+            network: ProcessSandboxNetwork::capture(
+                reporting,
+                policy.as_ref().map(|(policy, _)| policy),
+                network_inherited,
+            ),
             policy: policy.map(|(policy, _)| Box::new(policy)),
+        }
+    }
+
+    pub fn report(&self) -> ProcessSandboxReport {
+        ProcessSandboxReport {
+            kind: super::active_backend_mechanism().process_kind().to_string(),
+            enforced: self.reporting == ProcessSandboxDenialReporting::InferredOnly,
+            denial_reporting: self.reporting,
+            network: self.network,
         }
     }
 
@@ -331,7 +349,7 @@ impl ProcessSandboxReportingContext {
                 )
             });
         ProcessSandboxAssessment {
-            reporting: self.reporting,
+            report: self.report(),
             refusal,
         }
     }
@@ -339,7 +357,7 @@ impl ProcessSandboxReportingContext {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessSandboxAssessment {
-    pub reporting: ProcessSandboxDenialReporting,
+    pub report: ProcessSandboxReport,
     pub refusal: Option<ProcessSandboxRefusal>,
 }
 

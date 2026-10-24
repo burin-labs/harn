@@ -1,11 +1,14 @@
 import {
+  CommandNetworkGrants,
   CommandResult,
+  CommandSandboxReport,
   CommandStepReceipt,
   command_failure_text,
   command_json,
   command_json_step,
   command_result_fail,
   command_result_ok,
+  command_run,
   command_try,
 } from "std/command"
 import { assert_error_contains } from "std/testing"
@@ -53,6 +56,19 @@ pipeline default(harness: Harness) {
     {capture: {max_inline_bytes: 100}},
   )
   assert_eq(direct.direct, true)
+  const captured = command_run(
+    harness.tools,
+    no_newline_echo(harness.system, "network-receipt-control"),
+  )
+  assert_eq(captured.stdout, "network-receipt-control")
+  assert_eq(captured.exit_code, 0)
+  assert(captured.sandbox != nil)
+  require schema_is(captured.sandbox, schema_of(CommandSandboxReport)), "captured sandbox schema"
+  require schema_is(captured, schema_of(CommandResult)), "captured command result schema"
+  require !schema_is({status: "policy"}, schema_of(CommandNetworkGrants)),
+    "policy grants require route fields"
+  require !schema_is({status: "unsupported"}, schema_of(CommandNetworkGrants)),
+    "network status must be known"
   const parsed = command_json(
     harness.agent,
     harness.tools,

@@ -227,11 +227,15 @@ fn workspace_toolchain_env_with_package_cache(
     let mut env = vec![
         (
             "XDG_CACHE_HOME".to_string(),
-            root.join("xdg-cache").display().to_string(),
+            path("XDG_CACHE_HOME", "xdg-cache"),
         ),
         ("GOCACHE".to_string(), path("GOCACHE", "go-build")),
         ("GOMODCACHE".to_string(), path("GOMODCACHE", "go-mod")),
         ("GOPATH".to_string(), path("GOPATH", "go")),
+        (
+            "GRADLE_USER_HOME".to_string(),
+            path("GRADLE_USER_HOME", "gradle"),
+        ),
         (
             "SWIFTPM_MODULECACHE_OVERRIDE".to_string(),
             path("SWIFTPM_MODULECACHE_OVERRIDE", "swiftpm/modules"),
@@ -450,7 +454,7 @@ pub(crate) fn inject_workspace_process_env(
 }
 
 /// The JVM option that makes a loopback-only grant hold for Java children.
-const JVM_PREFER_IPV4_STACK: &str = "-Djava.net.preferIPv4Stack=true";
+const JVM_PREFER_IPV6_ADDRESSES: &str = "-Djava.net.preferIPv6Addresses=true";
 
 /// Make `allow_tcp_loopback` mean what it says for JVM children on macOS.
 ///
@@ -461,8 +465,16 @@ const JVM_PREFER_IPV4_STACK: &str = "-Djava.net.preferIPv4Stack=true";
 /// loopback dies with a bare `SocketException: Operation not permitted`
 /// while a Python or Node server beside it works. The seatbelt grammar
 /// offers no spelling for the mapped form (measured: numeric hosts are
-/// rejected at profile parse), so the fix is on the JVM side: prefer the
-/// IPv4 stack, which makes the JVM emit the addresses the filter matches.
+/// rejected at profile parse), so the fix is on the JVM side: prefer IPv6
+/// addresses, so `localhost` resolves to `::1`, which the filter matches.
+///
+/// Not the IPv4 stack, which also works for one JVM: a server JVM then
+/// advertises only `127.0.0.1`, and a child JVM launched without this
+/// variable connects to it mapped. Gradle starts its Checkstyle, PMD and
+/// CodeNarc workers with a fresh environment, so every code-quality task
+/// failed. With IPv6 preferred the server advertises `::1` first, and the
+/// child reaches it whatever its own setting. A JVM that names the literal
+/// `127.0.0.1` is still refused.
 ///
 /// `JAVA_TOOL_OPTIONS` is the one JVM-wide knob every launcher honours
 /// (Gradle's wrapper, sbt, Maven, `java` itself). A caller's own value is
@@ -493,9 +505,9 @@ fn inject_jvm_loopback_env(env: &mut Vec<(String, String)>, policy: &CapabilityP
         return;
     }
     let value = if existing.trim().is_empty() {
-        JVM_PREFER_IPV4_STACK.to_string()
+        JVM_PREFER_IPV6_ADDRESSES.to_string()
     } else {
-        format!("{} {JVM_PREFER_IPV4_STACK}", existing.trim_end())
+        format!("{} {JVM_PREFER_IPV6_ADDRESSES}", existing.trim_end())
     };
     env.retain(|(key, _)| key != "JAVA_TOOL_OPTIONS");
     env.push(("JAVA_TOOL_OPTIONS".to_string(), value));
@@ -699,6 +711,7 @@ mod tests {
             "GOCACHE",
             "GOMODCACHE",
             "GOPATH",
+            "GRADLE_USER_HOME",
             "CARGO_TARGET_DIR",
             "PIP_CACHE_DIR",
             "UV_CACHE_DIR",
@@ -882,7 +895,7 @@ mod tests {
     }
 
     #[test]
-    fn a_loopback_grant_pins_the_jvm_to_the_ipv4_stack_on_macos() {
+    fn a_loopback_grant_makes_the_jvm_prefer_ipv6_on_macos() {
         let workspace = tempfile::tempdir().unwrap();
         let mut policy = policy(workspace.path());
         let mut env = Vec::new();
@@ -901,7 +914,7 @@ mod tests {
             .map(|(_, value)| value.clone())
             .unwrap();
         if cfg!(target_os = "macos") {
-            assert_eq!(value, format!("-Xmx1g {JVM_PREFER_IPV4_STACK}"));
+            assert_eq!(value, format!("-Xmx1g {JVM_PREFER_IPV6_ADDRESSES}"));
         } else {
             assert_eq!(value, "-Xmx1g", "only the macOS seatbelt needs the pin");
         }
@@ -909,7 +922,7 @@ mod tests {
         // An operator who already chose a stack keeps their choice.
         let mut env = vec![(
             "JAVA_TOOL_OPTIONS".to_string(),
-            "-Djava.net.preferIPv6Addresses=true".to_string(),
+            "-Djava.net.preferIPv4Stack=true".to_string(),
         )];
         inject_workspace_process_env(&mut env, &policy);
         assert_eq!(
@@ -918,6 +931,6 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(env[0].1, "-Djava.net.preferIPv6Addresses=true");
+        assert_eq!(env[0].1, "-Djava.net.preferIPv4Stack=true");
     }
 }

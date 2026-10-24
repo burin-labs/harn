@@ -248,20 +248,14 @@ mod tests {
 
     fn excluded_registry(name: &str, mut entry: DictMap) -> VmValue {
         let mut governance = DictMap::new();
-        governance.insert(
-            crate::value::intern_key("audiences"),
-            VmValue::List(Arc::new(vec![VmValue::String("cli".into())])),
+        governance.put(
+            "audiences",
+            VmValue::list(vec![VmValue::String("cli".into())]),
         );
-        entry.insert(
-            crate::value::intern_key("governance"),
-            VmValue::dict(governance),
-        );
+        entry.put("governance", VmValue::dict(governance));
         entry.put_str("name", name);
         let mut registry = DictMap::new();
-        registry.insert(
-            crate::value::intern_key("tools"),
-            VmValue::List(Arc::new(vec![VmValue::dict(entry)])),
-        );
+        registry.put("tools", VmValue::list(vec![VmValue::dict(entry)]));
         let raw = VmValue::dict(registry);
         crate::tool_registry::project_tools_for_audience(
             &raw,
@@ -273,7 +267,7 @@ mod tests {
     fn registry(entries: Vec<VmValue>) -> VmValue {
         let mut registry = DictMap::new();
         registry.put_str("_type", "tool_registry");
-        registry.insert("tools".into(), VmValue::List(Arc::new(entries)));
+        registry.put("tools", VmValue::list(entries));
         VmValue::dict(registry)
     }
 
@@ -295,13 +289,11 @@ mod tests {
             .is_err());
 
         let mut changed = owned.as_dict().unwrap().as_ref().clone();
-        changed.insert(
-            "tools".into(),
-            VmValue::List(Arc::new(vec![crate::schema::json_to_vm_value(
-                &serde_json::json!({
-                    "name": "payload", "parameters": {}, "outputSchema": {"type": "string"}
-                }),
-            )])),
+        changed.put(
+            "tools",
+            VmValue::list(vec![crate::schema::json_to_vm_value(&serde_json::json!({
+                "name": "payload", "parameters": {}, "outputSchema": {"type": "string"}
+            }))]),
         );
         let current = prepared_handler_catalog(&VmValue::dict(changed), "payload")
             .expect("changed source gets its own contract");

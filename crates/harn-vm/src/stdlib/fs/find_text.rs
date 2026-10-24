@@ -583,7 +583,6 @@ fn find_text_summary_parallel(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "find_text(root: string, pattern: string, options?: dict) -> any",
     category = "fs",
     doc = "Search files under a root for text hits, existence, or capped counts."

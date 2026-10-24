@@ -165,6 +165,11 @@ Hidden-file filtering is a separate axis. `glob` and `walk_dir` always list
 dotfiles, so `harness.fs.glob(".github/workflows/*.yml")` works; `find_text` and
 `find_evidence` keep their `include_hidden: false` default.
 
+`harness.fs.walk` fails if it cannot read part of the tree. A missing root or
+an unreadable child does not return an empty or partial list. Invalid ignore
+files also fail the walk. Filesystem errors
+carry the same `error`, `kind`, and `message` fields as other file operations.
+
 `harness.fs.find_text(root, pattern, options?)` walks with gitignore-aware
 defaults and searches matching files in the VM. It returns a list of
 `{path, line, col, column, text}` hits by default. Set `mode: "exists"` for a

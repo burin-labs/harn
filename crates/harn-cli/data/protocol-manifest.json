@@ -1,0 +1,1093 @@
+{
+  "a2a": {
+    "methods": [
+      "message/send",
+      "message/stream",
+      "tasks/get",
+      "tasks/cancel",
+      "tasks/resubscribe",
+      "tasks/pushNotificationConfig/set",
+      "tasks/pushNotificationConfig/get",
+      "tasks/pushNotificationConfig/list",
+      "tasks/pushNotificationConfig/delete",
+      "agent/getAuthenticatedExtendedCard"
+    ],
+    "protocolVersion": "0.3.0",
+    "taskEventTypes": [
+      "status",
+      "message",
+      "worker_update"
+    ],
+    "taskStates": [
+      "submitted",
+      "working",
+      "completed",
+      "failed",
+      "canceled",
+      "cancelled",
+      "input-required",
+      "rejected",
+      "auth-required"
+    ]
+  },
+  "acp": {
+    "agentLifecycleEvents": [
+      "Spawned",
+      "Progressed",
+      "WaitingForInput",
+      "Suspended",
+      "Resumed",
+      "Completed",
+      "Failed",
+      "Stopped",
+      "Cancelled",
+      "Joined"
+    ],
+    "agentLifecycleStateProjections": [
+      {
+        "a2aTaskState": "working",
+        "aliases": [],
+        "resumable": false,
+        "runRecordStatus": "running",
+        "terminal": false,
+        "wire": "running"
+      },
+      {
+        "a2aTaskState": "working",
+        "aliases": [],
+        "resumable": false,
+        "runRecordStatus": "progressed",
+        "terminal": false,
+        "wire": "progressed"
+      },
+      {
+        "a2aTaskState": "input-required",
+        "aliases": [
+          "awaiting"
+        ],
+        "resumable": true,
+        "runRecordStatus": "awaiting_input",
+        "terminal": false,
+        "wire": "awaiting_input"
+      },
+      {
+        "a2aTaskState": "paused",
+        "aliases": [],
+        "resumable": true,
+        "runRecordStatus": "suspended",
+        "terminal": false,
+        "wire": "suspended"
+      },
+      {
+        "a2aTaskState": "completed",
+        "aliases": [
+          "done",
+          "succeeded",
+          "success",
+          "ok"
+        ],
+        "resumable": false,
+        "runRecordStatus": "completed",
+        "terminal": true,
+        "wire": "completed"
+      },
+      {
+        "a2aTaskState": "failed",
+        "aliases": [
+          "error",
+          "errored",
+          "timeout",
+          "timed_out"
+        ],
+        "resumable": false,
+        "runRecordStatus": "failed",
+        "terminal": true,
+        "wire": "failed"
+      },
+      {
+        "a2aTaskState": "cancelled",
+        "aliases": [],
+        "resumable": false,
+        "runRecordStatus": "stopped",
+        "terminal": true,
+        "wire": "stopped"
+      },
+      {
+        "a2aTaskState": "cancelled",
+        "aliases": [
+          "canceled",
+          "aborted"
+        ],
+        "resumable": false,
+        "runRecordStatus": "cancelled",
+        "terminal": true,
+        "wire": "cancelled"
+      }
+    ],
+    "agentLifecycleStates": [
+      "running",
+      "progressed",
+      "awaiting_input",
+      "suspended",
+      "completed",
+      "failed",
+      "stopped",
+      "cancelled"
+    ],
+    "agentMethods": [
+      "initialize",
+      "session/inject",
+      "session/inject_host_event",
+      "session/new",
+      "session/inputs",
+      "session/load",
+      "session/replace_inject",
+      "session/resume",
+      "session/prompt",
+      "session/revoke_inject",
+      "session/truncate",
+      "session/rollback",
+      "session/redo",
+      "session/remind",
+      "session/pending_injections",
+      "session/revoke_reminder",
+      "session/cancel_tool_call",
+      "session/close",
+      "session/stop"
+    ],
+    "agentNotifications": [
+      "session/message",
+      "session/update",
+      "terminal/output"
+    ],
+    "clientMethods": [
+      "fs/read_text_file",
+      "fs/write_text_file",
+      "terminal/create",
+      "terminal/kill",
+      "session/request_permission"
+    ],
+    "contentBlockTypes": [
+      "text",
+      "resource_link",
+      "resource",
+      "image",
+      "audio"
+    ],
+    "contentExtensionFields": [
+      "permission_preview",
+      "visible_delta",
+      "visible_text"
+    ],
+    "deprecatedAgentMethods": {
+      "session/stop": {
+        "removal": "after one release",
+        "replacement": "session/close"
+      }
+    },
+    "dispatchedMethods": [
+      "initialize",
+      "authenticate",
+      "_harn/providerCatalog",
+      "harn.session_recap.query",
+      "harn.session_timeline.query",
+      "harn.session_view.query",
+      "harn.session_history.boundaries",
+      "harn.session_timeline.subscribe",
+      "harn.session_timeline.unsubscribe",
+      "session/new",
+      "session/inputs",
+      "session/load",
+      "session/attach",
+      "session/detach",
+      "session/heartbeat",
+      "session/live_clients",
+      "session/takeover",
+      "session/resume",
+      "session/fork",
+      "session/truncate",
+      "session/rollback",
+      "session/redo",
+      "session/set_mode",
+      "session/set_config_option",
+      "session/plan_document/mutate",
+      "session/fs_mode",
+      "session/fs_commit_staged",
+      "session/fs_discard_staged",
+      "session/restore_tool_call",
+      "session/workspace_checkpoint",
+      "session/prompt",
+      "session/cancel",
+      "session/cancel_tool_call",
+      "session/close",
+      "session/stop",
+      "session/inject",
+      "session/inject_host_event",
+      "session/revoke_inject",
+      "session/replace_inject",
+      "session/remind",
+      "session/pending_injections",
+      "session/revoke_reminder",
+      "session/list",
+      "harn.session_workspace_roots",
+      "harn.session_add_root",
+      "harn.session_reanchor",
+      "harn.session_rollback",
+      "harn.session_redo",
+      "agent/resume",
+      "harn.hitl.respond",
+      "workflow/signal",
+      "harn.workflow.signal",
+      "workflow/query",
+      "harn.workflow.query",
+      "workflow/update",
+      "harn.workflow.update",
+      "workflow/pause",
+      "harn.workflow.pause",
+      "workflow/resume",
+      "harn.workflow.resume",
+      "mcp/catalog",
+      "harn.mcp.catalog",
+      "mcp/status",
+      "harn.mcp.status",
+      "mcp/authorize",
+      "harn.mcp.authorize",
+      "mcp/authorize_batch",
+      "harn.mcp.authorize_batch",
+      "mcp/oauth_callback",
+      "harn.mcp.oauth_callback",
+      "mcp/import_token",
+      "harn.mcp.import_token"
+    ],
+    "handledMethods": [
+      "session/set_budget",
+      "initialize",
+      "authenticate",
+      "_harn/providerCatalog",
+      "harn.session_recap.query",
+      "harn.session_timeline.query",
+      "harn.session_view.query",
+      "harn.session_history.boundaries",
+      "harn.session_timeline.subscribe",
+      "harn.session_timeline.unsubscribe",
+      "session/new",
+      "session/inputs",
+      "session/load",
+      "session/attach",
+      "session/detach",
+      "session/heartbeat",
+      "session/live_clients",
+      "session/takeover",
+      "session/resume",
+      "session/fork",
+      "session/truncate",
+      "session/rollback",
+      "session/redo",
+      "session/set_mode",
+      "session/set_config_option",
+      "session/plan_document/mutate",
+      "session/fs_mode",
+      "session/fs_commit_staged",
+      "session/fs_discard_staged",
+      "session/restore_tool_call",
+      "session/workspace_checkpoint",
+      "session/prompt",
+      "session/cancel",
+      "session/cancel_tool_call",
+      "session/close",
+      "session/stop",
+      "session/inject",
+      "session/inject_host_event",
+      "session/revoke_inject",
+      "session/replace_inject",
+      "session/remind",
+      "session/pending_injections",
+      "session/revoke_reminder",
+      "session/list",
+      "harn.session_workspace_roots",
+      "harn.session_add_root",
+      "harn.session_reanchor",
+      "harn.session_rollback",
+      "harn.session_redo",
+      "agent/resume",
+      "harn.hitl.respond",
+      "workflow/signal",
+      "harn.workflow.signal",
+      "workflow/query",
+      "harn.workflow.query",
+      "workflow/update",
+      "harn.workflow.update",
+      "workflow/pause",
+      "harn.workflow.pause",
+      "workflow/resume",
+      "harn.workflow.resume",
+      "mcp/catalog",
+      "harn.mcp.catalog",
+      "mcp/status",
+      "harn.mcp.status",
+      "mcp/authorize",
+      "harn.mcp.authorize",
+      "mcp/authorize_batch",
+      "harn.mcp.authorize_batch",
+      "mcp/oauth_callback",
+      "harn.mcp.oauth_callback",
+      "mcp/import_token",
+      "harn.mcp.import_token"
+    ],
+    "harnAgentEventKinds": [
+      "boundary_failure",
+      "budget_circuit_breaker",
+      "budget_exhausted",
+      "code_librarian_query_nl_fallback",
+      "composition_child_call",
+      "composition_child_result",
+      "composition_error",
+      "composition_finish",
+      "composition_start",
+      "compass_routing_decision",
+      "control_outcome",
+      "daemon_watchdog_tripped",
+      "feedback_injected",
+      "final_wrapup",
+      "host_attachment",
+      "host_tool_result",
+      "input_guardrail_verdict",
+      "iteration_end",
+      "session_health",
+      "iteration_start",
+      "judge_decision",
+      "judge_started",
+      "loop_control_decision",
+      "loop_stuck",
+      "mcp_auth_required",
+      "mcp_catalog_changed",
+      "mcp_notification",
+      "model_job",
+      "orchestration_decision",
+      "pack_thinking_stripped",
+      "progress_reported",
+      "purpose_label",
+      "repair_output_contract_applied",
+      "require_successful_tools_violation",
+      "reserved_terminal_verify",
+      "scope_classifier_verdict",
+      "self_consistency_tie",
+      "session_closed",
+      "structural_validator_decision",
+      "subagent_join",
+      "subagent_stop",
+      "step_judge_decision",
+      "tool_batch_disposition",
+      "tool_call_audit",
+      "tool_format_override",
+      "turn_phase_changed",
+      "typed_checkpoint"
+    ],
+    "harnAgentEventMethod": "_harn/agentEvent",
+    "harnProviderCatalogMethod": "_harn/providerCatalog",
+    "harnSessionRecapMethods": [
+      "harn.session_recap.query"
+    ],
+    "harnSessionTimelineMethods": [
+      "harn.session_timeline.query",
+      "harn.session_timeline.subscribe",
+      "harn.session_timeline.unsubscribe",
+      "harn.session_timeline.update"
+    ],
+    "harnSessionUpdateExtensions": [
+      "artifact",
+      "available_commands_update",
+      "fs_watch",
+      "handoff",
+      "hitl_request",
+      "hitl_resolved",
+      "live_session_client",
+      "log",
+      "progress",
+      "reminder_emitted",
+      "skill_activated",
+      "skill_deactivated",
+      "skill_narrow",
+      "skill_scope_tools",
+      "stance_transition",
+      "tool_search_query",
+      "tool_search_result",
+      "transcript_compacted",
+      "transcript_projected",
+      "worker_update"
+    ],
+    "promptErrorCategories": [
+      "timeout",
+      "auth",
+      "invalid_request",
+      "rate_limit",
+      "overloaded",
+      "server_error",
+      "transient_network",
+      "resource_busy",
+      "schema_incompatible",
+      "schema_validation",
+      "schema_stream_aborted",
+      "tool_error",
+      "tool_rejected",
+      "egress_blocked",
+      "cancelled",
+      "channel_closed",
+      "not_found",
+      "circuit_open",
+      "budget_exceeded",
+      "internal",
+      "environment",
+      "generic"
+    ],
+    "promptErrorCodeIsProviderPassthrough": true,
+    "promptErrorDataSchema": "harn.acp.prompt_error.v1",
+    "promptErrorKinds": [
+      "transient",
+      "terminal"
+    ],
+    "promptErrorReasons": [
+      "rate_limit",
+      "server_error",
+      "network_error",
+      "timeout",
+      "auth_failure",
+      "context_overflow",
+      "content_policy",
+      "invalid_request",
+      "invalid_response",
+      "model_unavailable",
+      "empty_generation",
+      "billing_limit",
+      "output_budget_exhausted",
+      "unknown",
+      "policy_denied",
+      "managed_spend_paused"
+    ],
+    "promptErrorTerminalClasses": [
+      "context_overflow",
+      "provider_misconfigured",
+      "provider_unavailable",
+      "provider_content_policy",
+      "provider_billing",
+      "rate_limited",
+      "timeout",
+      "resource_busy",
+      "tool_policy_rejected",
+      "host_bridge_unimplemented",
+      "agent_loop_protocol_failure",
+      "parse_dropped",
+      "generic_throw",
+      "managed_spend_paused"
+    ],
+    "promptResultExtensionFields": [
+      "terminal"
+    ],
+    "schemaCompatibility": "agentclientprotocol/agent-client-protocol schema v0.12.2",
+    "sessionUpdateVariants": [
+      "user_message",
+      "user_message_chunk",
+      "agent_message_chunk",
+      "agent_thought_chunk",
+      "tool_call",
+      "tool_call_update",
+      "plan",
+      "available_commands_update",
+      "current_mode_update",
+      "config_option_update",
+      "session_info_update",
+      "session_redo",
+      "session_rollback",
+      "session_truncated",
+      "artifact",
+      "fs_watch",
+      "handoff",
+      "hitl_request",
+      "hitl_resolved",
+      "live_session_client",
+      "log",
+      "progress",
+      "reminder_emitted",
+      "skill_activated",
+      "skill_deactivated",
+      "skill_narrow",
+      "skill_scope_tools",
+      "stance_transition",
+      "tool_search_query",
+      "tool_search_result",
+      "transcript_compacted",
+      "transcript_projected",
+      "worker_update"
+    ],
+    "toolCallErrorCategories": [
+      "schema_validation",
+      "tool_error",
+      "mcp_server_error",
+      "host_bridge_error",
+      "permission_denied",
+      "rejected_loop",
+      "parse_aborted",
+      "timeout",
+      "network",
+      "resource_busy",
+      "cancelled",
+      "abandoned_at_loop_exit",
+      "environment",
+      "unknown"
+    ],
+    "toolCallStatuses": [
+      "pending",
+      "in_progress",
+      "completed",
+      "failed"
+    ],
+    "toolExecutorSimpleValues": [
+      "harn_builtin",
+      "host_bridge",
+      "provider_native"
+    ],
+    "toolKinds": [
+      "read",
+      "edit",
+      "delete",
+      "move",
+      "search",
+      "execute",
+      "think",
+      "fetch",
+      "other"
+    ],
+    "toolLifecycleExtensionFields": [
+      "audit",
+      "changedPaths",
+      "data",
+      "durationMs",
+      "error",
+      "errorCategory",
+      "executionDurationMs",
+      "executor",
+      "health",
+      "intent",
+      "mutationStatus",
+      "parsing",
+      "rawInputPartial"
+    ],
+    "toolMutationStatuses": [
+      "applied",
+      "unchanged",
+      "not_applied",
+      "unknown"
+    ],
+    "transportControlMethods": [
+      "session/set_budget"
+    ],
+    "workerStatuses": [
+      "running",
+      "progressed",
+      "awaiting_input",
+      "suspended",
+      "completed",
+      "failed",
+      "stopped",
+      "cancelled"
+    ]
+  },
+  "activity": {
+    "kinds": [
+      "external_action",
+      "tool_permission"
+    ],
+    "source": "crates/harn-stdlib/src/stdlib/activity/vocabulary.harn",
+    "toolPermissionDeciders": [
+      "person",
+      "remembered_rule",
+      "user_policy",
+      "managed_policy",
+      "runtime_policy",
+      "host_unavailable",
+      "auto_reviewer"
+    ],
+    "toolPermissionGrantExpiries": [
+      "after_dispatch",
+      "session_end"
+    ],
+    "toolPermissionGrantScopes": [
+      "once",
+      "session"
+    ],
+    "toolPermissionOutcomes": [
+      "approved",
+      "denied",
+      "timed_out",
+      "cancelled"
+    ],
+    "toolPermissionPolicyLayers": [
+      "user_policy",
+      "managed_policy",
+      "runtime_policy",
+      "remembered_rule"
+    ],
+    "toolPermissionPolicyOutcomes": [
+      "allowed",
+      "denied",
+      "approval_required",
+      "unavailable"
+    ]
+  },
+  "bindings": {
+    "go": {
+      "artifact": "go/harnprotocol/harnprotocol.go",
+      "modulePath": "github.com/burin-labs/harn/spec/protocol-artifacts/go/harnprotocol",
+      "stability": "stable"
+    },
+    "harnToolsTypescript": {
+      "artifact": "harn-tools.ts",
+      "schema": "schemas/harn-tools-v2.schema.json",
+      "schemaVersion": "harn-tools/2.0",
+      "stability": "stable"
+    },
+    "python": {
+      "artifact": "python/harn_protocol.py",
+      "minimumPythonVersion": "3.9",
+      "stability": "stable"
+    },
+    "rust": {
+      "artifact": "harn-protocol.rs",
+      "dependencies": [
+        "serde",
+        "serde_json"
+      ],
+      "stability": "stable",
+      "vendorPath": "protocol/src/generated.rs"
+    },
+    "swift": {
+      "artifact": "HarnProtocol.swift",
+      "stability": "stable"
+    },
+    "swiftRunSessionView": {
+      "artifact": "HarnRunSessionView.swift",
+      "schema": "schemas/run-session-view-v1.schema.json",
+      "stability": "stable"
+    },
+    "typescript": {
+      "artifact": "harn-protocol.ts",
+      "stability": "stable"
+    }
+  },
+  "checkCommand": "make check-protocol-artifacts",
+  "connectorSetup": {
+    "configurationFields": [
+      "oauth_client_id"
+    ],
+    "errorCodes": [
+      "connector_unavailable",
+      "configuration_missing",
+      "browser_open_failed",
+      "callback_timeout",
+      "user_denied",
+      "state_mismatch",
+      "token_exchange_failed",
+      "credential_store_failed",
+      "validation_failed",
+      "cancelled",
+      "unknown"
+    ],
+    "interactions": [
+      "none",
+      "browser",
+      "secret_entry",
+      "user_code"
+    ],
+    "source": "crates/harn-stdlib/src/stdlib/connectors/setup.harn",
+    "stages": [
+      "resolving",
+      "opening_browser",
+      "waiting_for_user",
+      "exchanging",
+      "storing",
+      "validating",
+      "ready"
+    ],
+    "statuses": [
+      "in_progress",
+      "succeeded",
+      "failed",
+      "cancelled",
+      "timed_out"
+    ]
+  },
+  "externalActions": {
+    "activityStatuses": [
+      "proposed",
+      "approval_pending",
+      "denied",
+      "cancelled",
+      "timed_out",
+      "dispatch_pending",
+      "confirmed",
+      "failed_before_dispatch",
+      "rejected",
+      "reconciliation_required"
+    ],
+    "deciders": [
+      "person",
+      "remembered_rule",
+      "user_policy",
+      "managed_policy",
+      "adversarial_reviewer",
+      "test_fixture"
+    ],
+    "decisionOutcomes": [
+      "approved",
+      "denied",
+      "timed_out",
+      "cancelled"
+    ],
+    "nextActions": [
+      "none",
+      "reconcile"
+    ],
+    "outcomes": [
+      "confirmed",
+      "denied",
+      "failed_before_dispatch",
+      "rejected",
+      "indeterminate"
+    ],
+    "passengerGenders": [
+      "m",
+      "f"
+    ],
+    "policyEvaluationOutcomes": [
+      "allowed",
+      "denied",
+      "approval_required",
+      "unavailable"
+    ],
+    "policyLayers": [
+      "user_policy",
+      "managed_policy",
+      "adversarial_reviewer",
+      "remembered_rule"
+    ],
+    "progressActivityStatuses": [
+      "proposed",
+      "approval_pending",
+      "dispatch_pending",
+      "reconciliation_required"
+    ],
+    "protectedFieldClasses": [
+      "legal_identity",
+      "birth_date",
+      "contact_details",
+      "accessibility_needs",
+      "loyalty_accounts",
+      "travel_documents"
+    ],
+    "receiptStatuses": [
+      "confirmed",
+      "denied",
+      "failed_before_dispatch",
+      "rejected",
+      "reconciliation_required"
+    ],
+    "reconciliationStatuses": [
+      "not_needed",
+      "confirmed",
+      "rejected",
+      "indeterminate",
+      "refused"
+    ],
+    "source": "crates/harn-stdlib/src/stdlib/external_action/vocabulary.harn",
+    "terminalActivityStatuses": [
+      "denied",
+      "cancelled",
+      "timed_out",
+      "confirmed",
+      "failed_before_dispatch",
+      "rejected"
+    ]
+  },
+  "generatedBy": "harn dump-protocol-artifacts",
+  "mcp": {
+    "cacheResultFields": [
+      "ttlMs",
+      "cacheScope"
+    ],
+    "cacheScopes": [
+      "private",
+      "public"
+    ],
+    "inputRequiredResultType": "input_required",
+    "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+    "loggingLevels": [
+      "debug",
+      "info",
+      "notice",
+      "warning",
+      "error",
+      "critical",
+      "alert",
+      "emergency"
+    ],
+    "metadataKeys": [
+      "io.modelcontextprotocol/protocolVersion",
+      "io.modelcontextprotocol/clientInfo",
+      "io.modelcontextprotocol/clientCapabilities",
+      "io.modelcontextprotocol/logLevel",
+      "progressToken",
+      "traceparent",
+      "tracestate",
+      "baggage"
+    ],
+    "methods": [
+      "server/discover",
+      "tools/list",
+      "tools/call",
+      "resources/list",
+      "resources/read",
+      "resources/templates/list",
+      "prompts/list",
+      "prompts/get",
+      "completion/complete",
+      "sampling/createMessage",
+      "elicitation/create",
+      "notifications/message",
+      "tasks/get",
+      "tasks/update",
+      "tasks/cancel"
+    ],
+    "oauthApplicationTypes": [
+      "native",
+      "web"
+    ],
+    "oauthAuthModes": [
+      "cimd",
+      "dcr",
+      "static",
+      "byo"
+    ],
+    "oauthClientRegistrationModes": [
+      "pre_registered",
+      "client_id_metadata_document",
+      "dynamic_client_registration",
+      "manual"
+    ],
+    "protocolVersion": "2026-07-28",
+    "protocolVersions": [
+      "2026-07-28"
+    ],
+    "requiredRequestMetadataKeys": [
+      "io.modelcontextprotocol/protocolVersion",
+      "io.modelcontextprotocol/clientInfo",
+      "io.modelcontextprotocol/clientCapabilities"
+    ],
+    "resultTypes": [
+      "complete",
+      "input_required",
+      "task"
+    ],
+    "standardHttpHeaders": [
+      "MCP-Protocol-Version",
+      "Mcp-Method",
+      "Mcp-Name"
+    ],
+    "unsupportedProtocolVersionError": {
+      "code": -32022,
+      "message": "Unsupported protocol version"
+    }
+  },
+  "plans": {
+    "commentStates": [
+      "open",
+      "addressed",
+      "resolved",
+      "reopened"
+    ],
+    "documentSchema": "schemas/plan-document-v1.schema.json",
+    "documentSchemaVersion": "harn.plan_document.v1"
+  },
+  "preparedSession": {
+    "commands": [
+      "approval_decision",
+      "attach",
+      "turn",
+      "request_delta",
+      "stop",
+      "pivot",
+      "finish"
+    ],
+    "schema": "harn.prepared_session.v1",
+    "states": [
+      "needs_approval",
+      "ready",
+      "blocked",
+      "active",
+      "delta",
+      "stopped",
+      "pivoted",
+      "terminal"
+    ]
+  },
+  "receipts": {
+    "toolCallReceiptExecutors": [
+      "harn",
+      "host_bridge",
+      "mcp_server",
+      "provider_native"
+    ],
+    "toolCallReceiptSchema": "schemas/tool-call-receipt.schema.json",
+    "toolCallReceiptSchemaVersion": 1,
+    "toolCallReceiptStatuses": [
+      "ok",
+      "schema_violation",
+      "consent_denied",
+      "timeout",
+      "error"
+    ]
+  },
+  "schemaVersion": 1,
+  "schemas": [
+    {
+      "artifact": "schemas/acp-session-update.schema.json",
+      "protocol": "acp",
+      "provenance": {
+        "profile_note": "The profile roots the ACP request, response, session/update notification, and Harn extension notification shapes this adapter emits or accepts.",
+        "protocol": "acp",
+        "refresh_command": "curl -fsSL https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/v0.12.2/schema/schema.json",
+        "retrieved_at": "2026-05-08",
+        "upstream_source_url": "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/v0.12.2/schema/schema.json",
+        "upstream_spec_url": "https://agentclientprotocol.com/protocol/schema",
+        "upstream_version": "v0.12.2"
+      },
+      "source": "conformance/protocols/schemas/acp-session-update.schema.json"
+    },
+    {
+      "artifact": "schemas/a2a-0.3.0.schema.json",
+      "protocol": "a2a",
+      "provenance": {
+        "profile_note": "The upstream JSON schema is definitions-only; this profile supplies a root over Harn-served agent cards, JSON-RPC messages, task events, push config payloads, and security metadata.",
+        "protocol": "a2a",
+        "refresh_command": "curl -fsSL https://raw.githubusercontent.com/a2aproject/A2A/v0.3.0/specification/json/a2a.json",
+        "retrieved_at": "2026-05-08",
+        "upstream_source_url": "https://raw.githubusercontent.com/a2aproject/A2A/v0.3.0/specification/json/a2a.json",
+        "upstream_spec_url": "https://a2a-protocol.org/v0.3.0/specification",
+        "upstream_version": "0.3.0"
+      },
+      "source": "conformance/protocols/schemas/a2a-0.3.0.schema.json"
+    },
+    {
+      "artifact": "schemas/mcp-2026-07-28.schema.json",
+      "protocol": "mcp",
+      "provenance": {
+        "profile_note": "The upstream schema is definitions-only; this profile supplies a root over the stable request, response, notification, standard HTTP header, metadata, cache hint, input-required, and negotiation-error shapes Harn publishes for downstream implementers.",
+        "protocol": "mcp",
+        "refresh_command": "curl -fsSL https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/main/schema/2026-07-28/schema.json",
+        "retrieved_at": "2026-08-02",
+        "upstream_source_url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/main/schema/2026-07-28/schema.json",
+        "upstream_spec_url": "https://modelcontextprotocol.io/specification/2026-07-28",
+        "upstream_version": "2026-07-28"
+      },
+      "source": "conformance/protocols/schemas/mcp-2026-07-28.schema.json"
+    },
+    {
+      "artifact": "schemas/canonical-history-boundaries.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::agent_sessions::canonical_boundary",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/agent_sessions/canonical_boundary.rs"
+    },
+    {
+      "artifact": "schemas/run-session-view-v1.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::orchestration",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/orchestration/records/view.rs"
+    },
+    {
+      "artifact": "schemas/inference-admission-request.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::llm::api::inference_boundary",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/llm/api/inference_boundary/admission.rs"
+    },
+    {
+      "artifact": "schemas/inference-admission-snapshot.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::llm::api::inference_boundary",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/llm/api/inference_boundary/admission.rs"
+    },
+    {
+      "artifact": "schemas/machine-spend-exhaustion.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::llm::admission",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/llm/admission/durable.rs"
+    },
+    {
+      "artifact": "schemas/session-health.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::agent_events::session_health",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/agent_events/session_health.rs"
+    },
+    {
+      "artifact": "schemas/tool-call-receipt.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "schemaVersion": 1,
+        "source": "crates/harn-vm/src/llm/receipts.rs"
+      },
+      "source": "crates/harn-vm/src/llm/receipts.rs"
+    },
+    {
+      "artifact": "schemas/session-recap-v1.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::session_recap",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/session_recap.rs"
+    },
+    {
+      "artifact": "schemas/prepared-session-v1.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::prepared_run::PreparedSession",
+        "schema": "harn.prepared_session.v1"
+      },
+      "source": "crates/harn-vm/schemas/prepared-session-v1.schema.json"
+    },
+    {
+      "artifact": "schemas/plan-document-v1.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::llm::plan",
+        "schema_version": "harn.plan_document.v1"
+      },
+      "source": "crates/harn-vm/src/llm/plan/document.rs"
+    },
+    {
+      "artifact": "schemas/harn-tools-v2.schema.json",
+      "protocol": "harn-tools",
+      "provenance": {
+        "owner": "harn-vm::tool_registry::contract",
+        "schemaVersion": "harn-tools/2.0"
+      },
+      "source": "crates/harn-vm/src/tool_registry/contract.rs"
+    }
+  ]
+}

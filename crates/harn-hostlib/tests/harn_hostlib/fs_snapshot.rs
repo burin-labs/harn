@@ -10,7 +10,6 @@
 
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 
 use harn_hostlib::{fs_snapshot::FsSnapshotCapability, tools::ToolsCapability, BuiltinRegistry};
 use harn_vm::agent_sessions;
@@ -86,10 +85,7 @@ fn explicit_snapshot_then_restore_through_builtins() {
     let snapshot = (reg.find("hostlib_fs_snapshot").unwrap().handler)(&dict_arg(&[
         ("session_id", vm_string(&fixture.session)),
         ("scope_id", vm_string(&fixture.scope)),
-        (
-            "paths",
-            VmValue::List(Arc::new(vec![vm_string(&path_str(&file))])),
-        ),
+        ("paths", VmValue::list(vec![vm_string(&path_str(&file))])),
         ("root", vm_string(&path_str(dir.path()))),
     ]))
     .unwrap();
@@ -188,10 +184,7 @@ fn list_and_drop_remove_snapshot_state_through_builtins() {
     (reg.find("hostlib_fs_snapshot").unwrap().handler)(&dict_arg(&[
         ("session_id", vm_string(&fixture.session)),
         ("scope_id", vm_string(&fixture.scope)),
-        (
-            "paths",
-            VmValue::List(Arc::new(vec![vm_string(&path_str(&file))])),
-        ),
+        ("paths", VmValue::list(vec![vm_string(&path_str(&file))])),
         ("root", vm_string(&path_str(dir.path()))),
     ]))
     .unwrap();

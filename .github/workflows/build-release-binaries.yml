@@ -817,6 +817,9 @@ jobs:
         with:
           packages: gcc-aarch64-linux-gnu libc6-dev-arm64-cross
           check-command: aarch64-linux-gnu-gcc
+          # About 60 MB. A slow mirror (180 kB/s on Harn 0.10.174 attempt 6) cannot
+          # deliver that in the 60-second default, so both attempts timed out.
+          install-seconds: "420"
 
       - name: Configure Linux ARM64 cross linker (x86 host only)
         if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.arch == 'X64'

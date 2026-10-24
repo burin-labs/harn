@@ -103,9 +103,9 @@ impl Expr {
                     for item in items.iter() {
                         mapped.extend(expr.eval(item));
                     }
-                    vec![VmValue::List(std::sync::Arc::new(mapped))]
+                    vec![VmValue::list(mapped)]
                 }
-                _ => vec![VmValue::List(std::sync::Arc::new(Vec::new()))],
+                _ => vec![VmValue::list(Vec::new())],
             },
             Expr::Select(expr) => {
                 if expr.eval_bool(input) {
@@ -267,11 +267,7 @@ fn eval_builtin(builtin: Builtin, input: &VmValue) -> VmValue {
             _ => 1,
         }),
         Builtin::Keys => match input {
-            VmValue::Dict(map) => VmValue::list(
-                map.keys()
-                    .map(|key| VmValue::string(key.as_str()))
-                    .collect(),
-            ),
+            VmValue::Dict(map) => VmValue::strings(map.keys().map(|key| key.as_str())),
             VmValue::List(items) => VmValue::list(
                 (0..items.len())
                     .map(|index| VmValue::Int(index as i64))

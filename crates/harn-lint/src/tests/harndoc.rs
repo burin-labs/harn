@@ -3,38 +3,56 @@
 
 use super::*;
 
-#[test]
-fn test_clean_code() {
-    let diags = lint_source(
-        r"
+#[rstest::rstest]
+#[case::test_clean_code(
+    r"
 pipeline default(task) {
 const x = 1
 log(x)
 }
 ",
-    );
-    // x is used, task is a pipeline param -- should be clean.
-    assert!(
-        !has_rule(&diags, "unused-variable"),
-        "expected no unused-variable, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_missing_harndoc_is_off_by_default() {
-    // SOTA default: doc-presence lints are opt-in (`[lint]
-    // require_docstrings = true`), so a bare `pub fn` is clean out of
-    // the box.
-    let diags = lint_source(
-        r#"
+    "unused-variable",
+    false
+)]
+// SOTA default: doc-presence lints are opt-in (`[lint]
+// require_docstrings = true`), so a bare `pub fn` is clean out of
+// the box.
+#[case::test_missing_harndoc_is_off_by_default(
+    r#"
 pub fn exposed() -> string {
   return "x"
 }
 "#,
-    );
-    assert!(
-        !has_rule(&diags, "missing-harndoc"),
-        "missing-harndoc must not fire by default: {diags:?}"
+    "missing-harndoc",
+    false
+)]
+#[case::test_plain_double_slash_adjacent_to_pub_fn_fires(
+    r#"
+// Doc-by-adjacency.
+pub fn exposed() -> string {
+  return "x"
+}
+"#,
+    "legacy-doc-comment",
+    true
+)]
+#[case::test_plain_double_slash_with_blank_line_does_not_fire(
+    r#"
+// unrelated comment
+
+pub fn exposed() -> string {
+  return "x"
+}
+"#,
+    "legacy-doc-comment",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }
 
@@ -144,39 +162,6 @@ pub fn exposed() -> string {
         edit.replacement
     );
     harn_parser::parse_source(&candidate).expect("the generated HarnDoc must parse");
-}
-
-#[test]
-fn test_plain_double_slash_adjacent_to_pub_fn_fires() {
-    let diags = lint_source(
-        r#"
-// Doc-by-adjacency.
-pub fn exposed() -> string {
-  return "x"
-}
-"#,
-    );
-    assert!(
-        has_rule(&diags, "legacy-doc-comment"),
-        "expected legacy-doc-comment for // adjacent to def, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_plain_double_slash_with_blank_line_does_not_fire() {
-    let diags = lint_source(
-        r#"
-// unrelated comment
-
-pub fn exposed() -> string {
-  return "x"
-}
-"#,
-    );
-    assert!(
-        !has_rule(&diags, "legacy-doc-comment"),
-        "// with blank-line gap should not be treated as doc: {diags:?}"
-    );
 }
 
 #[test]

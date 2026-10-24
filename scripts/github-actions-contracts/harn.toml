@@ -1,0 +1,2 @@
+[dependencies]
+harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", tag = "v0.16.0" }

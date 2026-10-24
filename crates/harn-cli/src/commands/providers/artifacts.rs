@@ -59,13 +59,6 @@ pub(crate) fn run_validate(args: &ProvidersValidateArgs) -> Result<(), String> {
 }
 
 pub(crate) fn run_export(args: &ProvidersExportArgs) -> Result<(), String> {
-    if args.overlay.is_none() && args.capabilities_overlay.is_none() {
-        return Err(
-            "provider catalog export requires --overlay or --capabilities-overlay; \
-             use `harn provider catalog generate` for checked-in catalog artifacts"
-                .to_string(),
-        );
-    }
     let overlay = load_overlay(args.overlay.as_deref())?;
     let capabilities = load_capabilities_overlay(args.capabilities_overlay.as_deref())?;
     for warning in &overlay.diagnostics {

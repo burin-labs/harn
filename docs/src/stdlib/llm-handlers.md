@@ -20,7 +20,7 @@ logging, budgets, caching, and model options around that caller.
   in `std/llm/safe`.
 - System-prompt builders live in `std/llm/prompts`.
 - Catalog accessors (`model_info`, `resolved_options`, `family_of`,
-  `lineage_of`, `complementary_reviewer`, `has_capability`) live in
+  `lineage_of`, `complementary_reviewer`, `escalation_target`, `has_capability`) live in
   `std/llm/catalog`.
 
 ## Provider admission and retries
@@ -615,12 +615,14 @@ shadow the builtins.
 | `family_of(model_id)` | `(string) -> string` | Returns the normalized review-diversity family such as `"anthropic-claude"`, `"openai-gpt"`, `"google-gemini"`, or `"qwen"`. Hosted aliases keep the underlying model family. |
 | `lineage_of(model_id)` | `(string) -> string` | Returns the narrower catalog lineage token. Use it for inspection and grouping; runtime capability data, not stdlib branches, owns route policy. |
 | `complementary_reviewer(opts)` | `(dict) -> dict` | Wraps `llm_complementary_reviewer`. Required: `opts.author_model`; optional: `author_provider`, `intent`, `max_price_multiplier`, `min_price_cap_per_mtok`, and `max_price_cap_per_mtok`. The price cap applies to the candidate's catalog input plus output price per million tokens; the floor raises a relative cap and the ceiling limits it. |
+| `escalation_target(opts)` | `(dict) -> EscalationTarget` | Wraps `llm_escalation_target`. Required: `opts.primary.model`; optional: `available_only` (default `true`), `max_price_multiple`, and `exclude`. Returns a stronger catalog model as a `models:` ladder step plus `score` and `reasons`, or no `model` and a `fallback_code` (`unknown_primary`, `no_stronger_model`, `all_excluded`, `no_model_within_price`, `no_available_credential`). `route_diagnostic` counts the rows each rule rejected. A malformed or sparse catalog degrades to a fallback code, never an error. |
 
 ### Example
 
 ```harn,ignore
 import {
-  complementary_reviewer, family_of, has_capability, named_model_ladder,
+  complementary_reviewer, escalation_target, family_of, has_capability,
+  named_model_ladder,
 } from "std/llm/catalog"
 
 if has_capability(model, "thinking") {
@@ -632,6 +634,13 @@ const routes = named_model_ladder("agent_frontier").steps
 const reviewer = complementary_reviewer({
   author_model: model, intent: "plan_review",
 })
+const next = escalation_target(harness.llm, {primary: {model: model}})
+if next.fallback_code == nil {
+  // `next` is a ladder step for `models: [model, next]`.
+} else {
+  // e.g. "no_available_credential"
+  harness.stdio.log(next.fallback_code)
+}
 ```
 
 ---

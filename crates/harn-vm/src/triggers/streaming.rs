@@ -847,225 +847,219 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn chat_stream_windows_gate_and_dispatch_deterministically() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let (_dir, log, dispatcher) = stream_dispatcher_fixture(
-                    r#"
+        harn_clock::test_support::with_local_tasks(async {
+            let (_dir, log, dispatcher) = stream_dispatcher_fixture(
+                r#"
 import "std/triggers"
 
 pub fn local_fn(harness: Harness, event: TriggerEvent) -> int {
   return len(event.batch ?? [])
 }
 "#,
-                )
-                .await;
-
-                let mut runtime = StreamTriggerRuntime::new(
-                    StreamTriggerConfig {
-                        stream_id: "chat:triage".to_string(),
-                        window: StreamWindowConfig::tumbling(2),
-                        backpressure: StreamBackpressureConfig::default(),
-                        flow: StreamFlowConfig::default(),
-                        gate: Some(StreamGateConfig {
-                            gate_id: "chat-llm-gate".to_string(),
-                            cache_key: "chat:v1".to_string(),
-                            replay_of_event_id: None,
-                        }),
-                    },
-                    log.clone(),
-                    dispatcher,
-                )
-                .unwrap();
-
-                let calls = Rc::new(Cell::new(0));
-                for offset in 0..2 {
-                    let calls = calls.clone();
-                    let outcomes = runtime
-                        .push_event_with_gate(
-                            stream_fixture_event(
-                                "kafka",
-                                "issues.opened",
-                                "chat",
-                                offset,
-                                json!({"text": format!("message {offset}")}),
-                            ),
-                            move |_| {
-                                calls.set(calls.get() + 1);
-                                StreamGateOutcome::Pass {
-                                    reason: Some("fixture-positive".to_string()),
-                                }
-                            },
-                        )
-                        .await
-                        .unwrap();
-                    if offset == 1 {
-                        assert_eq!(outcomes.len(), 1);
-                        assert_eq!(outcomes[0].result, Some(json!(2)));
-                    } else {
-                        assert!(outcomes.is_empty());
-                    }
-                }
-                assert_eq!(calls.get(), 1);
-
-                let gate_events = read_topic(log.clone(), TRIGGER_STREAM_GATE_TOPIC).await;
-                assert_eq!(
-                    gate_events
-                        .iter()
-                        .filter(|(_, event)| event.kind == "stream_gate_decision")
-                        .count(),
-                    1
-                );
-
-                let first_window_id = gate_events[0].1.payload["window_id"]
-                    .as_str()
-                    .unwrap()
-                    .to_string();
-                runtime.config.gate.as_mut().unwrap().replay_of_event_id =
-                    Some(first_window_id.clone());
-
-                for offset in 0..2 {
-                    let calls = calls.clone();
-                    runtime
-                        .push_event_with_gate(
-                            stream_fixture_event(
-                                "kafka",
-                                "issues.opened",
-                                "chat",
-                                offset,
-                                json!({"text": format!("message {offset}")}),
-                            ),
-                            move |_| {
-                                calls.set(calls.get() + 1);
-                                StreamGateOutcome::Block {
-                                    reason: Some("should-not-run".to_string()),
-                                }
-                            },
-                        )
-                        .await
-                        .unwrap();
-                }
-                assert_eq!(calls.get(), 1);
-                let gate_events = read_topic(log.clone(), TRIGGER_STREAM_GATE_TOPIC).await;
-                assert!(gate_events.iter().any(|(_, event)| {
-                    event.kind == "stream_gate_decision"
-                        && event.payload["cached"] == json!(true)
-                        && event.payload["window_id"] == json!(first_window_id)
-                }));
-            })
+            )
             .await;
+
+            let mut runtime = StreamTriggerRuntime::new(
+                StreamTriggerConfig {
+                    stream_id: "chat:triage".to_string(),
+                    window: StreamWindowConfig::tumbling(2),
+                    backpressure: StreamBackpressureConfig::default(),
+                    flow: StreamFlowConfig::default(),
+                    gate: Some(StreamGateConfig {
+                        gate_id: "chat-llm-gate".to_string(),
+                        cache_key: "chat:v1".to_string(),
+                        replay_of_event_id: None,
+                    }),
+                },
+                log.clone(),
+                dispatcher,
+            )
+            .unwrap();
+
+            let calls = Rc::new(Cell::new(0));
+            for offset in 0..2 {
+                let calls = calls.clone();
+                let outcomes = runtime
+                    .push_event_with_gate(
+                        stream_fixture_event(
+                            "kafka",
+                            "issues.opened",
+                            "chat",
+                            offset,
+                            json!({"text": format!("message {offset}")}),
+                        ),
+                        move |_| {
+                            calls.set(calls.get() + 1);
+                            StreamGateOutcome::Pass {
+                                reason: Some("fixture-positive".to_string()),
+                            }
+                        },
+                    )
+                    .await
+                    .unwrap();
+                if offset == 1 {
+                    assert_eq!(outcomes.len(), 1);
+                    assert_eq!(outcomes[0].result, Some(json!(2)));
+                } else {
+                    assert!(outcomes.is_empty());
+                }
+            }
+            assert_eq!(calls.get(), 1);
+
+            let gate_events = read_topic(log.clone(), TRIGGER_STREAM_GATE_TOPIC).await;
+            assert_eq!(
+                gate_events
+                    .iter()
+                    .filter(|(_, event)| event.kind == "stream_gate_decision")
+                    .count(),
+                1
+            );
+
+            let first_window_id = gate_events[0].1.payload["window_id"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            runtime.config.gate.as_mut().unwrap().replay_of_event_id =
+                Some(first_window_id.clone());
+
+            for offset in 0..2 {
+                let calls = calls.clone();
+                runtime
+                    .push_event_with_gate(
+                        stream_fixture_event(
+                            "kafka",
+                            "issues.opened",
+                            "chat",
+                            offset,
+                            json!({"text": format!("message {offset}")}),
+                        ),
+                        move |_| {
+                            calls.set(calls.get() + 1);
+                            StreamGateOutcome::Block {
+                                reason: Some("should-not-run".to_string()),
+                            }
+                        },
+                    )
+                    .await
+                    .unwrap();
+            }
+            assert_eq!(calls.get(), 1);
+            let gate_events = read_topic(log.clone(), TRIGGER_STREAM_GATE_TOPIC).await;
+            assert!(gate_events.iter().any(|(_, event)| {
+                event.kind == "stream_gate_decision"
+                    && event.payload["cached"] == json!(true)
+                    && event.payload["window_id"] == json!(first_window_id)
+            }));
+        })
+        .await;
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn issue_feed_backpressure_dead_letters_overflow() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let dir = tempfile::tempdir().unwrap();
-                let log = install_test_event_log();
-                let mut vm = crate::new_vm();
-                register_vm_stdlib(&mut vm);
-                vm.set_source_dir(dir.path());
-                let dispatcher = Dispatcher::with_event_log(vm, log.clone());
-                let mut runtime = StreamTriggerRuntime::new(
-                    StreamTriggerConfig {
-                        stream_id: "issue-feed".to_string(),
-                        window: StreamWindowConfig::fixed(3),
-                        backpressure: StreamBackpressureConfig {
-                            max_pending_events: 1,
-                            overflow: StreamOverflowPolicy::DeadLetterNewest,
-                        },
-                        flow: StreamFlowConfig::default(),
-                        gate: None,
+        harn_clock::test_support::with_local_tasks(async {
+            let dir = tempfile::tempdir().unwrap();
+            let log = install_test_event_log();
+            let mut vm = crate::new_vm();
+            register_vm_stdlib(&mut vm);
+            vm.set_source_dir(dir.path());
+            let dispatcher = Dispatcher::with_event_log(vm, log.clone());
+            let mut runtime = StreamTriggerRuntime::new(
+                StreamTriggerConfig {
+                    stream_id: "issue-feed".to_string(),
+                    window: StreamWindowConfig::fixed(3),
+                    backpressure: StreamBackpressureConfig {
+                        max_pending_events: 1,
+                        overflow: StreamOverflowPolicy::DeadLetterNewest,
                     },
-                    log.clone(),
-                    dispatcher,
-                )
+                    flow: StreamFlowConfig::default(),
+                    gate: None,
+                },
+                log.clone(),
+                dispatcher,
+            )
+            .unwrap();
+
+            runtime
+                .push_event(stream_fixture_event(
+                    "kafka",
+                    "issues.opened",
+                    "issues",
+                    1,
+                    json!({"number": 1}),
+                ))
+                .await
+                .unwrap();
+            runtime
+                .push_event(stream_fixture_event(
+                    "kafka",
+                    "issues.opened",
+                    "issues",
+                    2,
+                    json!({"number": 2}),
+                ))
+                .await
                 .unwrap();
 
-                runtime
-                    .push_event(stream_fixture_event(
-                        "kafka",
-                        "issues.opened",
-                        "issues",
-                        1,
-                        json!({"number": 1}),
-                    ))
-                    .await
-                    .unwrap();
-                runtime
-                    .push_event(stream_fixture_event(
-                        "kafka",
-                        "issues.opened",
-                        "issues",
-                        2,
-                        json!({"number": 2}),
-                    ))
-                    .await
-                    .unwrap();
+            let snapshot = runtime.snapshot();
+            assert_eq!(snapshot.pending_events, 1);
+            assert_eq!(snapshot.dead_lettered_events, 1);
 
-                let snapshot = runtime.snapshot();
-                assert_eq!(snapshot.pending_events, 1);
-                assert_eq!(snapshot.dead_lettered_events, 1);
-
-                let dlq = read_topic(log.clone(), TRIGGER_DLQ_TOPIC).await;
-                assert!(dlq.iter().any(|(_, event)| {
-                    event.kind == "stream_dead_lettered"
-                        && event.payload["reason"] == json!("backpressure_queue_full")
-                }));
-            })
-            .await;
+            let dlq = read_topic(log.clone(), TRIGGER_DLQ_TOPIC).await;
+            assert!(dlq.iter().any(|(_, event)| {
+                event.kind == "stream_dead_lettered"
+                    && event.payload["reason"] == json!("backpressure_queue_full")
+            }));
+        })
+        .await;
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn sliding_windows_emit_overlapping_batches() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let (_dir, log, dispatcher) = stream_dispatcher_fixture(
-                    r#"
+        harn_clock::test_support::with_local_tasks(async {
+            let (_dir, log, dispatcher) = stream_dispatcher_fixture(
+                r#"
 import "std/triggers"
 
 pub fn local_fn(harness: Harness, event: TriggerEvent) -> int {
   return len(event.batch ?? [])
 }
 "#,
-                )
-                .await;
-                let mut runtime = StreamTriggerRuntime::new(
-                    StreamTriggerConfig {
-                        stream_id: "sliding".to_string(),
-                        window: StreamWindowConfig::sliding(2, 1),
-                        backpressure: StreamBackpressureConfig::default(),
-                        flow: StreamFlowConfig::default(),
-                        gate: None,
-                    },
-                    log.clone(),
-                    dispatcher,
-                )
-                .unwrap();
-
-                let mut dispatched = 0;
-                for offset in 1..=3 {
-                    dispatched += runtime
-                        .push_event(stream_fixture_event(
-                            "kafka",
-                            "issues.opened",
-                            "sliding",
-                            offset,
-                            json!({"offset": offset}),
-                        ))
-                        .await
-                        .unwrap()
-                        .len();
-                }
-
-                assert_eq!(dispatched, 2);
-                assert_eq!(runtime.snapshot().emitted_windows, 2);
-                let windows = read_topic(log, TRIGGER_STREAM_WINDOWS_TOPIC).await;
-                assert_eq!(windows.len(), 2);
-            })
+            )
             .await;
+            let mut runtime = StreamTriggerRuntime::new(
+                StreamTriggerConfig {
+                    stream_id: "sliding".to_string(),
+                    window: StreamWindowConfig::sliding(2, 1),
+                    backpressure: StreamBackpressureConfig::default(),
+                    flow: StreamFlowConfig::default(),
+                    gate: None,
+                },
+                log.clone(),
+                dispatcher,
+            )
+            .unwrap();
+
+            let mut dispatched = 0;
+            for offset in 1..=3 {
+                dispatched += runtime
+                    .push_event(stream_fixture_event(
+                        "kafka",
+                        "issues.opened",
+                        "sliding",
+                        offset,
+                        json!({"offset": offset}),
+                    ))
+                    .await
+                    .unwrap()
+                    .len();
+            }
+
+            assert_eq!(dispatched, 2);
+            assert_eq!(runtime.snapshot().emitted_windows, 2);
+            let windows = read_topic(log, TRIGGER_STREAM_WINDOWS_TOPIC).await;
+            assert_eq!(windows.len(), 2);
+        })
+        .await;
     }
 
     #[test]
@@ -1104,55 +1098,53 @@ pub fn local_fn(harness: Harness, event: TriggerEvent) -> int {
 
     #[tokio::test(flavor = "current_thread")]
     async fn sliding_window_step_equal_size_emits_non_overlapping_batches() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let (_dir, log, dispatcher) = stream_dispatcher_fixture(
-                    r#"
+        harn_clock::test_support::with_local_tasks(async {
+            let (_dir, log, dispatcher) = stream_dispatcher_fixture(
+                r#"
 import "std/triggers"
 
 pub fn local_fn(harness: Harness, event: TriggerEvent) -> int {
   return len(event.batch ?? [])
 }
 "#,
-                )
-                .await;
-                // step == size drains the whole window after each emit, so
-                // windows tile without overlap (tumbling-equivalent).
-                let mut runtime = StreamTriggerRuntime::new(
-                    StreamTriggerConfig {
-                        stream_id: "sliding-tumbling".to_string(),
-                        window: StreamWindowConfig::sliding(2, 2),
-                        backpressure: StreamBackpressureConfig::default(),
-                        flow: StreamFlowConfig::default(),
-                        gate: None,
-                    },
-                    log.clone(),
-                    dispatcher,
-                )
-                .unwrap();
-
-                let mut dispatched = 0;
-                for offset in 1..=4 {
-                    dispatched += runtime
-                        .push_event(stream_fixture_event(
-                            "kafka",
-                            "issues.opened",
-                            "sliding-tumbling",
-                            offset,
-                            json!({"offset": offset}),
-                        ))
-                        .await
-                        .unwrap()
-                        .len();
-                }
-
-                // 4 events, size 2, step 2 -> exactly 2 non-overlapping windows.
-                assert_eq!(dispatched, 2);
-                assert_eq!(runtime.snapshot().emitted_windows, 2);
-                let windows = read_topic(log, TRIGGER_STREAM_WINDOWS_TOPIC).await;
-                assert_eq!(windows.len(), 2);
-            })
+            )
             .await;
+            // step == size drains the whole window after each emit, so
+            // windows tile without overlap (tumbling-equivalent).
+            let mut runtime = StreamTriggerRuntime::new(
+                StreamTriggerConfig {
+                    stream_id: "sliding-tumbling".to_string(),
+                    window: StreamWindowConfig::sliding(2, 2),
+                    backpressure: StreamBackpressureConfig::default(),
+                    flow: StreamFlowConfig::default(),
+                    gate: None,
+                },
+                log.clone(),
+                dispatcher,
+            )
+            .unwrap();
+
+            let mut dispatched = 0;
+            for offset in 1..=4 {
+                dispatched += runtime
+                    .push_event(stream_fixture_event(
+                        "kafka",
+                        "issues.opened",
+                        "sliding-tumbling",
+                        offset,
+                        json!({"offset": offset}),
+                    ))
+                    .await
+                    .unwrap()
+                    .len();
+            }
+
+            // 4 events, size 2, step 2 -> exactly 2 non-overlapping windows.
+            assert_eq!(dispatched, 2);
+            assert_eq!(runtime.snapshot().emitted_windows, 2);
+            let windows = read_topic(log, TRIGGER_STREAM_WINDOWS_TOPIC).await;
+            assert_eq!(windows.len(), 2);
+        })
+        .await;
     }
 }

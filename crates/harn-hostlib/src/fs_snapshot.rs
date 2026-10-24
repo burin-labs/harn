@@ -32,7 +32,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs as stdfs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 
 use harn_vm::VmValue;
@@ -513,16 +512,7 @@ fn snapshot_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let result = snapshot(&session_id, &scope_id, &paths, root.as_deref())?;
     Ok(build_dict([
         ("snapshot_id", str_value(&result.snapshot_id)),
-        (
-            "captured_paths",
-            VmValue::List(Arc::new(
-                result
-                    .captured_paths
-                    .into_iter()
-                    .map(|path| VmValue::String(arcstr::ArcStr::from(path)))
-                    .collect(),
-            )),
-        ),
+        ("captured_paths", VmValue::strings(result.captured_paths)),
         ("byte_count", VmValue::Int(result.byte_count as i64)),
     ]))
 }
@@ -536,19 +526,10 @@ fn restore_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let result = restore(&session_id, &snapshot_id, &paths)?;
     Ok(build_dict([
         ("snapshot_id", str_value(&result.snapshot_id)),
-        (
-            "restored_paths",
-            VmValue::List(Arc::new(
-                result
-                    .restored_paths
-                    .into_iter()
-                    .map(|path| VmValue::String(arcstr::ArcStr::from(path)))
-                    .collect(),
-            )),
-        ),
+        ("restored_paths", VmValue::strings(result.restored_paths)),
         (
             "skipped_paths_with_reasons",
-            VmValue::List(Arc::new(
+            VmValue::list(
                 result
                     .skipped_paths_with_reasons
                     .into_iter()
@@ -556,7 +537,7 @@ fn restore_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                         build_dict([("path", str_value(&path)), ("reason", str_value(&reason))])
                     })
                     .collect(),
-            )),
+            ),
         ),
     ]))
 }
@@ -568,9 +549,7 @@ fn list_snapshots_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let summaries = list_snapshots(&session_id)?;
     Ok(build_dict([(
         "snapshots",
-        VmValue::List(Arc::new(
-            summaries.into_iter().map(snapshot_summary_value).collect(),
-        )),
+        VmValue::list(summaries.into_iter().map(snapshot_summary_value).collect()),
     )]))
 }
 
@@ -591,16 +570,7 @@ fn snapshot_summary_value(summary: SnapshotSummary) -> VmValue {
         ("snapshot_id", str_value(&summary.snapshot_id)),
         ("scope_id", str_value(&summary.scope_id)),
         ("taken_at_ms", VmValue::Int(summary.taken_at_ms)),
-        (
-            "captured_paths",
-            VmValue::List(Arc::new(
-                summary
-                    .captured_paths
-                    .into_iter()
-                    .map(|path| VmValue::String(arcstr::ArcStr::from(path)))
-                    .collect(),
-            )),
-        ),
+        ("captured_paths", VmValue::strings(summary.captured_paths)),
         ("byte_count", VmValue::Int(summary.byte_count as i64)),
     ])
 }

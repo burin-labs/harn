@@ -509,9 +509,9 @@ pub(crate) async fn observed_llm_call(
         resolution
             .assert_resolved_route(&opts.provider, &opts.model)
             .map_err(|error| {
-                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                VmError::Thrown(VmValue::string(format!(
                     "model resolution invariant failed before provider call: {error}"
-                ))))
+                )))
             })?;
     }
     if !super::mock::cli_llm_mock_replay_active() && !super::mock::builtin_llm_mock_active() {
@@ -749,6 +749,22 @@ pub(crate) async fn observed_llm_call(
             provider_call,
         )
         .await;
+        // A call the budget refused at settlement still completed and was paid
+        // for, so it is recorded before its stop takes the error path.
+        let llm_result = match llm_result {
+            Ok(settled) => match settled.stop {
+                None => Ok(settled.result),
+                Some(stop) => {
+                    super::agent_session_host::record_completed_call_usage(
+                        opts,
+                        &settled.result,
+                        &call_id,
+                    );
+                    Err(super::api::settlement_stop_error(&stop, &settled.result))
+                }
+            },
+            Err(error) => Err(error),
+        };
         let duration_ms = start.elapsed().as_millis() as u64;
         let attempt_count = attempt + 1;
         physical_attempts = physical_attempts.saturating_add(

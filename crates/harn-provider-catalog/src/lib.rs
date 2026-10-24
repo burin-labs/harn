@@ -23,7 +23,7 @@ mod view;
 
 pub use artifact::*;
 pub use bindings::{swift_binding, swift_binding_embedded, typescript_declarations};
-pub use catalog::{artifact_to_json, validate_artifact};
+pub use catalog::{artifact_to_json, provider_classification, validate_artifact};
 pub use data_controls::*;
 pub use from_artifact::config_from_artifact;
 pub use model_def::*;

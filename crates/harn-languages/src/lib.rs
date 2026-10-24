@@ -223,7 +223,7 @@ pub static LANGUAGES: &[LanguageSpec] = &[
     ),
     row(Language::Go, "go", &["golang"], &["go"], Code, RENAME_ONLY),
     row(Language::Rust, "rust", &["rs"], &["rs"], Code, REFACTOR_ALL),
-    row(Language::Java, "java", &[], &["java"], Code, GRAMMAR_ONLY),
+    row(Language::Java, "java", &[], &["java"], Code, RENAME_ONLY),
     row(Language::C, "c", &[], &["c", "h"], Code, GRAMMAR_ONLY),
     row(
         Language::Cpp,

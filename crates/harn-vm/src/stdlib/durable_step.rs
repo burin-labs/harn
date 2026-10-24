@@ -53,10 +53,14 @@ pub(crate) fn reset_durable_step_state() {
     STEP_CALL_COUNTS.with(|counts| counts.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_durable_step_state);
+
 pub(crate) fn register_durable_step_builtins(vm: &mut Vm) {
     register_step_namespace(vm);
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
+
+harn_vm_core::stdlib_installer!(Pure, register_durable_step_builtins);
 
 #[harn_builtin(
     exposure = "harness.runtime.step_run",
@@ -482,7 +486,7 @@ mod tests {
     use super::*;
 
     fn vm_str(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
+        VmValue::string(value)
     }
 
     #[test]
@@ -541,7 +545,7 @@ mod tests {
 
     #[test]
     fn options_reject_unknown_keys() {
-        let options = VmValue::dict(BTreeMap::from([("namesapce".to_string(), vm_str("oops"))]));
+        let options = VmValue::dict([("namesapce", vm_str("oops"))]);
 
         let err = parse_step_options(&options, "step.run").unwrap_err();
 

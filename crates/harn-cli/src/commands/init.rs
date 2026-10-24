@@ -153,10 +153,7 @@ mod tests {
         let exit = harn_parser::runtime_stack::builder()
             .name("typed-connector-scaffold".to_string())
             .spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("runtime");
+                let runtime = harn_clock::test_support::current_thread_runtime();
                 runtime.block_on(async {
                     let _guard =
                         crate::tests::common::harn_state_lock::lock_harn_state_async().await;
@@ -202,10 +199,7 @@ mod tests {
             let exit = harn_parser::runtime_stack::builder()
                 .name(format!("{kind}-docs-scaffold"))
                 .spawn(move || {
-                    let runtime = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .expect("runtime");
+                    let runtime = harn_clock::test_support::current_thread_runtime();
                     runtime.block_on(async {
                         let _guard =
                             crate::tests::common::harn_state_lock::lock_harn_state_async().await;

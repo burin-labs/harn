@@ -324,7 +324,7 @@ pub(super) fn parse_complementary_reviewer_options(
         })?;
     let max_price_multiplier = dict
         .get("max_price_multiplier")
-        .map(|value| vm_value_as_f64(value, "max_price_multiplier"))
+        .map(|value| vm_value_as_f64(value, "llm_complementary_reviewer", "max_price_multiplier"))
         .transpose()?;
     if max_price_multiplier.is_some_and(|value| !value.is_finite() || value <= 0.0) {
         return Err(VmError::Runtime(
@@ -333,11 +333,23 @@ pub(super) fn parse_complementary_reviewer_options(
     }
     let min_price_cap_per_mtok = dict
         .get("min_price_cap_per_mtok")
-        .map(|value| vm_value_as_f64(value, "min_price_cap_per_mtok"))
+        .map(|value| {
+            vm_value_as_f64(
+                value,
+                "llm_complementary_reviewer",
+                "min_price_cap_per_mtok",
+            )
+        })
         .transpose()?;
     let max_price_cap_per_mtok = dict
         .get("max_price_cap_per_mtok")
-        .map(|value| vm_value_as_f64(value, "max_price_cap_per_mtok"))
+        .map(|value| {
+            vm_value_as_f64(
+                value,
+                "llm_complementary_reviewer",
+                "max_price_cap_per_mtok",
+            )
+        })
         .transpose()?;
     if min_price_cap_per_mtok.is_some_and(|value| !value.is_finite() || value <= 0.0) {
         return Err(VmError::Runtime(
@@ -367,15 +379,106 @@ pub(super) fn parse_complementary_reviewer_options(
     })
 }
 
-fn vm_value_as_f64(value: &VmValue, field: &str) -> Result<f64, VmError> {
+fn vm_value_as_f64(value: &VmValue, builtin: &str, field: &str) -> Result<f64, VmError> {
     match value {
         VmValue::Float(value) => Ok(*value),
         VmValue::Int(value) => Ok(*value as f64),
         other => Err(VmError::Runtime(format!(
-            "llm_complementary_reviewer: {field} must be numeric, got {}",
+            "{builtin}: {field} must be numeric, got {}",
             other.type_name(),
         ))),
     }
+}
+
+/// Pick the stronger catalog model a run should escalate to after repeated
+/// verification failures, or a machine-readable `fallback_code` when none fits.
+#[harn_builtin(
+    exposure = "harness.llm.escalation_target",
+    effects = ["llm.read@dynamic"],
+    sig = "llm_escalation_target(options: dict) -> dict",
+    category = "llm.config"
+)]
+pub(super) fn llm_escalation_target_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let options = parse_escalation_target_options(args.first())?;
+    let selection = llm_config::pick_escalation_target(
+        &llm_config::effective_config(),
+        &options,
+        |provider| crate::llm::provider_auth_status(provider).available,
+        |provider, model| {
+            let caps = crate::llm::capabilities::lookup(provider, model);
+            llm_config::ToolChannelFacts {
+                tools: caps.native_tools || caps.text_tool_wire_format_supported,
+                text: caps.text_tool_wire_format_supported,
+                native_unreliable: llm_config::default_tool_format(model, provider) == "native"
+                    && caps.tool_mode_parity.as_deref() == Some("native_unreliable"),
+            }
+        },
+    );
+    let json = serde_json::to_value(selection).map_err(|error| {
+        VmError::Runtime(format!("llm_escalation_target: serialize result: {error}"))
+    })?;
+    Ok(json_to_vm_value(&json))
+}
+
+pub(super) fn parse_escalation_target_options(
+    value: Option<&VmValue>,
+) -> Result<llm_config::EscalationTargetOptions, VmError> {
+    let dict = value
+        .and_then(|value| value.as_dict())
+        .ok_or_else(|| VmError::Runtime("llm_escalation_target: options must be a dict".into()))?;
+    let primary = dict.get("primary").and_then(|value| value.as_dict());
+    let primary_model = primary
+        .and_then(|primary| primary.get("model"))
+        .map(|value| value.display().trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            VmError::Runtime("llm_escalation_target: options.primary.model is required".into())
+        })?;
+    let available_only = match dict.get("available_only") {
+        None | Some(VmValue::Nil) => true,
+        Some(VmValue::Bool(value)) => *value,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "llm_escalation_target: available_only must be a bool, got {}",
+                other.type_name()
+            )))
+        }
+    };
+    let max_price_multiple = match dict.get("max_price_multiple") {
+        None | Some(VmValue::Nil) => None,
+        Some(value) => {
+            let multiple = vm_value_as_f64(value, "llm_escalation_target", "max_price_multiple")?;
+            if !multiple.is_finite() || multiple <= 0.0 {
+                return Err(VmError::Runtime(
+                    "llm_escalation_target: max_price_multiple must be positive".into(),
+                ));
+            }
+            Some(multiple)
+        }
+    };
+    let exclude = match dict.get("exclude") {
+        None | Some(VmValue::Nil) => Vec::new(),
+        Some(VmValue::List(items)) => items
+            .iter()
+            .map(|item| item.display().trim().to_string())
+            .filter(|item| !item.is_empty())
+            .collect(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "llm_escalation_target: exclude must be a list of strings, got {}",
+                other.type_name()
+            )))
+        }
+    };
+    Ok(llm_config::EscalationTargetOptions {
+        primary_model,
+        available_only,
+        max_price_multiple,
+        exclude,
+    })
 }
 
 /// Return same-logical-model routes suitable for explicit failover or

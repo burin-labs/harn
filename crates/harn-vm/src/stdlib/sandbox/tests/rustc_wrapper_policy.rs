@@ -42,10 +42,12 @@ fn static_shell_cargo_keeps_the_wrapper_for_the_real_fixture_compilation() {
     .unwrap();
     let wrapper = cwd.join("record-wrapper");
     let marker = cwd.join("wrapper-arguments");
+    // Cargo can run several wrappers at once; each records its own arguments.
+    std::fs::create_dir(&marker).unwrap();
     std::fs::write(
         &wrapper,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" >> {}\nexec \"$@\"\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}/\"$$\"\nexec \"$@\"\n",
             shell_words::quote(&marker.display().to_string()),
         ),
     )
@@ -106,10 +108,15 @@ fn static_shell_cargo_keeps_the_wrapper_for_the_real_fixture_compilation() {
     );
     assert!(String::from_utf8_lossy(&output.stdout)
         .contains("test wrapped_shell_fixture_reaches_assertion ... ok"));
-    let arguments = std::fs::read_to_string(marker).unwrap();
+    let arguments: Vec<String> = std::fs::read_dir(marker)
+        .unwrap()
+        .map(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap())
+        .collect();
     assert!(
-        arguments.contains("--crate-name\nwrapper_shell_10122\n"),
-        "the wrapper must reach the actual fixture compiler, not only a probe: {arguments}"
+        arguments
+            .iter()
+            .any(|invocation| invocation.contains("--crate-name\nwrapper_shell_10122\n")),
+        "the wrapper must reach the actual fixture compiler, not only a probe: {arguments:#?}"
     );
     let applied = applications
         .0

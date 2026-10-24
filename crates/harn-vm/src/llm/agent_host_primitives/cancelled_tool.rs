@@ -31,7 +31,7 @@ pub(super) fn agent_primitive_cancelled_tool(
     } else {
         format!("tool call cancelled in-flight: {reason}")
     };
-    let mut result = super::agent_primitive_unexecuted_tool_base(
+    let mut result = super::undispatched_tool::agent_primitive_unexecuted_tool_base(
         tool_name,
         tool_call_id,
         tool_args,

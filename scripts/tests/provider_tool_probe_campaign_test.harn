@@ -1622,20 +1622,6 @@ pipeline test_provider_tool_probe_campaign_artifact_paths_are_unique_per_behavio
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_dotenv_parser_does_not_require_shell(
-  harness: Harness,
-  task: unknown,
-) {
-  const env = provider_tool_probe_campaign_env_from_dotenv_text(
-    "# ignored\nexport FIREWORKS_API_KEY=\"secret=value\"\nEMPTY=\nBAD LINE\nMOONSHOT_API_KEY='moon'\n",
-  )
-  assert_eq(env.FIREWORKS_API_KEY, "secret=value")
-  assert_eq(env.MOONSHOT_API_KEY, "moon")
-  assert_eq(env.EMPTY, "")
-  assert_eq(env.BAD, nil)
-}
-
-@test
 pipeline test_provider_tool_probe_campaign_cli_parses_catalog_routes(
   harness: Harness,
   task: unknown,

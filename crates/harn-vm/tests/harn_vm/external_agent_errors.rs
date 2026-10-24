@@ -10,19 +10,14 @@ fn run_source(source: &str) -> Result<String, String> {
         .enable_all()
         .build()
         .map_err(|error| error.to_string())?;
-    runtime.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut vm = harn_vm::new_vm();
-                register_vm_stdlib(&mut vm);
-                vm.execute(&chunk)
-                    .await
-                    .map_err(|error: VmError| format!("{error:?}"))?;
-                Ok(vm.output().to_string())
-            })
+    runtime.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut vm = harn_vm::new_vm();
+        register_vm_stdlib(&mut vm);
+        vm.execute(&chunk)
             .await
-    })
+            .map_err(|error: VmError| format!("{error:?}"))?;
+        Ok(vm.output().to_string())
+    }))
 }
 
 #[test]

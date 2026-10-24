@@ -1,0 +1,20 @@
+name: Install mold
+description: Install the pinned mold linker from its upstream release, verified by sha256 and cached, with an apt fallback.
+runs:
+  using: composite
+  steps:
+    - id: where
+      shell: bash
+      run: ./.github/actions/install-mold/install.sh dir
+    - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      with:
+        path: ${{ steps.where.outputs.dir }}
+        key: ${{ steps.where.outputs.key }}
+    - id: install
+      shell: bash
+      run: ./.github/actions/install-mold/install.sh install
+    - if: steps.install.outputs.installed != 'true'
+      uses: ./.github/actions/apt-install
+      with:
+        packages: mold
+        check-command: mold

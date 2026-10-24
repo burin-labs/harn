@@ -22,9 +22,10 @@ pub(crate) fn register_assemble_context_builtin(vm: &mut Vm) {
     vm.register_builtin_def(&ASSEMBLE_CONTEXT_IMPL_DEF);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_assemble_context_builtin);
+
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "assemble_context(options: dict) -> dict",
     kind = "async",
     category = "context"

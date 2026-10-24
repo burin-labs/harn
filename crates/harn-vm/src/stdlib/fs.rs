@@ -41,6 +41,8 @@ pub(crate) fn reset_fs_state() {
     FILE_TEXT_CACHE.with(|cache| cache.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_fs_state);
+
 /// Invalidate the VM's read-through text caches after a host capability
 /// mutates a path outside the `harness.fs` builtins.
 ///
@@ -178,13 +180,13 @@ fn ignore_policy_option(
 ) -> Result<IgnorePolicy, VmError> {
     match fs_options(opts, builtin).opt_string(IgnorePolicy::OPTION_KEY)? {
         Some(raw) => IgnorePolicy::parse_for(builtin, raw)
-            .map_err(|message| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))),
+            .map_err(|message| VmError::Thrown(VmValue::string(message))),
         None => Ok(IgnorePolicy::default()),
     }
 }
 
 fn ignore_policy_thrown(error: String) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error)))
+    VmError::Thrown(VmValue::string(error))
 }
 
 fn parse_walk_dir_options(args: &[VmValue]) -> Result<WalkDirOptions, VmError> {
@@ -205,6 +207,14 @@ fn parse_walk_dir_options(args: &[VmValue]) -> Result<WalkDirOptions, VmError> {
     Ok(options)
 }
 
+fn walk_error(error: &ignore::Error) -> VmError {
+    let message = format!("walk_dir: {error}");
+    match error.io_error() {
+        Some(cause) => io_error_thrown(message, cause),
+        None => ignore_policy_thrown(message),
+    }
+}
+
 fn walk_dir_entries(
     resolved: &PathBuf,
     options: WalkDirOptions,
@@ -223,9 +233,13 @@ fn walk_dir_entries(
         walker.max_depth(Some(d));
     }
     let mut entries = Vec::new();
-    for entry in walker.build().filter_map(|e| e.ok()) {
+    for entry in walker.build() {
         if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
             break;
+        }
+        let entry = entry.map_err(|error| walk_error(&error))?;
+        if let Some(error) = entry.error() {
+            return Err(walk_error(error));
         }
         let path = entry.path();
         let file_type = entry.file_type();
@@ -242,9 +256,9 @@ fn walk_dir_entries(
 fn walk_entry_to_vm(entry: WalkDirEntry) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("path", entry.path);
-    dict.insert("is_dir".to_string(), VmValue::Bool(entry.is_dir));
-    dict.insert("is_file".to_string(), VmValue::Bool(entry.is_file));
-    dict.insert("depth".to_string(), VmValue::Int(entry.depth));
+    dict.put_bool("is_dir", entry.is_dir);
+    dict.put_bool("is_file", entry.is_file);
+    dict.put_int("depth", entry.depth);
     VmValue::dict(dict)
 }
 
@@ -316,13 +330,12 @@ fn glob_matches(
     cancel: Option<&AtomicBool>,
 ) -> Result<Vec<String>, VmError> {
     let mut builder = globset::GlobSetBuilder::new();
-    let glob = globset::Glob::new(pattern).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!("glob: {e}"))))
-    })?;
+    let glob = globset::Glob::new(pattern)
+        .map_err(|e| VmError::Thrown(VmValue::string(format!("glob: {e}"))))?;
     builder.add(glob);
-    let set = builder.build().map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!("glob: {e}"))))
-    })?;
+    let set = builder
+        .build()
+        .map_err(|e| VmError::Thrown(VmValue::string(format!("glob: {e}"))))?;
     let mut walker = ignore::WalkBuilder::new(base);
     walker.sort_by_file_name(|left, right| left.cmp(right));
     // No blanket dotfile skip: `glob(".github/workflows/*.yml", ...)` is how
@@ -402,6 +415,8 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     }
 }
 
+harn_vm_core::stdlib_installer!(Host, register_fs_builtins);
+
 const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &READ_FILE_BUILTIN_DEF,
     &READ_FILE_RESULT_BUILTIN_DEF,
@@ -438,7 +453,6 @@ const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "read_file(path: string) -> string",
     category = "fs",
     doc = "Read an entire UTF-8 file or embedded stdlib prompt asset."
@@ -446,7 +460,7 @@ const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 fn read_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     if let Some(source) = crate::stdlib_modules::get_stdlib_prompt_asset(&path) {
-        return Ok(VmValue::String(arcstr::ArcStr::from(source)));
+        return Ok(VmValue::string(source));
     }
     if crate::stdlib::asset_paths::stdlib_prompt_asset_path(&path).is_some() {
         return Err(VmError::Thrown(unknown_prompt_asset_error_value(&path)));
@@ -475,7 +489,6 @@ fn read_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "read_file_result(path: string) -> Result<string, {error: \"io_error\", kind: \"not_found\" | \"permission_denied\" | \"already_exists\" | \"storage_full\" | \"quota_exceeded\" | \"file_too_large\" | \"read_only_filesystem\" | \"not_a_directory\" | \"is_a_directory\" | \"directory_not_empty\" | \"crosses_devices\" | \"too_many_links\" | \"invalid_input\" | \"invalid_data\" | \"timed_out\" | \"interrupted\" | \"unexpected_eof\" | \"would_block\" | \"out_of_memory\" | \"resource_busy\" | \"executable_file_busy\" | \"sandbox_denied\" | \"other\", message: string, category: \"tool_rejected\"?}>",
     category = "fs",
     doc = "Read a UTF-8 file and return Result.Ok(content) or a structured Result.Err."
@@ -483,7 +496,7 @@ fn read_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     if let Some(source) = crate::stdlib_modules::get_stdlib_prompt_asset(&path) {
-        return Ok(result_ok(VmValue::String(arcstr::ArcStr::from(source))));
+        return Ok(result_ok(VmValue::string(source)));
     }
     if crate::stdlib::asset_paths::stdlib_prompt_asset_path(&path).is_some() {
         return Ok(result_err(unknown_prompt_asset_error_value(&path)));
@@ -516,7 +529,6 @@ fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "read_file_bytes(path: string) -> bytes",
     category = "fs",
     doc = "Read an entire file as bytes."
@@ -540,7 +552,6 @@ fn read_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "write_file(path: string, content: string) -> nil",
     category = "fs",
     doc = "Write UTF-8 text to a file."
@@ -570,7 +581,6 @@ fn write_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "write_file_bytes(path: string, content: bytes) -> nil",
     category = "fs",
     doc = "Write bytes to a file."
@@ -582,11 +592,9 @@ fn write_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
         let content = match &args[1] {
             VmValue::Bytes(bytes) => bytes.as_slice(),
             other => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!(
-                        "write_file_bytes expects bytes content, got {}",
-                        other.type_name()
-                    ),
+                return Err(VmError::Thrown(VmValue::string(format!(
+                    "write_file_bytes expects bytes content, got {}",
+                    other.type_name()
                 ))));
             }
         };
@@ -633,7 +641,6 @@ fn edited_byte_count(bytes: u64) -> usize {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "file_exists(path: string) -> bool",
     category = "fs",
     doc = "Return whether a file-system path exists."
@@ -677,11 +684,9 @@ fn parse_path_status_access(args: &[VmValue]) -> Result<crate::stdlib::sandbox::
         VmValue::Nil => return Ok(crate::stdlib::sandbox::FsAccess::Read),
         VmValue::String(text) => text.as_str(),
         other => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!(
-                    "path_status access must be a string, got {}",
-                    other.type_name()
-                ),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "path_status access must be a string, got {}",
+                other.type_name()
             ))));
         }
     };
@@ -689,9 +694,9 @@ fn parse_path_status_access(args: &[VmValue]) -> Result<crate::stdlib::sandbox::
         "" | "read" => Ok(crate::stdlib::sandbox::FsAccess::Read),
         "write" => Ok(crate::stdlib::sandbox::FsAccess::Write),
         "delete" | "remove" => Ok(crate::stdlib::sandbox::FsAccess::Delete),
-        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        _ => Err(VmError::Thrown(VmValue::string(
             "path_status access must be one of: read, write, delete",
-        )))),
+        ))),
     }
 }
 
@@ -730,18 +735,15 @@ fn path_status_from_metadata(
     let mut info = base_path_status(path, resolved, access);
     info.put_str("status", status);
     info.put_str("kind", kind);
-    info.insert("visible".to_string(), VmValue::Bool(true));
-    info.insert("exists".to_string(), VmValue::Bool(true));
-    info.insert("size".to_string(), VmValue::Int(metadata.len() as i64));
-    info.insert("is_file".to_string(), VmValue::Bool(metadata.is_file()));
-    info.insert("is_dir".to_string(), VmValue::Bool(metadata.is_dir()));
-    info.insert(
-        "readonly".to_string(),
-        VmValue::Bool(metadata.permissions().readonly()),
-    );
+    info.put_bool("visible", true);
+    info.put_bool("exists", true);
+    info.put_int("size", metadata.len() as i64);
+    info.put_bool("is_file", metadata.is_file());
+    info.put_bool("is_dir", metadata.is_dir());
+    info.put_bool("readonly", metadata.permissions().readonly());
     if let Ok(modified) = metadata.modified() {
         if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
-            info.insert("modified".to_string(), VmValue::Float(dur.as_secs_f64()));
+            info.put("modified", VmValue::Float(dur.as_secs_f64()));
         }
     }
     VmValue::dict(info)
@@ -755,8 +757,8 @@ fn missing_path_status(
     let mut info = base_path_status(path, resolved, access);
     info.put_str("status", "missing");
     info.put_str("kind", "missing");
-    info.insert("visible".to_string(), VmValue::Bool(true));
-    info.insert("exists".to_string(), VmValue::Bool(false));
+    info.put_bool("visible", true);
+    info.put_bool("exists", false);
     VmValue::dict(info)
 }
 
@@ -774,21 +776,18 @@ fn scope_denied_path_status(
     let mut info = base_path_status(path, resolved, access);
     info.put_str("status", status);
     info.put_str("kind", status);
-    info.insert("visible".to_string(), VmValue::Bool(false));
-    info.insert("exists".to_string(), VmValue::Nil);
-    info.insert("read_only".to_string(), VmValue::Bool(violation.read_only));
+    info.put_bool("visible", false);
+    info.put("exists", VmValue::Nil);
+    info.put_bool("read_only", violation.read_only);
     info.put_str("attempted", violation.attempted.to_string_lossy());
-    info.insert(
-        "roots".to_string(),
-        VmValue::List(std::sync::Arc::new(
+    info.put(
+        "roots",
+        VmValue::strings(
             violation
                 .roots
                 .iter()
-                .map(|root| {
-                    VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().into_owned()))
-                })
-                .collect(),
-        )),
+                .map(|root| root.to_string_lossy().into_owned()),
+        ),
     );
     info.put_str("message", violation.message("path_status"));
     VmValue::dict(info)
@@ -803,8 +802,8 @@ fn stat_error_path_status(
     let mut info = base_path_status(path, resolved, access);
     info.put_str("status", "stat_error");
     info.put_str("kind", "stat_error");
-    info.insert("visible".to_string(), VmValue::Bool(false));
-    info.insert("exists".to_string(), VmValue::Nil);
+    info.put_bool("visible", false);
+    info.put("exists", VmValue::Nil);
     info.put_str("error_kind", format!("{:?}", error.kind()));
     info.put_str(
         "message",
@@ -815,7 +814,6 @@ fn stat_error_path_status(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "path_status(path: string, access?: string) -> dict",
     category = "fs",
     doc = "Return structured filesystem visibility status without collapsing scope denial into absence."
@@ -838,7 +836,6 @@ fn path_status_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "delete_file(path: string) -> nil",
     category = "fs",
     doc = "Delete a file or directory."
@@ -880,7 +877,6 @@ fn delete_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "append_file(path: string, content: string) -> nil",
     category = "fs",
     doc = "Append UTF-8 text to a file."
@@ -912,7 +908,6 @@ fn append_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "append_file_locked(path: string, content: string, options?: dict) -> nil",
     category = "fs",
     doc = "Append UTF-8 text to a file while holding a cross-process advisory lock."
@@ -958,7 +953,6 @@ fn append_file_locked_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "list_dir(path?: string) -> list",
     category = "fs",
     doc = "Return sorted directory entry names."
@@ -986,15 +980,14 @@ fn list_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             continue;
         };
         let name = name.to_string_lossy().into_owned();
-        result.push(VmValue::String(arcstr::ArcStr::from(name)));
+        result.push(VmValue::string(name));
     }
     result.sort_by_key(|a| a.display());
-    Ok(VmValue::List(std::sync::Arc::new(result)))
+    Ok(VmValue::list(result))
 }
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "mkdir(path: string, recursive?: bool) -> nil",
     category = "fs",
     doc = "Create a directory. By default missing parents are created; pass recursive=false for single-directory creation that fails if the target already exists."
@@ -1037,20 +1030,18 @@ fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig_expr = harn_builtin_meta::signatures::PORTABLE_PATH_JOIN,
     category = "fs",
     doc = "Join path segments in Harn's target-independent forward-slash form."
 )]
 fn path_join_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        harn_kernel::pure::join_path_segments(args.iter().map(VmValue::display)),
+    Ok(VmValue::string(harn_kernel::pure::join_path_segments(
+        args.iter().map(VmValue::display),
     )))
 }
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "copy_file(src: string, dst: string) -> nil",
     category = "fs",
     doc = "Copy a file to a destination path."
@@ -1092,15 +1083,14 @@ fn copy_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "temp_dir() -> string",
     category = "fs",
     doc = "Return the host temporary directory path."
 )]
 fn temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         std::env::temp_dir().to_string_lossy().into_owned().as_str(),
-    )))
+    ))
 }
 
 /// Render a temp-directory path for return to Harn-land, normalizing away any
@@ -1120,20 +1110,18 @@ fn temp_dir_path_string(path: &Path) -> String {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "workspace_temp_dir() -> string",
     category = "fs",
     doc = "Return a sandbox-writable workspace-local temporary directory path, creating it lazily."
 )]
 fn workspace_temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(temp_dir_path_string(
-        &workspace_temp_root()?,
-    ))))
+    Ok(VmValue::string(temp_dir_path_string(
+        &workspace_temp_root()?
+    )))
 }
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "mkdtemp(prefix?: string) -> string",
     category = "fs",
     doc = "Create a new uniquely-named directory under the host temp dir and return its absolute path. The caller owns the directory lifecycle."
@@ -1152,14 +1140,11 @@ fn mkdtemp_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
             &error,
         )
     })?;
-    Ok(VmValue::String(arcstr::ArcStr::from(temp_dir_path_string(
-        &path,
-    ))))
+    Ok(VmValue::string(temp_dir_path_string(&path)))
 }
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "mkdtemp_in_workspace(prefix?: string) -> string",
     category = "fs",
     doc = "Create a new uniquely-named directory under workspace_temp_dir() and return its path."
@@ -1182,12 +1167,10 @@ fn mkdtemp_in_workspace_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         )
     })?;
     queue_file_edited_for(&path, "mkdtemp_in_workspace", 0);
-    Ok(VmValue::String(arcstr::ArcStr::from(temp_dir_path_string(
-        &path,
-    ))))
+    Ok(VmValue::string(temp_dir_path_string(&path)))
 }
 
-fn workspace_temp_root() -> Result<PathBuf, VmError> {
+pub(crate) fn workspace_temp_root() -> Result<PathBuf, VmError> {
     if let Some(policy) = crate::orchestration::current_execution_policy() {
         if policy.sandbox_profile.enforces_path_scope() {
             if let Some(path) = crate::stdlib::sandbox::workspace_local_tmpdir(&policy) {
@@ -1232,7 +1215,6 @@ fn unique_temp_dir_name(args: &[VmValue], default_prefix: &str) -> String {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "stat(path: string) -> dict",
     category = "fs",
     doc = "Return metadata for a file-system path."
@@ -1248,16 +1230,13 @@ fn stat_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     let metadata = std::fs::metadata(&resolved)
         .map_err(|e| io_error_thrown(format!("Failed to stat {}: {e}", resolved.display()), &e))?;
     let mut info = BTreeMap::new();
-    info.insert("size".to_string(), VmValue::Int(metadata.len() as i64));
-    info.insert("is_file".to_string(), VmValue::Bool(metadata.is_file()));
-    info.insert("is_dir".to_string(), VmValue::Bool(metadata.is_dir()));
-    info.insert(
-        "readonly".to_string(),
-        VmValue::Bool(metadata.permissions().readonly()),
-    );
+    info.put_int("size", metadata.len() as i64);
+    info.put_bool("is_file", metadata.is_file());
+    info.put_bool("is_dir", metadata.is_dir());
+    info.put_bool("readonly", metadata.permissions().readonly());
     if let Ok(modified) = metadata.modified() {
         if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
-            info.insert("modified".to_string(), VmValue::Float(dur.as_secs_f64()));
+            info.put("modified", VmValue::Float(dur.as_secs_f64()));
         }
     }
     Ok(VmValue::dict(info))
@@ -1265,16 +1244,15 @@ fn stat_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "move_file(src: string, dst: string) -> nil",
     category = "fs",
     doc = "Move a file to a destination path."
 )]
 fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "move_file: src and dst are required",
-        ))));
+        )));
     }
     let src = resolve_fs_path(&args[0].display());
     let dst = resolve_fs_path(&args[1].display());
@@ -1319,7 +1297,6 @@ fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "read_lines(path: string) -> list",
     category = "fs",
     doc = "Read a UTF-8 file as a list of lines."
@@ -1334,16 +1311,12 @@ fn read_lines_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     )?;
     let content = overlay::read_to_string(&resolved)
         .map_err(|e| io_error_thrown(format!("read_lines: {}: {e}", resolved.display()), &e))?;
-    let lines: Vec<VmValue> = content
-        .lines()
-        .map(|l| VmValue::String(arcstr::ArcStr::from(l)))
-        .collect();
-    Ok(VmValue::List(std::sync::Arc::new(lines)))
+    let lines: Vec<VmValue> = content.lines().map(VmValue::string).collect();
+    Ok(VmValue::list(lines))
 }
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "walk_dir(path: string, options?: dict) -> list",
     category = "fs",
     doc = "Recursively list files and directories, honoring the project ignore stack by default."
@@ -1351,9 +1324,9 @@ fn read_lines_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 fn walk_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let root = args.first().map(|a| a.display()).unwrap_or_default();
     if root.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "walk_dir: root path is required",
-        ))));
+        )));
     }
     let resolved = resolve_fs_path(&root);
     crate::stdlib::sandbox::enforce_fs_path(
@@ -1382,12 +1355,11 @@ fn walk_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         .into_iter()
         .map(walk_entry_to_vm)
         .collect::<Vec<_>>();
-    Ok(VmValue::List(std::sync::Arc::new(entries)))
+    Ok(VmValue::list(entries))
 }
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "glob(pattern: string, base_or_options?: any, options?: dict) -> list",
     category = "fs",
     doc = "Match files under a base directory using a glob pattern, honoring the project ignore stack by default."
@@ -1395,9 +1367,9 @@ fn walk_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 fn glob_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let pattern = args.first().map(|a| a.display()).unwrap_or_default();
     if pattern.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "glob: pattern is required",
-        ))));
+        )));
     }
     let options = parse_glob_options(args)?;
     let base = resolve_fs_path(&options.base);
@@ -1425,9 +1397,9 @@ fn glob_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     }
     let matches = glob_matches(&pattern, &base, policy, None)?
         .into_iter()
-        .map(|path| VmValue::String(arcstr::ArcStr::from(path)))
+        .map(VmValue::string)
         .collect::<Vec<_>>();
-    Ok(VmValue::List(std::sync::Arc::new(matches)))
+    Ok(VmValue::list(matches))
 }
 
 #[cfg(test)]

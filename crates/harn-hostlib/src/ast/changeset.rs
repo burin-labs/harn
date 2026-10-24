@@ -24,6 +24,8 @@ const MAX_TOTAL_BYTES: usize = 20 * 1024 * 1024;
 struct Request {
     #[serde(default)]
     files: Vec<FileInput>,
+    #[serde(default)]
+    proof: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,6 +46,8 @@ struct Summary {
     candidate_callers: Vec<CandidateCallers>,
     counts: Counts,
     warnings: Vec<Warning>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proof: Option<crate::edit_proof::EditProof>,
 }
 
 #[derive(Debug, Serialize)]
@@ -163,6 +167,7 @@ pub(super) fn run_with_code_index(
 }
 
 fn summarize(request: Request, code_index: Option<&SharedIndex>) -> Summary {
+    let mut proof = request.proof.then(crate::edit_proof::EditProof::new);
     let mut files = Vec::new();
     let mut warnings = Vec::new();
     let mut before_facts = Vec::new();
@@ -172,6 +177,7 @@ fn summarize(request: Request, code_index: Option<&SharedIndex>) -> Summary {
 
     for input in request.files {
         if input.before.is_none() && input.after.is_none() {
+            proof = None;
             record_degraded(
                 input.path,
                 None,
@@ -188,6 +194,7 @@ fn summarize(request: Request, code_index: Option<&SharedIndex>) -> Summary {
             .saturating_add(before.len())
             .saturating_add(after.len());
         if total_bytes > MAX_TOTAL_BYTES {
+            proof = None;
             record_degraded(
                 input.path,
                 None,
@@ -199,6 +206,7 @@ fn summarize(request: Request, code_index: Option<&SharedIndex>) -> Summary {
             continue;
         }
         if let Some(reason) = unsafe_source_reason(before, after) {
+            proof = None;
             let language = Language::detect(std::path::Path::new(&input.path), None)
                 .map(|language| language.name().to_string());
             record_degraded(
@@ -210,6 +218,15 @@ fn summarize(request: Request, code_index: Option<&SharedIndex>) -> Summary {
                 &mut counts,
             );
             continue;
+        }
+        if let Some(proof) = &mut proof {
+            proof.add_file(
+                &input.path,
+                before,
+                after,
+                Language::detect(std::path::Path::new(&input.path), None),
+                None,
+            );
         }
         if before == after {
             counts.files_unchanged += 1;
@@ -295,6 +312,7 @@ fn summarize(request: Request, code_index: Option<&SharedIndex>) -> Summary {
         candidate_callers,
         counts,
         warnings,
+        proof,
     }
 }
 
@@ -632,8 +650,114 @@ fn candidate_callers(
 mod tests {
     use super::*;
 
+    #[test]
+    fn optional_proof_retains_line_ending_changes() {
+        use crate::test_support::*;
+        for (before, after, old_excerpt, new_excerpt) in [
+            ("class A {}\n", "class A {}\n\n", "", "\n"),
+            (
+                "class A {}\r\n",
+                "class A {}\n",
+                "class A {}\r\n",
+                "class A {}\n",
+            ),
+            ("class A {}", "class A {}\n", "class A {}", "class A {}\n"),
+            (
+                "class A {}\r\r",
+                "class A {}\r",
+                "class A {}\r\r",
+                "class A {}\r",
+            ),
+        ] {
+            let result = run(&[dict(&[
+                ("proof", VmValue::Bool(true)),
+                (
+                    "files",
+                    VmValue::list(vec![dict(&[
+                        ("path", vm_string("A.java")),
+                        ("before", vm_string(before)),
+                        ("after", vm_string(after)),
+                    ])]),
+                ),
+            ])])
+            .unwrap();
+            let VmValue::List(files) = field(field(&result, "proof"), "files") else {
+                panic!("proof files missing")
+            };
+            let VmValue::List(sites) = field(&files[0], "sites") else {
+                panic!("proof sites missing")
+            };
+            assert_eq!(sites.len(), 1);
+            assert_eq!(s(field(&sites[0], "before")), old_excerpt);
+            assert_eq!(s(field(&sites[0], "after")), new_excerpt);
+        }
+    }
+
+    #[test]
+    fn optional_proof_reports_broken_source_without_claiming_compilation() {
+        use crate::test_support::*;
+        let args = dict(&[
+            ("proof", VmValue::Bool(true)),
+            (
+                "files",
+                VmValue::list(vec![dict(&[
+                    ("path", vm_string("Example.java")),
+                    ("before", vm_string("class Example {}")),
+                    ("after", vm_string("class Example {")),
+                ])]),
+            ),
+        ]);
+        let result = run(&[args]).unwrap();
+        crate::schemas::validate_response(BUILTIN, "ast", "changeset_summary", result.clone())
+            .unwrap();
+        let proof = field(&result, "proof");
+        assert_eq!(s(field(proof, "schema")), "harn.edit_proof.v1");
+        let VmValue::List(files) = field(proof, "files") else {
+            panic!("proof files missing")
+        };
+        assert_eq!(files.len(), 1);
+        assert_eq!(s(field(field(&files[0], "syntax"), "status")), "failed");
+        assert_eq!(s(field(field(proof, "semantics"), "status")), "not_run");
+        assert_eq!(s(field(&files[0], "site_kind")), "line_regions");
+        let VmValue::Dict(result) = &result else {
+            panic!("result missing")
+        };
+        let mut invalid = crate::json::vm_dict_to_json(result);
+        invalid["proof"]["files"][0]["syntax"]["status"] = serde_json::json!("green");
+        assert!(crate::schemas::validate_response(
+            BUILTIN,
+            "ast",
+            "changeset_summary",
+            harn_vm::bridge::json_result_to_vm_value(&invalid)
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn incomplete_images_withhold_proof_instead_of_reporting_zero_sites() {
+        let summary = summarize(
+            Request {
+                proof: true,
+                files: vec![FileInput {
+                    path: "Example.java".into(),
+                    before: None,
+                    after: None,
+                }],
+            },
+            None,
+        );
+        assert_eq!(summary.status, "degraded");
+        assert!(summary.proof.is_none());
+    }
+
     fn summarize_files(files: Vec<FileInput>) -> Summary {
-        summarize(Request { files }, None)
+        summarize(
+            Request {
+                files,
+                proof: false,
+            },
+            None,
+        )
     }
 
     #[test]
@@ -688,6 +812,7 @@ mod tests {
 
         let summary = summarize(
             Request {
+                proof: false,
                 files: vec![FileInput {
                     path: "lib.rs".to_string(),
                     before: Some(

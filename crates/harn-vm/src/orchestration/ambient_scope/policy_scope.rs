@@ -149,7 +149,7 @@ mod tests {
         let state_write = || {
             enforce_current_policy_for_capability(
                 harn_builtin_meta::CapabilityId::Runtime,
-                "store_set",
+                "record_run",
                 &[],
             )
         };

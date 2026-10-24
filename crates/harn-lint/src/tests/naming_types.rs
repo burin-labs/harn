@@ -45,10 +45,9 @@ struct bad_name {
     );
 }
 
-#[test]
-fn test_unused_type_warns_for_unreferenced_struct() {
-    let diags = lint_source(
-        r#"
+#[rstest::rstest]
+#[case::test_unused_type_warns_for_unreferenced_struct(
+    r#"
 struct Helper {
   value: int
 }
@@ -57,17 +56,11 @@ pipeline default(task) {
   log("ready")
 }
 "#,
-    );
-    assert!(
-        has_rule(&diags, "unused-type"),
-        "expected unused-type warning, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unused_type_ignores_referenced_struct() {
-    let diags = lint_source(
-        r"
+    "unused-type",
+    true
+)]
+#[case::test_unused_type_ignores_referenced_struct(
+    r"
 struct Helper {
   value: int
 }
@@ -81,34 +74,22 @@ pipeline default(task) {
   log(item.value)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "unused-type"),
-        "referenced types should not trigger unused-type: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unused_type_warns_for_unreferenced_alias() {
-    let diags = lint_source(
-        r#"
+    "unused-type",
+    false
+)]
+#[case::test_unused_type_warns_for_unreferenced_alias(
+    r#"
 type Payload = {value: int}
 
 pipeline default(task) {
   log("ready")
 }
 "#,
-    );
-    assert!(
-        has_rule(&diags, "unused-type"),
-        "expected unused-type warning for alias, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unused_type_ignores_referenced_alias() {
-    let diags = lint_source(
-        r"
+    "unused-type",
+    true
+)]
+#[case::test_unused_type_ignores_referenced_alias(
+    r"
 type Payload = {value: int}
 
 fn build() -> Payload {
@@ -120,17 +101,11 @@ pipeline default(task) {
   log(item.value)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "unused-type"),
-        "referenced aliases should not trigger unused-type: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unused_type_ignores_binding_annotation_reference() {
-    let diags = lint_source(
-        r"
+    "unused-type",
+    false
+)]
+#[case::test_unused_type_ignores_binding_annotation_reference(
+    r"
 type Payload = {value: int}
 
 pipeline default(task) {
@@ -138,34 +113,22 @@ pipeline default(task) {
   log(item.value)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "unused-type"),
-        "types referenced by binding annotations should not trigger unused-type: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unused_type_ignores_pipeline_return_annotation_reference() {
-    let diags = lint_source(
-        r"
+    "unused-type",
+    false
+)]
+#[case::test_unused_type_ignores_pipeline_return_annotation_reference(
+    r"
 type Payload = {value: int}
 
 pipeline default(task) -> Payload {
   return {value: 1}
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "unused-type"),
-        "types referenced by pipeline return annotations should not trigger unused-type: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unused_type_ignores_closure_param_annotation_reference() {
-    let diags = lint_source(
-        r"
+    "unused-type",
+    false
+)]
+#[case::test_unused_type_ignores_closure_param_annotation_reference(
+    r"
 type Payload = {value: int}
 
 pipeline default(task) {
@@ -173,17 +136,11 @@ pipeline default(task) {
   log(read_value({value: 1}))
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "unused-type"),
-        "types referenced by closure parameter annotations should not trigger unused-type: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unused_type_ignores_function_call_type_arg_reference() {
-    let diags = lint_source(
-        r"
+    "unused-type",
+    false
+)]
+#[case::test_unused_type_ignores_function_call_type_arg_reference(
+    r"
 type Payload = {value: int}
 
 fn identity<T>(item: T) -> T {
@@ -195,17 +152,11 @@ pipeline default(task) {
   log(item.value)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "unused-type"),
-        "types referenced by call type arguments should not trigger unused-type: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unused_type_ignores_schema_of_reference() {
-    let diags = lint_source(
-        r"
+    "unused-type",
+    false
+)]
+#[case::test_unused_type_ignores_schema_of_reference(
+    r"
 type Payload = {value: int}
 
 pipeline default(task) {
@@ -213,17 +164,11 @@ pipeline default(task) {
   log(schema)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "unused-type"),
-        "types referenced by schema_of(T) should not trigger unused-type: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unused_type_ignores_schema_predicate_reference() {
-    let diags = lint_source(
-        r"
+    "unused-type",
+    false
+)]
+#[case::test_unused_type_ignores_schema_predicate_reference(
+    r"
 type Payload = {value: int}
 
 pipeline default(task) {
@@ -233,17 +178,11 @@ pipeline default(task) {
   }
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "unused-type"),
-        "types referenced by schema predicates should not trigger unused-type: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unused_type_ignores_typed_catch_reference() {
-    let diags = lint_source(
-        r#"
+    "unused-type",
+    false
+)]
+#[case::test_unused_type_ignores_typed_catch_reference(
+    r#"
 type AppError = {message: string}
 
 pipeline default(task) {
@@ -254,10 +193,15 @@ pipeline default(task) {
   }
 }
 "#,
-    );
-    assert!(
-        !has_rule(&diags, "unused-type"),
-        "types referenced by typed catch clauses should not trigger unused-type: {diags:?}"
+    "unused-type",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }
 

@@ -21,7 +21,6 @@ use harn_vm::orchestration::{
     WORKFLOW_BUNDLE_SCHEMA_VERSION,
 };
 use tempfile::TempDir;
-use tokio::runtime::Builder;
 
 // Ed25519 test fixture for the pack signing tests. Generated with openssl genpkey
 // on 2026-08-16 solely as a test prop; never used by any real service or account,
@@ -62,15 +61,11 @@ fn run_pack(args: &PackArgs) {
 }
 
 fn build_pack(args: &PackArgs) -> pack::PackOutcome {
-    Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("tokio current-thread runtime")
-        .block_on(async {
-            let _cwd_guard = cwd_lock::lock_cwd_async().await;
-            harn_vm::reset_thread_local_state();
-            pack::build(&build_args_from_pack(args)).expect("pack succeeds")
-        })
+    harn_clock::test_support::current_thread_runtime().block_on(async {
+        let _cwd_guard = cwd_lock::lock_cwd_async().await;
+        harn_vm::reset_thread_local_state();
+        pack::build(&build_args_from_pack(args)).expect("pack succeeds")
+    })
 }
 
 fn pack_args(entrypoint: PathBuf, out: PathBuf) -> PackArgs {
@@ -284,26 +279,22 @@ fn pack_json_envelope_carries_pack_schema() {
     .unwrap();
     let out = workdir.path().join("hello.harnpack");
 
-    let envelope = Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(async {
-            let _cwd_guard = cwd_lock::lock_cwd_async().await;
-            harn_vm::reset_thread_local_state();
-            pack::run_to_envelope(&PackArgs {
-                command: None,
-                entrypoint: Some(entry.clone()),
-                out: Some(out.clone()),
-                upgrade: None,
-                sign: false,
-                key: None,
-                unsigned: true,
-                exclude_secrets: false,
-                include_secrets: false,
-                json: true,
-            })
-        });
+    let envelope = harn_clock::test_support::current_thread_runtime().block_on(async {
+        let _cwd_guard = cwd_lock::lock_cwd_async().await;
+        harn_vm::reset_thread_local_state();
+        pack::run_to_envelope(&PackArgs {
+            command: None,
+            entrypoint: Some(entry.clone()),
+            out: Some(out.clone()),
+            upgrade: None,
+            sign: false,
+            key: None,
+            unsigned: true,
+            exclude_secrets: false,
+            include_secrets: false,
+            json: true,
+        })
+    });
 
     let value = serde_json::to_value(&envelope).unwrap();
     jsonschema::draft202012::meta::validate(&pack::json_schema()).unwrap();
@@ -789,7 +780,7 @@ fn pack_verify_json_envelope_round_trips_schema() {
 
 #[test]
 fn pack_verify_require_trusted_signer_rejects_signer_outside_policy_allowlist() {
-    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+    let runtime = harn_clock::test_support::current_thread_runtime();
     runtime.block_on(async {
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
@@ -952,7 +943,7 @@ fn pack_exclude_secrets_blocks_entrypoint_with_dotenv_name() {
     fs::write(&entry, print_entry_source("secret")).unwrap();
     let out = workdir.path().join(".env.harnpack");
 
-    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+    let runtime = harn_clock::test_support::current_thread_runtime();
     let err = runtime.block_on(async {
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
@@ -986,26 +977,22 @@ fn pack_exclude_secrets_skips_imported_assets_with_warning() {
     .unwrap();
     let out = workdir.path().join("entry.harnpack");
 
-    let envelope = Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(async {
-            let _cwd_guard = cwd_lock::lock_cwd_async().await;
-            harn_vm::reset_thread_local_state();
-            pack::run_to_envelope(&PackArgs {
-                command: None,
-                entrypoint: Some(entry.clone()),
-                out: Some(out.clone()),
-                upgrade: None,
-                sign: false,
-                key: None,
-                unsigned: true,
-                exclude_secrets: true,
-                include_secrets: false,
-                json: true,
-            })
-        });
+    let envelope = harn_clock::test_support::current_thread_runtime().block_on(async {
+        let _cwd_guard = cwd_lock::lock_cwd_async().await;
+        harn_vm::reset_thread_local_state();
+        pack::run_to_envelope(&PackArgs {
+            command: None,
+            entrypoint: Some(entry.clone()),
+            out: Some(out.clone()),
+            upgrade: None,
+            sign: false,
+            key: None,
+            unsigned: true,
+            exclude_secrets: true,
+            include_secrets: false,
+            json: true,
+        })
+    });
 
     let value = serde_json::to_value(&envelope).unwrap();
     assert_eq!(value["ok"], true);

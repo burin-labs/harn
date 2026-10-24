@@ -3,11 +3,8 @@
 use crate::stdlib::macros::harn_builtin;
 use crate::text_diff::{compute_line_diff, LineDiffOptions, DEFAULT_CONTEXT};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
-pub(crate) fn register_diff_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_diff_builtins);
 
 fn string_arg<'a>(args: &'a [VmValue], index: usize, name: &str) -> Result<&'a str, VmError> {
     match args.get(index) {
@@ -71,7 +68,6 @@ fn count_value(value: usize) -> VmValue {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__diff_line_artifact(before: string, after: string, options?: dict) -> dict",
     category = "diff"
 )]
@@ -127,7 +123,7 @@ mod tests {
             &[
                 VmValue::string("a\nb\nc\n"),
                 VmValue::string("a\nB\nc\n"),
-                VmValue::dict([("include_ops".to_owned(), VmValue::Bool(false))]),
+                VmValue::dict([("include_ops", VmValue::Bool(false))]),
             ],
             &mut String::new(),
         )

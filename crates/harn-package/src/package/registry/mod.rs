@@ -3,11 +3,13 @@
 //! A dependency spec becomes a resolved registry version ([`resolve`]) backed
 //! by an index document ([`index`]) fetched over a source URI ([`source`]);
 //! that source is cloned or unpacked ([`git_source`], [`populate`]) into a
-//! cache directory whose layout and locking live in [`cache_layout`] and whose
+//! cache directory whose layout and source lifetimes live in [`cache_layout`]
+//! and [`cache_source`] and whose
 //! contents are hashed and materialized by [`content_hash`]. [`inspect`] reads
 //! the cache back, and [`commands`] is the CLI surface over all of it.
 
 mod cache_layout;
+mod cache_source;
 mod commands;
 mod content_hash;
 mod git_source;
@@ -22,6 +24,7 @@ mod verify;
 mod tests;
 
 pub(crate) use self::cache_layout::*;
+pub(crate) use self::cache_source::*;
 pub(crate) use self::content_hash::*;
 pub(crate) use self::git_source::*;
 pub(crate) use self::index::*;

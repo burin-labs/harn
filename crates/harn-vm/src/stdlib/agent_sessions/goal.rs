@@ -10,9 +10,7 @@ struct GoalInput {
     metadata: SessionGoalMetadata,
 }
 
-pub(super) fn register(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, fn register_goal_builtins);
 
 fn snapshot(state: SessionGoalState) -> VmValue {
     crate::stdlib::json_to_vm_value(&serde_json::to_value(state).expect("typed goal serializes"))
@@ -89,6 +87,7 @@ fn require_owned_run(ctx: &AsyncBuiltinCtx, id: &str) -> Result<(), VmError> {
 #[harn_builtin(
     exposure = "runtime_internal", effects = [],
     sig = "agent_session_goal(id: string) -> dict",
+    read_only_preparation = true,
     category = "agent.session",
     doc = "Read typed session goal state. Use with_run to hydrate a cold session from its canonical journal."
 )]

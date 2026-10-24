@@ -106,6 +106,8 @@ pub(crate) fn register_review_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Host, register_review_builtins);
+
 async fn self_review_impl(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     args: Vec<VmValue>,
@@ -714,27 +716,19 @@ mod tests {
     use harn_parser::Parser;
 
     fn run_script(source: &str) -> String {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(async {
-            let local = tokio::task::LocalSet::new();
-            local
-                .run_until(async {
-                    let mut lexer = Lexer::new(source);
-                    let tokens = lexer.tokenize().unwrap();
-                    let mut parser = Parser::new(tokens);
-                    let program = parser.parse().unwrap();
-                    let chunk = Compiler::new().compile(&program).unwrap();
+        let rt = harn_clock::test_support::current_thread_runtime();
+        rt.block_on(harn_clock::test_support::with_local_tasks(async {
+            let mut lexer = Lexer::new(source);
+            let tokens = lexer.tokenize().unwrap();
+            let mut parser = Parser::new(tokens);
+            let program = parser.parse().unwrap();
+            let chunk = Compiler::new().compile(&program).unwrap();
 
-                    let mut vm = crate::new_vm();
-                    register_vm_stdlib(&mut vm);
-                    let _ = vm.execute(&chunk).await.unwrap();
-                    vm.output().trim_end().to_string()
-                })
-                .await
-        })
+            let mut vm = crate::new_vm();
+            register_vm_stdlib(&mut vm);
+            let _ = vm.execute(&chunk).await.unwrap();
+            vm.output().trim_end().to_string()
+        }))
     }
 
     fn with_mock_provider<T>(f: impl FnOnce() -> T) -> T {
@@ -757,13 +751,11 @@ mod tests {
         assert_eq!(default.1.as_deref(), Some("default"));
         assert!(default.0.contains("test coverage"));
 
-        let code = resolve_rubric(Some(&VmValue::String(arcstr::ArcStr::from("code"))));
+        let code = resolve_rubric(Some(&VmValue::string("code")));
         assert_eq!(code.1.as_deref(), Some("code"));
         assert!(code.0.contains("regressions"));
 
-        let custom = resolve_rubric(Some(&VmValue::String(arcstr::ArcStr::from(
-            "focus on docs drift",
-        ))));
+        let custom = resolve_rubric(Some(&VmValue::string("focus on docs drift")));
         assert_eq!(custom.1, None);
         assert_eq!(custom.0, "focus on docs drift");
     }

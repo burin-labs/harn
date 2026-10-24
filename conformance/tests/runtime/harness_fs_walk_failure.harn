@@ -1,0 +1,31 @@
+type IoError = {error: string, kind: string, message: string}
+
+fn main(harness: Harness) -> nil {
+  const root = harness.fs.mkdtemp_in_workspace("walk-failure-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const entries = harness.fs.walk(root, {ignore_policy: "none"})
+  assert_eq(entries.count, 1)
+  assert(entries[0]!.is_dir)
+  const missing = try {
+    harness.fs.walk(path_join(root, "missing"), {ignore_policy: "none"})
+  }
+  assert(is_err(missing))
+  const failure = schema_parse(unwrap_err(missing), schema_of(IoError))?
+  assert_eq(failure.error, "io_error")
+  assert_eq(failure.kind, "not_found")
+  harness.fs.mkdir(path_join(root, ".git"))
+  const ignore = path_join(root, ".gitignore")
+  harness.fs.write_text(ignore, "{invalid\n")
+  assert(
+    is_err(
+      try {
+        harness.fs.walk(root, {ignore_policy: "project"})
+      },
+    ),
+  )
+  harness.fs.delete(ignore)
+  assert_eq(harness.fs.walk(root, {ignore_policy: "project"}).count, 1)
+  harness.stdio.println("empty directory measured; missing directory refused")
+}

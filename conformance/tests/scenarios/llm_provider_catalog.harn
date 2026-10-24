@@ -66,5 +66,17 @@ pipeline test(harness: Harness, task: unknown) {
   )
   assert_eq(capped.fallback, true)
   assert_eq(capped.reviewer.id, "gpt-4o-mini")
+  const escalation = harness.llm.escalation_target(
+    {primary: {model: "gpt-4o-mini"}, available_only: false},
+  )
+  assert_eq(escalation.fallback_code, nil)
+  assert(
+    escalation.model != nil && escalation.model != "gpt-4o-mini",
+    "escalation names a stronger model",
+  )
+  assert(len(escalation.reasons) > 0, "escalation explains its choice")
+  const missing = harness.llm.escalation_target({primary: {model: "not-a-catalog-model-zzz"}})
+  assert_eq(missing.fallback_code, "unknown_primary")
+  assert_eq(missing.model, nil)
   harness.stdio.log("llm_provider_catalog passed")
 }

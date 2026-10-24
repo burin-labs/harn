@@ -204,8 +204,10 @@ pub fn reset_http_state() {
     HTTP_SERVERS.with(|servers| servers.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_http_state);
+
 pub(super) fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 pub(super) fn next_transport_handle(prefix: &str) -> String {
@@ -741,6 +743,8 @@ pub fn register_http_builtins(vm: &mut Vm) {
     streaming::register_http_streaming_builtins(vm);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_http_builtins);
+
 fn register_http_tls_builtins(vm: &mut Vm) {
     vm.register_builtin("__http_server_tls_plain", |_args, _out| {
         Ok(http_server_tls_config_value(
@@ -794,15 +798,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
             ))
         })?;
         let mut extra = crate::value::DictMap::new();
-        extra.insert(
-            crate::value::intern_key("hosts"),
-            VmValue::List(std::sync::Arc::new(
-                hosts
-                    .into_iter()
-                    .map(|host| VmValue::String(arcstr::ArcStr::from(host)))
-                    .collect(),
-            )),
-        );
+        extra.put("hosts", VmValue::strings(hosts));
         extra.put_str("cert_pem", cert.cert.pem());
         extra.put_str("key_pem", cert.signing_key.serialize_pem());
         Ok(http_server_tls_config_value(
@@ -1189,9 +1185,7 @@ fn register_http_mock_builtins(vm: &mut Vm) {
                 "redact_sensitive",
                 get_bool_option(&options, "redact_headers", true),
             ) && !include_sensitive;
-            Ok(VmValue::List(std::sync::Arc::new(http_mock_calls_value(
-                redact_sensitive,
-            ))))
+            Ok(VmValue::list(http_mock_calls_value(redact_sensitive)))
         },
     );
 }
@@ -1216,21 +1210,13 @@ fn http_server_tls_config_value(
 
 fn hsts_options(options: &crate::value::DictMap) -> crate::value::DictMap {
     let mut hsts = crate::value::DictMap::new();
-    hsts.insert(
-        crate::value::intern_key("hsts_max_age_seconds"),
-        VmValue::Int(vm_get_int_option(
-            options,
-            "hsts_max_age_seconds",
-            31_536_000,
-        )),
+    hsts.put_int(
+        "hsts_max_age_seconds",
+        vm_get_int_option(options, "hsts_max_age_seconds", 31_536_000),
     );
-    hsts.insert(
-        crate::value::intern_key("hsts_include_subdomains"),
-        VmValue::Bool(vm_get_bool_option(
-            options,
-            "hsts_include_subdomains",
-            false,
-        )),
+    hsts.put_bool(
+        "hsts_include_subdomains",
+        vm_get_bool_option(options, "hsts_include_subdomains", false),
     );
     hsts.put(
         "hsts_preload",
@@ -1256,7 +1242,7 @@ fn http_server_security_headers(config: &crate::value::DictMap) -> crate::value:
     }
     crate::value::DictMap::from_iter([(
         crate::value::intern_key("strict-transport-security"),
-        VmValue::String(arcstr::ArcStr::from(value)),
+        VmValue::string(value),
     )])
 }
 

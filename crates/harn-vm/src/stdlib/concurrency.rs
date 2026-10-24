@@ -29,8 +29,8 @@ fn select_result(index: usize, value: VmValue, channel_name: &str) -> VmValue {
 fn select_none() -> VmValue {
     let mut result = BTreeMap::new();
     result.put_int("index", -1);
-    result.insert("value".to_string(), VmValue::Nil);
-    result.insert("channel".to_string(), VmValue::Nil);
+    result.put("value", VmValue::Nil);
+    result.put("channel", VmValue::Nil);
     VmValue::dict(result)
 }
 
@@ -313,13 +313,10 @@ fn channel_receive_wait(vm: &Vm, channels: &[VmValue]) -> Result<Option<WaitGuar
         .wait_for_channel_receive(&vm.runtime_context().task_id, targets)
 }
 
-pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_concurrency_builtins, rebinds_execution_state);
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "sync_mutex_acquire(key?: string, timeout_ms?: int) -> any",
     kind = "async",
     category = "concurrency",
@@ -1212,7 +1209,6 @@ fn atomic_cas_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "sleep(ms?: any) -> nil",
     kind = "async",
     category = "concurrency",
@@ -1768,7 +1764,7 @@ mod tests {
     }
 
     fn s(v: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(v))
+        VmValue::string(v)
     }
 
     #[test]

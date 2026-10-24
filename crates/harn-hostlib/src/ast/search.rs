@@ -34,7 +34,6 @@
 //! reports `had_errors` so the caller can decide.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
@@ -337,7 +336,7 @@ fn error_response(
         ("truncated", VmValue::Bool(false)),
         ("had_errors", VmValue::Bool(false)),
         ("health", health.to_vm_value()),
-        ("matches", VmValue::List(Arc::new(Vec::new()))),
+        ("matches", VmValue::list(Vec::new())),
     ];
     entries.extend(extra);
     build_dict(entries)

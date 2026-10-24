@@ -132,7 +132,7 @@ impl HypothesisScenarioBridge {
                 "observed_blocking_values",
                 required(assignment_plan, "blocking_values")?.clone(),
             ),
-            ("arm_observations", VmValue::List(Arc::new(observations))),
+            ("arm_observations", VmValue::list(observations)),
             ("elapsed_ms", VmValue::Int(500)),
         ]);
         Ok(dict(entries))
@@ -177,7 +177,7 @@ impl HypothesisScenarioBridge {
         });
         Ok(dict([
             ("arm_id", arm_id),
-            ("metrics", VmValue::dict(metric_values.collect::<DictMap>())),
+            ("metrics", VmValue::dict(metric_values)),
             ("spend_delta_usd", VmValue::Float(0.0)),
             ("compute_delta_ms", VmValue::Int(1)),
             ("token_delta", VmValue::Int(0)),
@@ -190,7 +190,7 @@ impl HypothesisScenarioBridge {
                     "observed"
                 }),
             ),
-            ("capability_degradations", VmValue::List(Arc::new(vec![]))),
+            ("capability_degradations", VmValue::list(vec![])),
         ]))
     }
 }
@@ -280,7 +280,7 @@ fn invalid(message: &str) -> VmError {
 }
 
 fn string(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
+    VmValue::string(value)
 }
 
 fn string_value(value: &VmValue) -> Option<&str> {
@@ -294,7 +294,6 @@ fn dict(entries: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
     VmValue::dict(
         entries
             .into_iter()
-            .map(|(key, value)| (crate::value::intern_key(key), value))
-            .collect::<DictMap>(),
+            .map(|(key, value)| (crate::value::intern_key(key), value)),
     )
 }

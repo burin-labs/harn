@@ -32,6 +32,37 @@ equivalent), then talk to the librarian.
 The Cypher executor that backs `code_librarian_query` and
 `code_librarian_who_calls` is documented at
 [`crates/harn-hostlib/src/code_index/cypher.rs`](https://github.com/burin-labs/harn/blob/main/crates/harn-hostlib/src/code_index/cypher.rs).
+
+Graph nodes expose `name`, `path`, `line`, and `col`. Declaration coordinates
+point at the name, including declarations inside export or decorator wrappers.
+Coordinates are 1-based, and columns count UTF-16 code units. A null `col`
+means that the grammar did not supply a declaration-name position. Java calls
+also point at the member name. `qualified_name` includes
+the declaring type and package when known, such as `app.Store.load`.
+`receiver_qualified_name` uses the short type name, such as `Store.load`.
+The latter can match distinct types in different packages; filter by defining
+path or the full qualified name to select one declaration.
+
+`code_index.rename_symbol` accepts those exact indexed aliases and defining
+paths. Every supplied `line`, `col`, and `kind` must match the same declaration.
+A wrong owner, suffix-only file path, or byte column returns `no_match` without
+writes. Use `path: "."` only when intentionally searching the whole workspace.
+The language-server backend rechecks that exact declaration against current
+source before sending its name position to the server. Selecting a definition
+does not prove that all same-name references bind to it; existing ambiguity and
+binding refusals still apply. Other refactors retain their existing path rules.
+
+Rust callers construct graph nodes with
+`Node::new(kind, name, file_id, path, line, language)` from
+`harn_hostlib::code_index`. `Node` is non-exhaustive. The constructor leaves
+source metadata absent; assign its public fields when those facts are known.
+
+Java `CALLS` edges use explicit imports and declared receiver types. A name
+alone never resolves an unknown Java receiver, even when only one matching
+method exists. Inferred variables, chained expressions, inheritance contracts,
+and overloads can leave calls unresolved. Switch-local shadows and member types
+inherited from other types also remain unresolved. File-level `REFS` edges remain name
+matches and do not establish a member binding.
 Supported clauses: `MATCH`, `WHERE`, `RETURN`, alias projections
 (`RETURN expr AS name`), single-edge and variable-length traversal up
 to depth 4.

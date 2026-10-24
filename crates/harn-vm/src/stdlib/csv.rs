@@ -10,7 +10,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 fn opt_bool(opts: Option<&crate::value::DictMap>, key: &str, default: bool) -> bool {
     opts.and_then(|d| match d.get(key) {
@@ -43,13 +42,10 @@ fn opt_delimiter(
     Ok(bytes[0])
 }
 
-pub(crate) fn register_csv_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_csv_builtins);
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "csv_parse(text: string?, options?: dict) -> list",
     category = "csv"
 )]
@@ -73,10 +69,25 @@ fn csv_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
             .headers()
             .map_err(|e| VmError::Thrown(VmValue::string(format!("csv_parse: {e}"))))?
             .clone();
+        let mut names = BTreeSet::new();
+        for header in &headers {
+            if !names.insert(header) {
+                return Err(VmError::Thrown(VmValue::string(format!(
+                    "csv_parse: duplicate header '{header}'"
+                ))));
+            }
+        }
         let mut rows: Vec<VmValue> = Vec::new();
         for record in reader.records() {
             let record =
                 record.map_err(|e| VmError::Thrown(VmValue::string(format!("csv_parse: {e}"))))?;
+            if record.len() > headers.len() {
+                return Err(VmError::Thrown(VmValue::string(format!(
+                    "csv_parse: row has {} cells but only {} headers",
+                    record.len(),
+                    headers.len()
+                ))));
+            }
             let mut row = BTreeMap::new();
             for (i, h) in headers.iter().enumerate() {
                 let cell = record.get(i).unwrap_or("");
@@ -99,7 +110,6 @@ fn csv_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "csv_stringify(rows: list, options?: dict) -> string",
     category = "csv"
 )]
@@ -181,6 +191,7 @@ fn csv_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vm::Vm;
 
     fn vm() -> Vm {
         let mut vm = crate::new_vm();
@@ -195,19 +206,18 @@ mod tests {
     }
 
     fn string(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
+        VmValue::string(value)
     }
 
     fn list(items: Vec<VmValue>) -> VmValue {
-        VmValue::List(std::sync::Arc::new(items))
+        VmValue::list(items)
     }
 
     fn dict(items: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
         VmValue::dict(
             items
                 .into_iter()
-                .map(|(key, value)| (crate::value::intern_key(key), value))
-                .collect::<crate::value::DictMap>(),
+                .map(|(key, value)| (crate::value::intern_key(key), value)),
         )
     }
 

@@ -2,6 +2,8 @@ import { workflow_join_readiness, workflow_next_edges } from "std/workflow/sched
 
 pipeline default(harness: Harness) {
   const graph = {
+    entry: "a",
+    nodes: {join: {kind: "join"}},
     edges: [
       {from: "a", to: "join"},
       {from: "b", to: "join"},
@@ -27,8 +29,33 @@ pipeline default(harness: Harness) {
   harness.stdio.println(quorum.required)
   const exact = workflow_next_edges({graph: graph, current: "gate", branch: "true"})
   harness.stdio.println(len(exact))
-  harness.stdio.println(exact[0].to)
+  harness.stdio.println(exact[0]?.to)
   const fallback = workflow_next_edges({graph: graph, current: "gate", branch: "false"})
   harness.stdio.println(len(fallback))
-  harness.stdio.println(fallback[0].to)
+  harness.stdio.println(fallback[0]?.to)
+  assert(workflow_join_readiness() == {ready: true, required: 0, completed_inputs: 0})
+  assert(workflow_next_edges() == [])
+  const require_all = workflow_join_readiness(
+    {
+      graph: graph,
+      node_id: "join",
+      node: {
+        kind: "join",
+        join_policy: {strategy: "first", require_all_inputs: true, min_completed: nil},
+      },
+      completed_nodes: ["a", "unrelated"],
+    },
+  )
+  assert(!require_all.ready && require_all.required == 2 && require_all.completed_inputs == 1)
+  const explicit = workflow_join_readiness(
+    {
+      graph: graph,
+      node_id: "join",
+      node: {join_policy: {strategy: "all", require_all_inputs: true, min_completed: 1}},
+      completed_nodes: ["a"],
+    },
+  )
+  assert(explicit.ready && explicit.required == 1)
+  assert(workflow_next_edges({graph: graph, current: "gate"}) == [graph.edges[3]])
+  assert(workflow_next_edges({graph: graph, current: "missing", branch: "true"}) == [])
 }

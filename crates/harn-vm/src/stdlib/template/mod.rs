@@ -233,6 +233,8 @@ pub(crate) fn reset_prompt_registry() {
     }
 }
 
+harn_vm_core::stdlib_state_reset!(reset_prompt_registry);
+
 /// One-shot dedup for the user-supplied-`llm`-binding shadow warning.
 /// Keyed by template URI so a recurring render in a loop only emits
 /// the warning once per template per process.

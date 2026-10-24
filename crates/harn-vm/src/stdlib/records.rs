@@ -50,15 +50,13 @@ pub fn reset_eval_metrics() {
     EVAL_METRICS.with(|m| m.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_eval_metrics);
+
 pub fn reset_friction_events() {
     FRICTION_EVENTS.with(|events| events.borrow_mut().clear());
 }
 
-/// Peek at recorded eval metrics without consuming them.
-#[allow(dead_code)]
-pub(crate) fn peek_eval_metrics() -> Vec<EvalMetric> {
-    EVAL_METRICS.with(|m| m.borrow().clone())
-}
+harn_vm_core::stdlib_state_reset!(reset_friction_events);
 
 fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {
     let json = serde_json::to_value(value)
@@ -309,8 +307,8 @@ fn register_macro_builtins_by_category(vm: &mut Vm, category: &str) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "artifact(payload: dict) -> dict", category = "records"
+    sig = "artifact(payload: dict) -> dict",
+    category = "records"
 )]
 fn artifact_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let artifact = normalize_artifact(
@@ -323,8 +321,8 @@ fn artifact_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "handoff(payload: dict) -> dict", category = "records"
+    sig = "handoff(payload: dict) -> dict",
+    category = "records"
 )]
 fn handoff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let value = args
@@ -340,8 +338,8 @@ fn handoff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "handoff_context(payload: dict) -> string", category = "records"
+    sig = "handoff_context(payload: dict) -> string",
+    category = "records"
 )]
 fn handoff_context_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let value = args
@@ -356,8 +354,8 @@ fn handoff_context_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "handoff_routes() -> list", category = "records"
+    sig = "handoff_routes() -> list",
+    category = "records"
 )]
 fn handoff_routes_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     to_vm(&crate::orchestration::snapshot_handoff_routes())
@@ -370,7 +368,6 @@ fn handoff_routes_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 /// OpenTrustGraph receipt chain (E5.5) consume this payload directly.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "handoff_effects(source: string, ceiling?: dict) -> list",
     category = "records"
 )]
@@ -402,7 +399,6 @@ fn handoff_effects_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_derive(parent: dict, kind?: string, extras?: dict) -> dict",
     category = "records"
 )]
@@ -430,7 +426,6 @@ fn artifact_derive_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_select(artifacts: list, policy?: dict) -> list",
     category = "records"
 )]
@@ -442,7 +437,6 @@ fn artifact_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_context(artifacts: list, policy?: dict) -> string",
     category = "records"
 )]
@@ -457,7 +451,6 @@ fn artifact_context_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_workspace_file(path: string?, content: string, options?: dict) -> dict",
     category = "records"
 )]
@@ -480,7 +473,6 @@ fn artifact_workspace_file_impl(args: &[VmValue], _out: &mut String) -> Result<V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_workspace_snapshot(paths: any, summary?: string, options?: dict) -> dict",
     category = "records"
 )]
@@ -508,7 +500,6 @@ fn artifact_workspace_snapshot_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_editor_selection(path: string?, text: string?, options?: dict) -> dict",
     category = "records"
 )]
@@ -531,7 +522,6 @@ fn artifact_editor_selection_impl(args: &[VmValue], _out: &mut String) -> Result
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_verification_result(title: string, text: string?, options?: dict) -> dict",
     category = "records"
 )]
@@ -553,7 +543,6 @@ fn artifact_verification_result_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_test_result(title: string, text: string?, options?: dict) -> dict",
     category = "records"
 )]
@@ -572,7 +561,6 @@ fn artifact_test_result_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_command_result(command: string, output: any, options?: dict) -> dict",
     category = "records"
 )]
@@ -600,7 +588,6 @@ fn artifact_command_result_impl(args: &[VmValue], _out: &mut String) -> Result<V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_diff(path: string?, before: string, after: string, options?: dict) -> dict",
     category = "records"
 )]
@@ -624,7 +611,6 @@ fn artifact_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_git_diff(diff_text: string?, options?: dict) -> dict",
     category = "records"
 )]
@@ -642,7 +628,6 @@ fn artifact_git_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_diff_review(target: dict, summary?: string, options?: dict) -> dict",
     category = "records"
 )]
@@ -676,7 +661,6 @@ fn artifact_diff_review_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_review_decision(target: dict, decision: string, options?: dict) -> dict",
     category = "records"
 )]
@@ -718,7 +702,6 @@ fn artifact_review_decision_impl(args: &[VmValue], _out: &mut String) -> Result<
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_patch_proposal(target: dict, patch: string, options?: dict) -> dict",
     category = "records"
 )]
@@ -756,7 +739,6 @@ fn artifact_patch_proposal_impl(args: &[VmValue], _out: &mut String) -> Result<V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_verification_bundle(title: string, checks: any, options?: dict) -> dict",
     category = "records"
 )]
@@ -783,7 +765,6 @@ fn artifact_verification_bundle_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "artifact_apply_intent(target: dict, intent: string, options?: dict) -> dict",
     category = "records"
 )]
@@ -865,8 +846,8 @@ fn run_record_load_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "run_record_fixture(run: dict) -> dict", category = "records"
+    sig = "run_record_fixture(run: dict) -> dict",
+    category = "records"
 )]
 fn run_record_fixture_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let run = normalize_run_record(
@@ -878,7 +859,6 @@ fn run_record_fixture_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "run_record_eval(run: dict, fixture?: dict) -> dict",
     category = "records"
 )]
@@ -896,7 +876,6 @@ fn run_record_eval_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "run_record_eval_suite(cases: list) -> dict",
     category = "records"
 )]
@@ -936,7 +915,6 @@ fn run_record_eval_suite_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "run_record_diff(left: dict, right: dict) -> dict",
     category = "records"
 )]
@@ -954,7 +932,6 @@ fn run_record_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "eval_suite_manifest(payload: dict) -> dict",
     category = "records"
 )]
@@ -979,7 +956,6 @@ fn eval_suite_run_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "eval_pack_manifest(payload: dict) -> dict",
     category = "records"
 )]
@@ -992,7 +968,6 @@ fn eval_pack_manifest_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "eval_pack_validate_split(payload: dict) -> dict",
     category = "records"
 )]
@@ -1097,8 +1072,8 @@ fn eval_pack_run_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "skill_induce(payload: dict) -> dict", category = "records"
+    sig = "skill_induce(payload: dict) -> dict",
+    category = "records"
 )]
 fn skill_induce_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let payload_value = args
@@ -1229,7 +1204,6 @@ fn json_f64(value: Option<&serde_json::Value>) -> Option<f64> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "persona_eval_ladder_manifest(payload: dict) -> dict",
     category = "records"
 )]
@@ -1260,8 +1234,8 @@ fn persona_eval_ladder_run_impl(args: &[VmValue], _out: &mut String) -> Result<V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "friction_event(payload: dict) -> dict", category = "records"
+    sig = "friction_event(payload: dict) -> dict",
+    category = "records"
 )]
 fn friction_event_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let event = normalize_friction_event(
@@ -1361,7 +1335,6 @@ fn friction_clear_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "context_pack_manifest(payload: dict) -> dict",
     category = "records"
 )]
@@ -1375,7 +1348,6 @@ fn context_pack_manifest_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "context_pack_manifest_parse(source: string) -> dict",
     category = "records"
 )]
@@ -1390,7 +1362,6 @@ fn context_pack_manifest_parse_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "context_pack_suggestions(events?: list, options?: dict) -> list",
     category = "records"
 )]
@@ -1414,7 +1385,6 @@ fn context_pack_suggestions_impl(args: &[VmValue], _out: &mut String) -> Result<
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "friction_eval_fixture(fixture: dict) -> dict",
     category = "records"
 )]
@@ -1455,7 +1425,6 @@ fn friction_eval_fixture_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "eval_metric(name: string, value: any, metadata?: dict) -> nil",
     category = "records"
 )]
@@ -1485,8 +1454,8 @@ fn eval_metric_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "eval_metrics() -> list", category = "records"
+    sig = "eval_metrics() -> list",
+    category = "records"
 )]
 fn eval_metrics_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let metrics = EVAL_METRICS.with(|m| m.borrow().clone());

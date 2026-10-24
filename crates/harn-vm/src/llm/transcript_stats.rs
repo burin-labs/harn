@@ -77,6 +77,17 @@ pub(crate) fn compute_transcript_stats(transcript: &VmValue) -> TranscriptStats 
         };
         stats.message_count += 1;
         let role = string_field(msg, "role").unwrap_or_default();
+        // Text-channel results are `user` messages carrying tool output.
+        if harn_orchestration::tool_messages::is_tool_result_role(&role)
+            || (role == "user"
+                && harn_orchestration::tool_messages::is_tool_output_message(
+                    &crate::llm::helpers::vm_value_to_json(message),
+                ))
+        {
+            stats.tool_result_message_count += 1;
+            stats.tool_call_count += count_tool_calls(msg);
+            continue;
+        }
         match role.as_str() {
             "assistant" => {
                 stats.assistant_message_count += 1;
@@ -85,9 +96,6 @@ pub(crate) fn compute_transcript_stats(transcript: &VmValue) -> TranscriptStats 
             "user" => {
                 stats.user_message_count += 1;
                 stats.user_facing_message_count += 1;
-            }
-            "tool" | "tool_result" => {
-                stats.tool_result_message_count += 1;
             }
             _ => {}
         }
@@ -168,15 +176,20 @@ mod tests {
                 {"role": "assistant", "content": "", "tool_calls": [{"id": "a"}, {"id": "b"}]},
                 {"role": "tool", "content": "ok", "tool_use_id": "a"},
                 {"role": "tool_result", "content": "ok", "tool_use_id": "b"},
+                {"role": "user", "content": "[result of read]\nok\n[end of read result]\n", "_harn": {"kind": "tool_result"}},
                 {"role": "system", "content": "ignore me"},
+                {"role": "user", "content": "[result of read]\nmine\n[end of read result]\n"},
             ],
         }));
         let stats = compute_transcript_stats(&transcript);
-        assert_eq!(stats.message_count, 6);
-        assert_eq!(stats.user_message_count, 1);
+        assert_eq!(stats.message_count, 8);
+        assert_eq!(
+            stats.user_message_count, 2,
+            "a typed frame is still a person's message"
+        );
         assert_eq!(stats.assistant_message_count, 2);
-        assert_eq!(stats.user_facing_message_count, 3);
-        assert_eq!(stats.tool_result_message_count, 2);
+        assert_eq!(stats.user_facing_message_count, 4);
+        assert_eq!(stats.tool_result_message_count, 3);
         assert_eq!(stats.tool_call_count, 2);
     }
 

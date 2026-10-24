@@ -10,38 +10,33 @@ fn baseline_with_stdlib(source: &str) -> VmBaseline {
     let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     vm.set_source_info("baseline_test.harn", source);
-    vm.set_global(
-        "stable_global",
-        VmValue::String(arcstr::ArcStr::from("baseline")),
-    );
+    vm.set_global("stable_global", VmValue::string("baseline"));
     vm.baseline()
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn vm_baseline_rebinds_shared_state_builtins_per_instance() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let source = r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let source = r#"
 pipeline main(harness: Harness) {
   const cell = harness.runtime.shared_cell({scope: "task_group", key: "turn", initial: 0})
   harness.stdio.println(harness.runtime.shared_get(cell))
   harness.runtime.shared_set(cell, harness.runtime.shared_get(cell) + 1)
 }"#;
-            let chunk = crate::compile_source(source).expect("compile");
-            let baseline = baseline_with_stdlib(source);
+        let chunk = crate::compile_source(source).expect("compile");
+        let baseline = baseline_with_stdlib(source);
 
-            let mut first = baseline.instantiate();
-            first.execute(&chunk).await.expect("first execute");
-            assert_eq!(first.output(), "0\n");
+        let mut first = baseline.instantiate();
+        first.execute(&chunk).await.expect("first execute");
+        assert_eq!(first.output(), "0\n");
 
-            let mut second = baseline.instantiate();
-            second.execute(&chunk).await.expect("second execute");
-            assert_eq!(
-                second.output(),
-                "0\n",
-                "shared state created by the first VM must not leak into the next baseline instance"
-            );
-        })
-        .await;
+        let mut second = baseline.instantiate();
+        second.execute(&chunk).await.expect("second execute");
+        assert_eq!(
+            second.output(),
+            "0\n",
+            "shared state created by the first VM must not leak into the next baseline instance"
+        );
+    })
+    .await;
 }

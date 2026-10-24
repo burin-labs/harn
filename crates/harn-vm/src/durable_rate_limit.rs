@@ -11,7 +11,6 @@ use crate::stdlib::args::{Args, ErrorKind};
 use crate::stdlib::macros::harn_builtin;
 use crate::stdlib::sandbox::{self, FsAccess};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 const DEFAULT_WINDOW_MS: u64 = 60_000;
 const DEFAULT_BUSY_TIMEOUT_MS: u64 = 5_000;
@@ -163,9 +162,7 @@ impl Drop for FairWaiterGuard {
     }
 }
 
-pub(crate) fn register_durable_rate_limit_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_durable_rate_limit_builtins);
 
 #[harn_builtin(
     exposure = "harness.runtime.durable_rate_limit_acquire",

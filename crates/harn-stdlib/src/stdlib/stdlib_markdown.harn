@@ -1,0 +1,106 @@
+pub type MarkdownOptions = {mdx?: bool}
+
+pub type MarkdownHeading = {level: int, text: string, anchor: string, line: int, offset: int}
+
+pub type MarkdownLink = {destination: string, image: bool, line: int, offset: int}
+
+pub type MarkdownProseBlock = {text: string, heading: bool, line: int}
+
+pub type MarkdownDocument = {
+  headings: list<MarkdownHeading>,
+  links: list<MarkdownLink>,
+  blocks: list<MarkdownProseBlock>,
+  text: string,
+}
+
+pub type ReadingLevel = {
+  words: int,
+  sentences: int,
+  words_per_sentence: float,
+  syllables_per_word: float,
+  grade: float,
+  ease: float,
+  longest: string,
+}
+
+/**
+ * Parse Markdown structure, resolved link destinations and visible text.
+ * Lines are one-based; offsets count UTF-8 bytes from the start of the source.
+ * `mdx: true` excludes imports, exports and expressions without evaluating them.
+ * Prose blocks exclude code, images, tables, frontmatter and bare web addresses.
+ *
+ * @effects: []
+ * @errors: [markdown_parse]
+ */
+pub fn parse(source: string, options: MarkdownOptions = {}) -> MarkdownDocument {
+  return markdown_parse(source, options)
+}
+
+fn syllables(raw: string) -> int {
+  const word = regex_replace(r"[^a-z]", "", raw.lower())
+  if word.len() <= 3 {
+    return 1
+  }
+  const ending = regex_replace(r"(?:[^laeiouy]es|ed|[^laeiouy]e)$", "", word)
+  const normalized = regex_replace(r"^y", "", ending)
+  return max(1, regex_captures(r"[aeiouy]{1,2}", normalized).count)
+}
+
+fn words(text: string) -> list<string> {
+  return text.split(" ").map({ token: string -> regex_replace(r"[^A-Za-z'-]", "", token) }).filter(
+    { word: string -> regex_match(r"[A-Za-z]", word) != nil },
+  )
+    .to_list()
+}
+
+/**
+ * Estimate the Flesch-Kincaid grade and Flesch reading ease of English prose.
+ * Headings and list paragraphs stay separate. Return nil when no English words
+ * remain. These length-based scores cannot detect jargon or explain a page.
+ *
+ * @effects: []
+ * @errors: [markdown_parse]
+ */
+pub fn reading_level(source: string, options: MarkdownOptions = {}) -> ReadingLevel? {
+  let units: list<string> = []
+  for block in parse(source, options).blocks {
+    const pieces = if block.heading {
+      [block.text]
+    } else {
+      regex_replace(r"([.!?])\s+", "$1\n", block.text).split("\n")
+    }
+    for piece in pieces {
+      if words(piece).count > 0 {
+        units.push(piece.trim())
+      }
+    }
+  }
+  if units.count == 0 {
+    return nil
+  }
+  let word_count = 0
+  let syllable_count = 0
+  let longest = ""
+  let longest_count = 0
+  for unit in units {
+    const tokens = words(unit)
+    word_count = word_count + tokens.count
+    syllable_count = syllable_count
+      + tokens.map({ word: string -> syllables(word) }).to_list().sum()
+    if tokens.count > longest_count {
+      longest = unit
+      longest_count = tokens.count
+    }
+  }
+  const per_sentence = to_float(word_count) / to_float(units.count)
+  const per_word = to_float(syllable_count) / to_float(word_count)
+  return {
+    words: word_count,
+    sentences: units.count,
+    words_per_sentence: per_sentence,
+    syllables_per_word: per_word,
+    grade: 0.39 * per_sentence + 11.8 * per_word - 15.59,
+    ease: 206.835 - 1.015 * per_sentence - 84.6 * per_word,
+    longest: longest,
+  }
+}

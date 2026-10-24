@@ -13,7 +13,7 @@ pub(crate) async fn vm_stream_llm(
             result = &mut call => {
                 while let Ok(delta) = delta_rx.try_recv() {
                     if tx
-                        .send(VmValue::String(arcstr::ArcStr::from(delta)))
+                        .send(VmValue::string(delta))
                         .await
                         .is_err()
                     {
@@ -24,7 +24,7 @@ pub(crate) async fn vm_stream_llm(
             }
             Some(delta) = delta_rx.recv() => {
                 if tx
-                    .send(VmValue::String(arcstr::ArcStr::from(delta)))
+                    .send(VmValue::string(delta))
                     .await
                     .is_err()
                 {

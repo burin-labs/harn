@@ -10,15 +10,20 @@ use super::api::{LlmCallOptions, LlmRequestPayload, LlmResult};
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 mod bound;
+mod direct_endpoint;
 mod durable;
 mod host;
+mod policy_file;
 use bound::AttemptBound;
+#[cfg(test)]
+pub(crate) use direct_endpoint::allow_fixture_endpoint;
 use durable::DurableReservation;
 pub use durable::{
     BudgetCeilingUpdate, MachineSpendExhaustion, MachineSpendPeriod, MachineSpendPolicy,
     MachineSpendQuota, MachineSpendReceipt,
 };
 pub use host::ConservativeLlmBudget;
+pub use policy_file::MachineSpendPolicyFile;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -428,6 +433,15 @@ pub(crate) fn denial_reason(error: &VmError) -> Option<String> {
         VmValue::String(reason) => Some(reason.to_string()),
         _ => None,
     }
+}
+
+/// True while any admission authority (host-owned budget or durable machine
+/// allowance) bounds provider dispatch, so an unreserved redirect must not follow.
+pub(crate) fn bounds_dispatch() -> bool {
+    SCOPE.with(|slot| {
+        let scope = slot.borrow();
+        scope.host_owned || scope.machine.is_some()
+    })
 }
 
 /// A measured allowance only exists after conservative authority was installed.

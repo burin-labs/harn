@@ -202,6 +202,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("llm_completion", "harness.llm.completion"),
     ("llm_config", "harness.llm.config"),
     ("llm_equivalent_models", "harness.llm.equivalent_models"),
+    ("llm_escalation_target", "harness.llm.escalation_target"),
     ("llm_execution_contract", "harness.llm.execution_contract"),
     ("llm_healthcheck", "harness.llm.healthcheck"),
     ("llm_infer_provider", "harness.llm.infer_provider"),

@@ -110,12 +110,7 @@ pub(super) fn parse_options_arg(
 }
 
 pub(super) fn string_list_to_vm(values: &[String]) -> VmValue {
-    VmValue::list(
-        values
-            .iter()
-            .map(|value| VmValue::string(value.as_str()))
-            .collect(),
-    )
+    VmValue::strings(values.iter().map(|value| value.as_str()))
 }
 
 pub(super) fn parse_state_id_arg(
@@ -184,6 +179,8 @@ pub(super) fn insert_workflow_state(state: WorkflowRunState) {
 pub(crate) fn reset_workflow_run_states() {
     WORKFLOW_RUN_STATES.with(|states| states.borrow_mut().clear());
 }
+
+harn_vm_core::stdlib_state_reset!(reset_workflow_run_states);
 
 /// Number of interned workflow run states on this thread. Test-only.
 #[cfg(test)]
@@ -685,7 +682,7 @@ fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmE
                     prepared
                         .system
                         .as_ref()
-                        .map(|system| VmValue::String(arcstr::ArcStr::from(system.as_str())))
+                        .map(|system| VmValue::string(system.as_str()))
                         .unwrap_or(VmValue::Nil),
                 );
                 dict.put("run_agent_loop", VmValue::Bool(prepared.run_agent_loop));

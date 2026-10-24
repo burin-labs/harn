@@ -1,10 +1,7 @@
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmSet, VmValue};
-use crate::vm::Vm;
 
-pub(crate) fn register_set_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_set_builtins);
 
 /// Extract the backing [`VmSet`] from a set argument, throwing `message` when
 /// the argument is not a set.
@@ -15,11 +12,7 @@ fn expect_set<'a>(arg: Option<&'a VmValue>, message: &str) -> Result<&'a VmSet, 
     }
 }
 
-#[harn_builtin(
-    exposure = "pure",
-    effects = [],
-    sig = "set(...args: any) -> any", category = "sets"
-)]
+#[harn_builtin(exposure = "pure", sig = "set(...args: any) -> any", category = "sets")]
 fn set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut set = VmSet::new();
     for arg in args {
@@ -44,8 +37,8 @@ fn set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "set_add(s: any, value: any) -> any", category = "sets"
+    sig = "set_add(s: any, value: any) -> any",
+    category = "sets"
 )]
 fn set_add_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut set = expect_set(args.first(), "set_add: first argument must be a set")?.clone();
@@ -55,8 +48,8 @@ fn set_add_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "set_remove(s: any, value: any) -> any", category = "sets"
+    sig = "set_remove(s: any, value: any) -> any",
+    category = "sets"
 )]
 fn set_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut set = expect_set(args.first(), "set_remove: first argument must be a set")?.clone();
@@ -66,8 +59,8 @@ fn set_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "set_contains(s: any, value: any) -> bool", category = "sets"
+    sig = "set_contains(s: any, value: any) -> bool",
+    category = "sets"
 )]
 fn set_contains_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let set = match args.first() {
@@ -81,8 +74,8 @@ fn set_contains_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "set_union(a: any, b: any) -> any", category = "sets"
+    sig = "set_union(a: any, b: any) -> any",
+    category = "sets"
 )]
 fn set_union_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let a = expect_set(args.first(), "set_union: arguments must be sets")?;
@@ -92,8 +85,8 @@ fn set_union_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "set_intersect(a: any, b: any) -> any", category = "sets"
+    sig = "set_intersect(a: any, b: any) -> any",
+    category = "sets"
 )]
 fn set_intersect_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let a = expect_set(args.first(), "set_intersect: arguments must be sets")?;
@@ -103,8 +96,8 @@ fn set_intersect_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "set_difference(a: any, b: any) -> any", category = "sets"
+    sig = "set_difference(a: any, b: any) -> any",
+    category = "sets"
 )]
 fn set_difference_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let a = expect_set(args.first(), "set_difference: arguments must be sets")?;
@@ -114,7 +107,6 @@ fn set_difference_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "set_symmetric_difference(a: any, b: any) -> any",
     category = "sets"
 )]
@@ -132,8 +124,8 @@ fn set_symmetric_difference_impl(args: &[VmValue], _out: &mut String) -> Result<
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "set_is_subset(a: any, b: any) -> bool", category = "sets"
+    sig = "set_is_subset(a: any, b: any) -> bool",
+    category = "sets"
 )]
 fn set_is_subset_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let (Some(VmValue::Set(a)), Some(VmValue::Set(b))) = (args.first(), args.get(1)) else {
@@ -144,8 +136,8 @@ fn set_is_subset_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "set_is_superset(a: any, b: any) -> bool", category = "sets"
+    sig = "set_is_superset(a: any, b: any) -> bool",
+    category = "sets"
 )]
 fn set_is_superset_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let (Some(VmValue::Set(a)), Some(VmValue::Set(b))) = (args.first(), args.get(1)) else {
@@ -156,8 +148,8 @@ fn set_is_superset_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "set_is_disjoint(a: any, b: any) -> bool", category = "sets"
+    sig = "set_is_disjoint(a: any, b: any) -> bool",
+    category = "sets"
 )]
 fn set_is_disjoint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let (Some(VmValue::Set(a)), Some(VmValue::Set(b))) = (args.first(), args.get(1)) else {

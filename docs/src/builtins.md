@@ -495,6 +495,12 @@ line-, token-, or pattern-oriented scan suffices.
 
 ### Collection helper builtins
 
+`csv_parse(text, options?)` reads CSV as lists of cells. With `{headers: true}`,
+it returns dict rows and rejects duplicate headers or rows with more cells than
+headers. Missing cells become empty strings. Without headers, rows can have
+different lengths. `csv_stringify(rows, options?)` writes list or dict rows;
+`{headers: true}` adds sorted column names for dict rows.
+
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `chunk(list, size)` | list: list, size: int | list | Split into chunks of size |
@@ -510,8 +516,8 @@ line-, token-, or pattern-oriented scan suffices.
 | `unique(list)` | list: list | list | Remove duplicates, preserving first-seen order. Structural equality |
 | `dict_from_pairs(pairs)` | pairs: list of `[key, value]` | dict | Build a dict from a list of pairs (later pairs override earlier ones) |
 | `index_by(items, fn)` | items: list, fn: closure | dict | Build a lookup table keyed by `fn(item)` |
-| `to_xml(value, options?)` | value: any, options: dict (`root`, `item_tag`, `pretty`, `declaration`) | string | Convert a Harn value into XML. Dicts → tag trees; lists → repeated `<item>` children |
-| `from_xml(text, options?)` | text: string, options: dict (`preserve_repeated_tag`) | dict | Parse XML back into a dict tree. Repeated children collapse into a list by default; `preserve_repeated_tag: true` keeps the inner tag |
+| `to_xml(value, options?)` | value: any, options: dict (`root`, `item_tag`, `pretty`, `declaration`) | string | Convert a Harn value into valid XML. Dict keys become tags; punctuation, including colons, becomes `_`. Lists become repeated `<item>` children. Throws if text contains characters XML cannot represent |
+| `from_xml(text, options?)` | text: string, options: dict (`preserve_repeated_tag`) | dict | Parse one complete XML document into a dict tree; empty input returns `{}`. Accepts Unicode names and preserves declared namespace prefixes and spaces within text. Rejects malformed XML and DTDs. Repeated children collapse into a list by default; `preserve_repeated_tag: true` keeps the inner tag |
 | `jsonrpc_call(url, method, params?, options?)` | url: string, method: string, params: any, options: dict (`headers`, `id`, `notify`, `timeout_ms`) | any | POST a JSON-RPC 2.0 envelope. Returns `result` on success, raises a structured error dict on failure |
 | `jsonrpc_batch(url, calls, options?)` | url: string, calls: list of `{method, params?, id?, notify?}` dicts, options: dict (`headers`, `timeout_ms`) | list | POST a JSON-RPC 2.0 batch. Returns a list aligned with input order; per-call errors arrive as `{jsonrpc_error: true, ...}` dicts inside the list |
 
@@ -1169,7 +1175,7 @@ helpers such as `add_business_days` and `next_business_day`.
 | `date_in_zone(dt, tz)` | dt: float, int, or dict; tz: IANA timezone string | dict | Convert a timestamp into timezone-local fields: `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `zone`, `offset_seconds`, `timestamp`, and `iso8601` |
 | `date_to_zone(dt, tz)` | dt: float, int, or dict; tz: IANA timezone string | string | Convert a timestamp to an RFC 3339 string with the timezone's offset |
 | `date_from_components(parts, tz?)` | parts: dict; tz: IANA timezone string (default UTC) | int or float | Build a Unix timestamp from `{year, month, day, hour?, minute?, second?}` interpreted in the given timezone |
-| `date_add(dt, duration)` | dt: float, int, or dict; duration: duration | int or float | Add a duration to a timestamp |
+| `date_add(dt, duration)` | dt: float, int, or dict; duration: duration | int or float | Add a duration to a timestamp, keeping fractional seconds within floating-point precision. Throws if the result is outside the supported date range |
 | `date_diff(a, b)` | a, b: float, int, or dict | duration | Return the signed duration `a - b` |
 | `duration_ms(n)` | n: number | duration | Create a duration from milliseconds |
 | `duration_seconds(n)` | n: number | duration | Create a duration from seconds |
@@ -1874,14 +1880,14 @@ versioned schema and operation literals are stable orchestration
 discriminants; diagnostic policy/approval/output details may expand
 additively.
 
-`git_tools(registry?, options?)` builds a selected tool registry from those
+`git_tools(process, registry?, options?)` builds a selected tool registry from those
 functions. It defaults to read-only git inspection helpers and only exposes
 checkout-changing helpers such as `git_switch` or `git_pull_ff_only` when they
 are explicitly included in `enabled_tools`. It accepts the same Tool Vault
 metadata knobs used by host tool helpers: `defer_loading`, `namespace`, and
 per-tool `tool_config`.
 
-For small/local models, `git_toolbox_tools(registry?, options?)` exposes a
+For small/local models, `git_toolbox_tools(process, registry?, options?)` exposes a
 compact two-tool surface: `find_git_tool` ranks available git operations with a
 deterministic lexical scorer, and `run_git_tool` executes one returned operation
 id. Mutating operations stay unavailable unless the toolbox is configured with
@@ -2112,6 +2118,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.llm.model_ladder(name)` | name: string | dict/nil | Return one named catalog `[model_ladders.<name>]` row with its label and ordered route steps; unknown names return `nil` |
 | `harness.llm.pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
 | `harness.llm.complementary_reviewer(options)` | options: `{author_model, author_provider?, intent?, max_price_multiplier?, min_price_cap_per_mtok?, max_price_cap_per_mtok?}` | dict | Pick a different-family reviewer model for `review`, `critique`, or `plan_review`, returning the selected model, fallback reason when needed, and estimated incremental cost. The selector applies the relative price cap, raises it to the optional floor, then limits it to the optional ceiling; candidates without catalog pricing cannot pass a cap. |
+| `harness.llm.escalation_target(options)` | options: `{primary: {model}, available_only?, max_price_multiple?, exclude?}` | dict | Pick the stronger catalog model to switch to after repeated verification failures. Returns a `models:` ladder step (`provider`, `model`, `label`, `family`) with `score` and `reasons`, or a `fallback_code` (`unknown_primary`, `no_stronger_model`, `all_excluded`, `no_model_within_price`, `no_available_credential`) and no `model`. `route_diagnostic` counts the catalog rows each rule rejected. `available_only` defaults to `true`. |
 | `harness.llm.infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
 | `harness.llm.model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
 | `harness.llm.healthcheck(provider?, options?)` | provider: string or `{provider, api_key?, model?}`, options: `{api_key?, model?}` or model string | dict | Validate a configured provider healthcheck. Returns `{provider, valid, message, metadata}`; `api_key` lets hosts validate a candidate key without first exporting it. For OpenAI-compatible `/models` healthchecks, passing a `model` (positional, `{model: "..."}`, or `{provider, model: "..."}`) verifies the selected model/alias is served and surfaces distinct `metadata.category` values such as `unreachable`, `bad_status`, `model_missing`, and `invalid_url` |
@@ -2594,7 +2601,14 @@ advisory only), or `unbound` (no binding; advisory only).
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `secret_scan(content)` | content: string | list | Scan text or diffs for high-signal leaked credentials and return redacted findings with detector metadata and source locations |
+| `secret_pattern_catalog()` | none | list of records | Read the compiled catalog in detector order, with `redaction_name`, `detector`, `source`, `title`, `regex`, and `precision` string fields |
 | `self_review(diff, rubric?, max_rounds?)` | diff: string, rubric: string, max_rounds: int | dict | Run a structured pre-PR self-review over a diff, merge in `secret_scan` blockers, and append a `pr.self_review` trust-graph record with review metadata |
+
+Use `precision == "high"` for self-identifying token patterns that a host can
+compile with its own regex engine. Heuristic patterns need context checks beyond
+their regex; use `secret_scan` to classify text. The catalog contains public
+pattern definitions, not credential values, and is available in native and
+portable execution without file or network access.
 
 `self_review(...)` uses the existing tier-based model resolver with
 `model_tier: "small"` today, so it benefits from Harn's current

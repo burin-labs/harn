@@ -392,9 +392,15 @@ impl TaskStore for SqliteSessionStore {
 
     fn task_message_view(&self, session_id: &str) -> StoreResult<TaskMessageView> {
         let conn = self.lock();
-        let tx = conn.unchecked_transaction().map_err(map_sql)?;
-        let projection = read_message_projection(&tx, session_id)?;
-        let events = read_message_events(&tx, session_id)?
+        // A read-only handle already holds its frozen read transaction.
+        let tx = if conn.is_autocommit() {
+            Some(conn.unchecked_transaction().map_err(map_sql)?)
+        } else {
+            None
+        };
+        let reader: &Connection = tx.as_deref().unwrap_or(&conn);
+        let projection = read_message_projection(reader, session_id)?;
+        let events = read_message_events(reader, session_id)?
             .into_iter()
             .map(|event| event.redacted(self.hooks()))
             .collect();

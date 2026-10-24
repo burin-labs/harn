@@ -25,7 +25,7 @@ use crate::stdlib::waitpoint::{
 };
 use crate::triggers::dispatcher::current_dispatch_context;
 use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
-use crate::vm::{AsyncBuiltinCtx, Vm};
+use crate::vm::AsyncBuiltinCtx;
 
 mod fixtures;
 mod response;
@@ -273,13 +273,10 @@ enum WaitpointOutcome {
     },
 }
 
-pub(crate) fn register_hitl_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_hitl_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "ask_user(prompt: string, options?: dict) -> any",
     kind = "async",
     category = "hitl"
@@ -293,7 +290,6 @@ async fn ask_user_builtin(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig_expr = BuiltinSignature::variadic("request_approval", &[Param::new("args", TY_ANY
 )], TY_DICT),
     kind = "async",
@@ -308,7 +304,6 @@ async fn request_approval_builtin(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "dual_control(n: int, m: int, action: closure, approvers?: list) -> dict",
     kind = "async",
     category = "hitl"
@@ -322,7 +317,6 @@ async fn dual_control_builtin(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "escalate_to(role: string, reason: string) -> dict",
     kind = "async",
     category = "hitl"
@@ -339,6 +333,8 @@ pub(crate) fn reset_hitl_state() {
         *slot.borrow_mut() = RequestSequenceState::default();
     });
 }
+
+harn_vm_core::stdlib_state_reset!(reset_hitl_state);
 
 pub(crate) fn take_hitl_state() -> RequestSequenceState {
     REQUEST_SEQUENCE.with(|slot| std::mem::take(&mut *slot.borrow_mut()))
@@ -614,28 +610,12 @@ pub(crate) async fn request_approval_for_side_effect(
     options.put("args", crate::stdlib::json_to_vm_value(&detail));
     options.put("detail", crate::stdlib::json_to_vm_value(&detail));
     options.put_str("principal", principal);
-    options.put(
-        "reviewers",
-        VmValue::list(
-            reviewers
-                .into_iter()
-                .map(|reviewer| VmValue::String(arcstr::ArcStr::from(reviewer)))
-                .collect(),
-        ),
-    );
+    options.put("reviewers", VmValue::strings(reviewers));
     options.put(
         "capabilities_requested",
-        VmValue::list(
-            capabilities_requested
-                .into_iter()
-                .map(|capability| VmValue::String(arcstr::ArcStr::from(capability)))
-                .collect(),
-        ),
+        VmValue::strings(capabilities_requested),
     );
-    let args = vec![
-        VmValue::String(arcstr::ArcStr::from(action.to_string())),
-        VmValue::dict(options),
-    ];
+    let args = vec![VmValue::string(action.to_string()), VmValue::dict(options)];
     request_approval_impl(None, harness, &args).await
 }
 

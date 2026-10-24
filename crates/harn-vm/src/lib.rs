@@ -153,6 +153,7 @@ mod persistent_state;
 pub mod personas;
 pub mod portable;
 use harn_vm_core::prepared_module;
+pub use harn_vm_core::process_liveness;
 pub mod prepared_run;
 pub mod process_sandbox;
 pub mod profile;
@@ -219,6 +220,9 @@ pub use harn_vm_core::user_dirs;
 /// fallback for embedders without an explicit bootstrap phase.
 pub fn initialize_runtime_assets() {
     secret_patterns::initialize_default_secret_patterns();
+    llm::agent_host_primitives::tool_result_budget::install_spill_root(|| {
+        stdlib::fs::workspace_temp_root().map_err(|error| std::io::Error::other(error.to_string()))
+    });
 }
 
 /// A startup condition that must stop the process before any work begins.
@@ -514,9 +518,7 @@ pub use stdlib::workflow_messages::{
     workflow_respond_update_for_base, workflow_resume_for_base, workflow_signal_for_base,
     workflow_update_for_base, WorkflowMailboxState,
 };
-pub use stdlib::{
-    register_agent_stdlib, register_core_stdlib, register_io_stdlib, register_vm_stdlib,
-};
+pub use stdlib::{register_core_stdlib, register_vm_stdlib};
 pub use store::register_store_builtins;
 pub use tenant::{
     tenant_event_topic_prefix, tenant_secret_namespace, tenant_topic, validate_tenant_id, ApiKeyId,
@@ -1259,12 +1261,7 @@ mod reset_leak_tests {
     fn reset_drains_routing_policy_registry() {
         llm::routing::clear_policy_registry();
         let mut config: crate::value::DictMap = crate::value::DictMap::new();
-        config.insert(
-            crate::value::intern_key("chain"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("mock:mock"),
-            )])),
-        );
+        config.put("chain", VmValue::strings(["mock:mock"]));
         llm::routing::build_routing_policy(&config).expect("intern a routing policy");
         assert!(llm::routing::policy_registry_len() > 0);
         reset_thread_local_state();

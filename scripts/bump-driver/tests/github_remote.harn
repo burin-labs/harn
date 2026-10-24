@@ -381,6 +381,35 @@ pipeline test_refresh_publication_requires_the_headline_repair_replay_recognizes
   harness.fs.delete(fixture.dir)
 }
 
+pipeline test_untracked_file_before_refresh_is_never_bump_output(harness: Harness) {
+  const fixture = publication_repo(pick(harness, ["fs", "process"]))
+  harness.fs.write_text(fixture.dir + "/personal-notes.md", "not bump output\n")
+  const adapter = github_bump_live_adapter(
+    harness,
+    {
+      remote: remote(harness, fixture.dir),
+      authentication: {installation_token: "github-app-installation-token"},
+      config: {
+        repo_dir: fixture.dir,
+        version_file: fixture.dir + "/.harn-version",
+        revision_file: fixture.dir + "/.harn-revision",
+        refresh_command: "printf '%s\\n' \"$GH_TOKEN\" > refreshed.out",
+      },
+    },
+  )
+  const applied = adapter.apply_version("v0.10.114", "")
+  assert(applied.ok, "refresh runs with the renewed token")
+  assert_eq(harness.fs.read_text(fixture.dir + "/refreshed.out"), "github-app-installation-token\n")
+  assert(!contains(applied.refreshed, "personal-notes.md"), "apply excludes the prior note")
+  const changes = adapter.working_changes()
+  assert(contains(changes.additions, "refreshed.out"), "refresh output is bump output")
+  assert(
+    !contains(changes.additions, "personal-notes.md"),
+    "working_changes shares the snapshot apply_version took",
+  )
+  harness.fs.delete(fixture.dir)
+}
+
 fn remote(harness: Harness, repo_dir: string = ".", labels: list<string> = []) {
   return github_bump_remote(
     harness,

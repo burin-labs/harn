@@ -664,14 +664,9 @@ mod tests {
                             package::project_mutation_lock_test_probe::install(move || {
                                 attempted_tx.send(()).unwrap();
                             });
-                            tokio::runtime::Builder::new_current_thread()
-                                .enable_all()
-                                .build()
-                                .unwrap()
-                                .block_on(apply_reviewed_persona(
-                                    Some(&second_manifest),
-                                    &second_args,
-                                ))
+                            harn_clock::test_support::current_thread_runtime().block_on(
+                                apply_reviewed_persona(Some(&second_manifest), &second_args),
+                            )
                         })
                         .expect("failed to spawn concurrent persona-apply test thread");
                     *second_handle_for_verifier.lock().unwrap() = Some(handle);

@@ -8,6 +8,13 @@ inputs:
     description: Optional whitespace-separated commands that prove the packages are already installed.
     required: false
     default: ""
+  install-seconds:
+    description: >-
+      Seconds each install attempt may run. The default fits small packages; a
+      toolchain of tens of megabytes needs more when a hosted-runner mirror is
+      slow, or both attempts time out mid-download.
+    required: false
+    default: "60"
 runs:
   using: composite
   steps:
@@ -15,4 +22,5 @@ runs:
       env:
         APT_PACKAGES: ${{ inputs.packages }}
         CHECK_COMMAND: ${{ inputs.check-command }}
+        APT_INSTALL_SECONDS: ${{ inputs.install-seconds }}
       run: ./.github/actions/apt-install/install.sh

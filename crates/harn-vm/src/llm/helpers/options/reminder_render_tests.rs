@@ -280,12 +280,7 @@ fn s(text: &str) -> VmValue {
 }
 
 fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-    VmValue::dict(
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect::<crate::value::DictMap>(),
-    )
+    VmValue::dict(pairs.iter().map(|(k, v)| (k.to_string(), v.clone())))
 }
 
 fn list(items: Vec<VmValue>) -> VmValue {

@@ -8,7 +8,6 @@ use url::Url;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 fn dict_str<'a>(d: &'a crate::value::DictMap, key: &str) -> Option<&'a str> {
     match d.get(key) {
@@ -17,14 +16,12 @@ fn dict_str<'a>(d: &'a crate::value::DictMap, key: &str) -> Option<&'a str> {
     }
 }
 
-pub(crate) fn register_url_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_url_builtins);
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "url_parse(url: string) -> dict", category = "url"
+    sig = "url_parse(url: string) -> dict",
+    category = "url"
 )]
 fn url_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let raw = args.first().map(|a| a.display()).unwrap_or_default();
@@ -52,8 +49,8 @@ fn url_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "url_build(parts: dict) -> string", category = "url"
+    sig = "url_build(parts: dict) -> string",
+    category = "url"
 )]
 fn url_build_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(VmValue::Dict(parts)) = args.first() else {
@@ -112,8 +109,8 @@ fn url_build_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "query_parse(query: string) -> list", category = "url"
+    sig = "query_parse(query: string) -> list",
+    category = "url"
 )]
 fn query_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let raw = args.first().map(|a| a.display()).unwrap_or_default();
@@ -131,8 +128,8 @@ fn query_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "query_stringify(pairs: list) -> string", category = "url"
+    sig = "query_stringify(pairs: list) -> string",
+    category = "url"
 )]
 fn query_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(VmValue::List(items)) = args.first() else {

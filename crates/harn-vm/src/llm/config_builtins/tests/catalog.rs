@@ -31,7 +31,7 @@ fn provider_status_reports_deferred_for_platform_managed_providers() {
 #[test]
 fn llm_config_surfaces_bedrock_region_block() {
     let mut out = String::new();
-    let args = vec![VmValue::String(arcstr::ArcStr::from("bedrock"))];
+    let args = vec![VmValue::string("bedrock")];
     let result = llm_config_builtin(&args, &mut out).expect("bedrock config");
     let cfg = result.as_dict().expect("config dict");
 
@@ -63,7 +63,7 @@ fn llm_config_surfaces_bedrock_region_block() {
 #[test]
 fn llm_config_omits_region_block_for_single_region_provider() {
     let mut out = String::new();
-    let args = vec![VmValue::String(arcstr::ArcStr::from("anthropic"))];
+    let args = vec![VmValue::string("anthropic")];
     let result = llm_config_builtin(&args, &mut out).expect("anthropic config");
     let cfg = result.as_dict().expect("config dict");
     assert!(

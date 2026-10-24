@@ -604,6 +604,8 @@ pub(crate) fn register_workflow_message_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_workflow_message_builtins);
+
 /// Enqueue a workflow signal message.
 #[harn_builtin(
     exposure = "harness.runtime.workflow_signal",

@@ -1,0 +1,133 @@
+import { stream_validate_chunk, stream_validate_create, stream_validate_finalize } from "std/json"
+import { assert_error_contains } from "std/testing"
+
+pipeline test_csv_duplicate_headers_cannot_overwrite_cells() {
+  assert_error_contains(
+    { -> csv_parse("name,name\nAda,Grace\n", {headers: true}) },
+    "duplicate header",
+  )
+  assert_eq(csv_parse("name,role\nAda,engineer\n", {headers: true})[0].name, "Ada")
+}
+
+pipeline test_csv_extra_cells_cannot_disappear() {
+  assert_error_contains({ -> csv_parse("name\nAda,engineer\n", {headers: true}) }, "header")
+  assert_eq(csv_parse("name,role\nAda\n", {headers: true})[0].role, "")
+  assert_eq(csv_parse("Ada,engineer\nGrace\n"), [["Ada", "engineer"], ["Grace"]])
+}
+
+pipeline test_xml_consumes_the_whole_document() {
+  for text in ["<a/>garbage", "<a/><b/>", "<a/><!--unfinished", "<!DOCTYPE a><a/>"] {
+    assert_error_contains({ -> from_xml(text) }, "from_xml:")
+  }
+  assert_eq(from_xml("<a>ok</a><!--done-->\n").a, "ok")
+  assert_error_contains({ -> from_xml(bytes_to_string(bytes_from_hex("c2a0"))) }, "from_xml:")
+  assert_eq(from_xml(" \t\r\n"), {})
+}
+
+pipeline test_xml_preserves_spaces_around_comments_and_children() {
+  assert_eq(from_xml("<p>Hello<!--note--> world</p>").p, "Hello world")
+  assert_eq(from_xml("<p>Hello<b>bold</b> world</p>").p["@text"], "Hello world")
+}
+
+pipeline test_xml_accepts_unicode_names() {
+  assert_eq(
+    from_xml("<文書><名前 言語=\"日本語\">東京</名前></文書>")["文書"]["名前"]["@text"],
+    "東京",
+  )
+}
+
+pipeline test_xml_keeps_namespace_prefixes_and_attribute_values() {
+  const root = from_xml(
+    "<r xmlns:x=\"urn:same\" xmlns:y=\"urn:same\"><x:n x:id=\"first\"/><y:n y:id=\"second\"/></r>",
+  ).r
+  assert_eq(root["x:n"]["@attr"]["x:id"], "first")
+  assert_eq(root["y:n"]["@attr"]["y:id"], "second")
+  assert_eq(root["@attr"]["xmlns:x"], "urn:same")
+}
+
+pipeline test_xml_rejects_duplicate_attributes() {
+  assert_error_contains({ -> from_xml("<a id=\"first\" id=\"second\"/>") }, "from_xml:")
+  assert_eq(from_xml("<a id=\"first\"/>").a["@attr"].id, "first")
+}
+
+pipeline test_xml_rejects_forbidden_character_references() {
+  for text in ["<a>&#0;</a>", "<a>&#x1;</a>", "<a>&#xFFFE;</a>"] {
+    assert_error_contains({ -> from_xml(text) }, "from_xml:")
+  }
+  assert_eq(from_xml("<a>&#x1F642;</a>").a, "🙂")
+}
+
+pipeline test_xml_writer_produces_valid_documents() {
+  assert_eq(to_xml({"a:b": 1}), "<root><a_b>1</a_b></root>")
+  assert_eq(from_xml(to_xml({"a:b": 1})).root.a_b, 1)
+  assert_error_contains({ -> to_xml(bytes_to_string(bytes_from_hex("00"))) }, "to_xml:")
+}
+
+pipeline test_xml_bounds_depth_in_both_directions() {
+  let value: any = "leaf"
+  for _ in range(256) {
+    value = [value]
+  }
+  assert_error_contains({ -> to_xml(value) }, "max nesting depth")
+  assert_error_contains(
+    { -> from_xml("${repeat("<a>", 257)}${repeat("</a>", 257)}") },
+    "max nesting depth",
+  )
+}
+
+pipeline test_json_stream_accepts_split_utf8(harness: Harness) {
+  const validator = stream_validate_create(harness.runtime, {type: "object"})
+  const payload = bytes_from_string("{\"name\":\"東京🙂\"}")
+  for i in range(0, bytes_len(payload)) {
+    const result = stream_validate_chunk(validator, bytes_slice(payload, i, i + 1))
+    assert_ne(result.verdict, "invalid")
+  }
+  assert_eq(stream_validate_finalize(validator).verdict, "valid")
+  const broken = stream_validate_create(harness.runtime, {type: "string"})
+  stream_validate_chunk(broken, bytes_from_hex("22e6"))
+  assert_eq(stream_validate_finalize(broken).verdict, "invalid")
+  const invalid = stream_validate_create(harness.runtime, {type: "string"})
+  assert_eq(stream_validate_chunk(invalid, bytes_from_hex("22ff22")).verdict, "invalid")
+}
+
+pipeline test_json_stream_numbers_can_continue_across_chunks(harness: Harness) {
+  const validator = stream_validate_create(harness.runtime, {type: "integer"})
+  stream_validate_chunk(validator, "4")
+  assert_eq(stream_validate_chunk(validator, "2").verdict, "valid")
+  assert_eq(stream_validate_finalize(validator).verdict, "valid")
+  const fractional = stream_validate_create(harness.runtime, {type: "number"})
+  stream_validate_chunk(fractional, "1")
+  stream_validate_chunk(fractional, ".")
+  assert_eq(stream_validate_chunk(fractional, "25").verdict, "valid")
+  const constrained = stream_validate_create(harness.runtime, {type: "number", minimum: 10})
+  assert_eq(stream_validate_chunk(constrained, "1").verdict, "pending")
+  assert_eq(stream_validate_chunk(constrained, "2").verdict, "valid")
+  assert_eq(stream_validate_finalize(constrained).verdict, "valid")
+  const scaled = stream_validate_create(harness.runtime, {type: "number"})
+  assert_eq(stream_validate_chunk(scaled, repeat("9", 400)).verdict, "pending")
+  assert_eq(stream_validate_chunk(scaled, "e-399").verdict, "valid")
+  assert_eq(stream_validate_finalize(scaled).verdict, "valid")
+  const too_small = stream_validate_create(harness.runtime, {type: "number", minimum: 10})
+  stream_validate_chunk(too_small, "1")
+  assert_eq(stream_validate_finalize(too_small).verdict, "invalid")
+  for text in ["1x", "01", "1.2.3"] {
+    const malformed = stream_validate_create(harness.runtime, {type: "number"})
+    assert_eq(stream_validate_chunk(malformed, text).verdict, "invalid")
+  }
+  const trailing = stream_validate_create(harness.runtime, {type: "integer"})
+  stream_validate_chunk(trailing, "4 ")
+  assert_eq(stream_validate_chunk(trailing, "2").verdict, "invalid")
+}
+
+pipeline test_date_add_preserves_fractional_seconds() {
+  const timestamp = date_parse("2026-10-23T12:34:56.123456Z")
+  assert_eq(date_add(timestamp, duration_ms(0)), timestamp)
+  assert_approx(date_add(0.123456, duration_ms(1)), 0.124456, 0.000000001)
+  assert_approx(date_add(-0.123456, duration_ms(-1)), -0.124456, 0.000000001)
+  assert_eq(date_add(0.123456789, duration_ms(0)), 0.123456789)
+  assert_eq(date_to_zone(1792758896.123, "UTC"), "2026-10-23T12:34:56.123+00:00")
+  assert_eq(date_to_zone(timestamp, "UTC"), "2026-10-23T12:34:56.123456+00:00")
+  assert_eq(date_add(0.000000000000000000000000000001, duration_ms(0)), 0)
+  const last_day = date_from_components({year: 262142, month: 12, day: 31})
+  assert_error_contains({ -> date_add(last_day, duration_days(1)) }, "out of range")
+}

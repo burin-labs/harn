@@ -356,6 +356,12 @@ threads-required = "num-test-threads"
 # ---------------------------------------------------------------------------
 # Wall-clock budget tests: reserve the runner while they measure
 # ---------------------------------------------------------------------------
+# Language servers start child compilers. Concurrent cold Rust servers hit
+# request limits that the same fixtures meet in isolation.
+[[profile.default.overrides]]
+filter = 'package(=harn-hostlib) and test(/^code_index::lsp::rename_lsp_tests::/)'
+threads-required = "num-test-threads"
+
 # The native conformance aggregate executes 25 real process-tool probes in
 # sequence. Exact-source macOS qualification at b1bb46da9052 reached 24 conforming
 # cases before the 120s ceiling killed it under workspace fan-out. The identical

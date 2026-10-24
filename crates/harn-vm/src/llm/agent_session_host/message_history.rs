@@ -325,9 +325,7 @@ fn message_role(message: &VmValue) -> String {
         .unwrap_or_default()
 }
 
-fn is_tool_result_role(role: &str) -> bool {
-    role == "tool_result" || role == "tool"
-}
+use harn_orchestration::tool_messages::is_tool_result_role;
 
 /// Synthesize a matching tool-result for each orphaned `tool_use`/`tool_call`
 /// block on the trailing assistant turn, carrying `feedback` as the observation,

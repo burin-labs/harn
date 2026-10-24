@@ -5,6 +5,15 @@ review summaries backed by hostlib tree-sitter parsing.
 
 ## `changeset_summary` — symbol-level review header
 
+The underlying `harness.ast.changeset_summary` method also accepts `proof: true`
+beside `files`. Its optional `harn.edit_proof.v1` payload reports changed line
+regions and a syntax reading for every compared file. It reuses the shared
+Histogram diff engine. `site_kind: "line_regions"` counts adjacent changed
+lines, not references. Counts remain complete when excerpts are omitted.
+The result describes the supplied images; it does not claim they were written
+or compiled. See [optional edit evidence](edit.md#optional-edit-evidence) for
+the shared bounds and status meanings.
+
 `changeset_summary(ast, files)` accepts the narrow `HarnessAst` handle and
 bounded explicit file images shaped as
 `{path, before?, after?}` and returns `harn.review_changeset.v1`. The result

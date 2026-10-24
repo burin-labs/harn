@@ -14,6 +14,7 @@
 //!       tools;
 //!   (c) when no MCP servers are configured the opts are returned unchanged.
 
+use harn_vm::value::VmDictExt as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -29,7 +30,7 @@ fn run_with_stub(source: &str, tools_added: &[&str]) -> Result<Vec<String>, Stri
         .iter()
         .map(|name| {
             let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
-            dict.insert("name".to_string(), VmValue::string(*name));
+            dict.put_str("name", *name);
             VmValue::dict(dict)
         })
         .collect();
@@ -37,32 +38,24 @@ fn run_with_stub(source: &str, tools_added: &[&str]) -> Result<Vec<String>, Stri
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
-                // Override the runtime-only host builtin with a deterministic
-                // stub so the test never opens a real MCP connection.
-                let stub_tools = Arc::new(tools);
-                vm.register_builtin("__host_mcp_bootstrap", move |_args, _out| {
-                    let mut result: BTreeMap<String, VmValue> = BTreeMap::new();
-                    result.insert("tools_added".to_string(), VmValue::List(stub_tools.clone()));
-                    result.insert(
-                        "server_info".to_string(),
-                        VmValue::List(Arc::new(Vec::new())),
-                    );
-                    result.insert("errors".to_string(), VmValue::List(Arc::new(Vec::new())));
-                    Ok(VmValue::dict(result))
-                });
-                vm.execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"))?;
-                Ok(vm.output().to_string())
-            })
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut vm = harn_vm::new_vm();
+        harn_vm::register_vm_stdlib(&mut vm);
+        // Override the runtime-only host builtin with a deterministic
+        // stub so the test never opens a real MCP connection.
+        let stub_tools = Arc::new(tools);
+        vm.register_builtin("__host_mcp_bootstrap", move |_args, _out| {
+            let mut result: BTreeMap<String, VmValue> = BTreeMap::new();
+            result.put("tools_added", VmValue::List(stub_tools.clone()));
+            result.put("server_info", VmValue::list(Vec::new()));
+            result.put("errors", VmValue::list(Vec::new()));
+            Ok(VmValue::dict(result))
+        });
+        vm.execute(&chunk)
             .await
-    })
+            .map_err(|e: VmError| format!("{e:?}"))?;
+        Ok(vm.output().to_string())
+    }))
     .map(|raw| {
         raw.lines()
             .filter_map(|l| l.strip_prefix("[harn] ").map(str::to_string))

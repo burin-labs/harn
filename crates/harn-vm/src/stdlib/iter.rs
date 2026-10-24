@@ -145,12 +145,13 @@ pub(crate) fn register_iter_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_iter_builtins);
+
 // `iter` parser signature: union of list/dict/string/set/range/iter/Generator/stream/channel.
 // We express that as a hand-built signature via `sig_expr` so the `iter`, `Generator`, etc.
 // named types reach the parser as `Ty::Named("iter")`, matching the original entry.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "iter(value: list | dict | string | set | range | iter | Generator | stream | channel) -> iter",
     category = "iter"
 )]
@@ -164,8 +165,8 @@ fn iter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "pair(...args: any) -> pair", category = "iter"
+    sig = "pair(...args: any) -> pair",
+    category = "iter"
 )]
 fn pair_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() != 2 {

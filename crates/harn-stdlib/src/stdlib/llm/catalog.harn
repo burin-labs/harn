@@ -12,6 +12,44 @@ import { render_table } from "std/table"
 
 pub type NamedModelLadder = {label?: string, steps: list<ModelLadderStep>}
 
+/**
+ * Why `escalation_target` did or did not choose a model. `skipped` counts each
+ * rejected catalog row once, at the first rule that rejected it.
+ */
+pub type EscalationRouteDiagnostic = {
+  primary?: {
+    id: string,
+    provider: string,
+    family: string,
+    lineage: string,
+    tier: string,
+    matched_by: string,
+  },
+  primary_already_capable: bool,
+  considered: int,
+  skipped: dict<string, int>,
+}
+
+/**
+ * `escalation_target` result. On success the `ModelLadderStep` fields
+ * (`provider`, `model`, `label`, `family`) are set and `fallback_code` is
+ * absent; with no target only `fallback_code`, `reason`, and
+ * `route_diagnostic` are set. `tool_format` names the reliable channel when
+ * the target's preferred native channel is known to be unreliable.
+ */
+pub type EscalationTarget = {
+  provider?: string,
+  model?: string,
+  label?: string,
+  family?: string,
+  tool_format?: string,
+  score?: float,
+  reasons?: list<string>,
+  fallback_code?: string,
+  reason?: string,
+  route_diagnostic: EscalationRouteDiagnostic,
+}
+
 pub type ModelExecutionContract = {
   schema: "harn.llm.execution-contract/v2",
   requested_model: string,
@@ -218,6 +256,44 @@ pub fn lineage_of(llm: HarnessLlm, model_id: any) {
  */
 pub fn complementary_reviewer(llm: HarnessLlm, opts: any) {
   return llm.complementary_reviewer(opts)
+}
+
+/**
+ * Pick the stronger catalog model a run should switch to after repeated
+ * verification failures, given the model it started on.
+ * Options: `primary: {model: string}` (required; a catalog id, alias, or id
+ * with a delimiter-bounded revision suffix), `available_only` (default `true`:
+ * require a usable provider credential), `max_price_multiple` (cap the
+ * target's input-plus-output list price at this multiple of the primary's; a
+ * primary with no positive catalog price returns `no_model_within_price`),
+ * and `exclude` (model ids, providers, `provider/id` pairs, families, or
+ * lineages to skip).
+ *
+ * Ranking is catalog data only: a higher tier always wins, then claimed
+ * strengths, tool support, serving shape, and context window break ties, with a
+ * bonus for a different family or lineage than the primary. Deprecated,
+ * dedicated-only, local, and non-text rows never qualify, and a primary that
+ * is already capable never escalates. An alias primary keeps the alias's
+ * provider and needs no catalog row of its own. A primary matching no catalog id, alias, or id prefix is
+ * `unknown_primary`; a raw substring never matches.
+ *
+ * The result is directly usable as a `models:` ladder step. It never throws on
+ * a degenerate catalog: with no target it carries a machine-readable
+ * `fallback_code` and no `model`:
+ *   - `"unknown_primary"`          — the primary is not in the catalog
+ *   - `"no_stronger_model"`        — the primary is already capable, or no stronger routable row exists
+ *   - `"all_excluded"`             — stronger rows exist but all were excluded
+ *   - `"no_model_within_price"`    — stronger rows exist but none fits `max_price_multiple`
+ *   - `"no_available_credential"`  — stronger rows exist but no provider has a usable credential
+ * `route_diagnostic` explains the decision either way.
+ *
+ * @effects: []
+ * @errors: ["llm_escalation_target: ..."]
+ * @api_stability: experimental
+ * @example: escalation_target({primary: {model: "claude-haiku-4-5"}})
+ */
+pub fn escalation_target(llm: HarnessLlm, opts: any) -> EscalationTarget {
+  return get_typed_value(llm.escalation_target(opts), schema_of(EscalationTarget))
 }
 
 /**

@@ -45,13 +45,16 @@ mod fuzzy;
 mod health;
 mod imports;
 mod insert_at_anchor;
+pub(crate) mod java;
 mod language;
+mod member_insertion;
 mod mutation;
 pub(crate) mod name_resolution;
 mod outline;
 mod parse;
 mod parse_errors;
 mod replace_body;
+mod replace_declaration;
 mod search;
 mod structural_diff;
 mod symbols;
@@ -79,6 +82,7 @@ pub mod api {
     use super::outline::{build_outline, outline_source};
     use super::parse::{parse_source, read_source};
     use super::symbols::extract;
+    pub(crate) use super::symbols::helpers::declaration_wrapper;
     use super::types::{OutlineItem, Symbol};
 
     /// Parse `path` (with optional language hint) and return its symbols.
@@ -200,6 +204,12 @@ impl HostlibCapability for AstCapabilityWithCodeIndex {
 fn register_ast_builtins(registry: &mut BuiltinRegistry, code_index: Option<SharedIndex>) {
     registry.register_fn("ast", "hostlib_ast_parse_file", "parse_file", parse::run);
     registry.register_fn("ast", "hostlib_ast_symbols", "symbols", symbols_call::run);
+    registry.register_fn(
+        "ast",
+        "hostlib_ast_check_member_insertion",
+        "check_member_insertion",
+        member_insertion::run,
+    );
     registry.register_fn("ast", "hostlib_ast_outline", "outline", outline::run);
     registry.register_fn(
         "ast",

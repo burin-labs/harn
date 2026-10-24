@@ -57,7 +57,7 @@ async fn type_only_generic_alias_imports_do_not_require_schema_factories() {
         (VmValue::Int(1), true),
         (VmValue::String("bad".into()), false),
     ] {
-        let record = VmValue::dict(BTreeMap::from([("value".to_string(), value)]));
+        let record = VmValue::dict([("value", value)]);
         assert_eq!(
             crate::schema::schema_is_value(&record, &good).unwrap(),
             expected
@@ -991,10 +991,7 @@ fn large_public_type_surface_loads_every_schema() {
         assert_eq!(loaded.public_type_names.len(), 400);
         let mut fields = crate::value::DictMap::default();
         for field in 0..12 {
-            fields.insert(
-                format!("field_{field}").into(),
-                VmValue::String(arcstr::ArcStr::from("value")),
-            );
+            fields.insert(format!("field_{field}").into(), VmValue::string("value"));
         }
         let value = VmValue::dict(fields);
         for name in ["Contract0", "Contract399"] {

@@ -449,9 +449,9 @@ consistent way to land the bump. The recommended sequence:
    pin to a previous tag.
 5. **Check vendored protocol bindings** with
    `harn package artifacts check path/to/vendored/manifest.json`. If it
-   reports drift, regenerate the bindings (`make gen-protocol-artifacts`
-   inside the downstream repo, or `harn package artifacts manifest
-   --output …` to refresh the vendored copy).
+   reports drift, refresh the bindings from the pinned Harn release and run
+   `harn package artifacts manifest --output …` to refresh the vendored
+   manifest. Both manifest commands work outside the Harn source checkout.
 6. **Surface registry updates** with `harn package outdated --json` and
    bump dependency versions intentionally; `harn update <alias>` keeps
    each upgrade in its own commit.

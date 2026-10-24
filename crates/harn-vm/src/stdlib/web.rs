@@ -8,7 +8,6 @@ use url::Url;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 fn vm_str(value: impl AsRef<str>) -> VmValue {
     VmValue::string(value.as_ref())
@@ -259,13 +258,10 @@ fn web_error(name: &str, message: impl std::fmt::Display) -> VmError {
     VmError::Thrown(vm_str(format!("{name}: {message}")))
 }
 
-pub(crate) fn register_web_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_web_builtins);
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__web_extract_html(html: string, source_url?: string?) -> dict",
     category = "web"
 )]
@@ -283,7 +279,6 @@ fn web_extract_html_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__web_resolve_url(base_url: string, href: string) -> string?",
     category = "web"
 )]
@@ -302,7 +297,6 @@ fn web_resolve_url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__web_origin_url(url: string, path?: string) -> string",
     category = "web"
 )]

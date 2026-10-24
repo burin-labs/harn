@@ -750,10 +750,7 @@ mod tests {
                 stop_emitted: std::sync::Arc::default(),
             }),
         };
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
+        harn_clock::test_support::current_thread_runtime()
             .block_on(super::restore_worker_transcript(&config, None))
             .unwrap();
         exit_process();

@@ -8,7 +8,6 @@ use sha2::{Digest, Sha256};
 use crate::stdlib::args::Args;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 const DEFAULT_MAX_TOTAL_BYTES: usize = 8 * 1024 * 1024;
 const DEFAULT_MAX_FIELD_BYTES: usize = 8 * 1024 * 1024;
@@ -408,7 +407,6 @@ fn parsed_field_value(field: ParsedField) -> VmValue {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "multipart_parse(body: bytes | string, content_type: string, options?: dict) -> dict",
     category = "multipart"
 )]
@@ -446,7 +444,6 @@ fn field_dict<'a>(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "multipart_field_bytes(field: dict) -> bytes",
     category = "multipart"
 )]
@@ -467,7 +464,6 @@ fn multipart_field_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "multipart_field_text(field: dict) -> string",
     category = "multipart"
 )]
@@ -660,7 +656,6 @@ fn field_content_contains_boundary(field: &VmValue, boundary: &str) -> bool {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "multipart_form_data(fields: list, options?: dict) -> dict",
     category = "multipart"
 )]
@@ -723,9 +718,7 @@ fn form_data_result(boundary: String, body: Vec<u8>) -> Result<VmValue, VmError>
     Ok(dict_value(result))
 }
 
-pub(crate) fn register_multipart_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_multipart_builtins);
 
 #[cfg(test)]
 mod tests {

@@ -327,6 +327,7 @@ pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> 
         .run_http(SiteHttpServeOptions {
             bind: args.bind,
             public_url: args.public_url.clone(),
+            ready_file: args.ready_file.clone(),
             tls,
         })
         .await

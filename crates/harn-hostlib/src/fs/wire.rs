@@ -46,16 +46,7 @@ fn pending_write_to_value(write: PendingWrite) -> VmValue {
 
 pub(super) fn commit_result_to_value(result: CommitResult) -> VmValue {
     build_dict([
-        (
-            "committed_paths",
-            VmValue::list(
-                result
-                    .committed_paths
-                    .into_iter()
-                    .map(VmValue::string)
-                    .collect(),
-            ),
-        ),
+        ("committed_paths", VmValue::strings(result.committed_paths)),
         (
             "failed_paths_with_reasons",
             VmValue::list(
@@ -72,14 +63,5 @@ pub(super) fn commit_result_to_value(result: CommitResult) -> VmValue {
 }
 
 pub(super) fn discard_result_to_value(result: DiscardResult) -> VmValue {
-    build_dict([(
-        "discarded_paths",
-        VmValue::list(
-            result
-                .discarded_paths
-                .into_iter()
-                .map(VmValue::string)
-                .collect(),
-        ),
-    )])
+    build_dict([("discarded_paths", VmValue::strings(result.discarded_paths))])
 }

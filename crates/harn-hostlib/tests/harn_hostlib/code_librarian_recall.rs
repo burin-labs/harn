@@ -22,33 +22,25 @@ fn fixture_root() -> PathBuf {
 }
 
 fn run_harn(source: &str) -> VmValue {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut lexer = Lexer::new(source);
-                let tokens = lexer.tokenize().expect("tokenize");
-                let mut parser = Parser::new(tokens);
-                let program = parser.parse().expect("parse");
-                let chunk = Compiler::new().compile(&program).expect("compile");
-                let mut vm = harn_vm::new_vm();
-                register_vm_stdlib(&mut vm);
-                let _ = harn_hostlib::install_default(&mut vm);
-                vm.set_harness(harn_vm::Harness::real());
-                vm.execute(&chunk).await.expect("execute")
-            })
-            .await
-    })
+    let rt = harn_clock::test_support::current_thread_runtime();
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().expect("tokenize");
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().expect("parse");
+        let chunk = Compiler::new().compile(&program).expect("compile");
+        let mut vm = harn_vm::new_vm();
+        register_vm_stdlib(&mut vm);
+        let _ = harn_hostlib::install_default(&mut vm);
+        vm.set_harness(harn_vm::Harness::real());
+        vm.execute(&chunk).await.expect("execute")
+    }))
 }
 
 #[test]
 fn librarian_query_meets_ground_truth_recall() {
-    let corpus = fixture_root().join("corpus");
-    let root_str = corpus.to_string_lossy().replace('\\', "/");
+    let corpus = private_fixture_copy(&fixture_root().join("corpus"));
+    let root_str = corpus.path().to_string_lossy().replace('\\', "/");
 
     let qa_text =
         std::fs::read_to_string(fixture_root().join("queries.json")).expect("read queries.json");
@@ -157,8 +149,8 @@ pipeline default(harness: Harness, _task) {{
 fn librarian_who_calls_returns_call_sites() {
     // Reuse the same fixture: `fetchUser` is called from
     // `src/auth.ts` and `src/router.ts` per Q19 in queries.json.
-    let corpus = fixture_root().join("corpus");
-    let root_str = corpus.to_string_lossy().replace('\\', "/");
+    let corpus = private_fixture_copy(&fixture_root().join("corpus"));
+    let root_str = corpus.path().to_string_lossy().replace('\\', "/");
     let source = format!(
         r#"
 import "std/code_librarian"
@@ -218,8 +210,8 @@ pipeline default(harness: Harness, _task) {{
 
 #[test]
 fn librarian_freshness_and_overlay_roundtrip() {
-    let corpus = fixture_root().join("corpus");
-    let root_str = corpus.to_string_lossy().replace('\\', "/");
+    let corpus = private_fixture_copy(&fixture_root().join("corpus"));
+    let root_str = corpus.path().to_string_lossy().replace('\\', "/");
     let source = format!(
         r#"
 import "std/code_librarian"

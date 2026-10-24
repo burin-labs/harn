@@ -93,19 +93,10 @@ pub fn github_bump_live_adapter(
     request.remote,
     request.config,
     harness.fs,
+    { -> {GH_TOKEN: github_bump_access_token(harness, request.authentication)} },
   )
   return adapter
     + {
-      apply_version: fn(tag, revision) {
-        const environment = request.config?.refresh_environment ?? {}
-        const fresh = request.config
-          + {
-            refresh_environment: environment
-              + {GH_TOKEN: github_bump_access_token(harness, request.authentication)},
-          }
-        return live_bump_adapter(harness.clock, harness.tools, request.remote, fresh, harness.fs)
-          .apply_version(tag, revision)
-      },
       publish_commit: fn(commit) {
         // Repair replay recognizes refresh output by its headline. Any other
         // headline would be replayed onto the next refresh as a repair.

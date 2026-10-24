@@ -1,14 +1,10 @@
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
-pub(crate) fn register_command_policy_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_command_policy_builtins);
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "command_policy(config: dict) -> dict",
     category = "command_policy"
 )]
@@ -47,7 +43,6 @@ fn command_policy_pop_impl(_args: &[VmValue], _out: &mut String) -> Result<VmVal
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "command_risk_scan(ctx: dict) -> dict",
     category = "command_policy"
 )]
@@ -60,7 +55,6 @@ fn command_risk_scan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "command_result_scan(ctx: dict) -> dict",
     category = "command_policy"
 )]
@@ -73,7 +67,6 @@ fn command_result_scan_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "command_llm_risk_scan(ctx: dict, options?: dict) -> dict",
     category = "command_policy"
 )]
@@ -86,7 +79,6 @@ fn command_llm_risk_scan_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "command_workspace_effect(ctx: dict) -> dict",
     category = "command_policy"
 )]

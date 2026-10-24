@@ -7,7 +7,6 @@ use crate::stdlib::args::Args;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 use super::logging::{vm_build_log_line, VM_MIN_LOG_LEVEL};
 
@@ -98,6 +97,8 @@ pub(crate) fn reset_observability_state() {
     OBS_STATE.with(|state| *state.borrow_mut() = ObsState::default());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_observability_state);
+
 /// Snapshot of the buffered emission payloads on the current thread.
 /// Used by tests (e.g. the compass router) to assert that a primitive
 /// emitted the metric it claims to. Mirrors the `__obs_events` builtin
@@ -126,13 +127,10 @@ pub fn install_default_backend(kind: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn register_observability_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_observability_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__obs_configure(...args: any) -> nil",
     category = "observability"
 )]
@@ -145,8 +143,8 @@ fn obs_configure_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "__obs_reset(...args: any) -> nil", category = "observability"
+    sig = "__obs_reset(...args: any) -> nil",
+    category = "observability"
 )]
 fn obs_reset_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     reset_observability_state();
@@ -155,7 +153,6 @@ fn obs_reset_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__obs_start_span(...args: any) -> dict",
     category = "observability"
 )]
@@ -191,7 +188,6 @@ fn obs_start_span_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__obs_end_span(...args: any) -> nil",
     category = "observability"
 )]
@@ -227,8 +223,8 @@ fn obs_end_span_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "__obs_emit(...args: any) -> list", category = "observability"
+    sig = "__obs_emit(...args: any) -> list",
+    category = "observability"
 )]
 fn obs_emit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let event_value = args.first().cloned().unwrap_or(VmValue::Nil);
@@ -248,8 +244,8 @@ fn obs_emit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "__obs_events(...args: any) -> list", category = "observability"
+    sig = "__obs_events(...args: any) -> list",
+    category = "observability"
 )]
 fn obs_events_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let events = OBS_STATE.with(|state| state.borrow().emissions.clone());
@@ -258,7 +254,6 @@ fn obs_events_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__obs_events_take(...args: any) -> list",
     category = "observability"
 )]
@@ -269,7 +264,6 @@ fn obs_events_take_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__obs_auto_backend(...args: any) -> dict",
     category = "observability"
 )]
@@ -300,7 +294,6 @@ impl MetricInstrument {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__obs_counter(...args: any) -> list",
     category = "observability"
 )]
@@ -310,7 +303,6 @@ fn obs_counter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__obs_histogram(...args: any) -> list",
     category = "observability"
 )]
@@ -320,8 +312,8 @@ fn obs_histogram_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "__obs_gauge(...args: any) -> list", category = "observability"
+    sig = "__obs_gauge(...args: any) -> list",
+    category = "observability"
 )]
 fn obs_gauge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     emit_instrument_from_args(MetricInstrument::Gauge, args)
@@ -329,13 +321,12 @@ fn obs_gauge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__obs_request_id(...args: any) -> string|nil",
     category = "observability"
 )]
 fn obs_request_id_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(crate::observability::request_id::current_request_id()
-        .map(|id| VmValue::String(arcstr::ArcStr::from(id.as_str())))
+        .map(|id| VmValue::string(id.as_str()))
         .unwrap_or(VmValue::Nil))
 }
 
@@ -371,7 +362,7 @@ pub(crate) fn start_span_typed(
 ) -> Result<VmValue, VmError> {
     validate_vocabulary(&attrs, "span", &name)?;
     let args = vec![
-        VmValue::String(arcstr::ArcStr::from(name.as_str())),
+        VmValue::string(name.as_str()),
         json_to_vm_value(&serde_json::Value::Object(attrs)),
     ];
     obs_start_span_impl(&args, &mut String::new())

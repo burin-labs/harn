@@ -326,3 +326,64 @@ fn cli_rejects_invalid_registered_value_without_rendering_it() {
     );
     assert!(!output.stderr.contains(invalid_value), "{}", output.stderr);
 }
+
+#[test]
+fn playground_subprocess_environment_does_not_require_an_inference_ceiling() {
+    use crate::test_util::process::harn_e2e_command;
+
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("host.harn"),
+        "pub fn host_marker() -> string { return \"host-context\" }",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("pipeline.harn"),
+        r#"
+import { command_run } from "std/command"
+
+pipeline default(harness: Harness) {
+  assert(harness.env.get("HARN_TASK") == "probe")
+  assert(harness.env.get("HARN_LLM_PROVIDER") == "mock")
+  assert(harness.env.get("HARN_LLM_MODEL") == "mock")
+  const child = command_run(harness.tools, {mode: "argv", argv: ["git", "--version"]})
+  assert(child.success && child.stdout.starts_with("git version "))
+  harness.stdio.println("${host_marker()}: child ran")
+}
+"#,
+    )
+    .unwrap();
+    for boundary in [
+        None,
+        Some(r#"{"reach":"local_only","allow_training_discounts":false}"#),
+    ] {
+        let mut command = harn_e2e_command();
+        command
+            .current_dir(project.path())
+            .args([
+                "playground",
+                "--host",
+                "host.harn",
+                "--script",
+                "pipeline.harn",
+                "--task",
+                "probe",
+                "--llm",
+                "mock:mock",
+            ])
+            .env_remove("HARN_INFERENCE_BOUNDARY_JSON");
+        if let Some(boundary) = boundary {
+            command.env("HARN_INFERENCE_BOUNDARY_JSON", boundary);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "host-context: child ran"
+        );
+    }
+}

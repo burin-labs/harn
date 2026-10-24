@@ -308,14 +308,9 @@ mod tests {
 
     #[test]
     fn parse_channel_list_accepts_string_or_list() {
-        let one = parse_channel_list(&VmValue::String(arcstr::ArcStr::from("foo"))).unwrap();
+        let one = parse_channel_list(&VmValue::string("foo")).unwrap();
         assert_eq!(one, vec!["foo"]);
-        let many = parse_channel_list(&VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(arcstr::ArcStr::from("foo")),
-            VmValue::String(arcstr::ArcStr::from("bar")),
-            VmValue::String(arcstr::ArcStr::from("foo")),
-        ])))
-        .unwrap();
+        let many = parse_channel_list(&VmValue::strings(["foo", "bar", "foo"])).unwrap();
         assert_eq!(many, vec!["bar", "foo"]);
         assert!(parse_channel_list(&VmValue::Int(1)).is_err());
     }

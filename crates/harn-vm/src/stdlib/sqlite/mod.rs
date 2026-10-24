@@ -21,7 +21,6 @@ use crate::stdlib::sql_common::{
     render_savepoint_sql, runtime_error, sha256, typed_handle, MigrationEntry, MockDb, SavepointOp,
 };
 use crate::value::{VmError, VmResourceHandle, VmValue};
-use crate::vm::Vm;
 
 const HANDLE_DB: &str = "sqlite_db";
 const HANDLE_TX: &str = "sqlite_tx";
@@ -46,13 +45,12 @@ pub(crate) fn reset_sqlite_state() {
     // its databases, transactions, and mocks without clearing ambient state.
 }
 
-pub(crate) fn register_sqlite_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_state_reset!(reset_sqlite_state);
+
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_sqlite_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig_expr = BuiltinSignature::variadic("sqlite_open", &[Param::new("args", TY_ANY
 )], TY_RESOURCE),
     kind = "async",
@@ -739,10 +737,7 @@ fn bind_params(params: &[VmValue]) -> Vec<Value> {
 }
 
 fn execute_result_value(rows_affected: u64) -> VmValue {
-    VmValue::dict(crate::value::DictMap::from_iter([(
-        crate::value::intern_key("rows_affected"),
-        VmValue::Int(rows_affected as i64),
-    )]))
+    VmValue::dict([("rows_affected", VmValue::Int(rows_affected as i64))])
 }
 
 async fn execute_batch_on_record(
@@ -850,7 +845,7 @@ fn validate_identifier(
 }
 
 fn string_list(values: Vec<String>) -> VmValue {
-    VmValue::list(values.into_iter().map(VmValue::string).collect())
+    VmValue::strings(values)
 }
 
 #[cfg(test)]
@@ -858,15 +853,14 @@ mod tests {
     use super::*;
 
     fn s(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
+        VmValue::string(value)
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
         VmValue::dict(
             pairs
                 .iter()
-                .map(|(key, value)| (crate::value::intern_key(key), value.clone()))
-                .collect::<crate::value::DictMap>(),
+                .map(|(key, value)| (crate::value::intern_key(key), value.clone())),
         )
     }
 
@@ -910,10 +904,10 @@ mod tests {
         let fixtures = crate::stdlib::sql_common::parse_mock_fixtures(
             &[dict(&[
                 ("sql", s("select id from events where topic = ?")),
-                ("params", VmValue::List(Arc::new(vec![s("agent_events")]))),
+                ("params", VmValue::list(vec![s("agent_events")])),
                 (
                     "rows",
-                    VmValue::List(Arc::new(vec![dict(&[("id", VmValue::Int(1))])])),
+                    VmValue::list(vec![dict(&[("id", VmValue::Int(1))])]),
                 ),
             ])],
             "sqlite_mock_db",

@@ -69,9 +69,10 @@ This flag conflicts with `--allow-process-network` and `--no-sandbox`.
 
 Pass `--allow-process-loopback` when a confined child needs a local TCP server,
 as test runners commonly do. On macOS this admits TCP bind, accept, and connect
-only on IPv4 or IPv6 loopback; remote destinations remain denied. Other local
-sandbox backends currently reject this grant rather than silently opening the
-network.
+only on IPv4 or IPv6 loopback; direct remote sockets remain denied. Linux needs
+the host's network-namespace launcher and
+[withholds the grant when it is unavailable](#loopback-on-a-host-that-cannot-grant-it).
+Other unsupported backends refuse the grant.
 
 Pass `--sandbox-unix-socket-root <path>` when a confined child needs a local
 socket file rather than a TCP port. Build servers are the common case: sbt,
@@ -81,7 +82,7 @@ the build dies with a bare `Operation not permitted`. The grant is path-scoped:
 bind and connect are admitted only for socket files under the given roots, a
 socket anywhere else is still refused, and nothing here opens IP networking.
 macOS enforces it; other local backends reject a non-empty grant rather than
-widening, the same contract `--allow-process-loopback` follows. Granting the
+widening. Granting the
 process write roots as socket roots is the natural pairing, since a socket file
 is a file.
 
@@ -103,6 +104,10 @@ loopback addresses stay denied. `HARN_EGRESS_*` or
 the destinations available to a run that already has network access, so a
 script can install its policy before the network grant. See the
 [egress-policy reference](./builtins.md#http) for the policy fields.
+
+Command tool receipts retain the effective network grant in `sandbox.network`.
+See [command network grants](./long-running-tools.md#command-network-grants)
+for the fields and their limits.
 
 A matching [`harness.testing.http_mock`](./builtins.md#mock-http) is an
 in-process fixture, so it does not require a network grant. An unmatched HTTP
@@ -432,6 +437,23 @@ Flattened stages retain every host `read_deny_roots` entry. They also preserve
 `netns_launcher_path`, the host-selected network-namespace launcher, exactly:
 a stage cannot replace or remove it, or introduce one when the host set none.
 
+#### Loopback on a host that cannot grant it
+
+On Linux a confined child gets loopback only inside a private network
+namespace, which needs the namespace launcher named by
+`process_sandbox.netns_launcher_path`. When a policy grants
+`allow_tcp_loopback` and the host has no usable launcher, Harn drops that one
+grant, keeps every other confinement, and emits a `sandbox.loopback_unavailable`
+warning event whose metadata carries `grant`, `reason`, and `launcher`.
+Commands that need loopback then fail inside the sandbox. It never widens the
+syscall filter without the namespace that bounds it.
+
+Embedders ask the same question without spawning:
+`harn_vm::process_sandbox::loopback_support(&policy.process_sandbox)` returns
+`LoopbackSupport::Supported` or `Unavailable` with a typed reason, and
+`withhold_unsupported_loopback(&mut policy.process_sandbox)` applies the rule and
+returns what it dropped.
+
 #### Child writes for read-only roles
 
 A child process may write its writable roots (the workspace roots,
@@ -478,11 +500,27 @@ win. The directory self-ignores its contents and can be deleted safely.
 `CARGO_HOME`, `RUSTUP_HOME`, and existing package-manager config files keep
 pointing at their narrowly scoped toolchain/config preset roots so installed
 toolchains and private-registry configuration remain usable. On macOS, a
-loopback grant also appends `-Djava.net.preferIPv4Stack=true` to
+loopback grant also appends `-Djava.net.preferIPv6Addresses=true` to
 `JAVA_TOOL_OPTIONS`: a dual-stack JVM binds `127.0.0.1` as the IPv4-mapped
 IPv6 address `::ffff:127.0.0.1`, which the seatbelt's loopback filter does not
 recognise, so Gradle and other JVM tools would otherwise fail their loopback
-bind with `Operation not permitted` despite the grant.
+bind with `Operation not permitted` despite the grant. Preferring IPv6 makes
+`localhost` resolve to `::1`, which also reaches child JVMs that Gradle starts
+without the variable, such as its Checkstyle and PMD workers. A JVM that names
+the literal `127.0.0.1` is still refused.
+
+On Linux, a loopback grant runs the child in a private network namespace. The
+namespace keeps the caller's own user id, so the JVM finds the real home
+directory, and mounts the workspace's `.harn-tmp` over `/tmp`, so tools that
+write a compiled-in `/tmp` path (the JVM attach socket that Mockito's inline
+mock maker uses) write there instead of the host's `/tmp`. Concurrent runs in
+one workspace share that directory. The mount would hide every host path under
+`/tmp`, so it is skipped when the child is granted anything there, its
+workspace or its program included. Such a child keeps the host's `/tmp` with
+only its granted paths writable, and those tools fail; keep a JVM workspace
+outside `/tmp`. The helper now performs a bind mount, so a host policy that
+confines the helper must allow mounts as well as namespace creation; without
+them every loopback spawn fails closed.
 
 With the default `developer_toolchains` and `package_manager_config` presets,
 the Unix desktop backends grant child processes read-only access to common
@@ -779,6 +817,14 @@ on that axis.
 Only a process dedicated to serving may confine itself. An in-process
 (channel) ACP server shares its host's process, and confining it would
 confine the host.
+
+## Workspace-local Gradle cache (`GRADLE_USER_HOME`)
+
+The child environment admits `GRADLE_USER_HOME` as a cache path. A caller's
+populated Gradle cache is retained only when its resolved path is inside a
+writable workspace root. Otherwise, confined commands use
+`.harn-toolchain-cache/gradle`; an external cache path grants no new writes.
+Secret-shaped names such as `GRADLE_TOKEN` still require an explicit grant.
 
 ## Workspace-local temp dir (`TMPDIR`/`TMP`/`TEMP`)
 

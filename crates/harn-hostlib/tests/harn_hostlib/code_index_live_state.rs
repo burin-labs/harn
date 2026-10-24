@@ -204,11 +204,7 @@ fn file_hash_snapshot_batches_current_hashes_and_seq_binding() {
         "hostlib_code_index_file_hash_snapshot",
         dict(&[(
             "paths",
-            VmValue::list(vec![
-                VmValue::string("README.md"),
-                VmValue::string("src/new.ts"),
-                VmValue::string("src/util.ts"),
-            ]),
+            VmValue::strings(["README.md", "src/new.ts", "src/util.ts"]),
         )]),
     );
     let initial_dict = extract_dict(&initial);
@@ -261,7 +257,7 @@ fn file_hash_snapshot_batches_current_hashes_and_seq_binding() {
     let changed = call(
         &registry,
         "hostlib_code_index_file_hash_snapshot",
-        dict(&[("paths", VmValue::list(vec![VmValue::string("src/util.ts")]))]),
+        dict(&[("paths", VmValue::strings(["src/util.ts"]))]),
     );
     let changed_util = snapshot_entry(&changed, "src/util.ts");
     let changed_hash = extract_str(changed_util.get("hash").unwrap());
@@ -294,7 +290,7 @@ fn file_hash_snapshot_batches_current_hashes_and_seq_binding() {
     let bound = call(
         &registry,
         "hostlib_code_index_file_hash_snapshot",
-        dict(&[("paths", VmValue::list(vec![VmValue::string("src/util.ts")]))]),
+        dict(&[("paths", VmValue::strings(["src/util.ts"]))]),
     );
     let bound_dict = extract_dict(&bound);
     assert_eq!(extract_int(bound_dict.get("seq").unwrap()), seq);

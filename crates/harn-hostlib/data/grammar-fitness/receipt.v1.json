@@ -1,6 +1,6 @@
 {
   "corpus": {
-    "digest": "sha256:07ee7a553a1f0c1d3b97dc2c2b467290010f6e83c74befd9a6d01ce94b40bc20",
+    "digest": "sha256:b0fede387af67f2c522d9916b88df02edc58c04c6aef30ca06de53d5b0a637fe",
     "schema_version": 1
   },
   "languages": [
@@ -13,11 +13,11 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:426e387f0c24965209bcf8201fbd172a4665e6b2299103ef0ce68251f8430600",
+        "artifact_digest": "sha256:d5b36c5ecc2fb10defb643fd1ac24f5635f63fab6f359de1d7b8370077e85cd9",
         "checksum": null,
         "name": "tree-sitter-harn",
         "source": "workspace-path",
-        "version": "0.10.174-dev"
+        "version": "0.10.178-dev"
       }
     },
     {

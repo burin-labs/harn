@@ -7,7 +7,6 @@ use harn_modules::package_snapshot::PackageSnapshot;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmDictExt, VmError, VmValue};
-use crate::vm::Vm;
 
 #[derive(Default)]
 pub(crate) struct PackageSnapshotRegistry {
@@ -33,13 +32,10 @@ impl PackageSnapshotRegistry {
     }
 }
 
-pub(crate) fn register_package_snapshot_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_package_snapshot_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "package_snapshot_open(project_root: string) -> {handle: string, generation: string, packages_root: string, lock_path: string, lock_digest: string, packages: list<string>}?",
     kind = "async",
     category = "fs",
@@ -82,13 +78,7 @@ async fn package_snapshot_open_builtin(
     receipt.put_str("lock_digest", snapshot.lock_digest());
     receipt.put(
         "packages",
-        VmValue::list(
-            snapshot
-                .package_names()
-                .iter()
-                .map(VmValue::string)
-                .collect(),
-        ),
+        VmValue::strings(snapshot.package_names().iter()),
     );
     ctx.package_snapshot_registry().insert(handle, snapshot)?;
     Ok(VmValue::dict(receipt))
@@ -96,7 +86,6 @@ async fn package_snapshot_open_builtin(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "package_snapshot_close(handle: string) -> bool",
     kind = "async",
     category = "fs",

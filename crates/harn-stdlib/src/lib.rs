@@ -94,6 +94,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "testing" => "stdlib/stdlib_testing.harn",
     "files" => "stdlib/stdlib_files.harn",
     "document" => "stdlib/stdlib_document.harn",
+    "markdown" => "stdlib/stdlib_markdown.harn",
     "vision" => "stdlib/stdlib_vision.harn",
     "context" => "stdlib/stdlib_context.harn",
     "context/artifact_types" => "stdlib/context/artifact_types.harn",

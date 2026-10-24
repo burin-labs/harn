@@ -46,10 +46,12 @@ pub(crate) fn register_flow_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_flow_builtins);
+
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "flow_invariant_allow() -> dict", category = "flow"
+    sig = "flow_invariant_allow() -> dict",
+    category = "flow"
 )]
 fn flow_invariant_allow_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(InvariantResult::allow().to_vm_value())
@@ -57,8 +59,8 @@ fn flow_invariant_allow_impl(_args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "flow_invariant_warn(reason: string) -> dict", category = "flow"
+    sig = "flow_invariant_warn(reason: string) -> dict",
+    category = "flow"
 )]
 fn flow_invariant_warn_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let reason = required_string(args, 0, "flow_invariant_warn", "reason")?;
@@ -67,7 +69,6 @@ fn flow_invariant_warn_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "flow_invariant_block(code: string, message: string) -> dict",
     category = "flow"
 )]
@@ -79,7 +80,6 @@ fn flow_invariant_block_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "flow_invariant_require_approval(kind: string, id: string) -> dict",
     category = "flow"
 )]
@@ -103,7 +103,6 @@ fn flow_invariant_require_approval_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "flow_evidence_atom(atom_id: string, diff_start: int, diff_end: int) -> dict",
     category = "flow"
 )]
@@ -121,7 +120,6 @@ fn flow_evidence_atom_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "flow_evidence_metadata(directory: string, namespace: string, key: string) -> dict",
     category = "flow"
 )]
@@ -138,7 +136,6 @@ fn flow_evidence_metadata_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "flow_evidence_transcript(transcript_id: string, span_start: int, span_end: int) -> dict",
     category = "flow"
 )]
@@ -155,7 +152,6 @@ fn flow_evidence_transcript_impl(args: &[VmValue], _out: &mut String) -> Result<
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "flow_evidence_citation(url: string, quote: string, fetched_at: string) -> dict",
     category = "flow"
 )]
@@ -172,7 +168,6 @@ fn flow_evidence_citation_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "flow_remediation(description: string) -> dict",
     category = "flow"
 )]
@@ -183,7 +178,6 @@ fn flow_remediation_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "flow_with_evidence(result: dict, evidence: list) -> dict",
     category = "flow"
 )]
@@ -200,7 +194,6 @@ fn flow_with_evidence_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "flow_with_remediation(result: dict, remediation: dict) -> dict",
     category = "flow"
 )]
@@ -213,7 +206,6 @@ fn flow_with_remediation_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "flow_with_confidence(result: dict, confidence: float | int) -> dict",
     category = "flow"
 )]
@@ -226,8 +218,8 @@ fn flow_with_confidence_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "flow_invariant_kind(result: dict) -> string", category = "flow"
+    sig = "flow_invariant_kind(result: dict) -> string",
+    category = "flow"
 )]
 fn flow_invariant_kind_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let result = require_invariant(args, 0, "flow_invariant_kind")?;
@@ -242,7 +234,6 @@ fn flow_invariant_kind_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "flow_invariant_is_blocking(result: dict) -> bool",
     category = "flow"
 )]
@@ -256,7 +247,6 @@ fn flow_invariant_is_blocking_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "flow_invariant_confidence(result: dict) -> float",
     category = "flow"
 )]
@@ -267,7 +257,6 @@ fn flow_invariant_confidence_impl(args: &[VmValue], _out: &mut String) -> Result
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "flow_invariant_feedback(report: dict, options?: dict) -> string",
     category = "flow"
 )]

@@ -16,7 +16,7 @@ use crate::code_index::{CodeIndexCapability, IndexState};
 use crate::test_support::dict;
 
 fn string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
+    VmValue::string(s)
 }
 
 fn write(root: &Path, path: &str, body: &str) {
@@ -119,10 +119,10 @@ fn change_signature_does_not_write_through_a_directory_swapped_for_a_symlink() {
         ),
         (
             "params",
-            VmValue::List(std::sync::Arc::new(vec![dict(&[
+            VmValue::list(vec![dict(&[
                 ("name", string("factor")),
                 ("from", string("scale")),
-            ])])),
+            ])]),
         ),
     ]);
     let result = super::super::change_signature::run(&capability.shared(), &[request]);

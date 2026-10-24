@@ -54,6 +54,8 @@ pub(crate) fn reset_agent_worker_state() {
     reset_worker_registry();
 }
 
+harn_vm_core::stdlib_state_reset!(reset_agent_worker_state);
+
 pub(crate) use self::records::{parse_artifact_list, parse_context_policy};
 fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {
     let json = serde_json::to_value(value)
@@ -97,9 +99,10 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
     workflow::register_workflow_builtins(vm);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_agent_builtins);
+
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_sub_agent_run(request: dict) -> any",
     kind = "async",
     category = "agent.worker",
@@ -233,7 +236,6 @@ fn worker_mode_label(config: &WorkerConfig) -> &'static str {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_worker_spawn(config: dict) -> any",
     kind = "async",
     category = "agent.worker",
@@ -255,7 +257,6 @@ async fn spawn_agent_builtin(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_worker_send_input(worker: any, task: any) -> any",
     kind = "async",
     category = "agent.worker",
@@ -296,7 +297,6 @@ async fn send_input_builtin(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_worker_trigger(worker: any, payload: any) -> any",
     kind = "async",
     category = "agent.worker",
@@ -377,7 +377,6 @@ async fn worker_trigger_builtin(
 /// instead.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_worker_suspend(worker: any, reason: any, options?: dict) -> any",
     kind = "async",
     category = "agent.worker",
@@ -690,7 +689,6 @@ pub(crate) fn all_registered_worker_ids() -> Vec<String> {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_top_level_agent_suspend(session_id: string, task: any, system: any, options: dict, reason: any, conditions?: any, iteration?: int) -> any",
     kind = "async",
     category = "agent.worker",
@@ -864,7 +862,6 @@ fn diagnostic_error(code: Code, message: impl Into<String>) -> VmError {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_worker_resume(worker_or_snapshot: any, input_or_options?: any, continue_transcript?: bool) -> any",
     kind = "async",
     category = "agent.worker",
@@ -963,7 +960,6 @@ pub(crate) async fn resume_worker_from_auto_resume_trigger(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_worker_wait(worker_or_workers: any) -> any",
     kind = "async",
     category = "agent.worker",
@@ -987,7 +983,7 @@ async fn wait_agent_builtin(
                 wait_for_worker_terminal_with(state.clone(), "wait_agent", worker_summary).await?,
             );
         }
-        return Ok(VmValue::List(std::sync::Arc::new(results)));
+        return Ok(VmValue::list(results));
     }
     let worker_id = worker_id_from_value(target)?;
     let state = with_worker_state(&worker_id, Ok)?;
@@ -1036,7 +1032,6 @@ async fn await_due_auto_resume(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_worker_stop(worker: any, options: any) -> any",
     kind = "async",
     category = "agent.worker",
@@ -1089,7 +1084,6 @@ async fn stop_agent_builtin(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_worker_close(worker: any) -> any",
     kind = "async",
     category = "agent.worker",
@@ -1118,7 +1112,6 @@ async fn close_agent_builtin(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_worker_list() -> list",
     category = "agent.worker",
     runtime_only = true,
@@ -1130,12 +1123,11 @@ fn list_agents_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         .into_iter()
         .map(|state| worker_summary(&state.lock()))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(VmValue::List(std::sync::Arc::new(workers)))
+    Ok(VmValue::list(workers))
 }
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_resume_conditions_parse(conditions?: any) -> any",
     category = "agent.worker",
     runtime_only = true,

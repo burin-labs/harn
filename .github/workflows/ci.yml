@@ -122,6 +122,7 @@ jobs:
       release_residual: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.release_residual == 'true' }}
       post_merge_tier: ${{ steps.post_merge_tier.outputs.active }}
       consumer: ${{ steps.surface_filter.outputs.consumer }}
+      provider_contract_probe: ${{ steps.surface_filter.outputs.provider_contract_probe }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -216,6 +217,37 @@ jobs:
               - 'crates/harn-serve/src/adapters/acp/**'
               - 'spec/protocol-artifacts/**'
               - 'crates/harn-stdlib/src/stdlib/**'
+            # The offline provider campaign has the same scope on pull
+            # requests, merge groups and main pushes. Its standalone workflow
+            # owns only scheduled and manual runs.
+            provider_contract_probe:
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/provider-contract-probe.yml'
+              - '.github/actions/provider-contract-probe/**'
+              - 'crates/harn-cli/src/cli/provider.rs'
+              - 'crates/harn-cli/src/cli/mod.rs'
+              - 'crates/harn-cli/src/entrypoint.rs'
+              - 'crates/harn-cli/src/commands/mod.rs'
+              - 'crates/harn-cli/src/commands/provider.rs'
+              - 'crates/harn-cli/src/commands/provider_option_probe.rs'
+              - 'crates/harn-cli/src/commands/providers.rs'
+              - 'crates/harn-cli/src/commands/providers/tool_probe_request.rs'
+              - 'crates/harn-stdlib/src/lib.rs'
+              - 'crates/harn-provider-catalog/Cargo.toml'
+              - 'crates/harn-provider-catalog/src/**'
+              - 'crates/harn-vm/src/llm/capability_sources/**'
+              - 'crates/harn-vm/src/llm/catalog_sources/**'
+              - 'crates/harn-vm/src/llm/capabilities/**'
+              - 'crates/harn-vm/src/llm/agent_observe.rs'
+              - 'crates/harn-vm/src/llm/api/**'
+              - 'crates/harn-vm/src/llm/helpers/options/**'
+              - 'crates/harn-vm/src/llm/provider_contract_probe.rs'
+              - 'crates/harn-vm/src/llm/providers/**'
+              - 'crates/harn-stdlib/src/stdlib/cli/providers/**'
+              - 'scripts/provider_tool_probe_campaign.harn'
+              - 'scripts/provider_tool_probe_campaign/**'
+              - 'scripts/tests/provider_option_probe_test.harn'
+              - 'scripts/tests/provider_tool_probe_campaign_test.harn'
             prompt_prose:
               - '.github/workflows/ci.yml'
               - 'crates/harn-vm/src/llm/**'
@@ -715,11 +747,8 @@ jobs:
       # `-fuse-ld=mold` link-arg. ubuntu-24.04's gcc cc-driver (>=12) supports
       # `-fuse-ld=mold` directly.
       - name: Install mold linker
-        uses: ./.github/actions/apt-install
+        uses: ./.github/actions/install-mold
         timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       - uses: ./.github/actions/rust-toolchain
         with:
           components: clippy
@@ -906,11 +935,8 @@ jobs:
           HARN_BUDGET_PROFILE: producer
       - name: Install mold linker
         if: steps.proven-cli.outputs.found != 'true'
-        uses: ./.github/actions/apt-install
+        uses: ./.github/actions/install-mold
         timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       - uses: ./.github/actions/rust-toolchain
         if: steps.proven-cli.outputs.found != 'true'
       # Every tier gets an explicit answer, because a guard that names only
@@ -1073,11 +1099,8 @@ jobs:
           RUNNER_ENVIRONMENT: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'self-hosted' || 'github-hosted' }}
           HARN_BUDGET_PROFILE: producer
       - name: Install mold linker
-        uses: ./.github/actions/apt-install
+        uses: ./.github/actions/install-mold
         timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       - uses: ./.github/actions/rust-toolchain
       # Every tier gets an explicit answer, because a guard that names only
       # the tiers it knows turns a new tier into a silent skip: the first
@@ -1259,11 +1282,8 @@ jobs:
           RUNNER_ENVIRONMENT: github-hosted
           HARN_BUDGET_PROFILE: producer
       - name: Install mold linker
-        uses: ./.github/actions/apt-install
+        uses: ./.github/actions/install-mold
         timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       # The language-server rename fixtures require rust-analyzer instead of
       # skipping when it is absent, and rust-src so it can expand std macros.
       - uses: ./.github/actions/rust-toolchain
@@ -1291,7 +1311,7 @@ jobs:
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
           HARN_LLM_CALLS_DISABLED: "1"
-          HARN_LSP_FIXTURES_REQUIRED: "1"
+          HARN_EXT_LSP_FIXTURES_REQUIRED: "1"
           HARN_EXT_TEST_PARTITION: ${{ matrix.partition }}
           POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
         run: >-
@@ -1381,11 +1401,8 @@ jobs:
         with:
           fetch-depth: 1
       - name: Install mold linker
-        uses: ./.github/actions/apt-install
+        uses: ./.github/actions/install-mold
         timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       - uses: ./.github/actions/rust-toolchain
         with:
           components: rust-analyzer, rust-src
@@ -1434,7 +1451,7 @@ jobs:
         id: release-audit-rust-test
         env:
           HARN_LLM_CALLS_DISABLED: "1"
-          HARN_LSP_FIXTURES_REQUIRED: "1"
+          HARN_EXT_LSP_FIXTURES_REQUIRED: "1"
         run: >-
           scripts/ci/run_rust_test_lane.sh
           bash scripts/ci/run_workspace_tests.sh all
@@ -1497,11 +1514,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install mold linker
-        uses: ./.github/actions/apt-install
+        uses: ./.github/actions/install-mold
         timeout-minutes: 5
-        with:
-          packages: mold bubblewrap
-          check-command: mold bwrap
+      - name: Install bubblewrap
+        uses: ./.github/actions/install-bubblewrap
+        timeout-minutes: 5
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
         uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
@@ -2220,6 +2237,8 @@ jobs:
       - run: npm ci
       - name: Run pre-warm shell gates without Cargo
         run: ./scripts/tests/pr_gate_pre_warm_boundary_test.sh
+      - name: Check recorded AWS SDK mirror
+        run: make check-aws-config-vendor test-aws-config-vendor
 
   audit-scripts:
     name: Check repository policies
@@ -2368,9 +2387,9 @@ jobs:
           # handle the mounted target directory.
           CARGO_INCREMENTAL: "0"
         run: |
-          # Keep the broad workspace pass on production targets so unrelated
-          # dev-only dependencies cannot make this required lane brittle.
-          cross check --locked --workspace --target x86_64-pc-windows-gnu
+          # Include test targets: Windows-only test code (unused imports, items
+          # only a unix cfg reaches) otherwise first fails on native Windows.
+          cross check --locked --workspace --tests --target x86_64-pc-windows-gnu
           # harn-serve's hostlib-enabled tests exercise the platform process
           # boundary used by ACP cancellation. Compile that focused test surface
           # here because a missing Unix cfg once reached main and was detected
@@ -2794,6 +2813,39 @@ jobs:
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
 
+  provider-contract-probe:
+    name: Provider contract probe (offline)
+    needs: [changes, rust-cli]
+    if: ${{ !cancelled() && needs.changes.outputs.provider_contract_probe == 'true' && needs.rust-cli.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      HARN_BIN_NO_BUILD: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Download shared Harn binary
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify shared Harn binary
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
+      - name: Plan endpoint option contracts
+        uses: ./.github/actions/provider-contract-probe
+        with:
+          harn-bin: ${{ env.HARN_BIN }}
+          live: "false"
+
   ci-status:
     name: CI status
     runs-on: ubuntu-24.04
@@ -2810,6 +2862,7 @@ jobs:
         rust-checks,
         rust-producer-capacity,
         rust-cli,
+        provider-contract-probe,
         rust-check-inputs,
         rust-test-partitions,
         rust-test-status,
@@ -2846,6 +2899,7 @@ jobs:
           # merge group whose change the post-merge tier may leave to main.
           # Only a skip is excused by it.
           POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
+          PROVIDER_CONTRACT_PROBE_EXPECTED: ${{ needs.changes.outputs.provider_contract_probe }}
         run: |
           case "$POST_MERGE_TIER_ACTIVE" in
             true|false) ;;
@@ -2975,6 +3029,16 @@ jobs:
           echo "Shared Harn CLI build: $rust_cli_result"
           require_result "$rust_cli_result" \
             "Shared Harn CLI build failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+
+          case "$PROVIDER_CONTRACT_PROBE_EXPECTED" in
+            true|false) ;;
+            *) echo '::error::Provider contract probe scope was not measured.'; exit 1 ;;
+          esac
+          provider_contract_probe_result="${{ needs['provider-contract-probe'].result }}"
+          echo "Offline provider contracts: $provider_contract_probe_result (expected=$PROVIDER_CONTRACT_PROBE_EXPECTED)"
+          require_result "$provider_contract_probe_result" \
+            "Offline provider contract probe failed or skipped while its paths were touched." \
+            test "$PROVIDER_CONTRACT_PROBE_EXPECTED" = "false"
 
           rust_check_inputs_result="${{ needs['rust-check-inputs'].result }}"
           echo "Rust producer: $rust_check_inputs_result"

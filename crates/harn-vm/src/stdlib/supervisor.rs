@@ -115,9 +115,7 @@ thread_local! {
     static SUPERVISOR_COUNTER: RefCell<u64> = const { RefCell::new(0) };
 }
 
-pub(crate) fn register_supervisor_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_supervisor_builtins);
 
 #[harn_builtin(
     exposure = "harness.runtime.supervisor_start",
@@ -1109,6 +1107,8 @@ pub(crate) fn reset_supervisor_state() {
     });
 }
 
+harn_vm_core::stdlib_state_reset!(reset_supervisor_state);
+
 fn event_value(event: &SupervisorEvent) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_int("seq", event.seq);
@@ -1235,15 +1235,15 @@ mod tests {
 
     #[test]
     fn parses_restart_policy_aliases() {
-        let policy = parse_restart_policy(Some(&VmValue::dict(BTreeMap::from([
-            ("mode".to_string(), VmValue::string("on-failure")),
-            ("max".to_string(), VmValue::Int(2)),
-            ("window".to_string(), VmValue::Duration(500)),
-            ("backoff".to_string(), VmValue::string("10ms")),
-            ("factor".to_string(), VmValue::Float(3.0)),
-            ("jitter".to_string(), VmValue::Int(4)),
-            ("circuit_open".to_string(), VmValue::string("1s")),
-        ]))))
+        let policy = parse_restart_policy(Some(&VmValue::dict([
+            ("mode", VmValue::string("on-failure")),
+            ("max", VmValue::Int(2)),
+            ("window", VmValue::Duration(500)),
+            ("backoff", VmValue::string("10ms")),
+            ("factor", VmValue::Float(3.0)),
+            ("jitter", VmValue::Int(4)),
+            ("circuit_open", VmValue::string("1s")),
+        ])))
         .unwrap();
 
         assert_eq!(policy.mode, RestartMode::OnFailure);

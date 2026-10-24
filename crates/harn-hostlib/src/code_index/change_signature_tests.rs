@@ -7,7 +7,7 @@ use tempfile::tempdir;
 use crate::code_index::CodeIndexCapability;
 
 fn string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
+    VmValue::string(s)
 }
 
 fn text(value: &VmValue) -> String {
@@ -89,7 +89,7 @@ impl Workspace {
                 "symbol_ref",
                 dict(&[("name", string(name)), ("path", string(path))]),
             ),
-            ("params", VmValue::List(Arc::new(params))),
+            ("params", VmValue::list(params)),
         ];
         request.extend(extra.iter().cloned());
         run(&self.capability.shared(), &[dict(&request)]).expect("change_signature runs")
@@ -110,7 +110,7 @@ impl Workspace {
                 "symbol_ref",
                 dict(&[("name", string(name)), ("path", string(path))]),
             ),
-            ("params", VmValue::List(Arc::new(params))),
+            ("params", VmValue::list(params)),
         ]);
         match run(&self.capability.shared(), &[request]) {
             Ok(value) => panic!("expected an error, got {value:?}"),

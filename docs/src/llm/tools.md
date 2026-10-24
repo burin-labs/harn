@@ -292,7 +292,7 @@ coarse `git_inspect` operation switch:
 ```harn,ignore
 import { git_tools } from "std/git"
 
-const tools = git_tools(nil, {
+const tools = git_tools(harness.process, nil, {
   repo: repo_root,
   enabled_tools: ["git_status", "git_log", "git_switch"],
   names: {git_log: "release_git_log"},
@@ -301,11 +301,13 @@ const tools = git_tools(nil, {
 
 `git_tools(...)` also accepts `defer_loading`, `namespace`, and `tool_config`,
 so a large git surface can use the same Tool Vault path as any other registry.
+See the [Git module reference](../modules.md#stdgit) for typed overrides and
+their precedence.
 When small/local models struggle to choose among many individual git schemas,
 use the compact toolbox instead:
 
 ```harn,ignore
-const tools = git_toolbox_tools(nil, {
+const tools = git_toolbox_tools(harness.process, nil, {
   repo: repo_root,
   include_mutations: true,
 })

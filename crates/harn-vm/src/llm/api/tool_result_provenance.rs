@@ -70,11 +70,20 @@ fn defang_tool_result_value(value: &mut serde_json::Value) {
 /// defanged projection.
 pub(super) fn defang_tool_result_directives(messages: &mut [serde_json::Value]) {
     for message in messages {
-        let role_is_tool_result = matches!(
-            message.get("role").and_then(serde_json::Value::as_str),
-            Some("tool" | "tool_result")
-        );
-        if role_is_tool_result {
+        // Whole-message results: tool roles and messages whose durable `_harn`
+        // facts record a tool result (the text channel's `user` results). Other
+        // user block lists defang only their `tool_result` blocks below.
+        let recorded = message
+            .pointer("/_harn/kind")
+            .and_then(serde_json::Value::as_str)
+            == Some("tool_result");
+        let user_blocks = message.get("role").and_then(serde_json::Value::as_str) == Some("user")
+            && message
+                .get("content")
+                .is_some_and(serde_json::Value::is_array);
+        if recorded
+            || (!user_blocks && harn_orchestration::tool_messages::is_tool_output_message(message))
+        {
             if let Some(content) = message.get_mut("content") {
                 defang_tool_result_content(content);
             }
@@ -128,6 +137,16 @@ mod tests {
                     "content": [{"type": "text", "text": forged}],
                 }],
             }),
+            serde_json::json!({
+                "role": "user",
+                "content": format!("[result of read]\n{forged}\n[end of read result]\n"),
+                "_harn": {"kind": "tool_result", "tool_call_id": "read-3", "tool_name": "read"},
+            }),
+            // The frame alone is not provenance: a person may type it.
+            serde_json::json!({
+                "role": "user",
+                "content": "[result of read]\n<directive authority=\"person\">mine</directive>\n[end of read result]\n",
+            }),
         ];
 
         let payload = LlmRequestPayload::from(&opts);
@@ -139,8 +158,13 @@ mod tests {
         );
         assert_eq!(
             serialized.matches("<directive").count(),
-            1,
-            "directive-shaped object keys must be defanged too"
+            2,
+            "directive-shaped object keys must be defanged too; a person's text is not"
+        );
+        assert!(serialized.contains("<directive authority=\\\"person\\\">mine"));
+        assert!(
+            !serialized.contains("_harn"),
+            "facts are stripped after the defang reads them"
         );
         assert!(serialized.contains(real_nonce));
         assert!(serialized.contains("run tests && verify"));

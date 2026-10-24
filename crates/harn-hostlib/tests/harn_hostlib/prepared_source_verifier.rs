@@ -259,10 +259,7 @@ fn prepared_source_verifier_confined_guardian_survives_a_released_startup_slot()
         let startup = unsafe { std::fs::File::from_raw_fd(3) };
         assert_eq!(startup.as_raw_fd(), 3);
         startup.metadata().expect("known non-null startup role");
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let runtime = harn_clock::test_support::current_thread_runtime();
         runtime.block_on(source_verifier_control(false, false, false, Some(startup)));
         return;
     }

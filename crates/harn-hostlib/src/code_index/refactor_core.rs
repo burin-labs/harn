@@ -81,7 +81,7 @@ pub(super) type SeedCandidate = (String, u32, &'static str);
 pub(super) enum SeedLookup {
     One(NodeId),
     None,
-    Many(Vec<SeedCandidate>),
+    Many(Vec<NodeId>),
 }
 
 pub(super) fn resolve_seed(
@@ -91,28 +91,70 @@ pub(super) fn resolve_seed(
     line: Option<u32>,
     kind: Option<NodeKind>,
 ) -> SeedLookup {
+    resolve_seed_matching(graph, relative_path, name, line, None, kind, false)
+}
+
+pub(super) fn resolve_seed_selected(
+    graph: &SymbolGraph,
+    relative_path: &str,
+    query: &str,
+    line: Option<u32>,
+    col: Option<u32>,
+    kind: Option<NodeKind>,
+) -> SeedLookup {
+    resolve_seed_matching(graph, relative_path, query, line, col, kind, true)
+}
+
+fn resolve_seed_matching(
+    graph: &SymbolGraph,
+    relative_path: &str,
+    query: &str,
+    line: Option<u32>,
+    col: Option<u32>,
+    kind: Option<NodeKind>,
+    exact: bool,
+) -> SeedLookup {
+    let name = query.rsplit('.').next().unwrap_or(query);
     let candidates: Vec<&GraphNode> = graph
         .nodes_named(name)
         .iter()
         .filter_map(|id| graph.node(*id))
         .filter(|node| is_refactor_declaration(node))
+        .filter(|node| {
+            query == node.name
+                || ((exact || node.language == "java")
+                    && (node.qualified_name() == query || node.receiver_qualified_name() == query))
+        })
         .collect();
 
     let mut narrowed: Vec<&GraphNode> = candidates
         .iter()
         .copied()
-        .filter(|node| paths_match(&node.path, relative_path))
+        .filter(|node| {
+            if exact || node.language == "java" {
+                node.path.as_ref() == relative_path.trim_start_matches("./")
+            } else {
+                paths_match(&node.path, relative_path)
+            }
+        })
         .collect();
 
     if narrowed.is_empty() {
-        // The caller may have passed a workspace-wide hint; allow seeds
-        // from any file as long as the name matches and `line`/`kind`
-        // can pin one down.
-        narrowed = candidates;
+        let workspace_hint = matches!(relative_path, "" | "." | "./");
+        let java_path = Language::detect(Path::new(relative_path), None) == Some(Language::Java);
+        // Legacy sibling refactors keep their non-Java path fallback. Exact
+        // selectors broaden only when the caller explicitly searches globally.
+        narrowed = candidates
+            .into_iter()
+            .filter(|node| workspace_hint || (!exact && !java_path && node.language != "java"))
+            .collect();
     }
 
     if let Some(line) = line {
         narrowed.retain(|node| node.line == line);
+    }
+    if let Some(col) = col {
+        narrowed.retain(|node| (!exact && node.language != "java") || node.col == Some(col));
     }
     if let Some(kind) = kind {
         narrowed.retain(|node| node.kind == kind);
@@ -121,13 +163,19 @@ pub(super) fn resolve_seed(
     match narrowed.len() {
         0 => SeedLookup::None,
         1 => SeedLookup::One(narrowed[0].id),
-        _ => SeedLookup::Many(
-            narrowed
-                .iter()
-                .map(|n| (n.path.to_string(), n.line, n.kind.as_str()))
-                .collect(),
-        ),
+        _ => SeedLookup::Many(narrowed.iter().map(|node| node.id).collect()),
     }
+}
+
+pub(super) fn candidate_locations(
+    graph: &SymbolGraph,
+    candidates: &[NodeId],
+) -> Vec<SeedCandidate> {
+    candidates
+        .iter()
+        .filter_map(|id| graph.node(*id))
+        .map(|node| (node.path.to_string(), node.line, node.kind.as_str()))
+        .collect()
 }
 
 /// Whether a graph node declares a binding a refactoring can target.
@@ -449,7 +497,10 @@ pub(super) fn splice(source: &str, edits: &[EditSpan]) -> String {
 /// rejects (indentation, a line break outside brackets). Every refactoring
 /// runs it on each file before rewriting it and again on the patched text.
 pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<String> {
-    let tree = ast_api::parse_tree(source, language).ok()?;
+    let tree = match ast_api::parse_tree(source, language) {
+        Ok(tree) => tree,
+        Err(error) => return Some(error.to_string()),
+    };
     let root = tree.root_node();
     if !root.has_error() {
         return match language {
@@ -1058,6 +1109,7 @@ pub(super) struct EditEnvelope {
     pub fallback_suggestion: Option<String>,
     /// Operation-specific fields, appended after the shared ones.
     pub extra: Vec<(&'static str, VmValue)>,
+    pub proof: Option<VmValue>,
 }
 
 pub(super) fn edit_envelope(
@@ -1105,7 +1157,39 @@ pub(super) fn edit_envelope(
         entries.push(("fallback_suggestion", str_value(fallback)));
     }
     entries.extend(envelope.extra);
+    if let Some(proof) = envelope.proof {
+        entries.push(("proof", proof));
+    }
     build_dict(entries)
+}
+
+pub(super) fn edit_proof(
+    plans: &[FilePlan],
+    failed: &[(String, String)],
+) -> crate::edit_proof::EditProof {
+    let mut proof = crate::edit_proof::EditProof::new();
+    for plan in plans
+        .iter()
+        .filter(|plan| !failed.iter().any(|(path, _)| path == &plan.path))
+    {
+        proof.add_file(
+            &plan.path,
+            &plan.source,
+            &plan.patched,
+            Some(plan.language),
+            Some(
+                plan.edits
+                    .iter()
+                    .map(|edit| crate::edit_proof::EditRegion {
+                        start: edit.span.start_byte,
+                        end: edit.span.end_byte,
+                        replacement: &edit.after,
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    proof
 }
 
 /// One `touched_files` entry.

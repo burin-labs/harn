@@ -3,14 +3,11 @@ use std::time::Duration;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 const DEFAULT_TIMEOUT_MS: u64 = 1_000;
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 1_048_576;
 
-pub(crate) fn register_net_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_net_builtins);
 
 #[derive(Clone, Copy)]
 struct UnixSocketOptions {
@@ -255,7 +252,6 @@ fn unix_socket_json_request(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__net_unix_socket_json_request(path: string, request: any, options?: dict) -> dict",
     category = "net"
 )]

@@ -120,6 +120,9 @@ pub(crate) fn respond(
         _ => VmValue::Nil,
     };
     let envelope = EditEnvelope {
+        proof: (planned && request.proof && response.failed.is_empty()).then(|| {
+            crate::code_index::refactor_core::edit_proof(&response.plans, &response.failed).value()
+        }),
         applied: planned && !request.dry_run && response.failed.is_empty(),
         dry_run: request.dry_run,
         touched_files,

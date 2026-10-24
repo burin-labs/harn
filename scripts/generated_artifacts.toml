@@ -421,6 +421,7 @@ outputs = [
   "spec/protocol-artifacts/HarnRunSessionView.swift",
   "spec/protocol-artifacts/schemas/run-session-view-v1.schema.json",
   "spec/protocol-artifacts/manifest.json",
+  "crates/harn-cli/data/protocol-manifest.json",
   "spec/protocol-artifacts/schemas/harn-tools-v2.schema.json",
   "spec/protocol-artifacts/schemas/plan-document-v1.schema.json",
   "spec/protocol-artifacts/schemas/inference-admission-request.schema.json",

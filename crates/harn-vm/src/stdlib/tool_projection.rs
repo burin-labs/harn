@@ -1,14 +1,10 @@
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
-pub(crate) fn register_tool_projection_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_tool_projection_builtins);
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_project(registry: {_type: \"tool_registry\", tools: list} | list, audience: \"cli\" | \"mcp\" | \"catalog\" | \"dashboard\" | \"agent\") -> {_type: \"tool_registry\", tools: list} | list",
     category = "tools"
 )]

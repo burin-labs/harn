@@ -879,7 +879,6 @@ fn ordered_pool_config(opts: &crate::value::DictMap) -> crate::value::DictMap {
 /// Create a named agent pool and register it in the local pool registry.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__pool_create(options?: dict|nil) -> dict",
     kind = "async",
     category = "pool",
@@ -1025,7 +1024,6 @@ fn parse_durable_dir(opts: &crate::value::DictMap) -> Result<Option<String>, VmE
 /// Look up a pool by name or id; returns nil when missing.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__pool_get(name_or_id: string|dict) -> dict|nil",
     category = "pool",
     runtime_only = true
@@ -1047,8 +1045,9 @@ fn pool_get_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 /// List every pool registered in the local pool registry.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "__pool_list() -> list", category = "pool", runtime_only = true
+    sig = "__pool_list() -> list",
+    category = "pool",
+    runtime_only = true
 )]
 fn pool_list_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut entries: Vec<Arc<parking_lot::Mutex<PoolEntry>>> = current_pool_registry()
@@ -1070,7 +1069,6 @@ fn pool_list_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 /// Return active + queued task count for a pool.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__pool_size(pool: string|dict) -> int",
     category = "pool",
     runtime_only = true
@@ -1096,7 +1094,6 @@ fn pool_size_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 /// Drop the in-process pool registry; pipeline-scope pools reload from disk on next pool_create.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__pool_simulate_restart() -> nil",
     category = "pool",
     runtime_only = true
@@ -1109,7 +1106,6 @@ fn pool_reload_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 /// Return the full pool snapshot for inspection.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__pool_snapshot(pool: string|dict) -> dict",
     category = "pool",
     runtime_only = true
@@ -1129,7 +1125,6 @@ fn pool_snapshot_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 /// Submit a closure to a pool; spawns when a slot is free, otherwise queues.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__pool_submit(pool: string|dict, closure: closure, options?: dict|nil) -> dict",
     kind = "async",
     category = "pool",
@@ -2256,7 +2251,6 @@ fn finalize_task(
 /// Block until one or more pool task handles reach a terminal state.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__pool_wait(handle_or_handles: string|dict|list) -> dict",
     kind = "async",
     category = "pool",
@@ -2317,9 +2311,7 @@ async fn wait_single_task(
     Ok(snapshot)
 }
 
-pub(crate) fn register_pool_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_pool_builtins);
 
 /// Drop all in-process pool registry state. Called from
 /// `reset_thread_local_state` between top-level VM runs and from
@@ -2330,6 +2322,8 @@ pub(crate) fn register_pool_builtins(vm: &mut Vm) {
 pub fn reset_pool_state() {
     current_pool_registry().inner.lock().clear();
 }
+
+harn_vm_core::stdlib_state_reset!(reset_pool_state);
 
 /// Snapshot every pool task that has not yet reached a terminal state.
 ///

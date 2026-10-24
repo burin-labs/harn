@@ -5,137 +5,112 @@
 
 use super::*;
 
-#[test]
-fn warn_to_float_on_float_literal() {
-    let diags = lint_source(
-        r"
+#[rstest::rstest]
+#[case::warn_to_float_on_float_literal(
+    r"
 pipeline default(task) {
   const n = to_float(1.5)
   log(n)
 }
 ",
-    );
-    assert!(
-        has_rule(&diags, "unnecessary-cast"),
-        "expected unnecessary-cast, got: {diags:?}"
-    );
-}
-
-#[test]
-fn warn_to_dict_on_dict_literal() {
-    let diags = lint_source(
-        r"
+    "unnecessary-cast",
+    true
+)]
+#[case::warn_to_dict_on_dict_literal(
+    r"
 pipeline default(task) {
   const d = to_dict({a: 1, b: 2})
   log(d)
 }
 ",
-    );
-    assert!(
-        has_rule(&diags, "unnecessary-cast"),
-        "expected unnecessary-cast, got: {diags:?}"
-    );
-}
-
-#[test]
-fn warn_to_string_on_interpolated_string() {
-    let diags = lint_source(
-        r#"
+    "unnecessary-cast",
+    true
+)]
+#[case::warn_to_string_on_interpolated_string(
+    r#"
 pipeline default(task) {
   const name = "world"
   const s = to_string("hello ${name}")
   log(s)
 }
 "#,
-    );
-    assert!(
-        has_rule(&diags, "unnecessary-cast"),
-        "expected unnecessary-cast on interpolated string, got: {diags:?}"
-    );
-}
-
-#[test]
-fn no_warn_on_genuine_int_to_string() {
-    let diags = lint_source(
-        r"
+    "unnecessary-cast",
+    true
+)]
+#[case::no_warn_on_genuine_int_to_string(
+    r"
 pipeline default(task) {
   const n = 5
   const s = to_string(n)
   log(s)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "unnecessary-cast"),
-        "should not warn on genuine identifier-to-string cast: {diags:?}"
-    );
-}
-
-#[test]
-fn no_warn_on_string_to_int() {
-    // `to_int("42")` is a real parse, not a cast. Must not fire.
-    let diags = lint_source(
-        r#"
+    "unnecessary-cast",
+    false
+)]
+// `to_int("42")` is a real parse, not a cast. Must not fire.
+#[case::no_warn_on_string_to_int(
+    r#"
 pipeline default(task) {
   const n = to_int("42")
   log(n)
 }
 "#,
-    );
-    assert!(
-        !has_rule(&diags, "unnecessary-cast"),
-        "should not warn on string-to-int parse: {diags:?}"
-    );
-}
-
-#[test]
-fn no_warn_on_int_to_float() {
-    // `to_float(5)` widens int to float. Not a no-op.
-    let diags = lint_source(
-        r"
+    "unnecessary-cast",
+    false
+)]
+// `to_float(5)` widens int to float. Not a no-op.
+#[case::no_warn_on_int_to_float(
+    r"
 pipeline default(task) {
   const n = to_float(5)
   log(n)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "unnecessary-cast"),
-        "should not warn on int-to-float widening: {diags:?}"
-    );
-}
-
-#[test]
-fn no_warn_on_float_to_int() {
-    // `to_int(1.5)` truncates. Not a no-op.
-    let diags = lint_source(
-        r"
+    "unnecessary-cast",
+    false
+)]
+// `to_int(1.5)` truncates. Not a no-op.
+#[case::no_warn_on_float_to_int(
+    r"
 pipeline default(task) {
   const n = to_int(1.5)
   log(n)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "unnecessary-cast"),
-        "should not warn on float-to-int truncation: {diags:?}"
-    );
-}
-
-#[test]
-fn no_warn_on_to_list_of_set_call() {
-    // `to_list(set(...))` materializes a set as a list. Real conversion.
-    let diags = lint_source(
-        r"
+    "unnecessary-cast",
+    false
+)]
+// `to_list(set(...))` materializes a set as a list. Real conversion.
+#[case::no_warn_on_to_list_of_set_call(
+    r"
 pipeline default(task) {
   const xs = to_list(set([1, 2, 3]))
   log(xs)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "unnecessary-cast"),
-        "should not warn on set-to-list materialization: {diags:?}"
+    "unnecessary-cast",
+    false
+)]
+// Defensive: a wrong-arity call is not a cast — leave it alone.
+#[case::no_warn_on_zero_or_multi_arg_calls(
+    r"
+pipeline default(task) {
+  const s = to_string()
+  const t = to_string(1, 2)
+  log(s)
+  log(t)
+}
+",
+    "unnecessary-cast",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }
 
@@ -209,24 +184,5 @@ fn fix_chained_to_string_collapses_one_layer() {
     assert!(
         result.contains("const s = to_string(n)"),
         "expected outer to_string removed, got: {result}"
-    );
-}
-
-#[test]
-fn no_warn_on_zero_or_multi_arg_calls() {
-    // Defensive: a wrong-arity call is not a cast — leave it alone.
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-  const s = to_string()
-  const t = to_string(1, 2)
-  log(s)
-  log(t)
-}
-",
-    );
-    assert!(
-        !has_rule(&diags, "unnecessary-cast"),
-        "wrong-arity calls must not trigger unnecessary-cast: {diags:?}"
     );
 }

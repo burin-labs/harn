@@ -559,6 +559,8 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Host, register_git_builtins);
+
 async fn run_git_command(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     command: GitCommand,
@@ -664,6 +666,8 @@ fn warn_git_failure(operation: &str, exit_code: i64, stderr: &str) {
 pub(crate) fn reset_git_state() {
     WARNED_GIT_FAILURES.with(|keys| keys.borrow_mut().clear());
 }
+
+harn_vm_core::stdlib_state_reset!(reset_git_state);
 
 async fn planned_or_noop_receipt(
     operation: &'static str,
@@ -799,24 +803,13 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
     params.put_str("mode", "argv");
     params.put(
         "argv",
-        VmValue::list(
-            command
-                .argv
-                .iter()
-                .map(|arg| VmValue::String(arcstr::ArcStr::from(arg.as_str())))
-                .collect(),
-        ),
+        VmValue::strings(command.argv.iter().map(|arg| arg.as_str())),
     );
     params.put_str("cwd", display_path(&command.cwd));
     params.put_int("timeout_ms", 120_000);
     params.put(
         "env_remove",
-        VmValue::list(
-            GIT_ENV_OVERRIDES
-                .iter()
-                .map(|name| VmValue::String(arcstr::ArcStr::from(*name)))
-                .collect(),
-        ),
+        VmValue::strings(GIT_ENV_OVERRIDES.iter().copied()),
     );
     // Make every git subprocess non-interactive by default so a
     // credential / host-key prompt fails fast instead of hanging a

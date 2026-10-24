@@ -5,8 +5,6 @@
 //! top-k ranking, degenerate inputs, and the sandbox/asset-absent
 //! degradation contract.
 
-use std::sync::Arc;
-
 use harn_hostlib::embed::EmbedCapability;
 use harn_hostlib::{BuiltinRegistry, RegisteredBuiltin};
 use harn_vm::value::{intern_key, DictMap};
@@ -77,12 +75,12 @@ fn top_k_ranks_and_respects_k() {
             ("query", VmValue::string("authentication token validation")),
             (
                 "corpus",
-                VmValue::List(Arc::new(vec![
-                    VmValue::string("markdown renderer"),
-                    VmValue::string("validate the auth token on each request"),
-                    VmValue::string("json parser"),
-                    VmValue::string("auth token refresh and validation flow"),
-                ])),
+                VmValue::strings([
+                    "markdown renderer",
+                    "validate the auth token on each request",
+                    "json parser",
+                    "auth token refresh and validation flow",
+                ]),
             ),
             ("k", VmValue::Int(2)),
         ],
@@ -116,7 +114,7 @@ fn top_k_empty_corpus_is_empty() {
         "hostlib_embed_top_k",
         &[
             ("query", VmValue::string("anything")),
-            ("corpus", VmValue::List(Arc::new(vec![]))),
+            ("corpus", VmValue::list(vec![])),
             ("k", VmValue::Int(5)),
         ],
     );

@@ -1,17 +1,14 @@
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{string_char_count, VmError, VmValue};
-use crate::vm::Vm;
 
 const I64_FLOAT_UPPER_BOUND_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
 
-pub(crate) fn register_type_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_type_builtins);
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "type_of(...args: any) -> string", category = "types"
+    sig = "type_of(...args: any) -> string",
+    category = "types"
 )]
 fn type_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
@@ -20,7 +17,6 @@ fn type_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig_expr = harn_builtin_meta::signatures::PORTABLE_TO_STRING,
     category = "types"
 )]
@@ -31,8 +27,8 @@ fn to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "to_int(...args: any) -> int", category = "types"
+    sig = "to_int(...args: any) -> int",
+    category = "types"
 )]
 fn to_int_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
@@ -67,8 +63,8 @@ fn float_to_int(value: f64) -> Option<i64> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "to_float(...args: any) -> float", category = "types"
+    sig = "to_float(...args: any) -> float",
+    category = "types"
 )]
 fn to_float_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
@@ -96,7 +92,6 @@ fn to_float_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 /// conversion), or a decimal (identity).
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "decimal(value: string | int | float | decimal) -> decimal",
     category = "types"
 )]
@@ -125,7 +120,6 @@ fn decimal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 
 #[harn_builtin(
     exposure = "stdlib_internal",
-    effects = [],
     sig = "Ok(value?: any) -> any",
     runtime_only = true,
     category = "types"
@@ -137,7 +131,6 @@ fn ok_ctor_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 
 #[harn_builtin(
     exposure = "stdlib_internal",
-    effects = [],
     sig = "Err(value?: any) -> any",
     runtime_only = true,
     category = "types"
@@ -149,8 +142,8 @@ fn err_ctor_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "is_ok(value: any) -> bool", category = "types"
+    sig = "is_ok(value: any) -> bool",
+    category = "types"
 )]
 fn is_ok_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
@@ -163,8 +156,8 @@ fn is_ok_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "is_err(value: any) -> bool", category = "types"
+    sig = "is_err(value: any) -> bool",
+    category = "types"
 )]
 fn is_err_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
@@ -177,8 +170,8 @@ fn is_err_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "unwrap(...args: any) -> any", category = "types"
+    sig = "unwrap(...args: any) -> any",
+    category = "types"
 )]
 fn unwrap_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
@@ -200,8 +193,8 @@ fn unwrap_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "unwrap_or(...args: any) -> any", category = "types"
+    sig = "unwrap_or(...args: any) -> any",
+    category = "types"
 )]
 fn unwrap_or_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
@@ -219,8 +212,8 @@ fn unwrap_or_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "unwrap_err(...args: any) -> any", category = "types"
+    sig = "unwrap_err(...args: any) -> any",
+    category = "types"
 )]
 fn unwrap_err_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
@@ -234,8 +227,8 @@ fn unwrap_err_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "unreachable(...args: any) -> never", category = "types"
+    sig = "unreachable(...args: any) -> never",
+    category = "types"
 )]
 fn unreachable_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let msg = match args.first() {
@@ -247,8 +240,8 @@ fn unreachable_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "to_list(...args: any) -> list", category = "types"
+    sig = "to_list(...args: any) -> list",
+    category = "types"
 )]
 fn to_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
@@ -265,7 +258,6 @@ fn to_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 /// second collection hierarchy.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tuple(...items: any) -> list",
     category = "types"
 )]
@@ -275,7 +267,6 @@ fn tuple_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig_expr = harn_builtin_meta::signatures::PORTABLE_LEN,
     category = "types"
 )]
@@ -375,7 +366,7 @@ mod tests {
 
     #[test]
     fn to_int_and_to_float_trim_surrounding_whitespace() {
-        let s = |text: &str| VmValue::String(arcstr::ArcStr::from(text));
+        let s = |text: &str| VmValue::string(text);
         assert!(matches!(
             to_int_impl(&[s("  42  ")], &mut String::new()).unwrap(),
             VmValue::Int(42)

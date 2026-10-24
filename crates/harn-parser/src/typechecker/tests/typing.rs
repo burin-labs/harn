@@ -3,16 +3,291 @@
 use super::*;
 use crate::DiagnosticDetails;
 
-#[test]
-fn test_no_errors_for_untyped_code() {
-    let errs = errors("pipeline t(task) { let x = 42\nlog(x) }");
-    assert!(errs.is_empty());
+#[rstest::rstest]
+#[case::test_no_errors_for_untyped_code("pipeline t(task) { let x = 42\nlog(x) }", true)]
+#[case::test_correct_typed_let("pipeline t(task) { let x: int = 42 }", true)]
+// `[head, ...rest]` over `list<int>`: head: int, rest: list<int>.
+#[case::test_match_list_rest_binds_element_and_list_types(
+    r"pipeline t(task) {
+  let xs: list<int> = [1, 2, 3]
+  match xs {
+    [head, ...rest] -> { let h: int = head
+let r: list<int> = rest }
+    _ -> { }
+  }
+}",
+    true
+)]
+#[case::test_match_expression_infers_common_arm_type(
+    r#"pipeline t(task) {
+  let input = "b"
+  let value: string = match input {
+    "a" -> { "alpha" }
+    "b" -> {
+      let suffix = "ravo"
+      "b" + suffix
+    }
+    _ -> { "other" }
+  }
+}"#,
+    true
+)]
+#[case::test_match_expression_mixed_arms_infer_union(
+    r#"pipeline t(task) {
+  let input = "a"
+  let value: string | int = match input {
+    "a" -> { "alpha" }
+    _ -> { 42 }
+  }
+}"#,
+    true
+)]
+#[case::test_correct_typed_fn(
+    "pipeline t(task) { fn add(a: int, b: int) -> int { return a + b }\nadd(1, 2) }",
+    true
+)]
+#[case::test_rest_param_binding_is_list_of_declared_type(
+    r"pipeline t(task) {
+  fn collect(...nums: int) {
+    let values: list<int> = nums
+  }
+}",
+    true
+)]
+#[case::test_transcript_append_builtins_preserve_input_container_type(
+    r#"pipeline t(task) {
+  let built = transcript({workflow: "demo"})
+  built = add_user(built, [{type: "text", text: "hello", visibility: "public"}])
+  built = add_assistant(built, [{type: "output_text", text: "done", visibility: "public"}])
+  let messages = transcript_messages(built)
+}"#,
+    true
+)]
+#[case::test_optional_access_on_dynamic_dict_union_stays_unknown(
+    r"
+pipeline t(task) {
+  fn needs_string(target: string) {}
+  let worker_summary: dict | list = {}
+  needs_string(worker_summary?.snapshot_path)
+}
+",
+    true
+)]
+#[case::test_optional_access_infers_nil_when_receiver_is_nullable(
+    r#"
+type User = {name: string}
+pipeline t(task) {
+  let maybe: User? = nil
+  let name: string? = maybe?.name
+  let lowered: string? = maybe?.name?.lower()
+  let contains_a: bool? = maybe?.name?.contains("a")
+}
+"#,
+    true
+)]
+#[case::test_structured_stdlib_return_shapes_allow_documented_field_access(
+    r#"pipeline t(task) {
+  let call = llm_call("prompt", "system")
+  let text: string = call.text
+  let tool_calls: list = call.tool_calls
+  let input_tokens: int = call.usage.input_tokens
+
+  let safe = llm_call_safe("prompt", "system")
+  let ok: bool = safe.ok
+  let safe_text: string | nil = safe.response?.text
+  let safe_error: string | nil = safe.error?.message
+  let safe_status: int | nil = safe.error?.status
+
+  let completion = llm_completion("prefix", "suffix", "system")
+  let stop: string | nil = completion.stop_reason
+
+  let snap = agent_session_snapshot("session")
+  let length: int = snap.length
+  let messages: list = snap.messages
+  let created: string = snap.created_at
+
+  let child = sub_agent_run("summarize this")
+  let summary: string | nil = child?.summary
+  let worker_id: string | nil = child?.id
+
+  let transcript = transcript_reset({metadata: {source: "test"}})
+  let transcript_id: string = transcript.id
+  let archived_state: string | nil = transcript_archive(transcript).state
+
+  let tools = tool_registry()
+  let tool_type: string = tools._type
+  let tool_entries: list = tools.tools
+
+  __io_println(text)
+  __io_println(tool_calls)
+  __io_println(input_tokens)
+  __io_println(ok)
+  __io_println(safe_text)
+  __io_println(safe_error)
+  __io_println(stop)
+  __io_println(length)
+  __io_println(messages)
+  __io_println(created)
+  __io_println(summary)
+  __io_println(worker_id)
+  __io_println(transcript_id)
+  __io_println(archived_state)
+  __io_println(tool_type)
+  __io_println(tool_entries)
+}"#,
+    true
+)]
+#[case::test_comparison_returns_bool("pipeline t(task) { let x: bool = 1 < 2 }", true)]
+#[case::test_int_float_promotion("pipeline t(task) { let x: float = 42 }", true)]
+#[case::test_untyped_code_no_errors(
+    r#"pipeline t(task) {
+  fn process(data) {
+let result = data + " processed"
+return result
+  }
+  log(process("hello"))
+}"#,
+    true
+)]
+#[case::test_type_alias(
+    r#"pipeline t(task) {
+  type Name = string
+  let x: Name = "hello"
+}"#,
+    true
+)]
+#[case::test_covariance_int_to_float_in_fn(
+    "pipeline t(task) { fn scale(x: float) -> float { return x * 2.0 }\nscale(42) }",
+    true
+)]
+#[case::test_covariance_return_type("pipeline t(task) { fn get() -> float { return 42 } }", true)]
+// --- Comprehensive variance (issue #34) --------------------------------
+// A closure that accepts a float (a supertype of int) can
+// stand in for an expected `fn(int) -> int`: anything the
+// caller hands in (an int) the closure can still accept.
+#[case::test_fn_param_contravariance_positive(
+    r"pipeline t(task) {
+            let wide = fn(x: float) { return 0 }
+            let cb: fn(int) -> int = wide
+        }",
+    true
+)]
+// A closure that only accepts ints cannot stand in for an
+// expected `fn(float) -> int`: the caller may hand it a
+// float, which it is not prepared to receive.
+#[case::test_fn_param_contravariance_negative(
+    r"pipeline t(task) {
+            let narrow = fn(x: int) { return 0 }
+            let cb: fn(float) -> int = narrow
+        }",
+    false
+)]
+// dict<K, V> is covariant in its value type V for the same value-semantics
+// reason as `list`: no shared mutable aliasing, so a widening read is sound.
+#[case::test_dict_covariant_value_int_to_float_accepted(
+    r#"pipeline t(task) {
+            let d: dict<string, int> = {"a": 1}
+            let e: dict<string, float> = d
+        }"#,
+    true
+)]
+// The value type widens (covariant) but the key type does not: a
+// `dict<string, int>` must not flow into a `dict<int, int>`. Key variance
+// interacts with lookup in ways plain width-subtyping does not, so keys stay
+// exact.
+#[case::test_dict_key_stays_invariant(
+    r#"pipeline t(task) {
+            let d: dict<string, int> = {"a": 1}
+            let e: dict<int, int> = d
+        }"#,
+    false
+)]
+// `ActionContainer<Action>` must distribute into
+// `ActionContainer<"create"> | ActionContainer<"edit">`, which lets a
+// `fn("create") -> nil` value flow into the `"create"` branch without
+// running into contravariance grief (the TypeScript playground bug).
+#[case::test_generic_alias_distributes_over_closed_literal_union(
+    r#"
+type Action = "create" | "edit"
+type ActionContainer<T> = { action: T, process_action: fn(T) -> nil }
+
+fn process_create(a: "create") {}
+fn process_edit(a: "edit") {}
+
+pipeline t(task) {
+    let c: ActionContainer<Action> = {action: "create", process_action: process_create}
+    let d: ActionContainer<Action> = {action: "edit",   process_action: process_edit}
+}"#,
+    true
+)]
+// Before the identifier-to-fn-type fallback, a bare function reference
+// used as a value inferred to `None`, which meant it collapsed to
+// `nil` when placed into a dict literal. That silently broke
+// assignability against any typed `fn(...) -> R` slot.
+#[case::test_bare_function_reference_infers_fn_type(
+    r"
+fn process(a: string) -> string { return a }
+
+pipeline t(task) {
+    let slot: fn(string) -> string = process
+    let d: { handler: fn(string) -> string } = { handler: process }
+}",
+    true
+)]
+#[case::test_contextual_closure_typing_skips_unbound_generic_call_argument(
+    r#"fn keep_callback<T>(f: fn(T) -> T) -> int { return 0 }
+
+pipeline t(task) {
+    keep_callback({ x -> x + "oops" })
+}"#,
+    true
+)]
+#[case::test_contextual_collection_method_keeps_any_parameter_lenient(
+    r"pipeline t(task) {
+            let xs = [1, 2, 3]
+            iter(xs).map({ x -> x * 10 }).to_list()
+        }",
+    true
+)]
+#[case::test_contextual_closure_typing_skips_any_callback_parameter(
+    r"fn wait_for(condition: fn(any) -> bool) -> int { return 0 }
+
+pipeline t(task) {
+    wait_for({ state -> state.ready })
+}",
+    true
+)]
+#[case::test_bare_variant_pattern_on_user_enum(
+    r"enum Shape {
+  Circle(radius: int),
+  Square(side: int)
 }
 
-#[test]
-fn test_correct_typed_let() {
-    let errs = errors("pipeline t(task) { let x: int = 42 }");
-    assert!(errs.is_empty());
+fn area(s: Shape) -> int {
+  match s {
+    Circle(r) -> { return r * r * 3 }
+    Square(w) -> { return w * w }
+  }
+}",
+    true
+)]
+#[case::alias_forwarding_chain_reaches_structural_root(
+    r#"type Binding = {id: string}
+type Handle = Binding
+
+fn dynamic_handle() -> Binding {
+  return {id: "trigger-1"}
+}
+
+pipeline default() {
+  const handle: Handle = dynamic_handle()
+  return handle.id
+}"#,
+    true
+)]
+fn diagnostics_errors(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
 }
 
 #[test]
@@ -21,22 +296,6 @@ fn test_type_mismatch_let() {
     assert_eq!(errs.len(), 1);
     assert!(errs[0].contains("expected int"));
     assert!(errs[0].contains("found string"));
-}
-
-#[test]
-fn test_match_list_rest_binds_element_and_list_types() {
-    // `[head, ...rest]` over `list<int>`: head: int, rest: list<int>.
-    let errs = errors(
-        r"pipeline t(task) {
-  let xs: list<int> = [1, 2, 3]
-  match xs {
-    [head, ...rest] -> { let h: int = head
-let r: list<int> = rest }
-    _ -> { }
-  }
-}",
-    );
-    assert!(errs.is_empty(), "expected no errors, got: {errs:?}");
 }
 
 #[test]
@@ -89,24 +348,6 @@ pipeline t(task) {
 }
 
 #[test]
-fn test_match_expression_infers_common_arm_type() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  let input = "b"
-  let value: string = match input {
-    "a" -> { "alpha" }
-    "b" -> {
-      let suffix = "ravo"
-      "b" + suffix
-    }
-    _ -> { "other" }
-  }
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
-}
-
-#[test]
 fn test_match_expression_assignment_uses_arm_value_type() {
     let errs = errors(
         r#"pipeline t(task) {
@@ -120,20 +361,6 @@ fn test_match_expression_assignment_uses_arm_value_type() {
     assert_eq!(errs.len(), 1);
     assert!(errs[0].contains("expected int"));
     assert!(errs[0].contains("found string"));
-}
-
-#[test]
-fn test_match_expression_mixed_arms_infer_union() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  let input = "a"
-  let value: string | int = match input {
-    "a" -> { "alpha" }
-    _ -> { 42 }
-  }
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
 }
 
 #[test]
@@ -153,13 +380,6 @@ fn test_match_expression_infers_list_pattern_binding_type() {
 }
 
 #[test]
-fn test_correct_typed_fn() {
-    let errs =
-        errors("pipeline t(task) { fn add(a: int, b: int) -> int { return a + b }\nadd(1, 2) }");
-    assert!(errs.is_empty());
-}
-
-#[test]
 fn test_rest_param_type_checks_each_argument() {
     let errs = errors(
         r#"pipeline t(task) {
@@ -174,18 +394,6 @@ fn test_rest_param_type_checks_each_argument() {
 }
 
 #[test]
-fn test_rest_param_binding_is_list_of_declared_type() {
-    let errs = errors(
-        r"pipeline t(task) {
-  fn collect(...nums: int) {
-    let values: list<int> = nums
-  }
-}",
-    );
-    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
-}
-
-#[test]
 fn test_generic_rest_return_type_binds_from_all_rest_args() {
     let errs = errors(
         r#"pipeline t(task) {
@@ -196,19 +404,6 @@ fn test_generic_rest_return_type_binds_from_all_rest_args() {
     assert_eq!(errs.len(), 1, "expected one mismatch, got: {errs:?}");
     assert!(errs[0].contains("expected list<string>"), "{errs:?}");
     assert!(errs[0].contains("found list<int>"), "{errs:?}");
-}
-
-#[test]
-fn test_transcript_append_builtins_preserve_input_container_type() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  let built = transcript({workflow: "demo"})
-  built = add_user(built, [{type: "text", text: "hello", visibility: "public"}])
-  built = add_assistant(built, [{type: "output_text", text: "done", visibility: "public"}])
-  let messages = transcript_messages(built)
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
 }
 
 #[test]
@@ -414,95 +609,6 @@ pipeline t(task) {
 }
 
 #[test]
-fn test_optional_access_on_dynamic_dict_union_stays_unknown() {
-    let errs = errors(
-        r"
-pipeline t(task) {
-  fn needs_string(target: string) {}
-  let worker_summary: dict | list = {}
-  needs_string(worker_summary?.snapshot_path)
-}
-",
-    );
-    assert!(
-        errs.is_empty(),
-        "dynamic dict access should not collapse to nil: {errs:?}"
-    );
-}
-
-#[test]
-fn test_optional_access_infers_nil_when_receiver_is_nullable() {
-    let errs = errors(
-        r#"
-type User = {name: string}
-pipeline t(task) {
-  let maybe: User? = nil
-  let name: string? = maybe?.name
-  let lowered: string? = maybe?.name?.lower()
-  let contains_a: bool? = maybe?.name?.contains("a")
-}
-"#,
-    );
-    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
-}
-
-#[test]
-fn test_structured_stdlib_return_shapes_allow_documented_field_access() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  let call = llm_call("prompt", "system")
-  let text: string = call.text
-  let tool_calls: list = call.tool_calls
-  let input_tokens: int = call.usage.input_tokens
-
-  let safe = llm_call_safe("prompt", "system")
-  let ok: bool = safe.ok
-  let safe_text: string | nil = safe.response?.text
-  let safe_error: string | nil = safe.error?.message
-  let safe_status: int | nil = safe.error?.status
-
-  let completion = llm_completion("prefix", "suffix", "system")
-  let stop: string | nil = completion.stop_reason
-
-  let snap = agent_session_snapshot("session")
-  let length: int = snap.length
-  let messages: list = snap.messages
-  let created: string = snap.created_at
-
-  let child = sub_agent_run("summarize this")
-  let summary: string | nil = child?.summary
-  let worker_id: string | nil = child?.id
-
-  let transcript = transcript_reset({metadata: {source: "test"}})
-  let transcript_id: string = transcript.id
-  let archived_state: string | nil = transcript_archive(transcript).state
-
-  let tools = tool_registry()
-  let tool_type: string = tools._type
-  let tool_entries: list = tools.tools
-
-  __io_println(text)
-  __io_println(tool_calls)
-  __io_println(input_tokens)
-  __io_println(ok)
-  __io_println(safe_text)
-  __io_println(safe_error)
-  __io_println(stop)
-  __io_println(length)
-  __io_println(messages)
-  __io_println(created)
-  __io_println(summary)
-  __io_println(worker_id)
-  __io_println(transcript_id)
-  __io_println(archived_state)
-  __io_println(tool_type)
-  __io_println(tool_entries)
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
 fn test_structured_stdlib_return_shapes_type_known_fields() {
     let errs = errors(
         r#"pipeline t(task) {
@@ -523,50 +629,88 @@ fn test_binary_op_type_inference() {
     assert_eq!(errs.len(), 1);
 }
 
-#[test]
-fn test_exponentiation_requires_numeric_operands() {
-    let errs = errors(r#"pipeline t(task) { let x = "nope" ** 2 }"#);
-    assert!(
-        errs.iter().any(|err| err.contains("can't use '**'")),
-        "missing exponentiation type error: {errs:?}"
-    );
-}
+#[rstest::rstest]
+#[case::test_exponentiation_requires_numeric_operands(
+    r#"pipeline t(task) { let x = "nope" ** 2 }"#,
+    "can't use '**'",
+    true
+)]
+#[case::test_contextual_closure_typing_checks_annotated_binding_body(
+    r#"pipeline t(task) {
+            let f: fn(int) -> int = { x -> x + "oops" }
+        }"#,
+    "can't add int and string",
+    true
+)]
+#[case::test_contextual_closure_typing_checks_assignment_body(
+    r#"pipeline t(task) {
+            let f: fn(int) -> int = { x -> x + 1 }
+            f = { x -> x + "oops" }
+        }"#,
+    "can't add int and string",
+    true
+)]
+#[case::test_contextual_closure_typing_uses_bound_generic_call_argument(
+    r#"fn use_callback<T>(seed: T, f: fn(T) -> T) -> int { return 0 }
 
-#[test]
-fn test_comparison_returns_bool() {
-    let errs = errors("pipeline t(task) { let x: bool = 1 < 2 }");
-    assert!(errs.is_empty());
-}
-
-#[test]
-fn test_int_float_promotion() {
-    let errs = errors("pipeline t(task) { let x: float = 42 }");
-    assert!(errs.is_empty());
-}
-
-#[test]
-fn test_untyped_code_no_errors() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  fn process(data) {
-let result = data + " processed"
-return result
-  }
-  log(process("hello"))
+pipeline t(task) {
+    use_callback(1, { x -> x + "oops" })
 }"#,
+    "can't add int and string",
+    true
+)]
+#[case::test_contextual_closure_typing_checks_default_param_body(
+    r#"fn use_callback(f: fn(int) -> int = { x -> x + "oops" }) -> int {
+            return 0
+        }"#,
+    "can't add int and string",
+    true
+)]
+#[case::test_contextual_closure_typing_checks_return_slot_body(
+    r#"fn make_callback() -> fn(int) -> int {
+            return { x -> x + "oops" }
+        }"#,
+    "can't add int and string",
+    true
+)]
+#[case::test_contextual_closure_typing_checks_pipeline_return_slot_body(
+    r#"pipeline make_callback(task) -> fn(int) -> int {
+            return { x -> x + "oops" }
+        }"#,
+    "can't add int and string",
+    true
+)]
+#[case::test_contextual_closure_typing_checks_pipeline_implicit_return_slot_body(
+    r#"pipeline make_callback(task) -> fn(int) -> int {
+            { x -> x + "oops" }
+        }"#,
+    "can't add int and string",
+    true
+)]
+#[case::test_contextual_closure_typing_checks_shape_field_body(
+    r#"pipeline t(task) {
+            let slot: { callback: fn(int) -> int } = { callback: { x -> x + "oops" } }
+        }"#,
+    "can't add int and string",
+    true
+)]
+#[case::test_contextual_closure_typing_checks_collection_method_body(
+    r#"pipeline t(task) {
+            let xs: list<int> = [1, 2, 3]
+            xs.map({ x -> x + "oops" })
+        }"#,
+    "can't add int and string",
+    true
+)]
+fn diagnostic_message_errors(#[case] source: &str, #[case] message: &str, #[case] present: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains(message)),
+        present,
+        "{message}: {diagnostics:?}"
     );
-    assert!(errs.is_empty());
-}
-
-#[test]
-fn test_type_alias() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  type Name = string
-  let x: Name = "hello"
-}"#,
-    );
-    assert!(errs.is_empty());
 }
 
 #[test]
@@ -649,277 +793,9 @@ fn test_type_mismatch_render_snapshot_with_nested_note() {
 }
 
 #[test]
-fn test_covariance_int_to_float_in_fn() {
-    let errs =
-        errors("pipeline t(task) { fn scale(x: float) -> float { return x * 2.0 }\nscale(42) }");
-    assert!(errs.is_empty());
-}
-
-#[test]
-fn test_covariance_return_type() {
-    let errs = errors("pipeline t(task) { fn get() -> float { return 42 } }");
-    assert!(errs.is_empty());
-}
-
-#[test]
 fn test_no_contravariance_float_to_int() {
     let errs = errors("pipeline t(task) { fn add(a: int) -> int { return a + 1 }\nadd(3.14) }");
     assert_eq!(errs.len(), 1);
-}
-
-// --- Comprehensive variance (issue #34) --------------------------------
-
-#[test]
-fn test_fn_param_contravariance_positive() {
-    // A closure that accepts a float (a supertype of int) can
-    // stand in for an expected `fn(int) -> int`: anything the
-    // caller hands in (an int) the closure can still accept.
-    let errs = errors(
-        r"pipeline t(task) {
-            let wide = fn(x: float) { return 0 }
-            let cb: fn(int) -> int = wide
-        }",
-    );
-    assert!(
-        errs.is_empty(),
-        "expected fn(float)->int to satisfy fn(int)->int, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_fn_param_contravariance_negative() {
-    // A closure that only accepts ints cannot stand in for an
-    // expected `fn(float) -> int`: the caller may hand it a
-    // float, which it is not prepared to receive.
-    let errs = errors(
-        r"pipeline t(task) {
-            let narrow = fn(x: int) { return 0 }
-            let cb: fn(float) -> int = narrow
-        }",
-    );
-    assert!(
-        !errs.is_empty(),
-        "expected fn(int)->int NOT to satisfy fn(float)->int, but type-check passed"
-    );
-}
-
-#[test]
-fn test_dict_covariant_value_int_to_float_accepted() {
-    // dict<K, V> is covariant in its value type V for the same value-semantics
-    // reason as `list`: no shared mutable aliasing, so a widening read is sound.
-    let errs = errors(
-        r#"pipeline t(task) {
-            let d: dict<string, int> = {"a": 1}
-            let e: dict<string, float> = d
-        }"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "expected dict<string, int> value to widen into dict<string, float>, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_dict_key_stays_invariant() {
-    // The value type widens (covariant) but the key type does not: a
-    // `dict<string, int>` must not flow into a `dict<int, int>`. Key variance
-    // interacts with lookup in ways plain width-subtyping does not, so keys stay
-    // exact.
-    let errs = errors(
-        r#"pipeline t(task) {
-            let d: dict<string, int> = {"a": 1}
-            let e: dict<int, int> = d
-        }"#,
-    );
-    assert!(
-        !errs.is_empty(),
-        "expected dict<string, int> NOT to flow into dict<int, int> (keys invariant)"
-    );
-}
-
-#[test]
-fn test_generic_alias_distributes_over_closed_literal_union() {
-    // `ActionContainer<Action>` must distribute into
-    // `ActionContainer<"create"> | ActionContainer<"edit">`, which lets a
-    // `fn("create") -> nil` value flow into the `"create"` branch without
-    // running into contravariance grief (the TypeScript playground bug).
-    let errs = errors(
-        r#"
-type Action = "create" | "edit"
-type ActionContainer<T> = { action: T, process_action: fn(T) -> nil }
-
-fn process_create(a: "create") {}
-fn process_edit(a: "edit") {}
-
-pipeline t(task) {
-    let c: ActionContainer<Action> = {action: "create", process_action: process_create}
-    let d: ActionContainer<Action> = {action: "edit",   process_action: process_edit}
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
-fn test_bare_function_reference_infers_fn_type() {
-    // Before the identifier-to-fn-type fallback, a bare function reference
-    // used as a value inferred to `None`, which meant it collapsed to
-    // `nil` when placed into a dict literal. That silently broke
-    // assignability against any typed `fn(...) -> R` slot.
-    let errs = errors(
-        r"
-fn process(a: string) -> string { return a }
-
-pipeline t(task) {
-    let slot: fn(string) -> string = process
-    let d: { handler: fn(string) -> string } = { handler: process }
-}",
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
-fn test_contextual_closure_typing_checks_annotated_binding_body() {
-    let errs = errors(
-        r#"pipeline t(task) {
-            let f: fn(int) -> int = { x -> x + "oops" }
-        }"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("can't add int and string")),
-        "expected contextual closure body error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_contextual_closure_typing_checks_assignment_body() {
-    let errs = errors(
-        r#"pipeline t(task) {
-            let f: fn(int) -> int = { x -> x + 1 }
-            f = { x -> x + "oops" }
-        }"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("can't add int and string")),
-        "expected contextual closure assignment error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_contextual_closure_typing_uses_bound_generic_call_argument() {
-    let errs = errors(
-        r#"fn use_callback<T>(seed: T, f: fn(T) -> T) -> int { return 0 }
-
-pipeline t(task) {
-    use_callback(1, { x -> x + "oops" })
-}"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("can't add int and string")),
-        "expected contextual generic closure argument error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_contextual_closure_typing_skips_unbound_generic_call_argument() {
-    let errs = errors(
-        r#"fn keep_callback<T>(f: fn(T) -> T) -> int { return 0 }
-
-pipeline t(task) {
-    keep_callback({ x -> x + "oops" })
-}"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "unbound generic callback parameters should remain gradual: {errs:?}"
-    );
-}
-
-#[test]
-fn test_contextual_closure_typing_checks_default_param_body() {
-    let errs = errors(
-        r#"fn use_callback(f: fn(int) -> int = { x -> x + "oops" }) -> int {
-            return 0
-        }"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("can't add int and string")),
-        "expected contextual default parameter error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_contextual_closure_typing_checks_return_slot_body() {
-    let errs = errors(
-        r#"fn make_callback() -> fn(int) -> int {
-            return { x -> x + "oops" }
-        }"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("can't add int and string")),
-        "expected contextual closure return error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_contextual_closure_typing_checks_pipeline_return_slot_body() {
-    let errs = errors(
-        r#"pipeline make_callback(task) -> fn(int) -> int {
-            return { x -> x + "oops" }
-        }"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("can't add int and string")),
-        "expected contextual pipeline return error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_contextual_closure_typing_checks_pipeline_implicit_return_slot_body() {
-    let errs = errors(
-        r#"pipeline make_callback(task) -> fn(int) -> int {
-            { x -> x + "oops" }
-        }"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("can't add int and string")),
-        "expected contextual pipeline implicit return error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_contextual_closure_typing_checks_shape_field_body() {
-    let errs = errors(
-        r#"pipeline t(task) {
-            let slot: { callback: fn(int) -> int } = { callback: { x -> x + "oops" } }
-        }"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("can't add int and string")),
-        "expected contextual closure field error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_contextual_closure_typing_checks_collection_method_body() {
-    let errs = errors(
-        r#"pipeline t(task) {
-            let xs: list<int> = [1, 2, 3]
-            xs.map({ x -> x + "oops" })
-        }"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("can't add int and string")),
-        "expected contextual collection closure error, got: {errs:?}"
-    );
 }
 
 #[test]
@@ -936,35 +812,6 @@ fn test_contextual_collection_method_keeps_unknown_parameter_lenient() {
     assert!(
         warns.iter().all(|warn| !warn.contains("Comparison")),
         "unknown collection element types should not produce comparison warnings: {warns:?}"
-    );
-}
-
-#[test]
-fn test_contextual_collection_method_keeps_any_parameter_lenient() {
-    let errs = errors(
-        r"pipeline t(task) {
-            let xs = [1, 2, 3]
-            iter(xs).map({ x -> x * 10 }).to_list()
-        }",
-    );
-    assert!(
-        errs.is_empty(),
-        "`any` collection element types should remain gradual: {errs:?}"
-    );
-}
-
-#[test]
-fn test_contextual_closure_typing_skips_any_callback_parameter() {
-    let errs = errors(
-        r"fn wait_for(condition: fn(any) -> bool) -> int { return 0 }
-
-pipeline t(task) {
-    wait_for({ state -> state.ready })
-}",
-    );
-    assert!(
-        errs.is_empty(),
-        "`any` callback parameters should remain gradual: {errs:?}"
     );
 }
 
@@ -1071,24 +918,6 @@ fn f() -> int {
 }
 
 #[test]
-fn test_bare_variant_pattern_on_user_enum() {
-    let errs = errors(
-        r"enum Shape {
-  Circle(radius: int),
-  Square(side: int)
-}
-
-fn area(s: Shape) -> int {
-  match s {
-    Circle(r) -> { return r * r * 3 }
-    Square(w) -> { return w * w }
-  }
-}",
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
 fn test_ternary_branch_merge_collapses_never_and_simplifies() {
     // A throwing arm contributes `never`, which must collapse out of the
     // merged type — same rule as if/else expressions.
@@ -1187,22 +1016,4 @@ fn visit(t: Tree) -> int {
             .any(|error| error.contains("expected int") && error.contains("found string")),
         "expected nested recursive-alias mismatch, got: {errs:?}"
     );
-}
-
-#[test]
-fn alias_forwarding_chain_reaches_structural_root() {
-    let errs = errors(
-        r#"type Binding = {id: string}
-type Handle = Binding
-
-fn dynamic_handle() -> Binding {
-  return {id: "trigger-1"}
-}
-
-pipeline default() {
-  const handle: Handle = dynamic_handle()
-  return handle.id
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
 }

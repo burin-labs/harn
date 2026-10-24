@@ -647,11 +647,14 @@ The full `make all` gate includes `check-provider-catalog`,
 `check-provider-matrix`,
 `check-provider-support`, and the refresh workflow drift gate.
 
+Export the catalog embedded in your installed runtime with
+`harn provider catalog export --output-dir <directory>`. This snapshot ignores
+source fragments and personal provider settings. Generate checked-in catalog
+files from source fragments with `harn provider catalog generate`.
+
 For local or private models, pass a providers-style TOML overlay to
 `harn provider catalog validate --overlay <path>` or
-`harn provider catalog export --overlay <path>`. `export` is for explicit
-overlay artifacts only; checked-in catalog files are generated with
-`harn provider catalog generate`. Overlays are merged with the
+`harn provider catalog export --overlay <path>`. Overlays are merged with the
 same precedence as runtime provider config, so private providers,
 aliases, deprecation notes, quality tags, pricing, and transport
 settings can be validated before they are published.

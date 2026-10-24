@@ -3,7 +3,7 @@ use crate::value::{ErrorCategory, VmError, VmValue};
 use std::path::PathBuf;
 
 fn thrown(s: &str) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(s)))
+    VmError::Thrown(VmValue::string(s))
 }
 
 fn categorized(msg: &str, category: ErrorCategory) -> VmError {
@@ -310,16 +310,10 @@ fn template_render_snapshots_distinct_capabilities_and_redacts_before_hashing() 
         provider: "local".to_string(),
         model: "model-a".to_string(),
         family: "test".to_string(),
-        capabilities: VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("native_tools"),
-                VmValue::Bool(false),
-            ),
-            (
-                crate::value::intern_key("api_key"),
-                VmValue::String(arcstr::ArcStr::from("must-not-survive")),
-            ),
-        ])),
+        capabilities: VmValue::dict([
+            ("native_tools", VmValue::Bool(false)),
+            ("api_key", VmValue::string("must-not-survive")),
+        ]),
     };
     let dir = tempfile::tempdir().expect("tempdir");
     push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
@@ -444,11 +438,10 @@ fn response_record_exposes_text_parsed_calls_without_touching_history() {
             VmValue::dict(
                 pairs
                     .iter()
-                    .map(|(k, v)| (crate::value::intern_key(k), v.clone()))
-                    .collect::<crate::value::DictMap>(),
+                    .map(|(k, v)| (crate::value::intern_key(k), v.clone())),
             )
         };
-        let s = |v: &str| VmValue::String(arcstr::ArcStr::from(v));
+        let s = |v: &str| VmValue::string(v);
         let run_tool = dict(&[
             ("name", s("run")),
             ("description", s("Run a shell command.")),
@@ -460,7 +453,7 @@ fn response_record_exposes_text_parsed_calls_without_touching_history() {
                 )]),
             ),
         ]);
-        dict(&[("tools", VmValue::List(std::sync::Arc::new(vec![run_tool])))])
+        dict(&[("tools", VmValue::list(vec![run_tool]))])
     }
 
     // A text-format completion: native tool_calls EMPTY, the call lives
@@ -1252,28 +1245,16 @@ fn empty_completion_retry_error_edges() {
 
 #[test]
 fn llm_error_kind_dict_gates_retry() {
-    let transient = VmError::Thrown(VmValue::dict(std::collections::BTreeMap::from([
-        (
-            "kind".to_string(),
-            VmValue::String(arcstr::ArcStr::from("transient")),
-        ),
-        (
-            "reason".to_string(),
-            VmValue::String(arcstr::ArcStr::from("network_error")),
-        ),
-    ])));
+    let transient = VmError::Thrown(VmValue::dict([
+        ("kind", VmValue::string("transient")),
+        ("reason", VmValue::string("network_error")),
+    ]));
     assert!(is_retryable_llm_error(&transient));
 
-    let terminal = VmError::Thrown(VmValue::dict(std::collections::BTreeMap::from([
-        (
-            "kind".to_string(),
-            VmValue::String(arcstr::ArcStr::from("terminal")),
-        ),
-        (
-            "reason".to_string(),
-            VmValue::String(arcstr::ArcStr::from("context_overflow")),
-        ),
-    ])));
+    let terminal = VmError::Thrown(VmValue::dict([
+        ("kind", VmValue::string("terminal")),
+        ("reason", VmValue::string("context_overflow")),
+    ]));
     assert!(!is_retryable_llm_error(&terminal));
 }
 

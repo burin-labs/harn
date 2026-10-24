@@ -11,8 +11,8 @@ pub use regex::{
     MAX_REGEX_PATTERN_BYTES,
 };
 pub use secret_scan::{
-    compiled_secret_patterns, scan_secrets, secret_patterns_compiled, CompiledSecretPattern,
-    SecretFinding,
+    compiled_secret_patterns, scan_secrets, secret_pattern_catalog, secret_patterns_compiled,
+    CompiledSecretPattern, SecretFinding, SecretPattern,
 };
 
 /// Select existing fields without changing their values. Lookup belongs to
