@@ -785,6 +785,6 @@ regex = "debugger;"
         );
 
         drop(workspace);
-        lease.try_lock().unwrap();
+        harn_flock::assert_released(&lease);
     }
 }

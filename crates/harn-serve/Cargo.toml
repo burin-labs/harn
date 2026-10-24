@@ -88,6 +88,7 @@ default-features = false
 features = ["use_pem", "aws_lc_rs"]
 
 [dev-dependencies]
+harn-flock = { path = "../harn-flock", version = "=0.10.178-dev" }
 rstest.workspace = true
 zeroize = "1"
 harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.178-dev" }
