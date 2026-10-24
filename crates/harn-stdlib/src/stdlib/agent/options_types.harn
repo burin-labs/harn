@@ -466,6 +466,12 @@ pub type AgentExecutionSpec = {
   terminal_callback?: any,
   tool_retries?: int,
   tool_backoff_ms?: int,
+  /**
+   * Size budget for each model-visible tool result. Larger results spill to an
+   * owner-only temp file and the model sees a bounded excerpt naming it.
+   * Default 64000; 0 disables. Read by the dispatch primitive.
+   */
+  tool_result_max_chars?: int,
   max_concurrent_tools?: int,
   intra_turn_resource_fail_fast?: bool,
   prefetch_next_turn?: bool,

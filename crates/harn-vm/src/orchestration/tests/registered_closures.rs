@@ -29,51 +29,46 @@ fn run_registered_closure_probe(source: &str) -> (Result<String, String>, usize)
     let probe_for_rt = Arc::clone(&probe_calls);
 
     let rt = crate::test_support::current_thread_runtime();
-    let result = rt.block_on(async move {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async move {
-                let chunk = crate::compile_source(source)?;
-                let mut vm = crate::new_vm();
-                crate::stdlib::register_vm_stdlib(&mut vm);
+    let result = rt.block_on(harn_clock::test_support::with_local_tasks(async move {
+        let chunk = crate::compile_source(source)?;
+        let mut vm = crate::new_vm();
+        crate::stdlib::register_vm_stdlib(&mut vm);
 
-                let probe = Arc::clone(&probe_for_rt);
-                vm.register_builtin("__probe_bridge_gate", move |_args, _out| {
-                    probe.fetch_add(1, Ordering::SeqCst);
-                    crate::orchestration::enforce_current_policy_for_bridge_builtin(
-                        "evaluate_burin_user_reminder_rules",
-                    )?;
-                    Ok(crate::value::VmValue::string("ok"))
-                });
+        let probe = Arc::clone(&probe_for_rt);
+        vm.register_builtin("__probe_bridge_gate", move |_args, _out| {
+            probe.fetch_add(1, Ordering::SeqCst);
+            crate::orchestration::enforce_current_policy_for_bridge_builtin(
+                "evaluate_burin_user_reminder_rules",
+            )?;
+            Ok(crate::value::VmValue::string("ok"))
+        });
 
-                vm.register_async_builtin("__test_fire_reminders", |ctx, args| async move {
-                    let session_id = args
-                        .first()
-                        .map(crate::value::VmValue::display)
-                        .unwrap_or_default();
-                    let report = crate::llm::reminder_providers::evaluate_and_inject(
-                        Some(&ctx),
-                        crate::orchestration::HookEvent::SessionStart,
-                        &session_id,
-                        serde_json::json!({}),
-                        serde_json::json!({}),
-                    )
-                    .await?;
-                    Ok(crate::json_to_vm_value(&report))
-                });
+        vm.register_async_builtin("__test_fire_reminders", |ctx, args| async move {
+            let session_id = args
+                .first()
+                .map(crate::value::VmValue::display)
+                .unwrap_or_default();
+            let report = crate::llm::reminder_providers::evaluate_and_inject(
+                Some(&ctx),
+                crate::orchestration::HookEvent::SessionStart,
+                &session_id,
+                serde_json::json!({}),
+                serde_json::json!({}),
+            )
+            .await?;
+            Ok(crate::json_to_vm_value(&report))
+        });
 
-                push_execution_policy(CapabilityPolicy {
-                    tools: vec!["read".to_string()],
-                    ..Default::default()
-                });
-                let outcome = vm.execute(&chunk).await;
-                pop_execution_policy();
-                outcome
-                    .map(|_| vm.output().to_string())
-                    .map_err(|error| error.to_string())
-            })
-            .await
-    });
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["read".to_string()],
+            ..Default::default()
+        });
+        let outcome = vm.execute(&chunk).await;
+        pop_execution_policy();
+        outcome
+            .map(|_| vm.output().to_string())
+            .map_err(|error| error.to_string())
+    }));
 
     clear_execution_policy_stacks();
     crate::llm::reminder_providers::clear_reminder_providers();
@@ -247,44 +242,39 @@ fn registered_provider_closure_resolves_sibling_fn_after_registering_vm_dropped(
     clear_session_hooks();
 
     let rt = crate::test_support::current_thread_runtime();
-    let result = rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                register_from_disposable_vm("register_provider_closure").await;
+    let result = rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        register_from_disposable_vm("register_provider_closure").await;
 
-                // Fire from a fresh VM whose `module_cache` never loaded the
-                // module — the runtime's real invocation path.
-                let mut vm = crate::new_vm();
-                crate::stdlib::register_vm_stdlib(&mut vm);
-                vm.register_async_builtin("__test_fire_reminders", |ctx, _args| async move {
-                    let report = crate::llm::reminder_providers::evaluate_and_inject(
-                        Some(&ctx),
-                        crate::orchestration::HookEvent::SessionStart,
-                        "provider-fn-probe",
-                        serde_json::json!({}),
-                        serde_json::json!({}),
-                    )
-                    .await?;
-                    Ok(crate::json_to_vm_value(&report))
-                });
-                let chunk = crate::compile_source(
-                    r#"pipeline main(harness: Harness) {
+        // Fire from a fresh VM whose `module_cache` never loaded the
+        // module — the runtime's real invocation path.
+        let mut vm = crate::new_vm();
+        crate::stdlib::register_vm_stdlib(&mut vm);
+        vm.register_async_builtin("__test_fire_reminders", |ctx, _args| async move {
+            let report = crate::llm::reminder_providers::evaluate_and_inject(
+                Some(&ctx),
+                crate::orchestration::HookEvent::SessionStart,
+                "provider-fn-probe",
+                serde_json::json!({}),
+                serde_json::json!({}),
+            )
+            .await?;
+            Ok(crate::json_to_vm_value(&report))
+        });
+        let chunk = crate::compile_source(
+            r#"pipeline main(harness: Harness) {
   const session = harness.agent.open("provider-fn-probe")
   harness.agent.reset(session)
   __test_fire_reminders()
 }"#,
-                )?;
-                push_execution_policy(CapabilityPolicy {
-                    tools: vec!["read".to_string()],
-                    ..Default::default()
-                });
-                let outcome = vm.execute(&chunk).await;
-                pop_execution_policy();
-                outcome.map(|_| ()).map_err(|error| error.to_string())
-            })
-            .await
-    });
+        )?;
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["read".to_string()],
+            ..Default::default()
+        });
+        let outcome = vm.execute(&chunk).await;
+        pop_execution_policy();
+        outcome.map(|_| ()).map_err(|error| error.to_string())
+    }));
 
     clear_execution_policy_stacks();
     crate::llm::reminder_providers::clear_reminder_providers();
@@ -305,10 +295,7 @@ fn registered_session_hook_closure_resolves_sibling_fn_after_registering_vm_drop
     clear_session_hooks();
 
     let rt = crate::test_support::current_thread_runtime();
-    let result = rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
+    let result = rt.block_on(harn_clock::test_support::with_local_tasks(async {
                 register_from_disposable_vm("register_hook_closure").await;
 
                 let mut vm = crate::new_vm();
@@ -325,9 +312,7 @@ fn registered_session_hook_closure_resolves_sibling_fn_after_registering_vm_drop
                 let outcome = vm.execute(&chunk).await;
                 pop_execution_policy();
                 outcome.map(|_| ()).map_err(|error| error.to_string())
-            })
-            .await
-    });
+            }));
 
     clear_execution_policy_stacks();
     crate::llm::reminder_providers::clear_reminder_providers();
@@ -363,64 +348,56 @@ fn registered_provider_closure_unknown_name_still_falls_through_to_bridge() {
     clear_session_hooks();
 
     let rt = crate::test_support::current_thread_runtime();
-    let result = rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut vm = crate::new_vm();
-                crate::stdlib::register_vm_stdlib(&mut vm);
-                let exports = vm
-                    .load_module_exports_from_source(
-                        "orchestration/tests/unknown_call_module.harn",
-                        MODULE,
-                    )
-                    .await
-                    .expect("compile unknown-call module");
-                let register = exports
-                    .get("register_unknown_call_provider")
-                    .expect("module must export register fn")
-                    .clone();
-                let agent = match vm
-                    .root_harness_value()
-                    .expect("stdlib registration must install a root Harness")
-                {
-                    crate::value::VmValue::Harness(root) => crate::value::VmValue::harness(
-                        root.sub_handle("agent")
-                            .expect("root Harness must expose HarnessAgent"),
-                    ),
-                    _ => unreachable!("root Harness value must be a harness handle"),
-                };
-                vm.call_closure_pub(&register, &[agent])
-                    .await
-                    .expect("registration closure must run");
-                drop(exports);
-                drop(vm);
+    let result = rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut vm = crate::new_vm();
+        crate::stdlib::register_vm_stdlib(&mut vm);
+        let exports = vm
+            .load_module_exports_from_source("orchestration/tests/unknown_call_module.harn", MODULE)
+            .await
+            .expect("compile unknown-call module");
+        let register = exports
+            .get("register_unknown_call_provider")
+            .expect("module must export register fn")
+            .clone();
+        let agent = match vm
+            .root_harness_value()
+            .expect("stdlib registration must install a root Harness")
+        {
+            crate::value::VmValue::Harness(root) => crate::value::VmValue::harness(
+                root.sub_handle("agent")
+                    .expect("root Harness must expose HarnessAgent"),
+            ),
+            _ => unreachable!("root Harness value must be a harness handle"),
+        };
+        vm.call_closure_pub(&register, &[agent])
+            .await
+            .expect("registration closure must run");
+        drop(exports);
+        drop(vm);
 
-                let mut vm = crate::new_vm();
-                crate::stdlib::register_vm_stdlib(&mut vm);
-                vm.register_async_builtin("__test_fire_reminders", |ctx, _args| async move {
-                    let report = crate::llm::reminder_providers::evaluate_and_inject(
-                        Some(&ctx),
-                        crate::orchestration::HookEvent::SessionStart,
-                        "unknown-call-probe",
-                        serde_json::json!({}),
-                        serde_json::json!({}),
-                    )
-                    .await?;
-                    Ok(crate::json_to_vm_value(&report))
-                });
-                let chunk = crate::compile_source(
-                    r#"pipeline main(harness: Harness) {
+        let mut vm = crate::new_vm();
+        crate::stdlib::register_vm_stdlib(&mut vm);
+        vm.register_async_builtin("__test_fire_reminders", |ctx, _args| async move {
+            let report = crate::llm::reminder_providers::evaluate_and_inject(
+                Some(&ctx),
+                crate::orchestration::HookEvent::SessionStart,
+                "unknown-call-probe",
+                serde_json::json!({}),
+                serde_json::json!({}),
+            )
+            .await?;
+            Ok(crate::json_to_vm_value(&report))
+        });
+        let chunk = crate::compile_source(
+            r#"pipeline main(harness: Harness) {
   const session = harness.agent.open("unknown-call-probe")
   harness.agent.reset(session)
   __test_fire_reminders()
 }"#,
-                )?;
-                let outcome = vm.execute(&chunk).await;
-                outcome.map(|_| ()).map_err(|error| error.to_string())
-            })
-            .await
-    });
+        )?;
+        let outcome = vm.execute(&chunk).await;
+        outcome.map(|_| ()).map_err(|error| error.to_string())
+    }));
 
     clear_execution_policy_stacks();
     crate::llm::reminder_providers::clear_reminder_providers();

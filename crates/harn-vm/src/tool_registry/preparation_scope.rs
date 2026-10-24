@@ -117,4 +117,27 @@ mod tests {
         })
         .await;
     }
+
+    /// A tool's `prepare` hook reads the session goal to bind the facts an
+    /// approval card shows. The read is a preparation read; the writes beside it
+    /// stay refused.
+    #[tokio::test]
+    async fn the_session_goal_is_readable_in_preparation_but_not_writable() {
+        preparation(async {
+            let admitted = |name: &str| {
+                let (_, contract) = crate::stdlib::builtin_policy_metadata(name);
+                enforce_contract(name, contract)
+            };
+            admitted("agent_session_goal").expect("goal read is a preparation read");
+            for write in [
+                "agent_session_set_goal",
+                "agent_session_clear_goal",
+                "agent_session_begin_goal_turn",
+                "agent_session_end_goal_turn",
+            ] {
+                assert!(admitted(write).is_err(), "{write} must stay refused");
+            }
+        })
+        .await;
+    }
 }

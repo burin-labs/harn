@@ -4573,7 +4573,7 @@ Nine opinionated modules wrap common LLM patterns:
   `resolved_options(opts)`, `named_model_ladder(name)`,
   `has_capability(model, cap)`,
   `family_of(model_id)`, `lineage_of(model_id)`,
-  `complementary_reviewer(opts)`. `execution_contract` is the secret-free
+  `complementary_reviewer(opts)`, `escalation_target(opts)`. `execution_contract` is the secret-free
   durable receipt for an effective model route; it omits arbitrary operator
   overlays. Harn-side names avoid shadowing the same-named builtins.
 

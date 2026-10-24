@@ -103,11 +103,16 @@ impl AgentSessionRuntime {
 pub(super) struct RetiredSession {
     id: String,
     inputs: Option<crate::session_inputs::Store>,
+    spill_dir: Option<std::path::PathBuf>,
 }
 
 impl RetiredSession {
     pub(super) fn finish(mut self) -> String {
         self.close_inputs();
+        crate::llm::agent_host_primitives::tool_result_budget::release_spill_dir(
+            &self.id,
+            self.spill_dir.take(),
+        );
         std::mem::take(&mut self.id)
     }
 
@@ -132,6 +137,9 @@ pub(super) fn retire_session_state(
     Some(RetiredSession {
         id: id.to_owned(),
         inputs: active_session_runtime().inputs.write().remove(id),
+        spill_dir: crate::llm::agent_host_primitives::tool_result_budget::take_session_spill_dir(
+            id,
+        ),
     })
 }
 
@@ -144,10 +152,15 @@ pub(super) fn retire_all_session_states(
         .drain()
         .map(|(id, _)| RetiredSession {
             inputs: inputs.remove(&id),
+            spill_dir:
+                crate::llm::agent_host_primitives::tool_result_budget::take_session_spill_dir(&id),
             id,
         })
         .collect::<Vec<_>>();
     retired.extend(inputs.into_iter().map(|(id, inputs)| RetiredSession {
+        spill_dir: crate::llm::agent_host_primitives::tool_result_budget::take_session_spill_dir(
+            &id,
+        ),
         id,
         inputs: Some(inputs),
     }));

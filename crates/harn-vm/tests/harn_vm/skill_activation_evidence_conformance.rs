@@ -8,7 +8,6 @@
 //! package, host-backed SKILL.md-style, and duplicate names (precedence).
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use harn_vm::skills::{
     skill_manifest_ref_to_vm, FsSkillSource, HostSkillSource, Layer, LayeredDiscovery, Skill,
@@ -83,11 +82,8 @@ fn discovered_registry() -> VmValue {
         .map(skill_manifest_ref_to_vm)
         .collect();
     VmValue::dict([
-        (
-            "_type",
-            VmValue::String(arcstr::ArcStr::from("skill_registry")),
-        ),
-        ("skills", VmValue::List(Arc::new(entries))),
+        ("_type", VmValue::string("skill_registry")),
+        ("skills", VmValue::list(entries)),
     ])
 }
 
@@ -99,21 +95,13 @@ fn evidence(registry: VmValue, options_src: &str) -> DictMap {
         "pipeline t(task: unknown) {{ return skills_activation_evidence(skills, {options_src}) }}"
     );
     let chunk = harn_vm::compile_source(&source).expect("compile");
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let value = rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
-                vm.set_global("skills", registry);
-                vm.execute(&chunk).await.expect("execute")
-            })
-            .await
-    });
+    let rt = harn_clock::test_support::current_thread_runtime();
+    let value = rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut vm = harn_vm::new_vm();
+        harn_vm::register_vm_stdlib(&mut vm);
+        vm.set_global("skills", registry);
+        vm.execute(&chunk).await.expect("execute")
+    }));
     value.as_dict().expect("evidence is a dict").clone()
 }
 

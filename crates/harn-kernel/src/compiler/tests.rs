@@ -70,7 +70,7 @@ pub type Open = {name: string, ...dict<string, int>}
     assert_eq!(chunks.len(), 2, "one initializer per public alias");
     let strings = chunks
         .iter()
-        .flat_map(|chunk| &chunk.constants)
+        .flat_map(|init| &init.chunk.constants)
         .filter_map(|constant| match constant {
             Constant::String(value) => Some(value.as_str()),
             _ => None,
@@ -109,7 +109,7 @@ pub type Doc = {headers?: dict<string, RefOr<Header>>}
     assert_eq!(chunks.len(), 1, "one public alias");
     let strings = chunks
         .iter()
-        .flat_map(|chunk| &chunk.constants)
+        .flat_map(|init| &init.chunk.constants)
         .filter_map(|constant| match constant {
             Constant::String(value) => Some(value.as_str()),
             _ => None,
@@ -141,7 +141,7 @@ pub type Recur = {op: "leaf", n: int} | {op: "node", of: list<Recur>}
     assert_eq!(chunks.len(), 1, "one public alias");
     let strings = chunks
         .iter()
-        .flat_map(|chunk| &chunk.constants)
+        .flat_map(|init| &init.chunk.constants)
         .filter_map(|constant| match constant {
             Constant::String(value) => Some(value.as_str()),
             _ => None,
@@ -203,7 +203,7 @@ pub type OpenRow = {id: string, score?: float, ...rest}
     );
     let strings = chunks
         .iter()
-        .flat_map(|chunk| &chunk.constants)
+        .flat_map(|init| &init.chunk.constants)
         .filter_map(|constant| match constant {
             Constant::String(value) => Some(value.as_str()),
             _ => None,

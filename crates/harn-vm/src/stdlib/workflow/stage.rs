@@ -470,8 +470,8 @@ pub(super) async fn execute_stage_attempts(
         })?;
     let args = vec![
         random,
-        VmValue::String(arcstr::ArcStr::from(task)),
-        VmValue::String(arcstr::ArcStr::from(node_id)),
+        VmValue::string(task),
+        VmValue::string(node_id),
         node_to_vm_with_raw(node)?,
         to_vm(&artifacts)?,
         transcript.unwrap_or(VmValue::Nil),

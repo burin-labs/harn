@@ -1,5 +1,6 @@
 use super::*;
 use crate::llm::decision::replay::{EvaluationFixture, EvaluationReplayScope, FixtureAnswer};
+use crate::value::VmDictExt as _;
 use crate::NativeBuiltinCtxExt;
 use crate::NativeVmExt;
 
@@ -72,7 +73,7 @@ fn replay_and_cache_inherit_into_children_and_keep_occurrences_and_cost_separate
             assert_ne!(first.3.invocation_id, second.3.invocation_id);
             assert_eq!(second.3.source, EvaluationSource::Cache);
             assert_eq!(second.3.physical_attempts, 0);
-            policy.insert(crate::value::intern_key("effort"), VmValue::string("unset"));
+            policy.put_str("effort", "unset");
             cached_arguments[3] = VmValue::dict(policy);
             assert!(
                 evaluate_internal(

@@ -367,7 +367,10 @@ async fn execute_compiled(
                 )
                 .await
             {
-                Ok(value) => CaseOutcome::Passed(value),
+                Ok(value) => match crate::commands::run::return_value_error(&value) {
+                    Some(error) => CaseOutcome::RuntimeError(format!("returned Err: {error}")),
+                    None => CaseOutcome::Passed(value),
+                },
                 Err(harn_vm::VmError::TestSkipped(reason)) => CaseOutcome::Skipped(reason),
                 Err(harn_vm::VmError::ExecutionDeadlineExceeded) => CaseOutcome::ExecutionTimedOut,
                 Err(error) => CaseOutcome::RuntimeError(vm.format_runtime_error(&error)),

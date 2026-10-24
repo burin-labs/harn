@@ -89,6 +89,7 @@ fn require_owned_run(ctx: &AsyncBuiltinCtx, id: &str) -> Result<(), VmError> {
 #[harn_builtin(
     exposure = "runtime_internal", effects = [],
     sig = "agent_session_goal(id: string) -> dict",
+    read_only_preparation = true,
     category = "agent.session",
     doc = "Read typed session goal state. Use with_run to hydrate a cold session from its canonical journal."
 )]

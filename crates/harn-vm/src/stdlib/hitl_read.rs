@@ -198,15 +198,7 @@ fn pending_row_to_value(row: PendingHitlRow) -> VmValue {
     dict.put_str("prompt", row.prompt);
     dict.put_str("trace_id", row.trace_id);
     dict.put_str("timestamp", row.timestamp);
-    dict.put(
-        "approvers",
-        VmValue::list(
-            row.approvers
-                .into_iter()
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .collect(),
-        ),
-    );
+    dict.put("approvers", VmValue::strings(row.approvers));
     dict.insert(
         "metadata".to_string(),
         crate::stdlib::json_to_vm_value(&row.metadata),

@@ -27,7 +27,7 @@ impl OperationHandleInfo {
         let mut dict = BTreeMap::new();
         dict.put_str("handle_id", self.handle_id);
         dict.put_str("started_at", self.started_at);
-        dict.insert("ended_at".to_string(), VmValue::Nil);
+        dict.put("ended_at", VmValue::Nil);
         dict.put_int("duration_ms", 0);
         dict.put_str("status", "running");
         dict.put_str("operation", self.operation);

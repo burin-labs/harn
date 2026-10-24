@@ -67,7 +67,7 @@ decision is about whether to recommend it.
 
 ## Running the experiment
 
-Requires an OpenRouter API key in the environment or `HARN_EXPERIMENT_ENV_FILE`.
+Requires an OpenRouter API key in the environment or `HARN_EXT_EXPERIMENT_ENV_FILE`.
 
 ```sh
 # Mock smoke test first (no credits)
@@ -91,13 +91,26 @@ Requires an OpenRouter API key in the environment or `HARN_EXPERIMENT_ENV_FILE`.
 
 Outputs land under `experiments/step-judge/results/<timestamp>/`,
 with one subdir per cell × replicate and an aggregated `REPORT.md`.
+`driver.json` records the planned and completed cells, remaining work, command
+exit codes, and missing or invalid results. A task that fails verification is
+a measured outcome. An empty report, missing fixture, or infrastructure error
+fails the study instead of becoming a zero in the report.
+Use a new, empty output directory for each study so earlier results cannot
+enter a new comparison.
+
+The shell entrypoint starts the trusted Harn driver with `--no-sandbox`, matching
+the shell driver's authority. Each evaluator still applies its normal sandbox.
+This keeps verifier isolation working on macOS, which cannot apply a narrower
+sandbox from inside an existing one.
 
 ## Files
 
-- `run.sh` — bash driver that invokes `harn eval coding-agent` once
+- `run.harn` invokes `harn eval coding-agent` once
   per cell × replicate, with the right `--step-judge`,
   `--structural-validator`, `--tool-format`, `--model`, and
   `--run-label` flags.
+- `run.sh` starts the Harn driver through the repository's binary resolver.
+- `summary.harn` checks that each report contains all expected fixture outcomes.
 - `aggregate.harn` — reads each invocation's `summary.json`, groups
   by cell + replicate, computes pass-rate lift vs baseline, writes
   `REPORT.md`.

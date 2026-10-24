@@ -9,10 +9,12 @@ trap 'rm -rf "${work}"' EXIT
 
 run_case() {
   local name="$1" labelled="$2" touched="$3" files="$4"
+  local action="${5:-opened}" label="${6:-}"
   local out="${work}/${name}.out" summary="${work}/${name}.summary" gh_out="${work}/${name}.github"
   : >"${summary}"
   : >"${gh_out}"
   LABELLED="${labelled}" TOUCHED="${touched}" TOUCHED_FILES="${files}" \
+    EVENT_ACTION="${action}" EVENT_LABEL="${label}" \
     GITHUB_STEP_SUMMARY="${summary}" GITHUB_OUTPUT="${gh_out}" \
     bash "${script}" >"${out}" 2>&1
   printf '%s|%s' "$(grep -o 'should_run=[a-z]*' "${gh_out}" | head -1)" "${summary}"
@@ -58,5 +60,16 @@ grep -Fq 'label is on this pull request' "${summary}" \
   || { echo 'the both case dropped the label reason' >&2; exit 1; }
 grep -Fq 'the diff touches the E2E suite or the ACP adapter' "${summary}" \
   || { echo 'the both case dropped the path reason' >&2; exit 1; }
+
+result="$(run_case opt_in true false '' labeled e2e)"
+expect_output opt_in 'should_run=true' "${result%%|*}"
+
+result="$(run_case shipping false true '.github/workflows/e2e.yml' labeled ship)"
+expect_output shipping 'should_run=false' "${result%%|*}"
+grep -Fq 'NOT running for an unrelated label' "${result#*|}" \
+  || { echo 'the unrelated label case did not report why it stood down' >&2; exit 1; }
+
+result="$(run_case already_opted_in true true '.github/workflows/e2e.yml' labeled ship)"
+expect_output already_opted_in 'should_run=false' "${result%%|*}"
 
 echo 'E2E pull-request reason contract passed'

@@ -218,9 +218,9 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
                         }
                         Err(join_err) if join_err.is_cancelled() => {}
                         Err(join_err) => {
-                            let err = VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                            let err = VmError::Thrown(VmValue::string(format!(
                                 "llm_stream_call background task failed: {join_err}"
-                            ))));
+                            )));
                             send_llm_stream_error(&stream_tx, err, &provider, &model, &ledger)
                                 .await;
                         }
@@ -436,7 +436,7 @@ mod tests {
         options.put_str("provider", "fake");
         options.put_str("model", "fake");
         vec![
-            VmValue::String(arcstr::ArcStr::from("hello".to_string())),
+            VmValue::string("hello".to_string()),
             VmValue::Nil,
             VmValue::dict(options),
         ]

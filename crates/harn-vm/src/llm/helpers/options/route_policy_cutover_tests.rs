@@ -41,9 +41,7 @@ fn route_policy_dict_rejects_removed_prefer_mode() {
     policy.put_str("mode", "prefer");
     policy.put(
         "targets",
-        VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            "mock:gpt-5.4".into(),
-        )])),
+        VmValue::list(vec![VmValue::String("mock:gpt-5.4".into())]),
     );
     let error = message(extract(policy).expect_err("removed mode must fail"));
     assert!(error.contains("unsupported value `prefer`"), "{error}");
@@ -56,9 +54,7 @@ fn route_policy_dict_rejects_prefer_targets_alias() {
     policy.put_str("mode", "preference_list");
     policy.put(
         "prefer",
-        VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            "mock:gpt-5.4".into(),
-        )])),
+        VmValue::list(vec![VmValue::String("mock:gpt-5.4".into())]),
     );
     let error = message(extract(policy).expect_err("removed targets alias must fail"));
     assert!(error.contains("unknown key `prefer`"), "{error}");

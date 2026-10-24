@@ -22,7 +22,7 @@
 
 #![cfg(unix)]
 
-use std::sync::Arc;
+use harn_vm::value::VmDictExt as _;
 
 use harn_hostlib::HostlibError;
 use harn_vm::security::{EnvironmentPolicyKind, GrantSourceSpec, GrantSpec, SessionEnvironment};
@@ -53,14 +53,14 @@ fn call(request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
 /// cannot contribute a line that looks like a name.
 fn name_probe_request(cwd: &str) -> harn_vm::value::DictMap {
     let mut request = harn_vm::value::DictMap::new();
-    request.insert(
-        "argv".into(),
-        VmValue::List(Arc::new(
+    request.put(
+        "argv",
+        VmValue::list(
             ["sh", "-c", "env | cut -d= -f1 | sort"]
                 .into_iter()
                 .map(vm_string)
                 .collect(),
-        )),
+        ),
     );
     request.insert("cwd".into(), vm_string(cwd));
     request
@@ -260,7 +260,7 @@ fn an_explicit_replace_spawn_still_runs_without_a_session_environment() {
     let mut request = name_probe_request(&cwd);
     let mut env = harn_vm::value::DictMap::new();
     env.insert("PATH".into(), vm_string("/usr/bin:/bin"));
-    request.insert("env".into(), VmValue::dict(env));
+    request.put("env", VmValue::dict(env));
     request.insert("env_mode".into(), vm_string("replace"));
 
     let response = call(request).expect("an explicit replace spawn must still run");

@@ -27,11 +27,13 @@ pub struct BillingUsage {
 }
 
 pub(crate) struct BillingSettlement {
-    pub total_usd: f64,
+    pub known_cost_usd: f64,
     pub platform_fee_estimate_usd: f64,
     pub hosted_tool_unpriced: Vec<String>,
     pub modality_unpriced: Vec<String>,
     pub monthly_allowance_unapplied: Vec<String>,
+    /// A quoted zero is a price; an absent quote or zero units is not.
+    pub has_priced_hosted_tools: bool,
 }
 
 impl BillingSettlement {
@@ -41,74 +43,152 @@ impl BillingSettlement {
 }
 
 impl BillingUsage {
+    pub(crate) fn counts_fit(
+        &self,
+        input_tokens: i64,
+        output_tokens: i64,
+        cache_read_tokens: i64,
+        cache_write_tokens: i64,
+    ) -> bool {
+        let Ok(input) = u64::try_from(input_tokens) else {
+            return false;
+        };
+        let Ok(output) = u64::try_from(output_tokens) else {
+            return false;
+        };
+        let Ok(read) = u64::try_from(cache_read_tokens) else {
+            return false;
+        };
+        let Ok(write) = u64::try_from(cache_write_tokens) else {
+            return false;
+        };
+        let cached_audio = self.cached_audio_input_tokens.unwrap_or(0);
+        !self.audio_input_tokens.is_some_and(|count| {
+            count > input
+                || count.saturating_sub(cached_audio)
+                    > input.saturating_sub(read).saturating_sub(write)
+        }) && self.audio_output_tokens.is_none_or(|count| count <= output)
+            && !self.cached_audio_input_tokens.is_some_and(|count| {
+                self.audio_input_tokens.is_none_or(|audio| count > audio) || count > read
+            })
+    }
+
+    pub(crate) fn validate_normalized_counts(
+        &mut self,
+        input_tokens: i64,
+        output_tokens: i64,
+        cache_read_tokens: i64,
+        cache_write_tokens: i64,
+    ) {
+        self.invalid_modality_counts |= !self.counts_fit(
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+        );
+    }
+
     pub(crate) fn settle(
         &self,
-        detail: &crate::llm::cost::PricingDetail,
-        token_cost: f64,
+        detail: Option<&crate::llm::cost::PricingDetail>,
+        token_cost: Option<f64>,
+        free_inference: bool,
     ) -> BillingSettlement {
-        let multiplier = 1.0 + detail.platform_fee_percent / 100.0;
-        let mut subtotal = token_cost / multiplier;
+        let platform_percent = detail.map_or(0.0, |detail| detail.platform_fee_percent);
+        let multiplier = 1.0 + platform_percent / 100.0;
+        let mut subtotal = if free_inference {
+            0.0
+        } else {
+            token_cost.unwrap_or(0.0) / multiplier
+        };
         let mut unpriced = Vec::new();
         let mut allowances = Vec::new();
         let mut modality_unpriced = Vec::new();
+        let mut has_priced_hosted_tools = false;
         for (tool, count) in &self.hosted_tool_calls {
-            match detail.hosted_tool_fees.get(tool) {
-                Some(fee) => {
-                    subtotal += *count as f64 * fee.per_1k_calls / 1000.0;
-                    if fee.free_per_month.is_some() {
+            if *count == 0 {
+                continue;
+            }
+            match detail.and_then(|detail| detail.hosted_tool_fees.get(tool)) {
+                Some(crate::llm_config::HostedToolFee {
+                    per_1k_calls,
+                    free_per_month,
+                    source_url: _,
+                }) => {
+                    has_priced_hosted_tools = true;
+                    subtotal += *count as f64 * per_1k_calls / 1000.0;
+                    if free_per_month.is_some() {
                         allowances.push(tool.clone());
                     }
                 }
-                None if *count > 0 => unpriced.push(tool.clone()),
-                None => {}
+                None => unpriced.push(tool.clone()),
             }
         }
-        let rates = detail.modality_rates.as_ref();
-        let cached = self.cached_audio_input_tokens.unwrap_or(0);
-        if self.invalid_modality_counts {
-            modality_unpriced.push("invalid_modality_counts".into());
-        }
-        for (name, count, rate, text_rate) in [
-            (
-                "audio_input",
-                self.audio_input_tokens.unwrap_or(0).saturating_sub(cached),
-                rates.and_then(|r| r.audio_input_per_mtok),
-                detail.input_per_1k * 1000.0,
-            ),
-            (
-                "audio_output",
-                self.audio_output_tokens.unwrap_or(0),
-                rates.and_then(|r| r.audio_output_per_mtok),
-                detail.output_per_1k * 1000.0,
-            ),
-            (
-                "cached_audio_input",
-                cached,
-                rates.and_then(|r| r.cached_audio_input_per_mtok),
-                detail.cache_read_per_1k.unwrap_or(detail.input_per_1k) * 1000.0,
-            ),
-        ] {
-            if count > 0 && !self.invalid_modality_counts {
-                match rate {
-                    Some(rate) => subtotal += count as f64 * (rate - text_rate) / 1_000_000.0,
-                    None => {
-                        // These tokens are audio, so their text-token charge
-                        // is not part of the known priced portion.
-                        subtotal -= count as f64 * text_rate / 1_000_000.0;
-                        modality_unpriced.push(name.into());
+        if let Some(detail) = detail.filter(|_| !free_inference) {
+            let (audio_input, audio_output, cached_audio_input) = detail
+                .modality_rates
+                .as_ref()
+                .map(
+                    |crate::llm_config::ModalityRates {
+                         audio_input_per_mtok,
+                         audio_output_per_mtok,
+                         cached_audio_input_per_mtok,
+                     }| {
+                        (
+                            *audio_input_per_mtok,
+                            *audio_output_per_mtok,
+                            *cached_audio_input_per_mtok,
+                        )
+                    },
+                )
+                .unwrap_or_default();
+            let cached = self.cached_audio_input_tokens.unwrap_or(0);
+            if self.invalid_modality_counts {
+                modality_unpriced.push("invalid_modality_counts".into());
+            }
+            for (name, count, rate, text_rate) in [
+                (
+                    "audio_input",
+                    self.audio_input_tokens.unwrap_or(0).saturating_sub(cached),
+                    audio_input,
+                    detail.input_per_1k * 1000.0,
+                ),
+                (
+                    "audio_output",
+                    self.audio_output_tokens.unwrap_or(0),
+                    audio_output,
+                    detail.output_per_1k * 1000.0,
+                ),
+                (
+                    "cached_audio_input",
+                    cached,
+                    cached_audio_input,
+                    detail.cache_read_per_1k.unwrap_or(detail.input_per_1k) * 1000.0,
+                ),
+            ] {
+                if count > 0 && !self.invalid_modality_counts {
+                    match rate {
+                        Some(rate) => subtotal += count as f64 * (rate - text_rate) / 1_000_000.0,
+                        None => {
+                            // These tokens are audio, so their text-token charge
+                            // is not part of the known priced portion.
+                            subtotal -= count as f64 * text_rate / 1_000_000.0;
+                            modality_unpriced.push(name.into());
+                        }
                     }
                 }
             }
         }
         // Replacing every text token can leave a tiny negative float residue.
         let subtotal = subtotal.max(0.0);
-        let platform_fee = subtotal * detail.platform_fee_percent / 100.0;
+        let platform_fee = subtotal * platform_percent / 100.0;
         BillingSettlement {
-            total_usd: subtotal + platform_fee,
+            known_cost_usd: subtotal + platform_fee,
             platform_fee_estimate_usd: platform_fee,
             hosted_tool_unpriced: unpriced,
             modality_unpriced,
             monthly_allowance_unapplied: allowances,
+            has_priced_hosted_tools,
         }
     }
     pub(crate) fn from_openai(response: &Value) -> Option<Box<Self>> {
@@ -241,9 +321,9 @@ mod tests {
             ..BillingUsage::default()
         };
         let token_cost = crate::llm::cost::project_call_cost(&detail, 1000, 100, 200, 0, None);
-        let settled = units.settle(&detail, token_cost);
+        let settled = units.settle(Some(&detail), Some(token_cost), false);
         let expected = (800.0 * 32.0 + 200.0 * 0.4 + 100.0 * 64.0) / 1_000_000.0;
-        assert!((settled.total_usd - expected * 1.055).abs() < 1e-12);
+        assert!((settled.known_cost_usd - expected * 1.055).abs() < 1e-12);
         assert!((settled.platform_fee_estimate_usd - expected * 0.055).abs() < 1e-12);
         assert!(!settled.has_unpriced_units());
     }

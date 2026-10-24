@@ -170,13 +170,42 @@ pipeline default(task) {
     );
 }
 
-#[test]
-fn test_import_order_fires_when_out_of_order() {
-    let source = "import \"std/io\"\nimport \"std/fs\"\n\nfn a() -> int { return 1 }\n";
-    let diags = lint_source(source);
-    assert!(
-        has_rule(&diags, "import-order"),
-        "expected import-order when out of order, got: {diags:?}"
+#[rstest::rstest]
+#[case::test_import_order_fires_when_out_of_order(
+    "import \"std/io\"\nimport \"std/fs\"\n\nfn a() -> int { return 1 }\n",
+    "import-order",
+    true
+)]
+#[case::test_import_order_canonical_does_not_fire(
+    "import \"std/fs\"\nimport \"std/io\"\n\nfn a() -> int { return 1 }\n",
+    "import-order",
+    false
+)]
+#[case::test_import_order_single_import_does_not_fire(
+    "import \"std/io\"\n\nfn a() -> int { return 1 }\n",
+    "import-order",
+    false
+)]
+#[case::test_import_order_stdlib_before_third_party(
+    "import \"mypkg/util\"\nimport \"std/io\"\n\nfn a() -> int { return 1 }\n",
+    "import-order",
+    true
+)]
+// `hostlib_*` names are runtime-registered VM builtins
+// (`harn_hostlib::install_default`); the lint's static call
+// graph cannot see them. Suppressing the warning matches the
+// existing `__`-prefix exemption.
+#[case::test_hostlib_prefix_skips_undefined_function_warning(
+    "pipeline default(task) {\n  hostlib_code_index_stats({})\n  hostlib_ast_parse_file({})\n}\n",
+    "undefined-function",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }
 
@@ -218,51 +247,6 @@ fn test_import_order_keeps_comments_by_disabling_unsafe_fix() {
     );
     let fixed = apply_fixes(source, &diags);
     assert!(fixed.contains("// keep with imports"));
-}
-
-#[test]
-fn test_import_order_canonical_does_not_fire() {
-    let source = "import \"std/fs\"\nimport \"std/io\"\n\nfn a() -> int { return 1 }\n";
-    let diags = lint_source(source);
-    assert!(
-        !has_rule(&diags, "import-order"),
-        "canonical order should not fire, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_import_order_single_import_does_not_fire() {
-    let source = "import \"std/io\"\n\nfn a() -> int { return 1 }\n";
-    let diags = lint_source(source);
-    assert!(
-        !has_rule(&diags, "import-order"),
-        "single import should not fire, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_import_order_stdlib_before_third_party() {
-    let source = "import \"mypkg/util\"\nimport \"std/io\"\n\nfn a() -> int { return 1 }\n";
-    let diags = lint_source(source);
-    assert!(
-        has_rule(&diags, "import-order"),
-        "stdlib should come before third-party, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_hostlib_prefix_skips_undefined_function_warning() {
-    // `hostlib_*` names are runtime-registered VM builtins
-    // (`harn_hostlib::install_default`); the lint's static call
-    // graph cannot see them. Suppressing the warning matches the
-    // existing `__`-prefix exemption.
-    let source =
-        "pipeline default(task) {\n  hostlib_code_index_stats({})\n  hostlib_ast_parse_file({})\n}\n";
-    let diags = lint_source(source);
-    assert!(
-        !has_rule(&diags, "undefined-function"),
-        "hostlib_-prefixed calls should not raise undefined-function, got: {diags:?}"
-    );
 }
 
 #[test]

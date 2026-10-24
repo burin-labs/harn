@@ -389,7 +389,7 @@ fn running_result(
     result.put_str("status", "running");
     result.put_bool("completed", false);
     result.put_bool("timed_out", false);
-    result.insert("exit_code".into(), VmValue::Nil);
+    result.put("exit_code", VmValue::Nil);
     result.put_str("cwd", crate::tools::args::to_agent_path(cwd));
     result.put_str("stdout", String::from_utf8_lossy(&state.stdout));
     result.put_str("stderr", String::from_utf8_lossy(&state.stderr));

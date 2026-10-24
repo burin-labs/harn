@@ -1,0 +1,55 @@
+type Benchmark = {
+  iterations: list<{iteration: int, wall_time_ms: float, profile?: dict}>,
+  min_ms: float,
+  mean_ms: float,
+  max_ms: float,
+  total_ms: float,
+  rollup?: dict,
+}
+
+pipeline test_benchmark_output_measures_samples_without_enabling_profiling(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("bench-output-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const fixture = path_join(root, "work.harn")
+  harness.fs.write_text(fixture, "fn main(harness: Harness) { harness.stdio.println(42) }")
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const output = path_join(root, "results.json")
+  const result = harness.process.run(
+    {program: binary, args: ["bench", fixture, "--iterations", "3", "--output", output]},
+  )
+  assert_eq(result.exit_code, 0)
+  assert(result.stdout.contains("Iterations: 3"))
+  const report = unwrap(json_decode(harness.fs.read_text(output), schema_of(Benchmark)))
+  assert_eq(report.iterations.map({ sample -> sample.iteration }).to_list(), [1, 2, 3])
+  assert(report.iterations.all({ sample -> sample.wall_time_ms >= 0.0 && sample.profile == nil }))
+  assert_eq(report.rollup, nil)
+  const elapsed = report.iterations.map({ sample -> sample.wall_time_ms }).to_list()
+  assert_eq(report.min_ms, elapsed.min())
+  assert_eq(report.max_ms, elapsed.max())
+  assert_approx(report.total_ms, elapsed.sum(), 0.000000001)
+  assert_approx(report.mean_ms, report.total_ms / 3.0, 0.000000001)
+  const failed = harness.process.run(
+    {program: binary, args: ["bench", fixture, "--iterations", "1", "--output", root]},
+  )
+  assert(failed.exit_code != 0)
+  assert(failed.stderr.contains("failed to write benchmark results"))
+  const profiled = path_join(root, "profiled.json")
+  const with_profile = harness.process.run(
+    {program: binary, args: ["bench", fixture, "-n", "1", "--profile", "--output", profiled]},
+  )
+  assert_eq(with_profile.exit_code, 0)
+  const traced = unwrap(json_decode(harness.fs.read_text(profiled), schema_of(Benchmark)))
+  assert(traced.rollup != nil)
+  assert(traced.iterations[0]!.profile != nil)
+  harness.fs.write_text(fixture, "fn main(harness: Harness) { return Err(\"work failed\") }")
+  const invalid_output = path_join(root, "failed.json")
+  const errored = harness.process.run(
+    {program: binary, args: ["bench", fixture, "-n", "3", "--output", invalid_output]},
+  )
+  assert(errored.exit_code != 0)
+  assert(
+    errored.stderr.contains("work failed") && errored.stderr.contains("aborted on iteration 1"),
+  )
+}

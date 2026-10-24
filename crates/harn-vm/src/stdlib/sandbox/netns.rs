@@ -10,14 +10,17 @@
 
 use std::io;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::orchestration::CapabilityPolicy;
-use crate::process_sandbox::{NETNS_LAUNCH_SUBCOMMAND, NETNS_RULESET_FD_FLAG, NETNS_SECCOMP_FLAG};
+use crate::process_sandbox::{
+    NETNS_LAUNCH_SUBCOMMAND, NETNS_PRIVATE_TMP_FLAG, NETNS_RULESET_FD_FLAG, NETNS_SECCOMP_FLAG,
+};
+use crate::stdlib::sandbox::policy::ProcessNetworkGrant;
 use crate::VmError;
 
-use super::{sandbox_rejection, LandlockProfile, ProcessProfile, TransferableConfinement};
+use super::{sandbox_rejection, ProcessProfile, TransferableConfinement};
 use crate::stdlib::sandbox::backend::PrepareOutcome;
 
 /// Who enters a transferred Linux confinement before the payload starts.
@@ -42,11 +45,8 @@ pub(super) fn namespaced_outcome(
     args: &[String],
     prep: &mut ProcessProfile,
 ) -> PrepareOutcome {
-    let confinement = TransferableConfinement {
-        ruleset: prep.landlock.take().map(LandlockProfile::take_ruleset),
-        seccomp: std::mem::take(&mut prep.seccomp),
-    };
-    let argv = namespaced_launcher_argv(program, args, &confinement);
+    let confinement = TransferableConfinement::take_from(prep);
+    let argv = launcher_argv_with_ruleset(program, args, &confinement, confinement.ruleset_fd());
     PrepareOutcome::NamespacedExec {
         wrapper: launcher.display().to_string(),
         args: argv,
@@ -56,7 +56,9 @@ pub(super) fn namespaced_outcome(
 
 /// The helper this spawn must go through, or `None` when it needs none.
 ///
-/// `Ok(None)` means loopback was not requested. It never means loopback was
+/// `Ok(None)` means loopback was not requested. The spawn path withholds a grant
+/// the host cannot honor before it gets here (`withhold_unsupported_loopback`),
+/// so reaching the error means a caller bypassed that rule. It never means loopback was
 /// requested and the helper was missing: that is an error and is returned as
 /// one, naming the path that was looked for, because the alternative grants
 /// this backend could reach instead all leak datagram egress and a reader of
@@ -64,33 +66,18 @@ pub(super) fn namespaced_outcome(
 pub(in crate::stdlib::sandbox) fn resolve_netns_launcher(
     policy: &CapabilityPolicy,
 ) -> Result<Option<PathBuf>, VmError> {
-    if !policy.process_sandbox.allow_tcp_loopback {
+    if !ProcessNetworkGrant::for_policy(policy).loopback_only() {
         return Ok(None);
     }
-    let Some(path) = policy.process_sandbox.netns_launcher_path.as_ref() else {
-        return Err(sandbox_rejection(
-            "TCP loopback-only child networking needs a private network namespace, which only \
-             the namespace helper can build; no helper path was supplied, so the grant is \
-             refused rather than widened"
-                .to_string(),
-        ));
-    };
-    let path = PathBuf::from(path);
-    if !path.is_absolute() {
-        return Err(sandbox_rejection(format!(
-            "the namespace helper path must be absolute so the host policy grant names one \
-             file; got {}",
-            path.display()
-        )));
+    match crate::process_sandbox::loopback_support(&policy.process_sandbox) {
+        crate::process_sandbox::LoopbackSupport::Supported { launcher } => Ok(launcher),
+        crate::process_sandbox::LoopbackSupport::Unavailable(unavailable) => {
+            Err(sandbox_rejection(format!(
+                "TCP loopback-only child networking is refused rather than widened: {}",
+                unavailable.notice()
+            )))
+        }
     }
-    if !path.is_file() {
-        return Err(sandbox_rejection(format!(
-            "TCP loopback-only child networking needs the namespace helper at {}, which is not \
-             an existing file on this host; the grant is refused rather than widened",
-            path.display()
-        )));
-    }
-    Ok(Some(path))
 }
 
 /// Assemble the helper's argv: how to confine, then what to run.
@@ -101,19 +88,6 @@ pub(in crate::stdlib::sandbox) fn resolve_netns_launcher(
 /// about the policy and reveals nothing the receipt does not already state, so
 /// it does not need the pipe's protection and argv keeps the helper a plain
 /// exec with no setup protocol.
-pub(super) fn namespaced_launcher_argv(
-    payload_program: &str,
-    payload_args: &[String],
-    confinement: &TransferableConfinement,
-) -> Vec<String> {
-    launcher_argv_with_ruleset(
-        payload_program,
-        payload_args,
-        confinement,
-        confinement.ruleset_fd(),
-    )
-}
-
 pub(in crate::stdlib::sandbox) fn launcher_argv_with_ruleset(
     payload_program: &str,
     payload_args: &[String],
@@ -125,12 +99,34 @@ pub(in crate::stdlib::sandbox) fn launcher_argv_with_ruleset(
         argv.push(NETNS_RULESET_FD_FLAG.to_string());
         argv.push(fd.to_string());
     }
+    if let Some(tmp) = &confinement.private_tmp {
+        argv.push(NETNS_PRIVATE_TMP_FLAG.to_string());
+        argv.push(tmp.display().to_string());
+    }
     argv.push(NETNS_SECCOMP_FLAG.to_string());
     argv.push(hex_encode(&confinement.seccomp_bytes()));
     argv.push("--".to_string());
     argv.push(payload_program.to_string());
     argv.extend(payload_args.iter().cloned());
     argv
+}
+
+/// The workspace temp dir (`.harn-tmp`, shared by runs in that workspace) the
+/// helper mounts over the child's `/tmp`, when this
+/// spawn goes through the helper at all.
+///
+/// `granted` is every path the finished ruleset grants, the payload program
+/// and its `PATH` entries included. `None` when any lies under `/tmp`: the
+/// mount hides every host path beneath it, so such a child keeps the host's
+/// `/tmp` (where it can write nothing) rather than lose what it was granted.
+pub(super) fn private_tmp_dir<'a>(
+    policy: &CapabilityPolicy,
+    mut granted: impl Iterator<Item = &'a Path>,
+) -> Option<PathBuf> {
+    if !policy.process_sandbox.allow_tcp_loopback || granted.any(|p| p.starts_with("/tmp")) {
+        return None;
+    }
+    super::super::workspace_local_tmpdir(policy)
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -244,5 +240,5 @@ fn clear_cloexec_hook(
 /// this predicate cannot be true for a child that is about to run on the host
 /// network.
 pub(super) fn namespaced_loopback_grant(policy: &CapabilityPolicy) -> bool {
-    policy.process_sandbox.allow_tcp_loopback
+    ProcessNetworkGrant::for_policy(policy).loopback_only()
 }

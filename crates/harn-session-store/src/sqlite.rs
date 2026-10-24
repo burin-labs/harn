@@ -27,6 +27,7 @@ use super::event::{
     now_ms_and_rfc3339, AppendEvent, EventId, EventSignature, SessionEventKind, StoredEvent,
 };
 use super::lease::{SessionLeaseError, SessionMaintenanceLease, SessionMutationLease};
+use super::process_locks::{self, HeldGuard};
 use super::redaction::{
     prepare_append_event, prepare_stored_events_for_persistence, redact_stored_events,
 };
@@ -74,6 +75,8 @@ struct StoreInner {
     task_claims: Arc<Mutex<std::collections::BTreeSet<String>>>,
     /// Committed event-append transactions, for batching diagnostics.
     append_commits: std::sync::atomic::AtomicU64,
+    /// Declared last so it drops after `conn` closes. See [`crate::process_locks`].
+    _held: Option<HeldGuard>,
 }
 
 #[derive(Debug)]
@@ -124,15 +127,18 @@ impl SqliteSessionStore {
             PathBuf::from(":memory:"),
             hooks,
             MutationAdmission::InMemory,
+            None,
         )
     }
 
     /// Open an initialized file-backed store without creating or migrating it.
     ///
-    /// The returned handle reads a stable temporary snapshot through SQLite's
-    /// read-only connection mode, so every mutating [`SessionStore`] operation
-    /// fails at the database boundary without SQLite touching source WAL/SHM
-    /// bookkeeping.
+    /// When this process holds no connection on the store, the returned handle
+    /// reads a stable temporary snapshot through SQLite's read-only connection
+    /// mode, so every mutating [`SessionStore`] operation fails at the database
+    /// boundary without SQLite touching source WAL/SHM bookkeeping. When it does
+    /// hold one, copying would release its locks, so the handle reads the live
+    /// store through a read-only connection instead (see `process_locks`).
     /// Missing, malformed, and stale-schema databases are reported without
     /// creating the database, its parent directory, or an initialization lock.
     pub fn open_read_only(path: impl AsRef<Path>) -> StoreResult<Self> {
@@ -145,7 +151,15 @@ impl SqliteSessionStore {
         hooks: StoreHooks,
     ) -> StoreResult<Self> {
         let path = path.as_ref().to_path_buf();
+        // Holding the registry across the copy keeps any connection from
+        // opening on the file until the copy has closed its descriptors.
+        let held = process_locks::lock();
+        if held.holds(&path) {
+            drop(held);
+            return Self::open_live_read_only(path, hooks);
+        }
         let (snapshot, snapshot_path) = copy_sqlite_snapshot(&path)?;
+        drop(held);
         let conn = Connection::open_with_flags(&snapshot_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         conn.pragma_update(None, "foreign_keys", "ON")
@@ -161,6 +175,36 @@ impl SqliteSessionStore {
                 _snapshot: Some(snapshot),
                 task_claims: Arc::default(),
                 append_commits: std::sync::atomic::AtomicU64::new(0),
+                _held: None,
+            }),
+        })
+    }
+
+    /// Read through a SQLite connection on the live files because this process
+    /// already holds locks on them; a raw copy here would release those locks.
+    /// One read transaction gives every query on the handle the same frozen
+    /// view, so drop the handle promptly to let WAL checkpoints proceed.
+    fn open_live_read_only(path: PathBuf, hooks: StoreHooks) -> StoreResult<Self> {
+        let backend = |error: rusqlite::Error| StoreError::Backend(error.to_string());
+        let held = process_locks::register(&path);
+        let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(backend)?;
+        conn.busy_timeout(Duration::from_secs(5)).map_err(backend)?;
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(backend)?;
+        conn.execute_batch("BEGIN DEFERRED").map_err(backend)?;
+        require_snapshot_initialized::<StoreError>(&conn, SQLITE_SCHEMA)
+            .map_err(map_initialization)?;
+        Ok(Self {
+            inner: Arc::new(StoreInner {
+                conn: Mutex::new(conn),
+                hooks,
+                path,
+                mutation_admission: MutationAdmission::ReadOnly,
+                _snapshot: None,
+                task_claims: Arc::default(),
+                append_commits: std::sync::atomic::AtomicU64::new(0),
+                _held: Some(held),
             }),
         })
     }
@@ -176,9 +220,16 @@ impl SqliteSessionStore {
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
             }
         }
+        let held = process_locks::register(&path);
         let conn =
             Connection::open(&path).map_err(|error| StoreError::Backend(error.to_string()))?;
-        Self::initialize(conn, path, hooks, MutationAdmission::Shared { store_dir })
+        Self::initialize(
+            conn,
+            path,
+            hooks,
+            MutationAdmission::Shared { store_dir },
+            Some(held),
+        )
     }
 
     /// Open a file-backed store while excluding every participating writer.
@@ -199,6 +250,7 @@ impl SqliteSessionStore {
         let store_dir = store_directory(&path);
         let lease = SessionMaintenanceLease::try_acquire(&store_dir)
             .map_err(|error| map_lease(error, StoreContention::ProjectLeaseHeld))?;
+        let held = process_locks::register(&path);
         let conn =
             Connection::open(&path).map_err(|error| StoreError::Backend(error.to_string()))?;
         Self::initialize(
@@ -206,6 +258,7 @@ impl SqliteSessionStore {
             path,
             hooks,
             MutationAdmission::Maintenance { _lease: lease },
+            Some(held),
         )
     }
 
@@ -214,6 +267,7 @@ impl SqliteSessionStore {
         path: PathBuf,
         hooks: StoreHooks,
         mutation_admission: MutationAdmission,
+        held: Option<HeldGuard>,
     ) -> StoreResult<Self> {
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|error| StoreError::Backend(error.to_string()))?;
@@ -243,6 +297,7 @@ impl SqliteSessionStore {
                 _snapshot: None,
                 task_claims: Arc::default(),
                 append_commits: std::sync::atomic::AtomicU64::new(0),
+                _held: held,
             }),
         })
     }
@@ -694,6 +749,14 @@ fn write_transaction(conn: &mut Connection) -> StoreResult<Transaction<'_>> {
     // upgrade deadlock; SQLite intentionally skips the busy handler in that
     // case and returns SQLITE_BUSY immediately. Acquire writer ownership at
     // the boundary so the configured busy policy can serialize contenders.
+    //
+    // Only a live read-only handle already holds a transaction (its frozen
+    // read view); it can never write.
+    if !conn.is_autocommit() {
+        return Err(StoreError::Backend(
+            "attempt to write a readonly database".to_string(),
+        ));
+    }
     conn.transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sql)
 }

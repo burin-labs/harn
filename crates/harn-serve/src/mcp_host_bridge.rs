@@ -76,10 +76,7 @@ mod tests {
         let mut deny_all = McpAllowlist::deny_all();
         deny_all.allow("permitted", McpAllowlistTools::All);
         install_mcp_host_allowlist(&policy_with(Some(deny_all)));
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let runtime = harn_clock::test_support::current_thread_runtime();
         let denied = runtime.block_on(mcp_host::call("blocked", "anything", serde_json::json!({})));
         assert!(
             denied
@@ -102,10 +99,7 @@ mod tests {
         tools.insert("read_repo".to_string());
         allowlist.allow("github", McpAllowlistTools::Only(tools));
         install_mcp_host_allowlist(&policy_with(Some(allowlist)));
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let runtime = harn_clock::test_support::current_thread_runtime();
         // Disallowed tool on an allowed server.
         let err = runtime
             .block_on(mcp_host::call(

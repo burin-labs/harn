@@ -49,6 +49,8 @@ pub(crate) use datetime::date_dict_from_millis;
 mod document;
 mod durable_step;
 mod event_log;
+#[cfg(feature = "content")]
+mod markup;
 pub use event_log::mint_hypothesis_native_attestation;
 mod external_agent;
 pub(crate) mod files;
@@ -161,6 +163,8 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     diff::register_diff_builtins(vm);
     #[cfg(feature = "content")]
     document::register_document_builtins(vm);
+    #[cfg(feature = "content")]
+    markup::register_markdown_builtins(vm);
     calendar::register_calendar_builtins(vm);
     cron::register_cron_builtins(vm);
     regex::register_regex_builtins(vm);

@@ -13,6 +13,7 @@
 //! an identity the runtime recorded, and a binding that does not check out is
 //! a structured failure rather than a best guess.
 
+use crate::tool_messages::is_tool_result_role;
 use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -887,10 +888,6 @@ fn json_scalar_text(value: &JsonValue) -> String {
         JsonValue::Null => String::new(),
         other => other.to_string(),
     }
-}
-
-fn is_tool_result_role(role: &str) -> bool {
-    matches!(role, "tool" | "tool_result")
 }
 
 fn native_tool_result_id(event: &JsonValue) -> Option<&str> {

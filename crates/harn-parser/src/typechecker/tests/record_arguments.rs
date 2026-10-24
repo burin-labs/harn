@@ -2,10 +2,9 @@
 
 use super::*;
 
-#[test]
-fn named_record_parameter_accepts_exact_literal_and_inferred_local() {
-    let errs = errors(
-        r#"type BranchRequest = {owner: string, repo: string, branch: string}
+#[rstest::rstest]
+#[case::named_record_parameter_accepts_exact_literal_and_inferred_local(
+    r#"type BranchRequest = {owner: string, repo: string, branch: string}
 
 fn view(request: BranchRequest) -> string {
   return request.owner + "/" + request.repo + ":" + request.branch
@@ -18,15 +17,10 @@ pipeline test_named_record(task) {
   let internal = {owner: "octo", repo: "demo", branch: "release", force: true}
   view(internal)
 }"#,
-    );
-
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
-fn intersected_record_parameter_accepts_exact_literal_and_inferred_local() {
-    let errs = errors(
-        r#"type Repository = {owner: string, repo: string}
+    true
+)]
+#[case::intersected_record_parameter_accepts_exact_literal_and_inferred_local(
+    r#"type Repository = {owner: string, repo: string}
 type Branch = {branch: string}
 type BranchRequest = Repository & Branch
 
@@ -39,9 +33,21 @@ pipeline test_intersected_record(task) {
   let request = {owner: "octo", repo: "demo", branch: "next"}
   view(request)
 }"#,
-    );
+    true
+)]
+#[case::open_record_parameter_accepts_extra_literal_fields(
+    r#"fn greet(user: {name: string, ...dict}) -> string {
+  return "hi " + user.name
+}
 
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+pipeline test_open_record(task) {
+  greet({name: "Bob", age: 25})
+}"#,
+    true
+)]
+fn diagnostics_errors(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
 }
 
 #[test]
@@ -99,24 +105,6 @@ pipeline test_closed_record(task) {
 
     assert_eq!(errs.len(), 1, "expected an excess-field error: {errs:?}");
     assert!(errs[0].contains("unknown field `age` in closed record"));
-}
-
-#[test]
-fn open_record_parameter_accepts_extra_literal_fields() {
-    let errs = errors(
-        r#"fn greet(user: {name: string, ...dict}) -> string {
-  return "hi " + user.name
-}
-
-pipeline test_open_record(task) {
-  greet({name: "Bob", age: 25})
-}"#,
-    );
-
-    assert!(
-        errs.is_empty(),
-        "open record rejected extra fields: {errs:?}"
-    );
 }
 
 #[test]

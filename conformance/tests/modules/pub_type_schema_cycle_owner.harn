@@ -1,0 +1,7 @@
+import { Wrapped } from "./pub_type_schema_cycle_wrapper"
+
+pub type Base = {value: int}
+
+pub fn imported_schema() {
+  return Wrapped
+}

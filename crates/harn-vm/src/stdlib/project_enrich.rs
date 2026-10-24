@@ -1009,20 +1009,11 @@ jobs:
             "pub fn greet() -> &'static str { \"hi\" }\n",
         );
 
-        let base = VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("languages"),
-                VmValue::list(vec![VmValue::String(arcstr::ArcStr::from("rust"))]),
-            ),
-            (
-                crate::value::intern_key("anchors"),
-                VmValue::list(vec![VmValue::String(arcstr::ArcStr::from("Cargo.toml"))]),
-            ),
-            (
-                crate::value::intern_key("lockfiles"),
-                VmValue::list(vec![VmValue::String(arcstr::ArcStr::from("Cargo.lock"))]),
-            ),
-        ]));
+        let base = VmValue::dict([
+            ("languages", VmValue::strings(["rust"])),
+            ("anchors", VmValue::strings(["Cargo.toml"])),
+            ("lockfiles", VmValue::strings(["Cargo.lock"])),
+        ]);
         let files = collect_relevant_files(dir.path(), &base);
         let paths = files
             .iter()
@@ -1035,23 +1026,14 @@ jobs:
 
     #[test]
     fn attach_ci_metadata_merges_ci_block_into_result() {
-        let base = VmValue::dict(crate::value::DictMap::from_iter([(
-            crate::value::intern_key("ci"),
-            VmValue::dict(crate::value::DictMap::from_iter([(
-                crate::value::intern_key("merge_policy"),
-                VmValue::dict(crate::value::DictMap::from_iter([(
-                    crate::value::intern_key("squash_only"),
-                    VmValue::Bool(true),
-                )])),
-            )])),
-        )]));
-        let result = attach_ci_metadata(
-            VmValue::dict(crate::value::DictMap::from_iter([(
-                crate::value::intern_key("summary"),
-                VmValue::string("ok"),
-            )])),
-            &base,
-        );
+        let base = VmValue::dict([(
+            "ci",
+            VmValue::dict([(
+                "merge_policy",
+                VmValue::dict([("squash_only", VmValue::Bool(true))]),
+            )]),
+        )]);
+        let result = attach_ci_metadata(VmValue::dict([("summary", VmValue::string("ok"))]), &base);
         let dict = result.as_dict().expect("dict");
         assert_eq!(
             dict.get("ci")

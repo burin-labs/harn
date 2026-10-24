@@ -1,6 +1,6 @@
 import { AgentLoopProtocolFailure } from "std/agent/failure_types"
 import { agent_loop_default_retry_predicate } from "std/agent/retry"
-import { agent_emit_event } from "std/agent/state"
+import { agent_emit_event, agent_is_tool_result_message } from "std/agent/state"
 import { with_retry } from "std/llm/handlers"
 import { llm_call_options } from "std/llm/options"
 import { structured_output_preface } from "std/llm/prompts"
@@ -20,8 +20,7 @@ fn __dispatch_messages_include_tool_result(messages: list?) {
     return false
   }
   for msg in messages {
-    const role = to_string(msg?.role ?? "")
-    if role == "tool" || role == "tool_result" {
+    if agent_is_tool_result_message(msg) {
       return true
     }
   }

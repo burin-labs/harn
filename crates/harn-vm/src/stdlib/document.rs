@@ -176,7 +176,6 @@ pub(crate) fn register_document_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "document_render_pdf(source: string | bytes | nil, options?: dict) -> bytes",
     category = "document",
     doc = "Render text-like document input to valid PDF bytes using Harn's built-in cross-platform renderer."
@@ -194,7 +193,6 @@ fn document_render_pdf_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "document_extract_text(source: string | bytes | nil, options?: dict) -> string",
     category = "document",
     doc = "Extract normalized text from text, HTML, Markdown, or PDF byte input."
@@ -232,7 +230,6 @@ fn document_extract_text_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "document_pdf_capabilities(options?: dict) -> dict",
     category = "document",
     doc = "Describe the built-in PDF rendering and text extraction capabilities available in this Harn runtime."
@@ -248,16 +245,14 @@ fn document_pdf_capabilities_impl(
     renderer.put(
         "source_formats",
         VmValue::list(vec![
-            VmValue::String(arcstr::ArcStr::from(SOURCE_FORMAT_TEXT)),
-            VmValue::String(arcstr::ArcStr::from(SOURCE_FORMAT_HTML)),
-            VmValue::String(arcstr::ArcStr::from(SOURCE_FORMAT_MARKDOWN)),
+            VmValue::string(SOURCE_FORMAT_TEXT),
+            VmValue::string(SOURCE_FORMAT_HTML),
+            VmValue::string(SOURCE_FORMAT_MARKDOWN),
         ]),
     );
     renderer.put(
         "output_formats",
-        VmValue::list(vec![VmValue::String(arcstr::ArcStr::from(
-            PDF_OUTPUT_FORMAT,
-        ))]),
+        VmValue::list(vec![VmValue::string(PDF_OUTPUT_FORMAT)]),
     );
     renderer.put("external_dependencies", VmValue::list(Vec::new()));
 
@@ -267,9 +262,7 @@ fn document_pdf_capabilities_impl(
     extractor.put_str("input_type", "bytes");
     extractor.put(
         "source_formats",
-        VmValue::list(vec![VmValue::String(arcstr::ArcStr::from(
-            SOURCE_FORMAT_PDF,
-        ))]),
+        VmValue::list(vec![VmValue::string(SOURCE_FORMAT_PDF)]),
     );
     extractor.put_bool("ocr", false);
     extractor.put_int("max_input_bytes", MAX_PDF_INPUT_BYTES as i64);
@@ -400,106 +393,13 @@ fn infer_source_format(source: &str) -> &'static str {
 fn extract_text_for_format(source: &str, format: TextSourceFormat) -> String {
     match format {
         TextSourceFormat::Text => normalize_text(source),
-        TextSourceFormat::Html => extract_html_text(source),
-        TextSourceFormat::Markdown => strip_markdown(source),
+        TextSourceFormat::Html => super::markup::html_text(source, false),
+        TextSourceFormat::Markdown => super::markup::markdown_text(source),
     }
 }
 
 fn normalize_text(source: &str) -> String {
     source.replace("\r\n", "\n").replace('\r', "\n")
-}
-
-fn extract_html_text(source: &str) -> String {
-    let document = scraper::Html::parse_document(source);
-    let body_selector = scraper::Selector::parse("body").expect("static body selector");
-    let root_selector = scraper::Selector::parse("html").expect("static html selector");
-    let mut raw = Vec::new();
-    let mut selected = false;
-    for node in document.select(&body_selector) {
-        selected = true;
-        raw.extend(node.text());
-    }
-    if !selected {
-        for node in document.select(&root_selector) {
-            selected = true;
-            raw.extend(node.text());
-        }
-    }
-    if !selected {
-        raw.extend(document.root_element().text());
-    }
-    collapse_inline_whitespace(&raw.join(" "))
-}
-
-fn strip_markdown(source: &str) -> String {
-    let mut lines = Vec::new();
-    let mut in_fence = false;
-    for raw in normalize_text(source).lines() {
-        let mut line = raw.trim_start();
-        if line.starts_with("```") || line.starts_with("~~~") {
-            in_fence = !in_fence;
-            continue;
-        }
-        if !in_fence {
-            line = line.trim_start_matches('#').trim_start();
-            line = line
-                .strip_prefix("- ")
-                .or_else(|| line.strip_prefix("* "))
-                .or_else(|| line.strip_prefix("+ "))
-                .unwrap_or(line);
-            line = line.strip_prefix("> ").unwrap_or(line);
-        }
-        lines.push(strip_markdown_inline(line));
-    }
-    lines.join("\n")
-}
-
-fn strip_markdown_inline(line: &str) -> String {
-    let mut out = String::new();
-    let mut chars = line.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if matches!(ch, '*' | '_' | '`') {
-            continue;
-        }
-        if ch == '[' {
-            let mut label = String::new();
-            for inner in chars.by_ref() {
-                if inner == ']' {
-                    break;
-                }
-                label.push(inner);
-            }
-            if chars.peek() == Some(&'(') {
-                let _ = chars.next();
-                for inner in chars.by_ref() {
-                    if inner == ')' {
-                        break;
-                    }
-                }
-            }
-            out.push_str(&label);
-            continue;
-        }
-        out.push(ch);
-    }
-    out
-}
-
-fn collapse_inline_whitespace(source: &str) -> String {
-    let mut out = String::new();
-    let mut last_space = false;
-    for ch in source.chars() {
-        if ch.is_whitespace() {
-            if !last_space {
-                out.push(' ');
-                last_space = true;
-            }
-        } else {
-            out.push(ch);
-            last_space = false;
-        }
-    }
-    out.trim().to_string()
 }
 
 fn render_text_pdf(text: &str, options: &PdfRenderOptions) -> Vec<u8> {
@@ -661,7 +561,7 @@ mod tests {
     use super::*;
 
     fn s(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
+        VmValue::string(value)
     }
 
     fn b(value: Vec<u8>) -> VmValue {

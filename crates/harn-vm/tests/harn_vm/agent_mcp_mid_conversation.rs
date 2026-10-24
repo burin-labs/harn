@@ -11,6 +11,7 @@
 //! echoes one `<name>__tool` per requested spec and one server_info per spec,
 //! so the harn side can observe exactly which servers were (re)bootstrapped.
 
+use harn_vm::value::VmDictExt as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -28,56 +29,48 @@ fn run_with_spec_aware_stub(source: &str) -> Result<Vec<String>, String> {
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
-                vm.register_builtin("__host_mcp_bootstrap", move |args, out| {
-                    let specs = match args.get(1) {
-                        Some(VmValue::List(list)) => list.clone(),
-                        _ => Arc::new(Vec::new()),
-                    };
-                    let mut names: Vec<String> = Vec::new();
-                    let mut tools: Vec<VmValue> = Vec::new();
-                    let mut server_info: Vec<VmValue> = Vec::new();
-                    for spec in specs.iter() {
-                        let name = spec
-                            .as_dict()
-                            .and_then(|d| d.get("name"))
-                            .map(VmValue::display)
-                            .unwrap_or_default();
-                        if name.is_empty() {
-                            continue;
-                        }
-                        names.push(name.clone());
-                        let mut tool: BTreeMap<String, VmValue> = BTreeMap::new();
-                        tool.insert("name".to_string(), VmValue::string(format!("{name}__tool")));
-                        tools.push(VmValue::dict(tool));
-                        let mut info: BTreeMap<String, VmValue> = BTreeMap::new();
-                        info.insert("name".to_string(), VmValue::string(&name));
-                        server_info.push(VmValue::dict(info));
-                    }
-                    // Surface which servers this call bootstrapped so the test
-                    // can assert delta-only behavior across mounts.
-                    out.push_str(&format!("[harn] bootstrapped={}\n", names.join(",")));
-                    let mut result: BTreeMap<String, VmValue> = BTreeMap::new();
-                    result.insert("tools_added".to_string(), VmValue::List(Arc::new(tools)));
-                    result.insert(
-                        "server_info".to_string(),
-                        VmValue::List(Arc::new(server_info)),
-                    );
-                    result.insert("errors".to_string(), VmValue::List(Arc::new(Vec::new())));
-                    Ok(VmValue::dict(result))
-                });
-                vm.execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"))?;
-                Ok(vm.output().to_string())
-            })
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut vm = harn_vm::new_vm();
+        harn_vm::register_vm_stdlib(&mut vm);
+        vm.register_builtin("__host_mcp_bootstrap", move |args, out| {
+            let specs = match args.get(1) {
+                Some(VmValue::List(list)) => list.clone(),
+                _ => Arc::new(Vec::new()),
+            };
+            let mut names: Vec<String> = Vec::new();
+            let mut tools: Vec<VmValue> = Vec::new();
+            let mut server_info: Vec<VmValue> = Vec::new();
+            for spec in specs.iter() {
+                let name = spec
+                    .as_dict()
+                    .and_then(|d| d.get("name"))
+                    .map(VmValue::display)
+                    .unwrap_or_default();
+                if name.is_empty() {
+                    continue;
+                }
+                names.push(name.clone());
+                let mut tool: BTreeMap<String, VmValue> = BTreeMap::new();
+                tool.put_str("name", format!("{name}__tool"));
+                tools.push(VmValue::dict(tool));
+                let mut info: BTreeMap<String, VmValue> = BTreeMap::new();
+                info.put_str("name", &name);
+                server_info.push(VmValue::dict(info));
+            }
+            // Surface which servers this call bootstrapped so the test
+            // can assert delta-only behavior across mounts.
+            out.push_str(&format!("[harn] bootstrapped={}\n", names.join(",")));
+            let mut result: BTreeMap<String, VmValue> = BTreeMap::new();
+            result.put("tools_added", VmValue::list(tools));
+            result.put("server_info", VmValue::list(server_info));
+            result.put("errors", VmValue::list(Vec::new()));
+            Ok(VmValue::dict(result))
+        });
+        vm.execute(&chunk)
             .await
-    })
+            .map_err(|e: VmError| format!("{e:?}"))?;
+        Ok(vm.output().to_string())
+    }))
     .map(|raw| {
         raw.lines()
             .filter_map(|l| l.strip_prefix("[harn] ").map(str::to_string))

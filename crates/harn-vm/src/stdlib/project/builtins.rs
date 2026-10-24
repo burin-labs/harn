@@ -111,8 +111,7 @@ fn project_scan_tree_native_impl(args: &[VmValue], _out: &mut String) -> Result<
     let tree = scan_project_tree(&base, &options)?;
     Ok(VmValue::dict(
         tree.into_iter()
-            .map(|(rel, evidence)| (rel, evidence.into_vm_value()))
-            .collect::<crate::value::DictMap>(),
+            .map(|(rel, evidence)| (rel, evidence.into_vm_value())),
     ))
 }
 
@@ -199,63 +198,27 @@ fn catalog_entry_value(entry: &ProjectCatalogEntry) -> VmValue {
     value.put_str("id", entry.id);
     value.put(
         "languages",
-        VmValue::list(
-            entry
-                .languages
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
-                .collect(),
-        ),
+        VmValue::strings(entry.languages.iter().map(|item| (*item).to_string())),
     );
     value.put(
         "frameworks",
-        VmValue::list(
-            entry
-                .frameworks
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
-                .collect(),
-        ),
+        VmValue::strings(entry.frameworks.iter().map(|item| (*item).to_string())),
     );
     value.put(
         "build_systems",
-        VmValue::list(
-            entry
-                .build_systems
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
-                .collect(),
-        ),
+        VmValue::strings(entry.build_systems.iter().map(|item| (*item).to_string())),
     );
     value.put(
         "anchors",
-        VmValue::list(
-            entry
-                .anchors
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
-                .collect(),
-        ),
+        VmValue::strings(entry.anchors.iter().map(|item| (*item).to_string())),
     );
     value.put(
         "lockfiles",
-        VmValue::list(
-            entry
-                .lockfiles
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
-                .collect(),
-        ),
+        VmValue::strings(entry.lockfiles.iter().map(|item| (*item).to_string())),
     );
     value.put(
         "source_globs",
-        VmValue::list(
-            entry
-                .source_globs
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
-                .collect(),
-        ),
+        VmValue::strings(entry.source_globs.iter().map(|item| (*item).to_string())),
     );
     value.put_nullable_str("default_build_cmd", entry.default_build_cmd());
     value.put_nullable_str("default_test_cmd", entry.default_test_cmd());

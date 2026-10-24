@@ -922,6 +922,27 @@
     "verdict": "KEEP-with-expiry"
   },
   {
+    "default": "64000; 0 or negative disables; positive values below 1024 raise to 1024",
+    "evidence": "agent_host_primitives resolves the integer option through tool_result_budget::max_chars before bounding every rendered tool result. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.tool_result_max_chars",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
+        "reader": "agent_primitive_option_int"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
+        "reader": "__loop_dispatch_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "0 for tool_using profile; options_formats.harn:15 owns other profiles",
     "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
     "expiry": "2026-09-13",

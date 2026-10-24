@@ -353,29 +353,39 @@ New stdlib builtins are registered with the `#[harn_builtin]` proc-macro
 both the runtime entry and the parser `BuiltinSignature`, so there is no
 separate Rust-side signature table to keep in sync.
 
+Declare how scripts can reach the builtin with `exposure`. Pure and internal
+builtins imply empty effects. Harness methods and privileged wire calls require
+an explicit `effects` list. The macro rejects effects on pure builtins.
+
 ```rust
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 /// Sync builtin: short signature in Harn syntax, return type after `->`.
-#[harn_builtin(sig = "bytes_to_hex(input: bytes) -> string", category = "bytes")]
+#[harn_builtin(exposure = "pure", sig = "bytes_to_hex(input: bytes) -> string", category = "bytes")]
 fn bytes_to_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     // ... implementation returning Ok(VmValue::String(...)) ...
 }
 
 /// Async builtin: declare `kind = "async"` and write an `async fn`.
 #[harn_builtin(
+    exposure = "harness.runtime.with_autonomy_policy",
+    effects = ["state.mutate@const=runtime-policy"],
     sig = "with_autonomy_policy(policy: dict, fn: closure) -> any",
     kind = "async",
     category = "runtime_scope"
 )]
-async fn with_autonomy_policy_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn with_autonomy_policy_impl(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     // ... await your async work, return Ok(...) ...
 }
 
 /// Aliases share the impl + signature; each emits its own parser entry.
 #[harn_builtin(
+    exposure = "pure",
     sig = "render(template: string, vars: dict?) -> string",
     aliases = ["render_prompt"],
     category = "strings"
@@ -388,12 +398,14 @@ fn render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 /// signature set. Use for double-underscore internals (`__harn_*`) that
 /// scripts must not call directly.
 #[harn_builtin(
+    exposure = "runtime_internal",
     sig = "__harn_with_execution_policy_override(policy: dict, fn: closure) -> any",
     kind = "async",
     category = "runtime_scope",
     runtime_only = true
 )]
 async fn harn_with_execution_policy_override_impl(
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     // ... internal-only handler body ...

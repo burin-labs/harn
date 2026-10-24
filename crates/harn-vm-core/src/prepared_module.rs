@@ -15,6 +15,7 @@ use quick_cache::sync::{Cache, GuardResult};
 use quick_cache::{DefaultHashBuilder, Lifecycle, UnitWeighter};
 
 use crate::chunk::{Chunk, CompiledFunction};
+use crate::compiler::TypeSchemaInitializer;
 use crate::context_manifest::{ContextManifest, ManifestCheck};
 use crate::module_artifact::{
     compile_embedded_stdlib_module_artifact_from_source_with_context,
@@ -42,7 +43,7 @@ mod graph_tests;
 pub(crate) struct PreparedModuleArtifact {
     pub(crate) provenance: ModuleProvenance,
     pub(crate) imports: Vec<ModuleImportSpec>,
-    pub(crate) type_schema_init_chunks: Vec<Arc<Chunk>>,
+    pub(crate) type_schema_init_chunks: Vec<TypeSchemaInitializer<Arc<Chunk>>>,
     pub(crate) init_chunk: Option<Arc<Chunk>>,
     pub(crate) functions: BTreeMap<String, Arc<CompiledFunction>>,
     pub(crate) public_exports: BTreeMap<String, DefKind>,
@@ -66,7 +67,7 @@ impl PreparedModuleArtifact {
         } = artifact;
         let type_schema_init_chunks = type_schema_init_chunks
             .into_iter()
-            .map(|chunk| Arc::new(Chunk::from_cached(chunk)))
+            .map(|init| init.map_chunk(|chunk| Arc::new(Chunk::from_cached(chunk))))
             .collect();
         let init_chunk = init_chunk.map(|chunk| Arc::new(Chunk::from_cached(chunk)));
         let functions = functions
@@ -1182,7 +1183,7 @@ pub fn answer(items: list<string>) {
         let schema_init_codes = artifact
             .type_schema_init_chunks
             .iter()
-            .map(|chunk| chunk.code.as_ptr())
+            .map(|init| init.chunk.code.as_ptr())
             .collect::<Vec<_>>();
         let (function_key, function) = artifact.functions.first_key_value().unwrap();
         let function_key = function_key.as_ptr();
@@ -1218,7 +1219,7 @@ pub fn answer(items: list<string>) {
             hydrated
                 .type_schema_init_chunks
                 .iter()
-                .map(|chunk| chunk.code.as_ptr())
+                .map(|init| init.chunk.code.as_ptr())
                 .collect::<Vec<_>>(),
             schema_init_codes
         );

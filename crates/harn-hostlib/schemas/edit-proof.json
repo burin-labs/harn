@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/edit-proof.json",
+  "title": "Bounded evidence over compared edit images",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "harn.edit_proof.v1" },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "site_kind": { "enum": ["edits", "line_regions", "references"] },
+          "site_count": { "type": "integer", "minimum": 0 },
+          "sites": {
+            "type": "array", "maxItems": 12,
+            "items": {
+              "type": "object",
+              "properties": {
+                "before_line": { "type": "integer", "minimum": 1, "description": "One-based LF-delimited line; CRLF is one ending and bare CR is source content." },
+                "after_line": { "type": "integer", "minimum": 1, "description": "One-based LF-delimited line; CRLF is one ending and bare CR is source content." },
+                "before": { "type": "string", "maxLength": 180 },
+                "after": { "type": "string", "maxLength": 180 }
+              },
+              "required": ["before_line", "after_line", "before", "after"],
+              "additionalProperties": false
+            }
+          },
+          "omitted_sites": { "type": "integer", "minimum": 0 },
+          "syntax": {
+            "type": "object",
+            "properties": {
+              "status": { "enum": ["passed", "failed", "unavailable", "not_run"] },
+              "engine": { "enum": ["", "tree_sitter"] },
+              "detail": { "type": "string" }
+            },
+            "required": ["status", "engine", "detail"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["path", "site_kind", "site_count", "sites", "omitted_sites", "syntax"],
+        "additionalProperties": false
+      }
+    },
+    "file_count": { "type": "integer", "minimum": 0 },
+    "site_count": { "type": "integer", "minimum": 0 },
+    "preserved": {
+      "type": "object",
+      "properties": {
+        "status": { "enum": ["checked", "unavailable"] },
+        "site_count": { "type": ["integer", "null"], "minimum": 0 },
+        "sites": {
+          "type": "array", "maxItems": 12,
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "line": { "type": "integer", "minimum": 1, "description": "One-based LF-delimited line; CRLF is one ending and bare CR is source content." },
+              "text": { "type": "string", "maxLength": 180 },
+              "reason": { "type": "string" }
+            },
+            "required": ["path", "line", "text", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "omitted_sites": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["status", "site_count", "sites", "omitted_sites"],
+      "additionalProperties": false
+    },
+    "semantics": {
+      "type": "object",
+      "properties": {
+        "status": { "enum": ["not_run", "passed", "failed", "timed_out", "unsupported"] },
+        "engine": { "type": "string" },
+        "elapsed_ms": { "type": ["integer", "null"], "minimum": 0 },
+        "detail": { "type": "string" }
+      },
+      "required": ["status", "engine", "elapsed_ms", "detail"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["schema", "files", "file_count", "site_count", "preserved", "semantics"],
+  "additionalProperties": false
+}

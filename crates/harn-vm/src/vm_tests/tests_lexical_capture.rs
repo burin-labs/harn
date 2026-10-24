@@ -40,10 +40,9 @@ fn shadowed_loop_bindings_preserve_let_to_const_semantics() {
     );
 }
 
-#[test]
-fn inherited_pipeline_binding_is_captured_by_child_closure() {
-    let (output, _) = run_harn(
-        r"pipeline base(harness: Harness, task: unknown) {
+#[rstest::rstest]
+#[case::inherited_pipeline_binding_is_captured_by_child_closure(
+    r"pipeline base(harness: Harness, task: unknown) {
 let value = 1
 }
 pipeline default(harness: Harness, task: unknown) extends base {
@@ -51,15 +50,10 @@ const read = { -> value }
 value = value + 1
 harness.stdio.log(read())
 }",
-    );
-
-    assert_eq!(output.trim_end(), "[harn] 2");
-}
-
-#[test]
-fn reassigned_callable_is_observed_by_reference() {
-    let (output, _) = run_harn(
-        r#"pipeline default(harness: Harness, task: unknown) {
+    "[harn] 2"
+)]
+#[case::reassigned_callable_is_observed_by_reference(
+    r#"pipeline default(harness: Harness, task: unknown) {
 let callable = { -> "outer" }
 if true {
 let callable = { -> "before" }
@@ -70,15 +64,10 @@ harness.stdio.log(invoke() + "|" + callable())
 }
 harness.stdio.log(callable())
 }"#,
-    );
-
-    assert_eq!(output.trim_end(), "[harn] after|after\n[harn] outer");
-}
-
-#[test]
-fn environment_backed_captures_preserve_collection_write_paths() {
-    let (output, _) = run_harn(
-        r#"pipeline default(harness: Harness, task: unknown) {
+    "[harn] after|after\n[harn] outer"
+)]
+#[case::environment_backed_captures_preserve_collection_write_paths(
+    r#"pipeline default(harness: Harness, task: unknown) {
 let items = ["outer"]
 let record = {value: "outer", extra: "outer"}
 if true {
@@ -92,32 +81,19 @@ harness.stdio.log(read())
 }
 harness.stdio.log(items.join("") + "|" + record.value + "|" + record.extra)
 }"#,
-    );
-
-    assert_eq!(
-        output.trim_end(),
-        "[harn] ab|after|ok\n[harn] outer|outer|outer"
-    );
-}
-
-#[test]
-fn pipeline_before_later_module_binding_captures_shared_cell() {
-    let (output, _) = run_harn(
-        r"pipeline default(harness: Harness, task: unknown) {
+    "[harn] ab|after|ok\n[harn] outer|outer|outer"
+)]
+#[case::pipeline_before_later_module_binding_captures_shared_cell(
+    r"pipeline default(harness: Harness, task: unknown) {
 const increment = { -> counter = counter + 1 }
 increment()
 harness.stdio.log(counter)
 }
 let counter = 0",
-    );
-
-    assert_eq!(output.trim_end(), "[harn] 1");
-}
-
-#[test]
-fn reassigned_callable_in_match_pattern_is_observed_by_reference() {
-    let (output, _) = run_harn(
-        r#"pipeline default(harness: Harness, task: unknown) {
+    "[harn] 1"
+)]
+#[case::reassigned_callable_in_match_pattern_is_observed_by_reference(
+    r#"pipeline default(harness: Harness, task: unknown) {
 let callable = { value -> "before" }
 let argument = "before"
 const classify = { ->
@@ -130,15 +106,10 @@ callable = { value -> value }
 argument = "after"
 harness.stdio.log(classify())
 }"#,
-    );
-
-    assert_eq!(output.trim_end(), "[harn] matched");
-}
-
-#[test]
-fn reassigned_method_receiver_in_match_pattern_is_observed_by_reference() {
-    let (output, _) = run_harn(
-        r#"pipeline default(harness: Harness, task: unknown) {
+    "[harn] matched"
+)]
+#[case::reassigned_method_receiver_in_match_pattern_is_observed_by_reference(
+    r#"pipeline default(harness: Harness, task: unknown) {
 let values = ["before"]
 const classify = { ->
     match "after" {
@@ -149,15 +120,10 @@ const classify = { ->
 values = ["after"]
 harness.stdio.log(classify())
 }"#,
-    );
-
-    assert_eq!(output.trim_end(), "[harn] matched");
-}
-
-#[test]
-fn reassigned_outer_binding_in_parameter_default_is_observed_by_reference() {
-    let (output, _) = run_harn(
-        r#"pipeline default(harness: Harness, task: unknown) {
+    "[harn] matched"
+)]
+#[case::reassigned_outer_binding_in_parameter_default_is_observed_by_reference(
+    r#"pipeline default(harness: Harness, task: unknown) {
 let value = "before"
 fn read(value = value) {
     return value
@@ -165,9 +131,114 @@ fn read(value = value) {
 value = "after"
 harness.stdio.log(read())
 }"#,
-    );
-
-    assert_eq!(output.trim_end(), "[harn] after");
+    "[harn] after"
+)]
+#[case::captured_builtin_reference_shadows_same_named_builtin_for_all_call_positions(
+    r#"fn local_tail(value) {
+    const len = to_int
+    return len(value)
+}
+pipeline default(harness: Harness, task: unknown) {
+const len = to_int
+const ordinary = { value -> len(value) }
+const tail = { value -> return len(value) }
+harness.stdio.log("${ordinary("42")}|${tail("43")}|${local_tail("44")}")
+}"#,
+    "[harn] 42|43|44"
+)]
+#[case::loaded_builtin_reference_is_not_resolved_by_name_again(
+    r#"pipeline default(harness: Harness, task: unknown) {
+const convert = to_int
+const to_int = 7
+const spread = { args -> convert(...args) }
+harness.stdio.log("${convert("42")}|${spread(["43"])}")
+}"#,
+    "[harn] 42|43"
+)]
+#[case::lexical_binding_shadows_special_runtime_name(
+    r#"pipeline default(harness: Harness, task: unknown) {
+const cancel = to_int
+const ordinary = { value -> cancel(value) }
+const tail = { value -> return cancel(value) }
+harness.stdio.log("${ordinary("42")}|${tail("43")}")
+}"#,
+    "[harn] 42|43"
+)]
+#[case::return_spread_calls_use_the_regular_spread_dispatcher(
+    r#"fn add3(first, second, third) {
+    return first + second + third
+}
+fn invoke(callable, args) {
+    return callable(...args)
+}
+fn largest(args) {
+    return max(...args)
+}
+pipeline default(harness: Harness, task: unknown) {
+    harness.stdio.log("${invoke(add3, [1, 2, 3])}|${largest([4, 9, 5])}")
+}"#,
+    "[harn] 6|9"
+)]
+#[case::nested_enum_does_not_make_outer_bare_pattern_ambiguous(
+    r"enum Outer {
+    Shared(value)
+}
+fn nested_declaration() {
+    enum Inner {
+        Shared(value)
+    }
+    return Inner.Shared(2)
+}
+pipeline default(harness: Harness, task: unknown) {
+    match Outer.Shared(1) {
+        Shared(value) -> { harness.stdio.log(value) }
+    }
+}",
+    "[harn] 1"
+)]
+#[case::duplicate_pipeline_enums_shadow_in_source_order(
+    r"pipeline default(harness: Harness, task: unknown) {
+    enum Event { First(value) }
+    match Event.First(1) {
+        First(value) -> { harness.stdio.log(value) }
+    }
+    enum Event { Second(value) }
+}",
+    "[harn] 1"
+)]
+#[case::inherited_pipeline_enum_does_not_change_child_catalog(
+    r"pipeline base(harness: Harness, task: unknown) {
+    enum Event { Base(value) }
+}
+pipeline default(harness: Harness, task: unknown) extends base {
+    match Event.Child(1) {
+        Child(value) -> { harness.stdio.log(value) }
+    }
+    enum Event { Child(value) }
+}",
+    "[harn] 1"
+)]
+#[case::inherited_pipeline_enum_does_not_change_child_capture_analysis(
+    r"fn Candidate(value) { return value }
+pipeline base(harness: Harness, task: unknown) {
+    enum Event { Candidate(value) }
+}
+pipeline default(harness: Harness, task: unknown) extends base {
+    let seed = 1
+    match 1 {
+        Candidate(seed) -> {
+            const read = { -> seed }
+            seed = 2
+            harness.stdio.log(read())
+        }
+    }
+    enum Event { Other(value) }
+}",
+    "[harn] 2"
+)]
+fn output_run_harn(#[case] source: &str, #[case] expected: &str) {
+    let (output, _) = run_harn(source);
+    assert_eq!(output.trim_end(), expected);
 }
 
 #[test]
@@ -194,52 +265,6 @@ pipeline default(harness: Harness, task: unknown) {
 }
 
 #[test]
-fn captured_builtin_reference_shadows_same_named_builtin_for_all_call_positions() {
-    let (output, _) = run_harn(
-        r#"fn local_tail(value) {
-    const len = to_int
-    return len(value)
-}
-pipeline default(harness: Harness, task: unknown) {
-const len = to_int
-const ordinary = { value -> len(value) }
-const tail = { value -> return len(value) }
-harness.stdio.log("${ordinary("42")}|${tail("43")}|${local_tail("44")}")
-}"#,
-    );
-
-    assert_eq!(output.trim_end(), "[harn] 42|43|44");
-}
-
-#[test]
-fn loaded_builtin_reference_is_not_resolved_by_name_again() {
-    let (output, _) = run_harn(
-        r#"pipeline default(harness: Harness, task: unknown) {
-const convert = to_int
-const to_int = 7
-const spread = { args -> convert(...args) }
-harness.stdio.log("${convert("42")}|${spread(["43"])}")
-}"#,
-    );
-
-    assert_eq!(output.trim_end(), "[harn] 42|43");
-}
-
-#[test]
-fn lexical_binding_shadows_special_runtime_name() {
-    let (output, _) = run_harn(
-        r#"pipeline default(harness: Harness, task: unknown) {
-const cancel = to_int
-const ordinary = { value -> cancel(value) }
-const tail = { value -> return cancel(value) }
-harness.stdio.log("${ordinary("42")}|${tail("43")}")
-}"#,
-    );
-
-    assert_eq!(output.trim_end(), "[harn] 42|43");
-}
-
-#[test]
 fn captured_non_callable_shadows_same_named_builtin() {
     let error = run_harn_result_display_with_options(
         r#"pipeline default(harness: Harness, task: unknown) {
@@ -252,101 +277,4 @@ invoke()
     .expect_err("the captured integer must not fall through to builtin len");
 
     assert!(error.contains("Cannot call 7"), "unexpected error: {error}");
-}
-
-#[test]
-fn return_spread_calls_use_the_regular_spread_dispatcher() {
-    let (output, _) = run_harn(
-        r#"fn add3(first, second, third) {
-    return first + second + third
-}
-fn invoke(callable, args) {
-    return callable(...args)
-}
-fn largest(args) {
-    return max(...args)
-}
-pipeline default(harness: Harness, task: unknown) {
-    harness.stdio.log("${invoke(add3, [1, 2, 3])}|${largest([4, 9, 5])}")
-}"#,
-    );
-
-    assert_eq!(output.trim_end(), "[harn] 6|9");
-}
-
-#[test]
-fn nested_enum_does_not_make_outer_bare_pattern_ambiguous() {
-    let (output, _) = run_harn(
-        r"enum Outer {
-    Shared(value)
-}
-fn nested_declaration() {
-    enum Inner {
-        Shared(value)
-    }
-    return Inner.Shared(2)
-}
-pipeline default(harness: Harness, task: unknown) {
-    match Outer.Shared(1) {
-        Shared(value) -> { harness.stdio.log(value) }
-    }
-}",
-    );
-
-    assert_eq!(output.trim_end(), "[harn] 1");
-}
-
-#[test]
-fn duplicate_pipeline_enums_shadow_in_source_order() {
-    let (output, _) = run_harn(
-        r"pipeline default(harness: Harness, task: unknown) {
-    enum Event { First(value) }
-    match Event.First(1) {
-        First(value) -> { harness.stdio.log(value) }
-    }
-    enum Event { Second(value) }
-}",
-    );
-
-    assert_eq!(output.trim_end(), "[harn] 1");
-}
-
-#[test]
-fn inherited_pipeline_enum_does_not_change_child_catalog() {
-    let (output, _) = run_harn(
-        r"pipeline base(harness: Harness, task: unknown) {
-    enum Event { Base(value) }
-}
-pipeline default(harness: Harness, task: unknown) extends base {
-    match Event.Child(1) {
-        Child(value) -> { harness.stdio.log(value) }
-    }
-    enum Event { Child(value) }
-}",
-    );
-
-    assert_eq!(output.trim_end(), "[harn] 1");
-}
-
-#[test]
-fn inherited_pipeline_enum_does_not_change_child_capture_analysis() {
-    let (output, _) = run_harn(
-        r"fn Candidate(value) { return value }
-pipeline base(harness: Harness, task: unknown) {
-    enum Event { Candidate(value) }
-}
-pipeline default(harness: Harness, task: unknown) extends base {
-    let seed = 1
-    match 1 {
-        Candidate(seed) -> {
-            const read = { -> seed }
-            seed = 2
-            harness.stdio.log(read())
-        }
-    }
-    enum Event { Other(value) }
-}",
-    );
-
-    assert_eq!(output.trim_end(), "[harn] 2");
 }

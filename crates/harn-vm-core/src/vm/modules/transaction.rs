@@ -1,5 +1,27 @@
 use super::*;
 
+/// Import bindings that settle after the complete module graph is available.
+#[derive(Clone, Debug)]
+pub(crate) struct DeferredCyclicImport {
+    pub(crate) importer: PathBuf,
+    pub(crate) target: PathBuf,
+    pub(crate) selected_names: Option<Vec<String>>,
+    pub(crate) namespace: Option<DeferredNamespaceImport>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct DeferredNamespaceImport {
+    pub(crate) alias: String,
+    pub(crate) members: Option<Vec<String>>,
+    pub(crate) binding: NamespaceImportBinding,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NamespaceImportBinding {
+    Deferred,
+    Projected,
+}
+
 impl Vm {
     /// Call a module export while preserving the caller's lexical bindings.
     /// Module initialization commits through the same transaction as imports.
@@ -65,17 +87,15 @@ impl Vm {
     }
 
     /// Resolve all deferred cycle bindings as one atomic state update.
-    pub(super) fn flush_deferred_cyclic_imports(&mut self) -> Result<(), VmError> {
+    pub(super) async fn flush_deferred_cyclic_imports(&mut self) -> Result<(), VmError> {
         if self.deferred_cyclic_imports.is_empty() {
             return Ok(());
         }
         let deferred = std::mem::take(&mut self.deferred_cyclic_imports);
         let mut still_pending = Vec::new();
-        let mut staged_states: BTreeMap<PathBuf, (crate::value::ModuleState, VmEnv)> =
-            BTreeMap::new();
+        let mut imports = Vec::new();
+        let mut staged_states: BTreeMap<PathBuf, VmEnv> = BTreeMap::new();
         for import in deferred {
-            let allow_sibling =
-                harn_modules::sibling_module_access(&import.importer, &import.target);
             let (Some(importer), Some(target)) = (
                 self.module_cache.get(&import.importer).cloned(),
                 self.module_cache.get(&import.target).cloned(),
@@ -84,62 +104,126 @@ impl Vm {
                 continue;
             };
 
-            let (_, module_state) =
-                staged_states
-                    .entry(import.importer.clone())
-                    .or_insert_with(|| {
-                        let state = Arc::clone(&importer._module_state);
-                        let env = state.lock().clone();
-                        (state, env)
-                    });
-            if let Some(alias) = &import.namespace_alias {
-                if module_state.get(alias).is_none() {
-                    let dict = build_namespace_dict(
-                        &import.target.display().to_string(),
-                        &target,
-                        import.namespace_members.as_deref(),
-                        allow_sibling,
-                    )?;
-                    module_state.define(alias, dict, false)?;
-                }
-                continue;
-            }
-
-            let export_names = module_import_names(
-                &import.target.display().to_string(),
-                &target,
-                import.selected_names.as_deref(),
-                ImportNameUse::Binding,
-                allow_sibling,
-            )?;
-            for name in export_names {
-                if module_state.get(&name).is_some() {
-                    continue;
-                }
-                if let Some(closure) = target.functions.get(&name) {
-                    module_state.define(&name, VmValue::Closure(Arc::clone(closure)), false)?;
-                } else if let Some(value) = target.public_values.get(&name) {
-                    module_state.define(&name, value.clone(), false)?;
-                } else if target
-                    .public_exports
-                    .get(&name)
-                    .or_else(|| target.sibling_exports.get(&name))
-                    .is_some_and(|kind| !kind.has_runtime_value())
-                {
-                    continue;
-                } else {
-                    return Err(VmError::Runtime(format!(
-                        "Import error: '{name}' is not defined in {}",
-                        import.target.display()
-                    )));
-                }
-            }
+            staged_states
+                .entry(import.importer.clone())
+                .or_insert_with(|| importer._module_state.lock().clone());
+            staged_states
+                .entry(import.target.clone())
+                .or_insert_with(|| target._module_state.lock().clone());
+            imports.push(import);
         }
 
-        for (_, (state, staged_env)) in staged_states {
-            *state.lock() = staged_env;
+        // Each pass only adds bindings. Opaque type-only aliases add none, so
+        // they reach the same fixed point without becoming permissive schemas.
+        loop {
+            let before = self.initialized_schema_count(&staged_states);
+            let mut bound_import = false;
+            for import in imports.iter().filter(|import| import.namespace.is_none()) {
+                let target = self.module_cache.get(&import.target).unwrap();
+                let names = module_import_names(
+                    &import.target.display().to_string(),
+                    target,
+                    import.selected_names.as_deref(),
+                    ImportNameUse::Binding,
+                    harn_modules::sibling_module_access(&import.importer, &import.target),
+                )?;
+                for name in names {
+                    if staged_states[&import.importer].get(&name).is_some() {
+                        continue;
+                    }
+                    let schema = target
+                        .public_type_names
+                        .contains(&name)
+                        .then(|| staged_states[&import.target].get(&name))
+                        .flatten();
+                    let value = target
+                        .functions
+                        .get(&name)
+                        .map(|closure| VmValue::Closure(Arc::clone(closure)))
+                        .or_else(|| target.public_values.get(&name).cloned())
+                        .or(schema);
+                    if let Some(value) = value {
+                        staged_states
+                            .get_mut(&import.importer)
+                            .unwrap()
+                            .define(&name, value, false)?;
+                        bound_import = true;
+                    } else if target
+                        .public_exports
+                        .get(&name)
+                        .or_else(|| target.sibling_exports.get(&name))
+                        .is_none_or(|kind| kind.has_runtime_value())
+                    {
+                        return Err(VmError::Runtime(format!(
+                            "Import error: '{name}' is not defined in {}",
+                            import.target.display()
+                        )));
+                    }
+                }
+            }
+            let paths: Vec<_> = staged_states.keys().cloned().collect();
+            for path in paths {
+                let loaded = Arc::clone(&self.module_cache[&path]);
+                let env = staged_states.remove(&path).unwrap();
+                let saved_source =
+                    std::mem::replace(&mut self.source_dir, path.parent().map(Path::to_path_buf));
+                let result = self
+                    .run_module_initializers(env, &loaded.type_schema_initializers, None)
+                    .await;
+                self.source_dir = saved_source;
+                staged_states.insert(path, result?);
+            }
+            if !bound_import && self.initialized_schema_count(&staged_states) == before {
+                break;
+            }
+        }
+        // Namespace dictionaries are projected after the schema bindings settle.
+        let mut namespace_scopes = HashSet::new();
+        for import in imports.iter().filter(|import| import.namespace.is_some()) {
+            let namespace = import.namespace.as_ref().unwrap();
+            let alias = &namespace.alias;
+            if namespace.binding == NamespaceImportBinding::Deferred
+                && staged_states[&import.importer].contains(alias)
+            {
+                return Err(VmError::Runtime(format!(
+                    "Import collision: '{alias}' is already defined when importing {}. \
+                     Use a different namespace alias: import * as <name> from \"...\"",
+                    import.target.display()
+                )));
+            }
+            {
+                let target = &self.module_cache[&import.target];
+                let dict = build_namespace_dict_with_state(
+                    &import.target.display().to_string(),
+                    target,
+                    namespace.members.as_deref(),
+                    harn_modules::sibling_module_access(&import.importer, &import.target),
+                    &staged_states[&import.target],
+                )?;
+                let env = staged_states.get_mut(&import.importer).unwrap();
+                if namespace_scopes.insert(import.importer.clone()) {
+                    env.push_scope();
+                }
+                env.define(alias, dict, false)?;
+            }
+        }
+        for (path, env) in staged_states {
+            *self.module_cache[&path]._module_state.lock() = env;
         }
         self.deferred_cyclic_imports = still_pending;
         Ok(())
+    }
+
+    fn initialized_schema_count(&self, states: &BTreeMap<PathBuf, VmEnv>) -> usize {
+        states
+            .iter()
+            .map(|(path, env)| {
+                self.module_cache[path]
+                    .type_schema_initializers
+                    .iter()
+                    .filter(|init| env.contains(&init.name))
+                    .count()
+            })
+            .sum()
     }
 }

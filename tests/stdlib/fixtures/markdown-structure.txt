@@ -1,0 +1,36 @@
+---
+title: Hidden frontmatter
+---
+
+# Café **guide** `code`
+
+Read the [manual](./manual_(v2).md) and [guide][GUIDE].
+![Badge][ICON]
+
+[guide]: ./guide.md
+[icon]: ./badge.png
+
+````markdown
+# Fake heading
+```sh
+[Fake link](./missing-fence.md)
+```
+Code sentinel.
+````
+
+Use `[fake](./missing-inline.md)` carefully.
+
+| Name | Value |
+| --- | --- |
+| Table sentinel | 42 |
+
+<!-- Comment sentinel. -->
+
+<span>Visible HTML.</span>
+
+# Repeat
+# Repeat-1
+# Repeat
+
+Another
+-------

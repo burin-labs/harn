@@ -225,7 +225,7 @@ fn query_scope_filter_restricts_results() {
         )]),
     );
 
-    let scope_value = VmValue::list(vec![VmValue::string("src")]);
+    let scope_value = VmValue::strings(["src"]);
     let response = call(
         &registry,
         "hostlib_code_index_query",

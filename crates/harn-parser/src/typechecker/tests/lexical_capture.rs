@@ -59,10 +59,9 @@ fn module_skill_and_eval_pack_bindings_keep_forward_references() {
     }
 }
 
-#[test]
-fn enum_payload_closure_reassignment_does_not_poison_outer_narrowing() {
-    let errs = errors(
-        r#"enum Option<T> {
+#[rstest::rstest]
+#[case::enum_payload_closure_reassignment_does_not_poison_outer_narrowing(
+    r#"enum Option<T> {
   Some(value: T),
   None
 }
@@ -80,11 +79,45 @@ fn f(value: Option<string>) {
     let narrowed: string = pin
   }
 }"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "enum payload reassignment poisoned outer narrowing: {errs:?}"
-    );
+    true
+)]
+#[case::nested_enum_is_absent_from_outer_bare_variant_catalog(
+    r"enum Outer { Shared(value: int) }
+fn nested_declaration() {
+  enum Inner { Shared(value: int) }
+}
+pipeline default(task) {
+  match Outer.Shared(1) {
+    Shared(payload) -> { log(payload) }
+  }
+}",
+    true
+)]
+#[case::duplicate_pipeline_enums_shadow_in_source_order(
+    r"pipeline default(task) {
+  enum Event { First(value: int) }
+  match Event.First(1) {
+    First(payload) -> { log(payload) }
+  }
+  enum Event { Second(value: int) }
+}",
+    true
+)]
+#[case::inherited_pipeline_enum_does_not_change_child_catalog(
+    r"pipeline base(task) {
+  enum Event { Base(value: int) }
+}
+pipeline default(task) extends base {
+  match Event.Child(1) {
+    Child(payload) -> { log(payload) }
+  }
+  enum Event { Child(value: int) }
+}",
+    true
+)]
+fn diagnostics_errors(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
 }
 
 #[test]
@@ -168,58 +201,6 @@ fn inspect(value: First) -> int {
         errs.iter()
             .any(|err| err.contains("variant `Shared` is declared by enums First, Second")),
         "typechecker must reject the same ambiguity as codegen: {errs:?}"
-    );
-}
-
-#[test]
-fn nested_enum_is_absent_from_outer_bare_variant_catalog() {
-    let errs = errors(
-        r"enum Outer { Shared(value: int) }
-fn nested_declaration() {
-  enum Inner { Shared(value: int) }
-}
-pipeline default(task) {
-  match Outer.Shared(1) {
-    Shared(payload) -> { log(payload) }
-  }
-}",
-    );
-    assert!(
-        errs.is_empty(),
-        "nested enum leaked into outer scope: {errs:?}"
-    );
-}
-
-#[test]
-fn duplicate_pipeline_enums_shadow_in_source_order() {
-    let errs = errors(
-        r"pipeline default(task) {
-  enum Event { First(value: int) }
-  match Event.First(1) {
-    First(payload) -> { log(payload) }
-  }
-  enum Event { Second(value: int) }
-}",
-    );
-    assert!(errs.is_empty(), "pipeline enum shadowing drifted: {errs:?}");
-}
-
-#[test]
-fn inherited_pipeline_enum_does_not_change_child_catalog() {
-    let errs = errors(
-        r"pipeline base(task) {
-  enum Event { Base(value: int) }
-}
-pipeline default(task) extends base {
-  match Event.Child(1) {
-    Child(payload) -> { log(payload) }
-  }
-  enum Event { Child(value: int) }
-}",
-    );
-    assert!(
-        errs.is_empty(),
-        "parent enum changed child catalog: {errs:?}"
     );
 }
 

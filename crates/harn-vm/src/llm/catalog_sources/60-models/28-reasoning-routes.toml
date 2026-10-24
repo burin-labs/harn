@@ -41,6 +41,7 @@ strengths = ["coding", "reasoning", "tool_use", "long_context"]
 [models."accounts/fireworks/models/inkling"]
 name = "Inkling (Fireworks)"
 provider = "fireworks"
+deprecation_note = "Fireworks retires this serverless route 2026-11-07 and recommends Muse Spark Open on its US endpoint (regional premium waived). Dedicated deployments and Reserved Throughput are unaffected. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
 context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "vision"]
 tier = "frontier"

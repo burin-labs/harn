@@ -52,13 +52,29 @@ fn accepts_string_literal_in_union() {
     assert!(errs.is_empty(), "a member literal must pass: {errs:?}");
 }
 
-#[test]
-fn accepts_inline_union_member_without_alias() {
-    let errs = errors(
-        r#"pub fn f(p: "a" | "b") -> string { return p }
+#[rstest::rstest]
+#[case::accepts_inline_union_member_without_alias(
+    r#"pub fn f(p: "a" | "b") -> string { return p }
 pub fn g() -> string { return f("a") }"#,
-    );
-    assert!(errs.is_empty(), "{errs:?}");
+    true
+)]
+#[case::accepts_int_literal_in_union(
+    r"type Level = 1 | 2 | 3
+pub fn at(l: Level) -> int { return l }
+pub fn g() -> int { return at(2) }",
+    true
+)]
+// `"a" | "b" | string` accepts any string at runtime (the VM does not
+// build an enum schema for a mixed union), so a non-listed literal is
+// legal and must not be flagged.
+#[case::does_not_fire_on_mixed_union_with_open_string(
+    r#"pub fn f(p: "a" | "b" | string) -> string { return p }
+pub fn g() -> string { return f("c") }"#,
+    true
+)]
+fn diagnostics_errors(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
 }
 
 #[test]
@@ -83,16 +99,6 @@ pub fn g() -> int { return at(4) }",
 }
 
 #[test]
-fn accepts_int_literal_in_union() {
-    let errs = errors(
-        r"type Level = 1 | 2 | 3
-pub fn at(l: Level) -> int { return l }
-pub fn g() -> int { return at(2) }",
-    );
-    assert!(errs.is_empty(), "{errs:?}");
-}
-
-#[test]
 fn preserves_gradual_concession_for_runtime_valued_string() {
     // A `string`-typed *variable* (value unknown at check time) still flows
     // into a literal-union slot — this is the deliberate gradual concession
@@ -105,18 +111,6 @@ fn preserves_gradual_concession_for_runtime_valued_string() {
         errs.is_empty(),
         "runtime-valued string must keep flowing into a literal union: {errs:?}"
     );
-}
-
-#[test]
-fn does_not_fire_on_mixed_union_with_open_string() {
-    // `"a" | "b" | string` accepts any string at runtime (the VM does not
-    // build an enum schema for a mixed union), so a non-listed literal is
-    // legal and must not be flagged.
-    let errs = errors(
-        r#"pub fn f(p: "a" | "b" | string) -> string { return p }
-pub fn g() -> string { return f("c") }"#,
-    );
-    assert!(errs.is_empty(), "mixed union must not fire: {errs:?}");
 }
 
 #[test]

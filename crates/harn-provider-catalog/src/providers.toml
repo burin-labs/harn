@@ -5706,6 +5706,7 @@ strengths = ["coding", "reasoning", "tool_use", "long_context"]
 [models."accounts/fireworks/models/inkling"]
 name = "Inkling (Fireworks)"
 provider = "fireworks"
+deprecation_note = "Fireworks retires this serverless route 2026-11-07 and recommends Muse Spark Open on its US endpoint (regional premium waived). Dedicated deployments and Reserved Throughput are unaffected. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
 context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "vision"]
 tier = "frontier"
@@ -7231,6 +7232,10 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "vision"]
 [models."accounts/fireworks/models/gpt-oss-120b"]
 name = "GPT-OSS 120B (Fireworks)"
 provider = "fireworks"
+# A structured sunset requires deprecated=true, which excludes this current
+# Balanced default from active selectors. Record the notice now; retire the
+# serverless row together with the separately measured default cutover.
+deprecation_note = "Fireworks retires this serverless route 2026-11-07; dedicated deployments and Reserved Throughput are unaffected. The official migration is a dedicated GPT-OSS 120B deployment, not another token-billed model. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
 context_window = 131072
 logical_model = "openai-gpt-oss-120b"
 equivalence_group = "openai-gpt-oss-120b"
@@ -7384,6 +7389,7 @@ strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "visi
 [models."accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"]
 name = "Nemotron 3.5 Lightning 30B A3B (Fireworks)"
 provider = "fireworks"
+deprecation_note = "Fireworks retires this serverless route 2026-11-07 and recommends a dedicated Nemotron Super VL deployment. Dedicated deployments and Reserved Throughput are unaffected. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
 availability = "dedicated"
 context_window = 262144
 logical_model = "nemotron-3.5-lightning-30b-a3b"
@@ -7955,9 +7961,18 @@ strengths = ["speed", "cheap", "tool_use", "reasoning"]
 # Both had carried `deprecated = true` since 2026-06-20 and both are still
 # absent from https://api.sambanova.ai/v1/models (observed 2026-09-20). Nothing
 # in 20-routing, 30-aliases, 40-defaults or 62-ladders referenced either row.
+# Authenticated customer notice received 2026-10-23: SambaCloud retires
+# DeepSeek-V3.1 and V3.2 on 2026-11-03, then Llama 3.3 on 2026-11-17.
+# V3.1 has no catalog row to annotate. The public deprecation record still
+# ends at 2026-10-01 (read 2026-10-23):
+# https://docs.sambanova.ai/docs/en/models/deprecations
+# Keep future retirements in notes: sunset_date requires deprecated=true,
+# which excludes a route from active selectors immediately. These notes do
+# not enforce a timed dispatch cutoff or establish deployed configuration.
 [models."sambanova/DeepSeek-V3.2"]
 name = "DeepSeek V3.2 (SambaNova)"
 provider = "sambanova"
+deprecation_note = "SambaNova's authenticated customer notice received 2026-10-23 retires this SambaCloud route on 2026-11-03; cutoff time and timezone are unspecified. SambaStack and SambaManaged remain available. The public record https://docs.sambanova.ai/docs/en/models/deprecations does not yet include this notice (read 2026-10-23)."
 wire_model = "DeepSeek-V3.2"
 logical_model = "deepseek-v3.2"
 equivalence_group = "deepseek-v3.2"
@@ -7994,6 +8009,7 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen",
 [models."sambanova/MiniMax-M3"]
 name = "MiniMax M3 (SambaNova)"
 provider = "sambanova"
+deprecation_note = "SambaNova's authenticated customer notice received 2026-10-23 announces an undated upgrade that will automatically route MiniMax-M3 requests to MiniMax-M3.1-Flash, but separately recommends MiniMax-M3.1 when live. Exact replacement wire identity and activation date remain unverified; preserve this row's M3 identity. The public roster https://docs.sambanova.ai/docs/en/models/sambacloud-models still lists MiniMax-M3 (read 2026-10-23)."
 wire_model = "MiniMax-M3"
 logical_model = "minimax-m3"
 equivalence_group = "minimax-m3"
@@ -8041,6 +8057,7 @@ strengths = ["speed", "vision", "reasoning", "coding", "cheap"]
 [models."sambanova/Meta-Llama-3.3-70B-Instruct"]
 name = "Llama 3.3 70B Instruct (SambaNova)"
 provider = "sambanova"
+deprecation_note = "SambaNova's authenticated customer notice received 2026-10-23 retires this SambaCloud route on 2026-11-17; cutoff time and timezone are unspecified. SambaStack and SambaManaged remain available. The public record https://docs.sambanova.ai/docs/en/models/deprecations does not yet include this notice (read 2026-10-23)."
 wire_model = "Meta-Llama-3.3-70B-Instruct"
 logical_model = "llama-3.3-70b-instruct"
 equivalence_group = "llama-3.3-70b-instruct"

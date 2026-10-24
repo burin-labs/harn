@@ -195,10 +195,7 @@ mod tests {
         ));
 
         let mut owned = crate::value::DictMap::new();
-        owned.insert(
-            crate::value::intern_key("provider_call_count"),
-            VmValue::Int(7),
-        );
+        owned.put_int("provider_call_count", 7);
         let kept = stamp_thrown_terminal(VmError::Thrown(VmValue::dict(owned)), &ledger);
         let VmError::Thrown(VmValue::Dict(dict)) = kept else {
             panic!("dict terminal survives stamping");
@@ -208,10 +205,7 @@ mod tests {
             Some(VmValue::Int(7))
         ));
 
-        let text = stamp_thrown_terminal(
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from("plain"))),
-            &ledger,
-        );
+        let text = stamp_thrown_terminal(VmError::Thrown(VmValue::string("plain")), &ledger);
         assert!(matches!(text, VmError::Thrown(VmValue::String(_))));
     }
 

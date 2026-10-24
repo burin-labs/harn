@@ -367,6 +367,7 @@ Same as `harness.llm.call`, plus additional options:
 | `reasoning_task` | string | inferred | Task hint for `reasoning_policy: "auto"`: `chat`, `agent`, `code`, `verify`, or `summarize` |
 | `tool_retries` | int | `0` | Number of retry attempts for failed tool calls |
 | `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |
+| `tool_result_max_chars` | int | `64000` | Size budget for each tool result the model sees, applied after PostToolUse hooks. A larger result is written in full to an owner-only file in the workspace temp dir (`.harn-tmp/tool-results/<session>/`, self-ignored by git and readable by the agent's file tools), removed when the loop ends or the session closes, and the model gets a head/tail/diagnostic excerpt ending in a notice with the original size and that path. The result records `tool_output_truncated`, `dropped_bytes`, `original_size`, `final_size`, and `full_output_path`. `0` disables the budget; values below `1024` are raised to `1024` |
 | `max_concurrent_tools` | int | `1` | Maximum in-flight tool calls inside one independent effect phase from a planner turn. Results are recorded in emitted order even when calls complete out of order |
 | `intra_turn_resource_fail_fast` | bool | `true` | When an annotated mutating tool call fails, skip later sibling calls in the same assistant response that target the same declared path resource. Set `false` only for legacy dispatch-all behavior |
 | `prefetch_next_turn` | bool | `false` | Start the next planner turn after tool results are recorded while local/custom audit receipt sinks flush in the background. The loop drains those flushes before returning |
@@ -1351,8 +1352,10 @@ thrown loop error, the propagated error retains both causes.
 `AgentLoopTerminalCallbackFailure` record carries `cause.terminal_error` and
 `cause.callback_error`. `AgentLoopProtocolFailure` identifies an empty provider
 request refused before dispatch. `AgentLoopFailure` combines those records
-with `AgentLoopCancelledFailure` and the loop's string errors. Misspelled or
-missing record fields fail checking.
+with `AgentLoopCancelledFailure`, `AgentLoopClassifierConfigFailure`, and the
+loop's string errors. Invalid missing-tool-call classifier settings retain
+their configuration code, field, and offending value in that error channel.
+Misspelled or missing record fields fail checking.
 
 ### Example with retry
 

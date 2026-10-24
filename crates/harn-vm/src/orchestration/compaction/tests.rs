@@ -316,3 +316,91 @@ fn no_pins_preserves_prior_clamp_behavior() {
     assert!(content.len() < big_len, "unpinned output clamped as before");
     assert!(content.len() < 2000, "clamped near tool_output_max_chars");
 }
+
+/// Harn records native results as `role: "tool_result"` (string or block
+/// content) and text-channel results as framed `user` strings. All of them
+/// clamp; a person's own message of the same size does not.
+#[test]
+fn clamp_rewrites_harn_tool_result_shapes_but_not_a_person_message() {
+    let big = "z".repeat(4000);
+    let framed = format!("[result of read_file]\n{big}\n[end of read_file result]\n");
+    let person = format!("Please review this log:\n{big}");
+    let typed_frame = format!("[result of pasted]\n{big}\n[end of pasted result]\n");
+    let mut messages = vec![
+        serde_json::json!({"role": "user", "content": "old task"}),
+        serde_json::json!({"role": "assistant", "content": "old reply"}),
+        serde_json::json!({"role": "user", "content": "new task"}),
+        serde_json::json!({
+            "role": "assistant",
+            "content": "calling tools",
+            "tool_calls": [
+                {"id": "native", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+                {"id": "blocks", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+            ],
+        }),
+        serde_json::json!({"role": "tool_result", "tool_call_id": "native", "name": "read_file", "content": big}),
+        serde_json::json!({
+            "role": "tool_result",
+            "tool_call_id": "blocks",
+            "name": "read_file",
+            "content": [{"type": "text", "text": big}],
+        }),
+        serde_json::json!({"role": "assistant", "content": "calling read_file in text"}),
+        serde_json::json!({"role": "user", "content": framed, "_harn": {"kind": "tool_result"}}),
+        serde_json::json!({"role": "user", "content": person}),
+        serde_json::json!({"role": "user", "content": typed_frame}),
+    ];
+    let config = AutoCompactConfig {
+        token_threshold: 1,
+        keep_last: 8,
+        tool_output_max_chars: 500,
+        ..Default::default()
+    };
+    let runtime = crate::test_support::current_thread_runtime();
+    runtime
+        .block_on(auto_compact_messages(&mut messages, &config, None))
+        .expect("compaction succeeds")
+        .expect("compaction triggers");
+
+    let native = messages
+        .iter()
+        .find(|m| m["tool_call_id"] == "native")
+        .expect("native result kept");
+    assert!(native["content"].as_str().expect("string").len() < 2000);
+    let blocks = messages
+        .iter()
+        .find(|m| m["tool_call_id"] == "blocks")
+        .expect("block result kept");
+    assert!(
+        blocks["content"][0]["text"]
+            .as_str()
+            .expect("text block")
+            .len()
+            < 2000
+    );
+    let text_channel = messages
+        .iter()
+        .find(|m| {
+            m["content"]
+                .as_str()
+                .is_some_and(|c| c.starts_with("[result of read_file]"))
+        })
+        .expect("text-channel result kept");
+    assert!(text_channel["content"].as_str().expect("string").len() < 2000);
+    let kept_person = messages
+        .iter()
+        .find(|m| {
+            m["content"]
+                .as_str()
+                .is_some_and(|c| c.starts_with("Please review"))
+        })
+        .expect("person message kept");
+    assert_eq!(
+        kept_person["content"].as_str().map(str::len),
+        Some(person.len())
+    );
+    // A person who types the frame is still a person; only `_harn` facts mark a result.
+    assert!(messages
+        .iter()
+        .any(|m| m["content"].as_str() == Some(typed_frame.as_str())));
+}

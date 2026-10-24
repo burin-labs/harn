@@ -1,0 +1,5 @@
+import { git_tools } from "std/git"
+
+fn main(harness: Harness) {
+  git_tools(harness.process, nil, {names: {git_status: 42}})
+}

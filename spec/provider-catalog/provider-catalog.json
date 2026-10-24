@@ -10921,7 +10921,8 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "Fireworks retires this serverless route 2026-11-07; dedicated deployments and Reserved Throughput are unaffected. The official migration is a dedicated GPT-OSS 120B deployment, not another token-billed model. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -11009,7 +11010,8 @@
         ]
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "Fireworks retires this serverless route 2026-11-07 and recommends Muse Spark Open on its US endpoint (regional premium waived). Dedicated deployments and Reserved Throughput are unaffected. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -11685,7 +11687,8 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "Fireworks retires this serverless route 2026-11-07 and recommends a dedicated Nemotron Super VL deployment. Dedicated deployments and Reserved Throughput are unaffected. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
       },
       "availability": "dedicated",
       "quality_tags": [],
@@ -35473,7 +35476,8 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "SambaNova's authenticated customer notice received 2026-10-23 retires this SambaCloud route on 2026-11-03; cutoff time and timezone are unspecified. SambaStack and SambaManaged remain available. The public record https://docs.sambanova.ai/docs/en/models/deprecations does not yet include this notice (read 2026-10-23)."
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -35563,7 +35567,8 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "SambaNova's authenticated customer notice received 2026-10-23 retires this SambaCloud route on 2026-11-17; cutoff time and timezone are unspecified. SambaStack and SambaManaged remain available. The public record https://docs.sambanova.ai/docs/en/models/deprecations does not yet include this notice (read 2026-10-23)."
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -35750,7 +35755,8 @@
         "cache_write_per_mtok": 0.0
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "SambaNova's authenticated customer notice received 2026-10-23 announces an undated upgrade that will automatically route MiniMax-M3 requests to MiniMax-M3.1-Flash, but separately recommends MiniMax-M3.1 when live. Exact replacement wire identity and activation date remain unverified; preserve this row's M3 identity. The public roster https://docs.sambanova.ai/docs/en/models/sambacloud-models still lists MiniMax-M3 (read 2026-10-23)."
       },
       "availability": "serverless",
       "quality_tags": [],

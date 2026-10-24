@@ -94,6 +94,7 @@ pub fn __loop_dispatch_options(turn_opts: any, session_id: any, cap: int) -> dic
     // must be named here; `DISPATCH_OPTION_KEYS` in the VM pins this list.
     tool_retries: turn_opts?.tool_retries,
     tool_backoff_ms: turn_opts?.tool_backoff_ms,
+    tool_result_max_chars: turn_opts?.tool_result_max_chars,
     model: turn_opts?.model,
     provider: turn_opts?.provider,
     run_id: turn_opts?.run_id,

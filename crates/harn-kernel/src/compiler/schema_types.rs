@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use harn_parser::{substitute_type_expr, Node, SNode, ShapeField, TypeExpr};
 
@@ -27,7 +27,37 @@ const MAX_SCHEMA_ALIAS_NEST: usize = 128;
 /// never wrong, and the emitted size is bounded at every site.
 const SCHEMA_FRAGMENT_NODE_BUDGET: usize = 4096;
 
+/// A schema projection is available only when its lexical schema inputs exist.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct TypeSchemaInitializer<C> {
+    pub name: String,
+    pub required_bindings: Vec<String>,
+    pub chunk: C,
+}
+
+impl<C> TypeSchemaInitializer<C> {
+    pub fn map_chunk<T>(self, map: impl FnOnce(C) -> T) -> TypeSchemaInitializer<T> {
+        TypeSchemaInitializer {
+            name: self.name,
+            required_bindings: self.required_bindings,
+            chunk: map(self.chunk),
+        }
+    }
+}
+
 impl SchemaFragment {
+    fn required_bindings(&self) -> BTreeSet<String> {
+        match self {
+            Self::Value(_) => BTreeSet::new(),
+            Self::Ref(name) => BTreeSet::from([name.clone()]),
+            Self::Apply { name, args } => std::iter::once(name.clone())
+                .chain(args.iter().flat_map(Self::required_bindings))
+                .collect(),
+            Self::Dict(entries) => entries.values().flat_map(Self::required_bindings).collect(),
+            Self::List(items) => items.iter().flat_map(Self::required_bindings).collect(),
+        }
+    }
+
     /// A position that constrains nothing.
     ///
     /// The validator dispatches on which keys a schema carries, so a schema
@@ -209,7 +239,7 @@ impl Compiler {
     pub fn compile_public_type_schema_initializers(
         program: &[SNode],
         source_file: Option<String>,
-    ) -> Result<Vec<Chunk>, CompileError> {
+    ) -> Result<Vec<TypeSchemaInitializer<Chunk>>, CompileError> {
         Self::new().compile_type_schema_initializers(program, source_file, None)
     }
 
@@ -220,7 +250,7 @@ impl Compiler {
         program: &[SNode],
         source_file: Option<String>,
         selected_names: Option<&std::collections::BTreeSet<String>>,
-    ) -> Result<Vec<Chunk>, CompileError> {
+    ) -> Result<Vec<TypeSchemaInitializer<Chunk>>, CompileError> {
         Self::new().compile_type_schema_initializers(program, source_file, selected_names)
     }
 
@@ -231,7 +261,7 @@ impl Compiler {
         program: &[SNode],
         source_file: Option<String>,
         selected_names: Option<&std::collections::BTreeSet<String>>,
-    ) -> Result<Vec<Chunk>, CompileError> {
+    ) -> Result<Vec<TypeSchemaInitializer<Chunk>>, CompileError> {
         let compiler = &mut self;
         compiler.collect_type_aliases(program);
         let mut chunks = Vec::new();
@@ -248,9 +278,14 @@ impl Compiler {
             compiler.chunk = Chunk::new();
             compiler.string_constants.clear();
             compiler.chunk.source_file.clone_from(&source_file);
-            if compiler.emit_schema_for_alias(name)
-                || compiler.emit_generic_schema_factory(name, source_file.clone())?
-            {
+            let required = if let Some(fragment) = compiler.schema_fragment_for_alias(name) {
+                let required = fragment.required_bindings().into_iter().collect();
+                compiler.emit_schema_fragment(&fragment);
+                Some(required)
+            } else {
+                compiler.emit_generic_schema_factory(name, source_file.clone())?
+            };
+            if let Some(required_bindings) = required {
                 compiler.emit_define_binding(name, false);
                 compiler.chunk.emit(Op::Nil, compiler.line);
                 compiler.chunk.emit(Op::Return, compiler.line);
@@ -259,7 +294,11 @@ impl Compiler {
                     &format!("the public type-schema initializer for `{name}`"),
                     compiler.line,
                 )?;
-                chunks.push(std::mem::take(&mut compiler.chunk));
+                chunks.push(TypeSchemaInitializer {
+                    name: name.clone(),
+                    required_bindings,
+                    chunk: std::mem::take(&mut compiler.chunk),
+                });
             }
         }
         Ok(chunks)
@@ -560,15 +599,15 @@ impl Compiler {
         &mut self,
         name: &str,
         source_file: Option<String>,
-    ) -> Result<bool, super::CompileError> {
+    ) -> Result<Option<Vec<String>>, super::CompileError> {
         let Some(alias) = self.type_aliases.get(name).cloned() else {
-            return Ok(false);
+            return Ok(None);
         };
         let Some(body) = alias.body else {
-            return Ok(false);
+            return Ok(None);
         };
         if alias.type_params.is_empty() || alias.type_params.len() > u8::MAX as usize {
-            return Ok(false);
+            return Ok(None);
         }
         let params = alias
             .type_params
@@ -590,9 +629,15 @@ impl Compiler {
         let Some(fragment) =
             compiler.schema_fragment_for_type(&body, &mut vec![TypeExpr::Named(name.to_string())])
         else {
-            return Ok(false);
+            return Ok(None);
         };
-        compiler.emit_schema_fragment(&fragment.bounded());
+        let fragment = fragment.bounded();
+        let required_bindings = fragment
+            .required_bindings()
+            .into_iter()
+            .filter(|name| !params.iter().any(|param| param.name == *name))
+            .collect();
+        compiler.emit_schema_fragment(&fragment);
         compiler.chunk.emit(Op::Return, self.line);
         compiler.chunk.source_file = source_file;
         super::ensure_chunk_addressable(
@@ -615,6 +660,6 @@ impl Compiler {
         let index = self.chunk.functions.len();
         self.chunk.functions.push(std::sync::Arc::new(function));
         self.chunk.emit_u16(Op::Closure, index as u16, self.line);
-        Ok(true)
+        Ok(Some(required_bindings))
     }
 }

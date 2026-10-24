@@ -5,15 +5,19 @@
 //! Shared model records, configuration, and merge policy live in
 //! [`harn_provider_catalog::config`]. This adapter owns [`loading`] of ambient overlays, model
 //! [`taxonomy`] + provider inference, the [`catalog`] query surface, selector
-//! [`resolution`], and complementary-[`reviewer`] selection.
+//! [`resolution`], complementary-[`reviewer`] selection, and escalation-target
+//! selection.
 
 mod catalog;
+mod escalation;
 mod loading;
 mod provider_def;
 mod resolution;
 mod reviewer;
 mod taxonomy;
 
+#[cfg(test)]
+mod escalation_tests;
 #[cfg(test)]
 mod logical_defaults_tests;
 #[cfg(test)]
@@ -28,6 +32,7 @@ mod tests;
 mod tool_format_fitness_tests;
 
 pub use catalog::*;
+pub use escalation::*;
 pub use harn_provider_catalog::config::*;
 pub use loading::*;
 pub use provider_def::*;

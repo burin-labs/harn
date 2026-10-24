@@ -756,7 +756,17 @@ error naming the function and caller location.
 
 ## harn test
 
-Run tests.
+Run tests. A test or file fixture that returns `Err` fails, including errors
+propagated with `?`. `Ok` and other return values pass when no assertion fails.
+
+Directory scans select `.harn` files, honor `.gitignore` and `.agentignore`, and
+skip generated files and runtime state such as `.harn`, `target`, and
+`node_modules`. Hidden source
+folders such as `.github` and ordinary `vendor` folders remain eligible.
+Explicit file paths remain selectable regardless of extension, and directory
+roots remain selectable even when a root scan would exclude them. The summary
+counts source files from the same inventory captured for execution, including
+helpers that declare no tests.
 
 ```bash
 harn test conformance                  # run conformance test suite
@@ -1028,6 +1038,7 @@ fixtures.
 ```bash
 harn bench main.harn
 harn bench main.harn --iterations 25
+harn bench main.harn --iterations 25 --output bench.json
 harn bench main.harn --iterations 25 --profile-json bench.json
 harn bench portable reducer.harn --entry reduce --input event.json --threads 4 --json
 harn bench replay --json --output replay-benchmark.json
@@ -1037,7 +1048,9 @@ harn bench replay conformance/replay-oracle/fixtures --filter approval --json
 `harn bench` parses and compiles the file once, executes it with a fresh VM for
 each iteration, and reports wall time plus aggregated LLM token, call, and cost
 metrics. The wall-time rollup includes min, mean, p50, p95, max, stddev, and
-total. `--profile` prints the aggregate categorical timing rollup; `--profile-json`
+total. `--output <path>` writes the iteration samples and timing statistics as
+JSON without enabling profiling. A failed output write fails the command.
+`--profile` prints the aggregate categorical timing rollup; `--profile-json`
 writes a JSON report with `iterations[]`, `mean_ms`, `p50_ms`, `p95_ms`,
 `stddev_ms`, and `rollup`. `HARN_PROFILE=1` and `HARN_PROFILE_JSON=<path>` work
 as environment aliases.
@@ -1317,7 +1330,8 @@ writing and exits non-zero on drift — wire it into CI. See
 
 ## harn fmt
 
-Format `.harn` source files. Accepts files or directories.
+Format `.harn` and `.harn.txt` source files. Accepts files or directories.
+Prompt files such as `.harn.prompt` are excluded.
 
 ```bash
 harn fmt main.harn
@@ -4652,9 +4666,10 @@ harn package artifacts check vendor/manifest.json
 harn package artifacts check vendor/manifest.json --json
 ```
 
-`manifest` prints (or writes) the protocol-artifact manifest the running
-Harn binary would emit — the same JSON that `make gen-protocol-artifacts`
-ships under `spec/protocol-artifacts/manifest.json`. `check` compares a
+`manifest` prints (or writes) the protocol manifest compiled into the running
+Harn binary. It works from any directory and needs no source checkout or
+network access. `make gen-protocol-artifacts` owns the compiled source at
+`spec/protocol-artifacts/manifest.json`. `check` compares a
 vendored copy of that manifest against the running Harn and reports any
 drift. Hosts that vendor Harn protocol bindings (IDE hosts, cloud platforms,
 custom integrators) call `check` from CI to detect when a Harn bump

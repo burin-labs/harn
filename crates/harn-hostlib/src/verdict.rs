@@ -309,10 +309,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n";
         let mut req = DictMap::new();
         req.put_str("cwd", cwd.to_string_lossy());
         if let Some(argv) = argv {
-            req.put(
-                "argv",
-                VmValue::List(Arc::new(argv.into_iter().map(VmValue::string).collect())),
-            );
+            req.put("argv", VmValue::strings(argv));
         }
         req.put_opt_str("filter", filter);
         crate::tools::run_test::handle(&[VmValue::dict_map(req)]).expect("run_test ok")

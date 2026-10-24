@@ -79,11 +79,8 @@ jobs:
       - uses: ./.github/actions/free-disk-space
       - name: Install mold linker
         if: matrix.install_mold
-        uses: ./.github/actions/apt-install
+        uses: ./.github/actions/install-mold
         timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - id: rust-cache
         uses: ./.github/actions/rust-cache

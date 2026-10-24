@@ -107,13 +107,18 @@ fn exited_unreaped(_pid: u32) -> bool {
     false
 }
 
+/// Return an opaque native birth identity, or `None` if it cannot be measured.
+pub fn process_identity(pid: u32) -> Option<u64> {
+    native_process_identity(pid)
+}
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
-pub(crate) fn process_identity(pid: u32) -> Option<u64> {
+fn native_process_identity(pid: u32) -> Option<u64> {
     proc_stat_fields(pid)?.get(19)?.parse().ok()
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-pub(crate) fn process_identity(pid: u32) -> Option<u64> {
+fn native_process_identity(pid: u32) -> Option<u64> {
     let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
     let size = std::mem::size_of::<libc::proc_bsdinfo>();
     let written = unsafe {
@@ -148,7 +153,7 @@ fn fold_bsd_start_time(tv_sec: u64, tv_usec: u64) -> u64 {
 }
 
 #[cfg(windows)]
-pub(crate) fn process_identity(pid: u32) -> Option<u64> {
+fn native_process_identity(pid: u32) -> Option<u64> {
     use std::ffi::c_void;
 
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
@@ -194,7 +199,7 @@ pub(crate) fn process_identity(pid: u32) -> Option<u64> {
     target_os = "ios",
     windows
 )))]
-pub(crate) fn process_identity(pid: u32) -> Option<u64> {
+fn native_process_identity(pid: u32) -> Option<u64> {
     let _ = pid;
     None
 }

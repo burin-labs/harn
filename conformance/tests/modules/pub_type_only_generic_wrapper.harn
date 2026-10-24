@@ -1,0 +1,17 @@
+import { Answer, Box } from "./pub_type_only_generic_owner"
+
+pub type AnswerInt = Answer<int>
+
+pub type Nested = {answer: AnswerInt}
+
+pub type Generic<T> = {answer: Answer<T>}
+
+pub type Good = Box<int>
+
+pub fn answer() -> AnswerInt {
+  return Ok(1)
+}
+
+pub fn failure() -> AnswerInt {
+  return Err({code: "expected"})
+}

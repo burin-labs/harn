@@ -1,11 +1,4 @@
-/// Construct a fresh current-thread runtime with timers and IO enabled.
-#[track_caller]
-pub(crate) fn current_thread_runtime() -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("test runtime builds")
-}
+pub(crate) use harn_clock::test_support::current_thread_runtime;
 
 #[cfg(test)]
 mod tests {

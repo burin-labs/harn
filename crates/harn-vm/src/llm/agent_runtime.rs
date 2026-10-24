@@ -401,6 +401,8 @@ pub(crate) fn register_session_close_hook(hook: SessionCloseHook) -> SessionClos
 }
 
 pub(crate) fn fire_session_close_hooks(session_id: &str) {
+    // A terminal loop exit often leaves its session open, so spills go here.
+    crate::llm::agent_host_primitives::tool_result_budget::release_session(session_id);
     let hooks = SESSION_CLOSE_HOOKS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)

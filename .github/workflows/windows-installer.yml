@@ -1,0 +1,31 @@
+name: Windows installer
+
+on:
+  pull_request:
+    paths:
+      - install.ps1
+      - scripts/tests/windows-installer.ps1
+      - .github/workflows/windows-installer.yml
+  push:
+    branches: [main]
+    paths:
+      - install.ps1
+      - scripts/tests/windows-installer.ps1
+      - .github/workflows/windows-installer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Install the published Windows CLI and retain its licenses
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Exercise the real installer and reject an incomplete archive
+        shell: pwsh
+        run: ./scripts/tests/windows-installer.ps1

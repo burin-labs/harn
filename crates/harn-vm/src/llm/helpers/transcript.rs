@@ -451,7 +451,12 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
         .get("role")
         .map(|v| v.display())
         .unwrap_or_else(|| "user".to_string());
-    let blocks = normalize_message_blocks(dict.get("content"), &role);
+    // Text-channel results ride as `user` messages; they are still tool output.
+    use harn_orchestration::tool_messages::{is_tool_output_message, is_tool_result_role};
+    let tool_output = is_tool_result_role(&role)
+        || (role == "user" && is_tool_output_message(&vm_value_to_json(message)));
+    let block_role = if tool_output { "tool_result" } else { &role };
+    let blocks = normalize_message_blocks(dict.get("content"), block_role);
     let text = render_blocks_text(&blocks);
     if matches!(dict.get(DIRECTIVE_IDS_KEY), Some(VmValue::List(ids)) if !ids.is_empty()) {
         // The transport role can be user, but this entire frame belongs to
@@ -463,12 +468,8 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
         // inspect blocks independently, including multi-tool narration.
         return transcript_event("message", &role, "internal", &text, None);
     }
-    let visibility = overall_visibility(&blocks, default_visibility_for_role(&role));
-    let kind = if matches!(role.as_str(), "tool" | "tool_result") {
-        "tool_result"
-    } else {
-        "message"
-    };
+    let visibility = overall_visibility(&blocks, default_visibility_for_role(block_role));
+    let kind = if tool_output { block_role } else { "message" };
     let mut event = BTreeMap::new();
     event.put_str("id", uuid::Uuid::now_v7().to_string());
     event.put_str("kind", kind);
@@ -1114,6 +1115,27 @@ mod tests {
                 "{role} results must use the canonical tool_result event"
             );
         }
+    }
+
+    #[test]
+    fn text_channel_results_are_internal_tool_result_events() {
+        let event = |content: &str, recorded: bool| {
+            let mut message = serde_json::json!({"role": "user", "content": content});
+            if recorded {
+                message["_harn"] = serde_json::json!({"kind": "tool_result"});
+            }
+            let event = transcript_event_from_message(&crate::schema::json_to_vm_value(&message));
+            let field = |key: &str| event.as_dict().unwrap()[key].display();
+            (field("kind"), field("visibility"))
+        };
+        let text = "[result of read_file]\nsecret file text\n[end of read_file result]\n";
+        assert_eq!(event(text, true), ("tool_result".into(), "internal".into()));
+        assert_eq!(
+            event(text, false).0,
+            "message",
+            "the frame alone is a person's text"
+        );
+        assert_eq!(event("please read_file", false).0, "message");
     }
 
     #[test]

@@ -112,6 +112,33 @@ class Bar {
 }
 
 #[test]
+fn function_body_filters_by_java_record_container() {
+    let source = r#"
+class Folder {
+  String label() { return "folder"; }
+}
+record TagResponse(String name) {
+  String label() { return "tag"; }
+}
+"#;
+    let registry = ast_registry();
+    let payload = dict(&[
+        ("source", vstring(source)),
+        ("language", vstring("java")),
+        ("function_name", vstring("label")),
+        ("container", vstring("TagResponse")),
+    ]);
+    let result = call(&registry, "hostlib_ast_function_body", payload);
+
+    assert!(extract_bool(&dict_field(&result, "found")));
+    let body = extract_str(&dict_field(&result, "body_text"));
+    assert!(
+        body.contains("\"tag\""),
+        "should match TagResponse.label, got {body:?}"
+    );
+}
+
+#[test]
 fn function_body_extracts_arrow_function_via_lexical_declaration() {
     let source = "const yell = (msg: string) => msg.toUpperCase();\n";
     let registry = ast_registry();

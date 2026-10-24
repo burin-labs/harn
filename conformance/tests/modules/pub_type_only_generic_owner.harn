@@ -1,0 +1,5 @@
+pub type Error = {code: string}
+
+pub type Answer<T> = Result<T, Error>
+
+pub type Box<T> = {value: T}

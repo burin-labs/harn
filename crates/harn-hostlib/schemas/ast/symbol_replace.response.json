@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/symbol_replace.response.json",
   "title": "ast.symbol_replace response",
-  "description": "Tagged-union response for ast.symbol_replace. After splicing in `new_text` and collapsing 3+ blank-line runs, the rewritten source is re-parsed; if tree-sitter reports an ERROR/MISSING node the call returns `syntax_error_after_edit` rather than the rewritten source.",
+  "description": "Tagged-union response for ast.symbol_replace. Declaration replacement preserves bytes outside the declaration and inherits its indentation and local line endings. Multiline token bytes in new_text stay verbatim. The rewritten source is re-parsed; if tree-sitter reports an ERROR/MISSING node the call returns syntax_error_after_edit rather than the rewritten source.",
   "type": "object",
   "properties": {
     "result": {

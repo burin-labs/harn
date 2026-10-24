@@ -5,6 +5,7 @@
   "description": "The shared code_index edit envelope (the `rename_symbol` response shape) plus this operation's refusal tags and fields. `applied` carries the per-file edits and every rewritten call site; with `dry_run` nothing was written, and `applied: false` with `failed_paths_with_reasons` means some writes failed after every plan passed. Every other tag is a refusal that wrote nothing, with the blocking locations in `sites` and the reason in `details`. A request that does not fit the declaration (an unknown `from`, a new parameter without `call_value` or `default`, an unchanged list) raises an invalid-parameter error instead of returning a result.",
   "type": "object",
   "properties": {
+    "proof": { "$ref": "https://harnlang.com/schemas/hostlib/edit-proof.json" },
     "result": {
       "type": "string",
       "enum": [

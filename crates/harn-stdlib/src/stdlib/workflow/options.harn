@@ -1,5 +1,6 @@
 import { StallDiagnostics } from "std/agent/options_types"
 import { pick_keys } from "std/collections"
+import { WorkflowJoinPolicy } from "std/workflow/schedule"
 
 // -------------------------------------------------------------------------------------------------
 
@@ -120,7 +121,7 @@ pub type StageSpec = {
   output_contract?: StageContract,
   branch_semantics?: dict,
   map_policy?: dict,
-  join_policy?: dict,
+  join_policy?: WorkflowJoinPolicy,
   reduce_policy?: dict,
   escalation_policy?: dict,
   verify?: any,

@@ -31,6 +31,7 @@ pub type AgentIterationInfo = {
   thinking_chars: int,
   cost_usd?: float,
   wall_clock_ms?: int,
+  run_usage?: dict,
   ...rest,
 }
 
@@ -467,6 +468,7 @@ pub fn __agent_loop_budget_aggregates(
     usage_unknown_calls: to_int(resolved_totals?.usage_unknown_calls ?? 0) ?? 0,
     wall_clock_ms: __agent_loop_elapsed_ms(clock, loop_start_ms),
   }
+    + __agent_loop_run_usage(agent, session_id)
 }
 
 pub fn __agent_loop_iteration_info(
@@ -485,6 +487,22 @@ pub fn __agent_loop_iteration_info(
     visible_text,
     __agent_loop_budget_aggregates(agent, clock, session_id, totals, loop_start_ms),
   )
+}
+
+/**
+ * The run's complete physical provider ledger so far, including preparation
+ * calls recorded through `with_run`. Absent when the session reports none, so
+ * a host never reads a missing ledger as zero.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_run_usage(agent: HarnessAgent, session_id: any) -> {run_usage?: dict} {
+  const physical = agent_session_totals(agent, session_id)?.physical_usage
+  if physical == nil {
+    return {}
+  }
+  return {run_usage: physical}
 }
 
 pub fn __agent_loop_budget_exhaustion(

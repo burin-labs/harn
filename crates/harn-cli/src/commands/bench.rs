@@ -57,13 +57,19 @@ pub(crate) async fn run(args: BenchArgs) {
                 path,
                 args.iterations,
                 crate::run_profile_options(&args.profile),
+                args.output.as_deref(),
             )
             .await;
         }
     }
 }
 
-pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfileOptions) {
+pub(crate) async fn run_bench(
+    path: &str,
+    iterations: usize,
+    profile: RunProfileOptions,
+    output: Option<&Path>,
+) {
     if iterations == 0 {
         eprintln!("error: `harn bench` requires at least one iteration");
         process::exit(1);
@@ -167,7 +173,12 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
         let wall_time_ms = started_at.elapsed().as_secs_f64() * 1000.0;
 
         match execution_result {
-            Ok(_) => {
+            Ok(value) => {
+                if let Some(error) = crate::commands::run::return_value_error(&value) {
+                    eprint!("{error}");
+                    eprintln!("benchmark aborted on iteration {}", iteration + 1);
+                    process::exit(1);
+                }
                 let (input_tokens, output_tokens, llm_time_ms, call_count) =
                     harn_vm::llm::peek_trace_summary();
                 let run_profile = if profile.is_enabled() {
@@ -208,10 +219,14 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
         render_bench_report(path, &runs, profile.text, aggregate_profile.as_ref())
     );
     if let Some(json_path) = profile.json_path.as_ref() {
-        if let Err(error) =
-            write_bench_profile_json(json_path, path, &runs, aggregate_profile.as_ref())
-        {
+        if let Err(error) = write_bench_json(json_path, path, &runs, aggregate_profile.as_ref()) {
             eprintln!("warning: failed to write benchmark profile: {error}");
+        }
+    }
+    if let Some(json_path) = output {
+        if let Err(error) = write_bench_json(json_path, path, &runs, aggregate_profile.as_ref()) {
+            eprintln!("error: failed to write benchmark results: {error}");
+            process::exit(1);
         }
     }
 }
@@ -292,7 +307,7 @@ struct BenchJsonReport<'a> {
     rollup: Option<&'a harn_vm::profile::RunProfile>,
 }
 
-fn write_bench_profile_json(
+fn write_bench_json(
     json_path: &Path,
     bench_path: &str,
     runs: &[BenchRun],
@@ -318,7 +333,7 @@ fn write_bench_profile_json(
         rollup: aggregate_profile,
     };
     let json = serde_json::to_string_pretty(&report)
-        .map_err(|error| format!("serialize benchmark profile: {error}"))?;
+        .map_err(|error| format!("serialize benchmark results: {error}"))?;
     fs::write(json_path, json).map_err(|error| format!("write {}: {error}", json_path.display()))
 }
 
@@ -571,8 +586,8 @@ Observed interactions: {}
 mod tests {
     use super::{
         bench_stats, read_trace_fixture, render_bench_report, render_replay_benchmark_report,
-        resolve_replay_benchmark_selection, validate_protocol_fixture_refs,
-        write_bench_profile_json, BenchRun,
+        resolve_replay_benchmark_selection, validate_protocol_fixture_refs, write_bench_json,
+        BenchRun,
     };
     use std::path::PathBuf;
 
@@ -659,7 +674,7 @@ mod tests {
         let runs = vec![bench_run(1, 10.0), bench_run(2, 14.0)];
         let rollup = harn_vm::profile::build(&[]);
 
-        write_bench_profile_json(&path, "examples/demo.harn", &runs, Some(&rollup))
+        write_bench_json(&path, "examples/demo.harn", &runs, Some(&rollup))
             .expect("write benchmark profile json");
 
         let value: serde_json::Value =

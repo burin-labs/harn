@@ -25,7 +25,6 @@ use harn_cli::commands::run::{
 use harn_cli::tests::common::{cwd_lock, harn_state_lock};
 use harn_vm::orchestration::{build_harnpack, read_harnpack};
 use tempfile::TempDir;
-use tokio::runtime::Builder;
 
 // Ed25519 test fixture for the pack signing tests. Generated with openssl genpkey
 // on 2026-08-16 solely as a test prop; never used by any real service or account,
@@ -80,59 +79,51 @@ impl HarnpackFixture {
 fn execute(pack_path: &Path, cache_dir: &Path, options: HarnpackRunOptions) -> RunOutcome {
     let pack_path = pack_path.to_path_buf();
     let cache_dir = cache_dir.to_path_buf();
-    Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("tokio current-thread runtime")
-        .block_on(async move {
-            let _env = harn_state_lock::lock_harn_state_async().await;
-            let _cwd = cwd_lock::lock_cwd_async().await;
-            harn_vm::reset_thread_local_state();
-            let prev_cache = std::env::var("HARN_CACHE_DIR").ok();
-            std::env::set_var("HARN_CACHE_DIR", &cache_dir);
-            let outcome = execute_run_with_harnpack_options(
-                &pack_path.to_string_lossy(),
-                false,
-                std::collections::HashSet::new(),
-                Vec::new(),
-                Vec::new(),
-                CliLlmMockMode::Off,
-                None,
-                RunProfileOptions::default(),
-                options,
-            )
-            .await;
-            match prev_cache {
-                Some(value) => std::env::set_var("HARN_CACHE_DIR", value),
-                None => std::env::remove_var("HARN_CACHE_DIR"),
-            }
-            outcome
-        })
+    harn_clock::test_support::current_thread_runtime().block_on(async move {
+        let _env = harn_state_lock::lock_harn_state_async().await;
+        let _cwd = cwd_lock::lock_cwd_async().await;
+        harn_vm::reset_thread_local_state();
+        let prev_cache = std::env::var("HARN_CACHE_DIR").ok();
+        std::env::set_var("HARN_CACHE_DIR", &cache_dir);
+        let outcome = execute_run_with_harnpack_options(
+            &pack_path.to_string_lossy(),
+            false,
+            std::collections::HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+            RunProfileOptions::default(),
+            options,
+        )
+        .await;
+        match prev_cache {
+            Some(value) => std::env::set_var("HARN_CACHE_DIR", value),
+            None => std::env::remove_var("HARN_CACHE_DIR"),
+        }
+        outcome
+    })
 }
 
 fn build_pack(args: &PackArgs) -> pack::PackOutcome {
-    Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("tokio current-thread runtime")
-        .block_on(async {
-            let _cwd_guard = cwd_lock::lock_cwd_async().await;
-            harn_vm::reset_thread_local_state();
-            let build_args = pack::BuildArgs {
-                entrypoint: args
-                    .entrypoint
-                    .clone()
-                    .expect("PackArgs.entrypoint set in tests"),
-                out: args.out.clone(),
-                upgrade: args.upgrade.clone(),
-                sign: args.sign,
-                key: args.key.clone(),
-                unsigned: args.unsigned,
-                exclude_secrets: args.exclude_secrets,
-                json: args.json,
-            };
-            pack::build(&build_args).expect("pack succeeds")
-        })
+    harn_clock::test_support::current_thread_runtime().block_on(async {
+        let _cwd_guard = cwd_lock::lock_cwd_async().await;
+        harn_vm::reset_thread_local_state();
+        let build_args = pack::BuildArgs {
+            entrypoint: args
+                .entrypoint
+                .clone()
+                .expect("PackArgs.entrypoint set in tests"),
+            out: args.out.clone(),
+            upgrade: args.upgrade.clone(),
+            sign: args.sign,
+            key: args.key.clone(),
+            unsigned: args.unsigned,
+            exclude_secrets: args.exclude_secrets,
+            json: args.json,
+        };
+        pack::build(&build_args).expect("pack succeeds")
+    })
 }
 
 #[test]

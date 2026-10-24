@@ -1,6 +1,6 @@
 {
   "corpus": {
-    "digest": "sha256:07ee7a553a1f0c1d3b97dc2c2b467290010f6e83c74befd9a6d01ce94b40bc20",
+    "digest": "sha256:b0fede387af67f2c522d9916b88df02edc58c04c6aef30ca06de53d5b0a637fe",
     "schema_version": 1
   },
   "languages": [
@@ -17,7 +17,7 @@
         "checksum": null,
         "name": "tree-sitter-harn",
         "source": "workspace-path",
-        "version": "0.10.173"
+        "version": "0.10.176"
       }
     },
     {

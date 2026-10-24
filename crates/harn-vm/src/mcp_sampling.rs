@@ -447,7 +447,7 @@ fn build_llm_call_args(
         .unwrap_or(VmValue::Nil);
 
     let args = vec![
-        VmValue::String(arcstr::ArcStr::from("")),
+        VmValue::string(""),
         system_value,
         VmValue::dict(options.clone()),
     ];

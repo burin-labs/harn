@@ -83,23 +83,15 @@ fn allocs_during_execute(source: &str) -> usize {
 fn allocs_during_execute_after(source: &str, after_opening_count: impl FnOnce()) -> usize {
     harn_vm::reset_thread_local_state();
     let chunk = harn_vm::compile_source(source).expect("compile");
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let before = allocs_on_this_thread();
-                after_opening_count();
-                vm.execute(&chunk).await.expect("execute");
-                allocs_on_this_thread() - before
-            })
-            .await
-    })
+    let rt = harn_clock::test_support::current_thread_runtime();
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut vm = harn_vm::new_vm();
+        harn_vm::register_vm_stdlib(&mut vm);
+        let before = allocs_on_this_thread();
+        after_opening_count();
+        vm.execute(&chunk).await.expect("execute");
+        allocs_on_this_thread() - before
+    }))
 }
 
 /// Calls a user `fn` `n` times in an allocation-free loop (lazy `to` range,

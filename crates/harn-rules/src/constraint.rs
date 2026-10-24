@@ -14,7 +14,7 @@ use harn_hostlib::ast::{api, Language};
 use crate::engine::{Binding, ResolvedBinding};
 use crate::error::RulesError;
 use crate::model::{Constraint, ResolvedBindingConstraint};
-use crate::pattern::compile_pattern;
+use crate::pattern::{compile_shaped_pattern, ShapeCheck};
 
 /// A compiled `where` constraint bound to one metavar.
 pub struct CompiledConstraint {
@@ -25,8 +25,15 @@ pub struct CompiledConstraint {
 
 enum Kind {
     Regex(Regex),
-    Comparison { op: CmpOp, value: toml::Value },
-    SubPattern { language: Language, query: Query },
+    Comparison {
+        op: CmpOp,
+        value: toml::Value,
+    },
+    SubPattern {
+        language: Language,
+        query: Query,
+        shape: ShapeCheck,
+    },
     ResolvesTo(ResolvedBindingConstraint),
     Type(String),
 }
@@ -106,11 +113,16 @@ impl CompiledConstraint {
             let ts_language = language
                 .ts_language()
                 .ok_or_else(|| err(format!("grammar for `{}` is unavailable", language.name())))?;
-            let compiled = compile_pattern(snippet, language)
+            let (compiled, shape) = compile_shaped_pattern(snippet, language)
                 .map_err(|m| err(format!("sub-pattern on `{}`: {m}", constraint.metavar)))?;
             let query = Query::new(&ts_language, &compiled.query)
                 .map_err(|e| err(format!("sub-pattern query rejected: {e}")))?;
-            Kind::SubPattern { language, query }
+            let shape = ShapeCheck::new(&query, &shape);
+            Kind::SubPattern {
+                language,
+                query,
+                shape,
+            }
         } else if let Some(resolves_to) = &constraint.resolves_to {
             if default_language != Language::Harn {
                 return Err(err(format!(
@@ -158,13 +170,22 @@ impl CompiledConstraint {
         match &self.kind {
             Kind::Regex(re) => re.is_match(&binding.text),
             Kind::Comparison { op, value } => evaluate_comparison(*op, &binding.text, value),
-            Kind::SubPattern { language, query } => {
+            Kind::SubPattern {
+                language,
+                query,
+                shape,
+            } => {
                 let Ok(tree) = api::parse_tree(&binding.text, *language) else {
                     return false;
                 };
                 let mut cursor = QueryCursor::new();
                 let mut it = cursor.matches(query, tree.root_node(), binding.text.as_bytes());
-                it.next().is_some()
+                while let Some(m) = it.next() {
+                    if shape.admits(m) {
+                        return true;
+                    }
+                }
+                false
             }
             Kind::ResolvesTo(expected) => binding
                 .metadata

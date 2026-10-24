@@ -287,7 +287,7 @@ fn start_watcher(path: PathBuf, running: &mut Vec<(PathBuf, Arc<WatchState>)>) {
 
 fn watch_loop(
     path: PathBuf,
-    reader: rusqlite::Connection,
+    reader: harn_session_store::wal_watch::WatchReader,
     mut last_version: i64,
     stop: Arc<AtomicBool>,
     tx: mpsc::Sender<WatchSignal>,

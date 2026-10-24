@@ -30,12 +30,10 @@ async fn call_harness_root_method(
             }
         },
         "summary" => match args.first() {
-            Some(state) => Ok(VmValue::String(arcstr::ArcStr::from(
-                state_counts(state)?.summary().as_str(),
-            ))),
+            Some(state) => Ok(VmValue::string(state_counts(state)?.summary().as_str())),
             None => {
                 let snapshot = crate::orchestration::unsettled_state_snapshot_async().await;
-                Ok(VmValue::String(arcstr::ArcStr::from(snapshot.summary())))
+                Ok(VmValue::string(snapshot.summary()))
             }
         },
         "resume_subagent" => {
@@ -84,7 +82,7 @@ async fn call_harness_root_method(
         }
         "current_pipeline_id" => Ok(crate::orchestration::current_mutation_session()
             .and_then(|session| session.run_id.or(Some(session.session_id)))
-            .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
+            .map(VmValue::string)
             .unwrap_or(VmValue::Nil)),
         "handoff_to" => Ok(record_handoff_envelope(args)),
         "emit_audit" => {
@@ -181,7 +179,7 @@ async fn call_harness_fs_method(
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
     let path_value = |path: &std::path::Path| {
-        VmValue::String(arcstr::ArcStr::from(path.to_string_lossy().into_owned()))
+        VmValue::string(path.to_string_lossy().into_owned())
     };
     match method {
         "cwd" => {
@@ -448,7 +446,7 @@ async fn call_harness_process_method(
                 .collect::<Result<Vec<_>, _>>()?;
             let mut wire = crate::value::DictMap::new();
             wire.put_str("mode", "argv");
-            wire.put("argv", VmValue::List(std::sync::Arc::new(argv)));
+            wire.put("argv", VmValue::list(argv));
             if let Some(cwd) = cwd {
                 wire.put_str("cwd", cwd);
             }
@@ -540,11 +538,9 @@ async fn call_harness_process_method(
             wire.put_str("mode", "argv");
             wire.insert(
                 crate::value::intern_key("argv"),
-                VmValue::List(std::sync::Arc::new(
-                    std::iter::once(VmValue::String(arcstr::ArcStr::from(program)))
+                VmValue::list(std::iter::once(VmValue::string(program))
                         .chain(command_args)
-                        .collect(),
-                )),
+                        .collect()),
             );
             let ctx = crate::vm::AsyncBuiltinCtx::from_inline_parent(vm);
             crate::stdlib::host::dispatch_host_operation_with_ctx(
@@ -867,9 +863,7 @@ async fn call_testing_capability_method(
                         })
                         .unwrap_or(true)
                 });
-            Ok(VmValue::List(std::sync::Arc::new(
-                fixtures.http_mocks().calls_value(redact_sensitive),
-            )))
+            Ok(VmValue::list(fixtures.http_mocks().calls_value(redact_sensitive)))
         }
         "clock_set" => {
             let unix_ms = args.first().and_then(VmValue::as_int).ok_or_else(|| {
@@ -1032,17 +1026,17 @@ async fn call_testing_capability_method(
                         record.put_str("operation", call.member.clone());
                         record.put_str("method", call.member);
                         record.put("params", call.args.first().cloned().unwrap_or(VmValue::Nil));
-                        record.put("args", VmValue::List(std::sync::Arc::new(call.args)));
+                        record.put("args", VmValue::list(call.args));
                     } else {
                         record.put_str("method", call.member.clone());
                         record.put_str("operation", call.member);
                         record.put("params", call.args.first().cloned().unwrap_or(VmValue::Nil));
-                        record.put("args", VmValue::List(std::sync::Arc::new(call.args)));
+                        record.put("args", VmValue::list(call.args));
                     }
                     VmValue::dict(record)
                 })
                 .collect();
-            Ok(VmValue::List(std::sync::Arc::new(calls)))
+            Ok(VmValue::list(calls))
         }
         _ => Err(method_unsupported(handle, method)),
     }

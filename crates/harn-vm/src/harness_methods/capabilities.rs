@@ -156,6 +156,7 @@ fn call_harness_system_method(
         "temperature" => sys::temperature_snapshot(),
         "platform" => sys::platform_snapshot(),
         "identity" => sys::identity_snapshot(),
+        "parent_process" => sys::parent_process_snapshot(),
         "processes" => sys::processes_snapshot(),
         _ => return Err(method_unsupported(handle, method)),
     };

@@ -252,15 +252,13 @@ impl CapabilityFixtureState {
                 };
                 fixture.map(|fixture| {
                     fixture.result.map_err(|message| {
-                        crate::VmError::Thrown(crate::VmValue::String(arcstr::ArcStr::from(
-                            message,
-                        )))
+                        crate::VmError::Thrown(crate::VmValue::string(message))
                     })
                 })
             }
             None => Some(Err(crate::VmError::Runtime(format!(
                 "no fixture for {capability}.{member} matched arguments {}",
-                crate::VmValue::List(std::sync::Arc::new(args.to_vec())).display()
+                crate::VmValue::list(args.to_vec()).display()
             )))),
         }
     }
@@ -297,7 +295,7 @@ mod fixture_dispatch_tests {
         fixtures.respond(
             "process",
             "exec",
-            Ok(VmValue::String(arcstr::ArcStr::from("legacy-fixture"))),
+            Ok(VmValue::string("legacy-fixture")),
             None,
             None,
             false,
@@ -329,7 +327,7 @@ mod fixture_dispatch_tests {
         fixtures.respond(
             "process",
             "exec",
-            Ok(VmValue::String(arcstr::ArcStr::from("legacy"))),
+            Ok(VmValue::string("legacy")),
             None,
             None,
             false,
@@ -337,7 +335,7 @@ mod fixture_dispatch_tests {
         fixtures.respond(
             "tools",
             "run_command",
-            Ok(VmValue::String(arcstr::ArcStr::from("direct"))),
+            Ok(VmValue::string("direct")),
             None,
             None,
             false,
@@ -369,7 +367,7 @@ mod fixture_dispatch_tests {
         fixtures.respond(
             "dashboard",
             "write_bulletin",
-            Ok(VmValue::String(arcstr::ArcStr::from("pending-review"))),
+            Ok(VmValue::string("pending-review")),
             None,
             None,
             true,

@@ -251,7 +251,6 @@ pub(crate) fn register_calendar_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_parts(timestamp: any, timezone?: string) -> CalendarParts",
     category = "calendar"
 )]
@@ -268,7 +267,6 @@ fn calendar_parts_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_from_local(parts: dict, timezone?: string, disambiguation?: string) -> int | float",
     category = "calendar"
 )]
@@ -288,7 +286,6 @@ fn calendar_from_local_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_boundary(timestamp: any, unit: string, edge: string, timezone?: string) -> int | float",
     category = "calendar"
 )]
@@ -312,7 +309,6 @@ fn calendar_boundary_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_add(timestamp: any, amount: int, unit: string, timezone?: string, disambiguation?: string) -> int | float",
     category = "calendar"
 )]
@@ -333,7 +329,6 @@ fn calendar_add_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_date_range(start: any, end: any, unit: string, timezone?: string, options?: dict) -> list",
     category = "calendar"
 )]
@@ -390,7 +385,6 @@ fn calendar_date_range_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_next_weekday(timestamp: any, weekday: any, direction: string, timezone?: string, include_today?: bool) -> int | float",
     category = "calendar"
 )]
@@ -429,8 +423,8 @@ fn calendar_next_weekday_builtin(args: &[VmValue], _out: &mut String) -> Result<
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "__calendar_countries() -> list", category = "calendar"
+    sig = "__calendar_countries() -> list",
+    category = "calendar"
 )]
 fn calendar_countries_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::list(COUNTRIES.iter().map(country_value).collect()))
@@ -438,7 +432,6 @@ fn calendar_countries_builtin(_args: &[VmValue], _out: &mut String) -> Result<Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_country_info(code: string) -> CalendarCountry | nil",
     category = "calendar"
 )]
@@ -451,7 +444,6 @@ fn calendar_country_info_builtin(args: &[VmValue], _out: &mut String) -> Result<
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_supported_holiday_calendars() -> list",
     category = "calendar"
 )]
@@ -466,7 +458,6 @@ fn calendar_supported_holiday_calendars_builtin(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_holidays(calendar: string?, year: int) -> list",
     category = "calendar"
 )]
@@ -481,7 +472,6 @@ fn calendar_holidays_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_is_holiday(timestamp: any, calendar?: any, timezone?: string) -> bool",
     category = "calendar"
 )]
@@ -494,7 +484,6 @@ fn calendar_is_holiday_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_is_business_day(timestamp: any, calendar?: any, timezone?: string) -> bool",
     category = "calendar"
 )]
@@ -514,7 +503,6 @@ fn calendar_is_business_day_builtin(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_next_business_day(timestamp: any, calendar?: any, timezone?: string, include_today?: bool) -> int | float",
     category = "calendar"
 )]
@@ -559,7 +547,6 @@ fn calendar_next_business_day_builtin(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_add_business_days(timestamp: any, days: int, calendar?: any, timezone?: string) -> int | float",
     category = "calendar"
 )]
@@ -606,7 +593,6 @@ fn calendar_add_business_days_builtin(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_business_days_between(start: any, end: any, calendar?: any, timezone?: string) -> int",
     category = "calendar"
 )]
@@ -650,7 +636,6 @@ fn calendar_business_days_between_builtin(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__calendar_business_window(timestamp: any, calendar?: any, options?: dict, timezone?: string) -> CalendarBusinessWindow",
     category = "calendar"
 )]
@@ -1579,5 +1564,5 @@ fn bool_arg(value: Option<&VmValue>, builtin: &str, label: &str) -> Result<Optio
 }
 
 fn string_list_value<'a>(items: impl IntoIterator<Item = &'a str>) -> VmValue {
-    VmValue::list(items.into_iter().map(VmValue::string).collect())
+    VmValue::strings(items)
 }

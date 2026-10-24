@@ -2,6 +2,8 @@
 
 mod policy;
 mod tool_output;
+pub use crate::tool_messages::is_tool_output_message;
+use crate::tool_messages::is_tool_result_message;
 pub use policy::{
     compaction_policy_metadata_fields, compaction_policy_option_keys,
     compaction_policy_to_vm_value, parse_compaction_policy_options, CompactionPolicy,
@@ -68,11 +70,7 @@ fn estimate_content_chars(value: &serde_json::Value) -> usize {
 }
 
 fn is_reasoning_or_tool_turn_message(message: &serde_json::Value) -> bool {
-    let role = message
-        .get("role")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    role == "tool"
+    is_tool_result_message(message)
         || message.get("tool_calls").is_some()
         || message
             .get("reasoning")
@@ -84,26 +82,6 @@ fn find_prev_user_boundary(messages: &[serde_json::Value], start: usize) -> Opti
     (0..=start)
         .rev()
         .find(|idx| messages[*idx].get("role").and_then(|value| value.as_str()) == Some("user"))
-}
-
-/// True when the message carries a tool result: the OpenAI durable shape
-/// (`role: "tool"`), the Anthropic durable shape (`role: "tool_result"`), or
-/// a user message whose content blocks include a `tool_result`. Text-channel
-/// results are ordinary user strings and intentionally don't match — they
-/// have no provider-level pairing to protect.
-fn is_tool_result_message(message: &serde_json::Value) -> bool {
-    match message.get("role").and_then(|role| role.as_str()) {
-        Some("tool") | Some("tool_result") => true,
-        Some("user") => message
-            .get("content")
-            .and_then(|content| content.as_array())
-            .is_some_and(|blocks| {
-                blocks.iter().any(|block| {
-                    block.get("type").and_then(|value| value.as_str()) == Some("tool_result")
-                })
-            }),
-        _ => false,
-    }
 }
 
 /// A compaction split must never land between an assistant tool-use message

@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use crate::value::VmDictExt as _;
+use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -19,8 +20,11 @@ use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
 use super::stdlib_artifact::stdlib_module_artifact;
 use super::Vm;
 
+mod schemas;
 mod shared_instances;
 mod transaction;
+pub(crate) use transaction::DeferredCyclicImport;
+use transaction::{DeferredNamespaceImport, NamespaceImportBinding};
 mod visibility;
 pub(crate) use shared_instances::SharedModuleInstanceStore;
 pub use visibility::resolve_module_import_path;
@@ -69,10 +73,8 @@ pub(crate) struct LoadedModule {
     /// Evaluated values of exported declarations whose runtime binding is
     /// produced by module initialization, including structs and enums.
     pub(crate) public_values: BTreeMap<String, VmValue>,
-    /// Decoded JSON-Schema dict for each `pub type` alias that lowers to a
-    /// schema. Importers bind the alias name to this value so
-    /// expression-position uses (`output: ImportedAlias`) work.
-    pub(crate) public_type_schemas: BTreeMap<String, VmValue>,
+    pub(crate) public_type_names: HashSet<String>,
+    type_schema_initializers: Vec<crate::compiler::TypeSchemaInitializer<Arc<crate::chunk::Chunk>>>,
     /// Guard under which this filesystem module and its transitive closure were
     /// instantiated. A guarded execution cannot reuse an unguarded module even
     /// when the entry bytes currently match: its closures may retain imports
@@ -90,25 +92,6 @@ pub(crate) struct LoadedModule {
 /// registries/state through a cheap outer [`Arc`] instead of cloning the whole
 /// module.
 pub(crate) type ModuleCache = Arc<BTreeMap<PathBuf, Arc<LoadedModule>>>;
-
-/// An import whose target module was still mid-load (an import cycle) when the
-/// importing module reached it. The target's function closures don't exist yet
-/// at that point, so the binding can't happen inline. We record it here and
-/// resolve it once both modules are fully loaded — see
-/// [`Vm::flush_deferred_cyclic_imports`].
-#[derive(Clone, Debug)]
-pub(crate) struct DeferredCyclicImport {
-    /// Canonical path of the module that issued the import.
-    pub(crate) importer: PathBuf,
-    /// Canonical path of the cyclically-imported target module.
-    pub(crate) target: PathBuf,
-    /// Selectively-imported names, or `None` for a wildcard/side-effect import.
-    pub(crate) selected_names: Option<Vec<String>>,
-    /// When set, bind a namespace dict under this alias instead of flattening.
-    pub(crate) namespace_alias: Option<String>,
-    /// Statically demanded namespace members, or `None` for the whole namespace.
-    pub(crate) namespace_members: Option<Vec<String>>,
-}
 
 #[derive(Clone, Copy)]
 enum ImportProjection<'a> {
@@ -187,11 +170,24 @@ fn build_namespace_dict(
     members: Option<&[String]>,
     allow_sibling: bool,
 ) -> Result<VmValue, VmError> {
+    build_namespace_dict_with_state(
+        module_path,
+        loaded,
+        members,
+        allow_sibling,
+        &loaded._module_state.lock(),
+    )
+}
+
+fn build_namespace_dict_with_state(
+    module_path: &str,
+    loaded: &LoadedModule,
+    members: Option<&[String]>,
+    allow_sibling: bool,
+    state: &VmEnv,
+) -> Result<VmValue, VmError> {
     let mut map = BTreeMap::new();
-    map.insert(
-        "_namespace".to_string(),
-        VmValue::String(arcstr::ArcStr::from(module_path)),
-    );
+    map.put_str("_namespace", module_path);
     let names = module_import_names(
         module_path,
         loaded,
@@ -207,8 +203,13 @@ fn build_namespace_dict(
             .expect("module_import_names validates the visible export contract");
         if !kind.has_runtime_value() {
             // Still project schema-capable type aliases when present.
-            if let Some(schema) = loaded.public_type_schemas.get(&name) {
-                map.insert(name, schema.clone());
+            if let Some(schema) = loaded
+                .public_type_names
+                .contains(&name)
+                .then(|| state.get(&name))
+                .flatten()
+            {
+                map.insert(name, schema);
             }
             continue;
         }
@@ -216,8 +217,13 @@ fn build_namespace_dict(
             map.insert(name, value.clone());
             continue;
         }
-        if let Some(schema) = loaded.public_type_schemas.get(&name) {
-            map.insert(name, schema.clone());
+        if let Some(schema) = loaded
+            .public_type_names
+            .contains(&name)
+            .then(|| state.get(&name))
+            .flatten()
+        {
+            map.insert(name, schema);
             continue;
         }
         if let Some(closure) = loaded.functions.get(&name) {
@@ -483,7 +489,7 @@ impl Vm {
         }
         self.record_module_loaded();
         if self.imported_paths.is_empty() {
-            self.flush_deferred_cyclic_imports()?;
+            self.flush_deferred_cyclic_imports().await?;
         }
         Ok(loaded)
     }
@@ -560,22 +566,25 @@ impl Vm {
     /// those functions resolve against the originating file), and
     /// applies the re-export pass. Used by both stdlib and user-import
     /// code paths.
-    async fn instantiate_module(
-        &mut self,
+    fn instantiate_module<'a>(
+        &'a mut self,
         module_source_dir: Option<PathBuf>,
-        artifact: &PreparedModuleArtifact,
-    ) -> Result<LoadedModule, VmError> {
-        let caller_env = self.env.clone();
-        let old_source_dir = self.source_dir.clone();
-        self.env = VmEnv::new();
-        self.source_dir = module_source_dir.clone();
+        artifact: &'a PreparedModuleArtifact,
+    ) -> Pin<Box<dyn Future<Output = Result<LoadedModule, VmError>> + Send + 'a>> {
+        // Module initialization state must not enlarge every importing caller's frame.
+        Box::pin(async move {
+            let caller_env = self.env.clone();
+            let old_source_dir = self.source_dir.clone();
+            self.env = VmEnv::new();
+            self.source_dir = module_source_dir.clone();
 
-        let result = self
-            .instantiate_module_inner(module_source_dir, artifact)
-            .await;
-        self.env = caller_env;
-        self.source_dir = old_source_dir;
-        result
+            let result = self
+                .instantiate_module_inner(module_source_dir, artifact)
+                .await;
+            self.env = caller_env;
+            self.source_dir = old_source_dir;
+            result
+        })
     }
 
     async fn instantiate_module_inner(
@@ -620,7 +629,6 @@ impl Vm {
         // public functions declared anywhere in that module. The artifact
         // compiler retains those reachable functions; instantiation must make
         // the matching runtime namespace available before the init chunk runs.
-        let module_env = self.env.clone();
         let module_state: crate::value::ModuleState =
             Arc::new(crate::value::VmMutex::new(self.env.clone()));
         let registry: ModuleFunctionRegistry =
@@ -629,7 +637,7 @@ impl Vm {
         for (name, compiled) in &artifact.functions {
             let closure = Arc::new(VmClosure {
                 func: Arc::clone(compiled),
-                env: module_env.clone(),
+                env: VmEnv::new(),
                 source_dir: module_source_dir.clone(),
                 module_functions: Some(Arc::downgrade(&registry)),
                 module_state: Some(Arc::downgrade(&module_state)),
@@ -646,49 +654,14 @@ impl Vm {
 
         if !artifact.type_schema_init_chunks.is_empty() || artifact.init_chunk.is_some() {
             let init_env = module_state.lock().clone();
-            let saved_env = std::mem::replace(&mut self.env, init_env);
-            let saved_frames = std::mem::take(&mut self.frames);
-            let saved_handlers = std::mem::take(&mut self.exception_handlers);
-            let saved_iterators = std::mem::take(&mut self.iterators);
-            let saved_deadlines = std::mem::take(&mut self.deadlines);
-            let saved_sync_guards = std::mem::take(&mut self.held_sync_guards);
-            let saved_task_scopes = std::mem::take(&mut self.task_scopes);
-            // STEP_STACK / PERSONA_STACK are thread-locals shared with
-            // the calling frame. Emptying `self.frames` above means
-            // any `prune_below_frame(0)` triggered while the init
-            // chunk's bytecode runs — including the inevitable
-            // frame-pop prune at end-of-chunk — would wipe active
-            // steps owned by the *caller* (e.g., a `@step`-decorated
-            // function whose body lazily imports a module). Snapshot
-            // the persona/step context here and restore it after init
-            // so module loading is invisible to the step-tracking
-            // surface.
-            let active_context = self.runtime.suspend_active_context();
-            let init_result: Result<(), VmError> = async {
-                for chunk in &artifact.type_schema_init_chunks {
-                    self.run_chunk(Arc::clone(chunk)).await?;
-                }
-                if let Some(chunk) = &artifact.init_chunk {
-                    self.run_chunk(Arc::clone(chunk)).await?;
-                }
-                Ok(())
-            }
-            .await;
-            drop(active_context);
-            let initialized_env = std::mem::replace(&mut self.env, saved_env);
-            self.frames = saved_frames;
-            self.exception_handlers = saved_handlers;
-            self.iterators = saved_iterators;
-            self.deadlines = saved_deadlines;
-            // Any synchronization guard or nursery still present belongs to
-            // the initializer. Release/cancel it before reinstating the
-            // caller's frame-depth-indexed state.
-            self.held_sync_guards.clear();
-            self.cancel_task_scopes_where(|_| true);
-            self.held_sync_guards = saved_sync_guards;
-            self.task_scopes = saved_task_scopes;
+            let initialized_env = self
+                .run_module_initializers(
+                    init_env,
+                    &artifact.type_schema_init_chunks,
+                    artifact.init_chunk.as_ref(),
+                )
+                .await?;
             *module_state.lock() = initialized_env;
-            init_result?;
         }
 
         let mut public_exports = artifact.public_exports.clone();
@@ -714,14 +687,7 @@ impl Vm {
                 }
             }
         }
-        let public_type_names = artifact.public_type_names.clone();
-        let mut public_type_schemas: BTreeMap<String, VmValue> = {
-            let state = module_state.lock();
-            public_type_names
-                .iter()
-                .filter_map(|name| state.get(name).map(|schema| (name.clone(), schema)))
-                .collect()
-        };
+        let mut public_type_names = artifact.public_type_names.clone();
 
         for import in artifact.imports.iter().filter(|import| import.is_pub) {
             let cache_key = self.cache_key_for_import(&import.path)?;
@@ -793,8 +759,8 @@ impl Vm {
                     }
                     // Type-only declarations carry no runtime binding. Preserve
                     // an optional schema lowering and the contract entry.
-                    if let Some(schema) = loaded.public_type_schemas.get(&name) {
-                        public_type_schemas.insert(name.clone(), schema.clone());
+                    if loaded.public_type_names.contains(&name) {
+                        public_type_names.insert(name.clone());
                     }
                     public_exports.insert(name, kind);
                     continue;
@@ -818,7 +784,8 @@ impl Vm {
             public_exports,
             sibling_exports: artifact.sibling_exports.clone(),
             public_values,
-            public_type_schemas,
+            public_type_names,
+            type_schema_initializers: artifact.type_schema_init_chunks.clone(),
             package_execution_guard: module_source_dir
                 .as_ref()
                 .and(self.package_execution_guard.clone()),
@@ -842,6 +809,20 @@ impl Vm {
             )));
         }
         let allow_sibling = self.sibling_import_allowed(module_path);
+        if loaded.has_pending_type_schemas() {
+            if let Some(importer) = self.imported_paths.last() {
+                self.deferred_cyclic_imports.push(DeferredCyclicImport {
+                    importer: importer.clone(),
+                    target: module_path.to_path_buf(),
+                    selected_names: None,
+                    namespace: Some(DeferredNamespaceImport {
+                        alias: alias.to_string(),
+                        members: members.map(<[String]>::to_vec),
+                        binding: NamespaceImportBinding::Projected,
+                    }),
+                });
+            }
+        }
         let dict = build_namespace_dict(&module_name, loaded, members, allow_sibling)?;
         self.env.define(alias, dict, false)?;
         Ok(())
@@ -879,8 +860,8 @@ impl Vm {
             // Type and interface declarations are valid imports without a
             // runtime value. Schema-capable aliases still bind their schema so
             // expression-position uses match local alias lowering.
-            if let Some(schema) = loaded.public_type_schemas.get(&name) {
-                self.env.define(&name, schema.clone(), false)?;
+            if let Some(schema) = loaded.public_type_schema(&name) {
+                self.env.define(&name, schema, false)?;
                 continue;
             }
             if loaded
@@ -889,6 +870,16 @@ impl Vm {
                 .or_else(|| loaded.sibling_exports.get(&name))
                 .is_some_and(|kind| !kind.has_runtime_value())
             {
+                if loaded.public_type_names.contains(&name) {
+                    if let Some(importer) = self.imported_paths.last() {
+                        self.deferred_cyclic_imports.push(DeferredCyclicImport {
+                            importer: importer.clone(),
+                            target: module_path.to_path_buf(),
+                            selected_names: Some(vec![name]),
+                            namespace: None,
+                        });
+                    }
+                }
                 continue;
             }
             let Some(closure) = loaded.functions.get(&name) else {
@@ -1072,8 +1063,7 @@ impl Vm {
                                     importer,
                                     target: canonical.clone(),
                                     selected_names: selected_names.map(<[String]>::to_vec),
-                                    namespace_alias: None,
-                                    namespace_members: None,
+                                    namespace: None,
                                 });
                             }
                         }
@@ -1085,8 +1075,11 @@ impl Vm {
                                     importer,
                                     target: canonical.clone(),
                                     selected_names: None,
-                                    namespace_alias: Some(alias.to_string()),
-                                    namespace_members: members.map(<[String]>::to_vec),
+                                    namespace: Some(DeferredNamespaceImport {
+                                        alias: alias.to_string(),
+                                        members: members.map(<[String]>::to_vec),
+                                        binding: NamespaceImportBinding::Deferred,
+                                    }),
                                 });
                             }
                         }
@@ -1257,17 +1250,16 @@ impl Vm {
                     .insert(canonical.clone(), Arc::clone(&loaded));
             }
             self.record_module_loaded();
-            if !matches!(projection, ImportProjection::MaterializeOnly) {
-                let _load_span = self.module_load_span();
-                self.apply_import_projection(&canonical, &loaded, projection)?;
-            }
-
             // Once the import stack fully unwinds, every module reachable from
             // this top-level import is cached, so any deferred cyclic imports
             // can now bind against fully-loaded modules.
             if self.imported_paths.is_empty() {
                 let _load_span = self.module_load_span();
-                self.flush_deferred_cyclic_imports()?;
+                self.flush_deferred_cyclic_imports().await?;
+            }
+            if !matches!(projection, ImportProjection::MaterializeOnly) {
+                let _load_span = self.module_load_span();
+                self.apply_import_projection(&canonical, &loaded, projection)?;
             }
 
             Ok(())

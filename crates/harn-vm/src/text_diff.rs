@@ -93,6 +93,24 @@ pub fn render_line_diff(before: &str, after: &str) -> LineDiff {
 
 /// Compute one line diff and project only the representations a caller needs.
 pub fn compute_line_diff(before: &str, after: &str, options: LineDiffOptions) -> LineDiff {
+    compute_line_diff_inner(before, after, options, false)
+}
+
+/// Compute the same diff with each expanded line's original ending retained.
+pub fn compute_line_diff_with_endings(
+    before: &str,
+    after: &str,
+    options: LineDiffOptions,
+) -> LineDiff {
+    compute_line_diff_inner(before, after, options, true)
+}
+
+fn compute_line_diff_inner(
+    before: &str,
+    after: &str,
+    options: LineDiffOptions,
+    preserve_endings: bool,
+) -> LineDiff {
     let diff = TextDiff::configure()
         .algorithm(ALGORITHM)
         .diff_lines(before, after);
@@ -128,7 +146,11 @@ pub fn compute_line_diff(before: &str, after: &str, options: LineDiffOptions) ->
         if options.include_changes {
             changes.push(LineChange {
                 kind,
-                line: line_without_terminator(change.value()),
+                line: if preserve_endings {
+                    change.value().to_owned()
+                } else {
+                    line_without_terminator(change.value())
+                },
                 old_line,
                 new_line,
             });
@@ -161,6 +183,26 @@ fn line_without_terminator(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expanded_changes_retain_original_line_endings() {
+        for source in ["\n", "a\rb\r", "a\r\nb\n", "a\nb"] {
+            let diff = compute_line_diff_with_endings(
+                "",
+                source,
+                LineDiffOptions {
+                    include_body: false,
+                    include_changes: true,
+                    ..LineDiffOptions::default()
+                },
+            );
+            let mut reconstructed = String::new();
+            for change in diff.changes {
+                reconstructed.push_str(&change.line);
+            }
+            assert_eq!(reconstructed, source);
+        }
+    }
 
     #[test]
     fn identical_inputs_yield_empty_body() {

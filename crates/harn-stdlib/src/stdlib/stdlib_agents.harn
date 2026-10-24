@@ -40,6 +40,7 @@ pub fn workflow_options(llm: HarnessLlm, config: dict) {
       "require_successful_tools",
       "tool_retries",
       "tool_backoff_ms",
+      "tool_result_max_chars",
       "native_tool_fallback",
     ]
   return filter_nil(

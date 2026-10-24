@@ -4,11 +4,9 @@
 base_branch = "main"
 
 [repair]
-# Only conflicts are repaired; failing-check and review repair stay off until
-# one is proven to land a fix here.
 conflict = true
-failing = false
-review = false
+failing = true
+review = true
 # A runner has no agent settings, so without this grant every hosted repair
 # model is refused before anything is sent.
 inference_reach = "anyHosted"
@@ -17,3 +15,5 @@ inference_reach = "anyHosted"
 verify_command = "cargo check --workspace --locked"
 timeout_s = 1500
 spend_limit_usd = "1.00"
+# A problem gets at most two repair attempts.
+budget = 2

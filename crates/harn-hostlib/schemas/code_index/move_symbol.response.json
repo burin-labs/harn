@@ -5,6 +5,7 @@
   "description": "Tagged result of a move, in the `rename_symbol` envelope (`scope`, `conflicts`, `match_count`, `warnings`) plus move fields. `applied` carries the per-file edits (planned only, with `dry_run`); every other tag is a refusal that left every file byte-identical and says why in `details`, with the blocking locations in `sites`.",
   "type": "object",
   "properties": {
+    "proof": { "$ref": "https://harnlang.com/schemas/hostlib/edit-proof.json" },
     "result": {
       "type": "string",
       "enum": [

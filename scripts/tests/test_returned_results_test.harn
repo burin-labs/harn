@@ -1,0 +1,33 @@
+type TestReport = {
+  summary: {total: int, passed: int, failed: int, skipped: int, timed_out: int},
+  cases: list<{name: string, outcome: string, message?: string}>,
+}
+
+pipeline test_returned_errors_fail_tests_and_file_fixtures(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("test-results-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  for name in ["test-values", "fixture-error"] {
+    const fixture = path_join(root, "${name}.harn")
+    harness.fs.copy(path_join(harness.fs.source_dir(), "fixtures/${name}.txt"), fixture)
+    const output = path_join(root, "${name}.json")
+    const result = harness.process.run(
+      {program: binary, args: ["test", fixture, "--json-out", output]},
+    )
+    assert(result.exit_code != 0, "An Err return must fail the command: ${result.stdout}")
+    const report = unwrap(json_decode(harness.fs.read_text(output), schema_of(TestReport)))
+    if name == "test-values" {
+      assert_eq(report.summary, {total: 4, passed: 2, failed: 2, skipped: 0, timed_out: 0})
+      for kind in ["direct", "propagated"] {
+        const failure = report.cases.find({ item -> item.name == "test_${kind}" })!
+        assert_eq(failure.outcome, "failed")
+        assert(failure.message!.contains("${kind} failure"))
+      }
+    } else {
+      assert_eq(report.summary, {total: 1, passed: 0, failed: 1, skipped: 0, timed_out: 0})
+      assert(report.cases[0]!.message!.contains("fixture failure"), report.cases[0]!.message!)
+    }
+  }
+}

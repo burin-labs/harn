@@ -71,7 +71,7 @@ fn build_corpus() -> (tempfile::TempDir, PathBuf) {
 }
 
 fn cypher_query(reg: &BuiltinRegistry, query: &str) {
-    let payload = dict(&[("query", VmValue::String(arcstr::ArcStr::from(query)))]);
+    let payload = dict(&[("query", VmValue::string(query))]);
     let response = call(reg, "hostlib_code_index_cypher", payload);
     black_box(response);
 }
@@ -84,10 +84,7 @@ fn bench_cypher(c: &mut Criterion) {
     call(
         &reg,
         "hostlib_code_index_rebuild",
-        dict(&[(
-            "root",
-            VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().as_ref())),
-        )]),
+        dict(&[("root", VmValue::string(root.to_string_lossy().as_ref()))]),
     );
 
     let mut group = c.benchmark_group("code_index_cypher");

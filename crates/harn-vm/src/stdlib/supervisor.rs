@@ -1235,15 +1235,15 @@ mod tests {
 
     #[test]
     fn parses_restart_policy_aliases() {
-        let policy = parse_restart_policy(Some(&VmValue::dict(BTreeMap::from([
-            ("mode".to_string(), VmValue::string("on-failure")),
-            ("max".to_string(), VmValue::Int(2)),
-            ("window".to_string(), VmValue::Duration(500)),
-            ("backoff".to_string(), VmValue::string("10ms")),
-            ("factor".to_string(), VmValue::Float(3.0)),
-            ("jitter".to_string(), VmValue::Int(4)),
-            ("circuit_open".to_string(), VmValue::string("1s")),
-        ]))))
+        let policy = parse_restart_policy(Some(&VmValue::dict([
+            ("mode", VmValue::string("on-failure")),
+            ("max", VmValue::Int(2)),
+            ("window", VmValue::Duration(500)),
+            ("backoff", VmValue::string("10ms")),
+            ("factor", VmValue::Float(3.0)),
+            ("jitter", VmValue::Int(4)),
+            ("circuit_open", VmValue::string("1s")),
+        ])))
         .unwrap();
 
         assert_eq!(policy.mode, RestartMode::OnFailure);

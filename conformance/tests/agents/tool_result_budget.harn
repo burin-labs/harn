@@ -1,0 +1,156 @@
+import { agent_host_tools } from "std/agent/host_tools"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * An oversized tool result must reach the next model request bounded, with a
+ * notice naming a spill file the agent's own read_file can read back under the
+ * sandbox; a small result is unchanged.
+ */
+fn big_text() -> string {
+  return "HEAD-MARKER\n" + ("x".repeat(999) + "\n").repeat(2100) + "TAIL-MARKER"
+}
+
+fn budget_tools() {
+  const registry = tool_define(
+    tool_registry(),
+    "big_output",
+    "Return a very large text result.",
+    {parameters: {}, handler: { _args -> big_text() }},
+  )
+  return tool_define(
+    registry,
+    "small_output",
+    "Return a small text result.",
+    {parameters: {}, handler: { _args -> "small-result" }},
+  )
+}
+
+fn result_message(llm: HarnessLlm, tool_name: string) {
+  const second = llm.mock_calls()[1]
+  const frame = "[result of " + tool_name + "]"
+  const matches = second.messages.filter(
+    { m -> type_of(m.content) == "string" && contains(m.content, frame) },
+  )
+  assert_eq(len(matches), 1, "exactly one result message for " + tool_name)
+  return matches[0]
+}
+
+fn report_big(harness: Harness, label: string, budget: int) {
+  const content = result_message(harness.llm, "big_output").content
+  const saved = regex_captures("full output saved to ([^\\]]+)\\]", content)
+  assert_eq(len(saved), 1, "spill notice names a path")
+  harness.stdio.println(label + " bounded: " + to_string(len(content) <= budget + 128))
+  harness.stdio.println(label + " head kept: " + to_string(contains(content, "HEAD-MARKER")))
+  harness.stdio.println(label + " tail kept: " + to_string(contains(content, "TAIL-MARKER")))
+  return saved[0].groups[0]
+}
+
+fn read_back(llm: HarnessLlm, call_id: string) -> string {
+  const third = llm.mock_calls()[2]
+  const matches = third.messages.filter({ m -> m?.tool_call_id == call_id })
+  assert_eq(len(matches), 1, "one read_file result for " + call_id)
+  return to_string(matches[0].content)
+}
+
+pipeline main(harness: Harness) {
+  const tmp = harness.fs.workspace_temp_dir()
+  const session = "tool-result-budget-" + harness.random.uuid()
+  // Each id carries a digest of its exact text, so ids that sanitize alike never collide.
+  const spill = path_join(
+    tmp,
+    "tool-results",
+    session + "-" + sha256(session)[0:12],
+    "big_output-big_1-" + sha256("big_1")[0:12] + ".txt",
+  )
+  const tail_offset = len(big_text()) - len("TAIL-MARKER")
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "big_1", name: "big_output", arguments: {}}]},
+      {
+        tool_calls: [
+          {id: "read_head", name: "read_file", arguments: {path: spill, limit_bytes: 64}},
+          {
+            id: "read_tail",
+            name: "read_file",
+            arguments: {path: spill, offset: tail_offset, limit_bytes: 64},
+          },
+        ],
+      },
+      llm_text("done"),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "call big_output",
+        nil,
+        {
+          provider: "mock",
+          tools: agent_host_tools(harness, budget_tools(), {root: tmp, cwd: tmp}),
+          tool_format: "native",
+          max_iterations: 3,
+          session_id: session,
+        },
+      )
+      const noticed = report_big(harness, "native", 64000)
+      harness.stdio.println(
+        "native notice names the readable spill: " + to_string(noticed == spill),
+      )
+      harness.stdio.println(
+        "native read_file head: "
+          + to_string(contains(read_back(harness.llm, "read_head"), "\"content\":\"HEAD-MARKER")),
+      )
+      harness.stdio.println(
+        "native read_file tail: "
+          + to_string(contains(read_back(harness.llm, "read_tail"), "TAIL-MARKER")),
+      )
+      harness.stdio.println(
+        "native spill removed when the loop ends: " + to_string(!harness.fs.exists(spill)),
+      )
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("```tool\n{\"name\":\"big_output\",\"args\":{}}\n```"), llm_text("done ##DONE##")],
+    { ->
+      agent_loop(
+        harness,
+        "call big_output",
+        nil,
+        {
+          provider: "mock",
+          tools: budget_tools(),
+          tool_format: "json",
+          tool_result_max_chars: 20000,
+          loop_until_done: true,
+          max_iterations: 2,
+          session_id: session + "-text",
+        },
+      )
+      const text_spill = report_big(harness, "text", 20000)
+      harness.stdio.println(
+        "text spill removed when the loop ends: " + to_string(!harness.fs.exists(text_spill)),
+      )
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [{tool_calls: [{id: "small_1", name: "small_output", arguments: {}}]}, llm_text("done")],
+    { ->
+      agent_loop(
+        harness,
+        "call small_output",
+        nil,
+        {provider: "mock", tools: budget_tools(), tool_format: "native", max_iterations: 2},
+      )
+      const content = result_message(harness.llm, "small_output").content
+      harness.stdio.println(
+        "small unchanged: "
+          + to_string(
+            content == "[result of small_output]\nsmall-result\n[end of small_output result]\n",
+          ),
+      )
+    },
+  )
+}

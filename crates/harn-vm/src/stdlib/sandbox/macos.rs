@@ -52,6 +52,10 @@ impl SandboxBackend for Backend {
         Path::new(SANDBOX_EXEC_PATH).exists()
     }
 
+    fn inherits_network_grants() -> bool {
+        nested::process_is_sandboxed()
+    }
+
     fn filesystem_available() -> bool {
         Self::available() && parent_environment::available()
     }
@@ -413,30 +417,28 @@ fn render_profile_with_extra_read_roots(
         // it, which is a confusing way to learn a read root was too wide.
         profile.push_str(standard_device_profile_rules());
     }
-    // An explicit loopback-only grant is narrower than the ambient tool
-    // ceiling. ACP code mode may allow network-capable Harn tools, but that
-    // must not widen arbitrary child sockets beyond localhost.
-    if policy_allows_network(policy) && !policy.process_sandbox.allow_tcp_loopback {
-        if let Some(proxy) = policy.process_network_proxy {
+    use super::policy::ProcessNetworkGrant;
+    match ProcessNetworkGrant::for_policy(policy) {
+        ProcessNetworkGrant::Public { proxy: Some(proxy) } => {
             for port in [proxy.http_port, proxy.socks_port] {
                 profile.push_str(&format!(
                     "(allow network-outbound (remote ip \"localhost:{port}\"))\n"
                 ));
             }
-        } else {
-            profile.push_str("(allow network*)\n");
         }
-    }
-    if policy.process_sandbox.allow_tcp_loopback {
-        // Local test servers need all three operations: bind/listen, accept,
-        // and the client connection back to the listener. Match the remote
-        // endpoint on outbound. A `local ip` outbound filter also matches an
-        // unbound socket's wildcard source and would silently admit remote
-        // egress. Keeping these rules separate from `network*` preserves the
-        // managed-proxy boundary when the run also has provider/network work.
-        profile.push_str("(allow network-bind (local ip \"localhost:*\"))\n");
-        profile.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
-        profile.push_str("(allow network-outbound (remote ip \"localhost:*\"))\n");
+        ProcessNetworkGrant::Public { proxy: None } => profile.push_str("(allow network*)\n"),
+        ProcessNetworkGrant::Loopback { .. } => {
+            // Local test servers need all three operations: bind/listen, accept,
+            // and the client connection back to the listener. Match the remote
+            // endpoint on outbound. A `local ip` outbound filter also matches an
+            // unbound socket's wildcard source and would silently admit remote
+            // egress. Keeping these rules separate from `network*` preserves the
+            // managed-proxy boundary when the run also has provider/network work.
+            profile.push_str("(allow network-bind (local ip \"localhost:*\"))\n");
+            profile.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
+            profile.push_str("(allow network-outbound (remote ip \"localhost:*\"))\n");
+        }
+        ProcessNetworkGrant::Denied => {}
     }
     // Unix-domain sockets are filtered by the socket file's path, so a
     // `subpath` filter on the three socket operations admits exactly the
@@ -447,9 +449,9 @@ fn render_profile_with_extra_read_roots(
     // bare EPERM. Both spellings of a `/tmp`- or `/var`-rooted path are
     // emitted for the same reason the write denies emit them.
     //
-    // A non-empty grant also admits sockets under the session temp dir, which
-    // is already writable when UserTemp is on — a socket file is a file — so
-    // pairing the write with the bind is the grant, not a widening. A daemon
+    // Sockets under the session temp dir come only with an explicit grant: the
+    // dir is shared by every run in the workspace, so socket IPC there is the
+    // host's decision, not a side effect of write access. A daemon
     // that binds under the host's shared temp dirs instead (sbt's boot server
     // under `/tmp/bsbt`) needs that root named in the grant.
     //
@@ -608,7 +610,10 @@ fn user_temp_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
 }
 
 /// Socket-file roots the profile will admit: the explicit grant, plus the
-/// UserTemp write roots when that preset is on and the grant is non-empty.
+/// UserTemp roots when that preset is on and the grant is non-empty. The temp
+/// dir is shared by every run in the workspace, so socket IPC there stays a
+/// host decision; a host running JVM tests (whose attach socket binds there)
+/// grants a socket root.
 fn unix_socket_profile_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
     let mut roots = policy.process_sandbox.unix_socket_roots.clone();
     if !roots.is_empty()
@@ -677,6 +682,10 @@ mod write_roots_tests;
 #[cfg(test)]
 #[path = "macos/external_root_tests.rs"]
 mod external_root_tests;
+
+#[cfg(test)]
+#[path = "macos/socket_root_tests.rs"]
+mod socket_root_tests;
 
 #[cfg(test)]
 #[path = "macos/child_write_nested_tests.rs"]

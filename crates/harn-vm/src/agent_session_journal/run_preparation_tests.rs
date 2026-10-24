@@ -127,6 +127,11 @@ fn preparation_and_actor_share_one_durable_run_without_cross_turn_leakage() {
             let output = execute(
                 root.path(),
                 r#"
+  harness.agent.subscribe(session, { event ->
+    if event.type == "iteration_end" {
+      harness.stdio.println("LIVE " + json_stringify(event.iteration_info.run_usage))
+    }
+  })
   const result = harness.agent.with_run(session, options, { ->
     harness.llm.call("Classify this task.", nil, call_options)
     agent_loop(harness, "Reply briefly.", nil, options)
@@ -137,6 +142,14 @@ fn preparation_and_actor_share_one_durable_run_without_cross_turn_leakage() {
             .await
             .expect("preparation and actor finish");
             assert!(output.contains("\"provider_call_count\":2"), "{output}");
+            let live = output
+                .lines()
+                .find(|line| line.starts_with("LIVE "))
+                .expect("iteration_end carries the run ledger");
+            assert!(
+                live.contains("\"provider_call_count\":2"),
+                "the live total counts the preparatory call: {live}"
+            );
             assert_eq!(wire.lock().unwrap().len(), 2 + turn * 2);
             let run = project(root.path()).await;
             assert_eq!(run.usage.as_ref().unwrap().call_count, 2);

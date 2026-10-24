@@ -285,7 +285,7 @@ fn argument_supplies(actual: &str, carriers: &[Carrier], expected: &CarrierKind)
     }
     carriers.iter().any(|carrier| {
         if actual == carrier.name {
-            return &carrier.kind == expected;
+            return kind_supplies(&carrier.kind, expected);
         }
         let CarrierKind::Narrow(required) = expected else {
             return false;
@@ -298,6 +298,15 @@ fn argument_supplies(actual: &str, carriers: &[Carrier], expected: &CarrierKind)
                 CarrierKind::Narrow(_) => false,
             }
     })
+}
+
+fn kind_supplies(actual: &CarrierKind, expected: &CarrierKind) -> bool {
+    match (actual, expected) {
+        (CarrierKind::Bundle(available), CarrierKind::Bundle(required)) => {
+            required.is_subset(available)
+        }
+        _ => actual == expected,
+    }
 }
 
 fn classify_argument(
@@ -320,12 +329,12 @@ fn classify_argument(
             .get(&(argument_span.start, argument_span.end))
             .and_then(|binding| bindings.get(binding))
         {
-            Some(BindingEvidence::Capability(actual)) if actual == expected => {
+            Some(BindingEvidence::Capability(actual)) if kind_supplies(actual, expected) => {
                 ArgumentEvidence::Carrier
             }
-            Some(BindingEvidence::Capability(_) | BindingEvidence::Ordinary) => {
-                ArgumentEvidence::DefinitelyOrdinary
-            }
+            // A different carrier needs projection or replacement, not another argument.
+            Some(BindingEvidence::Capability(_)) => ArgumentEvidence::Ambiguous,
+            Some(BindingEvidence::Ordinary) => ArgumentEvidence::DefinitelyOrdinary,
             None => ArgumentEvidence::Identifier,
         },
         node if definitely_ordinary(&node) => ArgumentEvidence::DefinitelyOrdinary,

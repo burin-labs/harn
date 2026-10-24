@@ -18,6 +18,64 @@ fn checked(tools: HarnessTools, root: string, args: list<string>) -> string {
   return trim(result.stdout ?? "")
 }
 
+fn in_base(tools: HarnessTools, root: string, oid: string, base: string) -> bool {
+  // Exit 1 means non-ancestry; an unreadable commit is a failure, not that verdict.
+  const ancestry = git(tools, root, ["merge-base", "--is-ancestor", oid, base])
+  if !ancestry.success && ancestry.exit_code != 1 {
+    throw "std/bump/repairs: could not compare " + oid + " with base"
+  }
+  return ancestry.success
+}
+
+type RepairPartition = {
+  replayable: list<string>,
+  skipped: list<string>,
+  refused: string?,
+  detail: string,
+}
+
+/**
+ * Split pending repairs into single-parent patches and skippable merges. A
+ * merge whose incoming side is already in base only synced the branch with
+ * base; the refresh re-derives whatever its conflict resolution touched.
+ */
+fn partition_merges(
+  tools: HarnessTools,
+  root: string,
+  repairs: list<string>,
+  base: string,
+) -> RepairPartition {
+  let skipped: list<string> = []
+  let replayable: list<string> = []
+  for oid in repairs {
+    const parents = split(checked(tools, root, ["rev-list", "--parents", "-n", "1", oid]), " ")
+    if len(parents) == 2 {
+      replayable = replayable + [oid]
+      continue
+    }
+    if len(parents) < 2 {
+      return {
+        replayable: [],
+        skipped: [],
+        refused: oid,
+        detail: "repair must have exactly one parent: " + oid,
+      }
+    }
+    const foreign = parents[2:].filter({ parent -> !in_base(tools, root, parent, base) }).to_list()
+    if len(foreign) > 0 {
+      return {
+        replayable: [],
+        skipped: [],
+        refused: oid,
+        detail: "repair merge " + oid + " brings in " + join(foreign, ", ")
+          + ", which base does not contain; only a merge of the base branch is skipped",
+      }
+    }
+    skipped = skipped + [oid]
+  }
+  return {replayable: replayable, skipped: skipped, refused: nil, detail: ""}
+}
+
 fn lines(value: string) -> list<string> {
   return split(value, "\n").filter({ line -> line != "" }).to_list()
 }
@@ -84,29 +142,37 @@ pub fn replay_bump_repairs(
         throw "std/bump/repairs: could not fetch recorded repair " + oid
       }
     }
-    // Exit 1 means non-ancestry; an unreadable commit is a failure, not that verdict.
-    const ancestry = git(tools, root, ["merge-base", "--is-ancestor", oid, base])
-    if ancestry.exit_code == 1 {
+    if !in_base(tools, root, oid, base) {
       pending = pending + [oid]
-    } else if !ancestry.success {
-      throw "std/bump/repairs: could not compare repair " + oid + " with base"
     }
   }
   repairs = pending
   if len(repairs) == 0 {
     return {ok: true, commits: [], conflicts: [], detail: "no unmerged repairs"}
   }
+  const partition = partition_merges(tools, root, repairs, base)
+  if partition.refused != nil {
+    return {
+      ok: false,
+      commits: repairs,
+      conflicts: [partition.refused ?? ""],
+      detail: partition.detail,
+    }
+  }
+  const skipped = partition.skipped
+  repairs = partition.replayable
+  if len(repairs) == 0 {
+    return {
+      ok: true,
+      commits: [],
+      conflicts: [],
+      detail: "no unmerged repairs",
+      skipped_merges: skipped,
+    }
+  }
   checked(tools, root, ["add", "--all"])
   for oid in repairs {
     const parents = split(checked(tools, root, ["rev-list", "--parents", "-n", "1", oid]), " ")
-    if len(parents) != 2 {
-      return {
-        ok: false,
-        commits: repairs,
-        conflicts: [oid],
-        detail: "repair must have exactly one parent: " + oid,
-      }
-    }
     const patch = git(tools, root, ["diff", "--binary", parents[1], oid])
     if !patch.success {
       throw "std/bump/repairs: could not read repair patch " + oid
@@ -133,5 +199,6 @@ pub fn replay_bump_repairs(
     commits: repairs,
     conflicts: [],
     detail: "replayed ${len(repairs)} repair commits",
+    skipped_merges: skipped,
   }
 }

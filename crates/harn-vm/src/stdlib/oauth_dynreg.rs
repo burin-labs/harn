@@ -140,7 +140,6 @@ pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__oauth_dynreg_store_handle() -> dict",
     category = "oauth_dynreg"
 )]
@@ -161,7 +160,6 @@ fn oauth_dynreg_store_handle_impl(args: &[VmValue], _out: &mut String) -> Result
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "oauth_dynreg_validate_metadata(metadata: dict) -> dict",
     category = "oauth_dynreg"
 )]
@@ -177,7 +175,6 @@ fn oauth_dynreg_validate_metadata_impl(
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "oauth_dynreg_build_client_metadata(metadata: dict) -> dict",
     category = "oauth_dynreg"
 )]
@@ -193,7 +190,6 @@ fn oauth_dynreg_build_client_metadata_impl(
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "oauth_dynreg_build_authorization_server_metadata(provider: dict, overrides?: dict) -> dict",
     category = "oauth_dynreg"
 )]
@@ -212,7 +208,6 @@ fn oauth_dynreg_build_authorization_server_metadata_impl(
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__oauth_dynreg_register(handle: dict, metadata: dict) -> dict",
     category = "oauth_dynreg"
 )]
@@ -226,7 +221,6 @@ fn oauth_dynreg_register_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__oauth_dynreg_get(handle: dict, client_id: string) -> dict",
     category = "oauth_dynreg"
 )]
@@ -240,7 +234,6 @@ fn oauth_dynreg_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__oauth_dynreg_list(handle: dict) -> list",
     category = "oauth_dynreg"
 )]
@@ -301,10 +294,7 @@ fn validate_metadata_value(metadata: &crate::value::DictMap) -> VmValue {
     validate_metadata(metadata, &mut errors);
     let mut out = crate::value::DictMap::new();
     out.put_bool("ok", errors.is_empty());
-    out.put(
-        "errors",
-        VmValue::list(errors.iter().map(VmValue::string).collect::<Vec<_>>()),
-    );
+    out.put("errors", VmValue::strings(errors.iter()));
     VmValue::dict(out)
 }
 
@@ -573,9 +563,9 @@ fn build_client_metadata_value(metadata: &crate::value::DictMap) -> Result<VmVal
     // token_endpoint_auth_method defaults to `client_secret_basic`.
     let mut out: crate::value::DictMap = metadata.clone();
     out.entry(crate::value::intern_key("response_types"))
-        .or_insert_with(|| VmValue::list(vec![VmValue::string("code")]));
+        .or_insert_with(|| VmValue::strings(["code"]));
     out.entry(crate::value::intern_key("grant_types"))
-        .or_insert_with(|| VmValue::list(vec![VmValue::string("authorization_code")]));
+        .or_insert_with(|| VmValue::strings(["authorization_code"]));
     out.entry(crate::value::intern_key("token_endpoint_auth_method"))
         .or_insert_with(|| VmValue::string("client_secret_basic"));
     Ok(VmValue::dict(out))
@@ -602,35 +592,28 @@ fn build_authorization_server_metadata_value(
     if let Some(VmValue::String(s)) = provider.get("userinfo_url") {
         out.put("userinfo_endpoint", VmValue::string(s.as_str()));
     }
-    out.put(
-        "response_types_supported",
-        VmValue::list(vec![VmValue::string("code")]),
-    );
+    out.put("response_types_supported", VmValue::strings(["code"]));
     out.put(
         "grant_types_supported",
-        VmValue::list(vec![
-            VmValue::string("authorization_code"),
-            VmValue::string("refresh_token"),
-            VmValue::string("urn:ietf:params:oauth:grant-type:device_code"),
+        VmValue::strings([
+            "authorization_code",
+            "refresh_token",
+            "urn:ietf:params:oauth:grant-type:device_code",
         ]),
     );
     out.put(
         "token_endpoint_auth_methods_supported",
-        VmValue::list(vec![
-            VmValue::string("client_secret_basic"),
-            VmValue::string("client_secret_post"),
-            VmValue::string("none"),
-        ]),
+        VmValue::strings(["client_secret_basic", "client_secret_post", "none"]),
     );
     if let Some(VmValue::Bool(true)) | Some(VmValue::Bool(false)) = provider.get("pkce_required") {
         out.put(
             "code_challenge_methods_supported",
-            VmValue::list(vec![VmValue::string("S256")]),
+            VmValue::strings(["S256"]),
         );
     } else {
         out.put(
             "code_challenge_methods_supported",
-            VmValue::list(vec![VmValue::string("S256")]),
+            VmValue::strings(["S256"]),
         );
     }
     if let Some(VmValue::List(scopes)) = provider.get("default_scopes") {
@@ -686,10 +669,10 @@ fn register_client_value(
     let mut canonical = metadata.clone();
     canonical
         .entry(crate::value::intern_key("response_types"))
-        .or_insert_with(|| VmValue::list(vec![VmValue::string("code")]));
+        .or_insert_with(|| VmValue::strings(["code"]));
     canonical
         .entry(crate::value::intern_key("grant_types"))
-        .or_insert_with(|| VmValue::list(vec![VmValue::string("authorization_code")]));
+        .or_insert_with(|| VmValue::strings(["authorization_code"]));
     canonical
         .entry(crate::value::intern_key("token_endpoint_auth_method"))
         .or_insert_with(|| VmValue::string("client_secret_basic"));
@@ -823,10 +806,7 @@ mod tests {
 
     fn metadata_with_redirect(uri: &str) -> crate::value::DictMap {
         let mut m = crate::value::DictMap::new();
-        m.put(
-            "redirect_uris",
-            VmValue::List(std::sync::Arc::new(vec![VmValue::string(uri)])),
-        );
+        m.put("redirect_uris", VmValue::list(vec![VmValue::string(uri)]));
         m
     }
 

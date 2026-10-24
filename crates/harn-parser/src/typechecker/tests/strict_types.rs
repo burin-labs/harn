@@ -13,77 +13,167 @@ fn render_unresolved_call(source: &str) -> String {
     crate::diagnostic::render_type_diagnostic(source, "test.harn", &diag)
 }
 
-#[test]
-fn test_strict_types_json_parse_property_access() {
-    let errs = strict_errors(
-        r#"pipeline t(task) {
+#[rstest::rstest]
+#[case::test_strict_types_json_parse_property_access(
+    r#"pipeline t(task) {
   const data = json_parse("{}")
   log(data.name)
 }"#,
-    );
-    assert!(
-        errs.iter().any(|w| w.contains("unvalidated")),
-        "expected unvalidated error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_strict_types_direct_chain_access() {
-    let errs = strict_errors(
-        r#"pipeline t(task) {
+    "unvalidated",
+    true
+)]
+#[case::test_strict_types_direct_chain_access(
+    r#"pipeline t(task) {
   log(json_parse("{}").name)
 }"#,
-    );
-    assert!(
-        errs.iter().any(|w| w.contains("Direct property access")),
-        "expected direct access error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_strict_types_schema_expect_clears() {
-    let errs = strict_errors(
-        r#"pipeline t(task) {
+    "Direct property access",
+    true
+)]
+#[case::test_strict_types_schema_expect_clears(
+    r#"pipeline t(task) {
   const my_schema = {type: "object", properties: {name: {type: "string"}}}
   const data = json_parse("{}")
   schema_expect(data, my_schema)
   log(data.name)
 }"#,
-    );
-    assert!(
-        !errs.iter().any(|w| w.contains("unvalidated")),
-        "expected no unvalidated error after schema_expect, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_strict_types_schema_is_if_guard() {
-    let errs = strict_errors(
-        r#"pipeline t(task) {
+    "unvalidated",
+    false
+)]
+#[case::test_strict_types_schema_is_if_guard(
+    r#"pipeline t(task) {
   const my_schema = {type: "object", properties: {name: {type: "string"}}}
   const data = json_parse("{}")
   if schema_is(data, my_schema) {
 log(data.name)
   }
 }"#,
-    );
-    assert!(
-        !errs.iter().any(|w| w.contains("unvalidated")),
-        "expected no unvalidated error inside schema_is guard, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_strict_types_shape_annotation_clears() {
-    let errs = strict_errors(
-        r#"pipeline t(task) {
+    "unvalidated",
+    false
+)]
+#[case::test_strict_types_shape_annotation_clears(
+    r#"pipeline t(task) {
   const data: {name: string, age: int} = json_parse("{}")
   log(data.name)
 }"#,
-    );
-    assert!(
-        !errs.iter().any(|w| w.contains("unvalidated")),
-        "expected no error with shape annotation, got: {errs:?}"
+    "unvalidated",
+    false
+)]
+#[case::test_strict_types_non_boundary_no_error(
+    r#"pipeline t(task) {
+  const x = len("hello")
+  log(x)
+}"#,
+    "unvalidated",
+    false
+)]
+#[case::test_strict_types_subscript_access(
+    r#"pipeline t(task) {
+  const data = json_parse("{}")
+  log(data["name"])
+}"#,
+    "unvalidated",
+    true
+)]
+#[case::test_strict_types_llm_call_without_schema(
+    r#"pipeline t(task) {
+  const result = llm_call("prompt", "system")
+  log(result.text)
+}"#,
+    "unvalidated",
+    true
+)]
+#[case::test_strict_types_llm_call_with_schema_clean(
+    r#"pipeline t(task) {
+  const result = llm_call("prompt", "system", {
+output: {
+  schema: {type: "object", properties: {name: {type: "string"}}},
+  validation: "error"
+}
+  })
+  log(result.data)
+  log(result.text)
+}"#,
+    "unvalidated",
+    false
+)]
+#[case::test_strict_types_schema_expect_result_typed(
+    r#"pipeline t(task) {
+  const my_schema = {type: "object", properties: {name: {type: "string"}}}
+  const validated = schema_expect(json_parse("{}"), my_schema)
+  log(validated.name)
+}"#,
+    "unvalidated",
+    false
+)]
+#[case::test_strict_types_realistic_orchestration(
+    r#"pipeline t(task) {
+  const payload_schema = {type: "object", properties: {
+name: {type: "string"},
+steps: {type: "list", items: {type: "string"}}
+  }}
+
+  // Good: schema-aware llm_call
+  const result = llm_call("generate a workflow", "system", {
+output: {schema: payload_schema, validation: "error"}
+  })
+  const workflow_name = result.data.name
+
+  // Good: validate then access
+  const raw = json_parse("{}")
+  schema_expect(raw, payload_schema)
+  const steps = raw.steps
+
+  log(workflow_name)
+  log(steps)
+}"#,
+    "unvalidated",
+    false
+)]
+#[case::test_strict_types_llm_call_with_schema_via_variable(
+    r#"pipeline t(task) {
+  const my_schema = {type: "object", properties: {score: {type: "float"}}}
+  const result = llm_call("rate this", "system", {
+output: {schema: my_schema, validation: "error"}
+  })
+  log(result.data.score)
+}"#,
+    "unvalidated",
+    false
+)]
+#[case::test_strict_types_flags_the_ambient_boundary_spelling(
+    r#"pipeline t(harness: Harness) {
+  harness.stdio.log(llm_call("rate this", "system").data)
+}"#,
+    "unvalidated",
+    true
+)]
+#[case::test_strict_types_ignores_a_get_method_on_another_receiver(
+    r#"pipeline t(harness: Harness) {
+  const proxy = {llm: {call: { prompt, system -> {data: prompt} }}}
+  harness.stdio.log(proxy.llm.call("rate this", "system").data)
+}"#,
+    "unvalidated",
+    false
+)]
+#[case::test_strict_types_harness_llm_call_without_schema_still_errors(
+    r#"pipeline t(harness: Harness) {
+  harness.stdio.log(harness.llm.call("rate this", "system").data)
+}"#,
+    "unvalidated",
+    true
+)]
+fn diagnostic_message_strict_errors(
+    #[case] source: &str,
+    #[case] message: &str,
+    #[case] present: bool,
+) {
+    let diagnostics = strict_errors(source);
+    assert_eq!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains(message)),
+        present,
+        "{message}: {diagnostics:?}"
     );
 }
 
@@ -139,34 +229,6 @@ fn test_strict_types_propagation() {
 }
 
 #[test]
-fn test_strict_types_non_boundary_no_error() {
-    let errs = strict_errors(
-        r#"pipeline t(task) {
-  const x = len("hello")
-  log(x)
-}"#,
-    );
-    assert!(
-        !errs.iter().any(|w| w.contains("unvalidated")),
-        "non-boundary function should not be flagged, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_strict_types_subscript_access() {
-    let errs = strict_errors(
-        r#"pipeline t(task) {
-  const data = json_parse("{}")
-  log(data["name"])
-}"#,
-    );
-    assert!(
-        errs.iter().any(|w| w.contains("unvalidated")),
-        "expected subscript error, got: {errs:?}"
-    );
-}
-
-#[test]
 fn test_strict_types_disabled_by_default() {
     let diags = check_source(
         r#"pipeline t(task) {
@@ -177,115 +239,6 @@ fn test_strict_types_disabled_by_default() {
     assert!(
         !diags.iter().any(|d| d.message.contains("unvalidated")),
         "strict types should be off by default, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_strict_types_llm_call_without_schema() {
-    let errs = strict_errors(
-        r#"pipeline t(task) {
-  const result = llm_call("prompt", "system")
-  log(result.text)
-}"#,
-    );
-    assert!(
-        errs.iter().any(|w| w.contains("unvalidated")),
-        "llm_call without schema should error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_strict_types_llm_call_with_schema_clean() {
-    let errs = strict_errors(
-        r#"pipeline t(task) {
-  const result = llm_call("prompt", "system", {
-output: {
-  schema: {type: "object", properties: {name: {type: "string"}}},
-  validation: "error"
-}
-  })
-  log(result.data)
-  log(result.text)
-}"#,
-    );
-    assert!(
-        !errs.iter().any(|w| w.contains("unvalidated")),
-        "llm_call with schema should not error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_strict_types_schema_expect_result_typed() {
-    let errs = strict_errors(
-        r#"pipeline t(task) {
-  const my_schema = {type: "object", properties: {name: {type: "string"}}}
-  const validated = schema_expect(json_parse("{}"), my_schema)
-  log(validated.name)
-}"#,
-    );
-    assert!(
-        !errs.iter().any(|w| w.contains("unvalidated")),
-        "schema_expect result should be typed, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_strict_types_realistic_orchestration() {
-    let errs = strict_errors(
-        r#"pipeline t(task) {
-  const payload_schema = {type: "object", properties: {
-name: {type: "string"},
-steps: {type: "list", items: {type: "string"}}
-  }}
-
-  // Good: schema-aware llm_call
-  const result = llm_call("generate a workflow", "system", {
-output: {schema: payload_schema, validation: "error"}
-  })
-  const workflow_name = result.data.name
-
-  // Good: validate then access
-  const raw = json_parse("{}")
-  schema_expect(raw, payload_schema)
-  const steps = raw.steps
-
-  log(workflow_name)
-  log(steps)
-}"#,
-    );
-    assert!(
-        !errs.iter().any(|w| w.contains("unvalidated")),
-        "validated orchestration should be clean, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_strict_types_llm_call_with_schema_via_variable() {
-    let errs = strict_errors(
-        r#"pipeline t(task) {
-  const my_schema = {type: "object", properties: {score: {type: "float"}}}
-  const result = llm_call("rate this", "system", {
-output: {schema: my_schema, validation: "error"}
-  })
-  log(result.data.score)
-}"#,
-    );
-    assert!(
-        !errs.iter().any(|w| w.contains("unvalidated")),
-        "llm_call with schema variable should not error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_strict_types_flags_the_ambient_boundary_spelling() {
-    let errs = strict_errors(
-        r#"pipeline t(harness: Harness) {
-  harness.stdio.log(llm_call("rate this", "system").data)
-}"#,
-    );
-    assert!(
-        errs.iter().any(|w| w.contains("unvalidated")),
-        "expected unvalidated error, got: {errs:?}"
     );
 }
 
@@ -310,20 +263,6 @@ fn test_strict_types_reads_a_typed_http_envelope_and_flags_its_parsed_body() {
     assert!(unvalidated[0].contains("payload"), "got: {errs:?}");
 }
 
-#[test]
-fn test_strict_types_ignores_a_get_method_on_another_receiver() {
-    let errs = strict_errors(
-        r#"pipeline t(harness: Harness) {
-  const proxy = {llm: {call: { prompt, system -> {data: prompt} }}}
-  harness.stdio.log(proxy.llm.call("rate this", "system").data)
-}"#,
-    );
-    assert!(
-        !errs.iter().any(|w| w.contains("unvalidated")),
-        "`llm.call` on a plain value is not the harness method, got: {errs:?}"
-    );
-}
-
 /// The suppression that makes a typed `output` schema clear the boundary must
 /// follow the call to its harness spelling. Teaching the rule the new spelling
 /// without teaching the suppression would make every typed-schema LLM call
@@ -342,19 +281,6 @@ output: {schema: my_schema, validation: "error"}
     assert!(
         !errs.iter().any(|w| w.contains("unvalidated")),
         "harness.llm.call with an output schema should not error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_strict_types_harness_llm_call_without_schema_still_errors() {
-    let errs = strict_errors(
-        r#"pipeline t(harness: Harness) {
-  harness.stdio.log(harness.llm.call("rate this", "system").data)
-}"#,
-    );
-    assert!(
-        errs.iter().any(|w| w.contains("unvalidated")),
-        "an unschema'd harness.llm.call result is still unvalidated, got: {errs:?}"
     );
 }
 
@@ -622,47 +548,32 @@ fn test_renamed_stdlib_call_suggests_replacement() {
     );
 }
 
-#[test]
-fn test_worker_spawn_literal_config_allows_host_extension_keys() {
-    let errs = errors(
-        r#"pipeline t(harness: Harness, task) {
+#[rstest::rstest]
+#[case::test_worker_spawn_literal_config_allows_host_extension_keys(
+    r#"pipeline t(harness: Harness, task) {
   harness.agent.worker_spawn({
     task: "do it",
     node: {kind: "stage"},
     persmissions: {}
   })
 }"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "worker spawn config remains host-extensible and should not reject extension keys: {errs:?}"
-    );
-}
-
-#[test]
-fn test_worker_spawn_literal_config_allows_provider_extension_keys() {
-    let errs = errors(
-        r#"pipeline t(harness: Harness, task) {
+    true
+)]
+#[case::test_worker_spawn_literal_config_allows_provider_extension_keys(
+    r#"pipeline t(harness: Harness, task) {
   harness.agent.worker_spawn({task: "do it", provider: "mock", backgroun: true})
 }"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "worker spawn config remains host-extensible and should not reject extension keys: {errs:?}"
-    );
-}
-
-#[test]
-fn test_sub_agent_request_accepts_registry_tools_shape() {
-    let errs = errors(
-        r#"pipeline t(task) {
+    true
+)]
+#[case::test_sub_agent_request_accepts_registry_tools_shape(
+    r#"pipeline t(task) {
   sub_agent_request("do it", {provider: "mock", tools: tool_registry()})
 }"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "sub_agent_request should accept a tool registry dict in options.tools, got: {errs:?}"
-    );
+    true
+)]
+fn diagnostics_errors(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
 }
 
 #[test]

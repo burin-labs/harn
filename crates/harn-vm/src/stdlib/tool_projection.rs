@@ -8,7 +8,6 @@ pub(crate) fn register_tool_projection_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_project(registry: {_type: \"tool_registry\", tools: list} | list, audience: \"cli\" | \"mcp\" | \"catalog\" | \"dashboard\" | \"agent\") -> {_type: \"tool_registry\", tools: list} | list",
     category = "tools"
 )]

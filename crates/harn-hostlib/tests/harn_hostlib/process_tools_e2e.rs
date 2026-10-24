@@ -15,6 +15,7 @@
 
 #![cfg(unix)]
 
+use harn_vm::value::VmDictExt as _;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -72,7 +73,7 @@ pub(super) fn call(
 }
 
 fn vlist(values: Vec<VmValue>) -> VmValue {
-    VmValue::List(Arc::new(values))
+    VmValue::list(values)
 }
 
 fn python3() -> Option<String> {
@@ -193,7 +194,7 @@ fn real_run_command_present_program_exit_127_is_not_missing() {
         req.insert("cwd".into(), vm_string(workspace.path().to_str().unwrap()));
         let mut env = dict_map();
         env.insert("PATH".into(), vm_string(workspace.path().to_str().unwrap()));
-        req.insert("env".into(), VmValue::dict(env));
+        req.put("env", VmValue::dict(env));
         if mode == "argv" {
             req.insert("argv".into(), vlist_str(&[program.to_str().unwrap()]));
         } else {
@@ -206,7 +207,7 @@ fn real_run_command_present_program_exit_127_is_not_missing() {
                 vm_string(&format!("{}:/usr/bin:/bin", workspace.path().display())),
             );
             env.insert("HOME".into(), vm_string(workspace.path().to_str().unwrap()));
-            req.insert("env".into(), VmValue::dict(env));
+            req.put("env", VmValue::dict(env));
         }
         let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
         assert_eq!(require_int(&response, "exit_code"), 127, "{mode}");
@@ -230,7 +231,7 @@ fn real_run_command_startup_function_exit_127_is_not_missing() {
     req.insert("cwd".into(), vm_string(workspace.path().to_str().unwrap()));
     let mut env = dict_map();
     env.insert("BASH_ENV".into(), vm_string(startup.to_str().unwrap()));
-    req.insert("env".into(), VmValue::dict(env));
+    req.put("env", VmValue::dict(env));
     let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert_eq!(
         std::fs::read_to_string(workspace.path().join("called")).unwrap(),
@@ -267,7 +268,7 @@ fn real_run_command_auto_bare_env_bypasses_shell_startup() {
         let mut env = dict_map();
         env.insert("PATH".into(), vm_string(workspace.path().to_str().unwrap()));
         env.insert("BASH_ENV".into(), vm_string(startup.to_str().unwrap()));
-        req.insert("env".into(), VmValue::dict(env));
+        req.put("env", VmValue::dict(env));
         let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
         assert_eq!(require_int(&response, "exit_code"), 0);
         let stdout = require_str(&response, "stdout");
@@ -372,7 +373,7 @@ fn real_run_command_background_preserves_missing_program_evidence() {
     req.insert("mode".into(), vm_string("shell"));
     req.insert("shell_id".into(), vm_string("sh"));
     req.insert("command".into(), vm_string("harn-absent-program-8932"));
-    req.insert("background_after_ms".into(), VmValue::Int(30_000));
+    req.put_int("background_after_ms", 30_000);
     let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert_eq!(require_str(&response, "status"), "completed");
     assert_eq!(require_int(&response, "exit_code"), 127);
@@ -447,7 +448,7 @@ fn real_background_spawn_failure_is_reported_before_returning_a_handle() {
         "argv".into(),
         vlist_str(&["harn-owner-death-command-that-does-not-exist"]),
     );
-    req.insert("background".into(), VmValue::Bool(true));
+    req.put_bool("background", true);
     let error = call("hostlib_tools_run_command", req).expect_err("background spawn must fail");
     assert!(
         error
@@ -469,11 +470,11 @@ fn real_background_child_receives_explicit_credential_over_private_pipe() {
     let canary = "guardian-request-pipe-canary";
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["env"]));
-    req.insert("background".into(), VmValue::Bool(true));
+    req.put_bool("background", true);
     req.insert("env_mode".into(), vm_string("patch"));
     let mut env = dict_map();
     env.insert("EXAMPLE_API_KEY".into(), vm_string(canary));
-    req.insert("env".into(), VmValue::dict(env));
+    req.put("env", VmValue::dict(env));
 
     let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
     let mut wait_req = dict_map();
@@ -481,7 +482,7 @@ fn real_background_child_receives_explicit_credential_over_private_pipe() {
         "handle_id".into(),
         vm_string(&require_str(&start, "handle_id")),
     );
-    wait_req.insert("timeout_ms".into(), VmValue::Int(10_000));
+    wait_req.put_int("timeout_ms", 10_000);
     let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
 
     assert_eq!(require_str(&waited, "status"), "completed");
@@ -522,7 +523,7 @@ fn real_wait_command_completes_background_after_fifo_release() {
     );
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["bash", "-c", &script]));
-    req.insert("background".into(), VmValue::Bool(true));
+    req.put_bool("background", true);
     let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
     let handle_id = require_str(&start, "handle_id");
 
@@ -536,7 +537,7 @@ fn real_wait_command_completes_background_after_fifo_release() {
             .expect("wait-start receiver dropped");
         let mut wait_req = dict_map();
         wait_req.insert("handle_id".into(), vm_string(&wait_handle_id));
-        wait_req.insert("timeout_ms".into(), VmValue::Int(10_000));
+        wait_req.put_int("timeout_ms", 10_000);
         require_dict(call("hostlib_tools_wait_command", wait_req).unwrap())
     });
 
@@ -652,7 +653,7 @@ fn session_input_reaches_real_command_but_not_results_or_artifacts() {
     );
     let mut bindings = dict_map();
     bindings.insert("SERVICE_KEY".into(), vm_string("SERVICE_KEY"));
-    request.insert("input_env".into(), VmValue::dict(bindings));
+    request.put("input_env", VmValue::dict(bindings));
     let response = require_dict(call("hostlib_tools_run_command", request.clone()).unwrap());
     assert_eq!(require_int(&response, "exit_code"), 0);
     assert_eq!(require_str(&response, "stdout"), "received:[redacted]");
@@ -722,7 +723,7 @@ fn real_run_command_env_remove_strips_named_vars_but_explicit_env_wins() {
     );
     let mut env = dict_map();
     env.insert("HARN_E2E_OVERRIDE_ME".into(), vm_string("explicit-value"));
-    req.insert("env".into(), VmValue::dict(env));
+    req.put("env", VmValue::dict(env));
     // Supplying `env` alone defaults env_mode to `replace`; force `patch` so
     // the child actually inherits the parent env this test strips from.
     req.insert("env_mode".into(), vm_string("patch"));
@@ -781,7 +782,7 @@ fn real_run_command_cleanup_token_survives_replace_env_and_env_remove() {
         "HARN_PROCESS_CLEANUP_TOKEN".into(),
         vm_string("caller-token"),
     );
-    req.insert("env".into(), VmValue::dict(env));
+    req.put("env", VmValue::dict(env));
 
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
@@ -801,7 +802,7 @@ fn real_run_command_kills_child_when_timeout_elapses() {
     // doesn't bloat the slow suite — under 250 ms wall-clock total.
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "5"]));
-    req.insert("timeout_ms".into(), VmValue::Int(150));
+    req.put_int("timeout_ms", 150);
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert!(require_bool(&resp, "timed_out"));
     assert_eq!(require_str(&resp, "status"), "timed_out");
@@ -814,8 +815,8 @@ fn real_run_command_file_capture_kills_child_when_timeout_elapses() {
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "5"]));
-    req.insert("timeout_ms".into(), VmValue::Int(150));
-    req.insert("capture".into(), VmValue::dict(capture));
+    req.put_int("timeout_ms", 150);
+    req.put("capture", VmValue::dict(capture));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
     assert!(require_bool(&resp, "timed_out"));
@@ -924,7 +925,7 @@ fn real_run_command_sandbox_scope_allows_temp_cwd_outside_empty_policy_fallback(
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["pwd"]));
     req.insert("cwd".into(), vm_string(&command_root_str));
-    req.insert("sandbox".into(), VmValue::dict(sandbox));
+    req.put("sandbox", VmValue::dict(sandbox));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
     pop_execution_policy();
@@ -975,7 +976,7 @@ fn real_run_command_respects_a_caller_pinned_tmpdir() {
     req.insert("env_mode".into(), vm_string("patch"));
     let mut env = dict_map();
     env.insert("TMPDIR".into(), vm_string(&caller_tmp.to_string_lossy()));
-    req.insert("env".into(), VmValue::dict(env));
+    req.put("env", VmValue::dict(env));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
     pop_execution_policy();
@@ -1116,7 +1117,7 @@ fn real_run_command_isolates_the_child_in_its_own_session() {
     );
     let mut env = dict_map();
     env.insert(SESSION_REPORT_ENV.into(), vm_string("1"));
-    req.insert("env".into(), VmValue::dict(env));
+    req.put("env", VmValue::dict(env));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
     assert_eq!(require_str(&resp, "status"), "completed");
@@ -1212,7 +1213,7 @@ fn real_run_command_background_child_survives_interrupt() {
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "30"]));
-    req.insert("background".into(), VmValue::Bool(true));
+    req.put_bool("background", true);
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert_eq!(require_str(&resp, "status"), "running");
     let pid = require_int(&resp, "pid");
@@ -1292,7 +1293,7 @@ print("parent-exit", flush=True)
             vm_string(&pid_path_arg),
         ]),
     );
-    req.insert("timeout_ms".into(), VmValue::Int(500));
+    req.put_int("timeout_ms", 500);
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
     assert!(require_bool(&resp, "timed_out"));
@@ -1394,8 +1395,8 @@ print("parent-exit", flush=True)
     req.insert("shell_id".into(), vm_string("sh"));
     // A generous bound catches a broken capture that waits for the escaped
     // holder forever; elapsed time is not the assertion under test.
-    req.insert("timeout_ms".into(), VmValue::Int(10_000));
-    req.insert("capture".into(), VmValue::dict(capture));
+    req.put_int("timeout_ms", 10_000);
+    req.put("capture", VmValue::dict(capture));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
     assert!(!require_bool(&resp, "timed_out"));

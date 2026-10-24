@@ -202,6 +202,17 @@ impl Machine<'_> {
             (PortableBuiltin::Sha256, [RuntimeValue::Bytes(value)]) => self.push_charged(
                 RuntimeValue::String(Arc::from(crate::pure::sha256_hex(value))),
             ),
+            (PortableBuiltin::SecretPatternCatalog, []) => {
+                match serde_json::to_value(crate::pure::secret_pattern_catalog())
+                    .map_err(|error| {
+                        diagnostic("builtin_error", format!("secret_pattern_catalog: {error}"))
+                    })
+                    .and_then(DataValue::from_json)
+                {
+                    Ok(value) => self.push_charged(RuntimeValue::from(value)),
+                    Err(diagnostic) => OpStep::Error(diagnostic),
+                }
+            }
             (PortableBuiltin::SecretScan, [value]) => {
                 let Some(content) = runtime_text(value) else {
                     return OpStep::Error(diagnostic(
