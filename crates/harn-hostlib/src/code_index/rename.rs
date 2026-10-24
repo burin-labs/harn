@@ -330,10 +330,19 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         );
 
         if java_method && language == Language::Java {
-            targets = match super::rename_java::targets(
-                state, seed_node, path, &source, &tree, targets,
+            match super::rename_java::sites(
+                state,
+                seed_node,
+                path,
+                &source,
+                &tree,
+                targets,
+                local_shadows,
             ) {
-                Ok(targets) => targets,
+                Ok(sites) => {
+                    targets = sites.targets;
+                    local_shadows = sites.shadows;
+                }
                 Err(detail) => {
                     return Ok(ambiguous_response_with_details(
                         &env,

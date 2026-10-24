@@ -76,6 +76,110 @@ const DOCUMENTS: &str = "package lab;\npublic final class DocumentStore {\n  pub
 const AUDIT: &str = "package lab;\npublic final class AuditStore {\n  // getById is a separate audit API.\n  public int getById(int id) { return id; }\n  public String label() { return \"getById\"; }\n}\n";
 
 #[test]
+fn java_rename_ignores_new_name_on_unrelated_method_owners() {
+    let audit = "package lab; final class AuditStore { int getById(int id) { return id; } int loadById(int id) { return id; } }";
+    let page = "package lab; final class Page { int read(DocumentStore documents, AuditStore audit) { /* 😀 */ return documents.getById(1) + audit.getById(2) + audit.loadById(3); } }";
+    let ws = Workspace::new(&[
+        ("lab/DocumentStore.java", DOCUMENTS),
+        ("lab/AuditStore.java", audit),
+        ("lab/Page.java", page),
+    ]);
+    {
+        let guard = ws.index.lock().unwrap();
+        let graph = &guard.as_ref().unwrap().symbols;
+        assert_eq!(calls(graph, "lab.DocumentStore"), 1);
+        assert_eq!(calls(graph, "lab.AuditStore"), 1);
+        let audit_new = graph.java_method("loadById", "lab.AuditStore").unwrap();
+        assert_eq!(
+            graph
+                .incoming(audit_new.id)
+                .iter()
+                .filter(|edge| edge.kind == EdgeKind::Calls)
+                .count(),
+            1
+        );
+    }
+    let result = ws.rename(
+        "DocumentStore.getById",
+        "lab/DocumentStore.java",
+        Some(3),
+        Some(14),
+    );
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    assert_eq!(n(field(&result, "match_count")), 2);
+    assert_eq!(
+        ws.read("lab/DocumentStore.java"),
+        DOCUMENTS.replace("getById", "loadById")
+    );
+    assert_eq!(ws.read("lab/AuditStore.java"), audit);
+    assert_eq!(
+        ws.read("lab/Page.java"),
+        page.replace("documents.getById", "documents.loadById")
+    );
+}
+
+#[test]
+fn java_rename_keeps_same_owner_new_name_conflicts() {
+    let documents = "package lab;\npublic final class DocumentStore {\n  public int getById(int id) { return id; }\n  public int loadById(String id) { return id.length(); }\n}\n";
+    let page = "package lab; final class Page { int read(DocumentStore documents) { return documents.getById(1) + documents.loadById(\"x\"); } }";
+    let ws = Workspace::new(&[
+        ("lab/DocumentStore.java", documents),
+        ("lab/Page.java", page),
+    ]);
+    let result = ws.rename(
+        "DocumentStore.getById",
+        "lab/DocumentStore.java",
+        Some(3),
+        Some(14),
+    );
+    assert_eq!(s(field(&result, "result")), "conflict", "{result:?}");
+    let VmValue::List(conflicts) = field(&result, "conflicts") else {
+        panic!("missing actual same-owner conflicts")
+    };
+    assert_eq!(conflicts.len(), 2);
+    assert_eq!(n(field(&result, "match_count")), 0);
+    assert_eq!(ws.read("lab/DocumentStore.java"), documents);
+    assert_eq!(ws.read("lab/Page.java"), page);
+}
+
+#[test]
+fn java_rename_refuses_unknown_new_name_receiver_bindings() {
+    let audit = "package lab; class AuditStore { int loadById(int id) { return id; } }";
+    let page = "package lab; final class Page<T extends AuditStore> { int read(DocumentStore documents, T audit) { return documents.getById(1) + audit.loadById(2); } }";
+    let ws = Workspace::new(&[
+        ("lab/DocumentStore.java", DOCUMENTS),
+        ("lab/AuditStore.java", audit),
+        ("lab/Page.java", page),
+    ]);
+    {
+        let guard = ws.index.lock().unwrap();
+        let graph = &guard.as_ref().unwrap().symbols;
+        assert_eq!(calls(graph, "lab.DocumentStore"), 1);
+        let sites: Vec<_> = graph
+            .iter_nodes()
+            .filter(|node| node.kind == NodeKind::CallSite && node.name == "loadById")
+            .collect();
+        assert_eq!(sites.len(), 1);
+        assert!(sites[0].owner_type.is_none());
+    }
+    let result = ws.rename(
+        "DocumentStore.getById",
+        "lab/DocumentStore.java",
+        Some(3),
+        Some(14),
+    );
+    assert_eq!(
+        s(field(&result, "ambiguity_reason")),
+        "unresolved_reference_binding",
+        "{result:?}"
+    );
+    assert_eq!(n(field(&result, "match_count")), 0);
+    assert_eq!(ws.read("lab/DocumentStore.java"), DOCUMENTS);
+    assert_eq!(ws.read("lab/AuditStore.java"), audit);
+    assert_eq!(ws.read("lab/Page.java"), page);
+}
+
+#[test]
 fn java_annotated_type_parameters_do_not_bind_to_namesake_classes() {
     let marker = "package lab; @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_PARAMETER) @interface Marker {}";
     for source in [
