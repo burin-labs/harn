@@ -19,6 +19,7 @@ use axum::Router;
 use harn_serve::{
     HttpTlsConfig, SiteHttpServeOptions, SiteServer, SiteServerConfig, SiteServerReady,
 };
+use notify::Watcher;
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -480,6 +481,14 @@ async fn site_readiness_identifies_the_actual_bound_listener() {
         let scheme = tls.listener_scheme();
         let (dir, path) = write_site(SITE_SCRIPT);
         let ready_path = dir.path().join("ready.json");
+        let (events, mut changes) = tokio::sync::mpsc::unbounded_channel();
+        let mut watcher = notify::recommended_watcher(move |event| {
+            let _ = events.send(event);
+        })
+        .unwrap();
+        watcher
+            .watch(dir.path(), notify::RecursiveMode::NonRecursive)
+            .unwrap();
         let server = SiteServer::new(SiteServerConfig::new(build_core(&path))).run_http(
             SiteHttpServeOptions {
                 bind: "127.0.0.1:0".parse().unwrap(),
@@ -493,11 +502,11 @@ async fn site_readiness_identifies_the_actual_bound_listener() {
             biased;
             result = &mut server => panic!("server stopped before its first request: {result:?}"),
             () = async {
-                tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                harn_clock::test_support::within("site startup receipt", async {
                     while !ready_path.try_exists().unwrap() {
-                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        changes.recv().await.expect("file watcher closed").expect("file watch failed");
                     }
-                }).await.expect("site did not publish its startup receipt");
+                }).await;
                 let ready: SiteServerReady = serde_json::from_slice(&std::fs::read(&ready_path).unwrap()).unwrap();
                 assert_eq!(ready.schema_version, 1);
                 assert_eq!(ready.pid, std::process::id());
