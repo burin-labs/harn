@@ -753,3 +753,71 @@ fn a_source_file_broken_across_lines_refuses_before_planning() {
     );
     assert!(s(field(&result, "details")).starts_with("`orders.py` does not parse before the edit"));
 }
+
+// The three Rust cases below are reductions of compiler failures a seeded
+// qualification run found in published crates.
+
+#[test]
+fn rust_import_the_source_still_uses_stays_in_the_source() {
+    let fixture = Fixture::new(&[
+        ("Cargo.toml", "[package]\nname = \"kit\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "pub mod buf;\n"),
+        ("src/buf/mod.rs", "pub mod uninit;\n"),
+        (
+            "src/buf/uninit.rs",
+            "use core::fmt;\nuse core::mem::MaybeUninit;\n\n/// Uninitialized bytes.\n#[repr(transparent)]\npub struct Slice([MaybeUninit<u8>]);\n\nimpl Slice {\n    pub fn new(slice: &mut [MaybeUninit<u8>]) -> &mut Slice {\n        unsafe { &mut *(slice as *mut [MaybeUninit<u8>] as *mut Slice) }\n    }\n}\n\nimpl fmt::Debug for Slice {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        f.write_str(\"Slice\")\n    }\n}\n",
+        ),
+    ]);
+    let result = fixture.mv("Slice", "src/buf/uninit.rs", "src/buf/moved.rs");
+    assert_eq!(tag(&result), "applied", "{result:?}");
+    let source = fixture.read("src/buf/uninit.rs");
+    assert!(source.contains("use core::mem::MaybeUninit;"), "{source}");
+    assert!(fixture
+        .read("src/buf/moved.rs")
+        .contains("use core::mem::MaybeUninit;"));
+}
+
+#[test]
+fn rust_source_reading_the_moved_structs_private_fields_refuses() {
+    let fixture = Fixture::new(&[
+        ("Cargo.toml", "[package]\nname = \"kit\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "pub mod chain;\npub mod other;\n"),
+        (
+            "src/chain.rs",
+            "pub struct Chain<T, U> {\n    a: T,\n    b: U,\n}\n\nimpl<T, U> Chain<T, U> {\n    pub fn first_ref(&self) -> &T {\n        &self.a\n    }\n}\n",
+        ),
+        ("src/other.rs", "pub fn other() {}\n"),
+    ]);
+    let result = fixture.refused(
+        "visibility_required",
+        &[
+            ("symbol", vm_string("Chain")),
+            ("path", vm_string("src/chain.rs")),
+            ("to_path", vm_string("src/other.rs")),
+        ],
+    );
+    let sites = list(field(&result, "sites"));
+    assert_eq!(int(field(&sites[0], "line")), 8, "{sites:?}");
+}
+
+#[test]
+fn rust_import_list_in_a_nested_module_refuses() {
+    let fixture = Fixture::new(&[
+        ("Cargo.toml", "[package]\nname = \"kit\"\nversion = \"0.1.0\"\n"),
+        (
+            "src/lib.rs",
+            "pub mod other;\n\npub struct Meta {\n    pub level: u8,\n}\n\npub struct Record {\n    pub meta: Meta,\n}\n\n#[cfg(test)]\nmod tests {\n    use super::{Meta, Record};\n\n    #[test]\n    fn build() {\n        let _ = Record { meta: Meta { level: 1 } };\n    }\n}\n",
+        ),
+        ("src/other.rs", "pub fn other() {}\n"),
+    ]);
+    let result = fixture.refused(
+        "nested_import",
+        &[
+            ("symbol", vm_string("Meta")),
+            ("path", vm_string("src/lib.rs")),
+            ("to_path", vm_string("src/other.rs")),
+        ],
+    );
+    let sites = list(field(&result, "sites"));
+    assert_eq!(int(field(&sites[0], "line")), 13, "{sites:?}");
+}

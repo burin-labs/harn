@@ -872,3 +872,46 @@ fn a_file_that_does_not_parse_refuses_before_planning() {
         "{details}"
     );
 }
+
+// Probe regressions: each applied edit below failed the crate's compiler or
+// tsc. A harness calls a test with no arguments, and a declared function type
+// keeps the old arity, so these must refuse instead.
+#[test]
+fn test_entry_and_typed_arrow_signatures_refuse_as_fixed() {
+    let ws = Workspace::new(&[
+        (
+            "tests/macros.rs",
+            "#[test]\n\
+             fn kv_error() {\n\
+             \x20   helper();\n\
+             }\n\
+             // runs on the async runtime\n\
+             #[tokio::test]\n\
+             async fn kv_async() {}\n\
+             fn helper() {}\n",
+        ),
+        ("src/main.rs", "fn main() {\n    run();\n}\nfn run() {}\n"),
+        (
+            "src/check.ts",
+            "type Res = { ok: boolean }\n\
+             export const fallible: () => Res = () => ({ ok: true })\n\
+             export const plain = () => ({ ok: true })\n\
+             export const val = fallible() && plain()\n",
+        ),
+    ]);
+    let extra: &[&[(&str, &str)]] = &[&[("name", "extra"), ("type", "u8"), ("call_value", "0")]];
+    for (name, path, reason) in [
+        ("kv_error", "tests/macros.rs", "#[test]"),
+        ("kv_async", "tests/macros.rs", "#[tokio::test]"),
+        ("main", "src/main.rs", "entry point"),
+    ] {
+        let result = ws.refuse("fixed_signature", name, path, extra);
+        assert!(text(field(&result, "details")).contains(reason), "{name}");
+    }
+    let ts_extra: &[&[(&str, &str)]] =
+        &[&[("name", "extra"), ("type", "number"), ("call_value", "0")]];
+    let result = ws.refuse("fixed_signature", "fallible", "src/check.ts", ts_extra);
+    assert!(text(field(&result, "details")).contains("() => Res"));
+    assert_applied(&ws.change("plain", "src/check.ts", ts_extra), 1);
+    assert_applied(&ws.change("helper", "tests/macros.rs", extra), 1);
+}

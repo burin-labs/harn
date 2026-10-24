@@ -471,7 +471,7 @@ fn plan(
         .cloned()
     else {
         return Ok(refuse(
-            "error",
+            "not_top_level",
             format!("`{name}` is not a top-level declaration in `{source_path}`; only top-level items move"),
         ));
     };
@@ -650,6 +650,22 @@ fn plan(
             blocked,
         ));
     }
+    if family == Family::Rust {
+        let readers = rust::private_fields_read_outside(
+            source_path,
+            &src.source,
+            &src.tree,
+            item_node,
+            &moved,
+        );
+        if !readers.is_empty() {
+            return Ok(refuse_with_sites(
+                "visibility_required",
+                format!("the source reads private fields of `{name}`; make them public first"),
+                readers,
+            ));
+        }
+    }
 
     // 5. Every referencing file.
     let references = reference_sites(BUILTIN, state, seed, session)?;
@@ -688,6 +704,42 @@ fn plan(
                 imports: Vec::new(),
             },
         );
+    }
+
+    // Import requests render at the top of a file, so a list import inside a
+    // nested module or function would lose the name.
+    let nested: Vec<Site> = works
+        .values()
+        .flat_map(|work| {
+            work.model
+                .bindings
+                .iter()
+                .filter(|b| {
+                    !b.top_level
+                        && !b.sole
+                        && b.shape == Shape::Named
+                        && b.imported == name
+                        && b.target == source_module
+                })
+                .map(|b| {
+                    Site::at(
+                        &work.path,
+                        &work.source,
+                        b.statement.start,
+                        "import",
+                        "a nested import list naming the moved item",
+                    )
+                })
+        })
+        .collect();
+    if !nested.is_empty() {
+        return Ok(refuse_with_sites(
+            "nested_import",
+            format!(
+                "`{name}` is imported in a list inside a nested scope; split that import first"
+            ),
+            nested,
+        ));
     }
 
     let mut outside_users: Vec<Site> = Vec::new();
@@ -1036,7 +1088,12 @@ fn remaining_names(
     let kinds = language.rename_identifier_kinds().unwrap_or(&[]);
     let mut names = HashSet::new();
     text::walk(tree.root_node(), |node| {
-        if excluded.contains(&node.start_byte()) || model.in_import(node.start_byte()) {
+        // Prune only nodes wholly inside; the root starts where a leading
+        // `use` does.
+        let span = node.byte_range();
+        if text::covers(excluded, &span)
+            || model.import_ranges.iter().any(|r| text::covers(r, &span))
+        {
             return false;
         }
         if kinds.contains(&node.kind()) {

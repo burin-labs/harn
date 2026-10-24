@@ -149,6 +149,9 @@ pub(super) struct Declaration {
     /// Why other signatures must change with this one: it declares or
     /// implements a trait or interface method, or is an overload.
     pub contract: Option<String>,
+    /// Why the parameter list cannot change at all: a test, bench or entry
+    /// attribute (or `fn main`) fixes it, or a declared function type does.
+    pub fixed: Option<String>,
 }
 
 /// `source[range]`, or empty when the range is not on character boundaries.
@@ -328,7 +331,53 @@ pub(super) fn read_declaration(
         is_method,
         owner: is_method.then(|| owner_name(node, bytes)).flatten(),
         contract: contract(node, bytes, family),
+        fixed: fixed_signature(node, bytes, family),
     })
+}
+
+/// Attribute names whose function must keep its exact parameter list: a
+/// harness or runtime calls it, or its ABI symbol is exported.
+const SIGNATURE_FIXING_ATTRIBUTES: &[&str] = &["test", "bench", "main", "no_mangle", "export_name"];
+
+fn fixed_signature(node: Node<'_>, bytes: &[u8], family: Family) -> Option<String> {
+    match family {
+        Family::Rust => {
+            let mut sibling = node.prev_sibling();
+            while let Some(current) = sibling {
+                match current.kind() {
+                    "attribute_item" => {
+                        let path = named_children(current)
+                            .into_iter()
+                            .find(|c| c.kind() == "attribute")
+                            .and_then(|a| named_children(a).into_iter().next())
+                            .map(|p| text(p, bytes).to_string())
+                            .unwrap_or_default();
+                        let last = path.rsplit("::").next().unwrap_or("");
+                        if SIGNATURE_FIXING_ATTRIBUTES.contains(&last) {
+                            return Some(format!("carries `#[{path}]`"));
+                        }
+                    }
+                    "line_comment" | "block_comment" => {}
+                    _ => break,
+                }
+                sibling = current.prev_sibling();
+            }
+            let top_level = node.parent().is_some_and(|p| p.kind() == "source_file");
+            let name = node.child_by_field_name("name").map(|n| text(n, bytes));
+            (top_level && name == Some("main")).then(|| "is the program entry point".into())
+        }
+        Family::TypeScript => {
+            let annotation = match node.kind() {
+                "variable_declarator" => node.child_by_field_name("type"),
+                _ => None,
+            }?;
+            Some(format!(
+                "is bound to the declared type `{}`",
+                text(annotation, bytes).trim_start_matches(':').trim()
+            ))
+        }
+        Family::Python => None,
+    }
 }
 
 fn enclosing<'t>(node: Node<'t>, kinds: &[&str]) -> Option<Node<'t>> {

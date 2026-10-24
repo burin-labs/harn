@@ -17,7 +17,7 @@
 //! `ambiguous_symbol` (candidates in `warnings`) | `conflict` |
 //! `unsupported_language` | `syntax_error` | `error`, plus this operation's
 //! refusals `parameter_in_use` | `value_reference` | `unsupported_call_site` |
-//! `overrides_present` and its `call_sites_updated`, `sites`, and parameter
+//! `overrides_present` | `fixed_signature` and its `call_sites_updated`, `sites`, and parameter
 //! lists. A request that does not fit the declaration raises an invalid
 //! parameter error. Every refusal leaves every file byte-identical.
 //!
@@ -469,6 +469,23 @@ fn plan(
                 .unwrap_or("")
                 .trim()
                 .to_string(),
+        }])));
+    }
+
+    if let Some(reason) = &decl.fixed {
+        return Ok(Err(Refusal::new(
+            "fixed_signature",
+            format!(
+                "`{}` {reason}, which fixes its parameter list",
+                request.name
+            ),
+        )
+        .with_sites(vec![Site {
+            path: seed_path,
+            line: seed_line as usize,
+            kind: "declaration",
+            reason: reason.clone(),
+            text: String::new(),
         }])));
     }
 

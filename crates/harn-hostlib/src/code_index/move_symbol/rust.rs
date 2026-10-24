@@ -1,6 +1,6 @@
 //! Rust arm of `move_symbol`: crate-rooted module paths and use-trees.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
 
@@ -585,6 +585,92 @@ pub(crate) fn module_declaration_edit(source: &str, tree: &Tree, line: &str) -> 
         None if source.trim().is_empty() => Edit::insert(0, format!("{line}\n"), 0),
         None => Edit::insert(0, format!("{line}\n\n"), 0),
     }
+}
+
+/// Uses outside `moved` of the moved struct's private fields, which the
+/// destination module would hide from the source. Matching is by field name,
+/// so a same-named field of another type also refuses.
+pub(crate) fn private_fields_read_outside(
+    rel: &str,
+    source: &str,
+    tree: &Tree,
+    item: Node<'_>,
+    moved: &Range<usize>,
+) -> Vec<Site> {
+    let Some(body) = (item.kind() == "struct_item")
+        .then(|| item.child_by_field_name("body"))
+        .flatten()
+    else {
+        return Vec::new();
+    };
+    let mut private: HashSet<String> = HashSet::new();
+    match body.kind() {
+        "field_declaration_list" => {
+            for field in text::members(body) {
+                if field.kind() == "field_declaration" && !is_public(field, source) {
+                    if let Some(name) = field.child_by_field_name("name") {
+                        private.insert(text::text(name, source).to_string());
+                    }
+                }
+            }
+        }
+        "ordered_field_declaration_list" => {
+            let mut index = 0;
+            let mut public = false;
+            let mut cursor = body.walk();
+            for child in body.named_children(&mut cursor) {
+                match child.kind() {
+                    "visibility_modifier" => {
+                        public = text::text(child, source).replace(' ', "") != "pub(self)";
+                    }
+                    "attribute_item" => {}
+                    kind if kind.contains("comment") => {}
+                    _ => {
+                        if !public {
+                            private.insert(index.to_string());
+                        }
+                        index += 1;
+                        public = false;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    if private.is_empty() {
+        return Vec::new();
+    }
+    let mut sites = Vec::new();
+    text::walk(tree.root_node(), |node| {
+        if text::covers(moved, &node.byte_range()) {
+            return false;
+        }
+        let method_call = node.parent().is_some_and(|parent| {
+            parent.kind() == "call_expression" && text::is_field_child(parent, "function", node)
+        });
+        let field = match node.kind() {
+            "field_expression" if method_call => None,
+            "field_expression" | "field_initializer" | "field_pattern" => node
+                .child_by_field_name("field")
+                .or_else(|| node.child_by_field_name("name")),
+            "shorthand_field_initializer" => node.named_child(0),
+            _ => None,
+        };
+        if let Some(field) = field {
+            let name = text::text(field, source);
+            if private.contains(name) {
+                sites.push(Site::at(
+                    rel,
+                    source,
+                    field.start_byte(),
+                    "reference",
+                    format!("reads the private field `{name}`, which the destination would hide"),
+                ));
+            }
+        }
+        true
+    });
+    sites
 }
 
 /// Names the moved item uses (first path segments, types, values) and the

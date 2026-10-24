@@ -62,7 +62,7 @@ pub(super) fn extract_typescript(root: Node<'_>, source: &str, out: &mut Vec<Sym
                     prefix: "function",
                     out,
                 });
-                None
+                field_text(node, "name", source)
             }
             "method_definition" => {
                 push_func(PushFuncArgs {
@@ -74,7 +74,10 @@ pub(super) fn extract_typescript(root: Node<'_>, source: &str, out: &mut Vec<Sym
                     prefix: "",
                     out,
                 });
-                None
+                field_text(node, "name", source)
+            }
+            "arrow_function" | "function_expression" | "function" | "generator_function" => {
+                Some(function_value_name(node, source))
             }
             "lexical_declaration" | "variable_declaration" => {
                 extract_bindings(node, source, container, out);
@@ -108,7 +111,7 @@ pub(super) fn extract_javascript(root: Node<'_>, source: &str, out: &mut Vec<Sym
                     prefix: "function",
                     out,
                 });
-                None
+                field_text(node, "name", source)
             }
             "method_definition" => {
                 push_func(PushFuncArgs {
@@ -120,7 +123,10 @@ pub(super) fn extract_javascript(root: Node<'_>, source: &str, out: &mut Vec<Sym
                     prefix: "",
                     out,
                 });
-                None
+                field_text(node, "name", source)
+            }
+            "arrow_function" | "function_expression" | "function" | "generator_function" => {
+                Some(function_value_name(node, source))
             }
             "public_field_definition" | "field_definition" => {
                 push_field(node, source, container, pos, out);
@@ -133,6 +139,20 @@ pub(super) fn extract_javascript(root: Node<'_>, source: &str, out: &mut Vec<Sym
             _ => None,
         }
     });
+}
+
+/// The container a function value gives the declarations in its body: the
+/// name it is bound to, or `<anonymous>` for a callback. Either way they
+/// are local, not module level.
+fn function_value_name(node: Node<'_>, source: &str) -> String {
+    node.child_by_field_name("name")
+        .or_else(|| {
+            node.parent()
+                .filter(|parent| parent.kind() == "variable_declarator")
+                .and_then(|parent| parent.child_by_field_name("name"))
+        })
+        .map(|name| helpers::node_text(name, source))
+        .unwrap_or_else(|| "<anonymous>".to_string())
 }
 
 fn declaration_position(node: Node<'_>) -> NodePos {
