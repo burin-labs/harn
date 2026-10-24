@@ -38,8 +38,10 @@ const GOVERNOR_DEFAULT_HARD = 3.0
  *   - budget: the ceiling in that signal's units (turns / tokens / USD).
  *   - checkpoint / over_estimate / hard: consumption FRACTIONS of `budget` at
  *     which the governor starts caring / warns while progressing / hard-stops.
- *   - progress_tools: optional allowlist of tool names that count as progress.
- *     When absent, ANY successful tool this turn counts as progress.
+ *   - progress_tools: optional allowlist of tool names that may count as
+ *     progress. A turn makes progress only when the loop says it is progressing
+ *     (activity that is not an exact repeated observation or a recurring
+ *     failing verify) and, with an allowlist, one of these tools succeeded.
  */
 pub type GovernorPolicy = {
   budget?: float,
@@ -429,13 +431,11 @@ fn __governor_observe(agent: HarnessAgent, policy: GovernorPolicy, payload: dict
   } else {
     to_float((to_int(payload?.iteration ?? 0) ?? 0) + 1)
   }
+  // The loop owns what progress means; `progress_tools` only narrows which
+  // tools may supply it.
   const progress_tools = policy.progress_tools
-  const successful = payload?.successful_tool_names ?? []
-  const made_progress = if progress_tools == nil {
-    len(successful) > 0
-  } else {
-    __any_in(successful, progress_tools)
-  }
+  const made_progress = payload.progressing
+    && (progress_tools == nil || __any_in(payload.successful_tool_names, progress_tools))
   return {
     ceiling: to_float(policy.budget ?? 0.0),
     consumed: consumed,
@@ -448,7 +448,12 @@ fn __governor_observe(agent: HarnessAgent, policy: GovernorPolicy, payload: dict
 // shape. If any is ever renamed or dropped the governor cannot compute its
 // consumption signal, so it aborts LOUDLY with a distinct reason rather than
 // silently defaulting to 0 and never firing (the dead-since-inception class).
-const GOVERNOR_REQUIRED_PAYLOAD_KEYS = ["iteration", "session_id", "successful_tool_names"]
+const GOVERNOR_REQUIRED_PAYLOAD_KEYS = [
+  "iteration",
+  "progressing",
+  "session_id",
+  "successful_tool_names",
+]
 
 fn __governor_shape_ok(payload: dict) -> bool {
   const present = keys(payload)
@@ -681,6 +686,7 @@ pub fn governors_selftest(agent: HarnessAgent) -> dict {
     dispatch: [],
     has_tool_calls: true,
     iteration: 4,
+    progressing: true,
     rejected_tool_names: [],
     session: {id: "governors-selftest"},
     session_id: "governors-selftest",
@@ -692,7 +698,7 @@ pub fn governors_selftest(agent: HarnessAgent) -> dict {
     tool_results: [],
     visible_text: "",
   }
-  const required = ["iteration", "session_id", "successful_tool_names"]
+  const required = GOVERNOR_REQUIRED_PAYLOAD_KEYS
   let missing = []
   for key in required {
     if !contains(keys(live_payload), key) {

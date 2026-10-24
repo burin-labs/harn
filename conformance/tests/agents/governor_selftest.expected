@@ -1,4 +1,4 @@
 true
 abort
 budget_hard_stop
-iteration,session_id,successful_tool_names
+iteration,progressing,session_id,successful_tool_names
