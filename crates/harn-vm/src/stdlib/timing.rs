@@ -33,7 +33,6 @@ use crate::stdlib::args::Args;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 /// Process-wide monotonic anchor for unmocked timing handles. Mirrors
 /// the stdlib clock module's anchor but avoids its testbench tape
@@ -70,9 +69,9 @@ pub(crate) fn reset_timing_state() {
     FINALIZED.with(|state| state.borrow_mut().clear());
 }
 
-pub(crate) fn register_timing_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_state_reset!(reset_timing_state);
+
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_timing_builtins);
 
 #[harn_builtin(
     exposure = "harness.clock.timing_start",

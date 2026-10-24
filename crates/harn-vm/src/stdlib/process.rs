@@ -103,6 +103,8 @@ pub(crate) fn reset_process_state() {
     set_thread_execution_context(None);
 }
 
+harn_vm_core::stdlib_state_reset!(reset_process_state);
+
 /// The form of `path` a child process can actually be started in.
 ///
 /// Canonicalizing a path on Windows yields the extended-length `\\?\C:\...`
@@ -359,6 +361,8 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         vm.register_builtin_def(def);
     }
 }
+
+harn_vm_core::stdlib_installer!(Host, register_process_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",
@@ -1073,6 +1077,8 @@ pub(crate) fn register_path_builtins(vm: &mut Vm) {
         vm.register_builtin_def(def);
     }
 }
+
+harn_vm_core::stdlib_installer!(Host, register_path_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",

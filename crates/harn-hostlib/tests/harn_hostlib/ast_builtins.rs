@@ -249,6 +249,38 @@ fn symbol_replace_swaps_in_caller_text() {
 }
 
 #[test]
+fn symbol_replace_preserves_neighbor_preamble_on_shared_line() {
+    let registry = ast_registry();
+    for (language, source, replacement, expected) in [
+        (
+            "ts",
+            "// keep with before\nconst before = 1; export function value() { return 1; } function after() {}",
+            "export function value() { return 42; }",
+            "// keep with before\nconst before = 1; export function value() { return 42; } function after() {}",
+        ),
+        (
+            "rust",
+            "// keep with before\r\nconst BEFORE: i32 = 1; pub fn value() -> i32 { 1 } fn after() {}\r\n",
+            "pub fn value() -> i32 { 42 }",
+            "// keep with before\r\nconst BEFORE: i32 = 1; pub fn value() -> i32 { 42 } fn after() {}\r\n",
+        ),
+    ] {
+        let result = call(
+            &registry,
+            "hostlib_ast_symbol_replace",
+            dict(&[
+                ("source", vm_string(source)),
+                ("language", vm_string(language)),
+                ("symbol_name", vm_string("value")),
+                ("new_text", vm_string(replacement)),
+            ]),
+        );
+        assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
+        assert_eq!(as_string(&dict_field(&result, "source")), expected);
+    }
+}
+
+#[test]
 fn symbol_replace_preserves_declaration_layout_and_surrounding_bytes() {
     let registry = ast_registry();
     let source = concat!(

@@ -708,7 +708,7 @@ mod tests {
         assert!(!parseable_extension("Dockerfile"));
         assert!(rename_supported_extension("src/App.tsx"));
         assert!(rename_supported_extension("scripts/build.harn"));
-        assert!(!rename_supported_extension("src/Main.java"));
+        assert!(rename_supported_extension("src/Main.java"));
         assert!(!rename_supported_extension("lib/main.dart"));
     }
 

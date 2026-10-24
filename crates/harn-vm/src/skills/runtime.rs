@@ -51,6 +51,8 @@ pub fn clear_current_skill_registry() {
     });
 }
 
+harn_vm_core::stdlib_state_reset!(clear_current_skill_registry);
+
 pub fn skill_entry_id(entry: &crate::value::DictMap) -> String {
     let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
     let namespace = entry

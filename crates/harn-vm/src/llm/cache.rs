@@ -1021,6 +1021,8 @@ pub fn reset_in_process_cache_state() {
     ACCESS_CLOCK.with(|clock| clock.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_in_process_cache_state);
+
 #[cfg(test)]
 #[path = "cache_tests.rs"]
 mod tests;

@@ -257,6 +257,13 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# Direct mini Chat rejects function tools with low effort; Responses completes
+# the tool turn (live probe 2026-10-23). Aggregator routes keep their own rules.
+[[provider.openai]]
+model_match = ["gpt-5.4-mini", "gpt-5.4-mini-2026-03-17"]
+extends = true
+reasoning_tools_require_responses = true
+
 # GPT-5.4 accepts an explicit temperature when reasoning is off, but fixes
 # that value while effort-based reasoning is active. Keep this conditional
 # rather than marking temperature unsupported for every request.

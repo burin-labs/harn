@@ -1352,8 +1352,10 @@ thrown loop error, the propagated error retains both causes.
 `AgentLoopTerminalCallbackFailure` record carries `cause.terminal_error` and
 `cause.callback_error`. `AgentLoopProtocolFailure` identifies an empty provider
 request refused before dispatch. `AgentLoopFailure` combines those records
-with `AgentLoopCancelledFailure` and the loop's string errors. Misspelled or
-missing record fields fail checking.
+with `AgentLoopCancelledFailure`, `AgentLoopClassifierConfigFailure`, and the
+loop's string errors. Invalid missing-tool-call classifier settings retain
+their configuration code, field, and offending value in that error channel.
+Misspelled or missing record fields fail checking.
 
 ### Example with retry
 

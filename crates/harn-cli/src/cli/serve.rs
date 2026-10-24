@@ -271,6 +271,10 @@ pub(crate) struct SiteServeArgs {
     /// Public URL printed in the startup banner.
     #[arg(long = "public-url", env = "HARN_SERVE_SITE_PUBLIC_URL")]
     pub public_url: Option<String>,
+    /// Create a JSON receipt containing the actual bound URL and process ID.
+    /// The destination must not exist. Useful with --bind 127.0.0.1:0.
+    #[arg(long, value_name = "PATH")]
+    pub ready_file: Option<PathBuf>,
     /// Static API keys accepted via `Authorization: Bearer` or `X-API-Key`.
     #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
     pub api_key: Vec<String>,

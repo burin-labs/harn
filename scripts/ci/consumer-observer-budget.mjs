@@ -1,4 +1,4 @@
-import {observeConsumerTiming, observerContext, parentHeadSha} from '../lib/consumer-observer.mjs';
+import {observeConsumerTiming, observerContext, parentHeadSha, observerRefusal } from '../lib/consumer-observer.mjs';
 import {consumerObservationBudget} from '../lib/consumer-observation-budget.mjs';
 
 try {
@@ -24,8 +24,7 @@ try {
     console.log(JSON.stringify(reading));
   }
 } catch (error) {
-  const reason = /^CONSUMER_OBSERVER reason=([a-z_]+)$/.exec(error.message)?.[1]
-    ?? 'job_timing_unmeasured';
-  console.error(`::error::CONSUMER_OBSERVER reason=${reason}`);
+  const {line} = observerRefusal(error, 'job_timing_unmeasured');
+  console.error(`::error::${line}`);
   process.exitCode = 1;
 }

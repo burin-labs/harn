@@ -458,6 +458,14 @@ harn playground --script pipeline.harn --llm-mock fixtures.jsonl
   `harn playground --llm-mock ...` fail with the
   first prompt snippet so you can add the missing case directly.
 
+`harness.llm.completion` uses these same fixtures and scoped mock scripts.
+Matching sees the prefix followed by a nonempty suffix as separate user
+messages. Fixture usage, errors and consumption order follow ordinary LLM
+calls. Without a fixture, the `mock` provider keeps its default completion
+response. Native completions and chat fallback each contribute one response
+to a recording. A fixture with `liveAfterCalls` retains its explicit handoff
+to the configured provider after the replay prefix.
+
 To capture a replayable fixture from a run, record once and then replay
 the saved JSONL:
 

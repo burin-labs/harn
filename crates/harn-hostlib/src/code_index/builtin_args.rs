@@ -103,6 +103,22 @@ pub(super) fn optional_positive_u64(
     }
 }
 
+pub(super) fn optional_positive_u32(
+    builtin: &'static str,
+    dict: &harn_vm::value::DictMap,
+    key: &'static str,
+) -> Result<Option<u32>, HostlibError> {
+    optional_positive_u64(builtin, dict, key)?
+        .map(|value| {
+            u32::try_from(value).map_err(|_| HostlibError::InvalidParameter {
+                builtin,
+                param: key,
+                message: "does not fit in a source coordinate".into(),
+            })
+        })
+        .transpose()
+}
+
 pub(super) fn optional_non_negative_u64(
     builtin: &'static str,
     dict: &harn_vm::value::DictMap,

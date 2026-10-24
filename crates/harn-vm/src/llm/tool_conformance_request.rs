@@ -601,6 +601,10 @@ fn push_omitted_sampling_param(
 }
 
 #[cfg(test)]
+#[path = "tool_conformance_mini_responses_tests.rs"]
+mod mini_responses_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::llm::api::{ReasoningEffort, ThinkingConfig};
@@ -868,7 +872,7 @@ mod tests {
     fn tool_result_followup_renders_openai_tool_history_without_tool_choice() {
         let body = probe_request_body(
             "openai",
-            "gpt-5.4-mini",
+            "gpt-5.1",
             ToolProbeMode::NonStreaming,
             super::super::ToolProbeCase::ToolResultFollowup,
             super::super::ToolProbeRequestProfile::CatalogDefault,
@@ -891,7 +895,7 @@ mod tests {
 
         let validation = validate_probe_request_body(
             "openai",
-            "gpt-5.4-mini",
+            "gpt-5.1",
             super::super::ToolProbeCase::ToolResultFollowup,
             super::super::ToolProbeRequestProfile::CatalogDefault,
             &body,

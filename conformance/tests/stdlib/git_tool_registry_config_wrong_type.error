@@ -1,0 +1,1 @@
+expected GitToolRegistryOptions, found {tool_config: {find_git_tool: {defer_loading: string}}}

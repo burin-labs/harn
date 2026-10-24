@@ -8,6 +8,7 @@ use tree_sitter::Node;
 use crate::error::HostlibError;
 use crate::tools::args::{build_dict, dict_arg, optional_int, require_string, str_value};
 
+use super::java::{direct_members, type_parameter_name};
 use super::language::Language;
 use super::parse::{parse_source, ContentOrPath};
 use super::symbols::helpers::{children, node_text};
@@ -212,18 +213,6 @@ fn find_containers<'tree>(node: Node<'tree>, line: usize, out: &mut Vec<Node<'tr
     }
 }
 
-fn direct_members(body: Node<'_>) -> Vec<Node<'_>> {
-    let mut members = Vec::new();
-    for member in children(body) {
-        if member.kind() == "enum_body_declarations" {
-            members.extend(children(member));
-        } else {
-            members.push(member);
-        }
-    }
-    members
-}
-
 fn is_method(node: Node<'_>) -> bool {
     matches!(
         node.kind(),
@@ -246,7 +235,7 @@ fn parameter_types(parameters: Node<'_>, method: Node<'_>, source: &str) -> Vec<
     while let Some(node) = scope {
         if let Some(parameters) = node.child_by_field_name("type_parameters") {
             for parameter in children(parameters).filter(|n| n.kind() == "type_parameter") {
-                if let Some(name) = children(parameter).find(|n| n.kind() == "type_identifier") {
+                if let Some(name) = type_parameter_name(parameter) {
                     variables.insert(node_text(name, source));
                 }
             }

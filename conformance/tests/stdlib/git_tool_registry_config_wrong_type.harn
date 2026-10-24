@@ -1,0 +1,5 @@
+import { git_toolbox_tools } from "std/git"
+
+fn main(harness: Harness) {
+  git_toolbox_tools(harness.process, nil, {tool_config: {find_git_tool: {defer_loading: "yes"}}})
+}

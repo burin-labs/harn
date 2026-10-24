@@ -453,9 +453,7 @@ fn make_match_record(catalogue: &crate::value::DictMap, rule: &crate::value::Dic
     VmValue::dict(out)
 }
 
-pub(crate) fn register_tool_hooks_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_tool_hooks_builtins);
 
 #[harn_builtin(
     exposure = "pure",

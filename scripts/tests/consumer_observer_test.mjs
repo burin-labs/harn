@@ -10,7 +10,7 @@ import {
   admitChild, admitObserver, githubRecord, observerContext, observerRunName,
   observerDeclarationName, observerRunNameExpression, observerDispatchActor,
   qualifyOwnedChild, githubArtifactCensus, githubChildCensus, reconcileOwnedChildren,
-  createTerminalReceipt, qualifyTerminalReceipt, parentHeadSha, observerParentWorkflows,
+  createTerminalReceipt, qualifyTerminalReceipt, parentHeadSha, observerParentWorkflows, observerRefusal,
 } from '../lib/consumer-observer.mjs';
 
 const context = {
@@ -161,6 +161,43 @@ test('artifact discovery measures complete pages and refuses false zero or parti
     [{ total_count: 101, artifacts: artifacts.slice(0, 100) }, { total_count: 100, artifacts: [] }],
     [{ total_count: 101, artifacts: artifacts.slice(0, 100) }, { total_count: 101, artifacts: [] }],
   ]) await assert.rejects(() => read(pages), /observer_census_unmeasured/);
+});
+
+test('a refused census read carries status and rate limit, retries one exhausted limit, and prints no endpoint', async () => {
+  const headers = values => ({ get: name => values[name] });
+  const refused = (status, values) => ({ ok: false, status, headers: headers(values) });
+  const read = fetchRecord => githubArtifactCensus('fixture-read', 'acme/widget-host', '73', fetchRecord);
+  const error = await read(async () => refused(403, {
+    'x-ratelimit-remaining': '0', 'x-ratelimit-limit': '5000', 'x-ratelimit-resource': 'core',
+    'x-ratelimit-reset': '4102444800',
+  })).then(() => assert.fail('a refused read must reject'), failure => failure);
+  assert.equal(error.message, 'CONSUMER_OBSERVER reason=observer_census_read_refused');
+  const { reason, line } = observerRefusal(error, 'job_timing_unmeasured');
+  assert.equal(reason, 'observer_census_read_refused');
+  assert.equal(line, 'CONSUMER_OBSERVER reason=observer_census_read_refused status=403 '
+    + 'ratelimit_remaining=0 ratelimit_limit=5000 ratelimit_reset=4102444800 ratelimit_resource=core');
+  assert.ok(!/widget-host|acme|73/.test(line), 'the public line never names the consumer repository or run');
+  const forged = Object.assign(new Error('x'), { diagnostic: { status: 'acme/widget-host', ratelimit_resource: 'a b' } });
+  assert.equal(observerRefusal(forged, 'fallback_reason').line, 'CONSUMER_OBSERVER reason=fallback_reason');
+  let reads = 0;
+  assert.deepEqual(await read(async () => {
+    reads += 1;
+    if (reads === 1) return refused(429, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1' });
+    return { ok: true, json: async () => ({ total_count: 0, artifacts: [] }) };
+  }), []);
+  assert.equal(reads, 2);
+  reads = 0;
+  await assert.rejects(() => read(async () => { reads += 1; return refused(403, { 'x-ratelimit-remaining': '7' }); }),
+    /observer_census_read_refused/);
+  assert.equal(reads, 1, 'a refusal with budget left is not a rate limit and is not retried');
+});
+
+test('every observer entrypoint prints its failure through the one public refusal owner', () => {
+  const directory = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ci');
+  for (const name of fs.readdirSync(directory).filter(entry => /^consumer-observer-.*\.mjs$/.test(entry))) {
+    const text = fs.readFileSync(path.join(directory, name), 'utf8');
+    assert.ok(!/exec\(error\.message\)/.test(text), `${name} parses the refusal message itself`);
+  }
 });
 
 test('child discovery keeps a complete bounded census and never treats run names as authority', async () => {

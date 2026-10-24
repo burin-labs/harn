@@ -41,6 +41,8 @@ pub(crate) fn register_transcript_projection_builtins(vm: &mut Vm) {
     vm.register_builtin_def(&TRANSCRIPT_PROJECT_IMPL_DEF);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_transcript_projection_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     effects = [],

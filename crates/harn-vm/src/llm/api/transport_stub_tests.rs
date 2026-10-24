@@ -17,6 +17,7 @@ mod admission;
 mod admission_bypass;
 mod anthropic_admission;
 mod anthropic_egress;
+mod completion_fixtures;
 mod completion_rate_limits;
 mod effective_effort;
 #[path = "transport_stub_tests/gemini_generate_content.rs"]

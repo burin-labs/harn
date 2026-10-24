@@ -153,6 +153,7 @@ mod persistent_state;
 pub mod personas;
 pub mod portable;
 use harn_vm_core::prepared_module;
+pub use harn_vm_core::process_liveness;
 pub mod prepared_run;
 pub mod process_sandbox;
 pub mod profile;
@@ -517,9 +518,7 @@ pub use stdlib::workflow_messages::{
     workflow_respond_update_for_base, workflow_resume_for_base, workflow_signal_for_base,
     workflow_update_for_base, WorkflowMailboxState,
 };
-pub use stdlib::{
-    register_agent_stdlib, register_core_stdlib, register_io_stdlib, register_vm_stdlib,
-};
+pub use stdlib::{register_core_stdlib, register_vm_stdlib};
 pub use store::register_store_builtins;
 pub use tenant::{
     tenant_event_topic_prefix, tenant_secret_namespace, tenant_topic, validate_tenant_id, ApiKeyId,

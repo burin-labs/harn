@@ -270,6 +270,8 @@ pub fn clear_webhook_intake_state() {
     reset_cached_inbox();
 }
 
+harn_vm_core::stdlib_state_reset!(clear_webhook_intake_state);
+
 /// Snapshot of all currently-registered intakes.
 pub fn snapshot_webhook_intakes() -> Vec<WebhookIntakeSnapshot> {
     with_registry(|state| {

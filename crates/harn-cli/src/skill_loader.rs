@@ -688,7 +688,7 @@ mod tests {
         assert_eq!(fetched.body, "Review the project");
 
         drop(loaded);
-        lease.try_lock().unwrap();
+        harn_flock::assert_released(&lease);
     }
 
     #[test]

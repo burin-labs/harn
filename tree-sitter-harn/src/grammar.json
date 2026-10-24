@@ -8070,6 +8070,15 @@
           },
           "named": true,
           "value": "identifier"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "STRING",
+            "value": "gen"
+          },
+          "named": true,
+          "value": "identifier"
         }
       ]
     },
@@ -9362,8 +9371,20 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "<"
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "<"
+            },
+            {
+              "type": "IMMEDIATE_TOKEN",
+              "content": {
+                "type": "STRING",
+                "value": "<"
+              }
+            }
+          ]
         },
         {
           "type": "REPEAT",
@@ -9975,6 +9996,10 @@
     [
       "typed_parameter",
       "type_annotation"
+    ],
+    [
+      "type_arguments",
+      "_type_argument_list"
     ],
     [
       "shape_type"

@@ -1880,14 +1880,14 @@ versioned schema and operation literals are stable orchestration
 discriminants; diagnostic policy/approval/output details may expand
 additively.
 
-`git_tools(registry?, options?)` builds a selected tool registry from those
+`git_tools(process, registry?, options?)` builds a selected tool registry from those
 functions. It defaults to read-only git inspection helpers and only exposes
 checkout-changing helpers such as `git_switch` or `git_pull_ff_only` when they
 are explicitly included in `enabled_tools`. It accepts the same Tool Vault
 metadata knobs used by host tool helpers: `defer_loading`, `namespace`, and
 per-tool `tool_config`.
 
-For small/local models, `git_toolbox_tools(registry?, options?)` exposes a
+For small/local models, `git_toolbox_tools(process, registry?, options?)` exposes a
 compact two-tool surface: `find_git_tool` ranks available git operations with a
 deterministic lexical scorer, and `run_git_tool` executes one returned operation
 id. Mutating operations stay unavailable unless the toolbox is configured with

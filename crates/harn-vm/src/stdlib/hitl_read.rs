@@ -10,7 +10,6 @@ use time::OffsetDateTime;
 use crate::event_log::{active_event_log, EventId, EventLog, LogEvent, Topic};
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 use super::hitl::{
     HitlRequestKind, HITL_APPROVALS_TOPIC, HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC,
@@ -55,9 +54,7 @@ struct HitlRequestEnvelope {
     payload: JsonValue,
 }
 
-pub(crate) fn register_hitl_read_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_hitl_read_builtins);
 
 #[harn_builtin(
     exposure = "harness.interaction.hitl_pending",

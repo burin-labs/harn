@@ -313,9 +313,7 @@ fn channel_receive_wait(vm: &Vm, channels: &[VmValue]) -> Result<Option<WaitGuar
         .wait_for_channel_receive(&vm.runtime_context().task_id, targets)
 }
 
-pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_concurrency_builtins, rebinds_execution_state);
 
 #[harn_builtin(
     exposure = "runtime_internal",

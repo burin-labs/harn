@@ -67,9 +67,10 @@ pub(crate) fn policy_blocked_response(response: VmValue) -> VmValue {
         .map(to_agent_path)
         .unwrap_or_default();
 
-    let sandbox = proc::sandbox_response(
-        harn_vm::process_sandbox::ProcessSandboxReportingContext::current().reporting,
-    );
+    let mut sandbox_report =
+        harn_vm::process_sandbox::ProcessSandboxReportingContext::current().report();
+    sandbox_report.network = harn_vm::process_sandbox::ProcessSandboxNetwork::Unknown;
+    let sandbox = proc::sandbox_response(&sandbox_report);
 
     let mut builder = ResponseBuilder::new()
         .str("command_id", command_id)
@@ -98,7 +99,7 @@ pub(crate) fn policy_blocked_response(response: VmValue) -> VmValue {
         .int("byte_count", message.len() as i64)
         .str("output_sha256", "")
         .nil("denial")
-        .dict("sandbox", sandbox)
+        .value("sandbox", sandbox)
         .str("audit_id", audit_id);
     if let Some(policy) = map.and_then(|value| value.get("command_policy")).cloned() {
         builder = builder.value("command_policy", policy);
@@ -363,16 +364,7 @@ fn initial_background_snapshot(
         .filter(|byte| **byte == b'\n')
         .count();
     let byte_count = stdout.len().saturating_add(stderr.len());
-    let mut response = match super::proc::running_response(
-        info.command_id.clone(),
-        info.handle_id.clone(),
-        info.pid,
-        info.process_group_id,
-        info.started_at.clone(),
-        &info.cwd,
-        info.command_display.clone(),
-        info.snapshot_binding.as_ref(),
-    ) {
+    let mut response = match info.handle_response() {
         VmValue::Dict(map) => (*map).clone(),
         _ => harn_vm::value::DictMap::new(),
     };
@@ -610,6 +602,13 @@ mod tests {
     fn latest_progress_overlay_matches_public_response_schema() {
         let command_id = format!("progress-overlay-schema-{}", std::process::id());
         let handle_id = "handle-progress-overlay";
+        let mut sandbox_report =
+            harn_vm::process_sandbox::ProcessSandboxReportingContext::current().report();
+        sandbox_report.network = harn_vm::process_sandbox::ProcessSandboxNetwork::Policy {
+            direct_network: false,
+            tcp_loopback: false,
+            managed_proxy: false,
+        };
         let info = super::super::long_running::LongRunningHandleInfo {
             command_id,
             handle_id: handle_id.to_string(),
@@ -619,8 +618,19 @@ mod tests {
             process_group_id: Some(123),
             command_display: "test-command".to_string(),
             snapshot_binding: None,
+            sandbox_report,
         };
+        harn_vm::orchestration::push_execution_policy(harn_vm::orchestration::CapabilityPolicy {
+            sandbox_profile: harn_vm::orchestration::SandboxProfile::OsHardened,
+            side_effect_level: Some("network".to_string()),
+            ..Default::default()
+        });
         let mut response = initial_background_snapshot(&info, 500, 200);
+        harn_vm::orchestration::pop_execution_policy();
+        assert_eq!(
+            crate::json::vm_value_to_json(response.get("sandbox").expect("captured sandbox")),
+            serde_json::to_value(&info.sandbox_report).expect("serializable sandbox report")
+        );
         let feedback = select_background_feedback(vec![
             inbox_entry(
                 1,

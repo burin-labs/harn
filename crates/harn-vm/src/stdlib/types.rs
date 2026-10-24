@@ -1,12 +1,9 @@
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{string_char_count, VmError, VmValue};
-use crate::vm::Vm;
 
 const I64_FLOAT_UPPER_BOUND_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
 
-pub(crate) fn register_type_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_type_builtins);
 
 #[harn_builtin(
     exposure = "pure",

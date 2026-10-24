@@ -35,6 +35,8 @@ pub fn register_sandbox_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Host, register_sandbox_builtins);
+
 const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
     &SANDBOX_ACTIVE_BACKEND_IMPL_DEF,
     &SANDBOX_BACKEND_AVAILABLE_IMPL_DEF,

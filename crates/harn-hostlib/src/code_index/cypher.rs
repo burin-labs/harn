@@ -429,6 +429,7 @@ enum Operand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Literal {
+    Null,
     Str(String),
     Int(i64),
     Bool(bool),
@@ -1086,6 +1087,12 @@ fn property_value(node: &super::symbol_graph::Node, key: &str) -> Literal {
         "access_level" => Literal::Str(node.access_level.clone().unwrap_or_default()),
         "signature" => Literal::Str(node.signature.clone()),
         "line" => Literal::Int(node.line as i64),
+        "col" => node
+            .col
+            .map_or(Literal::Null, |col| Literal::Int(col as i64)),
+        "owner_type" => Literal::Str(node.owner_type.clone().unwrap_or_default()),
+        "qualified_name" => Literal::Str(node.qualified_name()),
+        "receiver_qualified_name" => Literal::Str(node.receiver_qualified_name()),
         "file_id" => Literal::Int(node.file_id as i64),
         "id" => Literal::Int(node.id as i64),
         _ => Literal::Str(String::new()),
@@ -1175,6 +1182,7 @@ fn eval_operand(
         }
         Literal::Int(n) => CypherValue::Int(n),
         Literal::Bool(b) => CypherValue::Bool(b),
+        Literal::Null => CypherValue::Null,
     })
 }
 

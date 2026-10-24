@@ -22,6 +22,7 @@
 mod background;
 mod build;
 mod cwd;
+mod network;
 
 use harn_vm::value::VmDictExt as _;
 use std::collections::BTreeMap;

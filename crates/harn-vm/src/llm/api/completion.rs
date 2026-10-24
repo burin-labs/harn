@@ -9,7 +9,7 @@ use crate::value::{VmError, VmValue};
 
 use super::auth::apply_auth_headers;
 use super::openai_normalize::extract_openai_choice_logprobs;
-use super::options::LlmCallOptions;
+use super::options::{LlmCallOptions, LlmRequestPayload, LlmRequestPayloadExt};
 use super::response::{extract_cache_read_tokens, extract_cache_write_tokens};
 use super::result::{mock_completion_response, LlmResult};
 use super::telemetry::{source as telemetry_source, ProviderTelemetry};
@@ -47,8 +47,17 @@ pub(crate) async fn vm_call_completion_full(
     suffix: Option<&str>,
 ) -> Result<LlmResult, VmError> {
     crate::llm::admission::check_auxiliary(opts.budget.as_ref(), "fill-in-the-middle completion")?;
+    let request = completion_fixture_request(opts, prefix, suffix);
+    if crate::llm::providers::MockProvider::fixture_active(request.cli_llm_mock_scope) {
+        request.emit_reminder_lifecycle();
+        let result = crate::llm::mock::mock_llm_response(&request)?;
+        crate::llm::mock::record_cli_llm_result(&request, &result);
+        return Ok(result);
+    }
     if opts.provider == "mock" {
-        return Ok(mock_completion_response(prefix, suffix));
+        let result = mock_completion_response(prefix, suffix);
+        crate::llm::mock::record_cli_llm_result(&request, &result);
+        return Ok(result);
     }
 
     let controls = super::data_controls::resolve(
@@ -101,7 +110,26 @@ pub(crate) async fn vm_call_completion_full(
         None => vm_call_completion_fallback(opts, prefix, suffix).await,
     }?;
     result.telemetry.inference_boundary_rule = boundary_rule.map(str::to_string);
+    if completion_endpoint.is_some() {
+        crate::llm::mock::mark_live_after_mock_prefix(&request, &mut result);
+        crate::llm::mock::record_cli_llm_result(&request, &result);
+    }
     Ok(result)
+}
+
+fn completion_fixture_request(
+    opts: &LlmCallOptions,
+    prefix: &str,
+    suffix: Option<&str>,
+) -> LlmRequestPayload {
+    let mut request = LlmRequestPayload::from(opts);
+    request.messages = vec![serde_json::json!({"role": "user", "content": prefix})];
+    if let Some(suffix) = suffix.filter(|suffix| !suffix.is_empty()) {
+        request
+            .messages
+            .push(serde_json::json!({"role": "user", "content": suffix}));
+    }
+    request
 }
 
 fn reject_completion_options(
