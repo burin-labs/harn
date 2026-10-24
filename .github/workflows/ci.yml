@@ -2245,13 +2245,13 @@ jobs:
     # Consumes only the small portable CLI bundle through the same live
     # artifact barrier as harn-audit.
     needs: [changes, rust-cli]
-    # `rust_paths`, not `rust`: no merge group runs this lane, so a push the
-    # merge group already proved still runs it, on that run's CLI.
-    if: >-
-      ${{ !cancelled() && github.event_name == 'push'
-      && github.ref == 'refs/heads/main'
-      && needs.changes.outputs.rust_paths == 'true'
-      && needs.rust-cli.result == 'success' }}
+    # No event condition, deliberately. This sweep reds main when a change
+    # breaks a policy, and while it ran only on main pushes six of nine red-main
+    # episodes in one week were this job failing for a change that never ran it.
+    # It needs the shared CLI, so it runs whenever `rust` selects a proof: the
+    # `changes` filter that excludes docs, website, the VS Code extension and
+    # `*.md`, and that holds every script, Makefile, spec and crate it reads.
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}
     # Keep this execution-only lane on elastic capacity. It gains no compiler
     # cache benefit from a persistent worker, and merge-queue bursts otherwise
     # leave it waiting behind compile-bearing jobs on the scarce stable pool.
@@ -3094,8 +3094,8 @@ jobs:
           audit_scripts_result="${{ needs['audit-scripts'].result }}"
           echo "Repository policy checks: $audit_scripts_result"
           require_result "$audit_scripts_result" \
-            "Repository policy checks failed or skipped on a Rust-changing main push." \
-            test "${EVENT_NAME}:${GIT_REF}:${RUST_PATHS_SELECTED}" != "push:refs/heads/main:true"
+            "Repository policy checks failed or skipped while Rust proof was required." \
+            [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           # The one Windows admission check. A merge-group candidate must
           # produce a success; a skip there is a failure. On a Rust-changing

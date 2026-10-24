@@ -552,29 +552,46 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
       "ci.yml:security-tests-ready must use GitHub-hosted ubuntu-24.04",
     ),
   )
-  let pr_policy = ci
-  pr_policy.jobs["audit-scripts"].if = "needs.changes.outputs.rust == 'true'"
+  // The repository policy sweep refuses before the merge: a pull request that
+  // changes any of its inputs must select it. Push-only was the defect, so the
+  // old spellings, with and without the status function, are refused.
+  for push_only in [
+    "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success'",
+    "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true' && needs.rust-cli.result == 'success'",
+    "$" + "{{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true' && needs.rust-cli.result == 'success' }}",
+  ] {
+    let pr_policy = ci
+    pr_policy.jobs["audit-scripts"].if = push_only
+    const refused = minimal_pr_capacity_errors(pr_policy, publish)
+    assert(
+      refused.contains(
+        "ci.yml:audit-scripts must run on every change that selects Rust proof, gated on rust and the shared CLI only",
+      ),
+    )
+    assert(
+      refused.filter({ e -> contains(e, "ci.yml:audit-scripts is a cheap refusal and must carry no event condition") })
+        .count() > 0,
+    )
+  }
+  // Negative control: dropping the `rust` gate would run it on a docs-only
+  // change, which has no CLI to run it with.
+  let ungated_policy = ci
+  ungated_policy.jobs["audit-scripts"].if = "$" + "{{ !cancelled() && needs.rust-cli.result == 'success' }}"
   assert(
-    minimal_pr_capacity_errors(pr_policy, publish).contains(
-      "ci.yml:audit-scripts must run on Rust-changing main pushes only",
+    minimal_pr_capacity_errors(ungated_policy, publish).contains(
+      "ci.yml:audit-scripts must run on every change that selects Rust proof, gated on rust and the shared CLI only",
     ),
   )
-  // A main push the merge group already proved sets `rust` false. Main-only
-  // lanes gated on it would never run again, so each one reads `rust_paths`.
-  let heavy_gated_policy = ci
-  heavy_gated_policy.jobs["audit-scripts"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success'"
-  assert(
-    minimal_pr_capacity_errors(heavy_gated_policy, publish).contains(
-      "ci.yml:audit-scripts must run on Rust-changing main pushes only",
-    ),
+  // ci-status must not excuse a skip on a pull request that selected Rust proof.
+  let push_only_status = ci
+  push_only_status.jobs["ci-status"].steps[0].run = replace(
+    push_only_status.jobs["ci-status"].steps[0].run,
+    "  [ \"$" + "{{ needs.changes.outputs.rust }}\" != \"true\" ]\n\n# The one Windows",
+    "  test \"$" + "{EVENT_NAME}:$" + "{GIT_REF}\" != \"push:refs/heads/main\"\n\n# The one Windows",
   )
-  // Without a status function the producer's skipped capacity ancestors
-  // skip the main-only lane on every push.
-  let skipped_policy = ci
-  skipped_policy.jobs["audit-scripts"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true' && needs.rust-cli.result == 'success'"
   assert(
-    minimal_pr_capacity_errors(skipped_policy, publish).contains(
-      "ci.yml:audit-scripts must run on Rust-changing main pushes only",
+    minimal_pr_capacity_errors(push_only_status, publish).contains(
+      "ci.yml:ci-status must require repository policies on every run that selects Rust proof",
     ),
   )
   let heavy_gated_size = ci
@@ -582,14 +599,6 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   assert(
     minimal_pr_capacity_errors(heavy_gated_size, publish).contains(
       "ci.yml:binary-size-signal must record main's baseline on every Rust-changing main push",
-    ),
-  )
-  let heavy_gated_status = ci
-  heavy_gated_status.jobs["ci-status"].steps[0].env.RUST_PATHS_SELECTED = "$"
-    + "{{ needs.changes.outputs.rust }}"
-  assert(
-    minimal_pr_capacity_errors(heavy_gated_status, publish).contains(
-      "ci.yml:ci-status must require repository policies on every Rust-changing main push, proven or not",
     ),
   )
   // Every run builds its own CLI: a download naming another run measures a
