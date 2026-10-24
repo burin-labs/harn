@@ -1,0 +1,88 @@
+import { RepoPlan, Symbol, index_clone, run_symbol } from "../precise_qualify.harn"
+
+const LIB =
+  "pub fn helper() -> i32 {\n    1\n}\n\npub fn user() -> i32 {\n    helper() + helper()\n}\n"
+
+const HELPER: Symbol = {
+  name: "helper",
+  path: "src/lib.rs",
+  line: 1,
+  col: nil,
+  kind: "Function",
+  container: "",
+}
+
+fn git(process: HarnessProcess, root: string, args: list<string>) {
+  const res = process.run(
+    {
+      program: "git",
+      args: ["-c", "user.name=probe", "-c", "user.email=probe@example.invalid"] + args,
+      cwd: root,
+    },
+  )
+  assert(res.success, res.stderr)
+}
+
+/** A committed one-file crate whose oracle is the given command. */
+fn fixture(harness: Harness, oracle: list<string>) -> {root: string, repo: RepoPlan} {
+  const root = harness.fs.mkdtemp_in_workspace("precise-qualify-")
+  harness.fs.mkdir(root + "/src")
+  harness.fs.write_text(root + "/src/lib.rs", LIB)
+  git(harness.process, root, ["init", "-q"])
+  git(harness.process, root, ["add", "-A"])
+  git(harness.process, root, ["commit", "-q", "-m", "fixture"])
+  assert(index_clone(harness, root).ok)
+  return {
+    root: root,
+    repo: {
+      id: "fixture",
+      language: "rust",
+      url: "",
+      commit: "",
+      checkout: root,
+      setup: [],
+      oracle: [oracle],
+    },
+  }
+}
+
+fn outcome_of(attempts: list<dict>, arm: string) -> dict {
+  return attempts.filter({ attempt -> attempt.arm == arm }).to_list()[0] ?? {}
+}
+
+// Negative control: the oracle requires the old public name, so any applied
+// rename breaks it. The probe must report that edit as wrong, never applied.
+@serial(group: "code_index")
+pipeline test_an_applied_rename_the_oracle_rejects_is_reported_wrong(harness: Harness) {
+  const fx = fixture(harness, ["grep", "-q", "fn helper()", "src/lib.rs"])
+  const attempts = run_symbol(
+    harness,
+    fx.repo,
+    fx.root,
+    HELPER,
+    ["find_references", "rename_symbol:syntax_tree"],
+  )
+  const rename = outcome_of(attempts, "rename_symbol:syntax_tree")
+  assert_eq(rename.outcome, "applied_wrong")
+  assert_eq(rename.reason, "oracle_failed")
+  assert_eq(rename.apply.changed_files, ["src/lib.rs"])
+  assert_eq(outcome_of(attempts, "find_references").outcome, "pending")
+  assert_eq(harness.fs.read_text(fx.root + "/src/lib.rs"), LIB)
+}
+
+@serial(group: "code_index")
+pipeline test_an_applied_rename_the_oracle_accepts_is_correct(harness: Harness) {
+  const fx = fixture(harness, ["grep", "-q", "pub fn user()", "src/lib.rs"])
+  const attempts = run_symbol(
+    harness,
+    fx.repo,
+    fx.root,
+    HELPER,
+    ["find_references", "rename_symbol:syntax_tree"],
+  )
+  assert_eq(outcome_of(attempts, "rename_symbol:syntax_tree").outcome, "applied_correct")
+  const references = outcome_of(attempts, "find_references")
+  assert_eq(references.outcome, "applied_correct")
+  assert_eq(references.oracle_source, "rename_symbol:syntax_tree")
+  assert_eq(harness.fs.read_text(fx.root + "/src/lib.rs"), LIB)
+}
