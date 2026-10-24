@@ -36,8 +36,8 @@ type RepairPartition = {
 
 /**
  * Split pending repairs into single-parent patches and skippable merges. A
- * merge whose incoming side is already in base only synced the branch with
- * base; the refresh re-derives whatever its conflict resolution touched.
+ * merge whose incoming side is already in base, and whose tree is exactly
+ * git's own merge of its parents, only synced the branch with base.
  */
 fn partition_merges(
   tools: HarnessTools,
@@ -71,9 +71,49 @@ fn partition_merges(
           + ", which base does not contain; only a merge of the base branch is skipped",
       }
     }
+    if len(parents) > 3 {
+      return {
+        replayable: [],
+        skipped: [],
+        refused: oid,
+        detail: "repair merge " + oid + " has more than two parents and cannot be re-merged",
+      }
+    }
+    const edited = hand_edited_paths(tools, root, oid, parents[1], parents[2])
+    if len(edited) > 0 {
+      return {
+        replayable: [],
+        skipped: [],
+        refused: oid,
+        detail: "repair merge " + oid + " differs from a mechanical merge of its parents in "
+          + join(edited, ", ")
+          + "; replay it as a single-parent commit",
+      }
+    }
     skipped = skipped + [oid]
   }
   return {replayable: replayable, skipped: skipped, refused: nil, detail: ""}
+}
+
+/**
+ * Paths where a merge's tree differs from git's own merge of its parents: a
+ * hand conflict resolution or an extra edit, which skipping would drop. A
+ * conflicted mechanical merge leaves markers, so its paths always differ.
+ */
+fn hand_edited_paths(
+  tools: HarnessTools,
+  root: string,
+  merge: string,
+  first: string,
+  second: string,
+) -> list<string> {
+  const mechanical = git(tools, root, ["merge-tree", "--write-tree", first, second])
+  if mechanical.exit_code != 0 && mechanical.exit_code != 1 {
+    throw "std/bump/repairs: could not re-merge the parents of " + merge + ": "
+      + trim(mechanical.stderr ?? "")
+  }
+  const tree = trim(lines(mechanical.stdout ?? "")[0] ?? "")
+  return lines(checked(tools, root, ["diff", "--name-only", tree, merge]))
 }
 
 fn lines(value: string) -> list<string> {
