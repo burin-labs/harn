@@ -34,6 +34,9 @@ on:
       verdict:
         description: Actual downstream pass or fail; empty means unmeasured
         value: ${{ jobs.consumers.outputs.verdict }}
+      consumer_run:
+        description: The consumer run's numeric id, which this workflow already prints
+        value: ${{ jobs.consumers.outputs.consumer_run }}
       source_revision:
         description: Exact source rehearsed by this invocation
         value: ${{ inputs.source_revision }}
@@ -133,6 +136,7 @@ jobs:
       contents: read
     outputs:
       verdict: ${{ steps.observe-1.outputs.verdict || steps.observe-2.outputs.verdict || steps.observe-3.outputs.verdict || steps.observe-4.outputs.verdict }}
+      consumer_run: ${{ steps.canary.outputs.run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -290,7 +294,7 @@ jobs:
         if: always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '' || steps.observe-4.outputs.failure-receipt != '' || steps.interrupted.outputs.failure_receipt != '')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: consumer-observer-failure-${{ github.run_attempt }}-${{ needs.decide.outputs.source_revision }}
+          name: consumer-observer-failure-${{ github.run_attempt }}-${{ needs.decide.outputs.source_revision }}-${{ steps.canary.outputs.run_id || 'undispatched' }}
           path: ${{ steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt || steps.observe-4.outputs.failure-receipt || steps.interrupted.outputs.failure_receipt }}
           if-no-files-found: error
           retention-days: 7

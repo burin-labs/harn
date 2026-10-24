@@ -2791,7 +2791,8 @@ jobs:
   # non-Dependabot pull request that touches the consumer's surfaces. A fail
   # verdict blocks only when the consumer passes at the pull request's base
   # (`consumer-base-check`); a red the base already carries is inherited and
-  # reported, not blocking. A run that reaches no verdict fails closed by name.
+  # reported, not blocking. A run that reaches no verdict is retried once,
+  # then fails closed by name.
   # Fork and Dependabot pull requests never run it; it needs the release app
   # credential, which neither receives.
   consumer-check:
@@ -2816,13 +2817,38 @@ jobs:
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
 
+  # One fresh rehearsal when the first reached no verdict (queue or timing
+  # deadline, refused dispatch, interrupted observation). Each attempt's job
+  # names its own reason; a measured fail is never retried.
+  consumer-check-retry:
+    name: Consumer check retry
+    needs: [consumer-check]
+    if: >-
+      !cancelled()
+      && (needs.consumer-check.result == 'failure' || needs.consumer-check.result == 'cancelled')
+      && needs.consumer-check.outputs.verdict == ''
+    uses: ./.github/workflows/consumer-canary.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      source_revision: ${{ github.sha }}
+      pull_request_cli_run: ${{ github.run_id }}
+      pull_request_base: ${{ github.event.pull_request.base.sha }}
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+
   # After a fail verdict only: the CLI at the pull request's base, uploaded to
   # this run under its own name so the consumer can install it beside the pull
   # request's. Reuses the base's live merge-group CLI when there is one.
   consumer-base-cli:
     name: Consumer base CLI
-    needs: [changes, consumer-check]
-    if: ${{ !cancelled() && needs.consumer-check.outputs.verdict == 'fail' }}
+    needs: [changes, consumer-check, consumer-check-retry]
+    if: >-
+      !cancelled()
+      && (needs.consumer-check.outputs.verdict || needs.consumer-check-retry.outputs.verdict) == 'fail'
     runs-on: ubuntu-24.04
     timeout-minutes: 49
     permissions:
@@ -2923,6 +2949,27 @@ jobs:
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
 
+  consumer-base-check-retry:
+    name: Consumer base check retry
+    needs: [consumer-base-check]
+    if: >-
+      !cancelled()
+      && (needs.consumer-base-check.result == 'failure' || needs.consumer-base-check.result == 'cancelled')
+      && needs.consumer-base-check.outputs.verdict == ''
+    uses: ./.github/workflows/consumer-canary.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      source_revision: ${{ github.event.pull_request.base.sha }}
+      pull_request_cli_run: ${{ github.run_id }}
+      pull_request_base: ${{ github.event.pull_request.base.sha }}
+      pull_request_cli_artifact: harn-base-cli.tar.zst
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+
   provider-contract-probe:
     name: Provider contract probe (offline)
     needs: [changes, rust-cli]
@@ -2973,8 +3020,10 @@ jobs:
         rust-producer-capacity,
         rust-cli,
         consumer-check,
+        consumer-check-retry,
         consumer-base-cli,
         consumer-base-check,
+        consumer-base-check-retry,
         provider-contract-probe,
         rust-check-inputs,
         rust-test-partitions,
@@ -3015,12 +3064,14 @@ jobs:
           PROVIDER_CONTRACT_PROBE_EXPECTED: ${{ needs.changes.outputs.provider_contract_probe }}
           # Exactly `consumer-check`'s own condition.
           CONSUMER_EXPECTED: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && needs.changes.outputs.consumer == 'true' && needs.rust-cli.result == 'success' }}
-          CONSUMER_RESULT: ${{ needs.consumer-check.result }}
-          CONSUMER_VERDICT: ${{ needs.consumer-check.outputs.verdict }}
+          CONSUMER_RESULT: ${{ needs.consumer-check.result }}/${{ needs.consumer-check-retry.result }}
+          CONSUMER_VERDICT: ${{ needs.consumer-check.outputs.verdict || needs.consumer-check-retry.outputs.verdict }}
           CONSUMER_BASE_CLI_RESULT: ${{ needs.consumer-base-cli.result }}
-          CONSUMER_BASE_RESULT: ${{ needs.consumer-base-check.result }}
-          CONSUMER_BASE_VERDICT: ${{ needs.consumer-base-check.outputs.verdict }}
+          CONSUMER_BASE_RESULT: ${{ needs.consumer-base-check.result }}/${{ needs.consumer-base-check-retry.result }}
+          CONSUMER_BASE_VERDICT: ${{ needs.consumer-base-check.outputs.verdict || needs.consumer-base-check-retry.outputs.verdict }}
           CONSUMER_BASE: ${{ github.event.pull_request.base.sha }}
+          CONSUMER_RUN: ${{ needs.consumer-check.outputs.verdict && needs.consumer-check.outputs.consumer_run || needs.consumer-check-retry.outputs.consumer_run }}
+          CONSUMER_BASE_RUN: ${{ needs.consumer-base-check.outputs.verdict && needs.consumer-base-check.outputs.consumer_run || needs.consumer-base-check-retry.outputs.consumer_run }}
         run: |
           case "$POST_MERGE_TIER_ACTIVE" in
             true|false) ;;
@@ -3156,19 +3207,19 @@ jobs:
           # base passes does. No verdict on either leg fails closed by name.
           echo "Downstream consumer: result=$CONSUMER_RESULT verdict=${CONSUMER_VERDICT:-none} (expected=$CONSUMER_EXPECTED)"
           if [ "$CONSUMER_EXPECTED" != "true" ]; then
-            require_result "$CONSUMER_RESULT" "Downstream consumer check ran without being expected and did not pass." true
+            require_result "${CONSUMER_RESULT%%/*}" "Downstream consumer check ran without being expected and did not pass." true
           else
             case "$CONSUMER_VERDICT" in
               pass) ;;
               fail)
                 echo "Downstream consumer at base $CONSUMER_BASE: base CLI=$CONSUMER_BASE_CLI_RESULT result=$CONSUMER_BASE_RESULT verdict=${CONSUMER_BASE_VERDICT:-none}"
                 case "$CONSUMER_BASE_VERDICT" in
-                  fail) echo "::notice::Downstream consumer red is inherited: it fails at base $CONSUMER_BASE too, so it does not block this pull request." ;;
-                  pass) echo "::error::Downstream consumer fails with this change and passes at base $CONSUMER_BASE."; exit 1 ;;
+                  fail) echo "::notice::Downstream consumer red is inherited: consumer run $CONSUMER_RUN fails here and consumer run $CONSUMER_BASE_RUN fails at base $CONSUMER_BASE too, so it does not block this pull request." ;;
+                  pass) echo "::error::Downstream consumer run $CONSUMER_RUN fails with this change and consumer run $CONSUMER_BASE_RUN passes at base $CONSUMER_BASE."; exit 1 ;;
                   *) echo "::error::Downstream consumer failed and its base rehearsal reached no verdict (reason=base_unmeasured base_cli=$CONSUMER_BASE_CLI_RESULT base_check=$CONSUMER_BASE_RESULT)."; exit 1 ;;
                 esac
                 ;;
-              *) echo "::error::Downstream consumer check reached no verdict (reason=consumer_unmeasured result=$CONSUMER_RESULT); rerun it."; exit 1 ;;
+              *) echo "::error::Downstream consumer check reached no verdict after one retry (reason=consumer_unmeasured first/retry=$CONSUMER_RESULT); each attempt's job names its reason."; exit 1 ;;
             esac
           fi
 
