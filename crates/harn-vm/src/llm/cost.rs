@@ -1256,7 +1256,7 @@ pub(crate) fn project_call_cost(
     .total_usd
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub struct CallCostBreakdown {
     pub input_usd: f64,
     pub output_usd: f64,

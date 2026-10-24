@@ -196,7 +196,7 @@ fn a_real_hosted_fee_card_prices_free_inference_without_token_or_audio_charges()
         ] {
             assert!((native.cost_usd.unwrap() - expected).abs() < 1e-12);
             assert_eq!(native.unpriced_calls, 0);
-            assert_eq!(native.pricing.as_deref(), Some(&facts));
+            assert_eq!(native.pricing.as_deref(), Some(facts.as_ref()));
             assert_eq!(native.cache_savings_usd, 0.0);
         }
     }
