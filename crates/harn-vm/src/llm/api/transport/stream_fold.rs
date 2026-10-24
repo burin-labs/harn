@@ -27,6 +27,8 @@ pub(super) enum StreamPart {
     /// Raw visible-text delta. OpenAI-compatible content may still contain
     /// inline `<think>` spans; the transport strips them before forwarding.
     Text(String),
+    /// Reasoning-channel delta. Never forwarded as text; only metered.
+    Reasoning(String),
     /// A dispatchable tool call started or its arguments grew. The value
     /// indexes [`StreamFold::tool`].
     ToolCall(usize),
@@ -215,12 +217,13 @@ impl AnthropicFold {
                         vec![StreamPart::Text(text.to_string())]
                     }
                     Some("thinking_delta") => {
-                        append(
-                            &mut entry.block,
-                            "thinking",
-                            delta["thinking"].as_str().unwrap_or_default(),
-                        );
-                        Vec::new()
+                        let thinking = delta["thinking"].as_str().unwrap_or_default();
+                        append(&mut entry.block, "thinking", thinking);
+                        if thinking.is_empty() {
+                            Vec::new()
+                        } else {
+                            vec![StreamPart::Reasoning(thinking.to_string())]
+                        }
                     }
                     Some("signature_delta") => {
                         append(
@@ -354,10 +357,14 @@ impl OpenAiFold {
             .any(|field| delta.get(*field).is_some_and(|value| !value.is_null()));
         // Reasoning fields arrive as token-sized fragments and concatenate
         // verbatim; a newline between fragments would put one token per line.
-        self.reasoning.push_str(extract_openai_delta_field_str(
+        let reasoning = extract_openai_delta_field_str(
             delta,
             &["reasoning", "reasoning_content", "reasoning_details"],
-        ));
+        );
+        self.reasoning.push_str(reasoning);
+        if !reasoning.is_empty() {
+            parts.push(StreamPart::Reasoning(reasoning.to_string()));
+        }
         // Keep the first finish_reason: some routes repeat it on later frames
         // and the repeat would truncate an in-progress tool call (qwen-code#2402).
         if self.finish_reason.is_none() {

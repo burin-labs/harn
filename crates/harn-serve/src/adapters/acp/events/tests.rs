@@ -140,6 +140,21 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
 
 fn extension_fixture_events() -> Vec<AgentEvent> {
     vec![
+        AgentEvent::InferenceSpeed {
+            session_id: "session-1".to_string(),
+            call_id: "llm-call-1".to_string(),
+            provider: "anthropic".to_string(),
+            model: "claude-sonnet-5-5".to_string(),
+            speed: harn_vm::llm::inference_speed::InferenceSpeed {
+                phase: harn_vm::llm::inference_speed::InferencePhase::Complete,
+                is_final: true,
+                elapsed_ms: 4210,
+                time_to_first_token_ms: Some(812),
+                output_tokens: 431,
+                output_tokens_per_second: Some(126.8),
+                token_source: harn_vm::llm::inference_speed::TokenCountSource::Provider,
+            },
+        },
         AgentEvent::Artifact {
             session_id: "session-1".to_string(),
             artifact_id: "artifact-chart-1".to_string(),
@@ -1494,6 +1509,21 @@ async fn vendor_extension_session_update_fields_live_under_meta_harn() {
         fixture_compaction_receipt("compaction-fixture-1", None, None, None).to_acp_meta();
     let compaction_fields: Vec<&str> = compaction_meta.keys().map(String::as_str).collect();
     let expectations: &[(&str, &[&str])] = &[
+        (
+            "inference_speed",
+            &[
+                "callId",
+                "provider",
+                "model",
+                "phase",
+                "isFinal",
+                "elapsedMs",
+                "timeToFirstTokenMs",
+                "outputTokens",
+                "outputTokensPerSecond",
+                "tokenSource",
+            ],
+        ),
         (
             "artifact",
             &[

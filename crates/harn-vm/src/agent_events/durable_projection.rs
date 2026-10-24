@@ -167,6 +167,8 @@ impl DurableAgentEventProjector {
                 self.remove_session(session_id);
                 true
             }
+            // Live speed estimates are presentation; the settled one is record.
+            AgentEvent::InferenceSpeed { speed, .. } => speed.is_final,
             _ => true,
         }
     }
