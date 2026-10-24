@@ -33,10 +33,9 @@ pipeline test_registered_listener_keeps_its_policy_and_restores_the_emitter(harn
       const session = "subscriber-owner-" + harness.random.uuid()
       const key = session + "/observed"
       const later_key = session + "/later-listener"
-      const emitter_key = session + "/emitter-write"
+      const emitter_file = path_join(root, "emitter-write.txt")
       harness.runtime.store_set(key, false)
       harness.runtime.store_set(later_key, false)
-      harness.runtime.store_set(emitter_key, false)
       assert_eq(harness.runtime.store_get(key), false)
       harness.agent.subscribe(
         session,
@@ -62,7 +61,7 @@ pipeline test_registered_listener_keeps_its_policy_and_restores_the_emitter(harn
           const result = finish_one_turn(harness, session, root)
           assert_eq(result.terminal.kind, "natural")
           const forbidden = try {
-            harness.runtime.store_set(emitter_key, true)
+            harness.fs.write_text(emitter_file, "emitter")
           }
           assert(is_err(forbidden), "the emitting caller must retain its read-only limit")
         },
@@ -73,13 +72,9 @@ pipeline test_registered_listener_keeps_its_policy_and_restores_the_emitter(harn
         true,
         "a failed listener must not skip the next",
       )
-      assert_eq(harness.runtime.store_get(emitter_key), false)
-      harness.runtime.store_set(emitter_key, true)
-      assert_eq(
-        harness.runtime.store_get(emitter_key),
-        true,
-        "the outer caller must regain its policy",
-      )
+      assert_eq(harness.fs.exists(emitter_file), false)
+      harness.fs.write_text(emitter_file, "emitter")
+      assert_eq(harness.fs.exists(emitter_file), true, "the outer caller must regain its policy")
     },
   )
 }
@@ -89,10 +84,8 @@ pipeline test_restricted_listener_does_not_borrow_the_emitters_authority(harness
     harness.fs,
     { root ->
       const session = "subscriber-restricted-" + harness.random.uuid()
-      const key = session + "/forbidden-write"
+      const file = path_join(root, "forbidden-write.txt")
       let reached = false
-      harness.runtime.store_set(key, false)
-      assert_eq(harness.runtime.store_get(key), false)
       harness.runtime.with_execution_policy(
         {side_effect_level: "read_only"},
         { ->
@@ -101,7 +94,7 @@ pipeline test_restricted_listener_does_not_borrow_the_emitters_authority(harness
             { event ->
               if event.type == "iteration_start" {
                 reached = true
-                harness.runtime.store_set(key, true)
+                harness.fs.write_text(file, "listener")
               }
             },
           )
@@ -111,16 +104,12 @@ pipeline test_restricted_listener_does_not_borrow_the_emitters_authority(harness
       assert_eq(result.terminal.kind, "natural")
       assert_eq(reached, true, "the restricted listener must run")
       assert_eq(
-        harness.runtime.store_get(key),
+        harness.fs.exists(file),
         false,
-        "registration restrictions must still deny state writes",
+        "registration restrictions must still deny workspace writes",
       )
-      harness.runtime.store_set(key, true)
-      assert_eq(
-        harness.runtime.store_get(key),
-        true,
-        "the emitting caller must remain unrestricted",
-      )
+      harness.fs.write_text(file, "emitter")
+      assert_eq(harness.fs.exists(file), true, "the emitting caller must remain unrestricted")
     },
   )
 }

@@ -28,6 +28,16 @@ harn scan '$X?.$K ?? $D' crates/harn-stdlib --lang harn
 
 - `$X`, `$K`, `$D` are **metavariables** — each binds a sub-tree and is printed
   in `[...]`. A repeated `$X` must bind identical text.
+- A pattern matches a node only when the node has exactly the pattern's
+  children and keywords. `getById($A)` does not match
+  `folderService.getById(x)` or `getById(a, b)`, so a `fix` can never drop a
+  receiver, argument, modifier, or comment the pattern did not mention. Write a
+  hole where the code may vary: `$OBJ.getById($A)`. Only a terminating `;` may
+  be left out. To flag a call with any arguments, match the callee with `has`
+  instead (see `rules/std/no-console-log.toml`).
+- In Java, C#, C, C++, and PHP, write an expression without `;`
+  (`svc.getById($A)`). A pattern that ends in `;` matches only a whole
+  statement, and its fix replaces that statement's `;`.
 - Add `--report-only` for per-file counts instead of each match, or `--json`
   for a machine envelope.
 - Narrow a hole to a syntactic class with a **typed placeholder**:

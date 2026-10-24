@@ -679,20 +679,26 @@ fn audit_git_entry_integrity(
     let Some(expected_hash) = entry.content_hash.as_deref() else {
         return Err(format!("{} is missing a content hash", entry.name).into());
     };
+    let cache = PackageCache::inspect(workspace)?;
     let cache_dir = git_cache_dir_in(workspace, &entry.source, commit)?;
-    if !cache_dir.exists() {
-        return Err(format!(
-            "{}: git cache entry missing at {}",
-            entry.name,
-            cache_dir.display()
-        )
-        .into());
-    }
-    verify_content_hash_or_compute(&cache_dir, expected_hash)?;
+    let cache = match cache {
+        Some(cache) if cache_dir.exists() => cache,
+        _ => {
+            return Err(format!(
+                "{}: git cache entry missing at {}",
+                entry.name,
+                cache_dir.display()
+            )
+            .into());
+        }
+    };
+    let source = cache.git(&entry.source, commit)?;
+    let cache_dir = source.directory();
+    verify_content_hash(cache_dir, expected_hash)?;
     if let Some(packages_root) = packages_root {
         let workspace_pkg = packages_root.join(&entry.name);
         if workspace_pkg.exists() {
-            verify_content_hash_or_compute(&workspace_pkg, expected_hash)?;
+            verify_content_hash(&workspace_pkg, expected_hash)?;
         }
     }
     Ok(())

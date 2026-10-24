@@ -265,7 +265,6 @@ pub(crate) fn register_web_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__web_extract_html(html: string, source_url?: string?) -> dict",
     category = "web"
 )]
@@ -283,7 +282,6 @@ fn web_extract_html_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__web_resolve_url(base_url: string, href: string) -> string?",
     category = "web"
 )]
@@ -302,7 +300,6 @@ fn web_resolve_url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__web_origin_url(url: string, path?: string) -> string",
     category = "web"
 )]

@@ -330,6 +330,7 @@ pub(super) fn reset_local() {
 
 #[cfg(test)]
 mod tests {
+    use crate::value::VmDictExt;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -339,7 +340,7 @@ mod tests {
     fn params(directory: &str, namespace: Option<&str>) -> DictMap {
         let mut params = DictMap::from_iter([(intern_key("dir"), VmValue::string(directory))]);
         if let Some(namespace) = namespace {
-            params.insert(intern_key("namespace"), VmValue::string(namespace));
+            params.put_str("namespace", namespace);
         }
         params
     }
@@ -347,12 +348,12 @@ mod tests {
     fn snapshot() -> VmValue {
         VmValue::dict([
             (
-                intern_key("facts"),
-                VmValue::dict([(intern_key("owner"), VmValue::string("facts-owner"))]),
+                "facts",
+                VmValue::dict([("owner", VmValue::string("facts-owner"))]),
             ),
             (
-                intern_key("test"),
-                VmValue::dict([(intern_key("owner"), VmValue::string("test-owner"))]),
+                "test",
+                VmValue::dict([("owner", VmValue::string("test-owner"))]),
             ),
         ])
     }
@@ -361,10 +362,7 @@ mod tests {
     where
         F: std::future::Future<Output = ()> + 'static,
     {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime");
+        let runtime = harn_clock::test_support::current_thread_runtime();
         runtime.block_on(tokio::task::LocalSet::new().run_until(future));
     }
 

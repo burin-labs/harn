@@ -22,7 +22,7 @@ use tree_sitter::{Node, Query, QueryCursor};
 use crate::engine::{Binding, Span};
 use crate::error::RulesError;
 use crate::model::{AtomicMatcher, RuleNode, StopBy, StopKeyword};
-use crate::pattern::{compile_pattern, ROOT_CAPTURE};
+use crate::pattern::{compile_shaped_pattern, ShapeCheck, ROOT_CAPTURE};
 
 /// Metavar bindings accumulated while matching a node.
 type Bindings = BTreeMap<String, Binding>;
@@ -69,7 +69,11 @@ enum CompiledStopBy {
 }
 
 enum CompiledAtomic {
-    Query { query: Query, metavars: Vec<String> },
+    Query {
+        query: Query,
+        metavars: Vec<String>,
+        shape: ShapeCheck,
+    },
     Kind(String),
     Regex(Regex),
 }
@@ -167,8 +171,8 @@ fn compile_node(
             let ts_language = language
                 .ts_language()
                 .ok_or_else(|| mkerr(format!("grammar for `{}` unavailable", language.name())))?;
-            let compiled =
-                compile_pattern(&snippet, language).map_err(|m| mkerr(format!("pattern: {m}")))?;
+            let (compiled, shape) = compile_shaped_pattern(&snippet, language)
+                .map_err(|m| mkerr(format!("pattern: {m}")))?;
             let query = Query::new(&ts_language, &compiled.query).map_err(|e| {
                 RulesError::QueryRejected {
                     rule: rule_id.to_string(),
@@ -176,9 +180,11 @@ fn compile_node(
                     query: compiled.query.clone(),
                 }
             })?;
+            let shape = ShapeCheck::new(&query, &shape);
             Some(CompiledAtomic::Query {
                 query,
                 metavars: compiled.metavars,
+                shape,
             })
         }
         Some(AtomicMatcher::Kind(kind)) => Some(CompiledAtomic::Kind(kind)),
@@ -210,7 +216,11 @@ fn compile_node(
                 .filter(|name| **name != ROOT_CAPTURE)
                 .map(|name| name.to_string())
                 .collect();
-            Some(CompiledAtomic::Query { query, metavars })
+            Some(CompiledAtomic::Query {
+                query,
+                metavars,
+                shape: ShapeCheck::default(),
+            })
         }
     };
 
@@ -271,13 +281,16 @@ fn compile_rel(
 /// one pass; kind/regex/composite-only rules fall back to a tree walk.
 fn seed_candidates<'t>(top: &CompiledNode, ctx: &Ctx<'_>, root: Node<'t>) -> Vec<Node<'t>> {
     match &top.atomic {
-        Some(CompiledAtomic::Query { query, .. }) => {
+        Some(CompiledAtomic::Query { query, shape, .. }) => {
             let mut out = Vec::new();
             let mut seen = std::collections::HashSet::new();
             let root_index = root_capture_index(query);
             let mut cursor = QueryCursor::new();
             let mut it = cursor.matches(query, root, ctx.source.as_bytes());
             while let Some(m) = it.next() {
+                if !shape.admits(m) {
+                    continue;
+                }
                 for cap in m.captures() {
                     if Some(cap.index) == root_index && seen.insert(cap.node.id()) {
                         out.push(cap.node);
@@ -349,7 +362,11 @@ fn atomic_match(atomic: &CompiledAtomic, node: Node<'_>, ctx: &Ctx<'_>) -> Optio
     match atomic {
         CompiledAtomic::Kind(kind) => (node.kind() == kind).then(Bindings::new),
         CompiledAtomic::Regex(re) => re.is_match(&ctx.text(node)).then(Bindings::new),
-        CompiledAtomic::Query { query, metavars } => {
+        CompiledAtomic::Query {
+            query,
+            metavars,
+            shape,
+        } => {
             let root_index = root_capture_index(query);
             let names: Vec<&str> = query.capture_names().to_vec();
             let mut cursor = QueryCursor::new();
@@ -360,7 +377,7 @@ fn atomic_match(atomic: &CompiledAtomic, node: Node<'_>, ctx: &Ctx<'_>) -> Optio
                     .captures()
                     .iter()
                     .any(|c| Some(c.index) == root_index && c.node.id() == node.id());
-                if !roots_here {
+                if !roots_here || !shape.admits(m) {
                     continue;
                 }
                 let mut bindings = Bindings::new();

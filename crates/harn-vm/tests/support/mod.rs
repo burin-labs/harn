@@ -158,37 +158,30 @@ fn run_vm(
         .enable_all()
         .build()
         .map_err(|error| error.to_string())?;
-    rt.block_on(async move {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async move {
-                if with_bridge {
-                    harn_vm::llm::install_current_host_bridge(std::sync::Arc::new(
-                        harn_vm::bridge::HostBridge::from_parts(
-                            std::sync::Arc::new(tokio::sync::Mutex::new(
-                                std::collections::HashMap::new(),
-                            )),
-                            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                            std::sync::Arc::new(Mutex::new(())),
-                            1,
-                        ),
-                    ));
-                }
-                harn_vm::stdlib::process::set_session_environment(environment);
-                harn_vm::stdlib::process::set_thread_execution_context(context);
-                let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let result = vm
-                    .execute(&chunk)
-                    .await
-                    .map_err(|error: VmError| format!("{error:?}"));
-                harn_vm::stdlib::process::set_session_environment(None);
-                harn_vm::stdlib::process::set_thread_execution_context(None);
-                if with_bridge {
-                    harn_vm::llm::clear_current_host_bridge();
-                }
-                result.map(|_| vm.output().to_string())
-            })
+    rt.block_on(harn_clock::test_support::with_local_tasks(async move {
+        if with_bridge {
+            harn_vm::llm::install_current_host_bridge(std::sync::Arc::new(
+                harn_vm::bridge::HostBridge::from_parts(
+                    std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+                    std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    std::sync::Arc::new(Mutex::new(())),
+                    1,
+                ),
+            ));
+        }
+        harn_vm::stdlib::process::set_session_environment(environment);
+        harn_vm::stdlib::process::set_thread_execution_context(context);
+        let mut vm = harn_vm::new_vm();
+        harn_vm::register_vm_stdlib(&mut vm);
+        let result = vm
+            .execute(&chunk)
             .await
-    })
+            .map_err(|error: VmError| format!("{error:?}"));
+        harn_vm::stdlib::process::set_session_environment(None);
+        harn_vm::stdlib::process::set_thread_execution_context(None);
+        if with_bridge {
+            harn_vm::llm::clear_current_host_bridge();
+        }
+        result.map(|_| vm.output().to_string())
+    }))
 }

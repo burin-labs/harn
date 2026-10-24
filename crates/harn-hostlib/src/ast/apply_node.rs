@@ -172,52 +172,44 @@ fn applied_response(
     replacement: &str,
     dry_run: bool,
 ) -> VmValue {
-    VmValue::dict(
-        [
-            ("result".to_string(), str_value("applied")),
-            ("applied".to_string(), VmValue::Bool(true)),
-            ("path".to_string(), str_value(path)),
-            ("dry_run".to_string(), VmValue::Bool(dry_run)),
-            ("match_count".to_string(), VmValue::Int(chosen.len() as i64)),
-            (
-                "edits".to_string(),
-                VmValue::list(
-                    chosen
-                        .iter()
-                        .map(|s| edit_to_value(s, replacement))
-                        .collect(),
-                ),
+    VmValue::dict([
+        ("result", str_value("applied")),
+        ("applied", VmValue::Bool(true)),
+        ("path", str_value(path)),
+        ("dry_run", VmValue::Bool(dry_run)),
+        ("match_count", VmValue::Int(chosen.len() as i64)),
+        (
+            "edits",
+            VmValue::list(
+                chosen
+                    .iter()
+                    .map(|s| edit_to_value(s, replacement))
+                    .collect(),
             ),
-            ("before_sha256".to_string(), str_value(sha256_hex(before))),
-            ("after_sha256".to_string(), str_value(sha256_hex(after))),
-            ("preview".to_string(), str_value(lossy_str(after))),
-        ]
-        .into_iter()
-        .collect::<harn_vm::value::DictMap>(),
-    )
+        ),
+        ("before_sha256", str_value(sha256_hex(before))),
+        ("after_sha256", str_value(sha256_hex(after))),
+        ("preview", str_value(lossy_str(after))),
+    ])
 }
 
 fn ambiguous_response(match_count: usize, spans: &[Span]) -> VmValue {
-    VmValue::dict(
-        [
-            ("result".to_string(), str_value("ambiguous")),
-            ("applied".to_string(), VmValue::Bool(false)),
-            ("match_count".to_string(), VmValue::Int(match_count as i64)),
-            (
-                "spans".to_string(),
-                VmValue::list(spans.iter().map(span_to_value).collect()),
-            ),
-            (
-                "details".to_string(),
-                str_value(format!(
-                    "`select: \"unique\"` requires a single match, found {match_count}; \
-                     use `\"first\" | \"all\" | \"nth\"` to disambiguate"
-                )),
-            ),
-        ]
-        .into_iter()
-        .collect::<harn_vm::value::DictMap>(),
-    )
+    VmValue::dict([
+        ("result", str_value("ambiguous")),
+        ("applied", VmValue::Bool(false)),
+        ("match_count", VmValue::Int(match_count as i64)),
+        (
+            "spans",
+            VmValue::list(spans.iter().map(span_to_value).collect()),
+        ),
+        (
+            "details",
+            str_value(format!(
+                "`select: \"unique\"` requires a single match, found {match_count}; \
+                 use `\"first\" | \"all\" | \"nth\"` to disambiguate"
+            )),
+        ),
+    ])
 }
 
 fn no_nth_response(match_count: usize, requested: usize, path: &str, query: &str) -> VmValue {

@@ -86,7 +86,23 @@ pub(crate) struct GraphFacts {
     /// Empty when the grammar rejected the source; the file then keeps a
     /// Module-only slice rather than failing the build.
     pub symbols: Vec<Symbol>,
-    pub call_sites: Vec<(String, u32)>,
+    pub call_sites: Vec<CallFact>,
+    pub declarations: BTreeMap<(u32, u32), Vec<DeclarationFact>>,
+}
+
+pub(crate) struct CallFact {
+    pub name: String,
+    pub line: u32,
+    pub col: u32,
+    pub owner_type: Option<String>,
+}
+
+#[derive(Clone)]
+pub(crate) struct DeclarationFact {
+    pub name: String,
+    pub line: u32,
+    pub col: u32,
+    pub owner_type: Option<String>,
 }
 
 impl GraphFacts {
@@ -98,11 +114,59 @@ impl GraphFacts {
         match parsed {
             Ok((tree, symbols)) => {
                 let _phase = super::timing::Phase::start("facts.call_sites");
-                let call_sites = super::symbol_graph::extract_call_sites_from_tree(&tree, source);
+                let java = (language == AstLanguage::Java)
+                    .then(|| super::java_bindings::JavaBindings::new(&tree, source));
+                let call_sites =
+                    super::symbol_graph::extract_call_sites_from_tree(&tree, source, java.as_ref());
+                let positions = super::source_positions::LineIndex::new(source);
+                let mut pending = vec![tree.root_node()];
+                let nodes = std::iter::from_fn(|| {
+                    let node = pending.pop()?;
+                    let mut cursor = node.walk();
+                    pending.extend(node.named_children(&mut cursor));
+                    Some(node)
+                });
+                let mut declarations: BTreeMap<_, Vec<_>> = BTreeMap::new();
+                if let Some(java) = java.as_ref() {
+                    for node in nodes {
+                        if let Some(name) = node.child_by_field_name("name") {
+                            let Some(name_text) = source.get(name.byte_range()) else {
+                                continue;
+                            };
+                            let fact = DeclarationFact {
+                                name: name_text.to_string(),
+                                line: name.start_position().row as u32 + 1,
+                                col: positions
+                                    .position(
+                                        name.start_byte(),
+                                        super::source_positions::Encoding::Utf16,
+                                    )
+                                    .character
+                                    + 1,
+                                owner_type: java.definition_owner(node),
+                            };
+                            if matches!(node.kind(), "variable_declarator" | "type_spec") {
+                                if let Some(parent) = node.parent().filter(|parent| {
+                                    matches!(
+                                        parent.kind(),
+                                        "lexical_declaration"
+                                            | "variable_declaration"
+                                            | "field_declaration"
+                                            | "type_declaration"
+                                    )
+                                }) {
+                                    insert_declaration(&mut declarations, parent, &fact);
+                                }
+                            }
+                            insert_declaration(&mut declarations, node, &fact);
+                        }
+                    }
+                }
                 Self {
                     language,
                     symbols,
                     call_sites,
+                    declarations,
                 }
             }
             Err(err) => {
@@ -114,10 +178,23 @@ impl GraphFacts {
                     language,
                     symbols: Vec::new(),
                     call_sites: Vec::new(),
+                    declarations: BTreeMap::new(),
                 }
             }
         }
     }
+}
+
+fn insert_declaration(
+    declarations: &mut BTreeMap<(u32, u32), Vec<DeclarationFact>>,
+    node: tree_sitter::Node<'_>,
+    fact: &DeclarationFact,
+) {
+    let start = node.start_position();
+    declarations
+        .entry((start.row as u32, start.column as u32))
+        .or_default()
+        .push(fact.clone());
 }
 
 /// Read `job` and extract its facts. Reads nothing but the file.

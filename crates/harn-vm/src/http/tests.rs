@@ -137,18 +137,15 @@ async fn http_mock_records_normalized_headers_and_final_query_url() {
         (
             "headers".to_string(),
             VmValue::dict([
-                (
-                    "Authorization".to_string(),
-                    VmValue::string("Bearer secret"),
-                ),
-                ("X-Trace".to_string(), VmValue::string("trace-1")),
+                ("Authorization", VmValue::string("Bearer secret")),
+                ("X-Trace", VmValue::string("trace-1")),
             ]),
         ),
         (
             "query".to_string(),
             VmValue::dict([
-                ("api_key".to_string(), VmValue::string("secret")),
-                ("limit".to_string(), VmValue::Int(2)),
+                ("api_key", VmValue::string("secret")),
+                ("limit", VmValue::Int(2)),
             ]),
         ),
     ]);
@@ -207,18 +204,15 @@ async fn multipart_requests_are_mock_visible() {
         "multipart".to_string(),
         VmValue::list(vec![
             VmValue::dict([
-                ("name".to_string(), VmValue::string("meta")),
-                ("value".to_string(), VmValue::string("hello")),
+                ("name", VmValue::string("meta")),
+                ("value", VmValue::string("hello")),
             ]),
             VmValue::dict([
-                ("name".to_string(), VmValue::string("blob")),
-                ("filename".to_string(), VmValue::string("blob.bin")),
+                ("name", VmValue::string("blob")),
+                ("filename", VmValue::string("blob.bin")),
+                ("content_type", VmValue::string("application/octet-stream")),
                 (
-                    "content_type".to_string(),
-                    VmValue::string("application/octet-stream"),
-                ),
-                (
-                    "value".to_string(),
+                    "value",
                     VmValue::Bytes(std::sync::Arc::new(vec![0, 1, 2, 3])),
                 ),
             ]),
@@ -329,10 +323,7 @@ async fn http_download_mock_retries_retryable_status() {
         &path.display().to_string(),
         &crate::value::DictMap::from_iter([(
             "retry".to_string(),
-            VmValue::dict([
-                ("max".to_string(), VmValue::Int(1)),
-                ("backoff_ms".to_string(), VmValue::Int(0)),
-            ]),
+            VmValue::dict([("max", VmValue::Int(1)), ("backoff_ms", VmValue::Int(0))]),
         )]),
     )
     .await
@@ -445,8 +436,8 @@ async fn http_proxy_routes_requests_through_configured_proxy() {
         (
             "proxy_auth".to_string(),
             VmValue::dict([
-                ("user".to_string(), VmValue::string("user")),
-                ("pass".to_string(), VmValue::string("pass")),
+                ("user", VmValue::string("user")),
+                ("pass", VmValue::string("pass")),
             ]),
         ),
         ("timeout_ms".to_string(), VmValue::Int(1_000)),
@@ -503,13 +494,10 @@ async fn custom_tls_ca_bundle_and_pin_allow_request() {
         "tls".to_string(),
         VmValue::dict([
             (
-                "ca_bundle_path".to_string(),
+                "ca_bundle_path",
                 VmValue::string(cert_path.display().to_string()),
             ),
-            (
-                "pinned_sha256".to_string(),
-                VmValue::list(vec![VmValue::string(pin)]),
-            ),
+            ("pinned_sha256", VmValue::list(vec![VmValue::string(pin)])),
         ]),
     )]);
     let response =
@@ -561,13 +549,10 @@ async fn custom_tls_pin_mismatch_is_rejected() {
         "tls".to_string(),
         VmValue::dict([
             (
-                "ca_bundle_path".to_string(),
+                "ca_bundle_path",
                 VmValue::string(cert_path.display().to_string()),
             ),
-            (
-                "pinned_sha256".to_string(),
-                VmValue::list(vec![VmValue::string("deadbeef")]),
-            ),
+            ("pinned_sha256", VmValue::strings(["deadbeef"])),
         ]),
     )]);
     let error =
@@ -634,10 +619,10 @@ fn write_http_response_generic<T: Write>(
 fn formats_sse_event_fields_and_multiline_data() {
     let frame = vm_sse_event_frame(
         &VmValue::dict([
-            ("event".to_string(), VmValue::string("progress")),
-            ("data".to_string(), VmValue::string("one\ntwo")),
-            ("id".to_string(), VmValue::string("evt-1")),
-            ("retry_ms".to_string(), VmValue::Int(2500)),
+            ("event", VmValue::string("progress")),
+            ("data", VmValue::string("one\ntwo")),
+            ("id", VmValue::string("evt-1")),
+            ("retry_ms", VmValue::Int(2500)),
         ]),
         &crate::value::DictMap::new(),
     )
@@ -651,7 +636,7 @@ fn formats_sse_event_fields_and_multiline_data() {
 #[test]
 fn rejects_sse_event_control_fields_with_newlines() {
     let err = vm_sse_event_frame(
-        &VmValue::dict([("event".to_string(), VmValue::string("bad\nname"))]),
+        &VmValue::dict([("event", VmValue::string("bad\nname"))]),
         &crate::value::DictMap::new(),
     )
     .expect_err("newline should reject");
@@ -672,8 +657,8 @@ fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
         vm_sse_server_send(
             &stream_id,
             &VmValue::dict([
-                ("event".to_string(), VmValue::string("progress"),),
-                ("data".to_string(), VmValue::string("50")),
+                ("event", VmValue::string("progress")),
+                ("data", VmValue::string("50"))
             ]),
             &crate::value::DictMap::new(),
         )

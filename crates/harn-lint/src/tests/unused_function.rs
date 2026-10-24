@@ -4,10 +4,9 @@
 
 use super::*;
 
-#[test]
-fn test_used_function_no_warning() {
-    let diags = lint_source(
-        r"
+#[rstest::rstest]
+#[case::test_used_function_no_warning(
+    r"
 pipeline default(task) {
 fn helper() {
     return 42
@@ -15,26 +14,150 @@ fn helper() {
 log(helper())
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "unused-function"),
-        "used function should not trigger unused-function: {diags:?}"
-    );
-}
-
-#[test]
-fn test_pub_function_exempt() {
-    let diags = lint_source(
-        r#"
+    "unused-function",
+    false
+)]
+#[case::test_pub_function_exempt(
+    r#"
 /// Documented public function.
 pub fn api_endpoint() {
 return "ok"
 }
 "#,
-    );
-    assert!(
-        !has_rule(&diags, "unused-function"),
-        "pub functions should be exempt: {diags:?}"
+    "unused-function",
+    false
+)]
+#[case::test_function_passed_as_value(
+    r"
+pipeline default(task) {
+fn transformer(x) {
+    return x * 2
+}
+const f = transformer
+log(f(5))
+}
+",
+    "unused-function",
+    false
+)]
+#[case::test_function_called_from_another_function(
+    r"
+pipeline default(task) {
+fn inner() {
+    return 42
+}
+fn outer() {
+    return inner()
+}
+log(outer())
+}
+",
+    "unused-function",
+    false
+)]
+#[case::test_pipeline_not_flagged_as_unused(
+    r#"
+pipeline default(task) {
+log("hello")
+}
+"#,
+    "unused-function",
+    false
+)]
+#[case::test_impl_methods_exempt(
+    r"
+pipeline default(task) {
+struct Point {
+    x: int
+    y: int
+}
+impl Point {
+    fn distance(self) {
+        return self.x + self.y
+    }
+}
+const p = Point({x: 3, y: 4})
+log(p)
+}
+",
+    "unused-function",
+    false
+)]
+#[case::test_recursive_function_called_externally(
+    r"
+pipeline default(task) {
+fn factorial(n) {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+log(factorial(5))
+}
+",
+    "unused-function",
+    false
+)]
+#[case::test_mutually_recursive_functions_one_called(
+    r"
+pipeline default(task) {
+fn is_even(n) {
+    if n == 0 { return true }
+    return is_odd(n - 1)
+}
+fn is_odd(n) {
+    if n == 0 { return false }
+    return is_even(n - 1)
+}
+log(is_even(4))
+}
+",
+    "unused-function",
+    false
+)]
+#[case::test_underscore_prefixed_function_exempt(
+    r#"
+pipeline default(task) {
+fn _unused_helper() {
+    return 42
+}
+log("hello")
+}
+"#,
+    "unused-function",
+    false
+)]
+#[case::test_top_level_unused_function(
+    r#"
+fn orphan() {
+return 42
+}
+pipeline default(task) {
+log("hello")
+}
+"#,
+    "unused-function",
+    true
+)]
+// Wildcard imports shouldn't suppress unused-function checks —
+// external code can't call local non-pub functions.
+#[case::test_unused_function_with_wildcard_import(
+    r#"
+import "some_module"
+pipeline default(task) {
+fn helper() { return 1 }
+log("hello")
+}
+"#,
+    "unused-function",
+    true
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }
 
@@ -53,148 +176,6 @@ fn main(_harness: Harness) {
     assert!(
         !has_rule(&diags, "unused-parameter"),
         "`_harness` should suppress the unused-parameter lint: {diags:?}"
-    );
-}
-
-#[test]
-fn test_function_passed_as_value() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-fn transformer(x) {
-    return x * 2
-}
-const f = transformer
-log(f(5))
-}
-",
-    );
-    assert!(
-        !has_rule(&diags, "unused-function"),
-        "function referenced as value should not trigger: {diags:?}"
-    );
-}
-
-#[test]
-fn test_function_called_from_another_function() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-fn inner() {
-    return 42
-}
-fn outer() {
-    return inner()
-}
-log(outer())
-}
-",
-    );
-    assert!(
-        !has_rule(&diags, "unused-function"),
-        "function called from another function should not trigger: {diags:?}"
-    );
-}
-
-#[test]
-fn test_pipeline_not_flagged_as_unused() {
-    let diags = lint_source(
-        r#"
-pipeline default(task) {
-log("hello")
-}
-"#,
-    );
-    assert!(
-        !has_rule(&diags, "unused-function"),
-        "pipelines should never trigger unused-function: {diags:?}"
-    );
-}
-
-#[test]
-fn test_impl_methods_exempt() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-struct Point {
-    x: int
-    y: int
-}
-impl Point {
-    fn distance(self) {
-        return self.x + self.y
-    }
-}
-const p = Point({x: 3, y: 4})
-log(p)
-}
-",
-    );
-    assert!(
-        !has_rule(&diags, "unused-function"),
-        "impl methods should be exempt: {diags:?}"
-    );
-}
-
-#[test]
-fn test_recursive_function_called_externally() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-fn factorial(n) {
-    if n <= 1 {
-        return 1
-    }
-    return n * factorial(n - 1)
-}
-log(factorial(5))
-}
-",
-    );
-    assert!(
-        !has_rule(&diags, "unused-function"),
-        "recursive function called externally should not trigger: {diags:?}"
-    );
-}
-
-#[test]
-fn test_mutually_recursive_functions_one_called() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-fn is_even(n) {
-    if n == 0 { return true }
-    return is_odd(n - 1)
-}
-fn is_odd(n) {
-    if n == 0 { return false }
-    return is_even(n - 1)
-}
-log(is_even(4))
-}
-",
-    );
-    assert!(
-        !has_rule(&diags, "unused-function"),
-        "mutually recursive functions where one is called should not trigger: {diags:?}"
-    );
-}
-
-#[test]
-fn test_underscore_prefixed_function_exempt() {
-    let diags = lint_source(
-        r#"
-pipeline default(task) {
-fn _unused_helper() {
-    return 42
-}
-log("hello")
-}
-"#,
-    );
-    assert!(
-        !has_rule(&diags, "unused-function"),
-        "underscore-prefixed functions should be exempt: {diags:?}"
     );
 }
 
@@ -234,43 +215,6 @@ log(used())
         count_rule(&diags, "unused-function"),
         2,
         "expected 2 unused-function warnings, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_top_level_unused_function() {
-    let diags = lint_source(
-        r#"
-fn orphan() {
-return 42
-}
-pipeline default(task) {
-log("hello")
-}
-"#,
-    );
-    assert!(
-        has_rule(&diags, "unused-function"),
-        "top-level unused function should trigger: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unused_function_with_wildcard_import() {
-    // Wildcard imports shouldn't suppress unused-function checks —
-    // external code can't call local non-pub functions.
-    let diags = lint_source(
-        r#"
-import "some_module"
-pipeline default(task) {
-fn helper() { return 1 }
-log("hello")
-}
-"#,
-    );
-    assert!(
-        has_rule(&diags, "unused-function"),
-        "unused-function should still fire with wildcard imports: {diags:?}"
     );
 }
 

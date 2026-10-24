@@ -19,6 +19,16 @@ TOUCHED=${TOUCHED:-false}
 TOUCHED_FILES=${TOUCHED_FILES:-}
 LABELLED=${LABELLED:-false}
 
+if [[ "${EVENT_ACTION:-}" == labeled && "${EVENT_LABEL:-}" != e2e ]]; then
+  echo '### Slow E2E suite: NOT running for an unrelated label' \
+    | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  echo 'Only adding the e2e label requests another label-triggered run.' \
+    | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  echo 'E2E_PULL_REQUEST_DECISION should_run=false reason=unrelated_label'
+  echo 'should_run=false' >> "${GITHUB_OUTPUT:-/dev/null}"
+  exit 0
+fi
+
 reasons=()
 if [[ "${LABELLED}" == "true" ]]; then
   reasons+=("the \`e2e\` label is on this pull request")

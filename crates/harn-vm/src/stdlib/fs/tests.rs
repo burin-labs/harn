@@ -18,7 +18,7 @@ fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError>
 }
 
 fn s(v: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(v))
+    VmValue::string(v)
 }
 
 fn b(v: bool) -> VmValue {
@@ -29,8 +29,7 @@ fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
     VmValue::dict(
         entries
             .into_iter()
-            .map(|(key, value)| (key.to_string(), value))
-            .collect::<crate::value::DictMap>(),
+            .map(|(key, value)| (key.to_string(), value)),
     )
 }
 
@@ -882,8 +881,8 @@ fn asynchronous_filesystem_options_accept_only_background() {
         (
             "find_evidence",
             vec![
-                VmValue::List(Arc::new(vec![evidence_root("repo", dir.path())])),
-                VmValue::List(Arc::new(vec![evidence_pattern("needle", "needle")])),
+                VmValue::list(vec![evidence_root("repo", dir.path())]),
+                VmValue::list(vec![evidence_pattern("needle", "needle")]),
                 retired_options(),
             ],
         ),

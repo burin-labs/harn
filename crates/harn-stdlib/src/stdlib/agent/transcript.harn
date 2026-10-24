@@ -1,3 +1,4 @@
+import { agent_is_tool_result_message } from "std/agent/state"
 // std/agent/transcript — canonical transcript normalization helpers.
 //
 // Agent transcripts are persisted by the Harn runtime, so Harn owns the
@@ -445,10 +446,8 @@ fn __known_record_shape(record: dict) -> bool {
   const role = __role(record)
   return record_type == "response"
     || record_type == "request"
-    || record?._harn?.kind == "tool_result"
+    || agent_is_tool_result_message(record + {role: role})
     || role == "assistant"
-    || role == "tool"
-    || role == "tool_result"
     || role == "user"
 }
 
@@ -800,7 +799,7 @@ pub fn agent_transcript_normalize(records: list<dict>?) -> list<AgentTranscriptR
       rows = rows + [__assistant_row(record, index, iteration)]
       next_iteration = max(next_iteration, iteration + 1)
       last_assistant_iteration = iteration
-    } else if role == "tool" || role == "tool_result" {
+    } else if agent_is_tool_result_message({role: role}) {
       rows = rows + [__tool_message_row(record, index, max(0, last_assistant_iteration))]
     } else if record_type == "request" {
       const extracted = __legacy_request_tool_result_rows(

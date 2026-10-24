@@ -770,7 +770,7 @@ impl crate::vm::Vm {
     }
 
     pub(crate) fn deadline_exceeded_error() -> VmError {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from("Deadline exceeded")))
+        VmError::Thrown(VmValue::string("Deadline exceeded"))
     }
 
     /// Capture the current call stack as (fn_name, line, col, source_file) tuples.

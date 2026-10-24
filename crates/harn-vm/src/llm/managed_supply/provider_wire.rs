@@ -170,28 +170,12 @@ pub struct HostedChatRequest {
     pub stream: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HostedStreamOptions {
-    pub include_usage: bool,
-}
-
-/// Exact third-party request body. There is intentionally no metadata field:
-/// request identity, routing, and accounting belong to the hosted envelope and
-/// authoritative receipt, not to a provider-specific extension surface.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+/// Provider body built from closed input by the ordinary transport encoder.
+/// Serialize this value directly; its fields cannot be changed after validation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
 pub struct HostedOpenAiRequest {
-    pub model: String,
-    pub messages: Vec<HostedChatMessage>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<HostedFunctionTool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<HostedToolChoice>,
-    pub max_tokens: u32,
-    pub temperature: f32,
-    pub stream: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stream_options: Option<HostedStreamOptions>,
+    body: serde_json::Value,
 }
 
 fn nonempty(value: &str, field: &str) -> Result<(), ManagedSupplyContractError> {
@@ -274,34 +258,75 @@ pub fn hosted_openai_request(
     nonempty(provider, "provider")?;
     nonempty(model, "model")?;
     validate_request(&request)?;
-    let provider_definition = crate::llm_config::provider_config(provider).ok_or_else(|| {
+    crate::llm_config::provider_config(provider).ok_or_else(|| {
         ManagedSupplyContractError::new("hosted chat provider is not in Harn's registry")
     })?;
-    let catalog_model = crate::llm_config::model_catalog_entry(model)
+    crate::llm_config::model_catalog_entry(model)
         .filter(|entry| entry.provider == provider)
         .ok_or_else(|| {
             ManagedSupplyContractError::new(
                 "hosted chat model is not a canonical route for the selected provider",
             )
         })?;
-    let wire_model = catalog_model
-        .wire_model
-        .unwrap_or_else(|| model.to_string());
-    let stream_options = (request.stream
-        && provider_definition.stream_usage_accounting == Some(true))
-    .then_some(HostedStreamOptions {
-        include_usage: true,
-    });
-    Ok(HostedOpenAiRequest {
-        model: wire_model,
-        messages: request.messages,
-        tools: request.tools,
-        tool_choice: request.tool_choice,
-        max_tokens: request.max_tokens,
-        temperature: request.temperature,
-        stream: request.stream,
-        stream_options,
-    })
+    let payload = request.into_payload(provider, model)?;
+    let dialect = crate::llm::api::DialectContract::for_request(&payload);
+    if dialect.wire() != crate::llm::capabilities::WireDialect::OpenAiCompat {
+        return Err(ManagedSupplyContractError::new(
+            "hosted chat requires an OpenAI-compatible provider route",
+        ));
+    }
+    let mut body = dialect.encode_request_body(&payload);
+    dialect.apply_stream_transport_fields(&mut body, provider, payload.stream);
+    Ok(HostedOpenAiRequest { body })
+}
+
+impl HostedChatRequest {
+    fn into_payload(
+        self,
+        provider: &str,
+        model: &str,
+    ) -> Result<crate::llm::api::LlmRequestPayload, ManagedSupplyContractError> {
+        let serialization_error = |error: serde_json::Error| {
+            ManagedSupplyContractError::new(format!("hosted chat encoding failed: {error}"))
+        };
+        Ok(crate::llm::api::LlmRequestPayload {
+            provider: provider.to_string(),
+            model: model.to_string(),
+            messages: self
+                .messages
+                .into_iter()
+                .map(|mut message| -> Result<_, serde_json::Error> {
+                    let reasoning = message.reasoning_content.take();
+                    let mut message = serde_json::to_value(message)?;
+                    if let Some(reasoning) = reasoning {
+                        message["reasoning"] = serde_json::Value::String(reasoning);
+                    }
+                    Ok(message)
+                })
+                .collect::<Result<_, _>>()
+                .map_err(serialization_error)?,
+            native_tools: if self.tools.is_empty() {
+                None
+            } else {
+                Some(
+                    self.tools
+                        .into_iter()
+                        .map(serde_json::to_value)
+                        .collect::<Result<_, _>>()
+                        .map_err(serialization_error)?,
+                )
+            },
+            tool_choice: self
+                .tool_choice
+                .map(serde_json::to_value)
+                .transpose()
+                .map_err(serialization_error)?,
+            max_tokens: i64::from(self.max_tokens),
+            temperature: Some(f64::from(self.temperature)),
+            stream: self.stream,
+            ..Default::default()
+        })
+    }
 }
 
 #[cfg(test)]
@@ -382,6 +407,146 @@ mod tests {
     }
 
     #[test]
+    fn hosted_projection_uses_the_routes_token_limit_field() {
+        let value = serde_json::to_value(
+            hosted_openai_request("moonshot", "moonshot/kimi-k3", request(true))
+                .expect("Moonshot request"),
+        )
+        .expect("JSON");
+        assert_eq!(value["max_completion_tokens"], 32);
+        assert!(value.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn hosted_projection_omits_tool_choice_without_tools() {
+        let mut input = request(false);
+        input.tool_choice = Some(HostedToolChoice::Mode(HostedToolChoiceMode::Auto));
+        let value = serde_json::to_value(
+            hosted_openai_request("groq", "qwen/qwen3.8-27b", input).expect("Groq request"),
+        )
+        .expect("JSON");
+        assert!(value.get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn hosted_projection_preserves_provider_call_receipts() {
+        crate::llm::reset_reasoning_receipts();
+        let payload = request(false)
+            .into_payload("groq", "qwen/qwen3.8-27b")
+            .expect("native input");
+        let dialect = crate::llm::api::DialectContract::for_request(&payload);
+        let native = dialect.build_request_body(&payload);
+        assert_eq!(native["model"], "qwen/qwen3.8-27b");
+        let before = crate::llm::peek_reasoning_receipts();
+        assert_eq!(before.len(), 1, "native transport records its encoded call");
+
+        for stream in [false, true] {
+            let hosted = hosted_openai_request("groq", "qwen/qwen3.8-27b", request(stream))
+                .expect("hosted projection");
+            assert_eq!(
+                serde_json::to_value(hosted).expect("JSON")["model"],
+                "qwen/qwen3.8-27b"
+            );
+        }
+        assert_eq!(crate::llm::peek_reasoning_receipts(), before);
+        assert_eq!(crate::llm::dropped_reasoning_receipts(), 0);
+
+        dialect.build_request_body(&payload);
+        let after = crate::llm::peek_reasoning_receipts();
+        assert_eq!(after.len(), 2);
+        assert_eq!(after[1].index, 1);
+        crate::llm::reset_reasoning_receipts();
+    }
+
+    #[test]
+    fn hosted_projection_matches_native_tools_history_and_streaming() {
+        for (provider, model) in [
+            ("groq", "qwen/qwen3.8-27b"),
+            ("together", "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+            ("deepseek", "deepseek-v4-flash"),
+            ("moonshot", "moonshot/kimi-k3"),
+        ] {
+            for stream in [false, true] {
+                let mut input: HostedChatRequest = serde_json::from_value(serde_json::json!({
+                    "messages": [
+                        {"role": "user", "content": "Read the test file"},
+                        {"role": "assistant", "content": "", "reasoning_content": "Inspect it",
+                            "tool_calls": [{"id": "call-read", "type": "function",
+                                "function": {"name": "look", "arguments": "{}"}}]},
+                        {"role": "tool", "content": "file contents", "name": "look",
+                            "tool_call_id": "call-read"}
+                    ],
+                    "tools": [{"type": "function", "function": {
+                        "name": "look", "description": "Read a file", "strict": true,
+                        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}
+                    }}],
+                    "tool_choice": "auto", "max_tokens": 32, "temperature": 0.2, "stream": false
+                }))
+                .expect("closed input");
+                input.stream = stream;
+                let mut messages = serde_json::to_value(&input.messages)
+                    .expect("native messages")
+                    .as_array()
+                    .expect("array")
+                    .clone();
+                messages[1]
+                    .as_object_mut()
+                    .expect("assistant")
+                    .remove("reasoning_content");
+                messages[1]["reasoning"] = serde_json::json!("Inspect it");
+                let payload = crate::llm::api::LlmRequestPayload {
+                    provider: provider.to_string(),
+                    model: model.to_string(),
+                    messages,
+                    native_tools: Some(
+                        serde_json::to_value(&input.tools)
+                            .expect("native tools")
+                            .as_array()
+                            .expect("array")
+                            .clone(),
+                    ),
+                    tool_choice: Some(serde_json::json!("auto")),
+                    max_tokens: 32,
+                    temperature: Some(f64::from(0.2_f32)),
+                    stream,
+                    ..Default::default()
+                };
+                let dialect = crate::llm::api::DialectContract::for_request(&payload);
+                let mut native = dialect.build_request_body(&payload);
+                dialect.apply_stream_transport_fields(&mut native, provider, stream);
+                let hosted = serde_json::to_value(
+                    hosted_openai_request(provider, model, input).expect("hosted input"),
+                )
+                .expect("JSON");
+                assert_eq!(hosted, native, "{provider}/{model}, stream={stream}");
+                assert!(hosted.get("metadata").is_none());
+                assert!(hosted.get("harn_managed_supply").is_none());
+                assert_eq!(hosted["messages"][2]["tool_call_id"], "call-read");
+                assert_eq!(hosted["tools"][0]["function"]["name"], "look");
+                if matches!(provider, "deepseek" | "moonshot") {
+                    assert_eq!(hosted["messages"][1]["reasoning_content"], "Inspect it");
+                } else {
+                    assert!(hosted["messages"][1].get("reasoning_content").is_none());
+                }
+                if stream {
+                    assert_eq!(hosted["stream_options"]["include_usage"], true);
+                } else {
+                    assert!(hosted.get("stream_options").is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hosted_projection_rejects_other_provider_dialects() {
+        let error = hosted_openai_request("anthropic", "claude-haiku-4-5-20251001", request(false))
+            .expect_err("Anthropic messages cannot be sent as OpenAI chat");
+        assert!(error
+            .to_string()
+            .contains("OpenAI-compatible provider route"));
+    }
+
+    #[test]
     fn hosted_projection_rejects_provider_model_mismatch() {
         let error = hosted_openai_request("groq", "deepseek-v4-flash", request(false))
             .expect_err("cross-provider route must fail before egress");
@@ -420,7 +585,7 @@ mod tests {
             hosted_openai_request("fireworks", "accounts/fireworks/models/gpt-oss-120b", input)
                 .expect("the hosted projection must accept the ordinary transport's history");
         assert_eq!(
-            serde_json::to_value(output.messages).expect("JSON"),
+            serde_json::to_value(output).expect("JSON")["messages"],
             serde_json::Value::Array(history)
         );
     }
@@ -439,6 +604,15 @@ mod tests {
     #[test]
     fn hosted_projection_preserves_empty_tool_result_but_requires_its_call_id() {
         let mut input = request(false);
+        input.tools.push(HostedFunctionTool {
+            kind: HostedToolKind::Function,
+            function: HostedFunctionDefinition {
+                name: "read_file".to_string(),
+                description: None,
+                parameters: serde_json::json!({"type": "object", "properties": {}}),
+                strict: None,
+            },
+        });
         input.messages.push(HostedChatMessage {
             role: HostedRole::Assistant,
             content: HostedContent::Null,
@@ -469,7 +643,10 @@ mod tests {
             input.clone(),
         )
         .expect("an empty tool result is valid history data");
-        assert_eq!(output.messages.last(), Some(&tool));
+        assert_eq!(
+            serde_json::to_value(output).expect("JSON")["messages"][2],
+            serde_json::to_value(&tool).expect("JSON")
+        );
 
         input.messages.last_mut().expect("tool result").tool_call_id = Some(String::new());
         let error =

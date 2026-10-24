@@ -1,0 +1,23 @@
+name: Install bubblewrap
+description: Install bubblewrap from a cached package, falling back to the bounded apt install and refilling the cache.
+runs:
+  using: composite
+  steps:
+    - id: where
+      shell: bash
+      run: ./.github/actions/install-bubblewrap/install.sh dir
+    - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      with:
+        path: ${{ steps.where.outputs.dir }}
+        key: ${{ steps.where.outputs.key }}
+    - id: install
+      shell: bash
+      run: ./.github/actions/install-bubblewrap/install.sh install
+    - if: steps.install.outputs.installed != 'true'
+      uses: ./.github/actions/apt-install
+      with:
+        packages: bubblewrap
+        check-command: bwrap
+    - if: steps.install.outputs.installed != 'true'
+      shell: bash
+      run: ./.github/actions/install-bubblewrap/install.sh stash

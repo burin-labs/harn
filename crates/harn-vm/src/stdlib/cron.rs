@@ -13,8 +13,8 @@ pub(crate) fn register_cron_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "__cron_is_valid(expression: string) -> bool", category = "cron"
+    sig = "__cron_is_valid(expression: string) -> bool",
+    category = "cron"
 )]
 fn cron_is_valid_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let expression = Args::runtime("__cron_is_valid", args).string(0, "expression")?;

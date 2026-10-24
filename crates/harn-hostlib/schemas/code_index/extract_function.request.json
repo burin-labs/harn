@@ -5,6 +5,7 @@
   "description": "Lift one expression, a run of whole statements, or a closure body out of a function into a new function `new_name`, and replace it (and, with `all_occurrences`, every same-file copy with an equal token sequence and the same bindings) with a call. Inputs are the region's free names bound in the enclosing function; outputs are names the region assigns that are read after it. Name the region by `start_line`/`end_line` or by its exact text in `region`. Rust, TypeScript/TSX, JavaScript/JSX, Python. All-or-nothing: every refusal leaves the file byte-identical.",
   "type": "object",
   "properties": {
+    "proof": { "type": "boolean", "default": false, "description": "Include bounded edit excerpts and per-file syntax evidence. Does not run a project check." },
     "path": {
       "type": "string",
       "minLength": 1,

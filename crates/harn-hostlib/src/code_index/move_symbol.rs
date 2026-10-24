@@ -79,8 +79,7 @@ use crate::tools::args::{dict_arg, optional_bool, optional_string};
 use super::builtins::SharedIndex;
 use super::refactor_core::{
     contained_path, first_syntax_error, parse_kind, plan_file, read_source, reference_sites,
-    resolve_seed, resolves_inside, write_plans, ReferenceKind, ReferenceSite, SeedCandidate,
-    SeedLookup,
+    resolve_seed, resolves_inside, write_plans, ReferenceKind, ReferenceSite, SeedLookup,
 };
 use super::state::IndexState;
 use super::symbol_graph::NodeKind;
@@ -102,6 +101,7 @@ pub(crate) struct Request {
     pub(crate) line: Option<u32>,
     pub(crate) kind: Option<NodeKind>,
     pub(crate) dry_run: bool,
+    pub(crate) proof: bool,
     pub(crate) session_id: Option<String>,
 }
 
@@ -158,6 +158,7 @@ impl Request {
             line,
             kind,
             dry_run: optional_bool(BUILTIN, dict, "dry_run", false)?,
+            proof: optional_bool(BUILTIN, dict, "proof", false)?,
             session_id: optional_string(BUILTIN, dict, "session_id")?,
         })
     }
@@ -327,21 +328,16 @@ fn plan(
     if let SeedLookup::Many(candidates) = &lookup {
         // Fields and enum cases never move, so a struct field that shares
         // the item's name does not make the item ambiguous.
-        let movable: Vec<&SeedCandidate> = candidates
+        let movable: Vec<_> = candidates
             .iter()
-            .filter(|(path, _, kind)| path == source_path && !matches!(*kind, "Field" | "EnumCase"))
+            .filter_map(|id| state.symbols.node(*id))
+            .filter(|node| {
+                node.path.as_ref() == source_path
+                    && !matches!(node.kind, NodeKind::Field | NodeKind::EnumCase)
+            })
             .collect();
-        if let [(_, line, kind)] = movable.as_slice() {
-            let narrowed = resolve_seed(
-                &state.symbols,
-                source_path,
-                name,
-                Some(*line),
-                parse_kind(BUILTIN, kind).ok(),
-            );
-            if matches!(narrowed, SeedLookup::One(_)) {
-                lookup = narrowed;
-            }
+        if let [node] = movable.as_slice() {
+            lookup = SeedLookup::One(node.id);
         }
     }
     let seed = match lookup {
@@ -357,7 +353,7 @@ fn plan(
                 "ambiguous_symbol",
                 format!("several declarations are named `{name}`; pass `line` or `kind`"),
             );
-            outcome.response.candidates = candidates;
+            outcome.response.candidates = super::refactor_core::candidate_locations(&state.symbols, &candidates);
             return Ok(outcome);
         }
     };

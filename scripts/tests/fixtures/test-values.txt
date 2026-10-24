@@ -1,0 +1,16 @@
+pipeline test_direct(harness: Harness) {
+  return Err("direct failure")
+}
+
+pipeline test_propagated(harness: Harness) {
+  Err("propagated failure")?
+  throw "propagation did not return"
+}
+
+pipeline test_ok(harness: Harness) {
+  return Ok(nil)
+}
+
+pipeline test_value(harness: Harness) {
+  return 42
+}

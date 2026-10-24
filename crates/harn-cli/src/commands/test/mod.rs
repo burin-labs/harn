@@ -478,7 +478,8 @@ async fn run_user_test_targets(
     }
     // Refuse a target whose content belongs to a different runner before any
     // of it runs, so the confident partial verdict is never printed.
-    let target_census = discovery::census_targets(paths);
+    let target_census =
+        discovery::census_targets(paths).unwrap_or_else(|error| command_error(&error));
     if let Some(refusal) = discovery::conformance_fixture_refusal(paths, &target_census) {
         command_error(&refusal);
     }
@@ -502,7 +503,7 @@ async fn run_user_test_targets(
     let selected_paths;
     let mut allow_empty = args.allow_empty;
     let paths = if let Some(base) = args.affected_from.as_deref() {
-        let resolved = affected::resolve(paths, base);
+        let resolved = affected::resolve(paths, base).unwrap_or_else(|error| command_error(&error));
         if args.plan {
             println!(
                 "{}",
@@ -967,10 +968,12 @@ struct UserTestOutputOptions {
     progress: bool,
 }
 
-async fn run_user_test_paths_once(
-    paths: &[PathBuf],
-    args: UserTestRunArgs<'_>,
-) -> test_runner::TestSummary {
+struct UserTestRun {
+    summary: test_runner::TestSummary,
+    census: discovery::TargetCensus,
+}
+
+async fn run_user_test_paths_once(paths: &[PathBuf], args: UserTestRunArgs<'_>) -> UserTestRun {
     run_user_test_paths_once_with_session(paths, args, &test_runner::TestRunSession::default())
         .await
 }
@@ -979,7 +982,10 @@ async fn run_user_test_paths_once_with_session(
     paths: &[PathBuf],
     args: UserTestRunArgs<'_>,
     session: &test_runner::TestRunSession,
-) -> test_runner::TestSummary {
+) -> UserTestRun {
+    let inventory = test_runner::TestSourceInventory::discover(paths)
+        .unwrap_or_else(|error| command_error(&error));
+    let census = discovery::census_inventory(&inventory);
     let options = test_runner::RunOptions {
         llm_policy: args.llm_policy,
         filter: args.filter.map(str::to_owned),
@@ -997,8 +1003,8 @@ async fn run_user_test_paths_once_with_session(
         diagnose: args.diagnose,
         trusted_host_dispatch: args.trusted_host_dispatch,
     };
-    let summary = test_runner::run_tests_with_paths_and_operator_grant(
-        paths,
+    let summary = test_runner::run_tests_with_source_inventory(
+        &inventory,
         &options,
         session,
         args.operator_approval_grant.as_ref(),
@@ -1011,7 +1017,7 @@ async fn run_user_test_paths_once_with_session(
             progress: true,
         },
     );
-    summary
+    UserTestRun { summary, census }
 }
 
 async fn run_user_tests_once_with_session(
@@ -1020,7 +1026,9 @@ async fn run_user_tests_once_with_session(
     session: &test_runner::TestRunSession,
 ) -> test_runner::TestSummary {
     let paths = [path.to_path_buf()];
-    run_user_test_paths_once_with_session(&paths, args, session).await
+    run_user_test_paths_once_with_session(&paths, args, session)
+        .await
+        .summary
 }
 pub(crate) async fn run_user_tests(
     path_strs: &[String],
@@ -1056,13 +1064,12 @@ pub(crate) async fn run_user_tests(
     let allow_empty = args.allow_empty;
     let fail_on_skip = args.fail_on_skip;
     let filter = args.filter;
-    let summary = run_user_test_paths_once(&paths, args).await;
+    let UserTestRun { summary, census } = run_user_test_paths_once(&paths, args).await;
 
     // A case count is only evidence beside the denominator it was drawn from,
     // so this belongs next to the summary on stdout. stderr stays reserved for
     // problems: an explicitly allowed empty run is a normal outcome and must
     // not write there.
-    let census = discovery::census_targets(&paths);
     let display_targets = report_config
         .display_target
         .as_ref()

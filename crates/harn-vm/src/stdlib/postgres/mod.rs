@@ -133,29 +133,20 @@ fn register_postgres_namespace(vm: &mut Vm) {
     );
     vm.set_global(
         "pg",
-        VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("_namespace"),
-                VmValue::String(arcstr::ArcStr::from("pg")),
-            ),
-            (crate::value::intern_key("jsonb"), jsonb),
-        ])),
+        VmValue::dict([("_namespace", VmValue::string("pg")), ("jsonb", jsonb)]),
     );
 }
 
 fn namespace(name: &str, entries: &[(&str, &str)]) -> VmValue {
     VmValue::dict(
-        std::iter::once((
-            "_namespace".to_string(),
-            VmValue::String(arcstr::ArcStr::from(name.to_string())),
-        ))
-        .chain(entries.iter().map(|(field, builtin)| {
-            (
-                (*field).to_string(),
-                VmValue::BuiltinRef(arcstr::ArcStr::from(*builtin)),
-            )
-        }))
-        .collect::<BTreeMap<_, _>>(),
+        std::iter::once(("_namespace".to_string(), VmValue::string(name.to_string())))
+            .chain(entries.iter().map(|(field, builtin)| {
+                (
+                    (*field).to_string(),
+                    VmValue::BuiltinRef(arcstr::ArcStr::from(*builtin)),
+                )
+            }))
+            .collect::<BTreeMap<_, _>>(),
     )
 }
 
@@ -172,7 +163,6 @@ pub use shared::install_shared_pool_registry;
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig_expr = BuiltinSignature::variadic("pg_pool", &[Param::new("args", TY_ANY
 )], TY_RESOURCE),
     kind = "async",
@@ -191,7 +181,6 @@ async fn pg_pool_impl(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig_expr = BuiltinSignature::variadic("pg_connect", &[Param::new("args", TY_ANY
 )], TY_RESOURCE),
     kind = "async",
@@ -590,7 +579,7 @@ fn pg_mock_pool_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 fn pg_mock_calls_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mock = mock_handle(args.first(), "pg_mock_calls")?;
     let calls = mock.lock().calls.clone();
-    Ok(VmValue::List(std::sync::Arc::new(calls)))
+    Ok(VmValue::list(calls))
 }
 
 async fn open_pool(
@@ -806,7 +795,7 @@ async fn query_many(
     routing: QueryRouting,
 ) -> Result<VmValue, VmError> {
     let rows = query_rows(target, sql, params, routing).await?;
-    Ok(VmValue::List(std::sync::Arc::new(rows)))
+    Ok(VmValue::list(rows))
 }
 
 pub(super) async fn query_rows(
@@ -1099,8 +1088,8 @@ async fn apply_transaction_settings(
             )));
         }
         let params = vec![
-            VmValue::String(arcstr::ArcStr::from(key.as_str())),
-            VmValue::String(arcstr::ArcStr::from(value.display())),
+            VmValue::string(key.as_str()),
+            VmValue::string(value.display()),
         ];
         let sql = "select set_config($1, $2, true)";
         let mut tx = tx.cell.lock().await;
@@ -1486,19 +1475,19 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         // code reads money columns as `::text`. Wrap the text in `decimal(...)`
         // to get an exact decimal value. (The bind path above DOES accept a
         // `decimal` and encodes it to NUMERIC natively.)
-        "NUMERIC" => VmValue::String(arcstr::ArcStr::from(
+        "NUMERIC" => VmValue::string(
             row.try_get::<rust_decimal::Decimal, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
-        )),
-        "TEXT" | "VARCHAR" | "BPCHAR" | "NAME" => VmValue::String(arcstr::ArcStr::from(
-            row.try_get::<String, _>(index).map_err(decode_error)?,
-        )),
-        "UUID" => VmValue::String(arcstr::ArcStr::from(
+        ),
+        "TEXT" | "VARCHAR" | "BPCHAR" | "NAME" => {
+            VmValue::string(row.try_get::<String, _>(index).map_err(decode_error)?)
+        }
+        "UUID" => VmValue::string(
             row.try_get::<uuid::Uuid, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
-        )),
+        ),
         "JSON" | "JSONB" => {
             let json = row
                 .try_get::<serde_json::Value, _>(index)
@@ -1508,26 +1497,26 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         "BYTEA" => VmValue::Bytes(std::sync::Arc::new(
             row.try_get::<Vec<u8>, _>(index).map_err(decode_error)?,
         )),
-        "DATE" => VmValue::String(arcstr::ArcStr::from(
+        "DATE" => VmValue::string(
             row.try_get::<time::Date, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
-        )),
-        "TIME" => VmValue::String(arcstr::ArcStr::from(
+        ),
+        "TIME" => VmValue::string(
             row.try_get::<time::Time, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
-        )),
-        "TIMESTAMP" => VmValue::String(arcstr::ArcStr::from(
+        ),
+        "TIMESTAMP" => VmValue::string(
             row.try_get::<time::PrimitiveDateTime, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
-        )),
-        "TIMESTAMPTZ" => VmValue::String(arcstr::ArcStr::from(
+        ),
+        "TIMESTAMPTZ" => VmValue::string(
             row.try_get::<time::OffsetDateTime, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
-        )),
+        ),
         // Postgres array types. sqlx exposes these as `<ELEMENT>[]`. Common
         // element types map directly; anything else (e.g. user-defined
         // enum arrays) falls back to text below.
@@ -1537,17 +1526,11 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         "INT8[]" => decode_array::<i64>(row, index, VmValue::Int)?,
         "FLOAT4[]" => decode_array::<f32>(row, index, |v| VmValue::Float(f64::from(v)))?,
         "FLOAT8[]" => decode_array::<f64>(row, index, VmValue::Float)?,
-        "TEXT[]" | "VARCHAR[]" => {
-            decode_array::<String>(row, index, |v| VmValue::String(arcstr::ArcStr::from(v)))?
-        }
-        "UUID[]" => decode_array::<uuid::Uuid>(row, index, |v| {
-            VmValue::String(arcstr::ArcStr::from(v.to_string()))
-        })?,
+        "TEXT[]" | "VARCHAR[]" => decode_array::<String>(row, index, VmValue::string)?,
+        "UUID[]" => decode_array::<uuid::Uuid>(row, index, |v| VmValue::string(v.to_string()))?,
         "JSON[]" | "JSONB[]" => {
             let values: Vec<serde_json::Value> = row.try_get(index).map_err(decode_error)?;
-            VmValue::List(std::sync::Arc::new(
-                values.iter().map(crate::stdlib::json_to_vm_value).collect(),
-            ))
+            VmValue::list(values.iter().map(crate::stdlib::json_to_vm_value).collect())
         }
         "INT4RANGE" => range_value(
             row.try_get::<sqlx_postgres::types::PgRange<i32>, _>(index)
@@ -1562,22 +1545,22 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         "NUMRANGE" => range_value(
             row.try_get::<sqlx_postgres::types::PgRange<rust_decimal::Decimal>, _>(index)
                 .map_err(decode_error)?,
-            |v| VmValue::String(arcstr::ArcStr::from(v.to_string())),
+            |v| VmValue::string(v.to_string()),
         ),
         "DATERANGE" => range_value(
             row.try_get::<sqlx_postgres::types::PgRange<time::Date>, _>(index)
                 .map_err(decode_error)?,
-            |v| VmValue::String(arcstr::ArcStr::from(v.to_string())),
+            |v| VmValue::string(v.to_string()),
         ),
         "TSRANGE" => range_value(
             row.try_get::<sqlx_postgres::types::PgRange<time::PrimitiveDateTime>, _>(index)
                 .map_err(decode_error)?,
-            |v| VmValue::String(arcstr::ArcStr::from(v.to_string())),
+            |v| VmValue::string(v.to_string()),
         ),
         "TSTZRANGE" => range_value(
             row.try_get::<sqlx_postgres::types::PgRange<time::OffsetDateTime>, _>(index)
                 .map_err(decode_error)?,
-            |v| VmValue::String(arcstr::ArcStr::from(v.to_string())),
+            |v| VmValue::string(v.to_string()),
         ),
         // HSTORE decodes as a Harn dict<string, string|nil>. sqlx surfaces
         // it as `BTreeMap<String, Option<String>>` already.
@@ -1587,9 +1570,7 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
             for (key, value) in map.0 {
                 dict.insert(
                     crate::value::intern_key(&key),
-                    value
-                        .map(|v| VmValue::String(arcstr::ArcStr::from(v)))
-                        .unwrap_or(VmValue::Nil),
+                    value.map(VmValue::string).unwrap_or(VmValue::Nil),
                 );
             }
             VmValue::dict(dict)
@@ -1648,13 +1629,11 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
                 ("radius", VmValue::Float(circle.radius)),
             ])
         }
-        _ => VmValue::String(arcstr::ArcStr::from(
-            row.try_get::<String, _>(index).map_err(|error| {
-                runtime_error(format!(
-                    "pg_query: unsupported column type {type_name}: {error}"
-                ))
-            })?,
-        )),
+        _ => VmValue::string(row.try_get::<String, _>(index).map_err(|error| {
+            runtime_error(format!(
+                "pg_query: unsupported column type {type_name}: {error}"
+            ))
+        })?),
     };
     Ok(value)
 }
@@ -1673,9 +1652,7 @@ where
         + 'static,
 {
     let values: Vec<T> = row.try_get(index).map_err(decode_error)?;
-    Ok(VmValue::List(std::sync::Arc::new(
-        values.into_iter().map(map).collect(),
-    )))
+    Ok(VmValue::list(values.into_iter().map(map).collect()))
 }
 
 fn range_value<T>(range: sqlx_postgres::types::PgRange<T>, map: impl Fn(T) -> VmValue) -> VmValue {
@@ -1698,12 +1675,12 @@ fn range_bound_value<T>(bound: Bound<T>, map: &impl Fn(T) -> VmValue) -> (VmValu
 }
 
 fn points_value(points: Vec<sqlx_postgres::types::PgPoint>) -> VmValue {
-    VmValue::List(Arc::new(
+    VmValue::list(
         points
             .into_iter()
             .map(|point| point_value(point.x, point.y))
             .collect(),
-    ))
+    )
 }
 
 fn point_value(x: f64, y: f64) -> VmValue {
@@ -1714,8 +1691,7 @@ fn dict_value<const N: usize>(pairs: [(&'static str, VmValue); N]) -> VmValue {
     VmValue::dict(
         pairs
             .into_iter()
-            .map(|(key, value)| (crate::value::intern_key(key), value))
-            .collect::<crate::value::DictMap>(),
+            .map(|(key, value)| (crate::value::intern_key(key), value)),
     )
 }
 
@@ -1860,9 +1836,7 @@ async fn secret_url(ctx: &crate::vm::AsyncBuiltinCtx, secret_id: &str) -> Result
     let value = child_vm
         .call_named_builtin(
             "secret_get",
-            vec![VmValue::String(arcstr::ArcStr::from(
-                secret_id.trim().to_string(),
-            ))],
+            vec![VmValue::string(secret_id.trim().to_string())],
         )
         .await?;
     ctx.forward_output(&child_vm.take_output());

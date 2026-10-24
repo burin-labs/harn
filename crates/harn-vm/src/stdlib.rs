@@ -37,6 +37,7 @@ pub(crate) mod compaction;
 #[cfg(feature = "compression")]
 mod compression;
 mod concurrency;
+mod config;
 mod connectors;
 mod cookies;
 mod cron;
@@ -49,6 +50,8 @@ pub(crate) use datetime::date_dict_from_millis;
 mod document;
 mod durable_step;
 mod event_log;
+#[cfg(feature = "content")]
+mod markup;
 pub use event_log::mint_hypothesis_native_attestation;
 mod external_agent;
 pub(crate) mod files;
@@ -161,6 +164,8 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     diff::register_diff_builtins(vm);
     #[cfg(feature = "content")]
     document::register_document_builtins(vm);
+    #[cfg(feature = "content")]
+    markup::register_markdown_builtins(vm);
     calendar::register_calendar_builtins(vm);
     cron::register_cron_builtins(vm);
     regex::register_regex_builtins(vm);
@@ -171,6 +176,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     runtime_scope::register_runtime_scope_builtins(vm);
     crypto::register_crypto_builtins(vm);
     csv::register_csv_builtins(vm);
+    config::register_config_builtins(vm);
     junit::register_junit_builtins(vm);
     multipart::register_multipart_builtins(vm);
     url_parse::register_url_builtins(vm);

@@ -5,6 +5,7 @@
   "description": "Change a function's parameter list and rewrite every call site across the workspace in one all-or-nothing edit. `params` is the complete new list in order: an entry whose `name` (or `from`) matches a current parameter keeps that parameter, an entry that matches none adds a parameter, and a current parameter no entry keeps is removed. The receiver (`self`, `cls`) is implicit and never listed. Call sites keep their argument text: positional arguments are remapped by position, Python keyword arguments by name, and a new parameter's `call_value` is written at every call. The function body is not rewritten except to rename the uses of a renamed parameter; adapting it to the new parameters is the caller's follow-up.",
   "type": "object",
   "properties": {
+    "proof": { "type": "boolean", "default": false, "description": "Include bounded edit excerpts and per-file syntax evidence. Does not run a project check." },
     "symbol_ref": {
       "type": "object",
       "description": "The function to change. `name` and `path` (the defining file) are required; `line` (1-based) picks one declaration when several share the name; `kind` defaults to `Function`.",

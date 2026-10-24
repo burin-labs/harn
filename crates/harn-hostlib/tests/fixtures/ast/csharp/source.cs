@@ -21,4 +21,13 @@ namespace Fixture
         Green,
         Blue
     }
+
+    public record TagResponse(Guid Id, string Name)
+    {
+        public TagResponse(Guid id) : this(id, "") { }
+
+        public string Label() => Name.ToUpper();
+    }
+
+    public record struct Point(int X, int Y);
 }

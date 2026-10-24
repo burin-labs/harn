@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/check_member_insertion.request.json",
+  "title": "ast.check_member_insertion request",
+  "description": "Check one inserted Java method against the direct methods of its enclosing type. Receives the complete proposed source before the host writes it. Lines are 1-based and inclusive.",
+  "type": "object",
+  "properties": {
+    "content": {"type": "string"},
+    "path": {"type": "string"},
+    "language": {"type": "string"},
+    "max_bytes": {"type": "integer", "minimum": 0},
+    "name": {"type": "string", "minLength": 1},
+    "container_line": {"type": "integer", "minimum": 1},
+    "start_line": {"type": "integer", "minimum": 1},
+    "end_line": {"type": "integer", "minimum": 1}
+  },
+  "required": ["name", "container_line", "start_line", "end_line"],
+  "anyOf": [{"required": ["content"]}, {"required": ["path"]}],
+  "additionalProperties": false
+}

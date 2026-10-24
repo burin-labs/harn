@@ -38,13 +38,10 @@
 //! 6. Splice every file in memory, re-parse it, and write only after every
 //!    file passed.
 
+use harn_vm::VmValue;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::path::Path;
-#[cfg(test)]
-use std::sync::Arc;
-
-use harn_vm::VmValue;
 use tree_sitter::Node;
 
 use crate::ast::{api as ast_api, Language, TEXT_PATCH_FALLBACK};
@@ -87,6 +84,7 @@ struct Request {
     kind: Option<NodeKind>,
     params: Vec<ParamSpec>,
     dry_run: bool,
+    proof: bool,
     session_id: Option<String>,
 }
 
@@ -165,6 +163,7 @@ fn parse_request(args: &[VmValue]) -> Result<Request, HostlibError> {
         kind,
         params,
         dry_run: optional_bool(BUILTIN, dict, "dry_run", false)?,
+        proof: optional_bool(BUILTIN, dict, "proof", false)?,
         session_id: optional_string(BUILTIN, dict, "session_id")?,
     })
 }
@@ -345,7 +344,8 @@ fn plan(
                 "ambiguous_symbol",
                 "several functions match; pass `symbol_ref.line` to pick one",
             );
-            refusal.candidates = candidates;
+            refusal.candidates =
+                super::refactor_core::candidate_locations(&state.symbols, &candidates);
             return Ok(Err(refusal));
         }
     };
@@ -1279,6 +1279,8 @@ fn finish(
         "applied",
         EditEnvelope {
             applied: !request.dry_run && failed.is_empty(),
+            proof: (request.proof && failed.is_empty())
+                .then(|| super::refactor_core::edit_proof(&planned.plans, &failed).value()),
             dry_run: request.dry_run,
             touched_files: planned.plans.iter().map(file_plan_value).collect(),
             failed_paths: failed_paths_value(&failed),

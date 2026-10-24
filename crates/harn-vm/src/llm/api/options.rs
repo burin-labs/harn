@@ -688,8 +688,9 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             done_sentinel: opts.done_sentinel.clone(),
             done_sentinel_form: opts.done_sentinel_form.clone(),
         };
-        strip_harn_owned_message_metadata(&mut payload.messages);
+        // Defang reads the durable `_harn` facts, so it runs before they are stripped.
         super::tool_result_provenance::defang_tool_result_directives(&mut payload.messages);
+        strip_harn_owned_message_metadata(&mut payload.messages);
         if opts.system_prompt_root == crate::llm::prompt::PromptRoot::Replacement {
             // A replacement is the entire system channel. Drop every
             // system/developer conversation contributor before route-specific
@@ -792,7 +793,7 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         },
         output_schema: Some(serde_json::json!({"type": "object"})),
         output_validation: Some("error".to_string()),
-        tools: Some(VmValue::String(arcstr::ArcStr::from("vm-local-tools"))),
+        tools: Some(VmValue::string("vm-local-tools")),
         native_tools: Some(vec![
             serde_json::json!({"type": "function", "function": {"name": "tool"}}),
         ]),

@@ -175,7 +175,13 @@ fn semantic_kind(message: &VmValue) -> crate::llm::message_lineage::MessageSeman
     if crate::llm::helpers::has_directive_commit_metadata(message) {
         return MessageSemanticKind::ContextDirective;
     }
+    use harn_orchestration::tool_messages::{is_tool_output_message, is_tool_result_role};
     match message.str_field("role") {
+        Some(role) if is_tool_result_role(role) => MessageSemanticKind::ToolResult,
+        // Text-channel results are `user` messages carrying tool output.
+        Some("user") if is_tool_output_message(&crate::llm::helpers::vm_value_to_json(message)) => {
+            MessageSemanticKind::ToolResult
+        }
         Some("user") => MessageSemanticKind::User,
         Some("assistant")
             if message
@@ -185,7 +191,6 @@ fn semantic_kind(message: &VmValue) -> crate::llm::message_lineage::MessageSeman
             MessageSemanticKind::AssistantToolCall
         }
         Some("assistant") => MessageSemanticKind::Assistant,
-        Some("tool" | "tool_result") => MessageSemanticKind::ToolResult,
         Some("system" | "developer") => MessageSemanticKind::Instruction,
         _ => MessageSemanticKind::Unknown,
     }
@@ -276,4 +281,40 @@ fn durable_messages(session_id: &str) -> Vec<VmValue> {
 
 pub(super) fn register_visible_message_primitives(vm: &mut Vm) {
     harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::semantic_kind;
+    use crate::llm::message_lineage::MessageSemanticKind;
+
+    fn kind(value: serde_json::Value) -> MessageSemanticKind {
+        semantic_kind(&crate::schema::json_to_vm_value(&value))
+    }
+
+    #[test]
+    fn text_channel_results_are_tool_results_but_a_person_is_a_user() {
+        let framed = "[result of read]\nok\n[end of read result]\n";
+        assert_eq!(
+            kind(serde_json::json!({
+                "role": "user",
+                "content": framed,
+                "_harn": {"kind": "tool_result"},
+            })),
+            MessageSemanticKind::ToolResult
+        );
+        // The frame alone is a person's text, not provenance.
+        assert_eq!(
+            kind(serde_json::json!({"role": "user", "content": framed})),
+            MessageSemanticKind::User
+        );
+        assert_eq!(
+            kind(serde_json::json!({"role": "tool_result", "content": "ok"})),
+            MessageSemanticKind::ToolResult
+        );
+        assert_eq!(
+            kind(serde_json::json!({"role": "user", "content": "please read the file"})),
+            MessageSemanticKind::User
+        );
+    }
 }

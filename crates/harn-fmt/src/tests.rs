@@ -112,31 +112,76 @@ fn test_format_binary_ops() {
     assert!(result.contains("a * b"));
 }
 
-#[test]
-fn test_format_ternary_list_branch() {
-    let source = r#"pipeline default() {
+#[rstest::rstest]
+#[case::test_format_ternary_list_branch(r#"pipeline default() {
   let args = repo ? ["--repo", repo] : []
   let first = xs?.[0]
   let legacy_first = xs?[0]
-}"#;
-    let result = format_source(source).unwrap();
-    assert!(result.contains(r#"repo ? ["--repo", repo] : []"#));
-    assert!(result.contains("xs?.[0]"));
-    assert!(result.contains("legacy_first = xs?.[0]"));
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_format_pipe_placeholder_patterns() {
-    let source = r#"pipeline default(task) {
+}"#, &[r#"repo ? ["--repo", repo] : []"#, "xs?.[0]", "legacy_first = xs?.[0]"])]
+#[case::test_format_pipe_placeholder_patterns(r#"pipeline default(task) {
   let words = "hello world" |> split(_, " ")
   let result = [3, 1, 2]
     |> _.sorted()
     |> len(_)
-}"#;
+}"#, &[r#""hello world" |> split(_, " ")"#, "let result = [3, 1, 2]\n    |> _.sorted()\n    |> len(_)"])]
+#[case::test_wraps_long_fn_decl_params(r"pipeline default(task) {
+  fn process(first_really_long_param_name: string, second_really_long_param_name: int, third_really_long_param_name: bool) {
+    log(1)
+  }
+}", &["fn process(\n"])]
+#[case::test_wraps_long_selective_import(r#"import { first_really_long_name, second_really_long_name, third_really_long_name, fourth_really_long_name } from "some/module"
+pipeline default(task) { log(1) }"#, &["  first_really_long_name,\n", "  fourth_really_long_name,\n"])]
+#[case::test_exponentiation_formats_with_natural_right_associativity(r"pipeline default(task) {
+  let x = a ** b ** c
+}", &["a ** b ** c"])]
+#[case::test_exponentiation_preserves_left_grouping_when_forced(r"pipeline default(task) {
+  let x = (a ** b) ** c
+}", &["(a ** b) ** c"])]
+#[case::test_exponentiation_binds_tighter_than_multiplication(r"pipeline default(task) {
+  let x = a * b ** c
+}", &["a * b ** c"])]
+#[case::test_parens_binary_op_method_call(r#"pipeline default(task) {
+  let x = (a ?? b).split("\n")
+}"#, &[r#"(a ?? b).split("\n")"#])]
+#[case::test_parens_binary_op_property_access(r"pipeline default(task) {
+  let x = (a + b).length
+}", &["(a + b).length"])]
+#[case::test_parens_binary_op_subscript(r"pipeline default(task) {
+  let x = (a ?? b)[0]
+}", &["(a ?? b)[0]"])]
+#[case::test_parens_unary_op_method_call(r"pipeline default(task) {
+  let x = (-a).abs()
+}", &["(-a).abs()"])]
+#[case::test_parens_unary_op_property_access(r"pipeline default(task) {
+  let x = (!flag).description
+}", &["(!flag).description"])]
+#[case::test_parens_ternary_method_call(r"pipeline default(task) {
+  let x = (a ? b : c).method()
+}", &["(a ? b : c).method()"])]
+#[case::test_parens_unary_binary_operand(r"pipeline default(task) {
+  let x = !(a + b)
+}", &["!(a + b)"])]
+#[case::test_parens_chained_postfix_on_binary(r"pipeline default(task) {
+  let x = (a + b)[0].method()
+}", &["(a + b)[0].method()"])]
+#[case::test_parens_binary_op_optional_method(r"pipeline default(task) {
+  let x = (a ?? b)?.method()
+}", &["(a ?? b)?.method()"])]
+#[case::test_parens_binary_op_optional_property(r"pipeline default(task) {
+  let x = (a ?? b)?.length
+}", &["(a ?? b)?.length"])]
+#[case::test_short_fn_params_stay_inline(r"pipeline default(task) {
+  fn add(a: int, b: int) -> int {
+    return a + b
+  }
+}", &["fn add(a: int, b: int) -> int {"])]
+#[case::test_short_import_stays_inline(r#"import { foo, bar, baz } from "module"
+pipeline default(task) { log(1) }"#, &["import { bar, baz, foo } from \"module\""])]
+fn formatting_preserves_text(#[case] source: &str, #[case] expected: &[&str]) {
     let result = format_source(source).unwrap();
-    assert!(result.contains(r#""hello world" |> split(_, " ")"#));
-    assert!(result.contains("let result = [3, 1, 2]\n    |> _.sorted()\n    |> len(_)"));
+    for text in expected {
+        assert!(result.contains(text), "missing {text:?} in {result:?}");
+    }
     assert_roundtrip(source);
 }
 
@@ -416,37 +461,6 @@ fn test_wraps_long_enum_constructor_arguments() {
 }
 
 #[test]
-fn test_wraps_long_fn_decl_params() {
-    let source = r"pipeline default(task) {
-  fn process(first_really_long_param_name: string, second_really_long_param_name: int, third_really_long_param_name: bool) {
-    log(1)
-  }
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("fn process(\n"),
-        "Expected fn decl params to wrap, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_wraps_long_selective_import() {
-    let source = r#"import { first_really_long_name, second_really_long_name, third_really_long_name, fourth_really_long_name } from "some/module"
-pipeline default(task) { log(1) }"#;
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("  first_really_long_name,\n"),
-        "Expected selective import names to wrap, got:\n{result}"
-    );
-    assert!(
-        result.contains("  fourth_really_long_name,\n"),
-        "Expected trailing comma on last import name, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
 fn test_adds_parens_for_mixed_and_or() {
     // a && b || c — the AST is BinaryOp("||", BinaryOp("&&", a, b), c)
     // Formatter should add parens for clarity: (a && b) || c
@@ -615,45 +629,6 @@ fn test_division_right_associativity_preserved() {
     assert!(
         result.contains("a / (b / c)"),
         "Expected parens for right-child division, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_exponentiation_formats_with_natural_right_associativity() {
-    let source = r"pipeline default(task) {
-  let x = a ** b ** c
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("a ** b ** c"),
-        "Expected natural right-associative exponentiation, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_exponentiation_preserves_left_grouping_when_forced() {
-    let source = r"pipeline default(task) {
-  let x = (a ** b) ** c
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("(a ** b) ** c"),
-        "Expected parens preserved for left-grouped exponentiation, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_exponentiation_binds_tighter_than_multiplication() {
-    let source = r"pipeline default(task) {
-  let x = a * b ** c
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("a * b ** c"),
-        "Expected exponentiation to bind tighter than multiplication, got:\n{result}"
     );
     assert_roundtrip(source);
 }
@@ -989,97 +964,6 @@ pipeline default() {
 // --- Postfix and unary precedence parens ---
 
 #[test]
-fn test_parens_binary_op_method_call() {
-    let source = r#"pipeline default(task) {
-  let x = (a ?? b).split("\n")
-}"#;
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains(r#"(a ?? b).split("\n")"#),
-        "Expected parens preserved for ?? as method call object, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_parens_binary_op_property_access() {
-    let source = r"pipeline default(task) {
-  let x = (a + b).length
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("(a + b).length"),
-        "Expected parens preserved for + as property access object, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_parens_binary_op_subscript() {
-    let source = r"pipeline default(task) {
-  let x = (a ?? b)[0]
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("(a ?? b)[0]"),
-        "Expected parens preserved for ?? as subscript object, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_parens_unary_op_method_call() {
-    let source = r"pipeline default(task) {
-  let x = (-a).abs()
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("(-a).abs()"),
-        "Expected parens for unary-op as method call object, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_parens_unary_op_property_access() {
-    let source = r"pipeline default(task) {
-  let x = (!flag).description
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("(!flag).description"),
-        "Expected parens for unary-op as property access object, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_parens_ternary_method_call() {
-    let source = r"pipeline default(task) {
-  let x = (a ? b : c).method()
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("(a ? b : c).method()"),
-        "Expected parens for ternary as method call object, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_parens_unary_binary_operand() {
-    let source = r"pipeline default(task) {
-  let x = !(a + b)
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("!(a + b)"),
-        "Expected parens for binary op as unary operand, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
 fn test_parens_chained_unary_method_on_binary() {
     // !(a ?? b).trim() — the unary wraps a method call whose object is a binary op
     let source = r"pipeline default(task) {
@@ -1089,45 +973,6 @@ fn test_parens_chained_unary_method_on_binary() {
     assert!(
         result.contains("!(a ?? b).trim()"),
         "Expected parens preserved in chained unary+method+binary, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_parens_chained_postfix_on_binary() {
-    let source = r"pipeline default(task) {
-  let x = (a + b)[0].method()
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("(a + b)[0].method()"),
-        "Expected parens for chained postfix on binary op, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_parens_binary_op_optional_method() {
-    let source = r"pipeline default(task) {
-  let x = (a ?? b)?.method()
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("(a ?? b)?.method()"),
-        "Expected parens for ?? as optional method call object, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_parens_binary_op_optional_property() {
-    let source = r"pipeline default(task) {
-  let x = (a ?? b)?.length
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("(a ?? b)?.length"),
-        "Expected parens for ?? as optional property access object, got:\n{result}"
     );
     assert_roundtrip(source);
 }
@@ -1157,33 +1002,6 @@ fn test_no_unnecessary_parens_on_simple_method_call() {
 }
 
 // --- Short lines stay inline ---
-
-#[test]
-fn test_short_fn_params_stay_inline() {
-    let source = r"pipeline default(task) {
-  fn add(a: int, b: int) -> int {
-    return a + b
-  }
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("fn add(a: int, b: int) -> int {"),
-        "Short params should stay inline, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_short_import_stays_inline() {
-    let source = r#"import { foo, bar, baz } from "module"
-pipeline default(task) { log(1) }"#;
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("import { bar, baz, foo } from \"module\""),
-        "Short import should stay inline, got:\n{result}"
-    );
-    assert_roundtrip(source);
-}
 
 #[test]
 fn test_import_block_sorts_std_first_then_alphabetically() {

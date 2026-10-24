@@ -1,14 +1,15 @@
 use super::output::*;
 use super::*;
+use crate::value::VmDictExt as _;
 
 #[test]
 fn parses_explicit_json_schema_output() {
     let mut spec = crate::value::DictMap::new();
-    spec.insert(
-        crate::value::intern_key("schema"),
-        VmValue::dict([(crate::value::intern_key("type"), VmValue::string("object"))]),
+    spec.put(
+        "schema",
+        VmValue::dict([("type", VmValue::string("object"))]),
     );
-    spec.insert(crate::value::intern_key("strict"), VmValue::Bool(false));
+    spec.put_bool("strict", false);
     let options = crate::value::DictMap::from_iter([(
         crate::value::intern_key("output"),
         VmValue::dict(spec),

@@ -5,6 +5,7 @@
 //! are the one copy of that plumbing; modules import what they use with
 //! `use super::support::*;` (or a narrower list).
 
+use harn_vm::value::VmDictExt as _;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -41,11 +42,11 @@ pub fn ast_registry() -> BuiltinRegistry {
 // -------- request builders --------
 
 pub fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
+    VmValue::string(s)
 }
 
 pub fn vlist_str(values: &[&str]) -> VmValue {
-    VmValue::List(Arc::new(values.iter().map(|s| vm_string(s)).collect()))
+    VmValue::list(values.iter().map(|s| vm_string(s)).collect())
 }
 
 /// An empty request map, for tests that build requests key by key.
@@ -252,9 +253,9 @@ pub fn snapshot_binding_fixture() -> DictMap {
     files.insert("src/lib.rs".into(), vm_string("sha256:abc123"));
 
     let mut binding = dict_map();
-    binding.insert("schema_version".into(), VmValue::Int(1));
+    binding.put_int("schema_version", 1);
     binding.insert("case_fingerprint".into(), vm_string("case-123"));
-    binding.insert("files".into(), VmValue::dict(files));
+    binding.put("files", VmValue::dict(files));
     binding
 }
 

@@ -1,0 +1,66 @@
+import { agent_loop } from "std/agent/loop"
+import { judge_payload } from "std/llm/safe"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * judge_payload names the tools a session used on both the native and the
+ * text channel, whatever role the durable tool result carries.
+ */
+fn tools() {
+  return tool_define(
+    tool_registry(),
+    "lookup",
+    "Return a short answer.",
+    {parameters: {}, handler: { _args -> "answer" }},
+  )
+}
+
+fn tools_used(agent: HarnessAgent, session: string) -> string {
+  return judge_payload(agent, {session_id: session}, nil, "done", "done", 1).all_tools_used
+}
+
+pipeline main(harness: Harness) {
+  const native = "judge-payload-native-" + harness.random.uuid()
+  with_llm_script(
+    harness.llm,
+    [{tool_calls: [{id: "l1", name: "lookup", arguments: {}}]}, llm_text("done")],
+    { ->
+      agent_loop(
+        harness,
+        "call lookup",
+        nil,
+        {
+          provider: "mock",
+          tools: tools(),
+          tool_format: "native",
+          max_iterations: 2,
+          session_id: native,
+        },
+      )
+      harness.stdio.println("native tools used: " + tools_used(harness.agent, native))
+      harness.agent.close(native)
+    },
+  )
+  const text = "judge-payload-text-" + harness.random.uuid()
+  with_llm_script(
+    harness.llm,
+    [llm_text("```tool\n{\"name\":\"lookup\",\"args\":{}}\n```"), llm_text("done ##DONE##")],
+    { ->
+      agent_loop(
+        harness,
+        "call lookup",
+        nil,
+        {
+          provider: "mock",
+          tools: tools(),
+          tool_format: "json",
+          loop_until_done: true,
+          max_iterations: 2,
+          session_id: text,
+        },
+      )
+      harness.stdio.println("text tools used: " + tools_used(harness.agent, text))
+      harness.agent.close(text)
+    },
+  )
+}

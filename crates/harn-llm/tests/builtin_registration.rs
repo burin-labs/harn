@@ -11,7 +11,6 @@ fn registration_probe(args: &[VmValue], _output: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "core_async_registration_probe() -> nil",
     kind = "async"
 )]

@@ -17,6 +17,9 @@ pub(crate) struct BenchArgs {
     /// Number of benchmark iterations to run.
     #[arg(short = 'n', long, default_value_t = 10)]
     pub iterations: usize,
+    /// Write iteration samples and timing statistics as JSON without enabling profiling.
+    #[arg(long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
     #[command(flatten)]
     pub profile: ProfileArgs,
 }

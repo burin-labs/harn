@@ -826,55 +826,51 @@ mod tests {
     #[tokio::test]
     async fn cancelling_swapped_out_llm_context_guard_does_not_panic() {
         crate::stdlib::template::llm_context::reset_llm_render_stack();
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let handle = spawn_pending_llm_context_task("anthropic", "claude-opus-4-7").await;
-                assert!(current_llm_render_context().is_none());
-                handle.abort();
-                let error = handle
-                    .await
-                    .expect_err("aborted child should report cancellation");
-                assert!(error.is_cancelled(), "unexpected join error: {error}");
-            })
-            .await;
+        harn_clock::test_support::with_local_tasks(async {
+            let handle = spawn_pending_llm_context_task("anthropic", "claude-opus-4-7").await;
+            assert!(current_llm_render_context().is_none());
+            handle.abort();
+            let error = handle
+                .await
+                .expect_err("aborted child should report cancellation");
+            assert!(error.is_cancelled(), "unexpected join error: {error}");
+        })
+        .await;
         assert!(current_llm_render_context().is_none());
     }
 
     #[tokio::test]
     async fn cancelling_child_llm_context_guard_preserves_parent_context() {
         crate::stdlib::template::llm_context::reset_llm_render_stack();
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let parent =
-                    LlmRenderContextGuard::enter(LlmRenderContext::resolve("openai", "gpt-5.4"));
-                assert_eq!(
-                    current_llm_render_context().map(|ctx| ctx.provider),
-                    Some("openai".to_string())
-                );
+        harn_clock::test_support::with_local_tasks(async {
+            let parent =
+                LlmRenderContextGuard::enter(LlmRenderContext::resolve("openai", "gpt-5.4"));
+            assert_eq!(
+                current_llm_render_context().map(|ctx| ctx.provider),
+                Some("openai".to_string())
+            );
 
-                let handle = spawn_pending_llm_context_task("anthropic", "claude-opus-4-7").await;
-                assert_eq!(
-                    current_llm_render_context().map(|ctx| ctx.provider),
-                    Some("openai".to_string()),
-                    "child poll should restore the parent LLM render context"
-                );
-                handle.abort();
-                let error = handle
-                    .await
-                    .expect_err("aborted child should report cancellation");
-                assert!(error.is_cancelled(), "unexpected join error: {error}");
-                assert_eq!(
-                    current_llm_render_context().map(|ctx| ctx.provider),
-                    Some("openai".to_string()),
-                    "cancelled child guard must not pop the parent LLM render context"
-                );
+            let handle = spawn_pending_llm_context_task("anthropic", "claude-opus-4-7").await;
+            assert_eq!(
+                current_llm_render_context().map(|ctx| ctx.provider),
+                Some("openai".to_string()),
+                "child poll should restore the parent LLM render context"
+            );
+            handle.abort();
+            let error = handle
+                .await
+                .expect_err("aborted child should report cancellation");
+            assert!(error.is_cancelled(), "unexpected join error: {error}");
+            assert_eq!(
+                current_llm_render_context().map(|ctx| ctx.provider),
+                Some("openai".to_string()),
+                "cancelled child guard must not pop the parent LLM render context"
+            );
 
-                drop(parent);
-                assert!(current_llm_render_context().is_none());
-            })
-            .await;
+            drop(parent);
+            assert!(current_llm_render_context().is_none());
+        })
+        .await;
     }
 
     #[tokio::test]
@@ -892,30 +888,28 @@ mod tests {
             1
         ));
 
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let scope = AmbientExecutionScope::capture_for_inline_subtask();
-                let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
-                let handle = tokio::task::spawn_local(scope_ambient(scope, async move {
-                    let _guard = crate::step_runtime::suspend_active_context();
-                    let _ = entered_tx.send(());
-                    pending::<()>().await;
-                }));
-                entered_rx.await.expect("child suspended active context");
-                assert_eq!(
-                    crate::step_runtime::current_persona_name().as_deref(),
-                    Some("parent")
-                );
+        harn_clock::test_support::with_local_tasks(async {
+            let scope = AmbientExecutionScope::capture_for_inline_subtask();
+            let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+            let handle = tokio::task::spawn_local(scope_ambient(scope, async move {
+                let _guard = crate::step_runtime::suspend_active_context();
+                let _ = entered_tx.send(());
+                pending::<()>().await;
+            }));
+            entered_rx.await.expect("child suspended active context");
+            assert_eq!(
+                crate::step_runtime::current_persona_name().as_deref(),
+                Some("parent")
+            );
 
-                handle.abort();
-                assert!(handle.await.unwrap_err().is_cancelled());
-                assert_eq!(
-                    crate::step_runtime::current_persona_name().as_deref(),
-                    Some("parent")
-                );
-            })
-            .await;
+            handle.abort();
+            assert!(handle.await.unwrap_err().is_cancelled());
+            assert_eq!(
+                crate::step_runtime::current_persona_name().as_deref(),
+                Some("parent")
+            );
+        })
+        .await;
         crate::step_runtime::reset_thread_local_state();
     }
 
@@ -926,31 +920,25 @@ mod tests {
     /// top-of-stack (the fan-out cross-wiring bug).
     #[tokio::test]
     async fn scoped_tasks_do_not_cross_wire_execution_policy() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let alpha = tokio::task::spawn_local(scope_ambient(
-                    AmbientExecutionScope::default(),
-                    async {
-                        push_execution_policy(policy_named("alpha"));
-                        tokio::task::yield_now().await;
-                        tokio::task::yield_now().await;
-                        current_execution_policy().map(|p| p.tools)
-                    },
-                ));
-                let beta = tokio::task::spawn_local(scope_ambient(
-                    AmbientExecutionScope::default(),
-                    async {
-                        push_execution_policy(policy_named("beta"));
-                        tokio::task::yield_now().await;
-                        tokio::task::yield_now().await;
-                        current_execution_policy().map(|p| p.tools)
-                    },
-                ));
-                assert_eq!(alpha.await.unwrap(), Some(vec!["alpha".to_string()]));
-                assert_eq!(beta.await.unwrap(), Some(vec!["beta".to_string()]));
-            })
-            .await;
+        harn_clock::test_support::with_local_tasks(async {
+            let alpha =
+                tokio::task::spawn_local(scope_ambient(AmbientExecutionScope::default(), async {
+                    push_execution_policy(policy_named("alpha"));
+                    tokio::task::yield_now().await;
+                    tokio::task::yield_now().await;
+                    current_execution_policy().map(|p| p.tools)
+                }));
+            let beta =
+                tokio::task::spawn_local(scope_ambient(AmbientExecutionScope::default(), async {
+                    push_execution_policy(policy_named("beta"));
+                    tokio::task::yield_now().await;
+                    tokio::task::yield_now().await;
+                    current_execution_policy().map(|p| p.tools)
+                }));
+            assert_eq!(alpha.await.unwrap(), Some(vec!["alpha".to_string()]));
+            assert_eq!(beta.await.unwrap(), Some(vec!["beta".to_string()]));
+        })
+        .await;
         // The outer thread is left clean — neither task's policy leaked out.
         assert!(current_execution_policy().is_none());
     }
@@ -995,45 +983,43 @@ mod tests {
         }
 
         let _parent_guard = crate::agent_sessions::enter_current_session(parent_session.clone());
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let alpha_scope = AmbientExecutionScope::capture_inherited();
-                let beta_scope = AmbientExecutionScope::capture_inherited();
-                let alpha_id = alpha_session.clone();
-                let beta_id = beta_session.clone();
+        harn_clock::test_support::with_local_tasks(async {
+            let alpha_scope = AmbientExecutionScope::capture_inherited();
+            let beta_scope = AmbientExecutionScope::capture_inherited();
+            let alpha_id = alpha_session.clone();
+            let beta_id = beta_session.clone();
 
-                let alpha = tokio::task::spawn_local(scope_ambient(alpha_scope, async move {
-                    assert!(
-                        crate::agent_sessions::current_session_id().is_none(),
-                        "child scope must not inherit the parent session"
-                    );
-                    let _guard = crate::agent_sessions::enter_current_session(alpha_id.clone());
-                    tokio::task::yield_now().await;
-                    tokio::task::yield_now().await;
-                    let current = crate::agent_sessions::current_session_id()
-                        .expect("child session survives await");
-                    crate::agent_sessions::record_session_changed_path(&current, "src/alpha.rs");
-                    current
-                }));
-                let beta = tokio::task::spawn_local(scope_ambient(beta_scope, async move {
-                    assert!(
-                        crate::agent_sessions::current_session_id().is_none(),
-                        "child scope must not inherit the parent session"
-                    );
-                    let _guard = crate::agent_sessions::enter_current_session(beta_id.clone());
-                    tokio::task::yield_now().await;
-                    tokio::task::yield_now().await;
-                    let current = crate::agent_sessions::current_session_id()
-                        .expect("child session survives await");
-                    crate::agent_sessions::record_session_changed_path(&current, "src/beta.rs");
-                    current
-                }));
+            let alpha = tokio::task::spawn_local(scope_ambient(alpha_scope, async move {
+                assert!(
+                    crate::agent_sessions::current_session_id().is_none(),
+                    "child scope must not inherit the parent session"
+                );
+                let _guard = crate::agent_sessions::enter_current_session(alpha_id.clone());
+                tokio::task::yield_now().await;
+                tokio::task::yield_now().await;
+                let current = crate::agent_sessions::current_session_id()
+                    .expect("child session survives await");
+                crate::agent_sessions::record_session_changed_path(&current, "src/alpha.rs");
+                current
+            }));
+            let beta = tokio::task::spawn_local(scope_ambient(beta_scope, async move {
+                assert!(
+                    crate::agent_sessions::current_session_id().is_none(),
+                    "child scope must not inherit the parent session"
+                );
+                let _guard = crate::agent_sessions::enter_current_session(beta_id.clone());
+                tokio::task::yield_now().await;
+                tokio::task::yield_now().await;
+                let current = crate::agent_sessions::current_session_id()
+                    .expect("child session survives await");
+                crate::agent_sessions::record_session_changed_path(&current, "src/beta.rs");
+                current
+            }));
 
-                assert_eq!(alpha.await.unwrap(), alpha_session);
-                assert_eq!(beta.await.unwrap(), beta_session);
-            })
-            .await;
+            assert_eq!(alpha.await.unwrap(), alpha_session);
+            assert_eq!(beta.await.unwrap(), beta_session);
+        })
+        .await;
 
         assert_eq!(
             crate::agent_sessions::current_session_id().as_deref(),
@@ -1077,77 +1063,73 @@ mod tests {
         }
 
         let _parent_guard = crate::agent_sessions::enter_current_session(parent_session.clone());
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                // One fan-out worker: opens its own session (never the parent's),
-                // yields, then dispatches an inline subtask exactly like the agent
-                // loop's `parallel settle` tool dispatch.
-                let run_worker = |worker_session: String, path: &'static str| {
-                    let worker_scope = AmbientExecutionScope::capture_inherited();
-                    tokio::task::spawn_local(scope_ambient(worker_scope, async move {
-                        assert!(
-                            crate::agent_sessions::current_session_id().is_none(),
-                            "fan-out worker must not inherit the parent session"
-                        );
-                        let _guard =
-                            crate::agent_sessions::enter_current_session(worker_session.clone());
-                        tokio::task::yield_now().await;
+        harn_clock::test_support::with_local_tasks(async {
+            // One fan-out worker: opens its own session (never the parent's),
+            // yields, then dispatches an inline subtask exactly like the agent
+            // loop's `parallel settle` tool dispatch.
+            let run_worker = |worker_session: String, path: &'static str| {
+                let worker_scope = AmbientExecutionScope::capture_inherited();
+                tokio::task::spawn_local(scope_ambient(worker_scope, async move {
+                    assert!(
+                        crate::agent_sessions::current_session_id().is_none(),
+                        "fan-out worker must not inherit the parent session"
+                    );
+                    let _guard =
+                        crate::agent_sessions::enter_current_session(worker_session.clone());
+                    tokio::task::yield_now().await;
 
-                        // CONTROL: a subtask spawned WITHOUT inline-subtask
-                        // scoping does not see the worker session — this is the
-                        // dropped-write bug, and proves the contention is real.
-                        let control = tokio::task::spawn_local(scope_ambient(
-                            AmbientExecutionScope::capture_inherited(),
-                            async move {
-                                tokio::task::yield_now().await;
-                                tokio::task::yield_now().await;
-                                crate::agent_sessions::current_session_id()
-                            },
-                        ))
-                        .await
-                        .unwrap();
-                        assert!(
-                            control.is_none(),
-                            "control subtask must NOT inherit the worker session"
-                        );
+                    // CONTROL: a subtask spawned WITHOUT inline-subtask
+                    // scoping does not see the worker session — this is the
+                    // dropped-write bug, and proves the contention is real.
+                    let control = tokio::task::spawn_local(scope_ambient(
+                        AmbientExecutionScope::capture_inherited(),
+                        async move {
+                            tokio::task::yield_now().await;
+                            tokio::task::yield_now().await;
+                            crate::agent_sessions::current_session_id()
+                        },
+                    ))
+                    .await
+                    .unwrap();
+                    assert!(
+                        control.is_none(),
+                        "control subtask must NOT inherit the worker session"
+                    );
 
-                        // FIX: the inline-subtask scope carries the worker session,
-                        // so the dispatched tool's write records against it.
-                        let observed = tokio::task::spawn_local(scope_ambient(
-                            AmbientExecutionScope::capture_for_inline_subtask(),
-                            async move {
-                                tokio::task::yield_now().await;
-                                tokio::task::yield_now().await;
-                                let session = crate::agent_sessions::current_session_id();
-                                if let Some(ref session) = session {
-                                    crate::agent_sessions::record_session_changed_path(
-                                        session, path,
-                                    );
-                                }
-                                session
-                            },
-                        ))
-                        .await
-                        .unwrap();
-                        observed
-                    }))
-                };
+                    // FIX: the inline-subtask scope carries the worker session,
+                    // so the dispatched tool's write records against it.
+                    let observed = tokio::task::spawn_local(scope_ambient(
+                        AmbientExecutionScope::capture_for_inline_subtask(),
+                        async move {
+                            tokio::task::yield_now().await;
+                            tokio::task::yield_now().await;
+                            let session = crate::agent_sessions::current_session_id();
+                            if let Some(ref session) = session {
+                                crate::agent_sessions::record_session_changed_path(session, path);
+                            }
+                            session
+                        },
+                    ))
+                    .await
+                    .unwrap();
+                    observed
+                }))
+            };
 
-                let alpha = run_worker(alpha_session.clone(), "src/alpha.rs");
-                let beta = run_worker(beta_session.clone(), "src/beta.rs");
-                assert_eq!(
-                    alpha.await.unwrap().as_deref(),
-                    Some(alpha_session.as_str()),
-                    "alpha's inline subtask must observe alpha's worker session"
-                );
-                assert_eq!(
-                    beta.await.unwrap().as_deref(),
-                    Some(beta_session.as_str()),
-                    "beta's inline subtask must observe beta's worker session"
-                );
-            })
-            .await;
+            let alpha = run_worker(alpha_session.clone(), "src/alpha.rs");
+            let beta = run_worker(beta_session.clone(), "src/beta.rs");
+            assert_eq!(
+                alpha.await.unwrap().as_deref(),
+                Some(alpha_session.as_str()),
+                "alpha's inline subtask must observe alpha's worker session"
+            );
+            assert_eq!(
+                beta.await.unwrap().as_deref(),
+                Some(beta_session.as_str()),
+                "beta's inline subtask must observe beta's worker session"
+            );
+        })
+        .await;
 
         assert_eq!(
             crate::agent_sessions::take_session_changed_paths(&alpha_session),
@@ -1169,17 +1151,15 @@ mod tests {
     /// thread once the scoped future has completed.
     #[tokio::test]
     async fn scope_is_restored_after_completion() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                tokio::task::spawn_local(scope_ambient(AmbientExecutionScope::default(), async {
-                    push_execution_policy(policy_named("gamma"));
-                    tokio::task::yield_now().await;
-                }))
-                .await
-                .unwrap();
-            })
-            .await;
+        harn_clock::test_support::with_local_tasks(async {
+            tokio::task::spawn_local(scope_ambient(AmbientExecutionScope::default(), async {
+                push_execution_policy(policy_named("gamma"));
+                tokio::task::yield_now().await;
+            }))
+            .await
+            .unwrap();
+        })
+        .await;
         assert!(current_execution_policy().is_none());
     }
 
@@ -1222,41 +1202,39 @@ mod tests {
         let parent_bridge = test_host_bridge(100);
         crate::llm::install_current_host_bridge(parent_bridge.clone());
 
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let run_worker = |name: &'static str, start_id: u64| {
-                    let scope = AmbientExecutionScope::capture_inherited();
-                    let expected_parent = parent_bridge.clone();
-                    let worker_bridge = test_host_bridge(start_id);
-                    let expected_worker = worker_bridge.clone();
-                    tokio::task::spawn_local(scope_ambient(scope, async move {
-                        let inherited = crate::llm::current_host_bridge()
-                            .expect("worker inherits parent host bridge");
-                        assert!(
-                            std::sync::Arc::ptr_eq(&inherited, &expected_parent),
-                            "{name} must inherit the parent host bridge before installing its own"
-                        );
+        harn_clock::test_support::with_local_tasks(async {
+            let run_worker = |name: &'static str, start_id: u64| {
+                let scope = AmbientExecutionScope::capture_inherited();
+                let expected_parent = parent_bridge.clone();
+                let worker_bridge = test_host_bridge(start_id);
+                let expected_worker = worker_bridge.clone();
+                tokio::task::spawn_local(scope_ambient(scope, async move {
+                    let inherited = crate::llm::current_host_bridge()
+                        .expect("worker inherits parent host bridge");
+                    assert!(
+                        std::sync::Arc::ptr_eq(&inherited, &expected_parent),
+                        "{name} must inherit the parent host bridge before installing its own"
+                    );
 
-                        crate::llm::install_current_host_bridge(worker_bridge);
-                        tokio::task::yield_now().await;
-                        tokio::task::yield_now().await;
+                    crate::llm::install_current_host_bridge(worker_bridge);
+                    tokio::task::yield_now().await;
+                    tokio::task::yield_now().await;
 
-                        let observed = crate::llm::current_host_bridge()
-                            .expect("worker host bridge survives awaits");
-                        assert!(
-                            std::sync::Arc::ptr_eq(&observed, &expected_worker),
-                            "{name} must keep its own host bridge after sibling interleaving"
-                        );
-                    }))
-                };
+                    let observed = crate::llm::current_host_bridge()
+                        .expect("worker host bridge survives awaits");
+                    assert!(
+                        std::sync::Arc::ptr_eq(&observed, &expected_worker),
+                        "{name} must keep its own host bridge after sibling interleaving"
+                    );
+                }))
+            };
 
-                let alpha = run_worker("alpha", 200);
-                let beta = run_worker("beta", 300);
-                alpha.await.unwrap();
-                beta.await.unwrap();
-            })
-            .await;
+            let alpha = run_worker("alpha", 200);
+            let beta = run_worker("beta", 300);
+            alpha.await.unwrap();
+            beta.await.unwrap();
+        })
+        .await;
 
         let restored =
             crate::llm::current_host_bridge().expect("parent host bridge restored after workers");
@@ -1273,45 +1251,37 @@ mod tests {
     #[tokio::test]
     async fn scoped_tasks_do_not_cross_wire_execution_context() {
         use crate::orchestration::{current_execution_context, set_thread_execution_context};
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let alpha = tokio::task::spawn_local(scope_ambient(
-                    AmbientExecutionScope::default(),
-                    async {
-                        set_thread_execution_context(Some(execution_context_named("alpha")));
-                        tokio::task::yield_now().await;
-                        tokio::task::yield_now().await;
-                        current_execution_context()
-                            .map(|ctx| (ctx.cwd, ctx.env.get("WORKER").cloned()))
-                    },
-                ));
-                let beta = tokio::task::spawn_local(scope_ambient(
-                    AmbientExecutionScope::default(),
-                    async {
-                        set_thread_execution_context(Some(execution_context_named("beta")));
-                        tokio::task::yield_now().await;
-                        tokio::task::yield_now().await;
-                        current_execution_context()
-                            .map(|ctx| (ctx.cwd, ctx.env.get("WORKER").cloned()))
-                    },
-                ));
-                assert_eq!(
-                    alpha.await.unwrap(),
-                    Some((
-                        Some("/worktrees/alpha".to_string()),
-                        Some("alpha".to_string())
-                    ))
-                );
-                assert_eq!(
-                    beta.await.unwrap(),
-                    Some((
-                        Some("/worktrees/beta".to_string()),
-                        Some("beta".to_string())
-                    ))
-                );
-            })
-            .await;
+        harn_clock::test_support::with_local_tasks(async {
+            let alpha =
+                tokio::task::spawn_local(scope_ambient(AmbientExecutionScope::default(), async {
+                    set_thread_execution_context(Some(execution_context_named("alpha")));
+                    tokio::task::yield_now().await;
+                    tokio::task::yield_now().await;
+                    current_execution_context().map(|ctx| (ctx.cwd, ctx.env.get("WORKER").cloned()))
+                }));
+            let beta =
+                tokio::task::spawn_local(scope_ambient(AmbientExecutionScope::default(), async {
+                    set_thread_execution_context(Some(execution_context_named("beta")));
+                    tokio::task::yield_now().await;
+                    tokio::task::yield_now().await;
+                    current_execution_context().map(|ctx| (ctx.cwd, ctx.env.get("WORKER").cloned()))
+                }));
+            assert_eq!(
+                alpha.await.unwrap(),
+                Some((
+                    Some("/worktrees/alpha".to_string()),
+                    Some("alpha".to_string())
+                ))
+            );
+            assert_eq!(
+                beta.await.unwrap(),
+                Some((
+                    Some("/worktrees/beta".to_string()),
+                    Some("beta".to_string())
+                ))
+            );
+        })
+        .await;
         // The outer thread is left clean — neither task's context leaked out.
         assert!(crate::orchestration::current_execution_context().is_none());
     }
@@ -1324,37 +1294,31 @@ mod tests {
     #[tokio::test]
     async fn scoped_tasks_do_not_cross_wire_mutation_session() {
         use crate::orchestration::{current_mutation_session, install_current_mutation_session};
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let alpha = tokio::task::spawn_local(scope_ambient(
-                    AmbientExecutionScope::default(),
-                    async {
-                        install_current_mutation_session(Some(mutation_session_named("alpha")));
-                        tokio::task::yield_now().await;
-                        tokio::task::yield_now().await;
-                        current_mutation_session().map(|s| (s.session_id, s.run_id))
-                    },
-                ));
-                let beta = tokio::task::spawn_local(scope_ambient(
-                    AmbientExecutionScope::default(),
-                    async {
-                        install_current_mutation_session(Some(mutation_session_named("beta")));
-                        tokio::task::yield_now().await;
-                        tokio::task::yield_now().await;
-                        current_mutation_session().map(|s| (s.session_id, s.run_id))
-                    },
-                ));
-                assert_eq!(
-                    alpha.await.unwrap(),
-                    Some(("session-alpha".to_string(), Some("run-alpha".to_string())))
-                );
-                assert_eq!(
-                    beta.await.unwrap(),
-                    Some(("session-beta".to_string(), Some("run-beta".to_string())))
-                );
-            })
-            .await;
+        harn_clock::test_support::with_local_tasks(async {
+            let alpha =
+                tokio::task::spawn_local(scope_ambient(AmbientExecutionScope::default(), async {
+                    install_current_mutation_session(Some(mutation_session_named("alpha")));
+                    tokio::task::yield_now().await;
+                    tokio::task::yield_now().await;
+                    current_mutation_session().map(|s| (s.session_id, s.run_id))
+                }));
+            let beta =
+                tokio::task::spawn_local(scope_ambient(AmbientExecutionScope::default(), async {
+                    install_current_mutation_session(Some(mutation_session_named("beta")));
+                    tokio::task::yield_now().await;
+                    tokio::task::yield_now().await;
+                    current_mutation_session().map(|s| (s.session_id, s.run_id))
+                }));
+            assert_eq!(
+                alpha.await.unwrap(),
+                Some(("session-alpha".to_string(), Some("run-alpha".to_string())))
+            );
+            assert_eq!(
+                beta.await.unwrap(),
+                Some(("session-beta".to_string(), Some("run-beta".to_string())))
+            );
+        })
+        .await;
         // The outer thread is left clean — neither task's session leaked out.
         assert!(crate::orchestration::current_mutation_session().is_none());
     }
@@ -1387,37 +1351,33 @@ mod tests {
             SessionEnvironment::launch(EnvironmentPolicyKind::Granted, grant_specs, &|_| None)
                 .unwrap();
 
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async move {
-                let alpha = tokio::task::spawn_local(scope_ambient(
-                    AmbientExecutionScope::default(),
-                    async {
-                        set_session_environment(Some(SessionEnvironment::isolated()));
-                        tokio::task::yield_now().await;
-                        tokio::task::yield_now().await;
-                        current_session_environment().map(|p| (p.kind(), p.grants().len()))
-                    },
-                ));
-                let beta = tokio::task::spawn_local(scope_ambient(
-                    AmbientExecutionScope::default(),
-                    async move {
-                        set_session_environment(Some(granted));
-                        tokio::task::yield_now().await;
-                        tokio::task::yield_now().await;
-                        current_session_environment().map(|p| (p.kind(), p.grants().len()))
-                    },
-                ));
-                assert_eq!(
-                    alpha.await.unwrap(),
-                    Some((EnvironmentPolicyKind::Isolated, 0))
-                );
-                assert_eq!(
-                    beta.await.unwrap(),
-                    Some((EnvironmentPolicyKind::Granted, 1))
-                );
-            })
-            .await;
+        harn_clock::test_support::with_local_tasks(async move {
+            let alpha =
+                tokio::task::spawn_local(scope_ambient(AmbientExecutionScope::default(), async {
+                    set_session_environment(Some(SessionEnvironment::isolated()));
+                    tokio::task::yield_now().await;
+                    tokio::task::yield_now().await;
+                    current_session_environment().map(|p| (p.kind(), p.grants().len()))
+                }));
+            let beta = tokio::task::spawn_local(scope_ambient(
+                AmbientExecutionScope::default(),
+                async move {
+                    set_session_environment(Some(granted));
+                    tokio::task::yield_now().await;
+                    tokio::task::yield_now().await;
+                    current_session_environment().map(|p| (p.kind(), p.grants().len()))
+                },
+            ));
+            assert_eq!(
+                alpha.await.unwrap(),
+                Some((EnvironmentPolicyKind::Isolated, 0))
+            );
+            assert_eq!(
+                beta.await.unwrap(),
+                Some((EnvironmentPolicyKind::Granted, 1))
+            );
+        })
+        .await;
         // The outer thread is left clean — neither task's profile leaked out.
         assert!(crate::stdlib::process::current_session_environment().is_none());
     }

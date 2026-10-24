@@ -5,6 +5,7 @@
   "description": "An honest symbol-level changeset summary. Candidate callers are name-matched heuristic evidence, never data-flow claims.",
   "type": "object",
   "properties": {
+    "proof": { "$ref": "https://harnlang.com/schemas/hostlib/edit-proof.json" },
     "schema": { "const": "harn.review_changeset.v1" },
     "status": { "enum": ["complete", "degraded"] },
     "files": {

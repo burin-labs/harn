@@ -379,7 +379,18 @@ pub struct SiteHttpServeOptions {
     /// URL advertised in the startup banner. Defaults to the bound
     /// address with the TLS-appropriate scheme.
     pub public_url: Option<String>,
+    /// Create one JSON startup receipt after binding. An existing path is refused.
+    pub ready_file: Option<std::path::PathBuf>,
     pub tls: HttpTlsConfig,
+}
+
+/// A bound site listener. This startup receipt is not a continuing health check.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SiteServerReady {
+    pub schema_version: u32,
+    pub pid: u32,
+    /// Actual listener URL, independent of the advertised public URL.
+    pub url: String,
 }
 
 /// Static configuration for a [`SiteServer`].
@@ -488,10 +499,42 @@ impl SiteServer {
             .public_url
             .clone()
             .unwrap_or_else(|| format!("{}://{local_addr}", tls.listener_scheme()));
-        eprintln!("[harn] Site server ready on {advertised}");
-        crate::tls::serve_router_from_tcp(listener, router, &tls)
-            .await
-            .map_err(|error| format!("Site server failed: {error}"))
+        let listener_url = format!("{}://{local_addr}", tls.listener_scheme());
+        crate::tls::serve_router_from_tcp_with_ready(listener, router, &tls, || {
+            if let Some(path) = options.ready_file {
+                let ready = SiteServerReady {
+                    schema_version: 1,
+                    pid: std::process::id(),
+                    url: listener_url,
+                };
+                let bytes = serde_json::to_vec(&ready).map_err(|error| error.to_string())?;
+                let receipt = harn_vm::conditional_replace::conditional_replace(
+                    &path,
+                    &bytes,
+                    &harn_vm::conditional_replace::ConditionalReplaceOptions {
+                        overwrite: false,
+                        ..Default::default()
+                    },
+                )
+                .map_err(|error| {
+                    format!(
+                        "cannot publish site readiness to {}: {error}",
+                        path.display()
+                    )
+                })?;
+                if receipt.status != harn_vm::conditional_replace::ConditionalReplaceStatus::Created
+                {
+                    return Err(format!(
+                        "site readiness path already exists: {}",
+                        path.display()
+                    ));
+                }
+            }
+            eprintln!("[harn] Site server ready on {advertised}");
+            Ok(())
+        })
+        .await
+        .map_err(|error| format!("Site server failed: {error}"))
     }
 }
 

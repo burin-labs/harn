@@ -581,7 +581,7 @@ fn project_clean_tool_repair(raw: &[JsonValue]) -> ProjectionDecision {
             for (offset, follow) in raw[idx + 1..].iter().enumerate() {
                 let follow_idx = idx + 1 + offset;
                 let follow_role = follow.get("role").and_then(JsonValue::as_str).unwrap_or("");
-                if !matches!(follow_role, "tool" | "tool_result") {
+                if !harn_orchestration::tool_messages::is_tool_result_role(follow_role) {
                     if follow_role == "assistant" {
                         break;
                     }
@@ -1034,7 +1034,7 @@ fn tool_result_candidates(message_idx: usize, message: &JsonValue) -> Vec<ToolRe
         .get("role")
         .and_then(JsonValue::as_str)
         .unwrap_or("");
-    if matches!(role, "tool" | "tool_result") {
+    if harn_orchestration::tool_messages::is_tool_result_role(role) {
         return message
             .get("content")
             .map(json_text)
@@ -1135,7 +1135,9 @@ fn find_tool_result_idx(
 ) -> Option<usize> {
     for (offset, follow) in raw[assistant_idx + 1..].iter().enumerate() {
         let role = follow.get("role").and_then(JsonValue::as_str).unwrap_or("");
-        if matches!(role, "tool" | "tool_result") && tool_result_matches(follow, call) {
+        if harn_orchestration::tool_messages::is_tool_result_role(role)
+            && tool_result_matches(follow, call)
+        {
             return Some(assistant_idx + 1 + offset);
         }
         if role == "assistant" {

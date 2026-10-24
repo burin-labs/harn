@@ -34,7 +34,6 @@
 //! response envelope.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -86,6 +85,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let helper = optional_string(BUILTIN, dict, "helper")?;
     let all_occurrences = optional_bool(BUILTIN, dict, "all_occurrences", true)?;
     let dry_run = optional_bool(BUILTIN, dict, "dry_run", false)?;
+    let proof = optional_bool(BUILTIN, dict, "proof", false)?;
     let session_id = optional_string(BUILTIN, dict, "session_id")?;
 
     let guard = index.lock().expect("code_index mutex poisoned");
@@ -115,6 +115,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let env = Response {
         path: &relative,
         new_name: &new_name,
+        proof,
     };
     let Some(language) = Language::detect(&absolute, None) else {
         return Ok(env.refusal(&Refusal::new(
@@ -210,6 +211,7 @@ fn typescript_is_strict(file: &Path) -> bool {
 struct Response<'a> {
     path: &'a str,
     new_name: &'a str,
+    proof: bool,
 }
 
 #[derive(Default)]
@@ -227,6 +229,7 @@ struct Fields {
     occurrences: usize,
     details: String,
     fallback: bool,
+    proof: Option<VmValue>,
 }
 
 impl Response<'_> {
@@ -264,6 +267,7 @@ impl Response<'_> {
             kind: Some(NodeKind::Function),
         };
         let envelope = EditEnvelope {
+            proof: fields.proof,
             applied: fields.applied,
             dry_run: fields.dry_run,
             touched_files: fields.touched_files,
@@ -280,10 +284,7 @@ impl Response<'_> {
                 ("returns_value", VmValue::Bool(flow.returns_value)),
                 ("helper", str_value(&fields.helper)),
                 ("call", str_value(&fields.call)),
-                (
-                    "sites",
-                    VmValue::List(Arc::new(sites_list(self.path, &fields.sites))),
-                ),
+                ("sites", VmValue::list(sites_list(self.path, &fields.sites))),
                 (
                     "occurrences_replaced",
                     VmValue::Int(fields.occurrences as i64),
@@ -292,7 +293,7 @@ impl Response<'_> {
                     "call_sites_updated",
                     VmValue::Int(fields.occurrences as i64),
                 ),
-                ("comments_left_behind", VmValue::List(Arc::new(Vec::new()))),
+                ("comments_left_behind", VmValue::list(Vec::new())),
             ],
         };
         edit_envelope(tag, Scope::File, &symbol, envelope)
@@ -356,6 +357,9 @@ impl Response<'_> {
             "applied",
             Fields {
                 applied: !dry_run && failed.is_empty(),
+                proof: (self.proof && failed.is_empty()).then(|| {
+                    super::refactor_core::edit_proof(std::slice::from_ref(file), &failed).value()
+                }),
                 dry_run,
                 flow: Some(planned.flow.clone()),
                 helper: planned.helper_text.clone(),

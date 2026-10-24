@@ -443,11 +443,11 @@ async fn validate_full_uri(
     }
     // For HTTP URIs, we need to validate that it points to a valid IP
     let host = uri.host().ok_or(InvalidFullUriErrorKind::MissingHost)?;
-    let maybe_ip = if host.starts_with('[') && host.ends_with(']') {
-        host[1..host.len() - 1].parse::<IpAddr>()
-    } else {
-        host.parse::<IpAddr>()
-    };
+    let host_without_brackets = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host);
+    let maybe_ip = host_without_brackets.parse::<IpAddr>();
     let is_allowed = match maybe_ip {
         Ok(addr) => is_full_uri_ip_allowed(&addr),
         Err(_domain_name) => {

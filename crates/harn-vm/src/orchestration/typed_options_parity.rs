@@ -18,8 +18,8 @@ use std::{borrow::Cow, collections::BTreeSet};
 use serde::Serialize;
 
 use super::{
-    ApprovalReviewPolicy, CompactionPolicy, ModelPolicy, RetryPolicy, StageContract, TurnPolicy,
-    WorkflowNode,
+    ApprovalReviewPolicy, CompactionPolicy, JoinPolicy, ModelPolicy, RetryPolicy, StageContract,
+    TurnPolicy, WorkflowEdge, WorkflowNode,
 };
 use crate::llm::cost::LlmBudgetEnvelope;
 
@@ -281,6 +281,25 @@ fn workflow_retry_policy_matches_retry_policy() {
         //   byte-stable (scripts/check_docs_workflow_quickstart.harn pins
         //   them).
         &["repair_prompt_builder", "feedback"],
+        &[],
+    );
+}
+
+#[test]
+fn workflow_schedule_contracts_match_runtime() {
+    let source = stdlib_source("workflow/schedule");
+    assert_key_parity(
+        "WorkflowJoinPolicy ↔ JoinPolicy",
+        &harn_alias_keys(source, "WorkflowJoinPolicy"),
+        &serde_default_keys::<JoinPolicy>(),
+        &[],
+        &[],
+    );
+    assert_key_parity(
+        "WorkflowScheduleEdge ↔ WorkflowEdge",
+        &harn_alias_keys(source, "WorkflowScheduleEdge"),
+        &serde_default_keys::<WorkflowEdge>(),
+        &[],
         &[],
     );
 }

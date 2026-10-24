@@ -62,27 +62,25 @@ mod tests {
   return 9
 }"#;
         let chunk = crate::compile_source(source).expect("source compiles");
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut vm = crate::new_vm();
-                crate::register_vm_stdlib(&mut vm);
-                vm.set_harness(crate::Harness::real());
-                vm.set_source_info("main.harn", source);
-                vm.enable_flight_recorder(512);
+        harn_clock::test_support::with_local_tasks(async {
+            let mut vm = crate::new_vm();
+            crate::register_vm_stdlib(&mut vm);
+            vm.set_harness(crate::Harness::real());
+            vm.set_source_info("main.harn", source);
+            vm.enable_flight_recorder(512);
 
-                let result = vm.execute(&chunk).await.expect("execution succeeds");
-                assert!(matches!(result, crate::VmValue::Int(7)));
-                let recording = vm.flight_recording().expect("recording exists");
-                assert_eq!(recording.terminal.as_ref().unwrap().status, "returned");
-                assert!(recording.events.iter().any(|event| event.line == 4));
-                assert!(!recording.events.iter().any(|event| event.line == 6));
-                assert!(recording.sources.iter().any(|source| source == "main.harn"));
-                assert!(!serde_json::to_string(&recording)
-                    .unwrap()
-                    .contains("do-not-record-me"));
-            })
-            .await;
+            let result = vm.execute(&chunk).await.expect("execution succeeds");
+            assert!(matches!(result, crate::VmValue::Int(7)));
+            let recording = vm.flight_recording().expect("recording exists");
+            assert_eq!(recording.terminal.as_ref().unwrap().status, "returned");
+            assert!(recording.events.iter().any(|event| event.line == 4));
+            assert!(!recording.events.iter().any(|event| event.line == 6));
+            assert!(recording.sources.iter().any(|source| source == "main.harn"));
+            assert!(!serde_json::to_string(&recording)
+                .unwrap()
+                .contains("do-not-record-me"));
+        })
+        .await;
     }
 
     #[test]

@@ -56,25 +56,31 @@ fn plan_path(path: &str) -> String {
         .replace(std::path::MAIN_SEPARATOR, "/")
 }
 
-pub(super) fn resolve(paths: &[String], base: &str) -> ResolvedAffectedTests {
+pub(super) fn resolve(paths: &[String], base: &str) -> Result<ResolvedAffectedTests, String> {
     let targets = paths.iter().map(PathBuf::from).collect::<Vec<_>>();
     let changed = match changed_harn_files(base) {
         Ok(changed) => changed,
         Err(reason) => {
-            return resolved(AffectedTestMode::Full, reason, all_test_files(&targets));
+            return Ok(resolved(
+                AffectedTestMode::Full,
+                reason,
+                all_test_files(&targets)?,
+            ));
         }
     };
 
-    match test_runner::select_affected_test_files(&targets, &changed) {
-        AffectedTestFiles::Selected { files } => resolved(
-            AffectedTestMode::Selected,
-            "resolved changed modules through the transitive importer graph".to_string(),
-            files,
-        ),
-        AffectedTestFiles::Full { files, reason } => {
-            resolved(AffectedTestMode::Full, reason, files)
-        }
-    }
+    Ok(
+        match test_runner::select_affected_test_files(&targets, &changed)? {
+            AffectedTestFiles::Selected { files } => resolved(
+                AffectedTestMode::Selected,
+                "resolved changed modules through the transitive importer graph".to_string(),
+                files,
+            ),
+            AffectedTestFiles::Full { files, reason } => {
+                resolved(AffectedTestMode::Full, reason, files)
+            }
+        },
+    )
 }
 
 fn resolved(mode: AffectedTestMode, reason: String, files: Vec<PathBuf>) -> ResolvedAffectedTests {
@@ -88,7 +94,7 @@ fn resolved(mode: AffectedTestMode, reason: String, files: Vec<PathBuf>) -> Reso
     }
 }
 
-fn all_test_files(targets: &[PathBuf]) -> Vec<PathBuf> {
+fn all_test_files(targets: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     test_runner::discover_test_files_for_targets(targets)
 }
 

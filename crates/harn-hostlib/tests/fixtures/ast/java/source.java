@@ -19,3 +19,17 @@ enum Color {
     GREEN,
     BLUE
 }
+
+record TagResponse(UUID id, String name) {
+    TagResponse {
+        Objects.requireNonNull(id);
+    }
+
+    String label() {
+        return name.toUpperCase();
+    }
+}
+
+@interface Audited {
+    String value();
+}

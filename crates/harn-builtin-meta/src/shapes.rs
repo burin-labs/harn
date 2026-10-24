@@ -384,6 +384,7 @@ pub const SUB_AGENT_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("tool_search", TY_DICT),
     ShapeFieldDescriptor::optional("tool_retries", TY_INT),
     ShapeFieldDescriptor::optional("tool_backoff_ms", TY_INT),
+    ShapeFieldDescriptor::optional("tool_result_max_chars", TY_INT),
     ShapeFieldDescriptor::optional("stop_after_successful_tools", TY_LIST),
     ShapeFieldDescriptor::optional("require_successful_tools", TY_LIST),
     ShapeFieldDescriptor::optional("turn_policy", TY_DICT),

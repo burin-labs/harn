@@ -1378,22 +1378,22 @@ fn excerpt(text: &str) -> Option<String> {
 }
 
 fn load_env_files(paths: &[PathBuf]) -> Result<(EnvOverlay, Vec<LoadedEnvKey>), String> {
-    let mut previous = Vec::new();
+    let mut overlay = EnvOverlay {
+        previous: Vec::new(),
+    };
     let mut loaded = Vec::new();
     let mut touched = BTreeSet::new();
     for path in paths {
         let path = harn_vm::user_dirs::expand_home_path(path);
         let raw = fs::read_to_string(&path)
             .map_err(|error| format!("failed to read env file {}: {error}", path.display()))?;
-        for (line_no, line) in raw.lines().enumerate() {
-            let Some((key, value)) = parse_env_line(line).map_err(|error| {
-                format!("{}:{}: {error}", path.display(), line_no.saturating_add(1))
-            })?
-            else {
-                continue;
-            };
+        let values = harn_vm::config::env_file::parse_env_file(&raw)
+            .map_err(|error| format!("{}:{}: {}", path.display(), error.line, error.message))?;
+        for (key, value) in values {
             if touched.insert(key.clone()) {
-                previous.push((OsString::from(&key), std::env::var_os(&key)));
+                overlay
+                    .previous
+                    .push((OsString::from(&key), std::env::var_os(&key)));
             }
             std::env::set_var(&key, value);
             loaded.push(LoadedEnvKey {
@@ -1402,41 +1402,7 @@ fn load_env_files(paths: &[PathBuf]) -> Result<(EnvOverlay, Vec<LoadedEnvKey>), 
             });
         }
     }
-    Ok((EnvOverlay { previous }, loaded))
-}
-
-fn parse_env_line(line: &str) -> Result<Option<(String, String)>, String> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() || trimmed.starts_with('#') {
-        return Ok(None);
-    }
-    let trimmed = trimmed.strip_prefix("export ").unwrap_or(trimmed).trim();
-    let Some((key, value)) = trimmed.split_once('=') else {
-        return Err("expected KEY=VALUE".to_string());
-    };
-    let key = key.trim();
-    if key.is_empty() {
-        return Err("empty key".to_string());
-    }
-    if !key
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-    {
-        return Err(format!("invalid key `{key}`"));
-    }
-    Ok(Some((key.to_string(), unquote_env_value(value.trim()))))
-}
-
-fn unquote_env_value(value: &str) -> String {
-    for quote in ['"', '\''] {
-        if let Some(inner) = value
-            .strip_prefix(quote)
-            .and_then(|rest| rest.strip_suffix(quote))
-        {
-            return inner.to_string();
-        }
-    }
-    value.to_string()
+    Ok((overlay, loaded))
 }
 
 #[cfg(test)]

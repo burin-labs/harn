@@ -33,7 +33,9 @@ NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 \
   --message-format-version 0.1 \
   || runner_status=$?
 
-node "$repo_root/scripts/ci/summarize_nextest_receipt.mjs" \
+HARN_EXT_BOOTSTRAP_INSTALLER="${HARN_BIN:-${HARN_EXT_BOOTSTRAP_INSTALLER:-}}" \
+  "$repo_root/scripts/bootstrap-harn.sh" --seed-command run --standalone --no-sandbox \
+  "$repo_root/scripts/ci/summarize_nextest_receipt.harn" -- \
   --inventory "$inventory" \
   --events "$events" \
   --runner-status "$runner_status" \

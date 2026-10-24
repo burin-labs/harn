@@ -447,10 +447,7 @@ mod tests {
 
     #[test]
     fn cancelled_wakes_pending_waiter() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("rt");
+        let rt = harn_clock::test_support::current_thread_runtime();
         let local = tokio::task::LocalSet::new();
         local.block_on(&rt, async {
             clear_registry_for_test();

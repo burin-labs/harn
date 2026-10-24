@@ -31,6 +31,55 @@ fn build_index(root: &Path) -> CodeIndexCapability {
 }
 
 #[test]
+fn registered_non_java_column_request_is_rejected_before_writes() {
+    use crate::{BuiltinRegistry, HostlibCapability};
+    let dir = tempdir().unwrap();
+    let source = "export function load() { return 1; }\nconst result = load();\n";
+    fs::write(dir.path().join("a.ts"), source).unwrap();
+    let capability = build_index(dir.path());
+    {
+        let shared = capability.shared();
+        let guard = shared.lock().unwrap();
+        assert_eq!(
+            guard
+                .as_ref()
+                .unwrap()
+                .symbols
+                .iter_nodes()
+                .filter(|node| node.kind == NodeKind::Function && node.name == "load")
+                .count(),
+            1
+        );
+    }
+    let mut registry = BuiltinRegistry::new();
+    capability.register_builtins(&mut registry);
+    let result = (registry.find(BUILTIN).unwrap().handler)(&[dict(&[
+        (
+            "symbol_ref",
+            dict(&[
+                ("name", vm_string("load")),
+                ("path", vm_string("a.ts")),
+                ("col", VmValue::Int(17)),
+            ]),
+        ),
+        ("new_name", vm_string("loadById")),
+        ("scope", vm_string("workspace")),
+        ("backend", vm_string("syntax_tree")),
+    ])]);
+    assert!(
+        matches!(
+            &result,
+            Err(HostlibError::InvalidParameter {
+                param: "symbol_ref.col",
+                ..
+            })
+        ),
+        "{result:?}"
+    );
+    assert_eq!(fs::read_to_string(dir.path().join("a.ts")).unwrap(), source);
+}
+
+#[test]
 fn workspace_rename_refuses_unindexed_bindings_before_any_write() {
     let cases = [
         ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\n\ndef parse(Reading):\n    return Reading()\n"),
@@ -544,7 +593,7 @@ fn ambiguous_symbol_without_disambiguator() {
     let capability = build_index(root);
     let symbol_ref = dict(&[
         ("name", vm_string("helper")),
-        ("path", vm_string("src/missing.rs")),
+        ("path", vm_string(".")),
         ("kind", vm_string("Function")),
     ]);
     let result = rename(&capability, symbol_ref, "renamed", "workspace");

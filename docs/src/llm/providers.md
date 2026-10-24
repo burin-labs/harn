@@ -1059,16 +1059,21 @@ Hosted OpenAI-compatible gateways should also deserialize messages, function
 tools, and generation options through `HostedChatRequest`, then call
 `hosted_openai_request(provider, model, request)` for physical provider egress.
 That projection is closed: hosted tenancy, routing, and accounting metadata
-cannot enter the third-party body. The provider catalog's
+cannot enter the third-party body. It uses the ordinary provider encoder for
+token limits, tool schemas, message history, and reasoning fields. The provider catalog's
 `stream_usage_accounting` field controls whether the documented
 `stream_options.include_usage` extension is emitted; an absent declaration
 fails closed.
 
+The returned `HostedOpenAiRequest` has private fields. Serialize it directly
+with Serde when sending the request. It rejects routes that use another
+provider dialect before encoding.
+
 Message strings preserve empty text. The ordinary text-tool history adapter can
 leave an assistant message with no prose, and a tool can return an empty file.
-The hosted contract accepts those strings without rewriting or dropping the
-messages. Tool-call identifiers, media payloads, and the closed message fields
-remain validated.
+The hosted contract accepts those strings. The shared encoder then applies the
+route's message rules, including tool-history normalization. Tool-call
+identifiers, media payloads, and closed message fields remain validated.
 
 ### Model operations
 

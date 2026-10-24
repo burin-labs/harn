@@ -5,6 +5,7 @@
   "description": "Move a top-level Rust, TypeScript/JavaScript, or Python declaration to another module. The declaration moves with its attributes or decorators and the comment block directly above it; every import and qualified use of it across the workspace is rewritten, the destination gains imports for the names the declaration uses, and the source re-imports it when still needed. A missing destination is created (for Rust, the parent module also gains a `mod` declaration). All-or-nothing: every planned file is re-parsed before anything is written.",
   "type": "object",
   "properties": {
+    "proof": { "type": "boolean", "default": false, "description": "Include bounded edit excerpts and per-file syntax evidence. Does not run a project check." },
     "symbol": {
       "type": "string",
       "minLength": 1,

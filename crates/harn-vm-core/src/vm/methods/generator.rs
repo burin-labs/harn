@@ -13,7 +13,7 @@ impl crate::vm::Vm {
             "next" => {
                 if gen.is_done() {
                     let mut dict = BTreeMap::new();
-                    dict.insert("value".to_string(), VmValue::Nil);
+                    dict.put("value", VmValue::Nil);
                     dict.put_bool("done", true);
                     Ok(VmValue::dict(dict))
                 } else {
@@ -33,7 +33,7 @@ impl crate::vm::Vm {
                         None => {
                             gen.mark_done();
                             let mut dict = BTreeMap::new();
-                            dict.insert("value".to_string(), VmValue::Nil);
+                            dict.put("value", VmValue::Nil);
                             dict.put_bool("done", true);
                             Ok(VmValue::dict(dict))
                         }
@@ -55,7 +55,7 @@ impl crate::vm::Vm {
             "next" => {
                 if stream.is_done() {
                     let mut dict = BTreeMap::new();
-                    dict.insert("value".to_string(), VmValue::Nil);
+                    dict.put("value", VmValue::Nil);
                     dict.put_bool("done", true);
                     Ok(VmValue::dict(dict))
                 } else {
@@ -75,7 +75,7 @@ impl crate::vm::Vm {
                         None => {
                             stream.mark_done();
                             let mut dict = BTreeMap::new();
-                            dict.insert("value".to_string(), VmValue::Nil);
+                            dict.put("value", VmValue::Nil);
                             dict.put_bool("done", true);
                             Ok(VmValue::dict(dict))
                         }

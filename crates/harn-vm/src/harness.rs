@@ -886,7 +886,7 @@ fn paused_clock_at_unix_ms(unix_ms: i64) -> Arc<PausedClock> {
 }
 
 pub(crate) fn vm_string(value: impl Into<String>) -> crate::VmValue {
-    crate::VmValue::String(arcstr::ArcStr::from(value.into()))
+    crate::VmValue::string(value.into())
 }
 
 impl Default for Harness {
@@ -961,7 +961,7 @@ pub struct HarnessChannels {
 }
 
 /// system sub-handle: `cpu`, `memory`, `gpus`, `temperature`, `platform`,
-/// `processes`. Read-only host introspection — no side effects on the host
+/// `processes`, `parent_process`. Read-only host introspection — no side effects on the host
 /// system. Gated by the harness handle so scripts running under
 /// `Harness::null()` or restricted policies cannot fingerprint the runner
 /// without an explicit grant (issue #1912 / epic #1765).

@@ -269,12 +269,13 @@ mod tests {
     /// here but not forwarded there is an option `agent_loop` accepts and
     /// never applies, which is how `approval_reviewer`, then `tool_precheck`
     /// and the tool-retry options, went dead on the loop path.
-    const DISPATCH_READ_KEYS: [&str; 8] = [
+    const DISPATCH_READ_KEYS: [&str; 9] = [
         "session_id",
         "tool_format",
         "reminders",
         "tool_retries",
         "tool_backoff_ms",
+        "tool_result_max_chars",
         "model",
         "provider",
         "run_id",

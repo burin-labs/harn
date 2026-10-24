@@ -800,10 +800,10 @@ pub(super) async fn execute_sub_agent(
     })?;
     let args = vec![
         harness,
-        VmValue::String(arcstr::ArcStr::from(spec.task.clone())),
+        VmValue::string(spec.task.clone()),
         spec.system
             .as_ref()
-            .map(|system| VmValue::String(arcstr::ArcStr::from(system.clone())))
+            .map(|system| VmValue::string(system.clone()))
             .unwrap_or(VmValue::Nil),
         VmValue::dict(loop_options),
     ];
@@ -871,7 +871,7 @@ pub(super) async fn execute_sub_agent(
         .as_dict()
         .and_then(|dict| dict.get("assets"))
         .cloned()
-        .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new())));
+        .unwrap_or_else(|| VmValue::list(Vec::new()));
     let evidence_added = match &artifacts {
         VmValue::List(list) => list.len() as i64,
         _ => 0,

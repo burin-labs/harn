@@ -318,7 +318,7 @@ pub(super) fn paired_tool_result_ids(messages: &[VmValue]) -> std::collections::
         let role = dict_get(message, "role")
             .map(|v| v.display())
             .unwrap_or_default();
-        if role != "tool_result" && role != "tool" {
+        if !harn_orchestration::tool_messages::is_tool_result_role(&role) {
             continue;
         }
         let id = dict_get(message, "tool_call_id")

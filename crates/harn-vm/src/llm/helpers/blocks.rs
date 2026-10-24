@@ -1,12 +1,12 @@
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 
 use crate::value::VmValue;
 
 pub(super) fn default_visibility_for_role(role: &str) -> &'static str {
-    match role {
-        "tool_result" => "internal",
-        _ => "public",
+    if harn_orchestration::tool_messages::is_tool_result_role(role) {
+        "internal"
+    } else {
+        "public"
     }
 }
 
@@ -24,20 +24,11 @@ pub(super) fn normalize_message_blocks(content: Option<&VmValue>, role: &str) ->
             )]
         }
         Some(VmValue::Nil) | None => Vec::new(),
-        Some(other) => vec![VmValue::dict(BTreeMap::from([
-            (
-                "type".to_string(),
-                VmValue::String(arcstr::ArcStr::from("text")),
-            ),
-            (
-                "text".to_string(),
-                VmValue::String(arcstr::ArcStr::from(other.display())),
-            ),
-            (
-                "visibility".to_string(),
-                VmValue::String(arcstr::ArcStr::from(default_visibility)),
-            ),
-        ]))],
+        Some(other) => vec![VmValue::dict([
+            ("type", VmValue::string("text")),
+            ("text", VmValue::string(other.display())),
+            ("visibility", VmValue::string(default_visibility)),
+        ])],
     }
 }
 

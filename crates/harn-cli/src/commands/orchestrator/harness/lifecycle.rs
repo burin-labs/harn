@@ -782,28 +782,26 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn manifest_reload_debouncer_coalesces_pending_signals_without_wall_clock_sleep() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let clock = harn_vm::clock::PausedClock::new(time::OffsetDateTime::UNIX_EPOCH);
-                let (reload, mut reload_rx) = AdminReloadHandle::channel();
-                let (tx, rx) = mpsc::unbounded_channel();
-                let task = spawn_manifest_reload_debouncer(rx, reload, clock, Duration::ZERO);
+        harn_clock::test_support::with_local_tasks(async {
+            let clock = harn_vm::clock::PausedClock::new(time::OffsetDateTime::UNIX_EPOCH);
+            let (reload, mut reload_rx) = AdminReloadHandle::channel();
+            let (tx, rx) = mpsc::unbounded_channel();
+            let task = spawn_manifest_reload_debouncer(rx, reload, clock, Duration::ZERO);
 
-                tx.send(()).unwrap();
-                tx.send(()).unwrap();
-                tx.send(()).unwrap();
+            tx.send(()).unwrap();
+            tx.send(()).unwrap();
+            tx.send(()).unwrap();
 
-                let request =
-                    harn_clock::test_support::within("debouncer emitting reload", reload_rx.recv())
-                        .await
-                        .expect("reload channel open");
-                assert_eq!(request.source, "file_watch");
-                assert!(reload_rx.try_recv().is_err());
+            let request =
+                harn_clock::test_support::within("debouncer emitting reload", reload_rx.recv())
+                    .await
+                    .expect("reload channel open");
+            assert_eq!(request.source, "file_watch");
+            assert!(reload_rx.try_recv().is_err());
 
-                drop(tx);
-                task.abort();
-            })
-            .await;
+            drop(tx);
+            task.abort();
+        })
+        .await;
     }
 }

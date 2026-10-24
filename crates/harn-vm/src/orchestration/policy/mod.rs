@@ -707,11 +707,8 @@ pub fn redact_transcript_visibility(
         _ => Vec::new(),
     };
     let mut redacted = dict.clone();
-    redacted.put(
-        "messages",
-        VmValue::List(std::sync::Arc::new(public_messages)),
-    );
-    redacted.put("events", VmValue::List(std::sync::Arc::new(public_events)));
+    redacted.put("messages", VmValue::list(public_messages));
+    redacted.put("events", VmValue::list(public_events));
     Some(VmValue::dict(redacted))
 }
 
@@ -719,7 +716,9 @@ fn redact_public_message(message: &VmValue) -> Option<VmValue> {
     let Some(dict) = message.as_dict() else {
         return Some(message.clone());
     };
-    if dict.get("role").map(|value| value.display()).as_deref() == Some("tool_result") {
+    if harn_orchestration::tool_messages::is_tool_output_message(
+        &crate::llm::helpers::vm_value_to_json(message),
+    ) {
         return None;
     }
     if dict
@@ -743,10 +742,7 @@ fn redact_public_message(message: &VmValue) -> Option<VmValue> {
             if key == "blocks" || public_text.is_empty() {
                 public_text = text_fragments_from_blocks(&public_blocks);
             }
-            redacted.insert(
-                crate::value::intern_key(key),
-                VmValue::List(std::sync::Arc::new(public_blocks)),
-            );
+            redacted.insert(crate::value::intern_key(key), VmValue::list(public_blocks));
         }
     }
     if saw_structured_blocks {
@@ -1328,6 +1324,23 @@ mod visibility_redaction_tests {
         let t = mock_transcript();
         let result = redact_transcript_visibility(&t, Some("public")).unwrap();
         assert_eq!(message_count(&result), 2);
+    }
+
+    #[test]
+    fn visibility_public_drops_every_tool_result_shape() {
+        let t = crate::schema::json_to_vm_value(&serde_json::json!({
+            "messages": [
+                {"role": "user", "content": "task"},
+                {"role": "tool", "tool_call_id": "a", "content": "openai-shaped output"},
+                {"role": "user", "content": "[result of read_file]\ntext output\n[end of read_file result]\n", "_harn": {"kind": "tool_result"}},
+                {"role": "user", "content": [{"type": "text", "text": "shot"}], "_harn": {"kind": "tool_result"}},
+                // A person who types the frame keeps their message.
+                {"role": "user", "content": "[result of notes]\nmine\n[end of notes result]\n"},
+            ],
+            "events": []
+        }));
+        let result = redact_transcript_visibility(&t, Some("public")).unwrap();
+        assert_eq!(message_count(&result), 2, "{}", result.display());
     }
 
     #[test]

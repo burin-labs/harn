@@ -139,7 +139,6 @@ pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__token_redaction_register_pattern(name: string, regex: string) -> nil",
     category = "token_redaction"
 )]
@@ -162,7 +161,6 @@ fn token_redaction_register_pattern_impl(
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__token_redaction_clear_custom_patterns() -> nil",
     category = "token_redaction"
 )]
@@ -181,7 +179,6 @@ fn token_redaction_clear_custom_patterns_impl(
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__token_redaction_redact(text: string) -> string",
     category = "token_redaction"
 )]
@@ -194,7 +191,6 @@ fn token_redaction_redact_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__token_redaction_redact_headers(headers: dict<string, string>) -> dict<string, string>",
     category = "token_redaction"
 )]
@@ -225,7 +221,6 @@ fn token_redaction_redact_headers_impl(
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__token_redaction_default_patterns() -> list",
     category = "token_redaction"
 )]
@@ -247,7 +242,6 @@ fn token_redaction_default_patterns_impl(
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__token_redaction_custom_patterns() -> list",
     category = "token_redaction"
 )]
@@ -269,7 +263,6 @@ fn token_redaction_custom_patterns_impl(
 
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__token_redaction_drain_audit() -> list",
     category = "token_redaction"
 )]

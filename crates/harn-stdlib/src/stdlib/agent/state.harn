@@ -178,6 +178,20 @@ pub fn agent_session_record_assistant(agent: HarnessAgent, session_id: any, llm_
 }
 
 /**
+ * True when a transcript message carries a tool result: a `tool` or
+ * `tool_result` role, or the `_harn.kind == "tool_result"` facts Harn attaches
+ * to every recorded result, including text-channel results sent as `user`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_is_tool_result_message(message: any) -> bool {
+  const role = to_string(message?.role ?? "")
+  return role == "tool" || role == "tool_result" || message?._harn?.kind == "tool_result"
+}
+
+/**
  * agent_session_record_tool_results.
  *
  * @effects: [host]

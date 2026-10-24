@@ -6,6 +6,10 @@ fn main() {
     println!("cargo:rerun-if-changed=schemas");
     let manifest = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let schemas = manifest.join("schemas");
+    let proof: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(schemas.join("edit-proof.json")).expect("read edit proof schema"),
+    )
+    .expect("parse edit proof schema");
     let mut entries = discover(&schemas);
     entries.sort();
     let mut pairs = BTreeMap::<(String, String), u8>::new();
@@ -30,9 +34,20 @@ fn main() {
             "response" => "Response",
             _ => unreachable!(),
         };
+        let mut schema: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).expect("read schema"))
+                .expect("parse schema");
+        if schema
+            .pointer("/properties/proof/$ref")
+            .and_then(serde_json::Value::as_str)
+            == Some("https://harnlang.com/schemas/hostlib/edit-proof.json")
+        {
+            schema["properties"]["proof"]["$ref"] = serde_json::json!("#/$defs/edit_proof");
+            schema["$defs"]["edit_proof"] = proof.clone();
+        }
+        let body = serde_json::to_string(&schema).expect("serialize schema");
         generated.push_str(&format!(
-            "    ({module:?}, {method:?}, SchemaKind::{kind_variant}, include_str!({path:?})),\n",
-            path = path.to_string_lossy(),
+            "    ({module:?}, {method:?}, SchemaKind::{kind_variant}, {body:?}),\n"
         ));
     }
     generated.push_str("];\n");

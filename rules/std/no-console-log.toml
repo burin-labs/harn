@@ -4,5 +4,10 @@ language = "typescript"
 severity = "warning"
 message = "Remove `console.log` before committing"
 
+# Patterns match exact argument lists, so the callee is matched instead to
+# flag calls with any number of arguments.
 [rule]
-pattern = "console.log($ARG)"
+kind = "call_expression"
+[rule.has]
+pattern = "console.log"
+field = "function"

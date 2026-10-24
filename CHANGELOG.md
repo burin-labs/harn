@@ -9,6 +9,460 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.177
+
+### Breaking
+
+- **Hosted provider encoding (#6518).** Hosted OpenAI-compatible requests now
+  use the ordinary provider encoder, including model-specific token limits,
+  tool schemas, history, and streaming usage. `HostedOpenAiRequest` is now a
+  read-only serializable body. The unused `HostedStreamOptions` type is removed.
+  Non-OpenAI provider routes are rejected before encoding. Formatting a hosted
+  body does not add provider-call receipts.
+
+  Migration: serialize `HostedOpenAiRequest` directly for HTTP egress. Use
+  `serde_json::to_value` to inspect the encoded body instead of reading its
+  former public fields, and remove `HostedStreamOptions` imports.
+- **Package cache reads now keep their source locked until copying or inspection
+  finishes.** Cache cleanup waits for those readers, and Git and archive entries
+  use a separate `v2` directory so older Harn processes cannot delete them.
+
+  Migration: if the required packages exist only in the older cache layout,
+  fetch them once online before installing a fresh project offline. Existing
+  installed generations still work when their packages match the lock. Keep
+  `HARN_CACHE_DIR` set to the same cache root as before.
+- Reject CSV imports with duplicate headers or extra cells instead of losing data.
+- Parse XML with the existing `roxmltree` library. Preserve Unicode names,
+  namespace prefixes, and spaces around comments and child elements. Reject
+  trailing content, duplicate attributes, forbidden characters, and DTDs.
+  Bound XML rendering depth as well as parsing depth. The writer sanitizes
+  colons in tags and rejects text XML cannot represent.
+- Accept JSON byte streams split within UTF-8 characters, and allow streamed
+  numbers to continue across chunks. Apply the same number rule to LLM output
+  validation, and reject incomplete UTF-8 when a stream ends.
+- Keep fractional seconds when adding durations to dates, and reject results
+  outside the supported date range.
+
+Migration: give CSV columns unique headers and match each row to those columns,
+or parse without headers to keep ragged rows. Remove XML DTDs and declare any
+namespace prefixes before parsing. Malformed XML now raises an error.
+Use bytes, which XML stores as base64, for data with forbidden text characters.
+
+- Command results now capture direct-network, TCP-loopback and managed-proxy grants in
+  `sandbox.network`. Background handles, progress and completion retain the
+  spawn-time record across policy changes. Unknown, inherited and unavailable
+  states don't fabricate grants. This metadata describes permission, not observed
+  network activity or denial coverage.
+
+  Migration: Rust callers now read `ProcessSandboxAssessment.report.denial_reporting`
+  instead of `ProcessSandboxAssessment.reporting`. Custom command adapters that
+  provide sandbox metadata must include the new `network` record; `std/command`
+  exports `CommandSandboxReport` and `CommandNetworkGrants` for that shape.
+- **Java method references and rename (#10374).** Call lookup and method rename
+  use explicit receiver types to keep unrelated methods with the same name
+  separate. Rename accepts qualified names and exact declaration positions,
+  and refuses unsupported receiver bindings before writing.
+  Saved code indexes rebuild automatically to apply the receiver rules.
+
+  `harn_hostlib::code_index::Node` now has optional `col` and `owner_type`
+  fields and is `#[non_exhaustive]`. The 0.10.177 patch release adopts this
+  construction policy so future metadata can be added without another
+  external struct-literal break.
+
+  Migration: replace external struct literals with
+  `Node::new(kind, name, file_id, path, line, language)`. The constructor sets
+  `id` to zero, leaves optional metadata absent and starts with an empty
+  signature. Assign the public fields when their facts are known. For Java,
+  use a measured 1-based UTF-16 identifier column and the actual fully qualified
+  declaring or receiver type. Keep an unknown column as `None`.
+- CI test inventory, completion receipts, and workspace build evidence now use Harn.
+  The shell callers reuse an explicit Harn binary or the verified bootstrap seed,
+  so they work before a source CLI is built. Completion requires a nonempty,
+  consistent inventory and one terminal event per selected test. Build evidence
+  reads fingerprint hash markers and file sizes without opening fingerprint JSON.
+
+  Migration: The CI-only language-server fixture switch `HARN_LSP_FIXTURES_REQUIRED` is now
+  `HARN_EXT_LSP_FIXTURES_REQUIRED`. Update local exports of the old name. The
+  extension prefix keeps this test-runner setting separate from runtime settings,
+  so older bootstrap releases can run while CI still requires the language servers.
+- The native process-liveness probe and its Rust enum now live in `harn-vm-core`.
+  `harn-vm` and `harn-hostlib` re-export that owner instead of defining another probe.
+
+  Migration: rebuild Rust consumers against the matching Harn release. Existing
+  `harn_hostlib::process_liveness` imports remain available. Code that names the
+  defining crate for `ProcessLiveness` should use
+  `harn_vm_core::process_liveness::ProcessLiveness`.
+- `harn serve site --ready-file PATH` atomically publishes the actual bound URL
+  and process ID as JSON. `SiteHttpServeOptions` adds the optional `ready_file`
+  field for Rust callers. Failed listener or TLS setup publishes no receipt.
+
+  Migration: Add `ready_file: None` to existing `SiteHttpServeOptions` struct
+  literals, or set it to a new receipt path when the launcher needs that endpoint.
+- **Shared call-cost settlement.** Rust hosts, `std/llm/economics.settle_call_cost`, and the existing
+  `estimate_call_cost` helper now price normalized usage through the runtime's settlement owner.
+  They apply request-time prices, input bands, one-hour cache writes, hosted tools, and audio rates.
+  Partial estimates keep the subtotal and name missing prices; monthly account allowances remain
+  explicitly unapplied. Downstream hosts can use this shared pricing boundary.
+  Free inference does not hide a hosted-tool fee or a missing hosted price.
+
+  Migration: handle nil `estimate_session_cost(...).total_cost_usd` and per-model `cost_usd` when any
+  call is unpriced. Use `known_cost_usd` for the subtotal. Call estimates reject negative or
+  contradictory token counts, and their breakdown adds `adjustments_usd` for hosted-tool and audio charges.
+
+### Added
+
+- `harn bench --output <path>` writes iteration samples and timing statistics as
+  JSON without enabling profiling. Failed output writes fail the command.
+- `harn provider catalog export` can export the runtime's embedded catalog without
+  an overlay. This gives external tools the full catalog and schema from their
+  pinned runtime without copying provider rules or reading repository sources.
+- `std/markdown` provides typed headings, resolved links, prose blocks, visible
+  text, and English reading scores for Markdown and MDX. Document extraction uses
+  the same parser, replacing its separate markup scanner.
+- Added `harness.ast.check_member_insertion` to distinguish Java method overloads
+  from duplicate signatures before writing a proposed edit. The check compares
+  direct members of one type, ignores parameter names and return types, and
+  refuses unresolved cases.
+- Add optional bounded edit evidence to code-index refactors and source-image
+  changeset summaries, with exact edit locations, per-file syntax readings, and
+  binding-proven preserved namesakes.
+- Add `secret_pattern_catalog()` to read the runtime's typed secret pattern catalog without fetching or parsing source files.
+- Embedded hosts and the CLI share one strict durable spending-policy loader,
+  preserving the same allowance and uncertain attempts across restarts without
+  exposing policy contents in parse or storage diagnostics.
+
+- `std/config.parse_env` parses literal environment files with typed errors and no shell execution.
+  Coding-agent evaluations and provider probe campaigns share the parser and reject malformed lines
+  or unfinished quotes. Evaluations restore earlier environment settings when loading fails.
+- Scripts can read their current parent process ID, native identity, and liveness
+  through `harness.system.parent_process()` without launching a process-table tool.
+  Unknown observations remain explicit and contain no process arguments or environment.
+
+### Changed
+
+- Workflow scheduling now uses typed join policies, edges, and readiness results.
+  Stage specs check join-policy fields instead of erasing them to `dict`.
+- **Shared runtime building blocks (#10349).** Value construction, builtin contracts,
+  and test execution share common helpers. Pure and internal builtin
+  declarations can omit an empty effects list; capability calls still require
+  explicit effects.
+- **Exported symbol replacement.** Replacing JavaScript or TypeScript declarations
+  includes the export wrapper and keeps neighboring code unchanged.
+- Run the step-judge study through a typed Harn driver. Reports refuse missing,
+  partial, or infrastructure-error measurements and preserve unknown cost.
+
+- Mini-model suite, reasoning-matrix, and planner drivers now use Harn instead of shell orchestration.
+  They reuse the repository runtime, keep output paths and task state explicit, and report measured failures.
+  Matrix environment files use literal values, and the runner no longer unloads shared model servers.
+
+### Fixed
+
+- A Linux run whose sandbox policy grants `allow_tcp_loopback` on a host with no
+  namespace launcher no longer refuses every confined command. The sandbox drops
+  only that grant, keeps every other confinement, and emits a
+  `sandbox.loopback_unavailable` warning that names the launcher it would need.
+  `process_sandbox::loopback_support` and `withhold_unsupported_loopback` expose
+  the same decision to embedders.
+- Run Gradle builds and tests under loopback-only process confinement on Linux and macOS. The Linux namespace helper keeps
+  the caller's uid, so the JVM finds the caller's `~/.gradle`, and binds the workspace's `.harn-tmp` over the child's
+  `/tmp`, so the JVM attach socket and Gradle's native libraries land there. On macOS the session temp alias is short
+  enough to hold a Unix socket when a socket root is granted, and the loopback grant sets
+  `-Djava.net.preferIPv6Addresses=true` so env-less Gradle workers reach the daemon.
+- Directory walks now report read failures and invalid ignore files instead of returning an incomplete list.
+  This keeps a missing or unreadable source tree from looking like an empty, successful scan.
+- Include every successfully opened editor-rule file in workspace guidance
+  dependencies, even when its body is empty, duplicated, or over budget.
+  Treat opened empty instruction files and imports as read rather than unreadable.
+- Let standalone playground, MCP, server, and orchestrator commands launch child
+  processes without requiring an inference ceiling. Preserve stricter session
+  environment policy and restore the playground environment between runs.
+- Harn formatting keeps module comments above sorted imports. The formatter's corpus check
+  now accepts its documented import ordering while still rejecting changed imports,
+  missing comments, and changed program tokens.
+
+  `harn fmt` also accepts explicit `.harn.txt` program files, using the same
+  file rules as directory formatting and source repair.
+- `harn test` now fails a test or file fixture that returns `Err`, including errors
+  propagated with `?`, instead of reporting a pass before assertions run.
+  `harn bench` also refuses to record an iteration that returns `Err` as a success.
+- Report safe operation, SQLite result codes and operating-system error kinds when
+  machine spending accounting is unavailable. Preserve fail-closed admission and
+  distinguish storage failures from an exhausted allowance without exposing paths,
+  SQL or stored values in the diagnostic.
+- Build the editor's model chooser from display metadata without resolving
+  tool support for every entry. Preserve alias labels, tiers, and scoped
+  catalog changes, and keep the inherited model option unique.
+- Java method insertion checks now handle enum members and annotation elements.
+  Methods in nested types and enum constant bodies do not block a new member in the enclosing type.
+- Structural declaration replacement preserves surrounding bytes, tabs, and local
+  line endings instead of rewriting whole lines and collapsing blank runs.
+- Conservative spend admission now supports the verified direct Fireworks and Groq token contracts,
+  retaining exact-route identity, full-context worst-case reservations and unknown-usage holds.
+  Compatible aggregators and custom providers remain unsupported until their billing contracts are verified.
+- Keep valid capability bundles intact during runtime bumps when they carry more
+  capabilities than an imported helper requires. The migration no longer inserts
+  a duplicate argument before such bundles.
+- Confined commands retain a caller's populated Gradle cache inside the workspace
+  instead of dropping `GRADLE_USER_HOME` and trying to download it again. External
+  cache paths relocate inside the workspace without adding filesystem authority.
+- Inference HTTP clients refuse redirects while a machine spend allowance is active,
+  keeping redirects outside the admitted provider request from dispatching. Cached
+  clients distinguish this policy from ordinary egress-checked redirect handling.
+- `harn package artifacts manifest` and `check` now inspect the compiled protocol
+  contract from any directory, without a Harn source checkout.
+- Recursive functions keep their names available inside collection callbacks,
+  including nested callbacks and mutually recursive calls.
+- Keep pipeline input repairs valid when the last unused input has a trailing comma, including when all inputs are removed.
+- Keep recursive user-test discovery and its reported source inventory in
+  agreement. Skip runtime state and generated files, honor project ignore
+  rules, and preserve hidden source folders, ordinary vendor folders, and
+  explicitly selected files or directory roots. Discovery errors fail the
+  selection instead of silently producing an empty successful run.
+- The PowerShell installer retains required release licenses in `harn-licenses/`,
+  matching the Unix installer. It rejects incomplete license payloads before
+  changing an existing installation.
+
+- Java method rename ignores existing names on unrelated receiver types while
+  retaining same-type conflicts and refusing unproved receiver bindings,
+  inherited member types, switch-local shadows and unsafe dispatch changes.
+  Saved indexes rebuild to discard older unproved Java call edges.
+- Direct GPT-5.4-mini requests with reasoning and function tools now use OpenAI's
+  Responses API. Explicit effort `none` keeps Chat Completions available, and
+  aggregator routes retain their own endpoint rules.
+- Completion calls now consume CLI replay tapes and scoped mock fixtures through
+  the same mock owner as ordinary LLM calls. Matching, usage, errors and response
+  order are preserved. Native completion responses are also included in mock
+  recordings; chat fallback responses remain recorded once.
+- The Harn bump runtime skips a merge of the base branch into an open bump pull
+  request instead of stopping every later run with `repair_conflict`. A merge
+  that brings in commits the base lacks is still refused, and the refusal names
+  the merge and those commits.
+- `harn install` now records every locked package in the shared package cache
+  even when the project's current generation already satisfied the lock. A later
+  `harn install --frozen --offline` from a fresh project resolves from that cache
+  instead of failing with a missing cache entry.
+- Symbol replacement preserves preceding code and its comments when the
+  selected declaration shares a line with another statement.
+- The Harn bump runtime now converges when the base branch changes a refreshed
+  file during validation. It re-derives the refresh on the advanced base and
+  publishes there, validating once per attempt, instead of failing with
+  `base_conflict` after a full validation. The `base_conflict` outcome is
+  removed, and the receipt adds `validated_base_oid`.
+- Include invalid missing-tool-call classifier settings in the exported agent-loop error contract,
+  preserving the configuration code, field, and offending value.
+- Git tool registries check custom names, descriptions, and tool configuration
+  before execution. They reuse the shared `std/tools.ToolDefinitionConfig` type
+  and preserve shared and per-tool override order.
+  `std/git` also exports its catalog option and execution argument types.
+- **VS Code extension.** Include the language client and its runtime dependencies
+  in the extension package so language features and commands can load.
+
+### Security
+
+- Update Tokio to 1.53.3 to address RUSTSEC-2026-0386 in its Unix asynchronous file-descriptor constructors.
+
+- **AWS login signing.** The AWS login provider signs its DPoP proof with p256 0.14
+  and a deterministic RFC 6979 nonce, which moves the build to crypto-bigint 0.7.6
+  and clears RUSTSEC-2026-0387.
+- **Dependency audit.** `cargo deny` ignores RUSTSEC-2026-0387 until 2026-10-31 while
+  the AWS login provider moves to p256 0.14 (#10421).
+- **VS Code extension packaging.** Use MSAL Node 7.1.0 in Azure Identity to
+  address GHSA-xcx6-jx8p-x3h5 in the extension packaging tools.
+
+## v0.10.176 (never published)
+
+### Breaking
+
+- **Hosted provider encoding (#6518).** Hosted OpenAI-compatible requests now
+  use the ordinary provider encoder, including model-specific token limits,
+  tool schemas, history, and streaming usage. `HostedOpenAiRequest` is now a
+  read-only serializable body. The unused `HostedStreamOptions` type is removed.
+  Non-OpenAI provider routes are rejected before encoding. Formatting a hosted
+  body does not add provider-call receipts.
+
+  Migration: serialize `HostedOpenAiRequest` directly for HTTP egress. Use
+  `serde_json::to_value` to inspect the encoded body instead of reading its
+  former public fields, and remove `HostedStreamOptions` imports.
+- **Package cache reads now keep their source locked until copying or inspection
+  finishes.** Cache cleanup waits for those readers, and Git and archive entries
+  use a separate `v2` directory so older Harn processes cannot delete them.
+
+  Migration: if the required packages exist only in the older cache layout,
+  fetch them once online before installing a fresh project offline. Existing
+  installed generations still work when their packages match the lock. Keep
+  `HARN_CACHE_DIR` set to the same cache root as before.
+- Reject CSV imports with duplicate headers or extra cells instead of losing data.
+- Parse XML with the existing `roxmltree` library. Preserve Unicode names,
+  namespace prefixes, and spaces around comments and child elements. Reject
+  trailing content, duplicate attributes, forbidden characters, and DTDs.
+  Bound XML rendering depth as well as parsing depth. The writer sanitizes
+  colons in tags and rejects text XML cannot represent.
+- Accept JSON byte streams split within UTF-8 characters, and allow streamed
+  numbers to continue across chunks. Apply the same number rule to LLM output
+  validation, and reject incomplete UTF-8 when a stream ends.
+- Keep fractional seconds when adding durations to dates, and reject results
+  outside the supported date range.
+
+Migration: give CSV columns unique headers and match each row to those columns,
+or parse without headers to keep ragged rows. Remove XML DTDs and declare any
+namespace prefixes before parsing. Malformed XML now raises an error.
+Use bytes, which XML stores as base64, for data with forbidden text characters.
+
+### Added
+
+- `harn bench --output <path>` writes iteration samples and timing statistics as
+  JSON without enabling profiling. Failed output writes fail the command.
+- `harn provider catalog export` can export the runtime's embedded catalog without
+  an overlay. This gives external tools the full catalog and schema from their
+  pinned runtime without copying provider rules or reading repository sources.
+- `std/markdown` provides typed headings, resolved links, prose blocks, visible
+  text, and English reading scores for Markdown and MDX. Document extraction uses
+  the same parser, replacing its separate markup scanner.
+- Added `harness.ast.check_member_insertion` to distinguish Java method overloads
+  from duplicate signatures before writing a proposed edit. The check compares
+  direct members of one type, ignores parameter names and return types, and
+  refuses unresolved cases.
+- Add optional bounded edit evidence to code-index refactors and source-image
+  changeset summaries, with exact edit locations, per-file syntax readings, and
+  binding-proven preserved namesakes.
+- Add `secret_pattern_catalog()` to read the runtime's typed secret pattern catalog without fetching or parsing source files.
+- Embedded hosts and the CLI share one strict durable spending-policy loader,
+  preserving the same allowance and uncertain attempts across restarts without
+  exposing policy contents in parse or storage diagnostics.
+
+### Changed
+
+- Workflow scheduling now uses typed join policies, edges, and readiness results.
+  Stage specs check join-policy fields instead of erasing them to `dict`.
+- **Shared runtime building blocks (#10349).** Value construction, builtin contracts,
+  and test execution share common helpers. Pure and internal builtin
+  declarations can omit an empty effects list; capability calls still require
+  explicit effects.
+- **Exported symbol replacement.** Replacing JavaScript or TypeScript declarations
+  includes the export wrapper and keeps neighboring code unchanged.
+- Run the step-judge study through a typed Harn driver. Reports refuse missing,
+  partial, or infrastructure-error measurements and preserve unknown cost.
+
+### Fixed
+
+- A Linux run whose sandbox policy grants `allow_tcp_loopback` on a host with no
+  namespace launcher no longer refuses every confined command. The sandbox drops
+  only that grant, keeps every other confinement, and emits a
+  `sandbox.loopback_unavailable` warning that names the launcher it would need.
+  `process_sandbox::loopback_support` and `withhold_unsupported_loopback` expose
+  the same decision to embedders.
+- Run Gradle builds and tests under loopback-only process confinement on Linux and macOS. The Linux namespace helper keeps
+  the caller's uid, so the JVM finds the caller's `~/.gradle`, and binds the workspace's `.harn-tmp` over the child's
+  `/tmp`, so the JVM attach socket and Gradle's native libraries land there. On macOS the session temp alias is short
+  enough to hold a Unix socket when a socket root is granted, and the loopback grant sets
+  `-Djava.net.preferIPv6Addresses=true` so env-less Gradle workers reach the daemon.
+- Directory walks now report read failures and invalid ignore files instead of returning an incomplete list.
+  This keeps a missing or unreadable source tree from looking like an empty, successful scan.
+- Include every successfully opened editor-rule file in workspace guidance
+  dependencies, even when its body is empty, duplicated, or over budget.
+  Treat opened empty instruction files and imports as read rather than unreadable.
+- Let standalone playground, MCP, server, and orchestrator commands launch child
+  processes without requiring an inference ceiling. Preserve stricter session
+  environment policy and restore the playground environment between runs.
+- Harn formatting keeps module comments above sorted imports. The formatter's corpus check
+  now accepts its documented import ordering while still rejecting changed imports,
+  missing comments, and changed program tokens.
+
+  `harn fmt` also accepts explicit `.harn.txt` program files, using the same
+  file rules as directory formatting and source repair.
+- `harn test` now fails a test or file fixture that returns `Err`, including errors
+  propagated with `?`, instead of reporting a pass before assertions run.
+  `harn bench` also refuses to record an iteration that returns `Err` as a success.
+- Report safe operation, SQLite result codes and operating-system error kinds when
+  machine spending accounting is unavailable. Preserve fail-closed admission and
+  distinguish storage failures from an exhausted allowance without exposing paths,
+  SQL or stored values in the diagnostic.
+- Build the editor's model chooser from display metadata without resolving
+  tool support for every entry. Preserve alias labels, tiers, and scoped
+  catalog changes, and keep the inherited model option unique.
+- Java method insertion checks now handle enum members and annotation elements.
+  Methods in nested types and enum constant bodies do not block a new member in the enclosing type.
+- Structural declaration replacement preserves surrounding bytes, tabs, and local
+  line endings instead of rewriting whole lines and collapsing blank runs.
+- Conservative spend admission now supports the verified direct Fireworks and Groq token contracts,
+  retaining exact-route identity, full-context worst-case reservations and unknown-usage holds.
+  Compatible aggregators and custom providers remain unsupported until their billing contracts are verified.
+- Keep valid capability bundles intact during runtime bumps when they carry more
+  capabilities than an imported helper requires. The migration no longer inserts
+  a duplicate argument before such bundles.
+- Confined commands retain a caller's populated Gradle cache inside the workspace
+  instead of dropping `GRADLE_USER_HOME` and trying to download it again. External
+  cache paths relocate inside the workspace without adding filesystem authority.
+- Inference HTTP clients refuse redirects while a machine spend allowance is active,
+  keeping redirects outside the admitted provider request from dispatching. Cached
+  clients distinguish this policy from ordinary egress-checked redirect handling.
+- `harn package artifacts manifest` and `check` now inspect the compiled protocol
+  contract from any directory, without a Harn source checkout.
+- Recursive functions keep their names available inside collection callbacks,
+  including nested callbacks and mutually recursive calls.
+- Keep pipeline input repairs valid when the last unused input has a trailing comma, including when all inputs are removed.
+- Keep recursive user-test discovery and its reported source inventory in
+  agreement. Skip runtime state and generated files, honor project ignore
+  rules, and preserve hidden source folders, ordinary vendor folders, and
+  explicitly selected files or directory roots. Discovery errors fail the
+  selection instead of silently producing an empty successful run.
+- The PowerShell installer retains required release licenses in `harn-licenses/`,
+  matching the Unix installer. It rejects incomplete license payloads before
+  changing an existing installation.
+
+### Security
+
+- Update Tokio to 1.53.3 to address RUSTSEC-2026-0386 in its Unix asynchronous file-descriptor constructors.
+
+## v0.10.175
+
+### Added
+
+- Add `llm.escalation_target`, which picks the stronger catalog model a run should switch to after repeated
+  verification failures. It returns a `models:` ladder step with the evidence behind the choice, or a
+  machine-readable `fallback_code` and a route diagnostic when no target fits.
+
+### Changed
+
+- Record SambaCloud's announced November DeepSeek and Llama retirements and the
+  undated MiniMax M3 redirect, preserving current availability and model identities
+  while the replacement wire ID and exact cutoff times remain unverified.
+
+### Fixed
+
+- Keep imported aliases of types without a runtime schema usable in type-only positions, including generic aliases over `Result`.
+- Fail `scripts/sign_local_macos.sh` when a signed binary does not pass
+  `codesign --verify --strict`, instead of reporting success after a swallowed signing failure.
+- Read through a SQLite connection, not a raw file copy, when a session store is opened read-only in a process that
+  already holds the store open. The copy released the WAL index lock and crashed long sessions with SIGBUS.
+- Let a served turn in the default `ask` ACP mode run a pipeline's own bookkeeping. The run-store write methods
+  (`harness.runtime.store_set`, `store_delete`, `store_save`, `store_clear`) now carry
+  `runtime_control_plane`, as `harness.agent.open` does, because they write only the Harn-owned `<state-root>/store.json`,
+  never the workspace or an external system. The `read_only` ceiling that every non-`code` session mode installs no longer
+  rejects them, which does permit durable writes to the state root. `harness.agent.goal` is also readable while a tool
+  prepares its approval facts, so a tool's `prepare` hook can bind the session goal.
+- Java `record` and `@interface` declarations, and C# `record` declarations and constructors, now appear in AST
+  symbols and outlines. Record header components are listed as fields, and methods and compact constructors inside a
+  record name the record as their container, so symbol-addressed edits can target them.
+- `harn-rules` patterns now match with exact shape: a match is rejected when the target has a child, keyword, or
+  comment the pattern neither spells nor binds to a metavariable. Previously `getById($A)` also matched
+  `folderService.getById(x)`, `foo($A)` matched `foo(a, b)`, and `let $N = $V;` matched `let mut x = 1;`, and the
+  `fix` silently deleted the receiver, the extra argument, or the modifier. Write a metavariable where the target may
+  vary, such as `$OBJ.getById($A)`. The `no-console-log` seed rule now matches the callee so it still flags calls
+  with any number of arguments.
+- Java, C#, C, C++, and PHP expression patterns no longer need a trailing `;` to compile. A pattern written with `;`
+  is rooted at the statement, so a fix ending in `;` replaces the target's `;` instead of producing `;;`. PHP patterns
+  are parsed as PHP code instead of inline HTML.
+- Agent tool results now pass a per-result size budget (`tool_result_max_chars`, default 64000, `0` disables)
+  before they enter the conversation. A larger result is saved in full to an owner-only file in the workspace
+  temp dir (`.harn-tmp/tool-results/`), which the agent can read back and which is removed when the loop ends.
+  The model sees a head/tail/diagnostic excerpt with a notice naming that file. The result records
+  `tool_output_truncated`, `dropped_bytes`, `original_size`, `final_size`, and `full_output_path`. The compaction
+  `tool_output_max_chars` clamp now also rewrites `tool_result` messages and framed text-channel results, which it
+  previously skipped.
+- Confined commands retain a configured XDG cache inside their workspace so dependency preparation and offline execution
+  can reuse it.
+
 ## v0.10.174
 
 ### Added

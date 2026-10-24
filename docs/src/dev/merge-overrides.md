@@ -30,15 +30,28 @@ actor.
 
 ## When to use an override
 
-- The merge queue is backed up enough that speculative CI would burn material
-  Actions spend, and one PR must land before the rest.
-- Required CI is broken in a way you can fix forward on `main` in the same
-  session.
-- You need to serialize a single founder land ahead of a long queue (release
-  unblock or production incident).
+`bypass-merge-queue` and `force-merge` land outside the queue, which rebuilds
+every queued merge group. The workflow allows them only when one of three
+measured signals holds, and refuses the label otherwise:
+
+- Main is red: an open `[CI] Main is red` issue, or the newest conclusive `CI`
+  run on `main` failed.
+- The pull request is a release-train pull request: a repin, a version-only
+  bump, or one labeled `release-blocker`.
+- The merge queue is wedged: the pull request has been queued for 90 minutes or
+  more and no merge group run is active on `main`.
+
+The reason text is never evidence; the signals are read at decision time. See
+the [org contract](https://github.com/burin-labs/.github#what-refuses-an-override)
+for the exact rules. `bypass-ci` keeps the queue, so it is not gated by these
+signals.
 
 ## When not to use an override
 
+- A long or costly queue. Each bypass rebuilds every queued group; on
+  2026-10-23 green-PR bypasses cancelled most merge group runs. A pull request
+  that must land first takes the queue's jump-to-front instead, which keeps the
+  combined-tree check.
 - Ordinary feature work, dependency bumps, or “CI is slow today.”
 - Changes you cannot fix forward if they break `main`.
 - Pull requests from forks.

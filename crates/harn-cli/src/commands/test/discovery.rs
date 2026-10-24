@@ -8,11 +8,13 @@
 //! suite, with no line anywhere saying the other 2,141 were never considered.
 //!
 //! Two things close that. Every path run reports how many cases it produced
-//! against how many `.harn` files it walked, so a collapsed selection is
+//! against how many source files it selected, so a collapsed selection is
 //! visible instead of implied. And a target that contains conformance fixtures
 //! is refused outright, naming the suite-root form that does run them.
 
 use std::path::Path;
+
+use crate::test_runner::TestSourceInventory;
 
 /// The suite root whose cases this runner does not execute.
 const CONFORMANCE_ROOT_NAME: &str = "conformance";
@@ -20,19 +22,11 @@ const CONFORMANCE_ROOT_NAME: &str = "conformance";
 /// One requested target's discoverable content.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct TargetCensus {
-    /// `.harn` files below the target, including the target itself when it is
-    /// one.
-    pub harn_files: usize,
-    /// Of those, the ones a sibling `.expected` file marks as conformance
+    /// Recursively discovered `.harn` files and explicitly selected files.
+    pub source_files: usize,
+    /// Of those, the `.harn` files a sibling `.expected` file marks as conformance
     /// fixtures, which the user-test runner never executes.
     pub conformance_fixtures: usize,
-}
-
-impl TargetCensus {
-    fn add(&mut self, other: TargetCensus) {
-        self.harn_files += other.harn_files;
-        self.conformance_fixtures += other.conformance_fixtures;
-    }
 }
 
 fn is_conformance_fixture(path: &Path) -> bool {
@@ -41,43 +35,35 @@ fn is_conformance_fixture(path: &Path) -> bool {
 
 /// Walk one requested target and count what it holds.
 ///
-/// Hidden directories and anything the repository ignores are skipped, so a
-/// vendored or generated tree cannot inflate the denominator.
+/// Use the runner's source inventory so the denominator and execution agree.
+#[cfg(test)]
 pub(crate) fn census_target(path: &Path) -> TargetCensus {
-    let mut census = TargetCensus::default();
-    if path.is_file() {
-        if path.extension().is_some_and(|ext| ext == "harn") {
-            census.harn_files = 1;
-            if is_conformance_fixture(path) {
-                census.conformance_fixtures = 1;
-            }
-        }
-        return census;
-    }
-    for entry in ignore::WalkBuilder::new(path)
-        .hidden(true)
-        .build()
-        .flatten()
-    {
-        let entry_path = entry.path();
-        if !entry_path.is_file() || entry_path.extension().is_none_or(|ext| ext != "harn") {
-            continue;
-        }
-        census.harn_files += 1;
-        if is_conformance_fixture(entry_path) {
-            census.conformance_fixtures += 1;
-        }
-    }
-    census
+    census_targets(&[path]).expect("fixture inventory")
 }
 
 /// Census every requested target as one.
-pub(crate) fn census_targets<P: AsRef<Path>>(paths: &[P]) -> TargetCensus {
-    let mut total = TargetCensus::default();
-    for path in paths {
-        total.add(census_target(path.as_ref()));
+pub(crate) fn census_targets<P: AsRef<Path>>(paths: &[P]) -> Result<TargetCensus, String> {
+    let paths = paths
+        .iter()
+        .map(|path| path.as_ref().to_path_buf())
+        .collect::<Vec<_>>();
+    Ok(census_inventory(&TestSourceInventory::discover(&paths)?))
+}
+
+pub(super) fn census_inventory(inventory: &TestSourceInventory) -> TargetCensus {
+    let mut census = TargetCensus {
+        source_files: inventory.source_files().len(),
+        conformance_fixtures: 0,
+    };
+    for path in inventory.source_files() {
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "harn")
+        {
+            census.conformance_fixtures += usize::from(is_conformance_fixture(path));
+        }
     }
-    total
+    census
 }
 
 /// True when the target sits inside the conformance suite.
@@ -113,9 +99,9 @@ pub(crate) fn conformance_fixture_refusal(
         return None;
     }
     Some(format!(
-        "{} of the {} .harn file(s) under {} are conformance fixtures, which are driven by their `.expected` file and are never executed by `harn test <path>`. This invocation would report a confident verdict over the remainder and say nothing about the rest. Run `harn test conformance` for the whole suite, or `harn test conformance --filter <name>` for one case.",
+        "{} of the {} source file(s) under {} are conformance fixtures, which are driven by their `.expected` file and are never executed by `harn test <path>`. This invocation would report a confident verdict over the remainder and say nothing about the rest. Run `harn test conformance` for the whole suite, or `harn test conformance --filter <name>` for one case.",
         census.conformance_fixtures,
-        census.harn_files,
+        census.source_files,
         path_strs.join(", "),
     ))
 }
@@ -128,8 +114,8 @@ pub(crate) fn conformance_fixture_refusal(
 /// different verdicts.
 pub(crate) fn coverage_line(path_strs: &[String], census: &TargetCensus, cases: usize) -> String {
     format!(
-        "test targets: ran {cases} case(s) from {} discoverable .harn file(s) under {}",
-        census.harn_files,
+        "test targets: ran {cases} case(s) from {} discoverable source file(s) under {}",
+        census.source_files,
         path_strs.join(", "),
     )
 }
@@ -156,7 +142,7 @@ mod tests {
         write(&target.join("real_test.harn"), "// pipeline\n");
 
         let census = census_target(&target);
-        assert_eq!(census.harn_files, 3);
+        assert_eq!(census.source_files, 3);
         assert_eq!(census.conformance_fixtures, 2);
 
         let refusal =
@@ -176,7 +162,7 @@ mod tests {
         write(&target.join("b_test.harn"), "// pipeline\n");
 
         let census = census_target(&target);
-        assert_eq!(census.harn_files, 2);
+        assert_eq!(census.source_files, 2);
         assert_eq!(census.conformance_fixtures, 0);
         assert_eq!(
             conformance_fixture_refusal(&[target.to_string_lossy().into_owned()], &census),
@@ -210,7 +196,7 @@ mod tests {
         write(&target.with_extension("expected"), "ok\n");
 
         let census = census_target(&target);
-        assert_eq!(census.harn_files, 1);
+        assert_eq!(census.source_files, 1);
         assert_eq!(census.conformance_fixtures, 1);
         assert!(
             conformance_fixture_refusal(&[target.to_string_lossy().into_owned()], &census)
@@ -219,9 +205,23 @@ mod tests {
     }
 
     #[test]
+    fn explicit_sources_without_harn_extensions_count_without_becoming_conformance_fixtures() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plain = dir.path().join("source_without_extension");
+        let text = dir.path().join("explicit.harn.txt");
+        for path in [&plain, &text] {
+            write(path, "pipeline test_explicit() {}\n");
+            write(&path.with_extension("expected"), "ok\n");
+        }
+        let census = census_targets(&[plain, text]).expect("explicit source inventory");
+        assert_eq!(census.source_files, 2);
+        assert_eq!(census.conformance_fixtures, 0);
+    }
+
+    #[test]
     fn the_coverage_line_names_both_numbers() {
         let census = TargetCensus {
-            harn_files: 2165,
+            source_files: 2165,
             conformance_fixtures: 0,
         };
         let line = coverage_line(&["conformance/tests".to_string()], &census, 24);

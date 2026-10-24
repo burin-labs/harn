@@ -288,7 +288,6 @@ pub(crate) fn register_file_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__files_upload(path: string, provider: string) -> string",
     kind = "async",
     category = "llm.host",

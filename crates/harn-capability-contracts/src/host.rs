@@ -664,14 +664,16 @@ capability_method!(
     "harness.runtime.store_set",
     ["state.write@arg0"],
     "__cap_runtime_store_set(key: string, value: any) -> nil",
-    "Write a value to the run store."
+    "Write a value to the run store.",
+    runtime_control_plane
 );
 capability_method!(
     runtime_store_delete,
     "harness.runtime.store_delete",
     ["state.mutate@arg0"],
     "__cap_runtime_store_delete(key: string) -> nil",
-    "Delete a value from the run store."
+    "Delete a value from the run store.",
+    runtime_control_plane
 );
 capability_method!(
     runtime_store_list,
@@ -685,14 +687,16 @@ capability_method!(
     "harness.runtime.store_save",
     ["state.write@const=run-store"],
     "__cap_runtime_store_save() -> nil",
-    "Persist the run store."
+    "Persist the run store.",
+    runtime_control_plane
 );
 capability_method!(
     runtime_store_clear,
     "harness.runtime.store_clear",
     ["state.mutate@const=run-store"],
     "__cap_runtime_store_clear() -> nil",
-    "Clear the run store."
+    "Clear the run store.",
+    runtime_control_plane
 );
 capability_method!(
     runtime_dry_run,

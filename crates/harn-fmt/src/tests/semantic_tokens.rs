@@ -170,6 +170,16 @@ fn assert_same_semantic_tokens(before_source: &str, after_source: &str) -> Resul
         return Ok(());
     }
 
+    // Import order and selective-name order have one canonical formatter key.
+    // Keep their AST meaning and every comment, while comparing the remaining
+    // program tokens in place.
+    if strip_grouping_parens(&without_import_prefix(before_source)?)
+        == strip_grouping_parens(&without_import_prefix(after_source)?)
+        && parsed_program(before_source)? == parsed_program(after_source)?
+    {
+        return Ok(());
+    }
+
     let first = before
         .iter()
         .zip(&after)
@@ -261,32 +271,53 @@ fn parsed_program(source: &str) -> Result<serde_json::Value, String> {
     let program = Parser::new(tokens)
         .parse()
         .map_err(|error| format!("source does not parse: {error}"))?;
-    let mut json =
-        serde_json::to_value(&program).map_err(|error| format!("cannot serialize AST: {error}"))?;
-    erase_spans(&mut json);
-    Ok(json)
+    Ok(super::meaning(&program))
 }
 
-fn erase_spans(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            // `Spanned` names its coordinate `span`, and several nodes record a
-            // keyword's own position beside it: `then_span`, `else_span`,
-            // `try_span`, `catch_span`, `finally_span`. Dropping only `span`
-            // leaves those behind, and they move whenever layout moves, so two
-            // identical programs laid out differently would compare unequal.
-            map.retain(|key, _| key != "span" && !key.ends_with("_span"));
-            for nested in map.values_mut() {
-                erase_spans(nested);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                erase_spans(item);
-            }
-        }
-        _ => {}
-    }
+fn without_import_prefix(source: &str) -> Result<Vec<TokenKind>, String> {
+    let program = harn_parser::parse_source(source).map_err(|error| error.to_string())?;
+    let end = program
+        .iter()
+        .take_while(|node| {
+            matches!(
+                node.node,
+                harn_parser::Node::ImportDecl { .. }
+                    | harn_parser::Node::SelectiveImport { .. }
+                    | harn_parser::Node::NamespaceImport { .. }
+            )
+        })
+        .last()
+        .map_or(0, |node| node.span.end);
+    let (prefix, body) = source
+        .split_at_checked(end)
+        .ok_or_else(|| "import prefix has an invalid UTF-8 boundary".to_string())?;
+    let mut comments = semantic_tokens(prefix)?
+        .into_iter()
+        .filter(|token| {
+            matches!(
+                token,
+                TokenKind::LineComment { .. } | TokenKind::BlockComment { .. }
+            )
+        })
+        .collect::<Vec<_>>();
+    comments.sort_by_cached_key(|token| format!("{token:?}"));
+    comments.extend(semantic_tokens(body)?);
+    Ok(comments)
+}
+
+#[test]
+fn sorted_imports_preserve_meaning_comments_and_body_tokens() {
+    let source = "// Module 🦀 header\nimport { z, a } from \"std/z\"\nimport \"std/a\"\nfn f() { value?.call() }\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.starts_with("// Module 🦀 header\nimport \"std/a\"\n"));
+    assert_same_semantic_tokens(source, &formatted).unwrap();
+    assert!(assert_same_semantic_tokens(source, &formatted.replace("std/z", "std/b")).is_err());
+    assert!(
+        assert_same_semantic_tokens(source, &formatted.replace("// Module 🦀 header\n", ""))
+            .is_err()
+    );
+    assert!(assert_same_semantic_tokens(source, &formatted.replace("?.", ".")).is_err());
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
 
 fn semantic_tokens(source: &str) -> Result<Vec<TokenKind>, String> {

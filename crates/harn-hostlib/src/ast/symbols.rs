@@ -490,19 +490,41 @@ fn extract_java(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 keyword: "enum",
                 out,
             }),
+            "record_declaration" => named_decl_with_keyword(NamedDeclArgs {
+                node,
+                source,
+                container,
+                pos,
+                kind: SymbolKind::Class,
+                keyword: "record",
+                out,
+            }),
+            "annotation_type_declaration" => named_decl_with_keyword(NamedDeclArgs {
+                node,
+                source,
+                container,
+                pos,
+                kind: SymbolKind::Interface,
+                keyword: "@interface",
+                out,
+            }),
             "enum_constant" => {
                 enum_case_symbol(node, source, container, pos, out);
+                None
+            }
+            "formal_parameter" if is_record_component(node, "record_declaration") => {
+                push_jvm_field(node, source, container, pos, "type", Some("private"), out);
                 None
             }
             "field_declaration" => {
                 push_jvm_field(node, source, container, pos, "type", Some("package"), out);
                 None
             }
-            "method_declaration" => {
+            "method_declaration" | "annotation_type_element_declaration" => {
                 push_jvm_method(node, source, container, pos, out);
                 None
             }
-            "constructor_declaration" => {
+            "constructor_declaration" | "compact_constructor_declaration" => {
                 push_func(PushFuncArgs {
                     node,
                     source,
@@ -517,6 +539,14 @@ fn extract_java(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
             _ => None,
         }
     });
+}
+
+/// A record's header parameters (`record Point(int x, int y)`) are its
+/// fields; parameters of its methods and constructors are not.
+fn is_record_component(node: Node<'_>, record_kind: &str) -> bool {
+    node.parent()
+        .and_then(|list| list.parent())
+        .is_some_and(|owner| owner.kind() == record_kind)
 }
 
 fn push_jvm_field(
@@ -639,12 +669,44 @@ fn extract_csharp(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 keyword: "enum",
                 out,
             }),
+            "record_declaration" => {
+                let (kind, keyword) = if has_anonymous_child(node, "struct", source) {
+                    (SymbolKind::Struct, "record struct")
+                } else {
+                    (SymbolKind::Class, "record")
+                };
+                named_decl_with_keyword(NamedDeclArgs {
+                    node,
+                    source,
+                    container,
+                    pos,
+                    kind,
+                    keyword,
+                    out,
+                })
+            }
             "enum_member_declaration" => {
                 enum_case_symbol(node, source, container, pos, out);
                 None
             }
+            "parameter" if is_record_component(node, "record_declaration") => {
+                push_jvm_field(node, source, container, pos, "type", Some("public"), out);
+                None
+            }
             "method_declaration" => {
                 push_csharp_method(node, source, container, pos, out);
+                None
+            }
+            "constructor_declaration" => {
+                push_func(PushFuncArgs {
+                    node,
+                    source,
+                    container,
+                    pos,
+                    kind: SymbolKind::Method,
+                    prefix: "",
+                    out,
+                });
                 None
             }
             "field_declaration" => {

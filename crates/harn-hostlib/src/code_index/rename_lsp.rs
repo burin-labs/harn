@@ -250,10 +250,17 @@ pub(super) fn rename(
         Ok(resolutions) => resolutions,
         Err(reason) => return Ok(Answer::Fallback(reason)),
     };
+    let mut preserved_sites = Vec::new();
     let missed: Vec<(&Site, Resolution)> = sites
         .iter()
         .zip(resolutions)
-        .filter(|(_, resolution)| !resolution.is_elsewhere())
+        .filter(|(site, resolution)| {
+            let elsewhere = resolution.is_elsewhere();
+            if env.proof && elsewhere {
+                preserved_sites.push(*site);
+            }
+            !elsewhere
+        })
         .collect();
     if let Some((site, resolution)) = missed.first() {
         let missed_paths: Vec<&str> = missed.iter().map(|(site, _)| site.path.as_str()).collect();
@@ -269,6 +276,24 @@ pub(super) fn rename(
             "the language server {what} `{}` at {}:{}",
             env.symbol_name, site.path, site.line
         )));
+    }
+
+    if env.proof && env.scope == Scope::Workspace {
+        let mut preserved = Vec::new();
+        for site in preserved_sites {
+            let source = read_source(BUILTIN, &request.state.root, &site.path, request.session_id)?;
+            preserved.push(crate::edit_proof::PreservedSite {
+                path: site.path.clone(),
+                line: site.line,
+                text: source
+                    .lines()
+                    .nth(site.line.saturating_sub(1))
+                    .unwrap_or("")
+                    .to_owned(),
+                reason: "language server resolved this name to another binding".into(),
+            });
+        }
+        env.preserved = Some(preserved);
     }
 
     let mut plans: Vec<FilePlan> = Vec::new();
@@ -660,4 +685,18 @@ fn declaration_offset(source: &str, language: Language, name: &str, line: u32) -
         .filter(|span| span.start_row + 1 == line as usize)
         .map(|span| span.start_byte)
         .min()
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn enum_member_lsp_lookup_does_not_require_an_indexed_name_column() {
+        let source = "export enum Status { Ready }\n";
+        assert_eq!(
+            declaration_offset(source, Language::TypeScript, "Ready", 1),
+            source.find("Ready")
+        );
+    }
 }

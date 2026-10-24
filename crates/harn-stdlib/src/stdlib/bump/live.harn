@@ -44,6 +44,9 @@ pub type LiveBumpConfig = {
   readiness_timeout_ms: int,
 }
 
+/** Produces fresh refresh-environment entries, such as a short-lived token. */
+pub type LiveBumpEnvironmentRenewal = fn() -> dict
+
 /** Verdict of an authenticated fetch of a commit into the local checkout. */
 pub type LiveBumpFetch = {ok: bool, detail: string}
 
@@ -119,13 +122,24 @@ fn __lines(text: string?) -> list<string> {
   }
 }
 
-fn __working_changes(tools: HarnessTools, repo_dir: string) -> BumpChangeSet {
+fn __untracked(tools: HarnessTools, repo_dir: string) -> list<string> {
+  return __lines(__git(tools, repo_dir, ["ls-files", "--others", "--exclude-standard"]).stdout)
+}
+
+/** `unrelated` names untracked files that predate the refresh; they are never bump output. */
+fn __working_changes(
+  tools: HarnessTools,
+  repo_dir: string,
+  unrelated: list<string> = [],
+) -> BumpChangeSet {
   const tracked_additions = __lines(
     __git(tools, repo_dir, ["diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"]).stdout,
   )
-  const untracked_additions = __lines(
-    __git(tools, repo_dir, ["ls-files", "--others", "--exclude-standard"]).stdout,
+  const skip = set(unrelated)
+  const untracked_additions = __untracked(tools, repo_dir).filter(
+    { name -> !set_contains(skip, name) },
   )
+    .to_list()
   return {
     additions: tracked_additions
       + untracked_additions.filter({ name -> !contains(tracked_additions, name) }).to_list(),
@@ -229,6 +243,7 @@ fn __apply_version(
   cfg: LiveBumpConfig,
   target: string,
   source_revision: string,
+  unrelated: list<string>,
 ) -> VersionApplyResult {
   const version_write = __write_version(fs, cfg.version_file, strip_v(target))
   const revision_write = if version_write.ok && source_revision != "" {
@@ -242,7 +257,7 @@ fn __apply_version(
     nil
   }
   const refresh_ok = refresh?.success ?? false
-  const changes = __working_changes(tools, cfg.repo_dir)
+  const changes = __working_changes(tools, cfg.repo_dir, unrelated)
   const refreshed = changes.additions + changes.deletions
   return {
     ok: version_write.ok && revision_write.ok && refresh_ok,
@@ -299,21 +314,19 @@ fn __base_changes(
   return __changed_paths(tools, cfg, older, newer)
 }
 
-fn __adoption_failure(detail: string, conflicts: list<string> = []) -> BumpBaseAdoption {
-  return {ok: false, adopted_oid: nil, conflicts: conflicts, detail: detail}
+fn __adoption_failure(detail: string) -> BumpBaseAdoption {
+  return {ok: false, adopted_oid: nil, detail: detail}
 }
 
 /**
  * Adopt an advanced base branch head into the local checkout.
  *
  * The provider capability owns the authenticated fetch; everything after it is
- * local git. The adoption refuses before it mutates when the incoming commits
- * changed a path this bump's refresh already authored: that is a contest
- * between two writers of one artifact, and resetting would silently pick a
- * winner. Otherwise the adapter discards only the refresh paths it owns and
- * checks out the observed head detached, which is what
- * `harn-github-connector` requires before it will derive a payload — it refuses
- * any base oid that is not the local HEAD.
+ * local git. The adapter discards only the refresh paths it owns and checks out
+ * the observed head detached, which is what `harn-github-connector` requires
+ * before it will derive a payload — it refuses any base oid that is not the
+ * local HEAD. Incoming commits may change a refreshed path: the discarded
+ * output is derived again from the adopted base, so no writer's change is lost.
  */
 fn __adopt_base(
   fs: HarnessFs?,
@@ -335,23 +348,15 @@ fn __adopt_base(
       "advanced base ${to_oid} is still not present after fetching ${request.base}",
     )
   }
+  // The discarded output was derived on the declared base; restoring it onto
+  // any other HEAD would mix two bases' content.
   const declared_from = lowercase(trim(request.from_oid ?? ""))
-  const from_oid = if declared_from != "" {
-    declared_from
-  } else {
-    lowercase(trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? ""))
-  }
-  const comparison = __changed_paths(tools, cfg, from_oid, to_oid)
-  if !comparison.ok {
-    return __adoption_failure(comparison.detail)
-  }
-  const incoming = comparison.paths
-  const authored = set(request.refreshed ?? [])
-  const conflicts = incoming.filter({ path -> set_contains(authored, path) }).to_list()
-  if len(conflicts) > 0 {
+  const current_head = lowercase(
+    trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? ""),
+  )
+  if declared_from != "" && declared_from != current_head {
     return __adoption_failure(
-      "${len(conflicts)} refreshed path(s) were also changed between ${from_oid} and ${to_oid}",
-      conflicts,
+      "checkout HEAD ${current_head} is not the declared base ${declared_from}",
     )
   }
   // Remove only untracked output the discarded refresh reported. Discovering
@@ -400,7 +405,20 @@ fn __adopt_base(
           + trim((tracked_result.stderr ?? "") + (tracked_result.stdout ?? "")),
       )
     }
-    const tracked = __lines(tracked_result.stdout)
+    // The index omits a staged deletion, so HEAD names the paths to bring back.
+    const committed_result = __git(
+      tools,
+      cfg.repo_dir,
+      ["--literal-pathspecs", "ls-tree", "-r", "--name-only", "HEAD", "--"] + cleanup_paths,
+    )
+    if !committed_result.success {
+      return __adoption_failure(
+        "discovering committed refresh output failed: "
+          + trim((committed_result.stderr ?? "") + (committed_result.stdout ?? "")),
+      )
+    }
+    const tracked = (__lines(tracked_result.stdout) + __lines(committed_result.stdout)).unique()
+      .to_list()
     if len(tracked) > 0 {
       const restore = __git(
         tools,
@@ -433,12 +451,7 @@ fn __adopt_base(
   if head != to_oid {
     return __adoption_failure("checkout of ${to_oid} left HEAD at ${head}")
   }
-  return {
-    ok: true,
-    adopted_oid: head,
-    conflicts: [],
-    detail: "adopted ${to_oid} for adoption ${request.attempt}",
-  }
+  return {ok: true, adopted_oid: head, detail: "adopted ${to_oid} for adoption ${request.attempt}"}
 }
 
 fn __release_finalized(release: LiveBumpRelease) -> bool {
@@ -450,6 +463,10 @@ fn __release_finalized(release: LiveBumpRelease) -> bool {
 /**
  * Build the local adapter around one package-owned remote capability.
  *
+ * `renew_refresh_environment`, when given, runs before each refresh and its
+ * entries overlay `refresh_environment`, so short-lived credentials stay
+ * current without rebuilding the adapter and losing its per-run state.
+ *
  * @effects: [fs, process, net]
  * @errors: [invalid target tags or delegated local/provider failures]
  */
@@ -459,8 +476,12 @@ pub fn live_bump_adapter(
   remote: LiveBumpRemote,
   config: dict = {},
   fs: HarnessFs? = nil,
+  renew_refresh_environment: LiveBumpEnvironmentRenewal? = nil,
 ) -> BumpAdapter {
   const cfg = live_bump_config(config)
+  // Untracked files present before the first refresh are not bump output, so
+  // adoption cleanup never deletes them.
+  let unrelated: list<string>? = nil
   return {
     resolve_target_tag: fn(tag) {
       const requested = trim(tag ?? "")
@@ -518,8 +539,17 @@ pub fn live_bump_adapter(
       tag,
     ) },
     base_sha: fn() { return trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? "") },
-    apply_version:
-      fn(target, revision) { return __apply_version(fs, tools, cfg, target, revision) },
+    apply_version: fn(target, revision) {
+      if unrelated == nil {
+        unrelated = __untracked(tools, cfg.repo_dir)
+      }
+      const run_cfg = if renew_refresh_environment == nil {
+        cfg
+      } else {
+        cfg + {refresh_environment: cfg.refresh_environment + renew_refresh_environment()}
+      }
+      return __apply_version(fs, tools, run_cfg, target, revision, unrelated ?? [])
+    },
     preserve_repairs: fn(existing, base) { return replay_bump_repairs(
       tools,
       cfg.repo_dir,
@@ -544,7 +574,7 @@ pub fn live_bump_adapter(
         },
       }
     },
-    working_changes: fn() { return __working_changes(tools, cfg.repo_dir) },
+    working_changes: fn() { return __working_changes(tools, cfg.repo_dir, unrelated ?? []) },
     remote_base_head: remote.base_head,
     adopt_base: fn(request) { return __adopt_base(fs, tools, remote, cfg, request) },
     base_changes:

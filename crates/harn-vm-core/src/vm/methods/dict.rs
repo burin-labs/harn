@@ -16,9 +16,7 @@ impl crate::vm::Vm {
         }
 
         let result = match method {
-            "keys" => Ok(VmValue::list(
-                map.keys().map(|k| VmValue::string(k.as_str())).collect(),
-            )),
+            "keys" => Ok(VmValue::strings(map.keys().map(|k| k.as_str()))),
             "values" => Ok(VmValue::list(map.values().cloned().collect())),
             "entries" => Ok(VmValue::list(Self::dict_entries(map))),
             "len" => Ok(VmValue::Int(map.len() as i64)),

@@ -105,6 +105,7 @@ pub(in crate::stdlib::sandbox) fn prepare(
     };
     let seccomp = TransferableConfinement {
         ruleset: None,
+        private_tmp: None,
         // Mounts bound truncation: an ungranted path does not exist in the
         // namespace, and a read-only bind refuses it.
         seccomp: compile_seccomp_program(policy, true)?,

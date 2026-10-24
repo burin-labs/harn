@@ -399,7 +399,7 @@ pub(crate) struct PackageArtifactsArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum PackageArtifactsCommand {
-    /// Print the protocol-artifact manifest the running Harn would generate.
+    /// Print the running Harn binary's protocol manifest.
     Manifest(PackageArtifactsManifestArgs),
     /// Compare a downstream-vendored manifest against the running Harn manifest and report drift.
     Check(PackageArtifactsCheckArgs),

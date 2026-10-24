@@ -1,0 +1,74 @@
+# Ask the external review workflow to record an administrator's disposition of
+# one automated review finding on a same-repository pull request.
+#
+# A disposition is a pull request comment that begins `/automated-disposition`
+# and names the exact head and the finding's fingerprint. This workflow only
+# relays it: one `workflow_dispatch` naming the pull request and the comment,
+# sent with an App token that can do nothing but that, on one repository. The
+# review repository re-reads the comment from GitHub and decides everything
+# itself: that the author is a repository administrator, that the head is
+# current, and which threads the fingerprint selects. Nothing here checks out
+# or executes pull request code, and nothing here decides authority.
+#
+# `issue_comment` always runs the copy on the default branch, so a pull request
+# cannot edit what its own comment triggers. The review repository and workflow
+# come from the same repository variables as the automatic review dispatch.
+name: Disposition dispatch
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+concurrency:
+  group: disposition-dispatch-${{ github.event.comment.id }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: >-
+      ${{ (vars.REVIEW_DISPATCH_REPOSITORY == '' || vars.REVIEW_DISPATCH_REF == '') && 'Disposition: skipped (not configured)'
+      || 'Disposition: requested' }}
+    # A comment only wakes the relay when it is a command on a pull request
+    # from someone the repository already trusts to write. The review side
+    # checks for an administrator again; this keeps strangers from filling the
+    # review repository's run list.
+    if: >-
+      github.event.issue.pull_request != null
+      && startsWith(github.event.comment.body, '/automated-disposition')
+      && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Mint a token that can only dispatch the review repository's workflow
+        id: token
+        if: vars.REVIEW_DISPATCH_REPOSITORY != '' && vars.REVIEW_DISPATCH_REF != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ vars.REVIEW_DISPATCH_REPOSITORY }}
+          permission-actions: write
+
+      - name: Relay the disposition comment
+        if: steps.token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REVIEW_REPOSITORY: ${{ github.repository_owner }}/${{ vars.REVIEW_DISPATCH_REPOSITORY }}
+          REVIEW_WORKFLOW: ${{ vars.REVIEW_DISPOSITION_WORKFLOW || 'review-override.yml' }}
+          REVIEW_REF: ${{ vars.REVIEW_DISPATCH_REF }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          set -euo pipefail
+          gh workflow run "$REVIEW_WORKFLOW" \
+            --repo "$REVIEW_REPOSITORY" \
+            --ref "$REVIEW_REF" \
+            -f repository="$TARGET_REPOSITORY" \
+            -f pr="$PR_NUMBER" \
+            -f comment_id="$COMMENT_ID"
+          echo "Relayed comment $COMMENT_ID on $TARGET_REPOSITORY#$PR_NUMBER for a disposition decision."

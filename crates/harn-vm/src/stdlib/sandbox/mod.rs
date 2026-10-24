@@ -140,9 +140,9 @@ pub(crate) use refusal::unavailable;
 pub use refusal::{
     infer_process_sandbox_mechanism, is_process_sandbox_signal, process_violation_error,
     ProcessSandboxAssessment, ProcessSandboxDenialReporting, ProcessSandboxGrants,
-    ProcessSandboxMechanism, ProcessSandboxOperation, ProcessSandboxRefusal,
-    ProcessSandboxReportingContext, SandboxMechanism, SandboxMechanismAvailability,
-    SandboxMechanismUnavailable, SandboxRequirement,
+    ProcessSandboxMechanism, ProcessSandboxNetwork, ProcessSandboxOperation, ProcessSandboxRefusal,
+    ProcessSandboxReport, ProcessSandboxReportingContext, SandboxMechanism,
+    SandboxMechanismAvailability, SandboxMechanismUnavailable, SandboxRequirement,
 };
 pub(crate) use refusal::{path_is_denied, process_sandbox_read_deny_roots};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1217,7 +1217,7 @@ pub(crate) fn active_sandbox_policy() -> Option<(CapabilityPolicy, SandboxProfil
     if !profile.confines_processes() || effective_fallback(profile) == SandboxFallback::Off {
         return None;
     }
-    Some((policy, profile))
+    Some((crate::process_sandbox::reconcile(policy), profile))
 }
 
 fn spawn_error(error: std::io::Error) -> VmError {

@@ -1,0 +1,87 @@
+import { extract_text } from "std/document"
+import { parse, reading_level } from "std/markdown"
+
+pipeline test_markdown_structure_resolves_real_links_and_preserves_source_positions(
+  harness: Harness,
+) {
+  const source = harness.fs.read_text(
+    path_join(harness.fs.source_dir(), "fixtures/markdown-structure.txt"),
+  )
+  const document = parse(source)
+  assert_eq(
+    document.headings.map({ heading -> heading.anchor }).to_list(),
+    ["café-guide-code", "repeat", "repeat-1", "repeat-2", "another"],
+  )
+  assert_eq(document.headings[0]!.text, "Café guide code")
+  assert_eq(document.headings[0]!.line, 5)
+  assert_eq(
+    document.headings[0]!.offset,
+    bytes_len(bytes_from_string("---\ntitle: Hidden frontmatter\n---\n\n")),
+  )
+  assert_eq(document.headings[4]!.level, 2)
+  assert(document.links.any({ link -> link.destination == "./manual_(v2).md" && link.line == 7 }))
+  assert(document.links.any({ link -> link.destination == "./guide.md" && link.line == 7 }))
+  assert(document.links.any({ link -> link.destination == "./badge.png" && link.image }))
+  assert(!document.links.any({ link -> link.destination.contains("missing-") }))
+  const prose = document.blocks.map({ block -> block.text }).to_list().join("\n")
+  assert(prose.contains("Read the manual and guide."))
+  assert(prose.contains("Visible HTML."))
+  for excluded in ["sentinel", "frontmatter", "Fake", "Badge", "code"] {
+    assert(!prose.contains(excluded), "Non-prose leaked into blocks: ${excluded}")
+  }
+  assert(document.text.contains("Code sentinel."))
+  assert(document.text.contains("Name Value"))
+  assert_eq(parse("Read www.example.com and https://example.com.").blocks[0]!.text, "Read and .")
+  assert_eq(parse("Before <script>hidden()</script> after.").text, "Before after.")
+  assert_eq(parse("Use `<tag> & code`.").text, "Use <tag> & code.")
+  assert_eq(parse("é 😀 [link](./x.md)").links[0]!.offset, 8)
+  assert_eq(parse("").headings, [])
+}
+
+pipeline test_mdx_uses_module_and_jsx_syntax_without_scoring_program_text(harness: Harness) {
+  const source = harness.fs.read_text(
+    path_join(harness.fs.source_dir(), "fixtures/markdown-mdx.txt"),
+  )
+  const document = parse(source, {mdx: true})
+  assert_eq(document.headings.map({ heading -> heading.text }).to_list(), ["Plain"])
+  assert_eq(
+    document.blocks.map({ block -> block.text }).to_list(),
+    ["Plain", "Read the guide.", "Use here."],
+  )
+  assert(document.links.any({ link -> link.destination == "./guide.md" }))
+  assert(!document.text.contains("sentinel"))
+  for invalid in ["import {", "{unclosed"] {
+    assert(
+      is_err(
+        try {
+          parse(invalid, {mdx: true})
+        },
+      ),
+    )
+  }
+}
+
+pipeline test_reading_level_measures_english_prose_and_document_extraction_shares_the_parser(
+  harness: Harness,
+) {
+  const simple = reading_level("One cat sat.")!
+  assert_eq(simple.words, 3)
+  assert_eq(simple.sentences, 1)
+  assert_approx(simple.grade, -2.62, 0.000000001)
+  assert_approx(simple.ease, 119.19, 0.000000001)
+  const syllables = reading_level("# Read\n\nA banana.")!
+  assert_eq(syllables.words, 3)
+  assert_eq(syllables.sentences, 2)
+  assert_approx(syllables.syllables_per_word, 5.0 / 3.0, 0.000000001)
+  assert_eq(reading_level("```js\nconst code = 42\n```"), nil)
+  assert_eq(reading_level("# 中文"), nil)
+  assert_eq(
+    extract_text("# Title\n- **Amount** [link](https://x.test)", {source_format: "markdown"}),
+    "Title\nAmount link",
+  )
+  assert_eq(extract_text("<p>Hello</p><script>hidden()</script>", {source_format: "html"}), "Hello")
+  assert_eq(
+    extract_text("Code `a_b*`.\n\nSee [guide](./manual_(v2).md).", {source_format: "markdown"}),
+    "Code a_b*.\nSee guide.",
+  )
+}

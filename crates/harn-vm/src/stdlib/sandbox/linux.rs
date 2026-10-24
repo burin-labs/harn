@@ -137,6 +137,7 @@ struct ProcessProfile {
 /// enter. Rules are added in the parent, so only the descriptor travels.
 struct LandlockProfile {
     ruleset: OwnedFd,
+    private_tmp: Option<PathBuf>,
 }
 
 struct FilesystemProfile {
@@ -191,12 +192,24 @@ impl LandlockProfile {
 pub struct TransferableConfinement {
     ruleset: Option<OwnedFd>,
     seccomp: BpfProgram,
+    /// The session temp dir the namespace helper mounts over `/tmp`, decided
+    /// with the ruleset; see [`netns::private_tmp_dir`].
+    private_tmp: Option<PathBuf>,
 }
 
 /// One `sock_filter` on the wire: code, jt, jf, k, little-endian.
 const SECCOMP_INSTRUCTION_BYTES: usize = 8;
 
 impl TransferableConfinement {
+    fn take_from(prep: &mut ProcessProfile) -> Self {
+        let landlock = prep.landlock.take();
+        Self {
+            private_tmp: landlock.as_ref().and_then(|l| l.private_tmp.clone()),
+            ruleset: landlock.map(LandlockProfile::take_ruleset),
+            seccomp: std::mem::take(&mut prep.seccomp),
+        }
+    }
+
     /// The ruleset descriptor, or `None` on a host with no Landlock where the
     /// resolved fallback allows the run to proceed without it.
     pub fn ruleset_fd(&self) -> Option<RawFd> {
@@ -239,6 +252,8 @@ impl TransferableConfinement {
             // purpose and is not owned elsewhere in this process.
             ruleset: ruleset_fd.map(|fd| unsafe { OwnedFd::from_raw_fd(fd) }),
             seccomp: program,
+            // The helper has already mounted it by the time it rebuilds this.
+            private_tmp: None,
         })
     }
 
@@ -309,11 +324,8 @@ pub fn transferable_confinement(program: &str) -> Result<Option<TransferableConf
     // the ruleset grants read and execute on, so a bare name here would build a
     // ruleset that refuses the very program it was built for.
     let resolved = crate::stdlib::process::resolve_program_path_for_spawn(program);
-    let prepared = profile_setup(&resolved, &policy, profile)?;
-    Ok(Some(TransferableConfinement {
-        ruleset: prepared.landlock.map(LandlockProfile::take_ruleset),
-        seccomp: prepared.seccomp,
-    }))
+    let mut prepared = profile_setup(&resolved, &policy, profile)?;
+    Ok(Some(TransferableConfinement::take_from(&mut prepared)))
 }
 
 fn profile_setup(
@@ -447,12 +459,26 @@ fn landlock_profile_for(
             support.abi()
         )));
     }
-    let filesystem = filesystem_profile(
+    let mut filesystem = filesystem_profile(
         program,
         policy,
         support.handled_access(),
         ProcessFilesystemScope::Host,
     )?;
+    let private_tmp = netns::private_tmp_dir(
+        policy,
+        filesystem.rules.iter().map(|rule| rule.path.as_path()),
+    );
+    if let Some(tmp) = &private_tmp {
+        // Landlock follows the path a file is reached by, and `/tmp/x` reached
+        // through the mount never passes the workspace root that grants it.
+        push_rule(
+            &mut filesystem,
+            tmp.clone(),
+            workspace_access(policy),
+            false,
+        )?;
+    }
     let ruleset = support
         .populated_ruleset(
             scope_abstract_unix,
@@ -466,7 +492,10 @@ fn landlock_profile_for(
                 "failed to build the Linux Landlock ruleset: {error}"
             ))
         })?;
-    Ok(LandlockProfile { ruleset })
+    Ok(LandlockProfile {
+        ruleset,
+        private_tmp,
+    })
 }
 
 fn system_read_roots() -> Vec<PathBuf> {

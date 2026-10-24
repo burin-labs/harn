@@ -30,15 +30,9 @@ pub(super) fn generate_tool_call_receipt_schema() -> Result<String, String> {
         .map_err(|error| format!("failed to serialize tool-call receipt schema: {error}"))
 }
 
-/// Render the protocol-artifact manifest the running Harn would write.
-///
-/// Re-exposed via `harn package artifacts manifest` so downstream automation
-/// (downstream hosts, cloud platforms) can compare against vendored copies without
-/// shelling out to `dump-protocol-artifacts`.
+/// Inspect the compiled contract without reading a host's source checkout.
 pub(crate) fn manifest_json() -> Result<String, String> {
-    let cwd = std::env::current_dir()
-        .map_err(|error| format!("failed to inspect the current directory: {error}"))?;
-    manifest_json_from(&cwd)
+    Ok(include_str!("../../../data/protocol-manifest.json").to_owned())
 }
 
 pub(crate) fn manifest_json_from(anchor: &Path) -> Result<String, String> {

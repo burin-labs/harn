@@ -39,6 +39,12 @@ conformance fixtures.
   compiled to a tree-sitter query. Operators/keywords match literally
   (`??` ≠ `||`); a repeated `$VAR` unifies; a metavar-free pattern is a
   **literal** pattern (`foo()` matches calls to `foo`, not any call).
+  Matching is **exact-shape**: the target must have exactly the pattern's
+  children and keywords (only a terminating `;` may be omitted), so
+  `getById($A)` does not match `svc.getById(x)` or `getById(a, b)`. Put a hole
+  where code varies (`$OBJ.getById($A)`); there is no variadic `$$$` yet.
+  Java/C#/C/C++/PHP expressions are written without `;`. A trailing `;` roots
+  the pattern at the statement.
 - `$VAR:kind` — a **typed placeholder**: bind only nodes of a syntactic class.
   `expr`/`stmt`/`type`/`ident` aliases resolve to the grammar's supertype
   (TypeScript/JS/Python), else use an exact tree-sitter kind. Unknown kind =
