@@ -177,6 +177,95 @@ pipeline test_refresh_refuses_a_conflicting_repair_before_validation_and_publica
   harness.fs.delete(fixture.root)
 }
 
+/**
+ * Merge `incoming` into the fixture's bump branch the way a person clearing a
+ * conflict would, then run one bump from `base` through the live adapter.
+ */
+fn bump_over_branch_merge(harness: Harness, fixture: dict, incoming: string, base: string) {
+  git_ok(harness.tools, fixture.root, ["checkout", "--quiet", "--detach", fixture.repair])
+  git_ok(harness.tools, fixture.root, ["merge", "--quiet", "--no-ff", "-m", "sync", incoming])
+  const merge = git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"])
+  git_ok(harness.tools, fixture.root, ["checkout", "--quiet", "--detach", base])
+  let published = nil
+  const remote = unreachable_remote()
+    + {
+      release_view: fn(_tag) { return {
+        found: true,
+        draft: false,
+        prerelease: false,
+        asset_names: ["SHA256SUMS", "release-assets.json"],
+      } },
+      base_head: fn() { return {available: true, oid: base, detail: ""} },
+      fetch_base: fn(oid) {
+        git_ok(harness.tools, fixture.root, ["cat-file", "-e", oid + "^{commit}"])
+        return {ok: true, detail: ""}
+      },
+      find_bump_pr: fn() { return fixture.existing + {head_oid: merge} },
+      is_generated_commit: fn(oid) { return oid == fixture.generated },
+      publish_commit: fn(request) {
+        published = request
+        assert_eq(harness.fs.read_text(path_join(fixture.root, "repair.txt")), "repaired\n")
+        return {oid: merge, url: "https://example.invalid/commit/" + merge, branch_action: "reset"}
+      },
+      branch_matches_base: fn() { return false },
+      upsert_pr: fn(_existing, head) { return {
+        number: 1,
+        head_oid: head,
+        url: "https://example.invalid/pull/1",
+        created: false,
+      } },
+    }
+  const adapter = live_bump_adapter(
+    harness.clock,
+    harness.tools,
+    remote,
+    {
+      repo_dir: fixture.root,
+      version_file: path_join(fixture.root, ".harn-version"),
+      refresh_command: "true",
+    },
+    harness.fs,
+  )
+  const receipt = run_bump(bump_options({tag: "v1.0.2", enable_auto_merge: false}), adapter)
+  return {receipt: receipt, merge: merge, published: published}
+}
+
+/** Merging the base branch into the bump branch leaves the repair set unchanged. */
+pipeline test_base_sync_merge_on_the_bump_branch_is_skipped(harness: Harness) {
+  const fixture = repair_fixture(pick(harness, ["fs", "tools"]))
+  harness.fs.write_text(path_join(fixture.root, "other.txt"), "main moved\n")
+  git_ok(harness.tools, fixture.root, ["add", "other.txt"])
+  git_ok(harness.tools, fixture.root, ["commit", "--quiet", "-m", "main advances"])
+  const advanced = git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"])
+  const run = bump_over_branch_merge(harness, fixture, advanced, advanced)
+  assert_eq(run.receipt.outcome, "committed")
+  assert_eq(run.receipt.repair_commits, [fixture.repair])
+  assert_eq(run.published?.repair_commits, [fixture.repair])
+  assert(contains(run.receipt.notes, "skipped base-sync merge(s) on the bump branch: " + run.merge))
+  harness.fs.delete(fixture.root)
+}
+
+/** A merge that brings in commits the base lacks cannot be replayed, and is named. */
+pipeline test_merge_of_a_foreign_branch_is_refused_by_name(harness: Harness) {
+  const fixture = repair_fixture(pick(harness, ["fs", "tools"]))
+  harness.fs.write_text(path_join(fixture.root, "side.txt"), "unmerged work\n")
+  git_ok(harness.tools, fixture.root, ["add", "side.txt"])
+  git_ok(harness.tools, fixture.root, ["commit", "--quiet", "-m", "side branch"])
+  const side = git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"])
+  const run = bump_over_branch_merge(harness, fixture, side, fixture.base)
+  assert_eq(run.receipt.outcome, "repair_conflict")
+  assert_eq(run.receipt.repair_conflicts, [run.merge])
+  assert_eq(run.published, nil)
+  assert(
+    contains(
+      run.receipt.notes,
+      "repair merge ${run.merge} brings in ${side}, which base does not contain; "
+        + "only a merge of the base branch is skipped",
+    ),
+  )
+  harness.fs.delete(fixture.root)
+}
+
 fn unreachable_remote() -> LiveBumpRemote {
   const unreachable = fn() {
     throw "test remote must not be reached"
