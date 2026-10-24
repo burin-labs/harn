@@ -1,5 +1,5 @@
-fn negated() -> bool {
-  return if true {
+fn negated(condition: bool) -> bool {
+  return if condition {
     const found = false
     !found
   } else {
@@ -7,8 +7,8 @@ fn negated() -> bool {
   }
 }
 
-fn commented() -> bool {
-  return if true {
+fn commented(condition: bool) -> bool {
+  return if condition {
     const found = false
     // This starts another expression.
     !found
@@ -17,11 +17,10 @@ fn commented() -> bool {
   }
 }
 
-// This continues the preceding expression.
-fn inequality() -> bool {
-  const value = 1
-    != 2
-  return value
+fn inequality(left: int, right: int) -> bool {
+  const value = left
+    != right
+  return value == (left != right)
 }
 
 fn typed_closure() -> bool {
@@ -31,7 +30,7 @@ fn typed_closure() -> bool {
 }
 
 pipeline default(harness: Harness) {
-  harness.stdio.println(negated() && commented() && inequality() && typed_closure())
+  harness.stdio.println(negated(true) && commented(true) && inequality(1, 2) && typed_closure())
   const source = harness.fs.read_text(
     path_join(harness.fs.source_dir(), "ast_structural_syntax.harn"),
   )
@@ -53,7 +52,7 @@ pipeline default(harness: Harness) {
   const arguments = searched.matches.filter({ row -> row.captures.argument?.text == "string" })
     .to_list()
   const comparisons = searched.matches.filter(
-    { row -> (row.captures.comparison?.text ?? "").starts_with("1\n") },
+    { row -> (row.captures.comparison?.text ?? "").starts_with("left\n") },
   )
     .to_list()
   harness.stdio.println(len(negations) == 2 && len(arguments) == 2 && len(comparisons) == 1)
