@@ -157,13 +157,13 @@ fn only_the_settled_snapshot_is_persisted() {
             token_source: TokenCountSource::Estimated,
         },
     };
-    let mut projector = crate::agent_events::DurableAgentEventProjector::new();
+    let mut projector = agent_events::DurableAgentEventProjector::new();
     assert!(!projector.should_persist(&event(false)));
     assert!(projector.should_persist(&event(true)));
 }
 
 struct Phases(Arc<Mutex<Vec<InferencePhase>>>);
-impl crate::agent_events::AgentEventSink for Phases {
+impl agent_events::AgentEventSink for Phases {
     fn handle_event(&self, event: &AgentEvent) {
         if let AgentEvent::InferenceSpeed { speed, .. } = event {
             self.0.lock().unwrap().push(speed.phase);
@@ -174,8 +174,8 @@ impl crate::agent_events::AgentEventSink for Phases {
 #[tokio::test(flavor = "current_thread")]
 async fn live_snapshots_from_the_text_tee_reach_the_prompts_transport_without_holding_it() {
     let phases = Arc::new(Mutex::new(Vec::new()));
-    let sink: Arc<dyn crate::agent_events::AgentEventSink> = Arc::new(Phases(phases.clone()));
-    let transport = crate::agent_events::AgentEventTransport::new(sink.clone());
+    let sink: Arc<dyn agent_events::AgentEventSink> = Arc::new(Phases(phases.clone()));
+    let transport = agent_events::AgentEventTransport::new(sink.clone());
     let session = format!("inference-speed-tee-{}", uuid::Uuid::now_v7());
     let (downstream, mut forwarded) = tokio::sync::mpsc::unbounded_channel();
     let (meter, (text, tee)) = transport

@@ -22,8 +22,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
 use super::api::{DeltaSender, LlmResult};
-use crate::agent_events::transport::WeakAgentEventTransport;
-use crate::agent_events::AgentEvent;
+use crate::agent_events::{self, transport::WeakAgentEventTransport, AgentEvent};
 
 /// Minimum spacing between live snapshots. A phase change publishes at once.
 const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(250);
@@ -183,7 +182,7 @@ impl InferenceMeter {
             let mut state = self.lock();
             state.origin = Instant::now();
             state.last_snapshot = Some(state.origin);
-            state.transport = crate::agent_events::transport::current().downgrade();
+            state.transport = agent_events::transport::current().downgrade();
             snapshot_of(&state, state.origin, false)
         };
         self.publish(snapshot);
@@ -353,7 +352,7 @@ impl InferenceMeter {
             speed,
         };
         let transport = self.lock().transport.upgrade();
-        transport.with(|| crate::agent_events::emit_event(&event));
+        transport.with(|| agent_events::emit_event(&event));
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
