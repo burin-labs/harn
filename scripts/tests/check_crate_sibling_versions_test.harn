@@ -52,6 +52,7 @@ pipeline test_dependency_package_and_path_are_structural(harness: Harness, task:
       "0.9.18",
       ["harn-private"],
       true,
+      [],
     ).count,
     1,
   )
@@ -62,6 +63,7 @@ pipeline test_dependency_package_and_path_are_structural(harness: Harness, task:
       "0.9.18",
       ["harn-private"],
       true,
+      [],
     ),
     [],
   )
@@ -113,6 +115,7 @@ pipeline test_allows_private_harness_crate_as_dev_dependency(harness: Harness, t
     "0.9.18",
     ["harn-mcp-compat"],
     true,
+    [],
   )
   assert_eq(errors, [])
 }
@@ -126,9 +129,54 @@ pipeline test_rejects_private_harness_crate_as_publish_dependency(harness: Harne
     "0.9.18",
     ["harn-mcp-compat"],
     true,
+    [],
   )
   assert_eq(errors.count, 1)
   assert_eq(errors[0]?.contains("publish = false"), true)
+}
+
+@test
+pipeline test_cycle_closing_dev_dependency_stays_path_only(harness: Harness, task: unknown) {
+  const path_only = "[dev-dependencies]\nharn-runtime = { path = \"../harn-runtime\" }\n"
+  const pinned =
+    "[dev-dependencies]\nharn-runtime = { path = \"../harn-runtime\", version = \"=0.9.18\" }\n"
+  const vm = "crates/harn-vm/Cargo.toml"
+  assert_eq(
+    sibling_dep_errors_from_text_with_context(vm, path_only, "0.9.18", [], true, ["harn-runtime"]),
+    [],
+  )
+  const errors = sibling_dep_errors_from_text_with_context(
+    vm,
+    pinned,
+    "0.9.18",
+    [],
+    true,
+    ["harn-runtime"],
+  )
+  assert_eq(errors.count, 1)
+  assert_eq(errors[0]?.contains("must stay path-only"), true)
+  // Without the reverse edge, a path-only dev-dependency still needs its pin.
+  assert_eq(
+    sibling_dep_errors_from_text_with_context(vm, path_only, "0.9.18", [], true, []).count,
+    1,
+  )
+  // The reverse edge excuses only dev-dependencies.
+  const regular = "[dependencies]\nharn-runtime = { path = \"../harn-runtime\" }\n"
+  assert_eq(
+    sibling_dep_errors_from_text_with_context(vm, regular, "0.9.18", [], true, ["harn-runtime"])
+      .count,
+    1,
+  )
+}
+
+@test
+pipeline test_regular_sibling_dependency_names_skip_dev_and_registry(
+  harness: Harness,
+  task: unknown,
+) {
+  const text =
+    "[package]\nname = \"harn-runtime\"\n\n[dependencies]\nharn-vm = { path = \"../harn-vm\", version = \"=0.9.18\" }\nserde = \"1\"\naws = { package = \"harn-aws\", path = \"../harn-aws\" }\n\n[dev-dependencies]\nharn-lint = { path = \"../harn-lint\" }\n"
+  assert_eq(regular_sibling_dependency_names_from_text(text), ["harn-aws", "harn-vm"])
 }
 
 @test

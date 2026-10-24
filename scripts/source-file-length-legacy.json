@@ -1,9 +1,15 @@
 {
   "version": 1,
   "legacy_path_identities": {
+    "crates/harn-builtins/src/calendar.rs": "crates/harn-vm/src/stdlib/calendar.rs",
+    "crates/harn-builtins/src/postgres/mod.rs": "crates/harn-vm/src/stdlib/postgres/mod.rs",
+    "crates/harn-builtins/src/postgres/tests.rs": "crates/harn-vm/src/stdlib/postgres/tests.rs",
     "crates/harn-package/src/package/extensions_tests.rs": "crates/harn-cli/src/package/extensions_tests.rs"
   },
   "legacy_oversized_paths": [
+    "crates/harn-builtins/src/calendar.rs",
+    "crates/harn-builtins/src/postgres/mod.rs",
+    "crates/harn-builtins/src/postgres/tests.rs",
     "crates/harn-cli/src/commands/orchestrator/listener/acp_hub.rs",
     "crates/harn-dap/src/debugger/tests.rs",
     "crates/harn-package/src/package/extensions_tests.rs",
@@ -23,14 +29,11 @@
     "crates/harn-vm/src/security/mod.rs",
     "crates/harn-vm/src/session_bundle.rs",
     "crates/harn-vm/src/stdlib/agent_sessions.rs",
-    "crates/harn-vm/src/stdlib/calendar.rs",
     "crates/harn-vm/src/stdlib/concurrency.rs",
     "crates/harn-vm/src/stdlib/hitl.rs",
     "crates/harn-vm/src/stdlib/json_stream.rs",
     "crates/harn-vm/src/stdlib/memory.rs",
     "crates/harn-vm/src/stdlib/pool/mod.rs",
-    "crates/harn-vm/src/stdlib/postgres/mod.rs",
-    "crates/harn-vm/src/stdlib/postgres/tests.rs",
     "crates/harn-vm/src/stdlib/records.rs",
     "crates/harn-vm/src/stdlib/sandbox/mod.rs",
     "crates/harn-vm/src/testbench/mcp_mock.rs",

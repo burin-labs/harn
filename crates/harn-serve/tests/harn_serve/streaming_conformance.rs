@@ -4,7 +4,7 @@
 //! Exercises both [`harn_serve::MultipartStream`] and
 //! [`harn_serve::RequestBodyChannel`] against a 50 MiB payload — large
 //! enough that the buffered
-//! [`harn_vm::stdlib::multipart::multipart_parse`] would have to
+//! [`harn_builtins::multipart::multipart_parse`] would have to
 //! allocate the full body plus a per-field copy (≥100 MiB live), but
 //! small enough that test runtime stays under a second on a modest CI
 //! box. The handlers never collect the body: each chunk flows straight

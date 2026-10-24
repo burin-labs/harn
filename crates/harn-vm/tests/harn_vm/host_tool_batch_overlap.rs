@@ -63,7 +63,7 @@ fn run_with_overlap_park_timeout(
                 ));
                 harn_vm::llm::install_current_host_bridge(bridge.clone());
                 let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
+                harn_runtime::register_vm_stdlib(&mut vm);
                 let enter_in_flight = in_flight.clone();
                 let enter_peak = peak.clone();
                 let barrier = Arc::new(tokio::sync::Barrier::new(release_at.max(1)));

@@ -133,6 +133,7 @@ harn-parser = { path = "../harn-parser", version = "=0.10.178" }
 harn-session-store = { path = "../harn-session-store", version = "=0.10.178" }
 harn-vm = { path = "../harn-vm", version = "=0.10.178", default-features = false }
 harn-runtime = { path = "../harn-runtime", version = "=0.10.178" }
+harn-builtins = { path = "../harn-builtins", version = "=0.10.178" }
 harn-terminal = { path = "../harn-terminal", version = "=0.10.178", optional = true }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive", "rc"] }

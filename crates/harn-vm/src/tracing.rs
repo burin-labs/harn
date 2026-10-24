@@ -559,7 +559,7 @@ impl<T> SharedCell<T> {
     }
 }
 
-pub(crate) struct TracingRuntime {
+pub struct TracingRuntime {
     collector: SharedCell<SpanCollector>,
     enabled: SharedCell<bool>,
     pub(crate) llm: crate::llm::LlmTraceRuntime,

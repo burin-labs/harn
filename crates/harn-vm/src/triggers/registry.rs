@@ -434,9 +434,7 @@ pub struct TriggerRegistry {
 }
 
 pub(crate) mod runtime;
-pub(crate) use runtime::{
-    active_trigger_registry, swap_active_trigger_registry, TriggerRegistryRuntime,
-};
+pub use runtime::{active_trigger_registry, swap_active_trigger_registry, TriggerRegistryRuntime};
 use runtime::{with_trigger_registry, with_trigger_registry_mut};
 
 thread_local! {

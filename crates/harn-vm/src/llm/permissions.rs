@@ -13,7 +13,7 @@ use crate::workspace_anchor::{MountMode, WorkspaceAnchor};
 const DEFAULT_PATH_SCOPE_ARG_KEYS: &[&str] = &["path", "destination", "source", "file"];
 
 #[derive(Clone)]
-pub(crate) struct DynamicPermissionPolicy {
+pub struct DynamicPermissionPolicy {
     allow: Vec<PermissionRule>,
     deny: Vec<PermissionRule>,
     on_escalation: Option<VmValue>,
@@ -250,7 +250,7 @@ pub(crate) fn session_has_grants(session_id: &str) -> bool {
     SESSION_PERMISSION_GRANTS.with(|store| store.borrow().contains_key(session_id))
 }
 
-pub(crate) fn parse_dynamic_permission_policy(
+pub fn parse_dynamic_permission_policy(
     value: Option<&VmValue>,
     label: &str,
 ) -> Result<Option<DynamicPermissionPolicy>, VmError> {

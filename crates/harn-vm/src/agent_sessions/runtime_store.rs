@@ -27,12 +27,12 @@ impl<T: Copy> SharedValue<T> {
         *self.0.lock()
     }
 
-    pub(super) fn set(&self, value: T) {
+    pub fn set(&self, value: T) {
         *self.0.lock() = value;
     }
 }
 
-pub(crate) struct AgentSessionRuntime {
+pub struct AgentSessionRuntime {
     sessions: SharedCell<HashMap<String, SessionState>>,
     inputs: parking_lot::RwLock<
         HashMap<
@@ -176,14 +176,14 @@ pub(crate) fn fresh_session_runtime() -> Arc<AgentSessionRuntime> {
     Arc::new(AgentSessionRuntime::default())
 }
 
-pub(crate) fn active_session_runtime() -> Arc<AgentSessionRuntime> {
+pub fn active_session_runtime() -> Arc<AgentSessionRuntime> {
     ACTIVE_SESSION_RUNTIME.with(|slot| Arc::clone(&slot.borrow()))
 }
 
 /// Record an unknown host event name in the runtime that owns the session.
 /// The runtime is shared across worker-thread migration, unlike ambient
 /// thread-local storage.
-pub(crate) fn mark_unknown_host_event_warning(session_id: &str, event_type: &str) -> bool {
+pub fn mark_unknown_host_event_warning(session_id: &str, event_type: &str) -> bool {
     active_session_runtime()
         .unknown_host_event_warnings
         .borrow_mut()
@@ -194,7 +194,7 @@ pub(crate) fn mark_unknown_host_event_warning(session_id: &str, event_type: &str
 ///
 /// Returns `true` the first time only, so a key dropped on every iteration of a
 /// loop reports once instead of once per turn.
-pub(crate) fn mark_dropped_host_payload_key_warning(
+pub fn mark_dropped_host_payload_key_warning(
     session_id: &str,
     event_type: &str,
     key: &str,
@@ -220,9 +220,7 @@ pub(super) fn clear_unknown_host_event_warnings(session_id: &str) {
         .retain(|(warned_session_id, _, _)| warned_session_id != session_id);
 }
 
-pub(crate) fn swap_active_session_runtime(
-    next: Arc<AgentSessionRuntime>,
-) -> Arc<AgentSessionRuntime> {
+pub fn swap_active_session_runtime(next: Arc<AgentSessionRuntime>) -> Arc<AgentSessionRuntime> {
     ACTIVE_SESSION_RUNTIME.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
 }
 

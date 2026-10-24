@@ -643,9 +643,12 @@ async fn secret_scan_tool_returns_findings_and_audits_them() {
     assert_eq!(findings[0]["detector"], "github-token");
 
     let ctx = load_local_runtime(&service.local_args()).await.unwrap();
-    let events = read_topic(&ctx.event_log, harn_vm::SECRET_SCAN_AUDIT_TOPIC)
-        .await
-        .unwrap();
+    let events = read_topic(
+        &ctx.event_log,
+        harn_builtins::secret_scan::SECRET_SCAN_AUDIT_TOPIC,
+    )
+    .await
+    .unwrap();
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].1.payload["caller"], "mcp.harn.secret_scan");
     assert_eq!(events[0].1.payload["finding_count"], 1);

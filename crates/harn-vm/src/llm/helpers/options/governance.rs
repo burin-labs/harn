@@ -4,7 +4,7 @@ use crate::value::{DictMap, VmError, VmValue};
 /// disclosure, provider schema, or call-option consumer can read it. Raw
 /// `harness.llm.call(...)` and the agent loop therefore share the same typed
 /// exposure boundary.
-pub(crate) fn project_agent_tools(options: &mut Option<DictMap>) -> Result<(), VmError> {
+pub fn project_agent_tools(options: &mut Option<DictMap>) -> Result<(), VmError> {
     let Some(options) = options.as_mut() else {
         return Ok(());
     };

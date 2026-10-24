@@ -160,7 +160,7 @@ pub(crate) fn write_stderr(line: &str) {
     crate::host_stdio::write(crate::host_stdio::HostStdioStream::Stderr, line);
 }
 
-pub(crate) fn write_stdout(out: &mut String, text: &str) {
+pub fn write_stdout(out: &mut String, text: &str) {
     if crate::run_events::sink_active() {
         crate::run_events::emit(crate::run_events::RunEvent::Stdout {
             payload: text.to_string(),
@@ -511,7 +511,7 @@ fn read_stdin_line_real_with_options(options: &ReadLineOptions) -> ReadLineOutco
     }
 }
 
-pub(crate) fn is_tty_for(stream: &str) -> bool {
+pub fn is_tty_for(stream: &str) -> bool {
     let mocked = TTY_MOCK.with(|t| {
         let mock = *t.borrow();
         match stream {

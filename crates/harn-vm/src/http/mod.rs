@@ -29,7 +29,7 @@ pub(crate) use retry_after::hint as retry_after_hint;
 /// This is the entry point used by the `harness.net.*` sub-handle so
 /// every script-visible network call observes the same egress allowlist,
 /// retry policy, and mock plumbing as the legacy ambient builtins.
-pub(crate) async fn execute_http_request(
+pub async fn execute_http_request(
     method: &str,
     url: &str,
     options: &crate::value::DictMap,
@@ -359,7 +359,7 @@ fn normalize_headers(value: Option<&VmValue>) -> crate::value::DictMap {
 /// Also the implementation behind the `url_decode` script builtin: indexing
 /// the `&str` by escape offsets panics when `%` is followed by a multi-byte
 /// character, so every decoder routes through this one byte-based copy.
-pub(crate) fn percent_decode(input: &str) -> String {
+pub fn percent_decode(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
