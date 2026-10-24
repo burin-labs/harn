@@ -449,7 +449,6 @@ fn pricing_facts(
         monthly_allowance_unapplied: settlement.monthly_allowance_unapplied.clone(),
         platform_fee_basis: (detail.platform_fee_percent > 0.0)
             .then(|| "catalog_estimate_funding_route_unknown".into()),
-        ..PricingFacts::default()
     }
 }
 
