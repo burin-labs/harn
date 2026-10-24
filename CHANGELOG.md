@@ -9,6 +9,29 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.178
+
+### Fixed
+
+- A budget stop raised when a finished call settles past the ceiling now names
+  the spend the ceiling judged in its `budget_exhausted` event. It used to
+  carry no session spend, so a report could say `$0.0000` for a stop that had
+  spent past the cap.
+- The Harn bump runtime's base adoption now restores a refreshed file the
+  refresh deleted and staged, instead of refusing on a dirty tree and never
+  converging. Untracked files that predate the refresh are no longer counted as
+  refresh output, so adoption never deletes them.
+- The Harn bump runtime skips a base-sync merge on the bump branch only when
+  skipping it loses nothing: every path where the merge departs from a
+  mechanical merge of its parents must match the refresh output or the base.
+  A merge that keeps any other content, such as a hand edit, is refused with
+  `repair_conflict`, naming those paths, instead of being silently dropped.
+
+### Security
+
+- **Dependency audit.** `cargo deny` no longer ignores RUSTSEC-2026-0387 now that the
+  build resolves crypto-bigint 0.7.6 (#10421).
+
 ## v0.10.177
 
 ### Breaking
