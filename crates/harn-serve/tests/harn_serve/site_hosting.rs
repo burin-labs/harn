@@ -476,31 +476,83 @@ async fn remote_addr_is_populated_over_a_live_socket() {
 
 #[tokio::test]
 async fn site_readiness_identifies_the_actual_bound_listener() {
+    for tls in [HttpTlsConfig::plain(), HttpTlsConfig::self_signed_dev()] {
+        let scheme = tls.listener_scheme();
+        let (dir, path) = write_site(SITE_SCRIPT);
+        let ready_path = dir.path().join("ready.json");
+        let server = SiteServer::new(SiteServerConfig::new(build_core(&path))).run_http(
+            SiteHttpServeOptions {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                public_url: Some("https://public.example.invalid".into()),
+                ready_file: Some(ready_path.clone()),
+                tls,
+            },
+        );
+        tokio::pin!(server);
+        tokio::select! {
+            biased;
+            result = &mut server => panic!("server stopped before its first request: {result:?}"),
+            () = async {
+                tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                    while !ready_path.try_exists().unwrap() {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                }).await.expect("site did not publish its startup receipt");
+                let ready: SiteServerReady = serde_json::from_slice(&std::fs::read(&ready_path).unwrap()).unwrap();
+                assert_eq!(ready.schema_version, 1);
+                assert_eq!(ready.pid, std::process::id());
+                let url = reqwest::Url::parse(&ready.url).unwrap();
+                assert_eq!(url.scheme(), scheme);
+                assert_eq!(url.host_str(), Some("127.0.0.1"));
+                assert_ne!(url.port(), Some(0));
+                let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build().unwrap();
+                let response = client.get(format!("{}/hello", ready.url)).send().await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                assert_eq!(response.json::<Value>().await.unwrap()["msg"], "hi");
+            } => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn invalid_site_tls_cannot_publish_a_false_ready_receipt() {
     let (dir, path) = write_site(SITE_SCRIPT);
-    let ready_path = dir.path().join("ready.json");
-    let server =
-        SiteServer::new(SiteServerConfig::new(build_core(&path))).run_http(SiteHttpServeOptions {
-            bind: "127.0.0.1:0".parse().unwrap(),
-            public_url: Some("https://public.example.invalid".into()),
-            ready_file: Some(ready_path.clone()),
-            tls: HttpTlsConfig::plain(),
-        });
-    tokio::pin!(server);
-    tokio::select! {
-        // Binding and receipt publication precede the server's first suspension.
-        biased;
-        result = &mut server => panic!("server stopped before its first request: {result:?}"),
-        () = async {
-            let ready: SiteServerReady = serde_json::from_slice(&std::fs::read(&ready_path).unwrap()).unwrap();
-            assert_eq!(ready.schema_version, 1);
-            assert_eq!(ready.pid, std::process::id());
-            let url = reqwest::Url::parse(&ready.url).unwrap();
-            assert_eq!(url.host_str(), Some("127.0.0.1"));
-            assert_ne!(url.port(), Some(0));
-            let response = reqwest::get(format!("{}/hello", ready.url)).await.unwrap();
-            assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(response.json::<Value>().await.unwrap()["msg"], "hi");
-        } => {}
+    let cert = dir.path().join("cert.pem");
+    let key = dir.path().join("key.pem");
+    std::fs::write(&cert, "invalid certificate").unwrap();
+    std::fs::write(&key, "invalid private key").unwrap();
+    for (name, tls, expected) in [
+        (
+            "missing-cert",
+            HttpTlsConfig::pem_files(dir.path().join("missing.pem"), &key),
+            "TLS certificate not found",
+        ),
+        (
+            "missing-key",
+            HttpTlsConfig::pem_files(&cert, dir.path().join("missing.key")),
+            "TLS private key not found",
+        ),
+        (
+            "malformed",
+            HttpTlsConfig::pem_files(&cert, &key),
+            "failed to load TLS certificate",
+        ),
+    ] {
+        let ready_path = dir.path().join(format!("{name}-ready.json"));
+        let error = SiteServer::new(SiteServerConfig::new(build_core(&path)))
+            .run_http(SiteHttpServeOptions {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                public_url: None,
+                ready_file: Some(ready_path.clone()),
+                tls,
+            })
+            .await
+            .unwrap_err();
+        assert!(error.contains(expected), "{error}");
+        assert!(
+            !ready_path.exists(),
+            "{name} TLS failure published readiness"
+        );
     }
 }
 
