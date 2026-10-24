@@ -44,6 +44,9 @@ pub type LiveBumpConfig = {
   readiness_timeout_ms: int,
 }
 
+/** Produces fresh refresh-environment entries, such as a short-lived token. */
+pub type LiveBumpEnvironmentRenewal = fn() -> dict
+
 /** Verdict of an authenticated fetch of a commit into the local checkout. */
 pub type LiveBumpFetch = {ok: bool, detail: string}
 
@@ -460,6 +463,10 @@ fn __release_finalized(release: LiveBumpRelease) -> bool {
 /**
  * Build the local adapter around one package-owned remote capability.
  *
+ * `renew_refresh_environment`, when given, runs before each refresh and its
+ * entries overlay `refresh_environment`, so short-lived credentials stay
+ * current without rebuilding the adapter and losing its per-run state.
+ *
  * @effects: [fs, process, net]
  * @errors: [invalid target tags or delegated local/provider failures]
  */
@@ -469,6 +476,7 @@ pub fn live_bump_adapter(
   remote: LiveBumpRemote,
   config: dict = {},
   fs: HarnessFs? = nil,
+  renew_refresh_environment: LiveBumpEnvironmentRenewal? = nil,
 ) -> BumpAdapter {
   const cfg = live_bump_config(config)
   // Untracked files present before the first refresh are not bump output, so
@@ -535,7 +543,12 @@ pub fn live_bump_adapter(
       if unrelated == nil {
         unrelated = __untracked(tools, cfg.repo_dir)
       }
-      return __apply_version(fs, tools, cfg, target, revision, unrelated ?? [])
+      const run_cfg = if renew_refresh_environment == nil {
+        cfg
+      } else {
+        cfg + {refresh_environment: cfg.refresh_environment + renew_refresh_environment()}
+      }
+      return __apply_version(fs, tools, run_cfg, target, revision, unrelated ?? [])
     },
     preserve_repairs: fn(existing, base) { return replay_bump_repairs(
       tools,
