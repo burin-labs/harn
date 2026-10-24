@@ -153,7 +153,7 @@ async fn configure_stable_vm(
     project_root: Option<&Path>,
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
 ) -> Result<String, String> {
-    harn_vm::register_vm_stdlib(vm);
+    harn_runtime::register_vm_stdlib(vm);
     // Metadata/store rooted at the launched project when supplied by the host,
     // otherwise at harn.toml when present.
     let project_root = acp_project_root(source_path, cwd, project_root);

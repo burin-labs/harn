@@ -9,6 +9,122 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.178
+
+### Breaking
+
+- **GitHub Actions result contracts now match the released connector (#10370).**
+  Runs expose `display_title` and `run_started_at`; jobs expose `head_sha`
+  and typed `GitHubActionsStep` values. Dispatch receipts expose `created_at`.
+  The types no longer promise `api_url`, job labels or runner groups, or
+  dispatch status and conclusion, which the connector does not return.
+  Read a dispatched run with `workflow_run` to obtain its status and conclusion.
+
+  Migration: rename a run's `started_at` field to `run_started_at`, use `url`
+  for links, and read dispatch status through `workflow_run`. Remove references
+  to job labels and runner groups from these normalized result records.
+- **Harn Flow moved out of `harn-vm` into the `harn-flow` crate.** Atoms,
+  intents, slices, the Flow store, invariant predicates, and the `flow_*`
+  builtins now compile in their own crate beside the VM, which shortens the
+  serial `harn-vm` build. The new `harn-runtime` crate assembles the VM with
+  every builtin family crate.
+
+  Migration: replace `harn_vm::flow::` paths with `harn_flow::`. An embedder
+  that runs Harn code registers the standard library through
+  `harn_runtime::register_vm_stdlib` or `harn_runtime::register_core_stdlib`
+  instead of the `harn_vm` functions of the same name, so the linker keeps
+  every family's builtins.
+- Rename selectors now use exact defining paths, indexed qualified aliases and
+  1-based UTF-16 declaration-name columns across supported languages. Decorated
+  and exported graph declarations report the name line, and language-server rename
+  uses that same selected position instead of the first matching name on a line.
+
+  Migration: use the defining path and declaration coordinates returned by the
+  index rather than a suffix path or an outline wrapper line. Pass `path: "."`
+  for an intentional workspace-wide seed search. Wrong supplied constraints now
+  return no match. Ambiguous-rename `warnings[*].symbol` now carries the
+  qualified name in every language, matching `qualified_name`. Move and
+  signature-change path rules are unchanged.
+- **Builtin families register their own installers.** Each standard-library
+  family declares its installer beside its `register_*_builtins` function
+  with `harn_vm_core::stdlib_installer!`, and `register_vm_stdlib` runs every
+  linked installer. A family's owning crate can therefore sit outside
+  `harn-vm`. Installers may not register a name another installer registers,
+  which a test now enforces, so installation order no longer matters.
+  Families that keep thread-local state declare their reset the same way,
+  and `reset_stdlib_state` runs every linked reset.
+
+  Migration: replace `harn_vm::register_io_stdlib` and
+  `harn_vm::register_agent_stdlib` with `harn_vm::register_vm_stdlib`, which
+  installs the complete library. `harn_vm::register_core_stdlib` still
+  installs only the deterministic builtins.
+
+### Changed
+
+- The missing-tool-call decision study uses Harn drivers and analysis tools.
+  They preserve the recorded statistics, refuse incomplete or duplicate cells,
+  and share literal environment parsing and native source migration.
+- Run diagnostics timing sweeps and calibration through Harn. Pin the checked
+  server through the selected provider's endpoint setting, require exact model
+  IDs and complete trial results, and preserve earlier output and transcripts.
+- Release binaries now build with fat LTO and one codegen unit on every target.
+  The x86_64 Linux `harn` binary is about 15% smaller (277.8 MB to 234.7 MB in
+  a paired local build), with no change to commands or startup latency.
+
+### Fixed
+
+- A consumer canary that cannot read a GitHub census now reports the HTTP status and
+  rate-limit fields in its failure line, and retries one exhausted rate limit that
+  resets within a minute. An unmeasured observer stays a red failure.
+- **Stack-frame banking.** The weekly banking job now banks while main is over budget, the one
+  time a bank is needed, instead of exiting on the gate's own refusal before it writes.
+- A budget stop raised when a finished call settles past the ceiling now names
+  the spend the ceiling judged in its `budget_exhausted` event. It used to
+  carry no session spend, so a report could say `$0.0000` for a stop that had
+  spent past the cap.
+- The Harn bump runtime's base adoption now restores a refreshed file the
+  refresh deleted and staged, instead of refusing on a dirty tree and never
+  converging. Untracked files that predate the refresh are no longer counted as
+  refresh output, so adoption never deletes them.
+- The Harn bump runtime skips a base-sync merge on the bump branch only when
+  skipping it loses nothing: every path where the merge departs from a
+  mechanical merge of its parents must match the refresh output or the base.
+  A merge that keeps any other content, such as a hand edit, is refused with
+  `repair_conflict`, naming those paths, instead of being silently dropped.
+- Structural Harn queries accept `gen` as a variable name while preserving `gen fn` declarations.
+- The provider catalog now marks the Fireworks DeepSeek V4 Flash 0731, DeepSeek
+  V4 Pro 0813, Kimi K2.6, Kimi K2.7 Code, and GLM 5.2 routes deprecated with
+  their 2026-09-25 serverless removal date, so selection and pickers stop
+  offering them. DeepSeek V4 Flash 0731 points at DeepSeek V4.1 Flash.
+- **Test stability.** The remaining lease-release assertions in the language server, the serve
+  prompt catalog and the hostlib artifact guard wait out descriptors a concurrent child spawn still
+  holds, instead of failing the test on the first try.
+- A call the budget ceiling refuses when it settles is now counted as the
+  completed, paid call it was. The agent loop's `cost_usd`, token counts and
+  run ledger (`physical_usage`, `provider_call_count`) include it, and its
+  thrown error carries the call as `settled_call`. Before, every cost report
+  read after such a stop omitted the call that crossed the ceiling.
+- Sorting (`sort`, `sorted`, `sort_by`, `sorted_by`) no longer panics on lists that
+  mix NaN or values of different types: the sort comparator is now a total order
+  that places numbers first, then NaN, then other types grouped by kind.
+  `pascal_to_camel("HTTPServer")` returns `httpServer` instead of `hTTPServer`.
+  `iter.sum()` shares `list.sum()` and so sums decimals. `round(x, -n)` returns
+  exact power-of-ten buckets for floats (`round(123456.0, -5)` is `100000.0`) and
+  no longer zeroes ints of 5e18 and beyond at `-19`. Set `union`, `intersection`,
+  `difference`, and `symmetric_difference` methods throw on a non-set argument
+  like their `set_*` builtins. Local JSON repair of structured LLM output keeps
+  non-ASCII text intact instead of mojibaking it. `zip_create` refuses `..` and
+  absolute entry paths, matching `tar_create`. `harn fmt` keeps the parentheses
+  around a `try*` operand, so `(try* fetch()).body` no longer reformats into
+  `try* fetch().body`.
+- Keep native Windows workspace tests buildable and make the shipped-interface
+  cache fixture use distinct file timestamps for dependency changes and restoration.
+
+### Security
+
+- **Dependency audit.** `cargo deny` no longer ignores RUSTSEC-2026-0387 now that the
+  build resolves crypto-bigint 0.7.6 (#10421).
+
 ## v0.10.177
 
 ### Breaking

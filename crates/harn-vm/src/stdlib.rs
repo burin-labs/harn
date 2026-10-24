@@ -57,7 +57,6 @@ mod markup;
 pub use event_log::mint_hypothesis_native_attestation;
 mod external_agent;
 pub(crate) mod files;
-mod flow;
 pub(crate) mod fs;
 mod git;
 pub(crate) mod git_topology;

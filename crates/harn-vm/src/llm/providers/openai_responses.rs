@@ -223,6 +223,24 @@ async fn read_responses_events<R: tokio::io::AsyncBufRead + Unpin>(
                     let _ = delta_tx.send(delta.to_string());
                 }
             }
+            Some(
+                kind @ ("response.reasoning_text.delta"
+                | "response.reasoning_summary_text.delta"
+                | "response.function_call_arguments.delta"),
+            ) => {
+                let output = if kind == "response.function_call_arguments.delta" {
+                    crate::llm::inference_speed::OutputKind::ToolArguments
+                } else {
+                    crate::llm::inference_speed::OutputKind::Reasoning
+                };
+                crate::llm::inference_speed::observe_output(
+                    output,
+                    event
+                        .get("delta")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default(),
+                );
+            }
             Some("response.completed" | "response.incomplete") => {
                 let response = event.get("response").cloned().unwrap_or_default();
                 return Ok((response, streamed_text));

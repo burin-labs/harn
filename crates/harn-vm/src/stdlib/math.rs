@@ -141,6 +141,12 @@ fn round_float_to_digits(x: f64, digits: i64) -> f64 {
     if digits < -308 {
         return 0.0 * x.signum();
     }
+    if digits < 0 {
+        // Divide by the exact power of ten rather than multiplying by its
+        // inexact reciprocal: `1e-5` unscales `1.0` to `99999.99999999999`.
+        let bucket = 10f64.powi((-digits) as i32);
+        return (x / bucket).round() * bucket;
+    }
     let factor = 10f64.powi(digits as i32);
     let scaled = x * factor;
     if !scaled.is_finite() {
@@ -159,8 +165,9 @@ fn round_int_to_digits(n: i64, digits: i64) -> VmValue {
     if digits >= 0 || n == 0 {
         return VmValue::Int(n);
     }
-    if digits <= -19 {
-        // 10^19 exceeds i64::MAX, so every i64 rounds to the zero bucket.
+    if digits <= -20 {
+        // 2 * |i64::MIN| < 10^20, so every i64 rounds to the zero bucket;
+        // at -19 values of 5e18 and beyond still round out to ±1e19.
         return VmValue::Int(0);
     }
     let factor = 10i128.pow((-digits) as u32);
@@ -749,6 +756,9 @@ mod tests {
         // Negative digits round to power-of-ten buckets.
         assert_eq!(round_float_to_digits(1234.5678, -2), 1200.0);
         assert_eq!(round_float_to_digits(1250.0, -2), 1300.0);
+        // Larger buckets stay exact instead of landing a hair below.
+        assert_eq!(round_float_to_digits(123456.0, -5), 100000.0);
+        assert_eq!(round_float_to_digits(150000.0, -5), 200000.0);
         // Extreme digit counts degrade gracefully.
         assert_eq!(round_float_to_digits(1.5, 400), 1.5);
         assert_eq!(round_float_to_digits(1.5, -400), 0.0);
@@ -766,6 +776,13 @@ mod tests {
         assert!(matches!(round_int_to_digits(1249, -2), VmValue::Int(1200)));
         assert!(matches!(round_int_to_digits(7, 3), VmValue::Int(7)));
         assert!(matches!(round_int_to_digits(123, -19), VmValue::Int(0)));
+        assert!(
+            matches!(round_int_to_digits(9_000_000_000_000_000_000, -19), VmValue::Float(f) if f == 1e19)
+        );
+        assert!(matches!(
+            round_int_to_digits(i64::MIN, -20),
+            VmValue::Int(0)
+        ));
         // A bucket boundary past i64::MAX promotes to float instead of wrapping
         // (i64::MAX rounds up to 9_223_400_000_000_000_000 at -14 digits).
         assert!(matches!(round_int_to_digits(i64::MAX, -14), VmValue::Float(f) if f == 9.2234e18));

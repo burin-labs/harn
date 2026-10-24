@@ -224,8 +224,9 @@ mod tests {
     use crate::tools::inspect_test_results::{store_run, RawArtifacts, TestSummaryData};
     use harn_lexer::Lexer;
     use harn_parser::Parser;
+    use harn_runtime::register_vm_stdlib;
     use harn_vm::orchestration::RunExecutionRecord;
-    use harn_vm::{enter_execution_scope, mint_execution_scope, register_vm_stdlib, Compiler, Vm};
+    use harn_vm::{enter_execution_scope, mint_execution_scope, Compiler, Vm};
     use std::path::Path;
     use std::sync::Arc;
     use tempfile::TempDir;

@@ -58,7 +58,7 @@ fn append_object(out: &mut String, shape: &Value, path: &[String], target: Targe
         }
         if let Some(minimum) = field["minimum"].as_i64() {
             let too_small = match target {
-                Target::Swift => format!("({value}?.intValue ?? {minimum}) < {minimum}"),
+                Target::Swift => format!("({value}?.doubleValue ?? {minimum}) < {minimum}"),
                 _ => unreachable!(),
             };
             refuse(out, &too_small, &child_path, "is below its minimum", target);

@@ -468,7 +468,12 @@ async fn parse_raw_generate_stream(
             ))));
         }
         if let Some(chunk) = json.get("response").and_then(|value| value.as_str()) {
+            let hidden_before = splitter.thinking.len();
             let visible = splitter.push(chunk);
+            crate::llm::inference_speed::observe_output(
+                crate::llm::inference_speed::OutputKind::Reasoning,
+                splitter.thinking.get(hidden_before..).unwrap_or_default(),
+            );
             if !visible.is_empty() {
                 text.push_str(&visible);
                 let _ = delta_tx.send(visible);

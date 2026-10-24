@@ -8,6 +8,8 @@
 [harn] TestFilePatterns
 [harn] test_file_patterns
 [harn] http_server
+[harn] httpServer
+[harn] HttpServer
 [harn] testFilePatterns
 [harn] test-file-patterns
 [harn] test-file-patterns
