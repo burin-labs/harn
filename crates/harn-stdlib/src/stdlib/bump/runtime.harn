@@ -98,7 +98,13 @@ pub type BumpCommitRequest = {
 }
 
 /** Repair patches carried onto refreshed files before validation and publication. */
-pub type BumpRepairs = {ok: bool, commits: list<string>, conflicts: list<string>, detail: string}
+pub type BumpRepairs = {
+  ok: bool,
+  commits: list<string>,
+  conflicts: list<string>,
+  detail: string,
+  skipped_merges?: list<string>,
+}
 
 /** Result of atomically publishing the bump branch and signed commit. */
 pub type BumpCommitResult = {oid: string, url: string, branch_action: string}
@@ -664,7 +670,19 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
         }
     }
     const repairs = adapter.preserve_repairs(existing, receipt.expected_base_oid ?? "")
-    receipt = receipt + {repair_commits: repairs.commits, repair_conflicts: repairs.conflicts}
+    const skipped_merges = repairs.skipped_merges ?? []
+    const skipped_note = "skipped base-sync merge(s) on the bump branch: "
+      + join(skipped_merges, ", ")
+    receipt = receipt
+      + {
+        repair_commits: repairs.commits,
+        repair_conflicts: repairs.conflicts,
+        notes: if len(skipped_merges) > 0 && !contains(receipt.notes, skipped_note) {
+          receipt.notes + [skipped_note]
+        } else {
+          receipt.notes
+        },
+      }
     if !repairs.ok {
       return receipt
         + {
