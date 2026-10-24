@@ -1012,37 +1012,8 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 self.emit_agent_event_ext("iteration_start", session_id, payload);
             }
-            AgentEvent::InferenceSpeed {
-                session_id,
-                call_id,
-                provider,
-                model,
-                speed,
-            } => {
-                let mut update = serde_json::json!({"sessionUpdate": "inference_speed"});
-                let mut harn_meta = serde_json::json!({
-                    "callId": call_id,
-                    "provider": provider,
-                    "model": model,
-                    "phase": speed.phase,
-                    "isFinal": speed.is_final,
-                    "elapsedMs": speed.elapsed_ms,
-                    "outputTokens": speed.output_tokens,
-                    "tokenSource": speed.token_source,
-                });
-                if let Some(ms) = speed.time_to_first_token_ms {
-                    harn_meta["timeToFirstTokenMs"] = serde_json::json!(ms);
-                }
-                if let Some(rate) = speed.output_tokens_per_second {
-                    harn_meta["outputTokensPerSecond"] = serde_json::json!(rate);
-                }
-                if let serde_json::Value::Object(harn_meta) = harn_meta {
-                    merge_harn_meta(&mut update, harn_meta);
-                }
-                self.write_notification(serde_json::json!({
-                    "sessionId": session_id,
-                    "update": update,
-                }));
+            AgentEvent::InferenceSpeed { .. } => {
+                self.write_notification(meta::inference_speed_notification(event));
             }
             AgentEvent::IterationEnd {
                 session_id,

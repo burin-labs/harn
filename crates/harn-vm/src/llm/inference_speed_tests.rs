@@ -172,16 +172,18 @@ impl crate::agent_events::AgentEventSink for Phases {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn live_snapshots_from_the_text_tee_reach_the_prompts_transport() {
+async fn live_snapshots_from_the_text_tee_reach_the_prompts_transport_without_holding_it() {
     let phases = Arc::new(Mutex::new(Vec::new()));
-    let transport = AgentEventTransport::new(Arc::new(Phases(phases.clone())));
+    let sink: Arc<dyn crate::agent_events::AgentEventSink> = Arc::new(Phases(phases.clone()));
+    let transport = crate::agent_events::AgentEventTransport::new(sink.clone());
     let session = format!("inference-speed-tee-{}", uuid::Uuid::now_v7());
     let (downstream, mut forwarded) = tokio::sync::mpsc::unbounded_channel();
-    let (text, tee) = transport
+    let (meter, (text, tee)) = transport
         .scope(async {
             let meter = InferenceMeter::new(Some(session), "call-1", "test-provider", "tee-model");
             meter.start();
-            meter.tee_text(downstream)
+            let tee = meter.tee_text(downstream);
+            (meter, tee)
         })
         .await;
 
@@ -197,4 +199,8 @@ async fn live_snapshots_from_the_text_tee_reach_the_prompts_transport() {
             InferencePhase::Responding
         ]
     );
+    // A meter that outlives its prompt must not keep the prompt's output open.
+    drop(transport);
+    assert_eq!(Arc::strong_count(&sink), 1);
+    drop(meter);
 }

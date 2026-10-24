@@ -22,7 +22,8 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
 use super::api::{DeltaSender, LlmResult};
-use crate::agent_events::{AgentEvent, AgentEventTransport};
+use crate::agent_events::transport::WeakAgentEventTransport;
+use crate::agent_events::AgentEvent;
 
 /// Minimum spacing between live snapshots. A phase change publishes at once.
 const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(250);
@@ -130,9 +131,9 @@ struct State {
     calibration: f64,
     window: VecDeque<(Instant, f64)>,
     last_snapshot: Option<Instant>,
-    // Bound at dispatch: the text tee and off-thread readers run outside the
-    // prompt's per-poll transport scope.
-    transport: AgentEventTransport,
+    // Bound weakly at dispatch: the text tee runs outside the prompt's
+    // per-poll transport scope, and must never keep its output open.
+    transport: WeakAgentEventTransport,
     finished: bool,
 }
 
@@ -169,7 +170,7 @@ impl InferenceMeter {
                 calibration,
                 window: VecDeque::new(),
                 last_snapshot: None,
-                transport: AgentEventTransport::default(),
+                transport: WeakAgentEventTransport::default(),
                 finished: false,
             })),
         }
@@ -182,7 +183,7 @@ impl InferenceMeter {
             let mut state = self.lock();
             state.origin = Instant::now();
             state.last_snapshot = Some(state.origin);
-            state.transport = crate::agent_events::transport::current();
+            state.transport = crate::agent_events::transport::current().downgrade();
             snapshot_of(&state, state.origin, false)
         };
         self.publish(snapshot);
@@ -351,7 +352,7 @@ impl InferenceMeter {
             model: self.identity.model.clone(),
             speed,
         };
-        let transport = self.lock().transport.clone();
+        let transport = self.lock().transport.upgrade();
         transport.with(|| crate::agent_events::emit_event(&event));
     }
 

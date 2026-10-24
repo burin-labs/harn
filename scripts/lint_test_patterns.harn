@@ -560,6 +560,9 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // to the first streamed delta as RunProfile telemetry; real provider
   // latency is the source of truth.
   "crates/harn-vm/src/llm/first_token.rs",
+  // The inference meter times a live provider stream for speed telemetry;
+  // its tokio clock is paused in its own tests.
+  "crates/harn-vm/src/llm/inference_speed.rs",
   "crates/harn-vm/src/llm/mod.rs",
   "crates/harn-vm/src/llm/model_test.rs",
   // Ollama raw `/api/generate` bypasses the shared transport wrapper, so it
