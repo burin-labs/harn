@@ -349,7 +349,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
                         &format!("rename aborted without writes: {detail}"),
                     ))
                 }
-            };
+            }
         }
 
         if !local_shadows.is_empty() {
