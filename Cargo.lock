@@ -3527,6 +3527,7 @@ dependencies = [
  "jsonschema",
  "jsonwebtoken",
  "libc",
+ "lzma-rust2",
  "mimalloc",
  "notify",
  "nu-ansi-term",
@@ -5527,6 +5528,9 @@ name = "lzma-rust2"
 version = "0.15.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e20f57f9918e5bd7bc58c22cdd70a6afc7375d4dd9683af5f2b34bd3d2bba619"
+dependencies = [
+ "sha2 0.10.9",
+]
 
 [[package]]
 name = "mach2"
