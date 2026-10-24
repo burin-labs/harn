@@ -50,6 +50,8 @@ pub(crate) fn register_sqlite_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_sqlite_builtins);
+
 #[harn_builtin(
     exposure = "runtime_internal",
     sig_expr = BuiltinSignature::variadic("sqlite_open", &[Param::new("args", TY_ANY

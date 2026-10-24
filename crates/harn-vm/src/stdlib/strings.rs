@@ -112,6 +112,8 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_string_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig = "format(template: string, ...rest: any) -> string",

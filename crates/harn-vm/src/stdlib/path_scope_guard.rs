@@ -39,6 +39,8 @@ pub fn register_path_scope_guard_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_path_scope_guard_builtins);
+
 /// Install a PreToolUse hook that denies (or emits a `<scope-alert>`
 /// reminder for) tool calls whose path-shaped args point outside the
 /// session's workspace anchor (#2221). `opts` may set `arg_keys`

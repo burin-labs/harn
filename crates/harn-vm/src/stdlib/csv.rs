@@ -47,6 +47,8 @@ pub(crate) fn register_csv_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_csv_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig = "csv_parse(text: string?, options?: dict) -> list",

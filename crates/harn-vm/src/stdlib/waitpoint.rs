@@ -165,6 +165,8 @@ pub(crate) fn register_waitpoint_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_waitpoint_builtins);
+
 #[harn_builtin(
     exposure = "harness.runtime.waitpoint_create",
     effects = ["state.mutate@dynamic"],

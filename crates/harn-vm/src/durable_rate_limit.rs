@@ -167,6 +167,8 @@ pub(crate) fn register_durable_rate_limit_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_durable_rate_limit_builtins);
+
 #[harn_builtin(
     exposure = "harness.runtime.durable_rate_limit_acquire",
     effects = ["state.mutate@arg0", "clock.observe@const=monotonic"],

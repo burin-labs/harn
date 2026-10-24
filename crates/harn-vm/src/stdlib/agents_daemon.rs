@@ -140,6 +140,8 @@ pub fn register_daemon_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_daemon_builtins);
+
 #[harn_builtin(
     exposure = "harness.agent.daemon_spawn",
     effects = ["worker.mutate@dynamic", "state.mutate@dynamic"],

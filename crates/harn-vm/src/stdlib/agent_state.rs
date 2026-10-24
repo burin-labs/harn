@@ -32,6 +32,8 @@ pub fn register_agent_state_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_agent_state_builtins);
+
 #[harn_builtin(
     exposure = "runtime_internal",
     sig = "__agent_state_init(root_or_session: string, options_or_root?: any, options?: dict) -> resource",

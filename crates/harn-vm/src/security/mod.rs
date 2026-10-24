@@ -1099,6 +1099,8 @@ pub fn register_security_builtins(vm: &mut Vm) {
     vm.register_builtin_def(&SECURITY_VERIFY_DIRECTIVE_IMPL_DEF);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_security_builtins);
+
 #[harn_builtin(exposure = "privileged_wire", effects = ["state.mutate@const=security-policy"], sig = "__security_policy(config: dict) -> dict", category = "security")]
 fn security_policy_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(VmValue::Dict(config)) = args.first() else {

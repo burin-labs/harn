@@ -6,6 +6,8 @@ pub(crate) fn register_channel_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_channel_builtins);
+
 #[harn_builtin(
     exposure = "runtime_internal",
     sig = "emit_channel(name: string, payload: any, options?: dict) -> dict",

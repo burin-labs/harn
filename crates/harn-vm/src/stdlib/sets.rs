@@ -6,6 +6,8 @@ pub(crate) fn register_set_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_set_builtins);
+
 /// Extract the backing [`VmSet`] from a set argument, throwing `message` when
 /// the argument is not a set.
 fn expect_set<'a>(arg: Option<&'a VmValue>, message: &str) -> Result<&'a VmSet, VmError> {

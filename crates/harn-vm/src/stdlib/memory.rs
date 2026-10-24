@@ -219,6 +219,8 @@ pub(crate) fn register_memory_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_memory_builtins);
+
 /// Reserved cache namespace for standalone `__embed` calls. Keeps the
 /// content-addressed embedding cache for ad-hoc embeds (e.g. the semantic
 /// response cache) separate from per-memory-namespace record embeddings.

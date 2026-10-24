@@ -122,6 +122,8 @@ pub(crate) fn register_json_stream_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_json_stream_builtins);
+
 fn create_validator(builtin: &str, args: &[VmValue]) -> Result<VmValue, VmError> {
     let schema = args
         .first()

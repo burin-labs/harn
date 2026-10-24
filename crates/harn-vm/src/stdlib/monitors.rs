@@ -107,6 +107,8 @@ pub(crate) fn register_monitor_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_monitor_builtins);
+
 #[harn_builtin(
     exposure = "harness.runtime.monitor_wait_for_native",
     effects = ["clock.observe@const=monotonic", "state.observe@dynamic"],

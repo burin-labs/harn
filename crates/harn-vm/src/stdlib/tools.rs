@@ -118,6 +118,8 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
     vm.register_builtin_def(&crate::llm::tools::TOOL_DESCRIPTION_SUMMARY_IMPL_DEF);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_tool_builtins);
+
 #[harn_builtin(
     exposure = "harness.tools.synthesize",
     effects = ["state.write@dynamic"],

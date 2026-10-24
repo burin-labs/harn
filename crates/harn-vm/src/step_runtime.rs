@@ -966,6 +966,8 @@ pub fn register_step_builtins(vm: &mut crate::vm::Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_step_builtins);
+
 #[harn_builtin(
     exposure = "runtime_internal",
     category = "step_runtime",

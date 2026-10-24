@@ -75,6 +75,8 @@ pub(crate) fn register_grounding_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_grounding_builtins);
+
 #[harn_builtin(
     exposure = "harness.fs.verify_imports",
     effects = ["fs.read@arg0"],

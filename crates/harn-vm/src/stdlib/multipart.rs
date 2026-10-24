@@ -723,6 +723,8 @@ pub(crate) fn register_multipart_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_multipart_builtins);
+
 #[cfg(test)]
 mod tests {
     use super::*;

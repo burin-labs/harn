@@ -186,6 +186,8 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
     schema_witness::register_builtins(vm);
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_json_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig_expr = harn_builtin_meta::signatures::PORTABLE_JSON_STRINGIFY,

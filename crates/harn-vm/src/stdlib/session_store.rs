@@ -67,6 +67,8 @@ pub(crate) fn register_session_store_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_session_store_builtins);
+
 #[harn_builtin(
     exposure = "harness.agent.session_store_append",
     effects = ["fs.write@dynamic", "state.write@arg0"],

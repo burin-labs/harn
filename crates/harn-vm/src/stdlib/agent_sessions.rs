@@ -29,6 +29,8 @@ pub fn register_agent_session_builtins(vm: &mut Vm) {
     goal::register(vm);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_agent_session_builtins);
+
 fn err(msg: impl Into<String>) -> VmError {
     ERR_KIND.err(msg.into())
 }

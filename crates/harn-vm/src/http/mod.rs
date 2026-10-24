@@ -741,6 +741,8 @@ pub fn register_http_builtins(vm: &mut Vm) {
     streaming::register_http_streaming_builtins(vm);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_http_builtins);
+
 fn register_http_tls_builtins(vm: &mut Vm) {
     vm.register_builtin("__http_server_tls_plain", |_args, _out| {
         Ok(http_server_tls_config_value(

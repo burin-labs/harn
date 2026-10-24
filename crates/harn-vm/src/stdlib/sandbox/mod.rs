@@ -156,7 +156,7 @@ mod workspace_env_integration;
 pub(crate) use handler_env::effective_fallback;
 #[cfg(test)]
 pub(crate) use handler_env::handler_sandbox_test_guard;
-pub use introspection::{host_confinement, register_sandbox_builtins, SANDBOX_CONFINEMENT_SCHEMA};
+pub use introspection::{host_confinement, SANDBOX_CONFINEMENT_SCHEMA};
 pub(crate) use locked_append::AppendLockOptions;
 pub(crate) use policy::allows_network as policy_allows_network;
 pub(crate) use replace::{

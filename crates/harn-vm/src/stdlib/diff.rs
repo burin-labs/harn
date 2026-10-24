@@ -9,6 +9,8 @@ pub(crate) fn register_diff_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_diff_builtins);
+
 fn string_arg<'a>(args: &'a [VmValue], index: usize, name: &str) -> Result<&'a str, VmError> {
     match args.get(index) {
         Some(VmValue::String(value)) => Ok(value.as_str()),

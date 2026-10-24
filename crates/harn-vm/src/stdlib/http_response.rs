@@ -43,6 +43,8 @@ pub(crate) fn register_http_response_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_http_response_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig = "http_ok(body: any?) -> dict",

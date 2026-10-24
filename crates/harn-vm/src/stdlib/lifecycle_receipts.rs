@@ -27,6 +27,8 @@ pub(crate) fn register_lifecycle_receipt_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_lifecycle_receipt_builtins);
+
 #[harn_builtin(
     exposure = "harness.agent.lifecycle_receipt_record_suspension",
     effects = ["state.write@arg0"],

@@ -62,6 +62,8 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_tracing_builtins);
+
 #[harn_builtin(
     exposure = "harness.obs.trace_start",
     effects = ["observability.write@arg0"],

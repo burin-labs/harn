@@ -571,6 +571,8 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Host, register_io_builtins);
+
 #[harn_builtin(
     exposure = "harness.stdio.log",
     effects = ["stdio.write@const=stdout"],

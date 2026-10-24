@@ -119,6 +119,8 @@ pub(crate) fn register_supervisor_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_supervisor_builtins);
+
 #[harn_builtin(
     exposure = "harness.runtime.supervisor_start",
     effects = ["worker.mutate@dynamic", "state.mutate@dynamic"],

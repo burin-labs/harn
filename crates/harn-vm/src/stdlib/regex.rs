@@ -38,6 +38,8 @@ pub(crate) fn register_regex_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_regex_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig_expr = harn_builtin_meta::signatures::PORTABLE_REGEX_MATCH,

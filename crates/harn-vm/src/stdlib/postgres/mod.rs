@@ -81,6 +81,8 @@ pub(crate) fn register_postgres_builtins(vm: &mut Vm) {
     register_postgres_namespace(vm);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_postgres_builtins);
+
 const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     // Core (v1 — issue #2500)
     &PG_POOL_IMPL_DEF,

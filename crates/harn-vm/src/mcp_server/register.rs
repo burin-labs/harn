@@ -466,6 +466,8 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Host, register_mcp_server_builtins);
+
 fn completion_sources_from_dict(
     value: Option<&VmValue>,
 ) -> Result<BTreeMap<String, McpCompletionSource>, VmError> {

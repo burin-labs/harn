@@ -106,6 +106,8 @@ pub(crate) fn register_review_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Host, register_review_builtins);
+
 async fn self_review_impl(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     args: Vec<VmValue>,

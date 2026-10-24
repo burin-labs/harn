@@ -360,6 +360,8 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
     }
 }
 
+harn_vm_core::stdlib_installer!(Host, register_process_builtins);
+
 #[harn_builtin(
     exposure = "runtime_internal",
     sig = "env(name: string) -> string?",
@@ -1073,6 +1075,8 @@ pub(crate) fn register_path_builtins(vm: &mut Vm) {
         vm.register_builtin_def(def);
     }
 }
+
+harn_vm_core::stdlib_installer!(Host, register_path_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",

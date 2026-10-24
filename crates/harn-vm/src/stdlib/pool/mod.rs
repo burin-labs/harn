@@ -2315,6 +2315,8 @@ pub(crate) fn register_pool_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_pool_builtins);
+
 /// Drop all in-process pool registry state. Called from
 /// `reset_thread_local_state` between top-level VM runs and from
 /// conformance test harness reload sequences so a fresh `pool_create`

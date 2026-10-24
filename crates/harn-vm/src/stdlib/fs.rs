@@ -413,6 +413,8 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     }
 }
 
+harn_vm_core::stdlib_installer!(Host, register_fs_builtins);
+
 const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &READ_FILE_BUILTIN_DEF,
     &READ_FILE_RESULT_BUILTIN_DEF,

@@ -11,6 +11,8 @@ pub(crate) fn register_external_agent_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_external_agent_builtins);
+
 #[harn_builtin(
     exposure = "harness.agent.external_agent_delegate",
     effects = ["worker.mutate@dynamic"],

@@ -29,6 +29,8 @@ pub(crate) fn register_runtime_scope_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_runtime_scope_builtins);
+
 #[harn_builtin(
     exposure = "harness.runtime.evaluate_approval_policy",
     effects = [],

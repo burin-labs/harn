@@ -242,6 +242,8 @@ pub(crate) fn register_vision_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Host, register_vision_builtins);
+
 fn current_backend() -> Arc<dyn OcrBackend> {
     OCR_BACKEND_OVERRIDE.with(|slot| {
         slot.borrow()

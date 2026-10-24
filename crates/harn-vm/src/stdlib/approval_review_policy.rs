@@ -9,6 +9,8 @@ pub(crate) fn register_approval_review_policy_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_approval_review_policy_builtins);
+
 /// Normalize an overlay against the one parsed policy owner before projection.
 #[harn_builtin(
     exposure = "pure",

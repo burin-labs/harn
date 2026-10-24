@@ -11,6 +11,8 @@ pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_bytes_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig = "bytes_from_string(text: string?) -> bytes",

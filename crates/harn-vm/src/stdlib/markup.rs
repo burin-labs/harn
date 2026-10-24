@@ -290,6 +290,8 @@ pub(super) fn register_markdown_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_markdown_builtins);
+
 /// Parse Markdown or MDX into headings, resolved links, prose blocks and plain text.
 #[harn_builtin(
     exposure = "pure",

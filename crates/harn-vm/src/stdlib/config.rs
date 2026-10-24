@@ -6,6 +6,8 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_config_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     effects = [],

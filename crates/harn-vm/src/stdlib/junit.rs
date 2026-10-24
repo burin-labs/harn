@@ -86,6 +86,8 @@ pub(crate) fn register_junit_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_junit_builtins);
+
 #[harn_builtin(
     exposure = "pure", effects = [],
     sig = "parse_junit_xml(input: string | bytes | nil) -> list<{name: string, status: \"passed\" | \"failed\" | \"skipped\" | \"errored\", duration_ms: int, message: string?, stdout: string?, stderr: string?, path: string?, line: int?}>",

@@ -58,6 +58,8 @@ pub(crate) fn register_durable_step_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_durable_step_builtins);
+
 #[harn_builtin(
     exposure = "harness.runtime.step_run",
     effects = ["state.mutate@dynamic", "clock.read@const=wall"],

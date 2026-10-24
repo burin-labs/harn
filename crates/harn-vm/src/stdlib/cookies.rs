@@ -676,6 +676,8 @@ pub(crate) fn register_cookie_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_cookie_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig = "cookie_parse(header: string | dict | list) -> dict",

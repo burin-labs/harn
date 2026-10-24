@@ -42,6 +42,8 @@ pub(crate) fn register_xml_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_xml_builtins);
+
 #[harn_builtin(
     aliases = ["__to_xml"],
     exposure = "pure",

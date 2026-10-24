@@ -660,6 +660,8 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_crypto_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig = "base64_encode(input: string | bytes) -> string",

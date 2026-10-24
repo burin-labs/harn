@@ -24,6 +24,8 @@ pub(crate) fn register_channel_guardrail_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_channel_guardrail_builtins);
+
 #[harn_builtin(
     exposure = "harness.channels.guardrail_register",
     effects = ["state.mutate@const=channel-guardrails"],

@@ -202,6 +202,8 @@ pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_path_helper_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig = "path_parts(path: string?) -> dict",

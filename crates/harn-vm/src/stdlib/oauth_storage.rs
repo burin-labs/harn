@@ -105,6 +105,8 @@ pub(crate) fn register_oauth_storage_builtins(vm: &mut Vm) {
     }
 }
 
+harn_vm_core::stdlib_installer!(Host, register_oauth_storage_builtins);
+
 pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
     &OAUTH_STORAGE_MEMORY_HANDLE_IMPL_DEF,
     &OAUTH_STORAGE_FILE_HANDLE_IMPL_DEF,

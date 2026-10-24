@@ -21,6 +21,8 @@ pub(crate) fn register_portable_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_portable_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig = "__portable_compile(source: string, entry: string, kind: string) -> dict",

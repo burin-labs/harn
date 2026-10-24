@@ -44,6 +44,8 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
     }
 }
 
+harn_vm_core::stdlib_installer!(Host, register_trigger_builtins);
+
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &dispatch::HANDLER_CONTEXT_IMPL_DEF,
     &dispatch::LIST_PROVIDERS_NATIVE_IMPL_DEF,

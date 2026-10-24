@@ -963,6 +963,8 @@ pub(crate) fn register_host_builtins(vm: &mut Vm) {
     }
 }
 
+harn_vm_core::stdlib_installer!(Host, register_host_builtins);
+
 pub(crate) fn register_missing_host_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         if vm.builtin_metadata_for(def.sig.name).is_none() {

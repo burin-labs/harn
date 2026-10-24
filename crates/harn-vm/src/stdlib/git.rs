@@ -559,6 +559,8 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Host, register_git_builtins);
+
 async fn run_git_command(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     command: GitCommand,

@@ -174,6 +174,8 @@ pub(crate) fn register_document_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_document_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig = "document_render_pdf(source: string | bytes | nil, options?: dict) -> bytes",

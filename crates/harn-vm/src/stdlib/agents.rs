@@ -97,6 +97,8 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
     workflow::register_workflow_builtins(vm);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_agent_builtins);
+
 #[harn_builtin(
     exposure = "runtime_internal",
     sig = "__host_sub_agent_run(request: dict) -> any",

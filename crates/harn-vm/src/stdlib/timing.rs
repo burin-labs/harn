@@ -74,6 +74,8 @@ pub(crate) fn register_timing_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_timing_builtins);
+
 #[harn_builtin(
     exposure = "harness.clock.timing_start",
     effects = ["clock.read@const=monotonic"],

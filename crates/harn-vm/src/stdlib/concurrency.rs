@@ -317,6 +317,8 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_concurrency_builtins, rebinds_execution_state);
+
 #[harn_builtin(
     exposure = "runtime_internal",
     sig = "sync_mutex_acquire(key?: string, timeout_ms?: int) -> any",

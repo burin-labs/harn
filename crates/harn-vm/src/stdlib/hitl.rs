@@ -277,6 +277,8 @@ pub(crate) fn register_hitl_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_hitl_builtins);
+
 #[harn_builtin(
     exposure = "runtime_internal",
     sig = "ask_user(prompt: string, options?: dict) -> any",

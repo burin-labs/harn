@@ -59,6 +59,8 @@ pub(crate) fn register_hitl_read_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_hitl_read_builtins);
+
 #[harn_builtin(
     exposure = "harness.interaction.hitl_pending",
     effects = ["state.read@const=hitl"],

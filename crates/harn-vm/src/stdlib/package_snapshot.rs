@@ -37,6 +37,8 @@ pub(crate) fn register_package_snapshot_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_package_snapshot_builtins);
+
 #[harn_builtin(
     exposure = "runtime_internal",
     sig = "package_snapshot_open(project_root: string) -> {handle: string, generation: string, packages_root: string, lock_path: string, lock_digest: string, packages: list<string>}?",

@@ -25,6 +25,8 @@ pub fn register_net_policy_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_net_policy_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig = "__net_policy_domain(host: string) -> dict",

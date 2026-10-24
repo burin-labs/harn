@@ -26,6 +26,8 @@ pub fn register_artifact_emit_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Host, register_artifact_emit_builtins);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ArtifactKind {
     VegaLite,
