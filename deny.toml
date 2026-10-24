@@ -46,6 +46,11 @@ ignore = [
     # binary. Both parents are Linux-only.
     { id = "RUSTSEC-2026-0194", reason = "quick-xml quadratic attribute-check; transitive via xcap@0.9.6 (latest) -> xcb/wayland. Fix >=0.41 semver-blocked upstream; local display-protocol data only. https://rustsec.org/advisories/RUSTSEC-2026-0194" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml unbounded namespace alloc; transitive via xcap@0.9.6 (latest) -> xcb/wayland. Fix >=0.41 semver-blocked upstream; local display-protocol data only. https://rustsec.org/advisories/RUSTSEC-2026-0195" },
+    # --- Dated exception: remove by 2026-10-31 (tracked in #10421). ---
+    # crypto-bigint 0.5.5 arrives via p256/ecdsa 0.13/0.16 in harn-aws-config; the
+    # fix (>=0.7.6) needs p256 0.14. The DPoP signing key it touches is ephemeral
+    # per login and the leak is a local-only timing channel.
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint timing leak; p256 0.13 pins ^0.5. Touches the ephemeral per-login DPoP key in harn-aws-config, local-only channel; expires 2026-10-31, migration tracked in https://github.com/burin-labs/harn/issues/10421. https://rustsec.org/advisories/RUSTSEC-2026-0387" },
 ]
 
 [licenses]
