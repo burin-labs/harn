@@ -131,24 +131,26 @@ opt-level = 0
 [profile.ci-cli.package.harn-vm]
 opt-level = 0
 
-# The everyday / local release: thin LTO + 16 codegen units, the same
-# optimization the distributed binary gets. It was fat LTO + 1 codegen unit,
-# which nothing shipped and which made local `cargo build --release`
-# needlessly slow. Cold start is dominated by fixed process/init overhead, not
-# LTO inlining, so the cli-cold-start-budget gate (which triggers on this
-# file) measures the real shipped optimization here.
+# The everyday / local release: thin LTO + 16 codegen units, so local
+# `cargo build --release` links in minutes. Cold start is dominated by fixed
+# process/init overhead, not LTO inlining; the dist profile below starts no
+# slower, so the cli-cold-start-budget gate (which triggers on this file)
+# measuring this profile is a conservative bound on the shipped binary.
 [profile.release]
 lto = "thin"
 codegen-units = 16
 
-# The distributed binary: `release` plus stripped symbols. Release workflows,
-# the release smoke, and the container image build with `--profile dist`, so
-# their output lives under `target/[<triple>/]dist/`. Only the per-target
-# codegen-unit count stays in the release workflow
-# (`CARGO_PROFILE_DIST_CODEGEN_UNITS`), because a profile cannot vary by
-# target.
+# The distributed binary. Release workflows, the release smoke, and the
+# container image build with `--profile dist`, so their output lives under
+# `target/[<triple>/]dist/`. Fat LTO with one codegen unit is about 15%
+# smaller than thin LTO with eight on x86_64 Linux, for a final link of
+# 15-20 minutes and a peak of about 13 GB, which fits a 16 GB hosted runner.
+# More codegen units are worse on every axis under fat LTO: 16 units peaked
+# at 19 GB and linked slower while staying 11% larger.
 [profile.dist]
 inherits = "release"
+lto = "fat"
+codegen-units = 1
 strip = "symbols"
 
 # Workspace-wide clippy floor. `pedantic` + `nursery` raised to `warn`; the
