@@ -29,7 +29,7 @@ fi
 printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || { echo 'invalid pinned bootstrap seed version' >&2; exit 1; }
 case "$(uname -m)" in arm64|aarch64) arch=aarch64;; x86_64|amd64) arch=x86_64;; *) echo 'unsupported seed architecture' >&2; exit 1;; esac
 # Releases before XZ_FIRST_RELEASE ship .tar.gz; later ones ship .tar.xz.
-XZ_FIRST_RELEASE=0.10.178
+XZ_FIRST_RELEASE=0.10.179
 unix_extension=tar.gz
 [ "$(printf '%s\n%s\n' "$version" "$XZ_FIRST_RELEASE" | sort -V | head -n 1)" != "$XZ_FIRST_RELEASE" ] || unix_extension=tar.xz
 case "$(uname -s)" in

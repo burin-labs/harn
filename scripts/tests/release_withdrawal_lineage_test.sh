@@ -20,7 +20,8 @@ unset RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER CARGO_BUIL
 mkdir -p "$CARGO_HOME"
 fixture_repo="$tmp_root/repo"
 mkdir -p \
-  "$fixture_repo/.github"
+  "$fixture_repo/.github" \
+  "$fixture_repo/spec/acp-registry/harn"
 
 cat > "$fixture_repo/Cargo.toml" <<'EOF'
 [workspace]
@@ -38,6 +39,18 @@ cat > "$fixture_repo/CHANGELOG.md" <<'EOF'
 ## v0.10.50
 
 - Last published release.
+EOF
+cat > "$fixture_repo/spec/acp-registry/harn/agent.json" <<'EOF'
+{
+  "version": "0.10.50",
+  "distribution": {
+    "binary": {
+      "linux": {
+        "archive": "https://example.test/releases/download/v0.10.50/harn.tar.gz"
+      }
+    }
+  }
+}
 EOF
 
 write_registry() {

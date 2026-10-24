@@ -139,7 +139,7 @@ case "$VERSION" in
 esac
 
 # Releases before XZ_FIRST_RELEASE ship .tar.gz; later ones ship .tar.xz.
-XZ_FIRST_RELEASE=0.10.178
+XZ_FIRST_RELEASE=0.10.179
 ARCHIVE_EXT="tar.gz"
 [ "$(printf '%s\n%s\n' "${VERSION#v}" "$XZ_FIRST_RELEASE" | sort -V | head -n 1)" != "$XZ_FIRST_RELEASE" ] || ARCHIVE_EXT="tar.xz"
 ASSET="harn-${TARGET}.${ARCHIVE_EXT}"

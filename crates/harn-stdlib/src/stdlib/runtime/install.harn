@@ -4,7 +4,7 @@ import { compare_release } from "std/semver"
 /**
  * First release that publishes macOS and Linux archives as `.tar.xz`; earlier ones are `.tar.gz`.
  */
-const XZ_FIRST_RELEASE = "0.10.178"
+const XZ_FIRST_RELEASE = "0.10.179"
 
 pub type RuntimeInstallRequest = {
   version: string,

@@ -857,7 +857,7 @@ fn hex_lower(bytes: &[u8]) -> String {
 }
 
 /// First release that publishes macOS and Linux archives as `.tar.xz`; earlier ones are `.tar.gz`.
-const XZ_FIRST_RELEASE: [u64; 3] = [0, 10, 178];
+const XZ_FIRST_RELEASE: [u64; 3] = [0, 10, 179];
 
 /// The release archive name for a target triple at a release tag; Windows stays a zip.
 pub(super) fn release_archive_name(triple: &str, tag: &str) -> String {
@@ -1428,11 +1428,11 @@ cafef00d00000000000000000000000000000000000000000000000000000000  harn-aarch64-a
     fn release_archive_name_follows_the_xz_cutover() {
         let linux = "x86_64-unknown-linux-gnu";
         assert_eq!(
-            release_archive_name(linux, "v0.10.177"),
+            release_archive_name(linux, "v0.10.178"),
             "harn-x86_64-unknown-linux-gnu.tar.gz"
         );
         assert_eq!(
-            release_archive_name(linux, "v0.10.178"),
+            release_archive_name(linux, "v0.10.179"),
             "harn-x86_64-unknown-linux-gnu.tar.xz"
         );
         assert_eq!(
@@ -1440,7 +1440,7 @@ cafef00d00000000000000000000000000000000000000000000000000000000  harn-aarch64-a
             "harn-aarch64-apple-darwin.tar.xz"
         );
         assert_eq!(
-            release_archive_name("x86_64-pc-windows-msvc", "v0.10.178"),
+            release_archive_name("x86_64-pc-windows-msvc", "v0.10.179"),
             "harn-x86_64-pc-windows-msvc.zip"
         );
     }
