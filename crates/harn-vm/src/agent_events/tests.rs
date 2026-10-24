@@ -1029,13 +1029,13 @@ fn emitted_tool_call_updates_carry_redacted_output_and_streamed_arguments() {
         tool_name: "read".into(),
         status: ToolCallStatus::Pending,
         raw_output,
-        error: None,
+        error: Some("upstream rejected key sk-abcdef0123456789abcdef".to_string()),
         duration_ms: None,
         execution_duration_ms: None,
         error_category: None,
         mutation_status: ToolMutationStatus::Unknown,
         changed_paths: None,
-        data: None,
+        data: Some(serde_json::json!({"token": "sk-abcdef0123456789abcdef", "rows": 3})),
         health: None,
         executor: None,
         parsing: None,
@@ -1052,12 +1052,14 @@ fn emitted_tool_call_updates_carry_redacted_output_and_streamed_arguments() {
     let AgentEvent::ToolCallUpdate {
         raw_output,
         raw_input_partial,
+        error,
+        data,
         ..
     } = &received[0]
     else {
         panic!("expected a tool call update: {received:?}");
     };
-    let rendered = format!("{raw_output:?} {raw_input_partial:?}");
+    let rendered = format!("{raw_output:?} {raw_input_partial:?} {error:?} {data:?}");
     assert!(
         !rendered.contains("sk-abcdef"),
         "credential leaked into the event: {rendered}"

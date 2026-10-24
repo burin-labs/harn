@@ -219,6 +219,8 @@ pub(crate) fn redact_for_emission(event: &AgentEvent) -> std::borrow::Cow<'_, Ag
             raw_input,
             raw_input_partial,
             raw_output,
+            error,
+            data,
             ..
         } => {
             if let Some(raw_input) = raw_input {
@@ -226,6 +228,12 @@ pub(crate) fn redact_for_emission(event: &AgentEvent) -> std::borrow::Cow<'_, Ag
             }
             if let Some(raw_output) = raw_output {
                 policy.redact_json_in_place(raw_output);
+            }
+            if let Some(data) = data {
+                policy.redact_json_in_place(data);
+            }
+            if let Some(error) = error {
+                *error = policy.redact_string(error).into_owned();
             }
             if let Some(partial) = raw_input_partial {
                 *partial = policy.redact_string(partial).into_owned();

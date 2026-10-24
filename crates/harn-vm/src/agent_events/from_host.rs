@@ -527,7 +527,13 @@ impl AgentEvent {
         // with the redaction policy. The live event is masked at emission.
         if matches!(event_type, "tool_call" | "tool_call_update") {
             let policy = crate::redact::current_policy();
-            for key in ["raw_input", "raw_output", "raw_input_partial"] {
+            for key in [
+                "raw_input",
+                "raw_output",
+                "raw_input_partial",
+                "data",
+                "error",
+            ] {
                 if let Some(value) = payload.get_mut(key) {
                     policy.redact_json_in_place(value);
                 }
