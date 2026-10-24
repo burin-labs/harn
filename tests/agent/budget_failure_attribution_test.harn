@@ -61,3 +61,36 @@ pipeline test_preserves_each_llm_budget_limit(harness: Harness, task: unknown) {
     assert_eq(events[0].model, "budget-fixture")
   }
 }
+
+/** A ceiling crossed at settlement has no projection; the event still names the judged spend. */
+pipeline test_a_settlement_stop_names_the_judged_spend(harness: Harness, task: unknown) {
+  const session = "budget-settlement-" + harness.random.uuid()
+  const caller = { _call ->
+    return {
+      ok: false,
+      status: "budget_exhausted",
+      stop_reason: "budget_exhausted",
+      error: {
+        category: "budget_exceeded",
+        message: "LLM budget exceeded: spent $2.2497 of $1.5000 budget",
+      },
+    }
+  }
+  const opts: AgentSpec = {
+    provider: "mock",
+    model: "budget-fixture",
+    llm_caller: caller,
+    session_id: session,
+    max_iterations: 2,
+    final_wrapup: false,
+  }
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(harness, "Exercise the settlement boundary.", nil, opts) },
+  )
+  const events = captured.events.filter({ event -> event.type == "budget_exhausted" })
+  assert_eq(len(events), 1)
+  assert_ne(events[0].session_cost_usd, nil, "the settlement stop names the spend it judged")
+  assert_eq(events[0].session_cost_usd, harness.llm.session_cost().budget_charged_usd)
+}
