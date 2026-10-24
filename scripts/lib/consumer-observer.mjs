@@ -51,8 +51,27 @@ const contextKeys = [
 /** @typedef {{source_revision: string, verdict: 'pass'|'fail', owed: number,
  * proven: number, pending: 0, failed: number, failed_suites: string[]}} ProductDecision */
 
-function refuse(reason, detail = '') {
-  throw new Error(`CONSUMER_OBSERVER reason=${reason}${detail ? ` ${detail}` : ''}`);
+function refuse(reason, diagnostic) {
+  const error = new Error(`CONSUMER_OBSERVER reason=${reason}`);
+  if (diagnostic) error.diagnostic = diagnostic;
+  throw error;
+}
+
+const diagnosticFields = {
+  status: /^[1-5][0-9]{2}$/, ratelimit_remaining: /^[0-9]{1,9}$/, ratelimit_limit: /^[0-9]{1,9}$/,
+  ratelimit_reset: /^[0-9]{1,12}$/, ratelimit_resource: /^[a-z_]{1,32}$/,
+};
+
+/** The one public failure line. The reason is a closed token; the diagnostic carries only
+ * HTTP status and rate-limit fields, never an endpoint, repository, run id or message prose.
+ * @param {unknown} error @param {string} fallback
+ * @returns {{reason:string, line:string}} */
+export function observerRefusal(error, fallback) {
+  const reason = /^CONSUMER_OBSERVER reason=([a-z_]+)$/.exec(error?.message)?.[1] ?? fallback;
+  const fields = Object.entries(diagnosticFields)
+    .filter(([name, shape]) => shape.test(String(error?.diagnostic?.[name] ?? '')))
+    .map(([name]) => `${name}=${error.diagnostic[name]}`);
+  return {reason, line: ['CONSUMER_OBSERVER', `reason=${reason}`, ...fields].join(' ')};
 }
 
 /** Normalize once. Unknown fields cannot silently alter the ownership contract.
@@ -353,13 +372,13 @@ function rateLimitWaitMs(response) {
   return wait <= censusRetryLimitMs ? wait + (wait > 0 ? 1000 : 0) : undefined;
 }
 
-function refusalDetail(response, endpoint) {
-  const fields = [`status=${response.status}`, `endpoint=${endpoint.pathname}`];
+function refusalDiagnostic(response) {
+  const fields = {status: response.status};
   for (const name of ['remaining', 'limit', 'reset', 'resource']) {
     const value = rateLimitHeader(response, name);
-    if (value !== undefined) fields.push(`ratelimit_${name}=${value}`);
+    if (value !== undefined) fields[`ratelimit_${name}`] = value;
   }
-  return fields.join(' ');
+  return fields;
 }
 
 async function githubCensus(token, url, field, fetchRecord) {
@@ -381,7 +400,7 @@ async function githubCensus(token, url, field, fetchRecord) {
       await new Promise(resolve => setTimeout(resolve, wait));
       response = await read();
     }
-    if (!response.ok) refuse('observer_census_read_refused', refusalDetail(response, endpoint));
+    if (!response.ok) refuse('observer_census_read_refused', refusalDiagnostic(response));
     const census = await response.json();
     if (!Number.isSafeInteger(census?.total_count) || census.total_count < 0
       || census.total_count > censusLimit || !Array.isArray(census[field])
