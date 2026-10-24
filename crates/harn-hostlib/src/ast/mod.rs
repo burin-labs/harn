@@ -82,6 +82,7 @@ pub mod api {
     use super::outline::{build_outline, outline_source};
     use super::parse::{parse_source, read_source};
     use super::symbols::extract;
+    pub(crate) use super::symbols::helpers::declaration_wrapper;
     use super::types::{OutlineItem, Symbol};
 
     /// Parse `path` (with optional language hint) and return its symbols.

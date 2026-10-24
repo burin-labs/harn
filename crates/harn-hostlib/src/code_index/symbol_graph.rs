@@ -202,9 +202,9 @@ pub struct Node {
     /// Workspace-relative path of the owning file, shared by every node of
     /// that file.
     pub path: Arc<str>,
-    /// 1-based start line within the file.
+    /// 1-based source line. Declarations use their name line when available.
     pub line: u32,
-    /// 1-based UTF-16 column, or unavailable. Java sites point at the member name.
+    /// 1-based UTF-16 column, or unavailable. Declarations and Java calls use the name.
     pub col: Option<u32>,
     /// Java declaration owner or the explicitly typed receiver of a call.
     pub owner_type: Option<String>,
@@ -615,14 +615,8 @@ impl SymbolGraph {
                 name: sym.name.clone(),
                 file_id,
                 path: path.clone(),
-                line: if language == Language::Java {
-                    declaration.map_or(sym.start_row.saturating_add(1), |fact| fact.line)
-                } else {
-                    sym.start_row.saturating_add(1)
-                },
-                col: declaration
-                    .filter(|_| language == Language::Java)
-                    .map(|fact| fact.col),
+                line: declaration.map_or(sym.start_row.saturating_add(1), |fact| fact.line),
+                col: declaration.map(|fact| fact.col),
                 owner_type: declaration.and_then(|fact| fact.owner_type.clone()),
                 signature: sym.signature.clone(),
                 container: sym.container.clone(),
