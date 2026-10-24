@@ -327,25 +327,25 @@ const GIT_VALUE_TAKING_OPTIONS: list<string> = [
 /** The stash subcommands that only read the list. Every other form writes it. */
 const GIT_STASH_READ_ONLY: list<string> = ["list", "show"]
 
-/** The arguments of a git command that are neither options nor option values. */
-fn git_positionals(argv: list<string>) -> list<string> {
+/**
+ * The git subcommand and every token after it, verbatim. Only the global
+ * options before the subcommand are skipped: after it, an option value such as
+ * a stash message must stay in place, or it would read as a verb.
+ */
+fn git_subcommand_args(argv: list<string>) -> list<string> {
   let consumes_next = false
-  let found: list<string> = []
+  let index = 1
   for token in argv.slice(1, len(argv)) {
     if consumes_next {
       consumes_next = false
-      continue
-    }
-    if GIT_VALUE_TAKING_OPTIONS.contains(token) {
+    } else if GIT_VALUE_TAKING_OPTIONS.contains(token) {
       consumes_next = true
-      continue
+    } else if !token.starts_with("-") {
+      return argv.slice(index, len(argv))
     }
-    if token.starts_with("-") {
-      continue
-    }
-    found = found + [token]
+    index = index + 1
   }
-  return found
+  return []
 }
 
 fn is_git_worktree_add(argv: list<string>) -> bool {
@@ -849,12 +849,10 @@ fn git_stash_write_in(command: string, depth: int) -> bool {
     for stage in group {
       const argv = launched_argv(stage.argv, 0)
       if argv_program(argv) == "git" {
-        const positionals = git_positionals(argv)
-        // A bare `git stash` pushes, and so does `git stash -u`. Anything but a
-        // named read-only verb is a write, so an option or message that happens
-        // to sit where the verb would be cannot slip through.
-        if (positionals[0] ?? "") == "stash"
-          && !GIT_STASH_READ_ONLY.contains(positionals[1] ?? "") {
+        const args = git_subcommand_args(argv)
+        // Git reads the verb only from the token right after `stash`; an option
+        // there (`-u`, `-m list`) means push. Anything but a read-only verb writes.
+        if (args[0] ?? "") == "stash" && !GIT_STASH_READ_ONLY.contains(args[1] ?? "") {
           return true
         }
       }
