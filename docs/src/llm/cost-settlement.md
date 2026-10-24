@@ -67,6 +67,9 @@ ledger instead of replacing it with a new estimate.
 Promotions and schedules apply at the request instant. Input bands apply to
 the whole request. Cache writes use the requested lifetime. Hosted tools add
 their per-call fees; audio rates replace those tokens' text charges.
+Self-hosted inference stays free. Hosted-tool units still need their own
+prices, and a real fee card is retained even when its quoted fee is zero.
+Token rates and breakdown charges stay zero for that free inference.
 
 When a one-hour cache rate is absent, the subtotal retains the runtime's
 standard-lifetime estimate and `cache_ttl_unpriced` prevents a complete amount.

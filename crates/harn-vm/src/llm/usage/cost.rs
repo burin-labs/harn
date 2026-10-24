@@ -3,7 +3,9 @@
 use harn_builtin_macros::harn_builtin;
 use serde::{Deserialize, Serialize};
 
-use super::{BillingUsage, LlmUsage, PricingFacts, ProviderUsageReceipt};
+use super::{
+    BillingUsage, LlmUsage, PricingFacts, ProviderReceiptSettlement, ProviderUsageReceipt,
+};
 use crate::llm::api::PromptCacheTtl;
 pub use crate::llm::cost::CallCostBreakdown;
 use crate::value::{VmError, VmValue};
@@ -81,63 +83,85 @@ pub fn settle_call_cost(input: &CallCostInput) -> Result<CallCostSettlement, Cal
         billing: Some(Box::new(input.billing.clone())),
         ..ProviderUsageReceipt::default()
     };
-    let (usage, detail) =
-        LlmUsage::from_provider_receipt_with_pricing(&input.provider, &input.model, &receipt);
-    project_settlement(input, usage, detail)
+    let settled = LlmUsage::settle_provider_receipt(&input.provider, &input.model, &receipt);
+    project_settlement(input, settled)
 }
 
 fn project_settlement(
     input: &CallCostInput,
-    usage: LlmUsage,
-    detail: Option<crate::llm::cost::PricingDetail>,
+    settled: ProviderReceiptSettlement,
 ) -> Result<CallCostSettlement, CallCostInputError> {
+    let ProviderReceiptSettlement {
+        usage,
+        pricing: detail,
+        billing,
+        free_inference,
+    } = settled;
+    let token_rate = |rate| if free_inference { 0.0 } else { rate * 1000.0 };
+    let cache_rate = |rate: Option<f64>| {
+        if free_inference {
+            Some(0.0)
+        } else {
+            rate.map(token_rate)
+        }
+    };
     let rates = detail.as_ref().map(|detail| CallCostRates {
         provider: input.provider.clone(),
         model: input.model.clone(),
-        input_per_mtok: detail.input_per_1k * 1000.0,
-        output_per_mtok: detail.output_per_1k * 1000.0,
-        cache_read_per_mtok: detail.cache_read_per_1k.map(|rate| rate * 1000.0),
-        cache_write_per_mtok: detail.cache_write_per_1k.map(|rate| rate * 1000.0),
-        cache_write_1h_per_mtok: detail.cache_write_1h_per_1k.map(|rate| rate * 1000.0),
-        source: detail.source.as_str().into(),
+        input_per_mtok: token_rate(detail.input_per_1k),
+        output_per_mtok: token_rate(detail.output_per_1k),
+        cache_read_per_mtok: cache_rate(detail.cache_read_per_1k),
+        cache_write_per_mtok: cache_rate(detail.cache_write_per_1k),
+        cache_write_1h_per_mtok: cache_rate(detail.cache_write_1h_per_1k),
+        source: if free_inference {
+            crate::llm::cost::PricingSource::ProviderEconomics.as_str()
+        } else {
+            detail.source.as_str()
+        }
+        .into(),
     });
     let breakdown = detail.as_ref().map(|detail| {
-        let mut breakdown = crate::llm::cost::project_call_cost_breakdown(
-            detail,
-            input.input_tokens,
-            input.output_tokens,
-            input.cache_read_tokens,
-            input.cache_write_tokens,
-            input.prompt_cache_ttl,
-        );
+        let mut breakdown = if free_inference {
+            CallCostBreakdown::default()
+        } else {
+            crate::llm::cost::project_call_cost_breakdown(
+                detail,
+                input.input_tokens,
+                input.output_tokens,
+                input.cache_read_tokens,
+                input.cache_write_tokens,
+                input.prompt_cache_ttl,
+            )
+        };
         breakdown.adjustments_usd = usage.known_cost_usd - breakdown.total();
         breakdown
     });
     let mut unpriced = Vec::new();
     if let Some(pricing) = &usage.pricing {
-        if input.cache_read_tokens > 0
+        if !free_inference
+            && input.cache_read_tokens > 0
             && detail
                 .as_ref()
                 .is_some_and(|detail| detail.cache_read_per_1k.is_none())
         {
             unpriced.push(CallCostUnpriced::CacheReadRateUnknown);
         }
-        if pricing.cache_ttl_unpriced && input.cache_write_tokens > 0 {
+        if !free_inference && pricing.cache_ttl_unpriced && input.cache_write_tokens > 0 {
             unpriced.push(CallCostUnpriced::CacheTtlUnpriced);
         }
-        unpriced.extend(
-            pricing
-                .hosted_tool_unpriced
-                .iter()
-                .map(|name| CallCostUnpriced::HostedTool { name: name.clone() }),
-        );
-        unpriced.extend(
-            pricing
-                .modality_unpriced
-                .iter()
-                .map(|name| CallCostUnpriced::Modality { name: name.clone() }),
-        );
     }
+    unpriced.extend(
+        billing
+            .hosted_tool_unpriced
+            .iter()
+            .map(|name| CallCostUnpriced::HostedTool { name: name.clone() }),
+    );
+    unpriced.extend(
+        billing
+            .modality_unpriced
+            .iter()
+            .map(|name| CallCostUnpriced::Modality { name: name.clone() }),
+    );
     if usage.cost_usd.is_none() {
         unpriced.push(CallCostUnpriced::PricingUnknown);
     }

@@ -54,7 +54,28 @@ fn main(harness: Harness) {
     request + {provider: "unpriced_fixture", model: "unpriced_fixture/model"},
   )
   require unknown.cost_usd == nil, "unknown route is not free"
-  require unknown.unpriced == [{kind: "pricing_unknown"}], "unknown pricing named"
+  require unknown.unpriced == [
+    {kind: "hosted_tool", name: "web_search"}, {kind: "pricing_unknown"},
+  ], "unknown token and hosted pricing named"
+  const local_request = request + {
+    provider: "ollama", model: "local_cost_fixture",
+    billing: {hosted_tool_calls: {unpublished_tool: 1}},
+  }
+  const local = settle_call_cost(local_request)
+  require local.cost_usd == nil, "free inference cannot hide an unpriced hosted tool"
+  require local.known_cost_usd == 0, "free inference keeps a known zero subtotal"
+  require local.pricing == nil, "an unknown hosted fee does not invent a card"
+  require local.unpriced == [{kind: "hosted_tool", name: "unpublished_tool"}],
+    "local hosted-tool gap is named"
+  const local_zero = settle_call_cost(
+    local_request + {billing: {hosted_tool_calls: {unpublished_tool: 0}}},
+  )
+  require local_zero.cost_usd == 0 && local_zero.unpriced == [],
+    "zero hosted units keep local inference free"
+  const local_session = estimate_session_cost([local_request, local_request + {billing: {}}])
+  require local_session.total_cost_usd == nil && local_session.unknown_calls == 1,
+    "session retains the local hosted gap"
+  require local_session.known_cost_usd == 0, "session keeps the measured free portion"
   assert_error_contains({ -> settle_call_cost(request + {cache_read_tokens: 1}) }, "exceed")
   assert_error_contains(
     { -> settle_call_cost(request + {billing: {audio_output_tokens: 1}}) },

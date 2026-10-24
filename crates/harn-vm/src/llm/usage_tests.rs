@@ -218,6 +218,42 @@ fn self_hosted_call_without_reported_usage_is_priced_but_still_usage_unknown() {
 }
 
 #[test]
+fn self_hosted_hosted_tool_gaps_preserve_authoritative_totals_on_both_native_paths() {
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    for reported_cost in [None, Some(0.0), Some(0.25)] {
+        let billing = super::BillingUsage {
+            hosted_tool_calls: [("unpublished_tool".into(), 1)].into(),
+            ..Default::default()
+        };
+        let mut result = self_hosted_result_without_usage();
+        result.telemetry.billing = Some(Box::new(billing.clone()));
+        result.telemetry.provider_cost_usd = reported_cost;
+        let receipt = ProviderUsageReceipt {
+            provider_cost_usd: reported_cost,
+            billing: Some(Box::new(billing)),
+            ..Default::default()
+        };
+        for usage in [
+            result.usage(),
+            LlmUsage::from_provider_receipt(&result.provider, &result.model, &receipt),
+        ] {
+            assert_eq!(usage.cost_usd, Some(reported_cost.unwrap_or(0.0)));
+            assert_eq!(usage.known_cost_usd, reported_cost.unwrap_or(0.0));
+            assert_eq!(usage.unpriced_calls, i64::from(reported_cost.is_none()));
+            assert_eq!(
+                summarize_usage_cost_certainty([&usage]).cost_usd(),
+                reported_cost
+            );
+            assert!(usage.pricing.is_none());
+            if reported_cost.is_none() {
+                assert_eq!(usage.accounting_status, UsageAccountingStatus::Partial);
+            }
+        }
+    }
+}
+
+#[test]
 fn live_tool_probe_preserves_missing_usage_as_unknown() {
     let result = LlmResult {
         provider: "together".to_string(),

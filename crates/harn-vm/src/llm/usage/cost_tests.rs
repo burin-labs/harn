@@ -53,6 +53,141 @@ fn missing_tool_price_keeps_priced_cache_and_refuses_a_complete_amount() {
 }
 
 #[test]
+fn free_inference_keeps_hosted_gaps_separate_from_plain_and_zero_calls() {
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    let mut request = input();
+    request.provider = "ollama".into();
+    request.model = "local_cost_fixture".into();
+    request.billing = BillingUsage::default();
+    for count in [None, Some(0), Some(1)] {
+        request.billing.hosted_tool_calls = count
+            .map(|count| ("unpublished_tool".into(), count))
+            .into_iter()
+            .collect();
+        let result = settle_call_cost(&request).unwrap();
+        assert_eq!(result.known_cost_usd, 0.0);
+        assert_eq!(result.pricing, None);
+        if count == Some(1) {
+            assert_eq!(result.cost_usd, None);
+            assert_eq!(
+                result.unpriced,
+                [CallCostUnpriced::HostedTool {
+                    name: "unpublished_tool".into(),
+                }]
+            );
+        } else {
+            assert_eq!(result.cost_usd, Some(0.0));
+            assert!(result.unpriced.is_empty());
+        }
+    }
+}
+
+#[test]
+fn a_real_hosted_fee_card_prices_free_inference_without_token_or_audio_charges() {
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    let mut request = input();
+    let config = crate::llm_config::embedded_config(None);
+    let mut model = config.models[&request.model].clone();
+    model.provider = "ollama".into();
+    model.wire_model = None;
+    let pricing = model.pricing.as_mut().unwrap();
+    pricing.input_per_mtok = 99.0;
+    pricing.output_per_mtok = 123.0;
+    pricing.cache_write_1h_per_mtok = None;
+    pricing.input_token_bands.clear();
+    pricing.promotions.clear();
+    pricing.schedules.clear();
+    pricing.modality_rates = Some(crate::llm_config::ModalityRates {
+        audio_input_per_mtok: Some(32.0),
+        audio_output_per_mtok: Some(64.0),
+        cached_audio_input_per_mtok: Some(0.4),
+    });
+    pricing.hosted_tool_fees = [(
+        "web_search".into(),
+        crate::llm_config::HostedToolFee {
+            per_1k_calls: 10.0,
+            free_per_month: Some(100),
+            source_url: "https://example.invalid/fixture".into(),
+        },
+    )]
+    .into();
+    let mut provider = config.providers["ollama"].clone();
+    provider.platform_fee_percent = Some(5.5);
+    request.provider = "ollama".into();
+    request.model = "local_hosted_fee_fixture".into();
+    request.output_tokens = 100;
+    request.cache_read_tokens = 100;
+    request.cache_write_tokens = 200;
+    request.billing.audio_input_tokens = Some(600);
+    request.billing.audio_output_tokens = Some(80);
+    request.billing.cached_audio_input_tokens = Some(100);
+    let mut overlay = crate::llm_config::ProvidersConfig::default();
+    overlay.providers.insert("ollama".into(), provider);
+    overlay.models.insert(request.model.clone(), model);
+    for per_1k_calls in [10.0, 0.0] {
+        overlay
+            .models
+            .get_mut(&request.model)
+            .unwrap()
+            .pricing
+            .as_mut()
+            .unwrap()
+            .hosted_tool_fees
+            .get_mut("web_search")
+            .unwrap()
+            .per_1k_calls = per_1k_calls;
+        crate::llm_config::set_user_overrides(Some(overlay.clone()));
+        let result = settle_call_cost(&request).unwrap();
+        let expected = per_1k_calls / 1000.0 * 1.055;
+        assert!((result.cost_usd.unwrap() - expected).abs() < 1e-12);
+        assert!(result.unpriced.is_empty());
+        let rates = result.rates.unwrap();
+        assert_eq!(rates.input_per_mtok, 0.0);
+        assert_eq!(rates.output_per_mtok, 0.0);
+        assert_eq!(rates.cache_write_1h_per_mtok, Some(0.0));
+        assert_eq!(rates.source, "provider_economics");
+        let breakdown = result.breakdown.unwrap();
+        assert_eq!(
+            breakdown.input_usd
+                + breakdown.output_usd
+                + breakdown.cache_read_usd
+                + breakdown.cache_write_usd,
+            0.0
+        );
+        assert!((breakdown.adjustments_usd - expected).abs() < 1e-12);
+        let facts = result
+            .pricing
+            .expect("a real card priced hosted units, including a quoted zero");
+        assert_eq!(facts.rate_card, "base");
+        assert!(!facts.cache_ttl_unpriced);
+        assert_eq!(facts.monthly_allowance_unapplied, ["web_search"]);
+        assert!((facts.platform_fee_estimate_usd - per_1k_calls / 1000.0 * 0.055).abs() < 1e-12);
+        let native = crate::llm::api::LlmResult {
+            provider: request.provider.clone(),
+            model: request.model.clone(),
+            input_tokens: request.input_tokens,
+            output_tokens: request.output_tokens,
+            cache_read_tokens: request.cache_read_tokens,
+            cache_write_tokens: request.cache_write_tokens,
+            telemetry: Box::new(crate::llm::api::ProviderTelemetry {
+                started_at_ms: Some(request.started_at_ms),
+                prompt_cache_ttl: Some("1h".into()),
+                billing: Some(Box::new(request.billing.clone())),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+        .usage();
+        assert!((native.cost_usd.unwrap() - expected).abs() < 1e-12);
+        assert_eq!(native.unpriced_calls, 0);
+        assert_eq!(native.pricing.as_deref(), Some(&facts));
+    }
+    crate::llm_config::clear_user_overrides();
+}
+
+#[test]
 fn projection_retains_the_rate_card_selected_before_a_catalog_change() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
@@ -67,10 +202,12 @@ fn projection_retains_the_rate_card_selected_before_a_catalog_change() {
         billing: Some(Box::new(request.billing.clone())),
         ..ProviderUsageReceipt::default()
     };
-    let (usage, selected) =
-        LlmUsage::from_provider_receipt_with_pricing(&request.provider, &request.model, &receipt);
-    assert!((usage.known_cost_usd - 0.016).abs() < 1e-12);
-    assert!(selected.is_some(), "a real selected rate card is required");
+    let selected = LlmUsage::settle_provider_receipt(&request.provider, &request.model, &receipt);
+    assert!((selected.usage.known_cost_usd - 0.016).abs() < 1e-12);
+    assert!(
+        selected.pricing.is_some(),
+        "a real selected rate card is required"
+    );
 
     let mut model = crate::llm_config::embedded_config(None).models[&request.model].clone();
     model.pricing.as_mut().unwrap().cache_write_1h_per_mtok = Some(60.0);
@@ -81,7 +218,7 @@ fn projection_retains_the_rate_card_selected_before_a_catalog_change() {
     assert!((changed.cost_usd.unwrap() - 0.07).abs() < 1e-12);
     assert_eq!(changed.rates.unwrap().cache_write_1h_per_mtok, Some(60.0));
 
-    let retained = project_settlement(&request, usage, selected).unwrap();
+    let retained = project_settlement(&request, selected).unwrap();
     crate::llm_config::clear_user_overrides();
     assert!((retained.cost_usd.unwrap() - 0.016).abs() < 1e-12);
     assert_eq!(retained.rates.unwrap().cache_write_1h_per_mtok, Some(6.0));
@@ -97,11 +234,25 @@ fn unknown_route_is_not_a_measured_free_call() {
     let mut request = input();
     request.provider = "unpriced_fixture".into();
     request.model = "unpriced_fixture/model".into();
+    request.billing = BillingUsage::default();
     let result = settle_call_cost(&request).unwrap();
     assert_eq!(result.cost_usd, None);
     assert_eq!(result.known_cost_usd, 0.0);
     assert_eq!(result.pricing, None);
     assert_eq!(result.unpriced, [CallCostUnpriced::PricingUnknown]);
+    request.billing.hosted_tool_calls = [("unpublished_tool".into(), 1)].into();
+    let result = settle_call_cost(&request).unwrap();
+    assert_eq!(result.cost_usd, None);
+    assert_eq!(result.known_cost_usd, 0.0);
+    assert_eq!(
+        result.unpriced,
+        [
+            CallCostUnpriced::HostedTool {
+                name: "unpublished_tool".into()
+            },
+            CallCostUnpriced::PricingUnknown,
+        ]
+    );
 }
 
 #[test]
