@@ -2787,8 +2787,13 @@ jobs:
   # update. `consumer-canary.yml` owns dispatch, custody and observation; the
   # consumer installs the CLI `rust-cli` uploaded to this run.
   #
-  # Non-blocking: deliberately absent from `ci-status`. Make it required once
-  # it has run green on at least 10 pull requests with no false red.
+  # Required through `ci-status` whenever it is expected: a same-repository,
+  # non-Dependabot pull request that touches the consumer's surfaces. A fail
+  # verdict blocks when the consumer passes at the pull request's base on the
+  # same consumer commit (`consumer-base-check`); a red the base shares is
+  # inherited and reported, not blocking. A run that reaches no verdict is
+  # retried once; still unmeasured, it is a named warning, not a success, and
+  # becomes blocking when `CONSUMER_UNMEASURED_BLOCKS` in `ci-status` flips.
   # Fork and Dependabot pull requests never run it; it needs the release app
   # credential, which neither receives.
   consumer-check:
@@ -2808,6 +2813,159 @@ jobs:
       source_revision: ${{ github.sha }}
       pull_request_cli_run: ${{ github.run_id }}
       pull_request_base: ${{ github.event.pull_request.base.sha }}
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+
+  # One fresh rehearsal when the first reached no verdict (queue or timing
+  # deadline, refused dispatch, interrupted observation). Each attempt's job
+  # names its own reason; a measured fail is never retried.
+  consumer-check-retry:
+    name: Consumer check retry
+    needs: [consumer-check]
+    if: >-
+      !cancelled()
+      && (needs.consumer-check.result == 'failure' || needs.consumer-check.result == 'cancelled')
+      && needs.consumer-check.outputs.verdict == ''
+    uses: ./.github/workflows/consumer-canary.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      source_revision: ${{ github.sha }}
+      pull_request_cli_run: ${{ github.run_id }}
+      pull_request_base: ${{ github.event.pull_request.base.sha }}
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+
+  # After a fail verdict only: the CLI at the pull request's base, uploaded to
+  # this run under its own name so the consumer can install it beside the pull
+  # request's. Reuses the base's live merge-group CLI when there is one.
+  consumer-base-cli:
+    name: Consumer base CLI
+    needs: [changes, consumer-check, consumer-check-retry]
+    if: >-
+      !cancelled()
+      && (needs.consumer-check.outputs.verdict || needs.consumer-check-retry.outputs.verdict) == 'fail'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 49
+    permissions:
+      actions: read
+      contents: read
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
+      SCCACHE_CACHE_SIZE: 15G
+      HARN_RUNNER_TIER: github-hosted
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Find the merge group's CLI for the base
+        id: proven-cli
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash scripts/ci/find_merge_group_cli.sh "$BASE_SHA" >> "$GITHUB_OUTPUT"
+      - name: Download the merge group's CLI
+        if: steps.proven-cli.outputs.found == 'true'
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+          run-id: ${{ steps.proven-cli.outputs.run_id }}
+      - name: Verify the merge group's CLI
+        if: steps.proven-cli.outputs.found == 'true'
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli-proven"
+          "$BASE_SHA"
+      - uses: ./.github/actions/free-disk-space
+        if: steps.proven-cli.outputs.found != 'true'
+      - name: Measure the compile budget
+        id: resource-budget
+        if: steps.proven-cli.outputs.found != 'true'
+        run: bash scripts/ci/rust_resource_budget.sh
+        env:
+          RUNNER_ENVIRONMENT: github-hosted
+          HARN_BUDGET_PROFILE: producer
+      - name: Install mold linker
+        if: steps.proven-cli.outputs.found != 'true'
+        uses: ./.github/actions/install-mold
+        timeout-minutes: 5
+      - uses: ./.github/actions/rust-toolchain
+        if: steps.proven-cli.outputs.found != 'true'
+      - uses: ./.github/actions/rust-cache
+        if: steps.proven-cli.outputs.found != 'true'
+        continue-on-error: true
+        with:
+          shared-key: harn-ci-cli
+          cache-on-failure: false
+          cache-bin: false
+          cache-workspace-crates: "true"
+          reuse-workspace-crates: "true"
+          save: "false"
+      - name: Build the base's Harn CLI
+        if: steps.proven-cli.outputs.found != 'true'
+        timeout-minutes: 31
+        env:
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
+        run: >-
+          ./scripts/ci/rust_artifact.sh build-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$BASE_SHA"
+      - name: Upload the base's Harn CLI
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: harn-base-cli.tar.zst
+          path: ${{ runner.temp }}/harn-cli.tar.zst
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+
+  # Rehearses the base with the same consumer ref, so a fail verdict above is
+  # either caused by this change (base passes) or inherited (base fails too).
+  consumer-base-check:
+    name: Consumer base check
+    needs: [consumer-check, consumer-base-cli]
+    if: ${{ !cancelled() && needs.consumer-base-cli.result == 'success' }}
+    uses: ./.github/workflows/consumer-canary.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      source_revision: ${{ github.event.pull_request.base.sha }}
+      pull_request_cli_run: ${{ github.run_id }}
+      pull_request_base: ${{ github.event.pull_request.base.sha }}
+      pull_request_cli_artifact: harn-base-cli.tar.zst
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+
+  consumer-base-check-retry:
+    name: Consumer base check retry
+    needs: [consumer-base-check]
+    if: >-
+      !cancelled()
+      && (needs.consumer-base-check.result == 'failure' || needs.consumer-base-check.result == 'cancelled')
+      && needs.consumer-base-check.outputs.verdict == ''
+    uses: ./.github/workflows/consumer-canary.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      source_revision: ${{ github.event.pull_request.base.sha }}
+      pull_request_cli_run: ${{ github.run_id }}
+      pull_request_base: ${{ github.event.pull_request.base.sha }}
+      pull_request_cli_artifact: harn-base-cli.tar.zst
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -2862,6 +3020,11 @@ jobs:
         rust-checks,
         rust-producer-capacity,
         rust-cli,
+        consumer-check,
+        consumer-check-retry,
+        consumer-base-cli,
+        consumer-base-check,
+        consumer-base-check-retry,
         provider-contract-probe,
         rust-check-inputs,
         rust-test-partitions,
@@ -2900,6 +3063,23 @@ jobs:
           # Only a skip is excused by it.
           POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
           PROVIDER_CONTRACT_PROBE_EXPECTED: ${{ needs.changes.outputs.provider_contract_probe }}
+          # Exactly `consumer-check`'s own condition.
+          CONSUMER_EXPECTED: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && needs.changes.outputs.consumer == 'true' && needs.rust-cli.result == 'success' }}
+          CONSUMER_RESULT: ${{ needs.consumer-check.result }}/${{ needs.consumer-check-retry.result }}
+          CONSUMER_VERDICT: ${{ needs.consumer-check.outputs.verdict || needs.consumer-check-retry.outputs.verdict }}
+          CONSUMER_BASE_CLI_RESULT: ${{ needs.consumer-base-cli.result }}
+          CONSUMER_BASE_RESULT: ${{ needs.consumer-base-check.result }}/${{ needs.consumer-base-check-retry.result }}
+          CONSUMER_BASE_VERDICT: ${{ needs.consumer-base-check.outputs.verdict || needs.consumer-base-check-retry.outputs.verdict }}
+          CONSUMER_BASE: ${{ github.event.pull_request.base.sha }}
+          CONSUMER_RUN: ${{ needs.consumer-check.outputs.verdict && needs.consumer-check.outputs.consumer_run || needs.consumer-check-retry.outputs.consumer_run }}
+          CONSUMER_BASE_RUN: ${{ needs.consumer-base-check.outputs.verdict && needs.consumer-base-check.outputs.consumer_run || needs.consumer-base-check-retry.outputs.consumer_run }}
+          CONSUMER_IDENTITY: ${{ needs.consumer-check.outputs.verdict && format('{0}/{1}', needs.consumer-check.outputs.consumer_head, needs.consumer-check.outputs.consumer_jobs) || format('{0}/{1}', needs.consumer-check-retry.outputs.consumer_head, needs.consumer-check-retry.outputs.consumer_jobs) }}
+          CONSUMER_BASE_IDENTITY: ${{ needs.consumer-base-check.outputs.verdict && format('{0}/{1}', needs.consumer-base-check.outputs.consumer_head, needs.consumer-base-check.outputs.consumer_jobs) || format('{0}/{1}', needs.consumer-base-check-retry.outputs.consumer_head, needs.consumer-base-check-retry.outputs.consumer_jobs) }}
+          CONSUMER_REASONS: first=${{ needs.consumer-check.outputs.reason || 'none' }} retry=${{ needs.consumer-check-retry.outputs.reason || 'none' }}
+          CONSUMER_BASE_REASONS: first=${{ needs.consumer-base-check.outputs.reason || 'none' }} retry=${{ needs.consumer-base-check-retry.outputs.reason || 'none' }}
+          # Flip to true once the consumer's runner capacity stops saturating;
+          # until then an unmeasured or unproven outcome warns instead of blocking.
+          CONSUMER_UNMEASURED_BLOCKS: "false"
         run: |
           case "$POST_MERGE_TIER_ACTIVE" in
             true|false) ;;
@@ -3029,6 +3209,50 @@ jobs:
           echo "Shared Harn CLI build: $rust_cli_result"
           require_result "$rust_cli_result" \
             "Shared Harn CLI build failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+
+          # The downstream consumer, when expected: a fail the base passes, on
+          # the same consumer commit and job set, blocks. A fail the base shares
+          # is inherited. An outcome still unmeasured after one retry, or a pair
+          # whose consumer commit or jobs differ, is unproven: a named warning
+          # until CONSUMER_UNMEASURED_BLOCKS flips it to blocking.
+          consumer_unmeasured() {
+            local message="consumer check UNMEASURED: $1"
+            echo "- $message" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$CONSUMER_UNMEASURED_BLOCKS" = "true" ]; then
+              echo "::error::$message"
+              exit 1
+            fi
+            echo "::warning::$message"
+          }
+          echo "Downstream consumer: result=$CONSUMER_RESULT verdict=${CONSUMER_VERDICT:-none} (expected=$CONSUMER_EXPECTED)"
+          if [ "$CONSUMER_EXPECTED" != "true" ]; then
+            require_result "${CONSUMER_RESULT%%/*}" "Downstream consumer check ran without being expected and did not pass." true
+          else
+            case "$CONSUMER_VERDICT" in
+              pass) ;;
+              fail)
+                echo "Downstream consumer at base $CONSUMER_BASE: base CLI=$CONSUMER_BASE_CLI_RESULT result=$CONSUMER_BASE_RESULT verdict=${CONSUMER_BASE_VERDICT:-none}"
+                same_head=false
+                same_jobs=false
+                [ "${CONSUMER_IDENTITY%%/*}" != "" ] && [ "${CONSUMER_IDENTITY%%/*}" = "${CONSUMER_BASE_IDENTITY%%/*}" ] && same_head=true
+                [ "${CONSUMER_IDENTITY#*/}" != "" ] && [ "${CONSUMER_IDENTITY#*/}" = "${CONSUMER_BASE_IDENTITY#*/}" ] && same_jobs=true
+                case "$CONSUMER_BASE_VERDICT" in
+                  pass|fail)
+                    if [ "$same_head" != "true" ] || [ "$same_jobs" != "true" ]; then
+                      consumer_unmeasured "consumer_identity_mismatch (runs $CONSUMER_RUN and $CONSUMER_BASE_RUN, same commit=$same_head, same jobs=$same_jobs)"
+                    elif [ "$CONSUMER_BASE_VERDICT" = "fail" ]; then
+                      echo "::notice::Downstream consumer red is inherited: consumer run $CONSUMER_RUN fails here and consumer run $CONSUMER_BASE_RUN fails at base $CONSUMER_BASE on the same consumer commit, so it does not block this pull request."
+                    else
+                      echo "::error::Downstream consumer run $CONSUMER_RUN fails with this change and consumer run $CONSUMER_BASE_RUN passes at base $CONSUMER_BASE on the same consumer commit."
+                      exit 1
+                    fi
+                    ;;
+                  *) consumer_unmeasured "base_unmeasured ($CONSUMER_BASE_REASONS, base CLI=$CONSUMER_BASE_CLI_RESULT)" ;;
+                esac
+                ;;
+              *) consumer_unmeasured "consumer_unmeasured ($CONSUMER_REASONS)" ;;
+            esac
+          fi
 
           case "$PROVIDER_CONTRACT_PROBE_EXPECTED" in
             true|false) ;;
