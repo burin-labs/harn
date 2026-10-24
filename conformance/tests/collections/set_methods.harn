@@ -43,5 +43,7 @@ pipeline default(harness: Harness, task: unknown) {
   }
   harness.stdio.println(contains(to_string(unwrap_err(bad)), "set.union: argument must be a set"))
   // iter.sum shares list.sum, decimals included
-  harness.stdio.println([decimal("1.50"), decimal("2.50")].iter().sum() == [decimal("1.50"), decimal("2.50")].sum())
+  harness.stdio.println(
+    [decimal("1.50"), decimal("2.50")].iter().sum() == [decimal("1.50"), decimal("2.50")].sum(),
+  )
 }

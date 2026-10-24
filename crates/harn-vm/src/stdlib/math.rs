@@ -774,8 +774,13 @@ mod tests {
         assert!(matches!(round_int_to_digits(1249, -2), VmValue::Int(1200)));
         assert!(matches!(round_int_to_digits(7, 3), VmValue::Int(7)));
         assert!(matches!(round_int_to_digits(123, -19), VmValue::Int(0)));
-        assert!(matches!(round_int_to_digits(9_000_000_000_000_000_000, -19), VmValue::Float(f) if f == 1e19));
-        assert!(matches!(round_int_to_digits(i64::MIN, -20), VmValue::Int(0)));
+        assert!(
+            matches!(round_int_to_digits(9_000_000_000_000_000_000, -19), VmValue::Float(f) if f == 1e19)
+        );
+        assert!(matches!(
+            round_int_to_digits(i64::MIN, -20),
+            VmValue::Int(0)
+        ));
         // A bucket boundary past i64::MAX promotes to float instead of wrapping
         // (i64::MAX rounds up to 9_223_400_000_000_000_000 at -14 digits).
         assert!(matches!(round_int_to_digits(i64::MAX, -14), VmValue::Float(f) if f == 9.2234e18));

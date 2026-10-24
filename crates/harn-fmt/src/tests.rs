@@ -510,7 +510,10 @@ fn test_preserves_parens_around_try_star_operand() {
     for kept in ["(try* fetch()).body", "(try* r)?"] {
         let source = format!("pipeline default(task) {{\n  let x = {kept}\n}}");
         let result = format_source(&source).unwrap();
-        assert!(result.contains(kept), "Expected `{kept}` kept, got:\n{result}");
+        assert!(
+            result.contains(kept),
+            "Expected `{kept}` kept, got:\n{result}"
+        );
         assert_roundtrip(&source);
     }
 }

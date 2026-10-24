@@ -8,4 +8,6 @@ no longer zeroes ints of 5e18 and beyond at `-19`. Set `union`, `intersection`,
 `difference`, and `symmetric_difference` methods throw on a non-set argument
 like their `set_*` builtins. Local JSON repair of structured LLM output keeps
 non-ASCII text intact instead of mojibaking it. `zip_create` refuses `..` and
-absolute entry paths, matching `tar_create`.
+absolute entry paths, matching `tar_create`. `harn fmt` keeps the parentheses
+around a `try*` operand, so `(try* fetch()).body` no longer reformats into
+`try* fetch().body`.

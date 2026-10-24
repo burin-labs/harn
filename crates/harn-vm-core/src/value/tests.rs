@@ -393,9 +393,7 @@ fn compare_values_is_a_total_order_for_sorting() {
         })
         .collect();
     assert!(ranks.windows(2).all(|w| w[0] <= w[1]), "{ranks:?}");
-    assert!(items
-        .windows(2)
-        .all(|w| compare_values(&w[0], &w[1]) <= 0));
+    assert!(items.windows(2).all(|w| compare_values(&w[0], &w[1]) <= 0));
 }
 
 #[test]

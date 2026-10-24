@@ -531,7 +531,9 @@ impl crate::vm::Vm {
 /// Sum of the numeric values: ints promote to float on overflow, a decimal
 /// makes the whole sum decimal, and non-numeric values are skipped. Shared by
 /// `list.sum()` and `iter.sum()` so the two cannot drift.
-pub(super) fn sum_values<'a>(items: impl IntoIterator<Item = &'a VmValue>) -> Result<VmValue, VmError> {
+pub(super) fn sum_values<'a>(
+    items: impl IntoIterator<Item = &'a VmValue>,
+) -> Result<VmValue, VmError> {
     let mut int_sum: i64 = 0;
     let mut overflowed = false;
     let mut has_float = false;

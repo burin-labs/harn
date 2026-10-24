@@ -405,10 +405,12 @@ pub fn compare_values(a: &VmValue, b: &VmValue) -> i32 {
         unequal => return unequal as i32,
     }
     match (a, b) {
-        (VmValue::List(x), VmValue::List(y)) => guard_recursion(|| lexicographic(x.iter(), y.iter())),
-        (VmValue::Pair(x), VmValue::Pair(y)) => guard_recursion(|| {
-            lexicographic([&x.0, &x.1].into_iter(), [&y.0, &y.1].into_iter())
-        }),
+        (VmValue::List(x), VmValue::List(y)) => {
+            guard_recursion(|| lexicographic(x.iter(), y.iter()))
+        }
+        (VmValue::Pair(x), VmValue::Pair(y)) => {
+            guard_recursion(|| lexicographic([&x.0, &x.1].into_iter(), [&y.0, &y.1].into_iter()))
+        }
         _ => try_compare_values(a, b).unwrap_or(0),
     }
 }
