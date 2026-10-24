@@ -65,7 +65,7 @@ impl BillingUsage {
             count > input
                 || count.saturating_sub(cached_audio)
                     > input.saturating_sub(read).saturating_sub(write)
-        }) && !self.audio_output_tokens.is_some_and(|count| count > output)
+        }) && self.audio_output_tokens.is_none_or(|count| count <= output)
             && !self.cached_audio_input_tokens.is_some_and(|count| {
                 self.audio_input_tokens.is_none_or(|audio| count > audio) || count > read
             })
