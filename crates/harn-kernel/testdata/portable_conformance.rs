@@ -6,13 +6,49 @@ pub struct PureCase {
     pub expected_json: &'static str,
 }
 
+const REGEX_ERROR_SOURCE: &str = r#"
+    fn inspect(input: string) {
+      const matched = try { regex_match(input, "x"); false } catch (_) { true }
+      const replaced = try { regex_replace(input, "y", "x"); false } catch (_) { true }
+      const captured = try { regex_captures(input, "x"); false } catch (_) { true }
+      const split = try { regex_split("x", input); false } catch (_) { true }
+      return [
+        matched,
+        replaced,
+        captured,
+        split,
+      ]
+    }
+"#;
+
 pub const PURE_CASES: &[PureCase] = &[
+    PureCase {
+        id: "hex-input-errors-are-catchable",
+        source: "fn inspect(input: string) { return try { hex_decode(input); false } catch (_) { true } }",
+        entry: "inspect",
+        input_json: r#""not-hex""#,
+        expected_json: "true",
+    },
+    PureCase {
+        id: "regex-input-errors-are-catchable",
+        source: REGEX_ERROR_SOURCE,
+        entry: "inspect",
+        input_json: r#""[""#,
+        expected_json: "[true,true,true,true]",
+    },
+    PureCase {
+        id: "valid-regex-inputs-do-not-throw",
+        source: REGEX_ERROR_SOURCE,
+        entry: "inspect",
+        input_json: r#""x""#,
+        expected_json: "[false,false,false,false]",
+    },
     PureCase {
         id: "hashed-secret-scan-refuses-an-empty-policy",
         source: r#"
             fn scan(input: string) {
               try { secret_scan(input, []) }
-              catch (_error) { return true }
+              catch (error) { return to_string(error).contains("hashes must be a nonempty list") }
               return false
             }
         "#,
@@ -593,6 +629,13 @@ pub struct RuntimeFailureCase {
 }
 
 pub const RUNTIME_FAILURE_CASES: &[RuntimeFailureCase] = &[
+    RuntimeFailureCase {
+        id: "catch-cannot-bypass-a-value-limit",
+        source: r#"fn repeat(input: string) { try { return input * 1048577 } catch (_) { return "caught" } }"#,
+        entry: "repeat",
+        input_json: r#""x""#,
+        expected_code: "value_byte_limit",
+    },
     RuntimeFailureCase {
         id: "string-repetition-rejects-output-over-byte-limit",
         source: r"fn repeat(input: {text: string, count: int}) { return input.text * input.count }",

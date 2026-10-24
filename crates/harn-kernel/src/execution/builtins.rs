@@ -79,7 +79,7 @@ impl Machine<'_> {
             (PortableBuiltin::HexDecode, [RuntimeValue::String(value)]) => {
                 match crate::pure::hex_decode_text(value) {
                     Ok(value) => self.push_charged(RuntimeValue::String(Arc::from(value))),
-                    Err(message) => OpStep::Error(diagnostic("builtin_error", message)),
+                    Err(message) => OpStep::RuntimeError(diagnostic("builtin_error", message)),
                 }
             }
             (PortableBuiltin::Trim, [value]) => match self.render_value(value) {
@@ -135,7 +135,7 @@ impl Machine<'_> {
                             .map(|value| RuntimeValue::String(Arc::from(value)))
                             .collect(),
                     ))),
-                    Err(message) => OpStep::Error(diagnostic(
+                    Err(message) => OpStep::RuntimeError(diagnostic(
                         "invalid_regex",
                         format!("Invalid regex: {message}"),
                     )),
@@ -153,7 +153,7 @@ impl Machine<'_> {
                 let flags = args.get(3).and_then(runtime_text).unwrap_or_default();
                 match crate::pure::regex_replace(&pattern, &replacement, &value, &flags) {
                     Ok(value) => self.push_charged(RuntimeValue::String(Arc::from(value))),
-                    Err(message) => OpStep::Error(diagnostic(
+                    Err(message) => OpStep::RuntimeError(diagnostic(
                         "invalid_regex",
                         format!("Invalid regex: {message}"),
                     )),
@@ -170,7 +170,7 @@ impl Machine<'_> {
                     Ok(captures) => self.push_charged(RuntimeValue::List(Rc::new(
                         captures.into_iter().map(regex_capture_value).collect(),
                     ))),
-                    Err(message) => OpStep::Error(diagnostic(
+                    Err(message) => OpStep::RuntimeError(diagnostic(
                         "invalid_regex",
                         format!("Invalid regex: {message}"),
                     )),
@@ -190,7 +190,7 @@ impl Machine<'_> {
                             .map(|value| RuntimeValue::String(Arc::from(value)))
                             .collect(),
                     ))),
-                    Err(message) => OpStep::Error(diagnostic(
+                    Err(message) => OpStep::RuntimeError(diagnostic(
                         "invalid_regex",
                         format!("Invalid regex: {message}"),
                     )),
@@ -217,7 +217,7 @@ impl Machine<'_> {
             | (PortableBuiltin::SecretScan, [value, RuntimeValue::Nil])
             | (PortableBuiltin::SecretScan, [value, RuntimeValue::List(_)]) => {
                 let Some(content) = runtime_text(value) else {
-                    return OpStep::Error(diagnostic(
+                    return OpStep::RuntimeError(diagnostic(
                         "builtin_error",
                         "secret_scan: content is required",
                     ));
@@ -237,7 +237,9 @@ impl Machine<'_> {
                 };
                 let findings = match findings {
                     Ok(findings) => findings,
-                    Err(message) => return OpStep::Error(diagnostic("builtin_error", message)),
+                    Err(message) => {
+                        return OpStep::RuntimeError(diagnostic("builtin_error", message))
+                    }
                 };
                 match serde_json::to_value(findings)
                     .map_err(|error| diagnostic("builtin_error", format!("secret_scan: {error}")))

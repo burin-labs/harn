@@ -601,6 +601,24 @@ impl<'a> Machine<'a> {
                         ));
                     }
                 }
+                OpStep::RuntimeError(error) => {
+                    let value = RuntimeValue::String(Arc::from(format!(
+                        "Runtime error: {}",
+                        error.message
+                    )));
+                    if let Err(limit) = self.charge_value_work(&value) {
+                        return Step::Error(limit);
+                    }
+                    if !handle_throw(
+                        frames,
+                        RuntimeException {
+                            value,
+                            declared: false,
+                        },
+                    ) {
+                        return Step::Error(error);
+                    }
+                }
                 OpStep::Error(error) => return Step::Error(error),
             }
             if frames
@@ -1424,6 +1442,7 @@ enum OpStep {
     Return(RuntimeValue),
     Suspend(CapabilityRequest),
     Throw(RuntimeException),
+    RuntimeError(Diagnostic),
     Error(Diagnostic),
 }
 
