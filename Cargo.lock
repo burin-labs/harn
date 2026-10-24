@@ -4107,6 +4107,7 @@ dependencies = [
  "ipnet",
  "jsonschema",
  "jsonwebtoken",
+ "notify",
  "rcgen",
  "reqwest",
  "rusqlite",

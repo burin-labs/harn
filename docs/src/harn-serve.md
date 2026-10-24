@@ -369,7 +369,7 @@ harn serve site --bind 127.0.0.1:0 --ready-file /tmp/site-ready.json server.harn
 
 The JSON receipt contains `schema_version: 1`, `pid`, and `url`. Its URL uses
 the actual listener address, even when `--public-url` advertises another URL.
-The complete receipt appears after routing and binding succeed. Startup fails
+The complete receipt appears after routing, binding, and TLS setup succeed. Startup fails
 if the file already exists or cannot be written. Use a fresh path for each run.
 The receipt records startup; check the process or make a request for current health.
 

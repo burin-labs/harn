@@ -499,38 +499,42 @@ impl SiteServer {
             .public_url
             .clone()
             .unwrap_or_else(|| format!("{}://{local_addr}", tls.listener_scheme()));
-        if let Some(path) = options.ready_file {
-            let ready = SiteServerReady {
-                schema_version: 1,
-                pid: std::process::id(),
-                url: format!("{}://{local_addr}", tls.listener_scheme()),
-            };
-            let bytes = serde_json::to_vec(&ready).map_err(|error| error.to_string())?;
-            let receipt = harn_vm::conditional_replace::conditional_replace(
-                &path,
-                &bytes,
-                &harn_vm::conditional_replace::ConditionalReplaceOptions {
-                    overwrite: false,
-                    ..Default::default()
-                },
-            )
-            .map_err(|error| {
-                format!(
-                    "cannot publish site readiness to {}: {error}",
-                    path.display()
+        let listener_url = format!("{}://{local_addr}", tls.listener_scheme());
+        crate::tls::serve_router_from_tcp_with_ready(listener, router, &tls, || {
+            if let Some(path) = options.ready_file {
+                let ready = SiteServerReady {
+                    schema_version: 1,
+                    pid: std::process::id(),
+                    url: listener_url,
+                };
+                let bytes = serde_json::to_vec(&ready).map_err(|error| error.to_string())?;
+                let receipt = harn_vm::conditional_replace::conditional_replace(
+                    &path,
+                    &bytes,
+                    &harn_vm::conditional_replace::ConditionalReplaceOptions {
+                        overwrite: false,
+                        ..Default::default()
+                    },
                 )
-            })?;
-            if receipt.status != harn_vm::conditional_replace::ConditionalReplaceStatus::Created {
-                return Err(format!(
-                    "site readiness path already exists: {}",
-                    path.display()
-                ));
+                .map_err(|error| {
+                    format!(
+                        "cannot publish site readiness to {}: {error}",
+                        path.display()
+                    )
+                })?;
+                if receipt.status != harn_vm::conditional_replace::ConditionalReplaceStatus::Created
+                {
+                    return Err(format!(
+                        "site readiness path already exists: {}",
+                        path.display()
+                    ));
+                }
             }
-        }
-        eprintln!("[harn] Site server ready on {advertised}");
-        crate::tls::serve_router_from_tcp(listener, router, &tls)
-            .await
-            .map_err(|error| format!("Site server failed: {error}"))
+            eprintln!("[harn] Site server ready on {advertised}");
+            Ok(())
+        })
+        .await
+        .map_err(|error| format!("Site server failed: {error}"))
     }
 }
 
