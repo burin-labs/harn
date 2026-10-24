@@ -45,6 +45,7 @@
 //! use `+++ /dev/null`. Missing trailing newlines surface as the
 //! conventional `\ No newline at end of file` markers.
 
+use harn_vm::value::VmDictExt as _;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -304,7 +305,7 @@ fn delegate_to_builtin(
         harn_vm::value::intern_key("session_id"),
         str_value(session_id),
     );
-    forwarded.insert(harn_vm::value::intern_key("dry_run"), VmValue::Bool(false));
+    forwarded.put_bool("dry_run", false);
     let request = VmValue::dict(forwarded);
     match runner(&[request]) {
         Ok(VmValue::Dict(result)) => parse_builtin_outcome(&result, op_label),
@@ -393,7 +394,7 @@ fn run_rename_symbol(
         harn_vm::value::intern_key("session_id"),
         str_value(session_id),
     );
-    forwarded.insert(harn_vm::value::intern_key("dry_run"), VmValue::Bool(false));
+    forwarded.put_bool("dry_run", false);
     forwarded
         .entry(harn_vm::value::intern_key("scope"))
         .or_insert_with(|| str_value("workspace"));
@@ -831,7 +832,7 @@ mod tests {
     }
 
     fn vm_list(items: &[VmValue]) -> VmValue {
-        VmValue::List(Arc::new(items.to_vec()))
+        VmValue::list(items.to_vec())
     }
 
     fn invoke(payload: VmValue) -> VmValue {

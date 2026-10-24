@@ -13,8 +13,8 @@ pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "bytes_from_string(text: string?) -> bytes", category = "bytes"
+    sig = "bytes_from_string(text: string?) -> bytes",
+    category = "bytes"
 )]
 fn bytes_from_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = Args::runtime("bytes_from_string", args).string(0, "text")?;
@@ -25,8 +25,8 @@ fn bytes_from_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "bytes_to_string(input: bytes) -> string", category = "bytes"
+    sig = "bytes_to_string(input: bytes) -> string",
+    category = "bytes"
 )]
 fn bytes_to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = Args::runtime("bytes_to_string", args).bytes(0, "input")?;
@@ -37,7 +37,6 @@ fn bytes_to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "bytes_to_string_lossy(input: bytes) -> string",
     category = "bytes"
 )]
@@ -48,8 +47,8 @@ fn bytes_to_string_lossy_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "bytes_to_hex(input: bytes) -> string", category = "bytes"
+    sig = "bytes_to_hex(input: bytes) -> string",
+    category = "bytes"
 )]
 fn bytes_to_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = Args::runtime("bytes_to_hex", args).bytes(0, "input")?;
@@ -58,8 +57,8 @@ fn bytes_to_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "bytes_from_hex(text: string?) -> bytes", category = "bytes"
+    sig = "bytes_from_hex(text: string?) -> bytes",
+    category = "bytes"
 )]
 fn bytes_from_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = Args::runtime("bytes_from_hex", args).string(0, "text")?;
@@ -70,8 +69,8 @@ fn bytes_from_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "bytes_to_base64(input: bytes) -> string", category = "bytes"
+    sig = "bytes_to_base64(input: bytes) -> string",
+    category = "bytes"
 )]
 fn bytes_to_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use base64::Engine;
@@ -84,8 +83,8 @@ fn bytes_to_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "bytes_from_base64(text: string?) -> bytes", category = "bytes"
+    sig = "bytes_from_base64(text: string?) -> bytes",
+    category = "bytes"
 )]
 fn bytes_from_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use base64::Engine;
@@ -124,7 +123,6 @@ fn decode_base64url_bytes(text: &str) -> Result<Vec<u8>, base64::DecodeError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "bytes_from_base64url(text: string?) -> bytes",
     category = "bytes"
 )]
@@ -137,8 +135,8 @@ fn bytes_from_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "bytes_len(input: bytes) -> int", category = "bytes"
+    sig = "bytes_len(input: bytes) -> int",
+    category = "bytes"
 )]
 fn bytes_len_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = Args::runtime("bytes_len", args).bytes(0, "input")?;
@@ -147,7 +145,6 @@ fn bytes_len_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "bytes_concat(left: bytes, right: bytes) -> bytes",
     category = "bytes"
 )]
@@ -163,7 +160,6 @@ fn bytes_concat_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "bytes_slice(input: bytes, start: int, end: int) -> bytes",
     category = "bytes"
 )]
@@ -183,7 +179,6 @@ fn bytes_slice_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "bytes_eq(left: bytes, right: bytes) -> bool",
     category = "bytes"
 )]
@@ -213,7 +208,7 @@ mod tests {
     }
 
     fn s(v: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(v))
+        VmValue::string(v)
     }
 
     fn b(v: &[u8]) -> VmValue {

@@ -2,10 +2,9 @@
 
 use super::*;
 
-#[test]
-fn test_shadow_variable() {
-    let diags = lint_source(
-        r"
+#[rstest::rstest]
+#[case::test_shadow_variable(
+    r"
 pipeline default(task) {
 const x = 1
 if true {
@@ -15,35 +14,23 @@ if true {
 log(x)
 }
 ",
-    );
-    assert!(
-        has_rule(&diags, "shadow-variable"),
-        "expected shadow-variable warning, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_no_shadow_same_scope() {
-    // Re-declaration in the same scope is not shadowing (it may be a
-    // parser error, but the linter only checks outer-scope shadows).
-    let diags = lint_source(
-        r"
+    "shadow-variable",
+    true
+)]
+// Re-declaration in the same scope is not shadowing (it may be a
+// parser error, but the linter only checks outer-scope shadows).
+#[case::test_no_shadow_same_scope(
+    r"
 pipeline default(task) {
 const x = 1
 log(x)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "shadow-variable"),
-        "same-scope should not trigger shadow-variable: {diags:?}"
-    );
-}
-
-#[test]
-fn test_nested_harness_boundary_does_not_warn() {
-    let diags = lint_source(
-        r"
+    "shadow-variable",
+    false
+)]
+#[case::test_nested_harness_boundary_does_not_warn(
+    r"
 pipeline default(harness: Harness) {
   register({
     handler: { harness, event ->
@@ -52,9 +39,14 @@ pipeline default(harness: Harness) {
   })
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "shadow-variable"),
-        "nested runtime-supplied Harness boundaries use the canonical name: {diags:?}"
+    "shadow-variable",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }

@@ -332,9 +332,9 @@ fn portable_value_to_vm(value: harn_kernel::value::VmValue) -> crate::VmValue {
         harn_kernel::value::VmValue::Bool(value) => crate::VmValue::Bool(value),
         harn_kernel::value::VmValue::Nil => crate::VmValue::Nil,
         harn_kernel::value::VmValue::Duration(value) => crate::VmValue::Duration(value),
-        harn_kernel::value::VmValue::List(values) => crate::VmValue::List(std::sync::Arc::new(
-            values.iter().cloned().map(portable_value_to_vm).collect(),
-        )),
+        harn_kernel::value::VmValue::List(values) => {
+            crate::VmValue::list(values.iter().cloned().map(portable_value_to_vm).collect())
+        }
         harn_kernel::value::VmValue::Dict(entries) => crate::VmValue::dict(
             entries
                 .iter()

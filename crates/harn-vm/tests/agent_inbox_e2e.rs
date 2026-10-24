@@ -27,19 +27,14 @@ fn run_with_setup(source: &str, setup: impl FnOnce()) -> Result<String, String> 
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
-                vm.execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"))?;
-                Ok(vm.output().to_string())
-            })
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut vm = harn_vm::new_vm();
+        harn_vm::register_vm_stdlib(&mut vm);
+        vm.execute(&chunk)
             .await
-    })
+            .map_err(|e: VmError| format!("{e:?}"))?;
+        Ok(vm.output().to_string())
+    }))
 }
 
 fn out(source: &str) -> Vec<String> {
@@ -103,53 +98,48 @@ fn inbox_survives_concurrent_pushes_during_awaited_future() {
     // on an unrelated await. This is the structural guarantee that the
     // agent loop relies on across a long compaction LLM call.
     let session_id = format!("inbox-race-{}", uuid::Uuid::now_v7());
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = harn_clock::test_support::current_thread_runtime();
     rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                // Simulate "compaction is running" by parking on a
-                // tokio::sync::Notify the producer wakes us with —
-                // logically equivalent to a long LLM call, but with
-                // no wall-clock dependency. Tests must not poll
-                // Instant::now or sleep wall-clock time.
-                let signal = std::sync::Arc::new(tokio::sync::Notify::new());
-                let producer_signal = signal.clone();
-                let sid_a = session_id.clone();
-                let producer = tokio::task::spawn_local(async move {
-                    tokio::task::yield_now().await;
-                    harn_vm::orchestration::agent_inbox::push(
-                        &sid_a,
-                        "tool_result",
-                        "during",
-                        "test.compaction_race",
-                    );
-                    harn_vm::orchestration::agent_inbox::push(
-                        &sid_a,
-                        "mcp_progress",
-                        "also during",
-                        "test.compaction_race",
-                    );
-                    producer_signal.notify_one();
-                });
-                // The "compaction" awaits a future the producer
-                // completes; this is the structural equivalent of an
-                // LLM call awaiting its provider. Production code
-                // would call `vm_call_llm_full` here.
-                signal.notified().await;
-                producer.await.unwrap();
-                // After the awaited future returns, drain — both
-                // entries must still be there, in push order.
-                let drained = harn_vm::orchestration::agent_inbox::drain(&session_id);
-                assert_eq!(drained.len(), 2);
-                assert_eq!(drained[0].content, "during");
-                assert_eq!(drained[1].content, "also during");
-                assert!(drained[0].sequence < drained[1].sequence);
-            })
-            .await;
+        harn_clock::test_support::with_local_tasks(async {
+            // Simulate "compaction is running" by parking on a
+            // tokio::sync::Notify the producer wakes us with —
+            // logically equivalent to a long LLM call, but with
+            // no wall-clock dependency. Tests must not poll
+            // Instant::now or sleep wall-clock time.
+            let signal = std::sync::Arc::new(tokio::sync::Notify::new());
+            let producer_signal = signal.clone();
+            let sid_a = session_id.clone();
+            let producer = tokio::task::spawn_local(async move {
+                tokio::task::yield_now().await;
+                harn_vm::orchestration::agent_inbox::push(
+                    &sid_a,
+                    "tool_result",
+                    "during",
+                    "test.compaction_race",
+                );
+                harn_vm::orchestration::agent_inbox::push(
+                    &sid_a,
+                    "mcp_progress",
+                    "also during",
+                    "test.compaction_race",
+                );
+                producer_signal.notify_one();
+            });
+            // The "compaction" awaits a future the producer
+            // completes; this is the structural equivalent of an
+            // LLM call awaiting its provider. Production code
+            // would call `vm_call_llm_full` here.
+            signal.notified().await;
+            producer.await.unwrap();
+            // After the awaited future returns, drain — both
+            // entries must still be there, in push order.
+            let drained = harn_vm::orchestration::agent_inbox::drain(&session_id);
+            assert_eq!(drained.len(), 2);
+            assert_eq!(drained[0].content, "during");
+            assert_eq!(drained[1].content, "also during");
+            assert!(drained[0].sequence < drained[1].sequence);
+        })
+        .await;
     });
 }
 

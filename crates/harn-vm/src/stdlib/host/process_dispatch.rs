@@ -180,7 +180,6 @@ fn validate_reviewed_git_push_with_lease(params: &crate::value::DictMap) -> Resu
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use crate::value::VmValue;
 
@@ -261,19 +260,16 @@ mod tests {
             "--force-with-lease=refs/heads/main:abc123",
         ] {
             let params = crate::value::DictMap::from_iter([
-                (
-                    crate::value::intern_key("mode"),
-                    VmValue::String(arcstr::ArcStr::from("argv")),
-                ),
+                (crate::value::intern_key("mode"), VmValue::string("argv")),
                 (
                     crate::value::intern_key("argv"),
-                    VmValue::List(Arc::new(vec![
-                        VmValue::String(arcstr::ArcStr::from("git")),
-                        VmValue::String(arcstr::ArcStr::from("push")),
-                        VmValue::String(arcstr::ArcStr::from(lease)),
-                        VmValue::String(arcstr::ArcStr::from("origin")),
-                        VmValue::String(arcstr::ArcStr::from("HEAD:main")),
-                    ])),
+                    VmValue::list(vec![
+                        VmValue::string("git"),
+                        VmValue::string("push"),
+                        VmValue::string(lease),
+                        VmValue::string("origin"),
+                        VmValue::string("HEAD:main"),
+                    ]),
                 ),
             ]);
 

@@ -146,7 +146,7 @@ pub(crate) fn aborted_result_value(abort: &SchemaStreamAbort) -> VmValue {
             crate::llm::usage::LlmUsage::stream_aborted_attempt().to_vm_dict(&Default::default()),
         ),
     );
-    dict.insert("data".to_string(), VmValue::Nil);
+    dict.put("data", VmValue::Nil);
     dict.put("schema_stream_aborted", VmValue::dict(meta));
     VmValue::dict(dict)
 }

@@ -204,8 +204,8 @@ pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "path_parts(path: string?) -> dict", category = "path"
+    sig = "path_parts(path: string?) -> dict",
+    category = "path"
 )]
 fn path_parts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
@@ -215,22 +215,14 @@ fn path_parts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     map.put_str("stem", stem(&p));
     map.put_str("ext", extension(&p));
     let (_, _, segments) = split_segments(&p);
-    map.put(
-        "segments",
-        VmValue::list(
-            segments
-                .into_iter()
-                .map(|s| VmValue::String(arcstr::ArcStr::from(s.as_str())))
-                .collect(),
-        ),
-    );
+    map.put("segments", VmValue::strings(segments));
     Ok(VmValue::dict(map))
 }
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "path_parent(path: string?) -> string", category = "path"
+    sig = "path_parent(path: string?) -> string",
+    category = "path"
 )]
 fn path_parent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
@@ -239,8 +231,8 @@ fn path_parent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "path_basename(path: string?) -> string", category = "path"
+    sig = "path_basename(path: string?) -> string",
+    category = "path"
 )]
 fn path_basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
@@ -249,8 +241,8 @@ fn path_basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "path_stem(path: string?) -> string", category = "path"
+    sig = "path_stem(path: string?) -> string",
+    category = "path"
 )]
 fn path_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
@@ -259,8 +251,8 @@ fn path_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "path_extension(path: string?) -> string", category = "path"
+    sig = "path_extension(path: string?) -> string",
+    category = "path"
 )]
 fn path_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
@@ -269,7 +261,6 @@ fn path_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "path_with_extension(path: string?, extension: string) -> string",
     category = "path"
 )]
@@ -281,7 +272,6 @@ fn path_with_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "path_with_stem(path: string?, stem: string) -> string",
     category = "path"
 )]
@@ -293,8 +283,8 @@ fn path_with_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "path_is_absolute(path: string?) -> bool", category = "path"
+    sig = "path_is_absolute(path: string?) -> bool",
+    category = "path"
 )]
 fn path_is_absolute_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
@@ -303,8 +293,8 @@ fn path_is_absolute_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "path_is_relative(path: string?) -> bool", category = "path"
+    sig = "path_is_relative(path: string?) -> bool",
+    category = "path"
 )]
 fn path_is_relative_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
@@ -313,8 +303,8 @@ fn path_is_relative_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "path_normalize(path: string?) -> string", category = "path"
+    sig = "path_normalize(path: string?) -> string",
+    category = "path"
 )]
 fn path_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
@@ -323,7 +313,6 @@ fn path_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "path_relative_to(path: string?, base: string) -> string?",
     category = "path"
 )]
@@ -338,8 +327,8 @@ fn path_relative_to_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "path_to_posix(path: string?) -> string", category = "path"
+    sig = "path_to_posix(path: string?) -> string",
+    category = "path"
 )]
 fn path_to_posix_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
@@ -348,8 +337,8 @@ fn path_to_posix_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "path_to_native(path: string?) -> string", category = "path"
+    sig = "path_to_native(path: string?) -> string",
+    category = "path"
 )]
 fn path_to_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
@@ -373,7 +362,6 @@ fn path_workspace_info_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "path_workspace_normalize(path: string?, workspace_root?: string) -> string?",
     category = "path"
 )]
@@ -423,18 +411,13 @@ fn path_workspace_canonicalize_existing_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "path_segments(path: string?) -> list", category = "path"
+    sig = "path_segments(path: string?) -> list",
+    category = "path"
 )]
 fn path_segments_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     let (_, _, segments) = split_segments(&p);
-    Ok(VmValue::list(
-        segments
-            .into_iter()
-            .map(|s| VmValue::string(s.as_str()))
-            .collect(),
-    ))
+    Ok(VmValue::strings(segments))
 }
 
 #[cfg(test)]

@@ -103,7 +103,7 @@ fn reasoning_aware_probe_floor_never_lowers_an_explicit_route_default() {
 fn request_report_materializes_large_string_case_without_provider_call() {
     let report = tool_conformance_request_report(
         "openai",
-        "gpt-5.4-mini",
+        "gpt-5.1",
         None,
         vec![ToolProbeMode::NonStreaming, ToolProbeMode::Streaming],
         ToolProbeCase::LargeStringArgument,
@@ -475,7 +475,7 @@ fn probe_request_body_uses_anthropic_tool_dialect() {
 fn probe_request_body_preserves_openai_tool_dialect() {
     let body = probe_request_body(
         "openai",
-        "gpt-5.4-mini",
+        "gpt-5.1",
         ToolProbeMode::NonStreaming,
         ToolProbeCase::SingleToolCall,
         ToolProbeRequestProfile::CatalogDefault,
@@ -492,7 +492,7 @@ fn probe_request_body_preserves_openai_tool_dialect() {
 
     let validation = validate_probe_request_body(
         "openai",
-        "gpt-5.4-mini",
+        "gpt-5.1",
         ToolProbeCase::SingleToolCall,
         ToolProbeRequestProfile::CatalogDefault,
         &body,

@@ -6,6 +6,126 @@ use crate::llm::helpers::options::routing::equivalent_failover_requirements_for_
 use crate::llm_config::ProvidersConfig;
 
 #[test]
+fn gpt_5_4_mini_reasoning_tools_preserve_route_constraints() {
+    use crate::llm::api::{effective_tool_api_mode, LlmApiMode, ReasoningEffort, ThinkingConfig};
+
+    crate::llm::capabilities::clear_user_overrides();
+    let thinking = ThinkingConfig::Effort {
+        level: ReasoningEffort::Low,
+    };
+    for (provider, model, requires_responses) in [
+        ("openai", "gpt-5.4-mini", true),
+        ("openai", "gpt-5.4-mini-2026-03-17", true),
+        ("openai", "gpt-5.4-mini-2099-01-01", false),
+        ("openai", "gpt-5.4", false),
+        ("openai", "gpt-5.4-nano", false),
+        ("openai", "gpt-5.1", false),
+        ("openrouter", "openai/gpt-5.4-mini", false),
+        ("vercel_ai_gateway", "openai/gpt-5.4-mini", false),
+    ] {
+        let caps = crate::llm::capabilities::lookup(provider, model);
+        assert!(
+            caps.native_tools,
+            "{provider}/{model} must reach native tools"
+        );
+        assert_eq!(
+            caps.reasoning_tools_require_responses, requires_responses,
+            "{provider}/{model}"
+        );
+        assert_eq!(
+            effective_tool_api_mode(
+                LlmApiMode::ChatCompletions,
+                provider,
+                &caps,
+                &thinking,
+                true
+            ),
+            if requires_responses {
+                LlmApiMode::Responses
+            } else {
+                LlmApiMode::ChatCompletions
+            },
+            "{provider}/{model}"
+        );
+        assert_eq!(
+            effective_tool_api_mode(
+                LlmApiMode::ChatCompletions,
+                provider,
+                &caps,
+                &ThinkingConfig::Effort {
+                    level: ReasoningEffort::None,
+                },
+                true,
+            ),
+            LlmApiMode::ChatCompletions,
+            "explicit none remains available on {provider}/{model}"
+        );
+        assert_eq!(
+            effective_tool_api_mode(
+                LlmApiMode::ChatCompletions,
+                provider,
+                &caps,
+                &thinking,
+                false
+            ),
+            LlmApiMode::ChatCompletions,
+            "reasoning without native tools keeps the requested route"
+        );
+    }
+}
+
+#[test]
+fn gpt_5_4_mini_tool_options_use_responses_unless_reasoning_is_disabled() {
+    let _openai_key = ScopedEnvVar::set("OPENAI_API_KEY", "test-key");
+    crate::llm::capabilities::clear_user_overrides();
+    crate::llm_config::clear_user_overrides();
+    for (effort, expected) in [
+        (None, crate::llm::api::LlmApiMode::Responses),
+        (Some("low"), crate::llm::api::LlmApiMode::Responses),
+        (Some("none"), crate::llm::api::LlmApiMode::ChatCompletions),
+    ] {
+        let mut options = crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("provider"),
+                VmValue::string("openai"),
+            ),
+            (
+                crate::value::intern_key("model"),
+                VmValue::string("gpt-5.4-mini"),
+            ),
+            (crate::value::intern_key("tools"), one_tool_list()),
+            (
+                crate::value::intern_key("api_mode"),
+                VmValue::string("chat_completions"),
+            ),
+        ]);
+        if let Some(effort) = effort {
+            options.insert(crate::value::intern_key("effort"), VmValue::string(effort));
+        }
+        let options = extract_with_options(options).expect("direct mini tool options");
+        assert!(
+            options
+                .native_tools
+                .as_ref()
+                .is_some_and(|tools| !tools.is_empty()),
+            "native tools must survive extraction"
+        );
+        assert_eq!(options.api_mode, expected, "effort={effort:?}");
+        if let Some(effort) = effort {
+            let expected = if effort == "none" {
+                crate::llm::api::ReasoningEffort::None
+            } else {
+                crate::llm::api::ReasoningEffort::Low
+            };
+            assert!(matches!(
+                options.thinking,
+                crate::llm::api::ThinkingConfig::Effort { level } if level == expected
+            ));
+        }
+    }
+}
+
+#[test]
 fn gpt_5_6_reasoning_tools_auto_route_to_responses() {
     let _openai_key = ScopedEnvVar::set("OPENAI_API_KEY", "test-key");
     crate::llm::capabilities::clear_user_overrides();

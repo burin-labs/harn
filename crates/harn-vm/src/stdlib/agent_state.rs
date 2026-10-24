@@ -34,7 +34,6 @@ pub fn register_agent_state_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__agent_state_init(root_or_session: string, options_or_root?: any, options?: dict) -> resource",
     runtime_only = true,
     category = "agent_state"
@@ -48,7 +47,6 @@ fn agent_state_init_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__agent_state_resume(root: string, session_id: string, options?: dict) -> resource",
     runtime_only = true,
     category = "agent_state"
@@ -62,7 +60,6 @@ fn agent_state_resume_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__agent_state_write(handle: resource, key: string, content: string) -> nil",
     runtime_only = true,
     category = "agent_state"
@@ -80,7 +77,6 @@ fn agent_state_write_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__agent_state_read(handle: resource, key: string) -> string?",
     runtime_only = true,
     category = "agent_state"
@@ -97,7 +93,6 @@ fn agent_state_read_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__agent_state_list(handle: resource) -> list",
     runtime_only = true,
     category = "agent_state"
@@ -115,7 +110,6 @@ fn agent_state_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__agent_state_delete(handle: resource, key: string) -> nil",
     runtime_only = true,
     category = "agent_state"
@@ -130,7 +124,6 @@ fn agent_state_delete_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__agent_state_handoff(handle: resource, summary: dict) -> nil",
     runtime_only = true,
     category = "agent_state"

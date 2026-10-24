@@ -94,6 +94,7 @@ the lowercase hostlib wire set
 syntax-node spans and falls back to a unified line diff when parsing or
 size limits make structural comparison unsuitable.
 `ast.symbol_replace` replaces only the selected declaration and its preamble.
+JavaScript and TypeScript declarations include their `export` wrapper.
 It keeps surrounding bytes, inherits the declaration's indentation and local
 line endings, and preserves multiline token bytes supplied in `new_text`.
 `ast.check_member_insertion` checks one proposed Java method against its

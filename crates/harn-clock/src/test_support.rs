@@ -40,6 +40,25 @@ use std::time::{Duration, Instant};
 /// and OS-thread scheduling under load rather than asserting performance.
 pub const HANG_CEILING: Duration = Duration::from_secs(45);
 
+/// Build a current-thread test runtime with every available driver enabled.
+#[track_caller]
+pub fn current_thread_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime builds")
+}
+
+/// Run a future that can spawn tasks carrying non-Send runtime values.
+pub async fn with_local_tasks<F: Future>(future: F) -> F::Output {
+    tokio::task::LocalSet::new().run_until(future).await
+}
+
+/// Run a synchronous test's async work on a fresh runtime with local tasks.
+pub fn run_local<F: Future>(future: F) -> F::Output {
+    current_thread_runtime().block_on(with_local_tasks(future))
+}
+
 /// Await `fut`, panicking if it has not completed within [`HANG_CEILING`].
 ///
 /// `label` names what the test is waiting for; it appears in the panic along
@@ -106,6 +125,54 @@ pub fn recv_within<T>(label: &str, rx: &mpsc::Receiver<T>) -> T {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_runtime_runs_non_send_tasks_on_the_calling_thread() {
+        let thread = std::thread::current().id();
+        let counter = std::rc::Rc::new(std::cell::Cell::new(0));
+        let result: Result<_, &str> = run_local(async {
+            assert_eq!(std::thread::current().id(), thread);
+            let counter = counter.clone();
+            tokio::task::spawn_local(async move {
+                tokio::task::yield_now().await;
+                assert_eq!(std::thread::current().id(), thread);
+                counter.set(7);
+            })
+            .await
+            .unwrap();
+            Err("returned error")
+        });
+        assert_eq!(result, Err::<(), _>("returned error"));
+        assert_eq!(counter.get(), 7);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn local_tasks_keep_the_callers_clock_and_stop_unfinished_children() {
+        struct Dropped(std::rc::Rc<std::cell::Cell<bool>>);
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                self.0.set(true);
+            }
+        }
+
+        let dropped = std::rc::Rc::new(std::cell::Cell::new(false));
+        with_local_tasks(async {
+            let guard = Dropped(dropped.clone());
+            let (started, ready) = tokio::sync::oneshot::channel();
+            tokio::task::spawn_local(async move {
+                let _guard = guard;
+                started.send(()).unwrap();
+                std::future::pending::<()>().await;
+            });
+            ready.await.unwrap();
+            assert!(!dropped.get());
+            let before = tokio::time::Instant::now();
+            tokio::time::advance(Duration::from_secs(3)).await;
+            assert_eq!(before.elapsed(), Duration::from_secs(3));
+        })
+        .await;
+        assert!(dropped.get());
+    }
 
     #[tokio::test]
     async fn within_returns_the_output_of_a_ready_future() {

@@ -16,23 +16,22 @@ fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError>
 }
 
 fn s(v: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(v))
+    VmValue::string(v)
 }
 
 fn jwt_claims() -> VmValue {
-    VmValue::dict(crate::value::DictMap::from_iter([
-        (crate::value::intern_key("exp"), VmValue::Int(4_102_444_800)),
-        (crate::value::intern_key("iat"), VmValue::Int(1_700_000_000)),
-        (crate::value::intern_key("iss"), s("12345")),
-    ]))
+    VmValue::dict([
+        ("exp", VmValue::Int(4_102_444_800)),
+        ("iat", VmValue::Int(1_700_000_000)),
+        ("iss", s("12345")),
+    ])
 }
 
 fn dict(items: &[(&str, VmValue)]) -> VmValue {
     VmValue::dict(
         items
             .iter()
-            .map(|(key, value)| (crate::value::intern_key(key), value.clone()))
-            .collect::<crate::value::DictMap>(),
+            .map(|(key, value)| (crate::value::intern_key(key), value.clone())),
     )
 }
 

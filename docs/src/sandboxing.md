@@ -813,6 +813,14 @@ Only a process dedicated to serving may confine itself. An in-process
 (channel) ACP server shares its host's process, and confining it would
 confine the host.
 
+## Workspace-local Gradle cache (`GRADLE_USER_HOME`)
+
+The child environment admits `GRADLE_USER_HOME` as a cache path. A caller's
+populated Gradle cache is retained only when its resolved path is inside a
+writable workspace root. Otherwise, confined commands use
+`.harn-toolchain-cache/gradle`; an external cache path grants no new writes.
+Secret-shaped names such as `GRADLE_TOKEN` still require an explicit grant.
+
 ## Workspace-local temp dir (`TMPDIR`/`TMP`/`TEMP`)
 
 Every sandboxed child spawned under a restricted profile gets `TMPDIR`,

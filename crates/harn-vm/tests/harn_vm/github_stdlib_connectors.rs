@@ -75,23 +75,18 @@ fn run_with_github_client(source: &str, client: Arc<RecordingClient>) -> Result<
         .enable_all()
         .build()
         .map_err(|error| error.to_string())?;
-    runtime.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut clients: BTreeMap<ProviderId, Arc<dyn ConnectorClient>> = BTreeMap::new();
-                clients.insert(ProviderId::from("github"), client);
-                install_active_connector_clients(clients);
+    runtime.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut clients: BTreeMap<ProviderId, Arc<dyn ConnectorClient>> = BTreeMap::new();
+        clients.insert(ProviderId::from("github"), client);
+        install_active_connector_clients(clients);
 
-                let mut vm = harn_vm::new_vm();
-                register_vm_stdlib(&mut vm);
-                vm.execute(&chunk)
-                    .await
-                    .map_err(|error: VmError| format!("{error:?}"))?;
-                Ok(vm.output().to_string())
-            })
+        let mut vm = harn_vm::new_vm();
+        register_vm_stdlib(&mut vm);
+        vm.execute(&chunk)
             .await
-    })
+            .map_err(|error: VmError| format!("{error:?}"))?;
+        Ok(vm.output().to_string())
+    }))
 }
 
 #[test]

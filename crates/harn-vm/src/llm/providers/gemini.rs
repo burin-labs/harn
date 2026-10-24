@@ -306,9 +306,9 @@ impl GeminiProvider {
             return dialect.parse_response(&envelope, request, false);
         }
         let body_text = response.text().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "gemini response read error: {error}"
-            ))))
+            )))
         })?;
         crate::llm::agent_observe::persist_raw_provider_response(
             raw_capture_context.as_ref(),
@@ -321,9 +321,9 @@ impl GeminiProvider {
             &body_text,
         );
         let json: serde_json::Value = serde_json::from_str(&body_text).map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "gemini response parse error: {error}"
-            ))))
+            )))
         })?;
         let result = dialect.parse_response(&json, request, false)?;
         maybe_emit_delta(delta_tx, &result.text);
@@ -353,8 +353,9 @@ pub(crate) fn parse_response(
         .and_then(|error| error.get("message"))
         .and_then(|value| value.as_str())
     {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{} API error: {message}", request.provider),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "{} API error: {message}",
+            request.provider
         ))));
     }
     let mut text = String::new();
@@ -389,9 +390,9 @@ pub(crate) fn parse_response(
                     continue;
                 };
                 raw_tool_calls.push(RawProviderToolCall::new(part.clone()).map_err(|message| {
-                    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                    VmError::Thrown(VmValue::string(format!(
                         "gemini raw tool call parse error: {message}"
-                    ))))
+                    )))
                 })?);
                 let args = call
                     .get("args")

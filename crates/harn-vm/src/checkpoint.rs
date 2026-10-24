@@ -330,9 +330,7 @@ fn checkpoint_clear_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
 fn checkpoint_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     with_state("checkpoint_list", |state| {
         let keys = state.list().map_err(VmError::Runtime)?;
-        Ok(VmValue::list(
-            keys.into_iter().map(VmValue::string).collect(),
-        ))
+        Ok(VmValue::strings(keys))
     })
 }
 

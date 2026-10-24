@@ -127,23 +127,21 @@ async fn prompt_with_identity(
 /// keeps passing.
 #[tokio::test(flavor = "current_thread")]
 async fn default_mode_reaches_a_model_turn_and_still_refuses_a_workspace_write() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let mock = harn_vm::llm::parse_llm_mock_value(&serde_json::json!({
-                "text": "all done",
-                "model": "served-proof",
-                "provider": "mock",
-            }))
-            .expect("mock fixture");
-            harn_vm::llm::install_cli_llm_mocks(vec![mock]);
-            let _mock_mode = MockModeGuard;
+    harn_clock::test_support::with_local_tasks(async {
+        let mock = harn_vm::llm::parse_llm_mock_value(&serde_json::json!({
+            "text": "all done",
+            "model": "served-proof",
+            "provider": "mock",
+        }))
+        .expect("mock fixture");
+        harn_vm::llm::install_cli_llm_mocks(vec![mock]);
+        let _mock_mode = MockModeGuard;
 
-            let dir = tempfile::tempdir().expect("tempdir");
-            let pipeline = dir.path().join("served-agent-turn.harn");
-            std::fs::write(
-                &pipeline,
-                r#"import { agent_loop } from "std/agent/loop"
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pipeline = dir.path().join("served-agent-turn.harn");
+        std::fs::write(
+            &pipeline,
+            r#"import { agent_loop } from "std/agent/loop"
 pipeline default(harness: Harness) {
   if prompt == "runtime-control" {
     agent_loop(harness, prompt, nil, {provider: "mock", model: "served-proof"})
@@ -167,92 +165,92 @@ pipeline default(harness: Harness) {
   }
 }
 "#,
-            )
-            .expect("write served pipeline");
+        )
+        .expect("write served pipeline");
 
-            // No session/set_mode: this is the `ask` default a client gets.
-            let (request_tx, mut response_rx, _server, session_id) =
-                start_acp_channel_session_with_config(
-                    AcpServerConfig::for_pipeline(pipeline.to_string_lossy().to_string()),
-                    serde_json::json!(dir.path()),
-                )
-                .await;
-
-            let admitted = prompt_with_identity(
-                &request_tx,
-                &mut response_rx,
-                &session_id,
-                2,
-                "runtime-control",
-                Some("default-opening-caller"),
+        // No session/set_mode: this is the `ask` default a client gets.
+        let (request_tx, mut response_rx, _server, session_id) =
+            start_acp_channel_session_with_config(
+                AcpServerConfig::for_pipeline(pipeline.to_string_lossy().to_string()),
+                serde_json::json!(dir.path()),
             )
             .await;
-            assert!(
-                admitted["error"].is_null(),
-                "the agent loop's own session control plane must survive the ceiling \
+
+        let admitted = prompt_with_identity(
+            &request_tx,
+            &mut response_rx,
+            &session_id,
+            2,
+            "runtime-control",
+            Some("default-opening-caller"),
+        )
+        .await;
+        assert!(
+            admitted["error"].is_null(),
+            "the agent loop's own session control plane must survive the ceiling \
                  every non-`code` session mode installs: {}",
-                admitted["error"]
-            );
-            assert_eq!(
-                admitted["result"]["stopReason"], "end_turn",
-                "default-mode control-plane turn should complete; got {}",
-                admitted["result"]
-            );
-            let transcript = harn_vm::agent_sessions::transcript(&session_id)
-                .expect("the default served agent opened its transcript");
-            let transcript = harn_vm::llm::vm_value_to_json(&transcript);
-            assert_eq!(transcript["messages"][0]["role"], "user", "{transcript}");
-            assert_eq!(
-                transcript["messages"][0]["messageId"], "default-opening-caller",
-                "{transcript}"
-            );
+            admitted["error"]
+        );
+        assert_eq!(
+            admitted["result"]["stopReason"], "end_turn",
+            "default-mode control-plane turn should complete; got {}",
+            admitted["result"]
+        );
+        let transcript = harn_vm::agent_sessions::transcript(&session_id)
+            .expect("the default served agent opened its transcript");
+        let transcript = harn_vm::llm::vm_value_to_json(&transcript);
+        assert_eq!(transcript["messages"][0]["role"], "user", "{transcript}");
+        assert_eq!(
+            transcript["messages"][0]["messageId"], "default-opening-caller",
+            "{transcript}"
+        );
 
-            // The control: an unmarked write, on the same live session, that
-            // the ladder must still refuse. If this is ever admitted, the
-            // ceiling has stopped meaning anything and the turn above proves
-            // nothing.
-            //
-            let durable = prompt(
-                &request_tx,
-                &mut response_rx,
-                &session_id,
-                3,
-                "workspace-write",
-            )
-            .await;
-            let rejection = format!(
-                "{}{}",
-                durable["error"]["message"].as_str().unwrap_or_default(),
-                durable["result"]["stopReason"].as_str().unwrap_or_default()
-            );
-            assert!(
-                rejection.contains("exceeds the active effect ceiling"),
-                "this session must really be carrying the `read_only` ceiling, or the \
+        // The control: an unmarked write, on the same live session, that
+        // the ladder must still refuse. If this is ever admitted, the
+        // ceiling has stopped meaning anything and the turn above proves
+        // nothing.
+        //
+        let durable = prompt(
+            &request_tx,
+            &mut response_rx,
+            &session_id,
+            3,
+            "workspace-write",
+        )
+        .await;
+        let rejection = format!(
+            "{}{}",
+            durable["error"]["message"].as_str().unwrap_or_default(),
+            durable["result"]["stopReason"].as_str().unwrap_or_default()
+        );
+        assert!(
+            rejection.contains("exceeds the active effect ceiling"),
+            "this session must really be carrying the `read_only` ceiling, or the \
                  admitted control-plane turn above proves nothing; got error={} \
                  result={}",
-                durable["error"],
-                durable["result"]
-            );
-            assert!(
-                !dir.path().join("ceiling-probe.txt").exists(),
-                "the rejected workspace write reached the filesystem"
-            );
+            durable["error"],
+            durable["result"]
+        );
+        assert!(
+            !dir.path().join("ceiling-probe.txt").exists(),
+            "the rejected workspace write reached the filesystem"
+        );
 
-            // The run store persists to `<state-root>/store.json`, a path the
-            // runtime fixes. A `read_only` run may save and clear it, but a
-            // caller-chosen key must never turn that into a write elsewhere.
-            let saved = prompt(&request_tx, &mut response_rx, &session_id, 4, "store-save").await;
-            assert_eq!(
-                saved["result"]["stopReason"], "end_turn",
-                "run-store save and clear are state-root control-plane writes; got {saved}"
-            );
-            assert!(
-                !dir.path().join("escape.txt").exists()
-                    && !dir.path().parent().unwrap().join("escape.txt").exists(),
-                "a run-store key escaped the state root"
-            );
+        // The run store persists to `<state-root>/store.json`, a path the
+        // runtime fixes. A `read_only` run may save and clear it, but a
+        // caller-chosen key must never turn that into a write elsewhere.
+        let saved = prompt(&request_tx, &mut response_rx, &session_id, 4, "store-save").await;
+        assert_eq!(
+            saved["result"]["stopReason"], "end_turn",
+            "run-store save and clear are state-root control-plane writes; got {saved}"
+        );
+        assert!(
+            !dir.path().join("escape.txt").exists()
+                && !dir.path().parent().unwrap().join("escape.txt").exists(),
+            "a run-store key escaped the state root"
+        );
 
-            drop(request_tx);
-        })
-        .await;
+        drop(request_tx);
+    })
+    .await;
 }

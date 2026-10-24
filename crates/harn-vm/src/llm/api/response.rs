@@ -56,8 +56,8 @@ pub(crate) fn parse_llm_response(
 
     if dialect == crate::llm::capabilities::WireDialect::Anthropic {
         if let Some(err) = json["error"]["message"].as_str() {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("{provider} API error: {err}"),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "{provider} API error: {err}"
             ))));
         }
 
@@ -71,9 +71,9 @@ pub(crate) fn parse_llm_response(
             .get("content")
             .and_then(|value| value.as_array())
             .ok_or_else(|| {
-                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                VmError::Thrown(VmValue::string(format!(
                     "{provider} API response missing content array"
-                ))))
+                )))
             })?;
         for block in content {
             match block["type"].as_str() {
@@ -99,9 +99,10 @@ pub(crate) fn parse_llm_response(
                     }
                 }
                 Some("tool_use") => {
-                    raw_tool_calls.push(RawProviderToolCall::new(block.clone()).map_err(
-                        |error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))),
-                    )?);
+                    raw_tool_calls.push(
+                        RawProviderToolCall::new(block.clone())
+                            .map_err(|error| VmError::Thrown(VmValue::string(error)))?,
+                    );
                     let raw_name = block["name"].as_str().unwrap_or("").to_string();
                     let id = block["id"].as_str().unwrap_or("").to_string();
                     let input = block["input"].clone();

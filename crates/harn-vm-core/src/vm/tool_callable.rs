@@ -116,10 +116,7 @@ mod tests {
     fn registry(tools: Vec<VmValue>) -> DictMap {
         let mut registry = DictMap::new();
         registry.put_str("_type", "tool_registry");
-        registry.insert(
-            crate::value::intern_key("tools"),
-            VmValue::List(Arc::new(tools)),
-        );
+        registry.put("tools", VmValue::list(tools));
         registry
     }
 
@@ -127,7 +124,7 @@ mod tests {
         let mut entry = DictMap::new();
         entry.put_str("name", name);
         entry.put_str("executor", executor);
-        entry.insert(crate::value::intern_key("handler"), VmValue::Nil);
+        entry.put("handler", VmValue::Nil);
         VmValue::dict(entry)
     }
 

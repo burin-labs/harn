@@ -359,7 +359,7 @@ async fn run_repair_pass(
     // Repair is a single canonical structured call. The positional schema
     // remains authoritative even after prompt-mode fallback.
     let args = vec![
-        VmValue::String(arcstr::ArcStr::from(prompt.as_str())),
+        VmValue::string(prompt.as_str()),
         // System slot — the prompt carries instructions inline.
         VmValue::Nil,
         VmValue::dict(merged_options),
@@ -531,13 +531,13 @@ fn finish_success_envelope(parts: SuccessEnvelope<'_>) -> VmValue {
     env.insert(crate::value::intern_key("data"), data);
     env.put_str("raw_text", raw_text);
     env.put_str("error", "");
-    env.insert(crate::value::intern_key("error_category"), VmValue::Nil);
+    env.put("error_category", VmValue::Nil);
     env.put_int("attempts", attempts as i64);
     env.put_bool("repaired", repaired);
     if let Some(tier) = repair_tier {
         env.put_str("repair_tier", tier);
     } else {
-        env.insert(crate::value::intern_key("repair_tier"), VmValue::Nil);
+        env.put("repair_tier", VmValue::Nil);
     }
     env.put_bool("extracted_json", extracted_json);
     env.insert(crate::value::intern_key("usage"), usage);
@@ -562,7 +562,7 @@ fn envelope_failure(
 
     let mut env = crate::value::DictMap::new();
     env.put_bool("ok", false);
-    env.insert(crate::value::intern_key("data"), VmValue::Nil);
+    env.put("data", VmValue::Nil);
     env.put_str("raw_text", outcome.raw_text.as_str());
     env.put_str("error", message.as_str());
     env.put_str("error_category", kind.category());
@@ -572,7 +572,7 @@ fn envelope_failure(
         super::call::schema_retry_failure_facts(outcome.attempts, outcome.schema_retries_budget),
     );
     env.put_bool("repaired", repaired);
-    env.insert(crate::value::intern_key("repair_tier"), VmValue::Nil);
+    env.put("repair_tier", VmValue::Nil);
     env.put_bool("extracted_json", extracted_json);
     env.insert(crate::value::intern_key("usage"), usage);
     env.put_str("model", model.as_str());
@@ -593,13 +593,13 @@ fn envelope_from_transport_error(err: &VmError, provider: &str, model: &str) -> 
     };
     let mut env = crate::value::DictMap::new();
     env.put_bool("ok", false);
-    env.insert(crate::value::intern_key("data"), VmValue::Nil);
+    env.put("data", VmValue::Nil);
     env.put_str("raw_text", "");
     env.put_str("error", message.as_str());
     env.put_str("error_category", category.as_str());
     env.put_int("attempts", 0);
     env.put_bool("repaired", false);
-    env.insert(crate::value::intern_key("repair_tier"), VmValue::Nil);
+    env.put("repair_tier", VmValue::Nil);
     env.put_bool("extracted_json", false);
     env.put("usage", VmValue::dict(empty_usage_dict()));
     env.put_str("model", model);
@@ -618,13 +618,13 @@ fn envelope_from_operation_timeout(timeout_ms: u64) -> VmValue {
     let message = format!("structured operation exceeded {timeout_ms}ms total deadline");
     let mut env = crate::value::DictMap::new();
     env.put_bool("ok", false);
-    env.insert(crate::value::intern_key("data"), VmValue::Nil);
+    env.put("data", VmValue::Nil);
     env.put_str("raw_text", "");
     env.put_str("error", message.as_str());
     env.put_str("error_category", "timeout");
     env.put_int("attempts", 0);
     env.put_bool("repaired", false);
-    env.insert(crate::value::intern_key("repair_tier"), VmValue::Nil);
+    env.put("repair_tier", VmValue::Nil);
     env.put_bool("extracted_json", false);
     env.put("usage", VmValue::dict(empty_usage_dict()));
     env.put_str("model", "");
@@ -792,10 +792,7 @@ mod tests {
     #[test]
     fn operation_timeout_is_removed_before_provider_option_extraction() {
         let mut opts = crate::value::DictMap::new();
-        opts.insert(
-            crate::value::intern_key("operation_timeout_ms"),
-            VmValue::Int(65_000),
-        );
+        opts.put_int("operation_timeout_ms", 65_000);
         opts.put_str("provider", "mock");
         let mut args = vec![VmValue::Nil, VmValue::Nil, VmValue::dict(opts)];
         assert_eq!(take_operation_timeout_ms(&mut args).unwrap(), Some(65_000));
@@ -1003,14 +1000,12 @@ mod tests {
     #[test]
     fn structured_output_rejection_detects_provider_400() {
         // The OpenRouter/upstream relay shape we degrade on.
-        let rejected = VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        let rejected = VmError::Thrown(VmValue::string(
             "openrouter HTTP 400 Bad Request [invalid_request]: Provider returned error",
-        )));
+        ));
         assert!(is_structured_output_rejection(&rejected));
         // An unrelated transport failure must NOT trigger the structured fallback.
-        let unrelated = VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "connection reset by peer",
-        )));
+        let unrelated = VmError::Thrown(VmValue::string("connection reset by peer"));
         assert!(!is_structured_output_rejection(&unrelated));
     }
 
@@ -1041,11 +1036,8 @@ mod tests {
     fn merge_repair_caps_schema_retries_and_drops_nested_repair() {
         let mut base = crate::value::DictMap::new();
         base.put_str("provider", "auto");
-        base.insert(crate::value::intern_key("schema_retries"), VmValue::Int(5));
-        base.insert(
-            crate::value::intern_key("repair"),
-            VmValue::dict(crate::value::DictMap::new()),
-        );
+        base.put_int("schema_retries", 5);
+        base.put("repair", VmValue::dict(crate::value::DictMap::new()));
         let overrides = {
             let mut o = crate::value::DictMap::new();
             o.put_str("model", "local:fix");
@@ -1082,44 +1074,38 @@ mod tests {
             parse_repair_value(&VmValue::dict(crate::value::DictMap::new())).unwrap();
         assert!(dict_no_enabled.enabled);
         let mut disabled = crate::value::DictMap::new();
-        disabled.insert(crate::value::intern_key("enabled"), VmValue::Bool(false));
+        disabled.put_bool("enabled", false);
         let dict_disabled = parse_repair_value(&VmValue::dict(disabled)).unwrap();
         assert!(!dict_disabled.enabled);
     }
 
     #[test]
     fn prompt_mode_structured_transport_keeps_harn_side_validation() {
-        let schema = VmValue::dict(crate::value::DictMap::from_iter([
+        let schema = VmValue::dict([
+            ("type", VmValue::string("object")),
             (
-                crate::value::intern_key("type"),
-                VmValue::String(arcstr::ArcStr::from("object")),
+                "properties",
+                VmValue::dict([(
+                    "pass",
+                    VmValue::dict([("type", VmValue::string("boolean"))]),
+                )]),
             ),
-            (
-                crate::value::intern_key("properties"),
-                VmValue::dict(crate::value::DictMap::from_iter([(
-                    crate::value::intern_key("pass"),
-                    VmValue::dict(crate::value::DictMap::from_iter([(
-                        crate::value::intern_key("type"),
-                        VmValue::String(arcstr::ArcStr::from("boolean")),
-                    )])),
-                )])),
-            ),
-        ]));
-        let options = VmValue::dict(crate::value::DictMap::from_iter([
+        ]);
+        let options = VmValue::dict([
             (
                 crate::value::intern_key("provider"),
-                VmValue::String(arcstr::ArcStr::from("ollama")),
+                VmValue::string("ollama"),
             ),
             (
                 crate::value::intern_key("model"),
                 // A capability rule with no structured_output transport, so native
                 // structured transport is unsupported and the loop must fall back to
                 // prompt-mode. (ollama gemma4/devstral now declare format_kw support.)
-                VmValue::String(arcstr::ArcStr::from("llava:latest")),
+                VmValue::string("llava:latest"),
             ),
-        ]));
+        ]);
         let mut args = crate::llm::rewrite_structured_args(vec![
-            VmValue::String(arcstr::ArcStr::from("Return a completion verdict.")),
+            VmValue::string("Return a completion verdict."),
             schema.clone(),
             options,
         ])
@@ -1152,28 +1138,17 @@ mod tests {
     }
 
     fn verdict_schema() -> VmValue {
-        VmValue::dict(crate::value::DictMap::from_iter([
+        VmValue::dict([
+            ("type", VmValue::string("object")),
+            ("required", VmValue::strings(["verdict"])),
             (
-                crate::value::intern_key("type"),
-                VmValue::String(arcstr::ArcStr::from("object")),
+                "properties",
+                VmValue::dict([(
+                    "verdict",
+                    VmValue::dict([("type", VmValue::string("string"))]),
+                )]),
             ),
-            (
-                crate::value::intern_key("required"),
-                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                    arcstr::ArcStr::from("verdict"),
-                )])),
-            ),
-            (
-                crate::value::intern_key("properties"),
-                VmValue::dict(crate::value::DictMap::from_iter([(
-                    crate::value::intern_key("verdict"),
-                    VmValue::dict(crate::value::DictMap::from_iter([(
-                        crate::value::intern_key("type"),
-                        VmValue::String(arcstr::ArcStr::from("string")),
-                    )])),
-                )])),
-            ),
-        ]))
+        ])
     }
 
     #[test]

@@ -509,9 +509,9 @@ pub(crate) async fn observed_llm_call(
         resolution
             .assert_resolved_route(&opts.provider, &opts.model)
             .map_err(|error| {
-                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                VmError::Thrown(VmValue::string(format!(
                     "model resolution invariant failed before provider call: {error}"
-                ))))
+                )))
             })?;
     }
     if !super::mock::cli_llm_mock_replay_active() && !super::mock::builtin_llm_mock_active() {

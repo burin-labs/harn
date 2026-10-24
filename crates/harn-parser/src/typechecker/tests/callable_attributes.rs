@@ -237,19 +237,68 @@ pipeline review_branch(task) {}
     );
 }
 
-#[test]
-fn test_command_attribute_warns_on_unknown_args() {
-    let warns = warnings(
-        r#"
+#[rstest::rstest]
+#[case::test_command_attribute_warns_on_unknown_args(
+    r#"
 @command(label: "oops")
 pipeline review_branch(task) {}
 "#,
-    );
-    assert!(
-        warns
+    "unknown `@command` argument `label`",
+    true
+)]
+#[case::test_command_attribute_warns_on_function_decls(
+    r#"
+@command(name: "review")
+fn review_branch(task) {}
+"#,
+    "`@command` only applies to pipeline declarations",
+    true
+)]
+#[case::test_flow_invariant_kinds_are_mutually_exclusive(
+    r#"
+@invariant
+@deterministic
+@semantic
+@archivist(evidence: ["x"])
+fn confused(slice) -> bool { return true }
+"#,
+    "mutually exclusive",
+    true
+)]
+#[case::test_archivist_without_invariant_warns(
+    r#"
+@archivist(evidence: ["https://x"])
+fn standalone() -> int { return 1 }
+"#,
+    "only applies to Flow predicates marked",
+    true
+)]
+#[case::test_archivist_unknown_arg_warns(
+    r#"
+@invariant
+@deterministic
+@archivist(evidence: ["x"], typo_key: "oops")
+fn oops(slice) -> bool { return true }
+"#,
+    "unknown `@archivist` argument `typo_key`",
+    true
+)]
+#[case::test_host_entry_on_a_non_function_warns(
+    r"
+@host_entry
+pipeline dispatch(task) {}
+",
+    "`@host_entry` only applies to function declarations",
+    true
+)]
+fn diagnostic_message_warnings(#[case] source: &str, #[case] message: &str, #[case] present: bool) {
+    let diagnostics = warnings(source);
+    assert_eq!(
+        diagnostics
             .iter()
-            .any(|w| w.contains("unknown `@command` argument `label`")),
-        "expected unknown-arg warning, got {warns:?}"
+            .any(|diagnostic| diagnostic.contains(message)),
+        present,
+        "{message}: {diagnostics:?}"
     );
 }
 
@@ -337,22 +386,6 @@ fn hooks(req) { return req }
 }
 
 #[test]
-fn test_command_attribute_warns_on_function_decls() {
-    let warns = warnings(
-        r#"
-@command(name: "review")
-fn review_branch(task) {}
-"#,
-    );
-    assert!(
-        warns
-            .iter()
-            .any(|w| w.contains("`@command` only applies to pipeline declarations")),
-        "expected placement warning, got {warns:?}"
-    );
-}
-
-#[test]
 fn test_flow_predicate_mode_attributes_warn_off_function_declarations() {
     let diagnostics = diagnostics_with_code(
         r"
@@ -426,39 +459,6 @@ fn kinded_predicate(slice) -> bool { return true }
 }
 
 #[test]
-fn test_flow_invariant_kinds_are_mutually_exclusive() {
-    let warns = warnings(
-        r#"
-@invariant
-@deterministic
-@semantic
-@archivist(evidence: ["x"])
-fn confused(slice) -> bool { return true }
-"#,
-    );
-    assert!(
-        warns.iter().any(|w| w.contains("mutually exclusive")),
-        "expected mutual-exclusion warning, got {warns:?}"
-    );
-}
-
-#[test]
-fn test_archivist_without_invariant_warns() {
-    let warns = warnings(
-        r#"
-@archivist(evidence: ["https://x"])
-fn standalone() -> int { return 1 }
-"#,
-    );
-    assert!(
-        warns
-            .iter()
-            .any(|w| w.contains("only applies to Flow predicates marked")),
-        "expected standalone-archivist warning, got {warns:?}"
-    );
-}
-
-#[test]
 fn test_handler_ir_invariant_does_not_trigger_flow_lints() {
     // `@invariant("name")` is the harn-ir handler form, validated
     // separately. Flow lints must not fire for it.
@@ -473,24 +473,6 @@ fn handler() -> int { return 1 }
             .iter()
             .all(|w| !w.contains("`@archivist(...)`") && !w.contains("requires exactly one of")),
         "handler-IR @invariant should not trigger Flow lints: {warns:?}"
-    );
-}
-
-#[test]
-fn test_archivist_unknown_arg_warns() {
-    let warns = warnings(
-        r#"
-@invariant
-@deterministic
-@archivist(evidence: ["x"], typo_key: "oops")
-fn oops(slice) -> bool { return true }
-"#,
-    );
-    assert!(
-        warns
-            .iter()
-            .any(|w| w.contains("unknown `@archivist` argument `typo_key`")),
-        "expected unknown-arg warning, got {warns:?}"
     );
 }
 
@@ -525,22 +507,6 @@ pub fn dispatch(harness: Harness, args: dict) -> dict { return args }
             .iter()
             .all(|w| !w.contains("unknown attribute") && !w.contains("only applies")),
         "`@host_entry` should be recognized on a function: {warns:?}"
-    );
-}
-
-#[test]
-fn test_host_entry_on_a_non_function_warns() {
-    let warns = warnings(
-        r"
-@host_entry
-pipeline dispatch(task) {}
-",
-    );
-    assert!(
-        warns
-            .iter()
-            .any(|w| w.contains("`@host_entry` only applies to function declarations")),
-        "expected an invalid-target warning, got {warns:?}"
     );
 }
 

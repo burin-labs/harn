@@ -21,10 +21,7 @@ fn sample_rule_config() -> VmValue {
     let mut config: crate::value::DictMap = crate::value::DictMap::new();
     config.put_str("id", "rust.cargo.target_dir_conflict");
     config.put_str("pattern", r"^cargo (build|test)\b");
-    config.insert(
-        crate::value::intern_key("applies_to"),
-        VmValue::list(vec![VmValue::string("rust")]),
-    );
+    config.put("applies_to", VmValue::strings(["rust"]));
     config.put_str("severity", "warning");
     config.put_str(
         "explanation",
@@ -144,22 +141,16 @@ fn registry_unregister_removes_catalogue() {
 
 #[test]
 fn context_stacks_normalizes_shapes() {
-    let dict_form = VmValue::dict([(
-        crate::value::intern_key("stacks"),
-        VmValue::list(vec![VmValue::string("rust")]),
-    )]);
+    let dict_form = VmValue::dict([("stacks", VmValue::strings(["rust"]))]);
     assert_eq!(context_stacks(Some(&dict_form)), vec!["rust".to_string()]);
 
-    let dict_string = VmValue::dict([(
-        crate::value::intern_key("stacks"),
-        VmValue::string("python"),
-    )]);
+    let dict_string = VmValue::dict([("stacks", VmValue::string("python"))]);
     assert_eq!(
         context_stacks(Some(&dict_string)),
         vec!["python".to_string()]
     );
 
-    let list_form = VmValue::list(vec![VmValue::string("typescript"), VmValue::string("rust")]);
+    let list_form = VmValue::strings(["typescript", "rust"]);
     assert_eq!(
         context_stacks(Some(&list_form)),
         vec!["typescript".to_string(), "rust".to_string()]
@@ -209,12 +200,8 @@ fn registry_filter_keeps_matching_and_stackless_catalogues() {
         3,
     );
 
-    let only_rust = call_sync(
-        &vm,
-        "tool_hooks_filter",
-        &[r3, VmValue::list(vec![VmValue::string("rust")])],
-    )
-    .expect("filtered");
+    let only_rust =
+        call_sync(&vm, "tool_hooks_filter", &[r3, VmValue::strings(["rust"])]).expect("filtered");
     let listed = call_sync(&vm, "tool_hooks_list", &[only_rust]).expect("list");
     let items = match listed {
         VmValue::List(items) => items,
@@ -263,10 +250,7 @@ fn audit_payload(rule_id: &str, command: &str) -> VmValue {
 fn reminder_options(body: &str, tag: &str, ttl: i64) -> VmValue {
     let mut options: crate::value::DictMap = crate::value::DictMap::new();
     options.put_str("body", body);
-    options.insert(
-        crate::value::intern_key("tags"),
-        VmValue::list(vec![VmValue::string(tag)]),
-    );
+    options.put("tags", VmValue::list(vec![VmValue::string(tag)]));
     options.put("ttl_turns", VmValue::Int(ttl));
     VmValue::dict(options)
 }
@@ -348,10 +332,7 @@ fn tool_hooks_inject_reminder_records_audit_when_no_session() {
 fn tool_hooks_inject_reminder_requires_body() {
     let vm = vm_with_stdlib();
     let mut options: crate::value::DictMap = crate::value::DictMap::new();
-    options.insert(
-        crate::value::intern_key("tags"),
-        VmValue::list(vec![VmValue::string("x")]),
-    );
+    options.put("tags", VmValue::strings(["x"]));
     let result = call_sync(&vm, "tool_hooks_inject_reminder", &[VmValue::dict(options)]);
     let Err(VmError::Thrown(VmValue::String(message))) = result else {
         panic!("expected thrown error, got {result:?}");

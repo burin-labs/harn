@@ -588,6 +588,7 @@ fn next_subscription_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harn_vm::value::VmDictExt;
 
     fn event(kind: EventKind, path: impl Into<PathBuf>) -> Event {
         Event::new(kind).add_path(path.into())
@@ -626,11 +627,11 @@ mod tests {
         let mut dict = harn_vm::value::DictMap::new();
         dict.insert(
             arcstr::ArcStr::from("root"),
-            harn_vm::VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().as_ref())),
+            harn_vm::VmValue::string(root.to_string_lossy().as_ref()),
         );
         dict.insert(
             arcstr::ArcStr::from("session_id"),
-            harn_vm::VmValue::String(arcstr::ArcStr::from("session")),
+            harn_vm::VmValue::string("session"),
         );
         let request = SubscribeRequest::from_dict(&dict).expect("subscribe request");
 
@@ -658,15 +659,15 @@ mod tests {
         let mut dict = harn_vm::value::DictMap::new();
         dict.insert(
             arcstr::ArcStr::from("root"),
-            harn_vm::VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().as_ref())),
+            harn_vm::VmValue::string(root.to_string_lossy().as_ref()),
         );
         dict.insert(
             arcstr::ArcStr::from("session_id"),
-            harn_vm::VmValue::String(arcstr::ArcStr::from("session")),
+            harn_vm::VmValue::string("session"),
         );
         dict.insert(
             arcstr::ArcStr::from("ignore_policy"),
-            harn_vm::VmValue::String(arcstr::ArcStr::from("none")),
+            harn_vm::VmValue::string("none"),
         );
         let request = SubscribeRequest::from_dict(&dict).expect("subscribe request");
         assert!(request.gitignore.is_none());
@@ -741,13 +742,7 @@ mod tests {
     fn kind_filter_allows_access_and_other_events() {
         let root = std::env::current_dir().unwrap();
         let mut config = harn_vm::value::DictMap::new();
-        config.insert(
-            harn_vm::value::intern_key("kinds"),
-            VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(arcstr::ArcStr::from("access")),
-                VmValue::String(arcstr::ArcStr::from("other")),
-            ])),
-        );
+        config.put("kinds", VmValue::strings(["access", "other"]));
         let mut filter = filter(root.clone(), None);
         filter.kinds = parse_kinds(&config).unwrap();
 

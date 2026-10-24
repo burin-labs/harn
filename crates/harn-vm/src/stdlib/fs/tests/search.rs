@@ -158,14 +158,14 @@ fn find_evidence_is_labeled_overlapping_and_worker_deterministic() {
     let second = tempfile::tempdir().unwrap();
     std::fs::write(first.path().join("a.txt"), "needle\n").unwrap();
     std::fs::write(second.path().join("b.txt"), "a needle twice needle\n").unwrap();
-    let roots = VmValue::List(Arc::new(vec![
+    let roots = VmValue::list(vec![
         evidence_root("z-root", second.path()),
         evidence_root("a-root", first.path()),
-    ]));
-    let patterns = VmValue::List(Arc::new(vec![
+    ]);
+    let patterns = VmValue::list(vec![
         evidence_pattern("whole", "needle"),
         evidence_pattern("prefix", "need"),
-    ]));
+    ]);
     let mut vm = vm();
 
     let sequential = call(
@@ -213,8 +213,8 @@ fn find_evidence_follows_symlinks_only_when_requested() {
     let external = tempfile::tempdir().unwrap();
     std::fs::write(external.path().join("linked.txt"), "needle\n").unwrap();
     symlink(external.path(), root.path().join("linked")).unwrap();
-    let roots = VmValue::List(Arc::new(vec![evidence_root("repo", root.path())]));
-    let patterns = VmValue::List(Arc::new(vec![evidence_pattern("needle", "needle")]));
+    let roots = VmValue::list(vec![evidence_root("repo", root.path())]);
+    let patterns = VmValue::list(vec![evidence_pattern("needle", "needle")]);
     let mut vm = vm();
 
     let default_receipt = call(
@@ -263,8 +263,8 @@ fn find_evidence_background_returns_typed_feedback() {
         &mut vm,
         "find_evidence",
         vec![
-            VmValue::List(Arc::new(vec![evidence_root("repo", root.path())])),
-            VmValue::List(Arc::new(vec![evidence_pattern("needle", "needle")])),
+            VmValue::list(vec![evidence_root("repo", root.path())]),
+            VmValue::list(vec![evidence_pattern("needle", "needle")]),
             dict(vec![("background", b(true))]),
         ],
     )
@@ -296,11 +296,11 @@ fn find_evidence_settles_failed_roots_and_handles_non_utf8() {
     )
     .unwrap();
     let missing = readable.path().join("missing");
-    let roots = VmValue::List(Arc::new(vec![
+    let roots = VmValue::list(vec![
         evidence_root("missing", &missing),
         evidence_root("readable", readable.path()),
-    ]));
-    let patterns = VmValue::List(Arc::new(vec![evidence_pattern("needle", "needle")]));
+    ]);
+    let patterns = VmValue::list(vec![evidence_pattern("needle", "needle")]);
     let mut vm = vm();
 
     let receipt = call(
@@ -325,11 +325,11 @@ fn find_evidence_applies_stable_global_and_root_budgets() {
     let second = tempfile::tempdir().unwrap();
     std::fs::write(first.path().join("a.txt"), "x x x\n").unwrap();
     std::fs::write(second.path().join("b.txt"), "x x x\n").unwrap();
-    let roots = VmValue::List(Arc::new(vec![
+    let roots = VmValue::list(vec![
         evidence_root("b", second.path()),
         evidence_root("a", first.path()),
-    ]));
-    let patterns = VmValue::List(Arc::new(vec![evidence_pattern("x", "x")]));
+    ]);
+    let patterns = VmValue::list(vec![evidence_pattern("x", "x")]);
     let mut vm = vm();
 
     let receipt = call(
@@ -358,17 +358,17 @@ fn find_evidence_applies_stable_global_and_root_budgets() {
 #[test]
 fn find_evidence_rejects_duplicate_or_empty_labels() {
     let root = tempfile::tempdir().unwrap();
-    let duplicate_roots = VmValue::List(Arc::new(vec![
+    let duplicate_roots = VmValue::list(vec![
         evidence_root("same", root.path()),
         evidence_root("same", root.path()),
-    ]));
-    let patterns = VmValue::List(Arc::new(vec![evidence_pattern("p", "x")]));
+    ]);
+    let patterns = VmValue::list(vec![evidence_pattern("p", "x")]);
     let mut vm = vm();
     let error = call(&mut vm, "find_evidence", vec![duplicate_roots, patterns]).unwrap_err();
     assert!(error.to_string().contains("duplicate roots id `same`"));
 
-    let roots = VmValue::List(Arc::new(vec![evidence_root("root", root.path())]));
-    let empty_patterns = VmValue::List(Arc::new(vec![evidence_pattern("", "x")]));
+    let roots = VmValue::list(vec![evidence_root("root", root.path())]);
+    let empty_patterns = VmValue::list(vec![evidence_pattern("", "x")]);
     let error = call(&mut vm, "find_evidence", vec![roots, empty_patterns]).unwrap_err();
     assert!(error.to_string().contains("patterns id must not be empty"));
 }

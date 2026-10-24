@@ -377,42 +377,21 @@ fn initial_background_snapshot(
         _ => harn_vm::value::DictMap::new(),
     };
     response.put_str("feedback_kind", "tool_progress");
-    response.insert(
-        harn_vm::value::intern_key("duration_ms"),
-        VmValue::Int(wait_ms as i64),
-    );
+    response.put_int("duration_ms", wait_ms as i64);
     response.put_str("stdout", inline.stdout);
-    response.insert(
-        harn_vm::value::intern_key("stdout_truncated"),
-        VmValue::Bool(inline.stdout_truncated),
-    );
+    response.put_bool("stdout_truncated", inline.stdout_truncated);
     response.put_str("stderr", inline.stderr);
-    response.insert(
-        harn_vm::value::intern_key("stderr_truncated"),
-        VmValue::Bool(inline.stderr_truncated),
-    );
-    response.insert(
-        harn_vm::value::intern_key("byte_count"),
-        VmValue::Int(byte_count as i64),
-    );
+    response.put_bool("stderr_truncated", inline.stderr_truncated);
+    response.put_int("byte_count", byte_count as i64);
     // Seed the loop's per-handle delta cursor and stall/first-stderr detectors on
     // the conversion snapshot, matching the ongoing progress-thread payloads.
-    response.insert(
-        harn_vm::value::intern_key("output_offset"),
-        VmValue::Int(byte_count as i64),
+    response.put_int("output_offset", byte_count as i64);
+    response.put_int("stderr_byte_count", stderr.len() as i64);
+    response.put_int(
+        "silence_ms",
+        if byte_count > 0 { 0 } else { wait_ms as i64 },
     );
-    response.insert(
-        harn_vm::value::intern_key("stderr_byte_count"),
-        VmValue::Int(stderr.len() as i64),
-    );
-    response.insert(
-        harn_vm::value::intern_key("silence_ms"),
-        VmValue::Int(if byte_count > 0 { 0 } else { wait_ms as i64 }),
-    );
-    response.insert(
-        harn_vm::value::intern_key("line_count"),
-        VmValue::Int(line_count as i64),
-    );
+    response.put_int("line_count", line_count as i64);
     response
 }
 
@@ -491,13 +470,10 @@ fn parse_command(map: &harn_vm::value::DictMap) -> Result<(String, Vec<String>),
                 }
             }
             if let Some(login) = optional_bool(NAME, map, "login")? {
-                invocation.insert(harn_vm::value::intern_key("login"), VmValue::Bool(login));
+                invocation.put_bool("login", login);
             }
             if let Some(interactive) = optional_bool(NAME, map, "interactive")? {
-                invocation.insert(
-                    harn_vm::value::intern_key("interactive"),
-                    VmValue::Bool(interactive),
-                );
+                invocation.put_bool("interactive", interactive);
             }
             let resolved = harn_vm::shells::resolve_invocation_from_vm_params(&invocation)
                 .map_err(|message| HostlibError::InvalidParameter {
@@ -622,16 +598,10 @@ mod tests {
     #[test]
     fn background_detection_matches_public_request_modes() {
         let mut request = harn_vm::value::DictMap::new();
-        request.insert(
-            harn_vm::value::intern_key("background"),
-            VmValue::Bool(true),
-        );
+        request.put_bool("background", true);
         assert!(request_is_background(&request));
         let mut delayed = harn_vm::value::DictMap::new();
-        delayed.insert(
-            harn_vm::value::intern_key("background_after_ms"),
-            VmValue::Int(0),
-        );
+        delayed.put_int("background_after_ms", 0);
         assert!(request_is_background(&delayed));
         assert!(!request_is_background(&harn_vm::value::DictMap::new()));
     }

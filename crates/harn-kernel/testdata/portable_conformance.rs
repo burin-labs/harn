@@ -414,6 +414,37 @@ pub const PURE_CASES: &[PureCase] = &[
         expected_json: r#"{"host":"C:/workspace/.harn/state.json","reset":"/absolute/file"}"#,
     },
     PureCase {
+        id: "compiled-secret-pattern-catalog",
+        source: r#"
+            fn inspect(input: string) {
+              const catalog = secret_pattern_catalog()
+              let high_count = 0
+              let contextual = false
+              let detector = ""
+              let pattern = ""
+              for row in catalog {
+                if row.precision == "high" { high_count = high_count + 1 }
+                if row.precision == "heuristic" { contextual = true }
+                if row.detector == "aws-access-key-id" {
+                  detector = row.detector
+                  pattern = row.regex
+                }
+              }
+              if pattern == "" { throw "missing AWS detector" }
+              return {
+                measured: high_count >= 10,
+                contextual: contextual,
+                detector: detector,
+                accepted: regex_match(pattern, "AKIA" + input) != nil,
+                rejected: regex_match(pattern, "ordinary text") == nil,
+              }
+            }
+        "#,
+        entry: "inspect",
+        input_json: r#""ABCDEFGHIJKLMNOP""#,
+        expected_json: r#"{"accepted":true,"contextual":true,"detector":"aws-access-key-id","measured":true,"rejected":true}"#,
+    },
+    PureCase {
         id: "result-enum-match-and-propagation",
         source: r#"
             fn divide(value: int, divisor: int) -> Result<int, string> {

@@ -16,6 +16,7 @@
 //! cases, never a pass, and a runner class that declares it must enforce
 //! (`HARN_REQUIRE_LANDLOCK_TESTS`) turns any `not_measured` into a failure.
 
+use harn_vm::value::VmDictExt as _;
 use std::io::Write;
 
 use harn_hostlib::sandbox::conformance::run_conformance_with_progress;
@@ -92,20 +93,17 @@ fn assert_required_tool_refuses() {
         .find("hostlib_tools_run_command")
         .expect("real process tool");
     let mut request = harn_vm::value::DictMap::new();
-    request.insert(
-        "cwd".into(),
-        VmValue::string(workspace.path().to_string_lossy()),
-    );
-    request.insert(
-        "argv".into(),
-        VmValue::List(std::sync::Arc::new(vec![
+    request.put_str("cwd", workspace.path().to_string_lossy());
+    request.put(
+        "argv",
+        VmValue::list(vec![
             VmValue::string(
                 std::env::current_exe()
                     .expect("test executable")
                     .to_string_lossy(),
             ),
             VmValue::string("--list"),
-        ])),
+        ]),
     );
     let expected = harn_vm::llm::vm_value_to_json(&harn_vm::process_sandbox::host_confinement())
         ["os_hardened_refusal"]

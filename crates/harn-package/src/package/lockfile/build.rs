@@ -6,31 +6,18 @@ use super::resolution::fill_provenance;
 use crate::package::*;
 use harn_modules::package_snapshot::PackageSnapshot;
 
-/// The dependency's directory inside the current package generation, when what
-/// is materialized there is exactly the content the lock pins.
-///
-/// Resolution needs each dependency's own manifest in order to walk transitive
-/// dependencies. Reading it from the package cache means *populating* the cache,
-/// and populating it on a cold cache means fetching from the source -- so a
-/// fully pinned lock still required the network on every install, and for a
-/// private git dependency it required credentials that automated bumps do not
-/// carry.
-///
-/// The generation already holds that content, checked against the same
-/// `content_hash` the cache itself would be verified against. A matching hash
-/// means the bytes are the ones the source would have served, so the manifest
-/// read is equivalent and the fetch is redundant. On any mismatch -- a changed
-/// pin, a new dependency, a missing generation -- this yields nothing and the
-/// caller fetches as before.
+#[cfg(test)]
+#[path = "build_source_lifetime_tests.rs"]
+mod source_lifetime_tests;
+
+/// Reuse matching installed bytes under their generation lease, without a fetch.
 fn materialized_package_dir(
     ctx: &ManifestContext,
     alias: &str,
     expected_hash: &str,
-) -> Option<PathBuf> {
+) -> Option<PackageSource> {
     let snapshot = PackageSnapshot::acquire(&ctx.dir).ok()??;
-    let directory = snapshot.packages_root().join(alias);
-    (directory.is_dir() && materialized_hash_matches(&directory, expected_hash))
-        .then_some(directory)
+    PackageSource::installed(std::sync::Arc::new(snapshot), alias, expected_hash).ok()?
 }
 
 pub(crate) fn dependency_conflict_message(
@@ -195,11 +182,9 @@ pub(crate) fn build_lockfile(
         let alias = next.alias;
         validate_package_alias(&alias)?;
         let dependency = next.dependency;
-        if dependency.local_path().is_some() && next.parent_is_remote {
+        if next.parent_is_remote {
             let parent = next.parent.as_deref().unwrap_or("a remote package");
-            return Err(format!(
-                "package {parent} declares local path dependency {alias}, but path dependencies are not supported inside remote-installed packages; publish {alias} as a git or registry dependency"
-            ).into());
+            validate_remote_dependency(parent, &alias, &dependency)?;
         }
         if dependency.requires_git() {
             ensure_git_available()?;
@@ -231,15 +216,19 @@ pub(crate) fn build_lockfile(
                         .commit
                         .as_deref()
                         .ok_or_else(|| format!("missing locked commit for {alias}"))?;
-                    entry.content_hash = Some(ensure_git_cache_populated_in(
-                        workspace,
-                        url,
-                        &entry.source,
-                        commit,
-                        None,
-                        false,
-                        offline,
-                    )?);
+                    entry.content_hash = Some(
+                        ensure_git_cache_populated_in(
+                            workspace,
+                            url,
+                            &entry.source,
+                            commit,
+                            None,
+                            false,
+                            offline,
+                        )?
+                        .content_hash()
+                        .to_string(),
+                    );
                 }
                 if entry.source.starts_with("git+") {
                     let url = entry.source.trim_start_matches("git+");
@@ -251,33 +240,40 @@ pub(crate) fn build_lockfile(
                         .content_hash
                         .as_deref()
                         .ok_or_else(|| format!("missing content hash for {alias}"))?;
-                    let cache_dir = match materialized_package_dir(ctx, &alias, expected_hash) {
+                    let package_source = match materialized_package_dir(ctx, &alias, expected_hash)
+                    {
                         Some(dir) => dir,
-                        None => {
-                            ensure_git_cache_populated_in(
-                                workspace,
-                                url,
-                                &entry.source,
-                                commit,
-                                Some(expected_hash),
-                                false,
-                                offline,
-                            )?;
-                            git_cache_dir_in(workspace, &entry.source, commit)?
-                        }
+                        None => ensure_git_cache_populated_in(
+                            workspace,
+                            url,
+                            &entry.source,
+                            commit,
+                            Some(expected_hash),
+                            false,
+                            offline,
+                        )?
+                        .into(),
                     };
                     if entry.manifest_digest.is_none()
                         || entry.package_version.is_none()
                         || entry.provenance.is_none()
                     {
-                        fill_provenance(&mut entry, read_lock_entry_provenance(&cache_dir)?);
+                        fill_provenance(
+                            &mut entry,
+                            read_lock_entry_provenance(package_source.as_ref())?,
+                        );
                     }
                     if entry.registry.is_none() {
                         entry.registry = dependency.registry_provenance();
                     }
                     let inserted = replace_lock_entry(&mut lock, entry.clone())?;
                     if inserted {
-                        enqueue_dependencies_from_dir(&mut pending, cache_dir, alias, true)?;
+                        enqueue_dependencies_from_dir(
+                            &mut pending,
+                            package_source.as_ref().to_path_buf(),
+                            alias,
+                            true,
+                        )?;
                     }
                 } else if entry.source.starts_with("archive+") {
                     let url = archive_url_from_source_uri(&entry.source)?;
@@ -285,32 +281,39 @@ pub(crate) fn build_lockfile(
                         .content_hash
                         .as_deref()
                         .ok_or_else(|| format!("missing content hash for {alias}"))?;
-                    let cache_dir = match materialized_package_dir(ctx, &alias, expected_hash) {
+                    let package_source = match materialized_package_dir(ctx, &alias, expected_hash)
+                    {
                         Some(dir) => dir,
-                        None => {
-                            ensure_archive_cache_populated_in(
-                                workspace,
-                                url,
-                                &entry.source,
-                                expected_hash,
-                                false,
-                                offline,
-                            )?;
-                            archive_cache_dir_in(workspace, &entry.source, expected_hash)?
-                        }
+                        None => ensure_archive_cache_populated_in(
+                            workspace,
+                            url,
+                            &entry.source,
+                            expected_hash,
+                            false,
+                            offline,
+                        )?
+                        .into(),
                     };
                     if entry.manifest_digest.is_none()
                         || entry.package_version.is_none()
                         || entry.provenance.is_none()
                     {
-                        fill_provenance(&mut entry, read_lock_entry_provenance(&cache_dir)?);
+                        fill_provenance(
+                            &mut entry,
+                            read_lock_entry_provenance(package_source.as_ref())?,
+                        );
                     }
                     if entry.registry.is_none() {
                         entry.registry = dependency.registry_provenance();
                     }
                     let inserted = replace_lock_entry(&mut lock, entry.clone())?;
                     if inserted {
-                        enqueue_dependencies_from_dir(&mut pending, cache_dir, alias, true)?;
+                        enqueue_dependencies_from_dir(
+                            &mut pending,
+                            package_source.as_ref().to_path_buf(),
+                            alias,
+                            true,
+                        )?;
                     }
                 } else if entry.source.starts_with("path+") {
                     let source = path_from_source_uri(&entry.source)?;
@@ -398,7 +401,7 @@ pub(crate) fn build_lockfile(
             let normalized_url = normalize_archive_url(url)?;
             let source = format!("archive+{normalized_url}");
             let expected_hash = dependency_content_hash(&alias, &dependency)?;
-            let content_hash = ensure_archive_cache_populated_in(
+            let package_source = ensure_archive_cache_populated_in(
                 workspace,
                 &normalized_url,
                 &source,
@@ -406,8 +409,8 @@ pub(crate) fn build_lockfile(
                 false,
                 offline,
             )?;
-            let cache_dir = archive_cache_dir_in(workspace, &source, &content_hash)?;
-            let provenance = read_lock_entry_provenance(&cache_dir)?;
+            let content_hash = package_source.content_hash().to_string();
+            let provenance = read_lock_entry_provenance(package_source.directory())?;
             let mut entry = LockEntry {
                 name: alias.clone(),
                 source: source.clone(),
@@ -427,7 +430,12 @@ pub(crate) fn build_lockfile(
             fill_provenance(&mut entry, provenance);
             let inserted = replace_lock_entry(&mut lock, entry)?;
             if inserted {
-                enqueue_dependencies_from_dir(&mut pending, cache_dir, alias, true)?;
+                enqueue_dependencies_from_dir(
+                    &mut pending,
+                    package_source.directory().to_path_buf(),
+                    alias,
+                    true,
+                )?;
             }
             continue;
         }
@@ -450,7 +458,7 @@ pub(crate) fn build_lockfile(
                     .into());
                 }
             }
-            let content_hash = ensure_git_cache_populated_in(
+            let package_source = ensure_git_cache_populated_in(
                 workspace,
                 &normalized_url,
                 &source,
@@ -459,8 +467,8 @@ pub(crate) fn build_lockfile(
                 false,
                 offline,
             )?;
-            let cache_dir = git_cache_dir_in(workspace, &source, &commit)?;
-            let provenance = read_lock_entry_provenance(&cache_dir)?;
+            let content_hash = package_source.content_hash().to_string();
+            let provenance = read_lock_entry_provenance(package_source.directory())?;
             let mut entry = LockEntry {
                 name: alias.clone(),
                 source: source.clone(),
@@ -480,7 +488,12 @@ pub(crate) fn build_lockfile(
             fill_provenance(&mut entry, provenance);
             let inserted = replace_lock_entry(&mut lock, entry)?;
             if inserted {
-                enqueue_dependencies_from_dir(&mut pending, cache_dir, alias, true)?;
+                enqueue_dependencies_from_dir(
+                    &mut pending,
+                    package_source.directory().to_path_buf(),
+                    alias,
+                    true,
+                )?;
             }
             continue;
         }

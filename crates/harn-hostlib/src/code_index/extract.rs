@@ -34,7 +34,6 @@
 //! response envelope.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -285,10 +284,7 @@ impl Response<'_> {
                 ("returns_value", VmValue::Bool(flow.returns_value)),
                 ("helper", str_value(&fields.helper)),
                 ("call", str_value(&fields.call)),
-                (
-                    "sites",
-                    VmValue::List(Arc::new(sites_list(self.path, &fields.sites))),
-                ),
+                ("sites", VmValue::list(sites_list(self.path, &fields.sites))),
                 (
                     "occurrences_replaced",
                     VmValue::Int(fields.occurrences as i64),
@@ -297,7 +293,7 @@ impl Response<'_> {
                     "call_sites_updated",
                     VmValue::Int(fields.occurrences as i64),
                 ),
-                ("comments_left_behind", VmValue::List(Arc::new(Vec::new()))),
+                ("comments_left_behind", VmValue::list(Vec::new())),
             ],
         };
         edit_envelope(tag, Scope::File, &symbol, envelope)

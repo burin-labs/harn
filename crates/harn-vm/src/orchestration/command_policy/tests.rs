@@ -201,12 +201,9 @@ fn deterministic_scan_marks_dynamic_dispatch_dialects_and_malformed_argv_unresol
 fn canonical_context_binds_mode_argv_shape_and_resolved_shell_once() {
     let mut malformed = crate::value::DictMap::new();
     malformed.put_str("mode", "argv");
-    malformed.insert(
-        crate::value::intern_key("argv"),
-        VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(arcstr::ArcStr::from("printf")),
-            VmValue::Int(7),
-        ])),
+    malformed.put(
+        "argv",
+        VmValue::list(vec![VmValue::string("printf"), VmValue::Int(7)]),
     );
     let malformed_context =
         command_context_json(&malformed, &CommandPolicy::default(), JsonValue::Null);
@@ -1290,14 +1287,7 @@ fn dd_input_read_is_no_longer_flagged_destructive() {
 fn argv_params(argv: &[&str]) -> crate::value::DictMap {
     let mut params = crate::value::DictMap::new();
     params.put_str("mode", "argv");
-    params.insert(
-        crate::value::intern_key("argv"),
-        VmValue::List(std::sync::Arc::new(
-            argv.iter()
-                .map(|arg| VmValue::String(arcstr::ArcStr::from(*arg)))
-                .collect(),
-        )),
-    );
+    params.put("argv", VmValue::strings(argv.iter().copied()));
     params
 }
 

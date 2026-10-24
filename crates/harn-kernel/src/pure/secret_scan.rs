@@ -8,6 +8,31 @@ use sha2::Digest;
 
 const HIGH_ENTROPY_THRESHOLD: f64 = 3.5;
 
+/// Public catalog data in detector-attribution order, without compiled matchers.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct SecretPattern {
+    pub redaction_name: &'static str,
+    pub detector: &'static str,
+    pub source: &'static str,
+    pub title: &'static str,
+    pub regex: &'static str,
+    pub precision: &'static str,
+}
+
+pub fn secret_pattern_catalog() -> Vec<SecretPattern> {
+    DEFAULT_SECRET_PATTERN_SPECS
+        .iter()
+        .map(|spec| SecretPattern {
+            redaction_name: spec.redaction_name,
+            detector: spec.detector,
+            source: spec.source,
+            title: spec.title,
+            regex: spec.regex,
+            precision: spec.precision,
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SecretFinding {
     pub detector: String,

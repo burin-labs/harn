@@ -606,7 +606,6 @@ pub(super) fn pipeline_lifecycle_audit_log_snapshot_builtin(
 /// Return true while the settlement-agent drain loop is running on this thread.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_settlement_agent_active() -> bool",
     category = "workflow.host",
     runtime_only = true
@@ -629,7 +628,6 @@ pub(super) fn settlement_agent_active_builtin(
 /// Fire a session-level lifecycle hook and return its control flow.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_fire_session_hook(event: string, payload?: dict|nil) -> dict",
     kind = "async",
     category = "workflow.host",
@@ -729,7 +727,6 @@ pub(super) fn notify_file_edited_builtin(
 /// Drain the FileEdited queue, fire matching hooks, return the drained paths.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__host_drain_file_edits(session_id?: string|nil) -> list",
     kind = "async",
     category = "workflow.host",
@@ -768,8 +765,7 @@ mod tests {
         VmValue::dict(
             entries
                 .iter()
-                .map(|(key, value)| (crate::value::intern_key(key), value.clone()))
-                .collect::<crate::value::DictMap>(),
+                .map(|(key, value)| (crate::value::intern_key(key), value.clone())),
         )
     }
 
@@ -778,7 +774,7 @@ mod tests {
         let mut out = String::new();
         let err = register_tool_hook_builtin(
             &[dict(&[
-                ("pattern", VmValue::String(arcstr::ArcStr::from("*"))),
+                ("pattern", VmValue::string("*")),
                 ("max_output", VmValue::Int(-1)),
             ])],
             &mut out,

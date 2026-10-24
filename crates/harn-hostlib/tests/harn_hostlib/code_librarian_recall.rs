@@ -22,27 +22,19 @@ fn fixture_root() -> PathBuf {
 }
 
 fn run_harn(source: &str) -> VmValue {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut lexer = Lexer::new(source);
-                let tokens = lexer.tokenize().expect("tokenize");
-                let mut parser = Parser::new(tokens);
-                let program = parser.parse().expect("parse");
-                let chunk = Compiler::new().compile(&program).expect("compile");
-                let mut vm = harn_vm::new_vm();
-                register_vm_stdlib(&mut vm);
-                let _ = harn_hostlib::install_default(&mut vm);
-                vm.set_harness(harn_vm::Harness::real());
-                vm.execute(&chunk).await.expect("execute")
-            })
-            .await
-    })
+    let rt = harn_clock::test_support::current_thread_runtime();
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().expect("tokenize");
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().expect("parse");
+        let chunk = Compiler::new().compile(&program).expect("compile");
+        let mut vm = harn_vm::new_vm();
+        register_vm_stdlib(&mut vm);
+        let _ = harn_hostlib::install_default(&mut vm);
+        vm.set_harness(harn_vm::Harness::real());
+        vm.execute(&chunk).await.expect("execute")
+    }))
 }
 
 #[test]

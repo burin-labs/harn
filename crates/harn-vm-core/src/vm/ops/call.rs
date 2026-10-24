@@ -210,14 +210,14 @@ impl super::super::Vm {
                                     self.stack.push(VmValue::enum_variant(
                                         "Result",
                                         "Err",
-                                        vec![VmValue::String(arcstr::ArcStr::from(e.to_string()))],
+                                        vec![VmValue::string(e.to_string())],
                                     ));
                                 }
                                 Err(e) => {
                                     self.stack.push(VmValue::enum_variant(
                                         "Result",
                                         "Err",
-                                        vec![VmValue::String(arcstr::ArcStr::from(format!("Task join error: {e}")))],
+                                        vec![VmValue::string(format!("Task join error: {e}"))],
                                     ));
                                 }
                             }
@@ -233,9 +233,7 @@ impl super::super::Vm {
                             self.stack.push(VmValue::enum_variant(
                                 "Result",
                                 "Err",
-                                vec![VmValue::String(arcstr::ArcStr::from(
-                                    "cancel_graceful: timeout, task forcefully aborted",
-                                ))],
+                                vec![VmValue::string("cancel_graceful: timeout, task forcefully aborted")],
                             ));
                         }
                     }

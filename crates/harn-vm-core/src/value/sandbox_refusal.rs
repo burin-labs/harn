@@ -269,12 +269,7 @@ impl SandboxMechanismUnavailable {
         if !self.unconfined.is_empty() {
             cause.put(
                 "unconfined",
-                VmValue::list(
-                    self.unconfined
-                        .iter()
-                        .map(|dimension| VmValue::String(arcstr::ArcStr::from(dimension.as_str())))
-                        .collect(),
-                ),
+                VmValue::strings(self.unconfined.iter().map(|dimension| dimension.as_str())),
             );
         }
         cause.put_bool("selector_honored", self.requirement.selector_is_honored());

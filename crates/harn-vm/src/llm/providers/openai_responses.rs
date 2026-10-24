@@ -23,11 +23,9 @@ impl OpenAiResponsesProvider {
             && request.provider != "mock"
             && !crate::llm_config::provider_has_feature(&request.provider, "responses_api")
         {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!(
-                    "api_mode: \"responses\" is not supported by provider \"{}\"",
-                    request.provider
-                ),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "api_mode: \"responses\" is not supported by provider \"{}\"",
+                request.provider
             ))));
         }
 
@@ -76,10 +74,10 @@ impl OpenAiResponsesProvider {
             Some(tx) => read_responses_stream(response, &request.provider, tx).await?,
             None => {
                 let json: serde_json::Value = response.json().await.map_err(|error| {
-                    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                    VmError::Thrown(VmValue::string(format!(
                         "{} Responses API response parse error: {error}",
                         request.provider
-                    ))))
+                    )))
                 })?;
                 (json, false)
             }
@@ -210,9 +208,9 @@ async fn read_responses_events<R: tokio::io::AsyncBufRead + Unpin>(
             continue;
         }
         let event: serde_json::Value = serde_json::from_str(data).map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "{provider} Responses stream event parse error: {error}"
-            ))))
+            )))
         })?;
         match event.get("type").and_then(serde_json::Value::as_str) {
             Some("response.output_text.delta") => {
@@ -236,8 +234,8 @@ async fn read_responses_events<R: tokio::io::AsyncBufRead + Unpin>(
                     .or_else(|| event.get("message"))
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("the provider reported a failed response");
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!("{provider} Responses API error: {message}"),
+                return Err(VmError::Thrown(VmValue::string(format!(
+                    "{provider} Responses API error: {message}"
                 ))));
             }
             _ => {}

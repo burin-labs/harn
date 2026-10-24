@@ -39,10 +39,9 @@ pipeline t(task) {
     );
 }
 
-#[test]
-fn test_inferred_record_call_keeps_width_subtyping() {
-    let errs = errors(
-        r#"fn greet(u: {name: string}) -> string {
+#[rstest::rstest]
+#[case::test_inferred_record_call_keeps_width_subtyping(
+    r#"fn greet(u: {name: string}) -> string {
   return "hi " + u.name
 }
 
@@ -50,8 +49,212 @@ pipeline t(task) {
   const person = {name: "Bob", age: 25}
   greet(person)
 }"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+    true
+)]
+#[case::test_union_type_compatible(r"pipeline t(task) { let x: string | nil = nil }", true)]
+#[case::test_var_nil_widens_on_first_concrete_assignment(
+    r#"pipeline t(task) {
+  let hit = nil
+  hit = {name: "b", score: 2}
+  let widened: {name: string, score: int} | nil = hit
+  hit = nil
+}"#,
+    true
+)]
+#[case::test_var_nil_widens_inside_nil_guard(
+    r#"pipeline t(task) {
+  let hit = nil
+  if hit == nil {
+    hit = {name: "b", score: 2}
+  }
+}"#,
+    true
+)]
+#[case::test_explicit_nullable_var_annotation_still_accepts_nil_and_concrete(
+    r#"pipeline t(task) {
+  let hit: {name: string, score: int} | nil = nil
+  hit = {name: "b", score: 2}
+  hit = nil
+}"#,
+    true
+)]
+// `items[0]` is `T?` under index soundness, so an honest element accessor
+// is declared `-> T?`; the instantiated call then yields `string?`.
+#[case::test_generic_return_type_instantiates_from_callsite(
+    r#"pipeline t(task) {
+  fn identity<T>(x: T) -> T { return x }
+  fn first<T>(items: list<T>) -> T? { return items[0] }
+  let n: int = identity(42)
+  let s: string? = first(["a", "b"])
+}"#,
+    true
+)]
+#[case::test_explicit_generic_call_type_args_are_checked(
+    r#"pipeline t(task) {
+  fn identity<T>(x: T) -> T { return x }
+  let n: int = identity<int>(42)
+  let words: [string] = identity<[string]>(["a", "b"])
+}"#,
+    true
+)]
+#[case::test_generic_callback_union_selects_matching_arity(
+    r#"type Nullary<out T> = fn() -> T
+type Unary<out T> = fn(nil) -> T
+type Scoped<T> = Nullary<T> | Unary<T>
+
+fn accept<T>(body: Scoped<T>) -> nil { return nil }
+fn accept_nullary<T>(body: Nullary<T>) -> nil { return nil }
+fn choose(flag: bool) -> bool | int | nil | dict {
+  return if flag { true } else { {ok: false} }
+}
+
+pipeline t(task) {
+  accept({ -> 42 })
+  accept({ _ -> "ok" })
+  let body: Nullary<bool | int | nil | dict> = { -> choose(true) }
+  accept_nullary(body)
+}"#,
+    true
+)]
+#[case::test_generic_struct_literal_instantiates_type_arguments(
+    r#"pipeline t(task) {
+  struct Pair<A, B> {
+first: A
+second: B
+  }
+  let pair: Pair<int, string> = Pair { first: 1, second: "two" }
+}"#,
+    true
+)]
+#[case::test_attributed_struct_forward_reference_is_registered(
+    r#"pipeline t(task) {
+  let point = Point { x: 1, y: 2 }
+  @note("shape")
+  struct Point {
+    x: int
+    y: int
+  }
+}"#,
+    true
+)]
+#[case::test_generic_enum_construct_instantiates_type_arguments(
+    r"pipeline t(task) {
+  enum Option<T> {
+Some(value: T),
+None
+  }
+  let value: Option<int> = Option.Some(42)
+}",
+    true
+)]
+#[case::test_result_generic_type_compatibility(
+    r#"pipeline t(task) {
+  let ok: Result<int, string> = Result.Ok(42)
+  let err: Result<int, string> = Result.Err("oops")
+}"#,
+    true
+)]
+#[case::test_generic_enum_match_pattern_binds_instantiated_payload(
+    r#"enum Box<T> {
+  Full(value: T),
+  Empty
+}
+
+fn f(b: Box<string>) -> string {
+  match b {
+    Box.Full(v) -> { return v }
+    Box.Empty -> { return "" }
+  }
+}"#,
+    true
+)]
+// A bare `Result` scrutinee (no type args statically known) must not
+// leak the phantom declaration param `T` into the arm scope; the
+// binding degrades to gradual and the arm body stays checkable.
+#[case::test_unparameterised_generic_enum_match_binds_gradual_payload(
+    r"fn f(r: Result) -> int {
+  match r {
+    Result.Ok(v) -> { return v }
+    Result.Err(e) -> { return 0 }
+  }
+}",
+    true
+)]
+#[case::test_harness_fs_method_return_type_inference(
+    r#"fn main(harness: Harness) {
+  let dir: string = harness.fs.mkdtemp("harn-type-")
+  let workspace_root: string = harness.fs.workspace_temp_dir()
+  let workspace_dir: string = harness.fs.mkdtemp_in_workspace("harn-type-")
+  let matches: list = harness.fs.glob("*.toml", dir)
+}"#,
+    true
+)]
+#[case::test_harness_llm_method_return_type_inference(
+    r"fn main(harness: Harness) {
+  let catalog: list = harness.llm.catalog()
+  let refresh: dict = harness.llm.catalog_refresh()
+  let providers: list = harness.llm.providers()
+}",
+    true
+)]
+#[case::test_len_accepts_nil_like_runtime(r"pipeline t(task) { let n: int = len(nil) }", true)]
+#[case::test_workflow_and_transcript_builtins_are_known(r#"pipeline t(task) {
+  let flow = workflow_graph({name: "demo", entry: "act", nodes: {act: {kind: "stage"}}})
+  let report: dict = workflow_policy_report(flow, {tools: tool_registry(), capabilities: {workspace: ["read_text"]}})
+  let run: dict = workflow_execute("task", flow, [], {})
+  let tree: dict = load_run_tree("run.json")
+  let fixture: dict = run_record_fixture(run?.run)
+  let suite: dict = run_record_eval_suite([{run: run?.run, fixture: fixture}])
+  let diff: dict = run_record_diff(run?.run, run?.run)
+  let manifest: dict = eval_suite_manifest({cases: [{run_path: "run.json"}]})
+  let suite_report: dict = eval_suite_run(manifest)
+  let wf: dict = artifact_workspace_file("src/main.rs", "fn main() {}", {source: "host"})
+  let snap: dict = artifact_workspace_snapshot(["src/main.rs"], "snapshot")
+  let selection: dict = artifact_editor_selection("src/main.rs", "main")
+  let verify: dict = artifact_verification_result("verify", "ok")
+  let test_result: dict = artifact_test_result("tests", "pass")
+  let cmd: dict = artifact_command_result("cargo test", {status: 0})
+  let patch: dict = artifact_diff("src/main.rs", "old", "new")
+  let git: dict = artifact_git_diff("diff --git a b")
+  let review: dict = artifact_diff_review(patch, "review me")
+  let decision: dict = artifact_review_decision(review, "accepted")
+  let proposal: dict = artifact_patch_proposal(review, "*** Begin Patch")
+  let bundle: dict = artifact_verification_bundle("checks", [{name: "fmt", ok: true}])
+  let apply: dict = artifact_apply_intent(review, "apply")
+  let transcript = transcript_reset({metadata: {source: "test"}})
+  let visible: string = transcript_render_visible(transcript_archive(transcript))
+  let events: list = transcript_events(transcript)
+  let worker: dict = worker_trigger({id: "worker_1"}, {follow_up: "next"})
+  let context: string = artifact_context([], {max_artifacts: 1})
+  __io_println(report)
+  __io_println(run)
+  __io_println(tree)
+  __io_println(fixture)
+  __io_println(suite)
+  __io_println(diff)
+  __io_println(manifest)
+  __io_println(suite_report)
+  __io_println(wf)
+  __io_println(snap)
+  __io_println(selection)
+  __io_println(verify)
+  __io_println(test_result)
+  __io_println(cmd)
+  __io_println(patch)
+  __io_println(git)
+  __io_println(review)
+  __io_println(decision)
+  __io_println(proposal)
+  __io_println(bundle)
+  __io_println(apply)
+  __io_println(visible)
+  __io_println(events)
+  __io_println(worker)
+  __io_println(context)
+}"#, true)]
+fn diagnostics_errors(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
 }
 
 #[test]
@@ -59,12 +262,6 @@ fn test_return_type_mismatch() {
     let errs = errors(r#"pipeline t(task) { fn get() -> int { return "hello" } }"#);
     assert_eq!(errs.len(), 1);
     assert!(errs[0].contains("return value: expected int, found string"));
-}
-
-#[test]
-fn test_union_type_compatible() {
-    let errs = errors(r"pipeline t(task) { let x: string | nil = nil }");
-    assert!(errs.is_empty());
 }
 
 #[test]
@@ -79,44 +276,6 @@ fn test_union_type_mismatch() {
         errs[0]
     );
     assert!(errs[0].contains("found int"));
-}
-
-#[test]
-fn test_var_nil_widens_on_first_concrete_assignment() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  let hit = nil
-  hit = {name: "b", score: 2}
-  let widened: {name: string, score: int} | nil = hit
-  hit = nil
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
-fn test_var_nil_widens_inside_nil_guard() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  let hit = nil
-  if hit == nil {
-    hit = {name: "b", score: 2}
-  }
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
-fn test_explicit_nullable_var_annotation_still_accepts_nil_and_concrete() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  let hit: {name: string, score: int} | nil = nil
-  hit = {name: "b", score: 2}
-  hit = nil
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
 }
 
 #[test]
@@ -144,33 +303,6 @@ fn test_type_inference_propagation() {
     assert!(errs[0].contains("found int"));
     assert!(errs[0].contains("string"));
     assert!(errs[0].contains("int"));
-}
-
-#[test]
-fn test_generic_return_type_instantiates_from_callsite() {
-    // `items[0]` is `T?` under index soundness, so an honest element accessor
-    // is declared `-> T?`; the instantiated call then yields `string?`.
-    let errs = errors(
-        r#"pipeline t(task) {
-  fn identity<T>(x: T) -> T { return x }
-  fn first<T>(items: list<T>) -> T? { return items[0] }
-  let n: int = identity(42)
-  let s: string? = first(["a", "b"])
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
-fn test_explicit_generic_call_type_args_are_checked() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  fn identity<T>(x: T) -> T { return x }
-  let n: int = identity<int>(42)
-  let words: [string] = identity<[string]>(["a", "b"])
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
 }
 
 #[test]
@@ -224,29 +356,6 @@ fn test_generic_type_param_conflicting_candidates_join_to_union() {
 }
 
 #[test]
-fn test_generic_callback_union_selects_matching_arity() {
-    let errs = errors(
-        r#"type Nullary<out T> = fn() -> T
-type Unary<out T> = fn(nil) -> T
-type Scoped<T> = Nullary<T> | Unary<T>
-
-fn accept<T>(body: Scoped<T>) -> nil { return nil }
-fn accept_nullary<T>(body: Nullary<T>) -> nil { return nil }
-fn choose(flag: bool) -> bool | int | nil | dict {
-  return if flag { true } else { {ok: false} }
-}
-
-pipeline t(task) {
-  accept({ -> 42 })
-  accept({ _ -> "ok" })
-  let body: Nullary<bool | int | nil | dict> = { -> choose(true) }
-  accept_nullary(body)
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
 fn test_generic_list_binding_propagates_element_type() {
     // The element accessor is `-> T?` (index soundness): instantiating `T` to
     // `int` still surfaces the callsite mismatch against `string`.
@@ -258,35 +367,6 @@ fn test_generic_list_binding_propagates_element_type() {
     );
     assert_eq!(errs.len(), 1, "expected 1 error, got: {errs:?}");
     assert!(errs[0].contains("expected string, found int"));
-}
-
-#[test]
-fn test_generic_struct_literal_instantiates_type_arguments() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  struct Pair<A, B> {
-first: A
-second: B
-  }
-  let pair: Pair<int, string> = Pair { first: 1, second: "two" }
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
-fn test_attributed_struct_forward_reference_is_registered() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  let point = Point { x: 1, y: 2 }
-  @note("shape")
-  struct Point {
-    x: int
-    y: int
-  }
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
 }
 
 #[test]
@@ -332,31 +412,6 @@ fn test_unknown_struct_literal_suggests_close_match() {
 }
 
 #[test]
-fn test_generic_enum_construct_instantiates_type_arguments() {
-    let errs = errors(
-        r"pipeline t(task) {
-  enum Option<T> {
-Some(value: T),
-None
-  }
-  let value: Option<int> = Option.Some(42)
-}",
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
-fn test_result_generic_type_compatibility() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  let ok: Result<int, string> = Result.Ok(42)
-  let err: Result<int, string> = Result.Err("oops")
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
 fn test_result_match_pattern_binds_instantiated_payload_types() {
     // `Result<int, string>` scrutinee: `Result.Ok(v)` binds `v: int`, and
     // `Result.Err(e)` binds `e: string` — not the raw declaration params.
@@ -388,40 +443,6 @@ fn f() -> string {
     );
     assert_eq!(bad_errs.len(), 1, "expected 1 error, got: {bad_errs:?}");
     assert!(bad_errs[0].contains("expected string, found int"));
-}
-
-#[test]
-fn test_generic_enum_match_pattern_binds_instantiated_payload() {
-    let errs = errors(
-        r#"enum Box<T> {
-  Full(value: T),
-  Empty
-}
-
-fn f(b: Box<string>) -> string {
-  match b {
-    Box.Full(v) -> { return v }
-    Box.Empty -> { return "" }
-  }
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
-fn test_unparameterised_generic_enum_match_binds_gradual_payload() {
-    // A bare `Result` scrutinee (no type args statically known) must not
-    // leak the phantom declaration param `T` into the arm scope; the
-    // binding degrades to gradual and the arm body stays checkable.
-    let errs = errors(
-        r"fn f(r: Result) -> int {
-  match r {
-    Result.Ok(v) -> { return v }
-    Result.Err(e) -> { return 0 }
-  }
-}",
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
 }
 
 #[test]
@@ -467,19 +488,6 @@ fn test_builtin_arg_type_mismatch() {
 }
 
 #[test]
-fn test_harness_fs_method_return_type_inference() {
-    let errs = errors(
-        r#"fn main(harness: Harness) {
-  let dir: string = harness.fs.mkdtemp("harn-type-")
-  let workspace_root: string = harness.fs.workspace_temp_dir()
-  let workspace_dir: string = harness.fs.mkdtemp_in_workspace("harn-type-")
-  let matches: list = harness.fs.glob("*.toml", dir)
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
-}
-
-#[test]
 fn test_harness_fs_method_arg_type_mismatch() {
     let errs = errors(
         r"fn main(harness: Harness) {
@@ -489,18 +497,6 @@ fn test_harness_fs_method_arg_type_mismatch() {
     assert_eq!(errs.len(), 1, "expected one error, got: {errs:?}");
     assert!(errs[0].contains("argument 1 `prefix`"), "{errs:?}");
     assert!(errs[0].contains("found int"), "{errs:?}");
-}
-
-#[test]
-fn test_harness_llm_method_return_type_inference() {
-    let errs = errors(
-        r"fn main(harness: Harness) {
-  let catalog: list = harness.llm.catalog()
-  let refresh: dict = harness.llm.catalog_refresh()
-  let providers: list = harness.llm.providers()
-}",
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
 }
 
 #[test]
@@ -518,12 +514,6 @@ fn test_harness_llm_method_arg_type_mismatch() {
 }
 
 #[test]
-fn test_len_accepts_nil_like_runtime() {
-    let errs = errors(r"pipeline t(task) { let n: int = len(nil) }");
-    assert!(errs.is_empty(), "got errors: {errs:?}");
-}
-
-#[test]
 fn test_llm_call_option_literal_checks_known_field_types() {
     let errs = errors(
         r#"pipeline t(task) {
@@ -536,10 +526,9 @@ fn test_llm_call_option_literal_checks_known_field_types() {
     assert!(errs[0].contains("max_tokens: string"), "{errs:?}");
 }
 
-#[test]
-fn test_llm_call_option_literal_accepts_canonical_responses_options() {
-    let warns = warnings(
-        r#"pipeline t(task) {
+#[rstest::rstest]
+#[case::test_llm_call_option_literal_accepts_canonical_responses_options(
+    r#"pipeline t(task) {
   llm_call("prompt", nil, {
     provider: "mock", mock_scope: "completion.judge",
     api_mode: "responses",
@@ -553,14 +542,9 @@ fn test_llm_call_option_literal_accepts_canonical_responses_options() {
     max_tool_calls: 2
   })
 }"#,
-    );
-    assert!(warns.is_empty(), "got warnings: {warns:?}");
-}
-
-#[test]
-fn test_llm_call_option_literal_accepts_canonical_reasoning_and_routing_options() {
-    let warns = warnings(
-        r#"pipeline t(task) {
+    true
+)]
+#[case::test_llm_call_option_literal_accepts_canonical_reasoning_and_routing_options(r#"pipeline t(task) {
   let profile = {prompt_fragments: [{body: "Use repo context.", requires_caps: ["language.rust"]}], caps: ["language.rust"]}
   llm_call("prompt", nil, {
     provider: "mock",
@@ -581,15 +565,9 @@ fn test_llm_call_option_literal_accepts_canonical_reasoning_and_routing_options(
     reasoning_policy: "off",
     timeout_ms: 250
   })
-}"#,
-    );
-    assert!(warns.is_empty(), "got warnings: {warns:?}");
-}
-
-#[test]
-fn test_structured_llm_options_accept_canonical_keys() {
-    let warns = warnings(
-        r#"pipeline t(task) {
+}"#, true)]
+#[case::test_structured_llm_options_accept_canonical_keys(
+    r#"pipeline t(task) {
   let schema = {type: "object", properties: {answer: {type: "string"}}}
   llm_call_structured_result("prompt", schema, {
     provider: "mock",
@@ -605,8 +583,11 @@ fn test_structured_llm_options_accept_canonical_keys() {
     video: false
   })
 }"#,
-    );
-    assert!(warns.is_empty(), "got warnings: {warns:?}");
+    true
+)]
+fn diagnostics_warnings(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = warnings(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
 }
 
 #[test]
@@ -626,67 +607,6 @@ fn test_user_function_named_like_builtin_reports_user_arity() {
     );
     assert_eq!(warns.len(), 1, "expected one arity warning, got: {warns:?}");
     assert!(warns[0].contains("Function 'len' expects at least 1 argument, got 0"));
-}
-
-#[test]
-fn test_workflow_and_transcript_builtins_are_known() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  let flow = workflow_graph({name: "demo", entry: "act", nodes: {act: {kind: "stage"}}})
-  let report: dict = workflow_policy_report(flow, {tools: tool_registry(), capabilities: {workspace: ["read_text"]}})
-  let run: dict = workflow_execute("task", flow, [], {})
-  let tree: dict = load_run_tree("run.json")
-  let fixture: dict = run_record_fixture(run?.run)
-  let suite: dict = run_record_eval_suite([{run: run?.run, fixture: fixture}])
-  let diff: dict = run_record_diff(run?.run, run?.run)
-  let manifest: dict = eval_suite_manifest({cases: [{run_path: "run.json"}]})
-  let suite_report: dict = eval_suite_run(manifest)
-  let wf: dict = artifact_workspace_file("src/main.rs", "fn main() {}", {source: "host"})
-  let snap: dict = artifact_workspace_snapshot(["src/main.rs"], "snapshot")
-  let selection: dict = artifact_editor_selection("src/main.rs", "main")
-  let verify: dict = artifact_verification_result("verify", "ok")
-  let test_result: dict = artifact_test_result("tests", "pass")
-  let cmd: dict = artifact_command_result("cargo test", {status: 0})
-  let patch: dict = artifact_diff("src/main.rs", "old", "new")
-  let git: dict = artifact_git_diff("diff --git a b")
-  let review: dict = artifact_diff_review(patch, "review me")
-  let decision: dict = artifact_review_decision(review, "accepted")
-  let proposal: dict = artifact_patch_proposal(review, "*** Begin Patch")
-  let bundle: dict = artifact_verification_bundle("checks", [{name: "fmt", ok: true}])
-  let apply: dict = artifact_apply_intent(review, "apply")
-  let transcript = transcript_reset({metadata: {source: "test"}})
-  let visible: string = transcript_render_visible(transcript_archive(transcript))
-  let events: list = transcript_events(transcript)
-  let worker: dict = worker_trigger({id: "worker_1"}, {follow_up: "next"})
-  let context: string = artifact_context([], {max_artifacts: 1})
-  __io_println(report)
-  __io_println(run)
-  __io_println(tree)
-  __io_println(fixture)
-  __io_println(suite)
-  __io_println(diff)
-  __io_println(manifest)
-  __io_println(suite_report)
-  __io_println(wf)
-  __io_println(snap)
-  __io_println(selection)
-  __io_println(verify)
-  __io_println(test_result)
-  __io_println(cmd)
-  __io_println(patch)
-  __io_println(git)
-  __io_println(review)
-  __io_println(decision)
-  __io_println(proposal)
-  __io_println(bundle)
-  __io_println(apply)
-  __io_println(visible)
-  __io_println(events)
-  __io_println(worker)
-  __io_println(context)
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
 }
 
 /// A destructuring default is ordinary code, so every call diagnostic must

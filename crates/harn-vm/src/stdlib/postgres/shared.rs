@@ -247,7 +247,7 @@ mod tests {
     use super::*;
 
     fn s(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
+        VmValue::string(value)
     }
 
     fn opts(pairs: &[(&str, VmValue)]) -> crate::value::DictMap {
