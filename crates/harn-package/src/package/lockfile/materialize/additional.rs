@@ -177,6 +177,31 @@ fn new_cache_layout_rejects_legacy_entries_but_reuses_installed_generations() {
 }
 
 #[test]
+fn frozen_install_that_reuses_a_generation_still_fills_the_cache_for_an_offline_install() {
+    let (_repository, repo, _branch) = create_git_package_repo();
+    let project = tempfile::tempdir().unwrap();
+    let workspace = TestWorkspace::new(project.path());
+    let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+    let manifest = format!("[dependencies]\nacme-lib = {{ git = \"{git}\", tag = \"v1.0.0\" }}\n");
+    fs::write(project.path().join(MANIFEST), &manifest).unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    // A cold cache beside a current generation is what a rebuilt cache
+    // directory or a later checkout of the same project looks like.
+    fs::remove_dir_all(workspace.cache_dir()).unwrap();
+    install_packages_in(workspace.env(), true, None, false).unwrap();
+
+    let downstream = tempfile::tempdir().unwrap();
+    fs::write(downstream.path().join(MANIFEST), &manifest).unwrap();
+    fs::copy(
+        project.path().join(LOCK_FILE),
+        downstream.path().join(LOCK_FILE),
+    )
+    .unwrap();
+    let offline = PackageWorkspace::for_test(downstream.path(), project.path().join(".cache"));
+    install_packages_in(&offline, true, None, true).unwrap();
+}
+
+#[test]
 fn distinct_aliases_can_reuse_the_same_cached_source() {
     let (_repository, repo, _branch) = create_git_package_repo();
     let project = tempfile::tempdir().unwrap();

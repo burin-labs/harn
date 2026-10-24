@@ -19,6 +19,28 @@ pub(crate) fn materialize_dependencies_from_lock(
     })
 }
 
+/// A successful install leaves the shared cache holding every locked package,
+/// including when the current generation already satisfied the lock and no
+/// package was fetched, so an offline install elsewhere resolves from it.
+pub(crate) fn seed_cache_from_current_generation(
+    workspace: &PackageWorkspace,
+    ctx: &ManifestContext,
+    lock: &LockFile,
+) -> Result<(), PackageError> {
+    let Some(installed) = InstalledPackageSources::acquire(ctx)? else {
+        return Ok(());
+    };
+    for entry in &lock.packages {
+        let (Some(expected_hash), Some(source)) =
+            (entry.content_hash.as_deref(), installed.source_for(entry)?)
+        else {
+            continue;
+        };
+        seed_cache_from_installed(workspace, entry, source.as_ref(), expected_hash)?;
+    }
+    Ok(())
+}
+
 fn materialize_lock_entries(
     workspace: &PackageWorkspace,
     lock: &LockFile,
