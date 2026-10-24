@@ -52,7 +52,7 @@ fn run_study(harness: Harness, options: Options, transcript: string = "") -> nil
       harness.runtime.exit(4)
     }
     endpoint_key = unwrap(setting)
-    const checked = check_server_model(harness.net, options.base_url, options.llm)
+    const checked = check_server_model(harness.net, harness.llm, options.base_url, options.llm)
     if is_err(checked) {
       harness.stdio.eprintln(unwrap_err(checked))
       harness.runtime.exit(4)
