@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use parking_lot::RwLock;
 
-use super::usage::UsageCostCertainty;
+use super::usage::{ReportedCacheTotals, UsageCostCertainty};
 
 /// A single LLM call trace entry.
 #[derive(Debug, Clone)]
@@ -33,6 +33,7 @@ pub struct LlmTraceUsageSummary {
     /// explicit zero-dispatch reuse, come from each ledger's cost certainty.
     pub call_count: i64,
     pub cost: UsageCostCertainty,
+    pub cache: ReportedCacheTotals,
 }
 
 #[derive(Default)]
@@ -84,6 +85,7 @@ impl LlmTraceRuntime {
             .duration_ms
             .saturating_add(i64::try_from(entry.duration_ms).unwrap_or(i64::MAX));
         summary.cost.record(&entry.usage);
+        summary.cache.record_usage(&entry.usage);
         if state.enabled {
             state.entries.push(entry);
         }

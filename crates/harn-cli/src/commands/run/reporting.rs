@@ -813,6 +813,7 @@ mod trace_summary_pricing_tests {
                 usage_unknown_calls: 0,
                 ..UsageCostCertainty::default()
             },
+            ..LlmTraceUsageSummary::default()
         });
         assert_eq!(summary.call_count, 1);
         assert_eq!(summary.provider_call_count, 2);

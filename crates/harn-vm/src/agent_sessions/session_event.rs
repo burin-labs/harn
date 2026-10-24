@@ -397,6 +397,10 @@ pub(crate) struct KnownMetadata {
     pub cache_read_tokens: Option<Number>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_write_tokens: Option<Number>,
+    /// Whether the cache counts are a provider measurement. Absent on calls
+    /// recorded before the field existed, which read as not reported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_counts_reported: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<Number>,
     /// Whether provider usage was reported or remains `"unknown"`.

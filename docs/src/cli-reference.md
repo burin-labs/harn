@@ -3366,6 +3366,12 @@ harn runs report --from-session <session-id>
 harn runs report --from-session <session-id> --session-root /path/to/workspace
 ```
 
+A view's `usage.cache_read_tokens` and `usage.cache_write_tokens` sum only the
+calls whose provider reported cache accounting (`cache_visibility` null). They
+are null when no call did: an unsupported or undeclared route's zeros are not
+a measured zero. Child runs and session views add reported counts and stay
+null only when every part is null.
+
 ### Reporting on a run that never wrote a run record
 
 Nothing on the agent-session path writes a run record: `save_run_record` is

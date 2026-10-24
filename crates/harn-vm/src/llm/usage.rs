@@ -367,6 +367,59 @@ impl UsageCostCertainty {
     }
 }
 
+/// Cache token totals over the calls whose provider reported cache accounting.
+///
+/// A call counts only when its route declared cache accounting and the
+/// response reported it (`cache_visibility` null). The totals read `None`
+/// until such a call is folded, so an unreported count never reads as a
+/// measured zero.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReportedCacheTotals {
+    pub reported_calls: i64,
+    pub read_tokens: i64,
+    pub write_tokens: i64,
+}
+
+impl ReportedCacheTotals {
+    pub(crate) fn record(&mut self, reported: bool, read_tokens: i64, write_tokens: i64) {
+        if !reported {
+            return;
+        }
+        self.reported_calls = self.reported_calls.saturating_add(1);
+        self.read_tokens = self.read_tokens.saturating_add(read_tokens);
+        self.write_tokens = self.write_tokens.saturating_add(write_tokens);
+    }
+
+    pub(crate) fn record_usage(&mut self, usage: &LlmUsage) {
+        self.record(
+            usage.cache_counts_reported(),
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
+        );
+    }
+
+    /// Calls folded after `before` was taken from the same running total.
+    #[must_use]
+    pub(crate) fn since(&self, before: &Self) -> Self {
+        Self {
+            reported_calls: self.reported_calls.saturating_sub(before.reported_calls),
+            read_tokens: self.read_tokens.saturating_sub(before.read_tokens),
+            write_tokens: self.write_tokens.saturating_sub(before.write_tokens),
+        }
+    }
+
+    #[must_use]
+    pub fn reported_read_tokens(&self) -> Option<i64> {
+        (self.reported_calls > 0).then_some(self.read_tokens)
+    }
+
+    #[must_use]
+    pub fn reported_write_tokens(&self) -> Option<i64> {
+        (self.reported_calls > 0).then_some(self.write_tokens)
+    }
+}
+
 /// Fold cost and accounting certainty once for every reporting projection.
 pub fn summarize_usage_cost_certainty<'a>(
     usages: impl IntoIterator<Item = &'a LlmUsage>,
@@ -1075,6 +1128,12 @@ impl LlmUsage {
             (Some(false), _) | (Some(true), false) => Some("unsupported"),
             (Some(true), true) => None,
         }
+    }
+
+    /// Whether the cache counts are a provider measurement rather than an
+    /// unsupported or undeclared zero.
+    pub(crate) fn cache_counts_reported(&self) -> bool {
+        self.cache_visibility().is_none()
     }
 
     /// Mechanically add the canonical accounting fields to the flat provider

@@ -55,6 +55,12 @@ pub struct LlmUsageRecord {
     pub known_cost_usd: f64,
     /// Legacy alias for `known_cost_usd`.
     pub total_cost: f64,
+    /// Cache tokens summed over the calls that reported cache accounting.
+    /// `None` when no call did, so an unreported count never reads as zero.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<i64>,
     pub models: Vec<String>,
 }
 
@@ -73,6 +79,8 @@ struct LlmUsageRecordWire {
     cost_usd: Option<f64>,
     known_cost_usd: Option<f64>,
     total_cost: f64,
+    cache_read_tokens: Option<i64>,
+    cache_write_tokens: Option<i64>,
     models: Vec<String>,
 }
 
@@ -90,6 +98,8 @@ impl From<LlmUsageRecordWire> for LlmUsageRecord {
                 .filter(|_| wire.unpriced_calls == 0 && wire.usage_unknown_calls == 0),
             known_cost_usd: wire.known_cost_usd.unwrap_or(wire.total_cost),
             total_cost: wire.total_cost,
+            cache_read_tokens: wire.cache_read_tokens,
+            cache_write_tokens: wire.cache_write_tokens,
             models: wire.models,
         }
     }

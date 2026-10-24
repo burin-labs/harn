@@ -51,6 +51,7 @@ use super::EXECUTION_EVIDENCE_SCHEMA_VERSION;
 use crate::agent_sessions::session_event::{
     self, float, integer, nonblank, TranscriptKind, TranscriptRecord,
 };
+use crate::llm::usage::ReportedCacheTotals;
 use crate::value::VmError;
 
 /// Marker written into `metadata.projected_from.source`, identifying both that
@@ -357,8 +358,7 @@ struct SessionFold {
     usage: LlmUsageRecord,
     models: Vec<String>,
     providers: Vec<String>,
-    cache_read_tokens: i64,
-    cache_write_tokens: i64,
+    cache: ReportedCacheTotals,
     /// Provider requests across every call, and why the extra ones happened.
     /// Distinct from `usage.call_count`, which counts logical calls: a run
     /// whose provider rejected a third of its requests with a retryable 429
@@ -398,8 +398,9 @@ struct LlmCallFacts {
     provider: Option<String>,
     input_tokens: i64,
     output_tokens: i64,
-    cache_read_tokens: i64,
-    cache_write_tokens: i64,
+    /// `None` when the call did not report cache accounting.
+    cache_read_tokens: Option<i64>,
+    cache_write_tokens: Option<i64>,
     cost_usd: Option<f64>,
 }
 
@@ -677,12 +678,6 @@ fn assemble(
     if fold.max_iteration > 0 {
         metadata.insert("iterations".to_string(), json!(fold.max_iteration));
     }
-    if fold.cache_read_tokens > 0 || fold.cache_write_tokens > 0 {
-        metadata.insert(
-            "cache_tokens".to_string(),
-            json!({"read": fold.cache_read_tokens, "write": fold.cache_write_tokens}),
-        );
-    }
     if !fold.providers.is_empty() {
         metadata.insert("providers".to_string(), json!(fold.providers));
     }
@@ -745,6 +740,8 @@ fn assemble(
             .then_some(known_cost_usd),
         known_cost_usd,
         total_cost: known_cost_usd,
+        cache_read_tokens: fold.cache.reported_read_tokens(),
+        cache_write_tokens: fold.cache.reported_write_tokens(),
         ..fold.usage
     };
     let (execution_id, mut evidence_gaps) = match fold.execution_id.as_deref() {
@@ -988,6 +985,9 @@ impl SessionFold {
         let metadata = record.metadata();
         let input_tokens = integer(&metadata.input_tokens).unwrap_or(0);
         let output_tokens = integer(&metadata.output_tokens).unwrap_or(0);
+        // Only a call that recorded a provider measurement counts; an older
+        // call without the flag carries zeros that were never measured.
+        let cache_reported = metadata.cache_counts_reported == Some(true);
         let cache_read_tokens = integer(&metadata.cache_read_tokens).unwrap_or(0);
         let cache_write_tokens = integer(&metadata.cache_write_tokens).unwrap_or(0);
         let cost_usd = float(&metadata.cost_usd);
@@ -999,8 +999,8 @@ impl SessionFold {
             provider: provider.clone(),
             input_tokens,
             output_tokens,
-            cache_read_tokens,
-            cache_write_tokens,
+            cache_read_tokens: cache_reported.then_some(cache_read_tokens),
+            cache_write_tokens: cache_reported.then_some(cache_write_tokens),
             cost_usd,
         });
         self.usage.call_count += 1;
@@ -1015,8 +1015,8 @@ impl SessionFold {
         if let Some(cost) = cost_usd {
             self.total_cost += Decimal::from_f64_retain(cost).unwrap_or_default();
         }
-        self.cache_read_tokens += cache_read_tokens;
-        self.cache_write_tokens += cache_write_tokens;
+        self.cache
+            .record(cache_reported, cache_read_tokens, cache_write_tokens);
         let attempts = metadata.provider_attempts.clone().unwrap_or_default();
         // A call recorded before provider attempts existed has no entry. It
         // still made at least one request, so counting 1 keeps the total a
@@ -1283,16 +1283,20 @@ fn llm_call_spans(
                     crate::tracing::meta::OUTPUT_TOKENS.to_string(),
                     json!(call.output_tokens),
                 ),
-                (
-                    crate::tracing::meta::CACHE_READ_TOKENS.to_string(),
-                    json!(call.cache_read_tokens),
-                ),
-                (
-                    crate::tracing::meta::CACHE_WRITE_TOKENS.to_string(),
-                    json!(call.cache_write_tokens),
-                ),
                 ("duration_available".to_string(), json!(false)),
             ]);
+            if let Some(read) = call.cache_read_tokens {
+                metadata.insert(
+                    crate::tracing::meta::CACHE_READ_TOKENS.to_string(),
+                    json!(read),
+                );
+            }
+            if let Some(write) = call.cache_write_tokens {
+                metadata.insert(
+                    crate::tracing::meta::CACHE_WRITE_TOKENS.to_string(),
+                    json!(write),
+                );
+            }
             if let Some(model) = &call.model {
                 metadata.insert(crate::tracing::meta::MODEL.to_string(), json!(model));
             }

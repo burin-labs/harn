@@ -534,6 +534,7 @@ pub(crate) fn record_completed_call_usage(
     metadata.put_str("call_role", opts.context_manifest.call_role());
     metadata.put_str("provider", &result.provider);
     metadata.put_str("model", &result.model);
+    metadata.put_bool("cache_counts_reported", usage.cache_counts_reported());
     metadata.put(
         "provider_stop_reason",
         result
