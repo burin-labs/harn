@@ -233,3 +233,4 @@ fn extract_bindings(node: Node<'_>, source: &str, container: Option<&str>, out: 
         }
     }
 }
+// Throwaway: inherited-red probe of the downstream consumer gate.
