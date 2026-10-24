@@ -453,11 +453,10 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let failed = if dry_run {
         Vec::new()
     } else {
-        if let Some(interrupt) = call.interrupted() {
-            return Ok(interrupted_response(&env, interrupt));
+        match commit(&env, &call, &state.root, &plans, session_id.as_deref())? {
+            Ok(failed) => failed,
+            Err(stopped) => return Ok(stopped),
         }
-        call.report(Phase::Applying, BUILTIN);
-        write_plans(BUILTIN, &state.root, &plans, session_id.as_deref())?
     };
 
     Ok(applied_response(&env, &plans, dry_run, failed))
@@ -564,6 +563,39 @@ fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtra
             proof: extras.proof,
         },
     )
+}
+
+/// The commit point. A stop requested before it leaves every file as it was.
+/// Once it passes the write runs to completion, so a cancel can never leave
+/// some files renamed and others not. A file another writer changed after it
+/// was read refuses the whole rename.
+fn commit(
+    env: &ResponseEnv<'_>,
+    call: &HostCallContext,
+    root: &Path,
+    plans: &[FilePlan],
+    session_id: Option<&str>,
+) -> Result<Result<Vec<(String, String)>, VmValue>, HostlibError> {
+    if let Some(interrupt) = call.interrupted() {
+        return Ok(Err(interrupted_response(env, interrupt)));
+    }
+    call.report(Phase::Applying, BUILTIN);
+    let changed = super::refactor_core::changed_since_planned(BUILTIN, root, plans, session_id);
+    if !changed.is_empty() {
+        return Ok(Err(emit_response(
+            env,
+            "refused",
+            ResponseExtras {
+                details: format!(
+                    "rename stopped without writes: {} changed after the rename read them (listed in `warnings`); run it again",
+                    changed.join(", ")
+                ),
+                warnings: changed.into_iter().map(str_value).collect(),
+                ..Default::default()
+            },
+        )));
+    }
+    write_plans(BUILTIN, root, plans, session_id).map(Ok)
 }
 
 /// The caller stopped the rename before it wrote anything.

@@ -231,3 +231,96 @@ fn a_deadline_refuses_with_a_retry_hint_instead_of_falling_back() {
     );
     assert_ne!(snapshot(fixture.workspace.path()), before);
 }
+
+/// Runs `on_applying` on the rename's own thread when it reports `applying`,
+/// the moment the commit point begins.
+struct OnApplying(Box<dyn Fn() + Send + Sync>);
+
+impl AgentEventSink for OnApplying {
+    fn handle_event(&self, event: &AgentEvent) {
+        if let AgentEvent::ToolCallUpdate {
+            data: Some(data), ..
+        } = event
+        {
+            if data["progress"]["phase"] == "applying" {
+                (self.0)();
+            }
+        }
+    }
+}
+
+fn syntax_rename_at_commit(
+    fixture: &Fixture,
+    session: &str,
+    cancel: Arc<AtomicBool>,
+    on_applying: impl Fn() + Send + Sync + 'static,
+) -> VmValue {
+    harn_vm::agent_events::register_sink(session, Arc::new(OnApplying(Box::new(on_applying))));
+    let _interrupt = harn_vm::op_interrupt::install(Some(cancel), None);
+    let _call = HostCallContext::new(Some(CallAddress {
+        session_id: session.into(),
+        tool_call_id: "rename-commit".into(),
+        tool_name: "rename_symbol".into(),
+    }))
+    .enter();
+    let result = rename(fixture, &[("backend", vm_string("syntax_tree"))]);
+    harn_vm::agent_events::clear_session_sinks(session);
+    result
+}
+
+#[test]
+fn a_cancel_once_applying_began_lets_the_whole_write_finish() {
+    let fixture = fixture();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let result = syntax_rename_at_commit(&fixture, "host-call-applying", cancel.clone(), {
+        let cancel = cancel.clone();
+        move || cancel.store(true, Ordering::SeqCst)
+    });
+
+    assert!(
+        cancel.load(Ordering::SeqCst),
+        "the commit point reported applying"
+    );
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    let read = |path: &str| fs::read_to_string(fixture.workspace.path().join(path)).unwrap();
+    assert_eq!(read("src/reading.rs"), "pub struct Measurement;\n");
+    assert_eq!(
+        read("src/use_it.rs"),
+        "use crate::reading::Measurement;\n\npub fn keep(value: Measurement) -> Measurement {\n    value\n}\n"
+    );
+}
+
+#[test]
+fn a_file_changed_by_another_writer_refuses_the_whole_rename() {
+    let fixture = fixture();
+    let before = snapshot(fixture.workspace.path());
+    let other_writer = fixture.workspace.path().join("src/use_it.rs");
+    let concurrent = "// written by another tool\n";
+    let result = syntax_rename_at_commit(
+        &fixture,
+        "host-call-concurrent",
+        Arc::new(AtomicBool::new(false)),
+        {
+            let other_writer = other_writer.clone();
+            move || {
+                let mut text = fs::read_to_string(&other_writer).unwrap();
+                text.push_str(concurrent);
+                fs::write(&other_writer, text).unwrap();
+            }
+        },
+    );
+
+    assert_eq!(s(field(&result, "result")), "refused", "{result:?}");
+    assert!(
+        s(field(&result, "details")).contains("src/use_it.rs"),
+        "{result:?}"
+    );
+    let mut expected = before;
+    let original = expected.get_mut(&other_writer).unwrap();
+    original.extend_from_slice(concurrent.as_bytes());
+    assert_eq!(
+        snapshot(fixture.workspace.path()),
+        expected,
+        "only the other writer's change may land"
+    );
+}

@@ -682,14 +682,13 @@ impl HostlibCapability for CodeIndexCapability {
         // (#1722) so all touched files succeed or none do. A language-server
         // rename can wait on a cold server, so its caller must be able to
         // stop it and see its progress.
-        let index = self.index.clone();
-        let handler: SyncHandler = Arc::new(move |args| rename::run(&index, args));
-        registry.register_interruptible(RegisteredBuiltin {
-            name: rename::BUILTIN,
-            module: "code_index",
-            method: "rename_symbol",
-            handler,
-        });
+        register_interruptible(
+            registry,
+            self.index.clone(),
+            rename::BUILTIN,
+            "rename_symbol",
+            rename::run,
+        );
         register(
             registry,
             self.index.clone(),
@@ -731,12 +730,31 @@ fn register(
     method: &'static str,
     runner: fn(&SharedIndex, &[VmValue]) -> Result<VmValue, HostlibError>,
 ) {
-    let captured = index;
-    let handler: SyncHandler = Arc::new(move |args| runner(&captured, args));
-    registry.register(RegisteredBuiltin {
+    registry.register(index_builtin(index, name, method, runner));
+}
+
+/// [`register`] for a builtin that can wait on an external process.
+fn register_interruptible(
+    registry: &mut BuiltinRegistry,
+    index: SharedIndex,
+    name: &'static str,
+    method: &'static str,
+    runner: fn(&SharedIndex, &[VmValue]) -> Result<VmValue, HostlibError>,
+) {
+    registry.register_interruptible(index_builtin(index, name, method, runner));
+}
+
+fn index_builtin(
+    index: SharedIndex,
+    name: &'static str,
+    method: &'static str,
+    runner: fn(&SharedIndex, &[VmValue]) -> Result<VmValue, HostlibError>,
+) -> RegisteredBuiltin {
+    let handler: SyncHandler = Arc::new(move |args| runner(&index, args));
+    RegisteredBuiltin {
         name,
         module: "code_index",
         method,
         handler,
-    });
+    }
 }

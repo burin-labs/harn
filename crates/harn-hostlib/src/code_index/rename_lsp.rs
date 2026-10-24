@@ -11,14 +11,14 @@ use harn_vm::VmValue;
 
 use crate::ast::{api as ast_api, Language};
 use crate::error::HostlibError;
-use crate::host_call::{HostCallContext, Interrupt, Phase};
+use crate::host_call::{HostCallContext, Interrupt};
 
 use super::super::builtins::SharedIndex;
 use super::super::lsp::{self, RenameRequest, Resolution};
 use super::super::refactor_backend::{BackendOutcome, FileEdits, ServerRun, Unanswered};
 use super::super::refactor_core::{
-    collect_identifier_spans, files_in_scope, first_syntax_error, plan_file, read_source,
-    write_plans, EditSpan, FilePlan, Scope, ShadowSite,
+    collect_identifier_spans, files_in_scope, first_syntax_error, plan_file, read_source, EditSpan,
+    FilePlan, Scope, ShadowSite,
 };
 use super::super::rename_rust_residue::{doc_link_mentions, span_at, Residue};
 use super::super::state::IndexState;
@@ -392,11 +392,16 @@ pub(super) fn rename(
     let failed = if request.dry_run {
         Vec::new()
     } else {
-        if let Some(interrupt) = request.call.interrupted() {
-            return Ok(Answer::Interrupted(interrupt));
-        }
-        request.call.report(Phase::Applying, BUILTIN);
-        let failed = write_plans(BUILTIN, &request.state.root, &plans, request.session_id)?;
+        let failed = match commit(
+            env,
+            request.call,
+            &request.state.root,
+            &plans,
+            request.session_id,
+        )? {
+            Ok(failed) => failed,
+            Err(stopped) => return Ok(Answer::Response(stopped)),
+        };
         if request.session_id.is_none() {
             let written: Vec<String> = plans.iter().map(|plan| plan.path.clone()).collect();
             lsp::files_written(&request.state.root, &written);
