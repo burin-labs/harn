@@ -163,6 +163,27 @@ test('artifact discovery measures complete pages and refuses false zero or parti
   ]) await assert.rejects(() => read(pages), /observer_census_unmeasured/);
 });
 
+test('a refused census read names its status, endpoint and rate limit, and retries one exhausted limit', async () => {
+  const headers = values => ({ get: name => values[name] });
+  const refused = (status, values) => ({ ok: false, status, headers: headers(values) });
+  const read = fetchRecord => githubArtifactCensus('fixture-read', 'acme/widget-host', '73', fetchRecord);
+  await assert.rejects(() => read(async () => refused(403, {
+    'x-ratelimit-remaining': '0', 'x-ratelimit-limit': '5000', 'x-ratelimit-resource': 'core',
+    'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600),
+  })), /reason=observer_census_read_refused status=403 endpoint=\/repos\/acme\/widget-host\/actions\/runs\/73\/artifacts ratelimit_remaining=0 ratelimit_limit=5000 ratelimit_reset=\d+ ratelimit_resource=core$/);
+  let reads = 0;
+  assert.deepEqual(await read(async () => {
+    reads += 1;
+    if (reads === 1) return refused(429, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1' });
+    return { ok: true, json: async () => ({ total_count: 0, artifacts: [] }) };
+  }), []);
+  assert.equal(reads, 2);
+  reads = 0;
+  await assert.rejects(() => read(async () => { reads += 1; return refused(403, { 'x-ratelimit-remaining': '7' }); }),
+    /status=403/);
+  assert.equal(reads, 1, 'a refusal with budget left is not a rate limit and is not retried');
+});
+
 test('child discovery keeps a complete bounded census and never treats run names as authority', async () => {
   let endpoint;
   const read = async url => {

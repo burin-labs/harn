@@ -51,8 +51,8 @@ const contextKeys = [
 /** @typedef {{source_revision: string, verdict: 'pass'|'fail', owed: number,
  * proven: number, pending: 0, failed: number, failed_suites: string[]}} ProductDecision */
 
-function refuse(reason) {
-  throw new Error(`CONSUMER_OBSERVER reason=${reason}`);
+function refuse(reason, detail = '') {
+  throw new Error(`CONSUMER_OBSERVER reason=${reason}${detail ? ` ${detail}` : ''}`);
 }
 
 /** Normalize once. Unknown fields cannot silently alter the ownership contract.
@@ -338,6 +338,30 @@ export async function githubDeclaration(token, context, fetchRecord = fetch, ext
   return declaration;
 }
 
+const censusRetryLimitMs = 60_000;
+
+function rateLimitHeader(response, name) {
+  return response.headers?.get?.(`x-ratelimit-${name}`) ?? undefined;
+}
+
+/** Milliseconds until a 403 or 429 with no budget left resets, or undefined when a retry cannot help. */
+function rateLimitWaitMs(response) {
+  if (response.ok || ![403, 429].includes(response.status)) return undefined;
+  const reset = Number(rateLimitHeader(response, 'reset'));
+  if (rateLimitHeader(response, 'remaining') !== '0' || !Number.isFinite(reset)) return undefined;
+  const wait = Math.max(0, reset * 1000 - Date.now());
+  return wait <= censusRetryLimitMs ? wait + (wait > 0 ? 1000 : 0) : undefined;
+}
+
+function refusalDetail(response, endpoint) {
+  const fields = [`status=${response.status}`, `endpoint=${endpoint.pathname}`];
+  for (const name of ['remaining', 'limit', 'reset', 'resource']) {
+    const value = rateLimitHeader(response, name);
+    if (value !== undefined) fields.push(`ratelimit_${name}=${value}`);
+  }
+  return fields.join(' ');
+}
+
 async function githubCensus(token, url, field, fetchRecord) {
   if (!token) refuse('read_authority_or_identity_missing');
   const records = [];
@@ -346,11 +370,18 @@ async function githubCensus(token, url, field, fetchRecord) {
     const endpoint = new URL(url);
     endpoint.searchParams.set('per_page', '100');
     endpoint.searchParams.set('page', String(page));
-    const response = await fetchRecord(endpoint.toString(), {
+    const read = () => fetchRecord(endpoint.toString(), {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
       signal: AbortSignal.timeout(30_000),
     });
-    if (!response.ok) refuse('observer_census_read_refused');
+    let response = await read();
+    // An exhausted rate limit that resets within a minute is worth one more read.
+    const wait = rateLimitWaitMs(response);
+    if (!response.ok && wait !== undefined) {
+      await new Promise(resolve => setTimeout(resolve, wait));
+      response = await read();
+    }
+    if (!response.ok) refuse('observer_census_read_refused', refusalDetail(response, endpoint));
     const census = await response.json();
     if (!Number.isSafeInteger(census?.total_count) || census.total_count < 0
       || census.total_count > censusLimit || !Array.isArray(census[field])
