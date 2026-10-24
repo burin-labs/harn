@@ -7267,6 +7267,9 @@ logical_model = "glm-5.2"
 equivalence_group = "glm-5.2"
 served_variant = "fireworks"
 wire_model = "accounts/fireworks/models/glm-5p2"
+deprecated = true
+deprecation_note = "Fireworks removed every GLM 5.2 variant from public serverless 2026-09-25. Source: https://docs.fireworks.ai/updates/changelog (2026-09-12 notice, checked 2026-10-24)."
+sunset_date = "2026-09-25"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 # Cached input is $0.14 on the standard tier; $0.26 is GLM 5.3's cached rate.
@@ -7339,6 +7342,10 @@ logical_model = "deepseek-v4-flash-0731"
 equivalence_group = "deepseek-v4-flash"
 served_variant = "fireworks"
 wire_model = "accounts/fireworks/models/deepseek-v4-flash-0731"
+deprecated = true
+deprecation_note = "Fireworks removed this route from public serverless 2026-09-25 (it also leaves the shared Serverless Training pool 2026-11-02) and names DeepSeek V4.1 Flash as the replacement. Source: https://docs.fireworks.ai/updates/changelog (2026-09-12 notice, checked 2026-10-24)."
+sunset_date = "2026-09-25"
+superseded_by = "accounts/fireworks/models/deepseek-v4p1-flash"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.22, output_per_mtok = 0.66, cache_read_per_mtok = 0.007 }
@@ -7358,6 +7365,9 @@ logical_model = "deepseek-v4-pro-0813"
 equivalence_group = "deepseek-v4-pro-0813"
 served_variant = "fireworks"
 wire_model = "accounts/fireworks/models/deepseek-v4-pro-0813"
+deprecated = true
+deprecation_note = "Fireworks removed this route from public serverless 2026-09-25. Source: https://docs.fireworks.ai/updates/changelog (2026-09-12 notice, checked 2026-10-24)."
+sunset_date = "2026-09-25"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok = 0.044 }
@@ -7436,6 +7446,9 @@ logical_model = "moonshot-kimi-k2.6"
 equivalence_group = "moonshot-kimi-k2.6"
 served_variant = "fireworks"
 wire_model = "accounts/fireworks/models/kimi-k2p6"
+deprecated = true
+deprecation_note = "Fireworks removed this route from public serverless 2026-09-25. Source: https://docs.fireworks.ai/updates/changelog (2026-09-12 notice, checked 2026-10-24)."
+sunset_date = "2026-09-25"
 api_dialect = "openai_chat"
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 # Standard serverless tier, https://docs.fireworks.ai/serverless/pricing
@@ -7457,6 +7470,9 @@ logical_model = "moonshot-kimi-k2.7-code"
 equivalence_group = "moonshot-kimi-k2.7-code"
 served_variant = "fireworks"
 wire_model = "accounts/fireworks/models/kimi-k2p7-code"
+deprecated = true
+deprecation_note = "Fireworks removed this route from public serverless 2026-09-25. Source: https://docs.fireworks.ai/updates/changelog (2026-09-12 notice, checked 2026-10-24)."
+sunset_date = "2026-09-25"
 api_dialect = "openai_chat"
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
 # Base serverless tier verified 2026-07-02; Fireworks also sells
