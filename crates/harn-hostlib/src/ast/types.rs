@@ -9,7 +9,6 @@
 #![allow(missing_docs)]
 
 use harn_vm::value::VmDictExt;
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -141,7 +140,7 @@ impl OutlineItem {
         dict.put_int("start_row", self.start_row as i64);
         dict.put_int("end_row", self.end_row as i64);
         let kids: Vec<VmValue> = self.children.iter().map(OutlineItem::to_vm_value).collect();
-        dict.put("children", VmValue::List(Arc::new(kids)));
+        dict.put("children", VmValue::list(kids));
         VmValue::dict(dict)
     }
 }

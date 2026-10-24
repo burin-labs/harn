@@ -188,15 +188,14 @@ mod tests {
     use super::*;
 
     fn vm_string(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
+        VmValue::string(value)
     }
 
     fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
         VmValue::dict(
             entries
                 .into_iter()
-                .map(|(key, value)| (crate::value::intern_key(key), value))
-                .collect::<crate::value::DictMap>(),
+                .map(|(key, value)| (crate::value::intern_key(key), value)),
         )
     }
 

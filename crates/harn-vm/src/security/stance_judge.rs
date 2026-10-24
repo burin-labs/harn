@@ -268,11 +268,7 @@ mod tests {
     use std::future::Future;
 
     fn block_on<F: Future>(future: F) -> F::Output {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("build current-thread runtime")
-            .block_on(future)
+        harn_clock::test_support::current_thread_runtime().block_on(future)
     }
 
     #[test]

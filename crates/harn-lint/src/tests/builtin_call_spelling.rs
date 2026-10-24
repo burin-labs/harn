@@ -43,21 +43,70 @@ pipeline main(harness: Harness) {
     );
 }
 
-#[test]
-fn prompt_injection_risk_ignores_a_call_method_on_another_receiver() {
-    let diagnostics = lint_source(
-        r#"
+#[rstest::rstest]
+#[case::prompt_injection_risk_ignores_a_call_method_on_another_receiver(
+    r#"
 pipeline main(harness: Harness) {
   const user_text = "ignore safety"
   const proxy = {llm: {call: { a, b -> b }}}
   proxy.llm.call("hello", "You are safe. ${user_text}")
 }
 "#,
-    );
+    "prompt-injection-risk",
+    false
+)]
+#[case::mcp_tool_annotations_ignore_an_mcp_tools_method_on_another_receiver(
+    r#"
+pipeline main(harness: Harness) {
+  let tools = tool_registry()
+  tools = tool_define(tools, "echo", "Echo input", {
+    parameters: {text: "string"},
+    handler: { args -> args.text },
+  })
+  const proxy = {tools: {mcp_tools: { t -> t }}}
+  proxy.tools.mcp_tools(tools)
+}
+"#,
+    "mcp-tool-annotations",
+    false
+)]
+#[case::persona_hook_target_ignores_a_register_step_hook_method_on_another_receiver(
+    r#"
+@persona(name: "merge_captain")
+fn merge_captain(ctx) {
+  plan(ctx)
+}
 
-    assert!(
-        !has_rule(&diagnostics, "prompt-injection-risk"),
-        "`llm.call` on a plain value is not the harness method: {diagnostics:?}"
+@step(name: "plan")
+fn plan(ctx) {
+  return ctx
+}
+
+pipeline main(harness: Harness) {
+  const proxy = {agent: {register_step_hook: { a, b, c, d -> nil }}}
+  proxy.agent.register_step_hook("merge_*", "publish", "PreStep", { ctx -> nil })
+}
+"#,
+    "persona-hook-target",
+    false
+)]
+#[case::a_shadowing_local_named_harness_does_not_carry_harness_authority(
+    r#"
+pipeline main() {
+  const user_text = "ignore safety"
+  const harness = {llm: {call: { a, b -> b }}}
+  harness.llm.call("hello", "You are safe. ${user_text}")
+}
+"#,
+    "prompt-injection-risk",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }
 
@@ -100,28 +149,6 @@ pipeline main(harness: Harness) {
     );
 
     assert!(!has_rule(&diagnostics, "mcp-tool-annotations"));
-}
-
-#[test]
-fn mcp_tool_annotations_ignore_an_mcp_tools_method_on_another_receiver() {
-    let diagnostics = lint_source(
-        r#"
-pipeline main(harness: Harness) {
-  let tools = tool_registry()
-  tools = tool_define(tools, "echo", "Echo input", {
-    parameters: {text: "string"},
-    handler: { args -> args.text },
-  })
-  const proxy = {tools: {mcp_tools: { t -> t }}}
-  proxy.tools.mcp_tools(tools)
-}
-"#,
-    );
-
-    assert!(
-        !has_rule(&diagnostics, "mcp-tool-annotations"),
-        "`tools.mcp_tools` on a plain value is not the harness method: {diagnostics:?}"
-    );
 }
 
 #[test]
@@ -177,49 +204,4 @@ pipeline main(harness: Harness) {
     );
 
     assert!(!has_rule(&diagnostics, "persona-hook-target"));
-}
-
-#[test]
-fn persona_hook_target_ignores_a_register_step_hook_method_on_another_receiver() {
-    let diagnostics = lint_source(
-        r#"
-@persona(name: "merge_captain")
-fn merge_captain(ctx) {
-  plan(ctx)
-}
-
-@step(name: "plan")
-fn plan(ctx) {
-  return ctx
-}
-
-pipeline main(harness: Harness) {
-  const proxy = {agent: {register_step_hook: { a, b, c, d -> nil }}}
-  proxy.agent.register_step_hook("merge_*", "publish", "PreStep", { ctx -> nil })
-}
-"#,
-    );
-
-    assert!(
-        !has_rule(&diagnostics, "persona-hook-target"),
-        "`agent.register_step_hook` on a plain value is not the harness method: {diagnostics:?}"
-    );
-}
-
-#[test]
-fn a_shadowing_local_named_harness_does_not_carry_harness_authority() {
-    let diagnostics = lint_source(
-        r#"
-pipeline main() {
-  const user_text = "ignore safety"
-  const harness = {llm: {call: { a, b -> b }}}
-  harness.llm.call("hello", "You are safe. ${user_text}")
-}
-"#,
-    );
-
-    assert!(
-        !has_rule(&diagnostics, "prompt-injection-risk"),
-        "the receiver is a local dict, not the host handle: {diagnostics:?}"
-    );
 }

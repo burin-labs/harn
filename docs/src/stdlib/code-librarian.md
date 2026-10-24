@@ -32,6 +32,27 @@ equivalent), then talk to the librarian.
 The Cypher executor that backs `code_librarian_query` and
 `code_librarian_who_calls` is documented at
 [`crates/harn-hostlib/src/code_index/cypher.rs`](https://github.com/burin-labs/harn/blob/main/crates/harn-hostlib/src/code_index/cypher.rs).
+
+Graph nodes expose `name`, `path`, `line`, and `col`. Java declarations and
+calls point at the member name. Their coordinates are 1-based, and columns
+count UTF-16 code units. Other languages retain the symbol's start line and
+have a null `col`. `qualified_name` includes
+the declaring type and package when known, such as `app.Store.load`.
+`receiver_qualified_name` uses the short type name, such as `Store.load`.
+The latter can match distinct types in different packages; filter by defining
+path or the full qualified name to select one declaration.
+
+Rust callers construct graph nodes with
+`Node::new(kind, name, file_id, path, line, language)` from
+`harn_hostlib::code_index`. `Node` is non-exhaustive. The constructor leaves
+source metadata absent; assign its public fields when those facts are known.
+
+Java `CALLS` edges use explicit imports and declared receiver types. A name
+alone never resolves an unknown Java receiver, even when only one matching
+method exists. Inferred variables, chained expressions, inheritance contracts,
+and overloads can leave calls unresolved. Switch-local shadows and member types
+inherited from other types also remain unresolved. File-level `REFS` edges remain name
+matches and do not establish a member binding.
 Supported clauses: `MATCH`, `WHERE`, `RETURN`, alias projections
 (`RETURN expr AS name`), single-edge and variable-length traversal up
 to depth 4.

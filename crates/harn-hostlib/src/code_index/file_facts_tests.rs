@@ -87,6 +87,111 @@ fn resolved_calls(state: &IndexState) -> usize {
 }
 
 #[test]
+fn non_java_graph_nodes_keep_symbol_start_lines_and_unavailable_columns() {
+    for (path, language, source, name) in [
+        (
+            "entry.ts",
+            crate::ast::Language::TypeScript,
+            "@Component({})\nexport class Widget {}\n",
+            "Widget",
+        ),
+        (
+            "entry.swift",
+            crate::ast::Language::Swift,
+            "@MainActor\nclass Widget {}\n",
+            "Widget",
+        ),
+        (
+            "entry.py",
+            crate::ast::Language::Python,
+            "@decorate\ndef Widget():\n    pass\n",
+            "Widget",
+        ),
+    ] {
+        let facts = super::GraphFacts::extract(path, language, source);
+        let symbol = facts
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == name)
+            .unwrap();
+        let dir = tempdir().unwrap();
+        write(dir.path(), path, source);
+        let (state, _) = IndexState::build_from_root(dir.path());
+        let node = state
+            .symbols
+            .iter_nodes()
+            .find(|node| node.name == name)
+            .unwrap();
+        assert_eq!(node.line, symbol.start_row + 1, "{path}");
+        assert_eq!(node.col, None, "{path}");
+    }
+}
+
+#[test]
+fn snapshots_rebuild_v9_missing_positions_and_restore_current_java_positions() {
+    use crate::code_index::snapshot::{CodeIndexSnapshot, SNAPSHOT_FORMAT_VERSION};
+    use crate::code_index::CodeIndexCapability;
+
+    let dir = tempdir().unwrap();
+    write(
+        dir.path(),
+        "Span.java",
+        "package lab;\nfinal class Span {}\n",
+    );
+    let (state, _) = IndexState::build_from_root(dir.path());
+    let span_col = |graph: &crate::code_index::SymbolGraph| {
+        let nodes: Vec<_> = graph
+            .iter_nodes()
+            .filter(|node| {
+                node.name == "Span" && node.kind == crate::code_index::symbol_graph::NodeKind::Type
+            })
+            .collect();
+        assert_eq!(nodes.len(), 1);
+        nodes[0].col
+    };
+    assert_eq!(span_col(&state.symbols), Some(13));
+    let mut snapshot = state.snapshot();
+    snapshot.save(dir.path()).unwrap();
+    let restored = CodeIndexCapability::new();
+    assert!(restored.restore_from_disk(dir.path()).unwrap());
+    restored.wait_until_idle();
+    assert_eq!(
+        span_col(&restored.shared().lock().unwrap().as_ref().unwrap().symbols),
+        Some(13)
+    );
+    let node = snapshot
+        .symbols
+        .as_mut()
+        .unwrap()
+        .nodes
+        .iter_mut()
+        .find(|node| {
+            node.name == "Span" && node.kind == crate::code_index::symbol_graph::NodeKind::Type
+        })
+        .unwrap();
+    assert_eq!(node.col.take(), Some(13));
+    snapshot.meta.format_version = 9;
+    snapshot.save(dir.path()).unwrap();
+    let upgraded = CodeIndexCapability::new();
+    assert!(!upgraded.restore_from_disk(dir.path()).unwrap());
+    assert!(upgraded.shared().lock().unwrap().is_none());
+    upgraded.warm_session(dir.path());
+    upgraded.wait_until_idle();
+    assert_eq!(
+        span_col(&upgraded.shared().lock().unwrap().as_ref().unwrap().symbols),
+        Some(13)
+    );
+    assert_eq!(
+        CodeIndexSnapshot::load(dir.path())
+            .unwrap()
+            .unwrap()
+            .meta
+            .format_version,
+        SNAPSHOT_FORMAT_VERSION
+    );
+}
+
+#[test]
 fn every_worker_count_installs_identical_facts() {
     let dir = tempdir().unwrap();
     mixed_workspace(dir.path());

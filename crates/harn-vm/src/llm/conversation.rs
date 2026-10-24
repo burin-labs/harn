@@ -691,17 +691,14 @@ fn transcript_inject_reminder_builtin(
         reminder_lifecycle_payload(transcript_id.as_deref(), &reminder),
     );
 
-    Ok(VmValue::dict(crate::value::DictMap::from_iter([
-        (crate::value::intern_key("transcript"), next),
+    Ok(VmValue::dict([
+        ("transcript", next),
+        ("reminder_id", VmValue::string(reminder_id)),
         (
-            crate::value::intern_key("reminder_id"),
-            VmValue::string(reminder_id),
-        ),
-        (
-            crate::value::intern_key("deduped_count"),
+            "deduped_count",
             VmValue::Int(deduped_reminder_ids.len() as i64),
         ),
-    ])))
+    ]))
 }
 
 #[harn_builtin(exposure = "privileged_wire", effects = ["state.mutate@arg0", "observability.write@const=reminder-lifecycle"], sig = "__transcript_clear_reminders(transcript: list | dict | Transcript, selector: dict) -> dict", category = "transcript")]
@@ -751,13 +748,10 @@ fn transcript_clear_reminders_builtin(
         emit_reminder_lifecycle_event(REMINDER_EXPIRED_EVENT_KIND, payload);
     }
 
-    Ok(VmValue::dict(crate::value::DictMap::from_iter([
-        (crate::value::intern_key("transcript"), next),
-        (
-            crate::value::intern_key("removed_count"),
-            VmValue::Int(removed_count),
-        ),
-    ])))
+    Ok(VmValue::dict([
+        ("transcript", next),
+        ("removed_count", VmValue::Int(removed_count)),
+    ]))
 }
 
 fn require_reminder_options<'a>(
@@ -1085,22 +1079,19 @@ mod tests {
     use super::*;
 
     fn vm_string(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
+        VmValue::string(value)
     }
 
     fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
         VmValue::dict(
             entries
                 .into_iter()
-                .map(|(key, value)| (crate::value::intern_key(key), value))
-                .collect::<crate::value::DictMap>(),
+                .map(|(key, value)| (crate::value::intern_key(key), value)),
         )
     }
 
     fn strings(values: &[&str]) -> VmValue {
-        VmValue::List(std::sync::Arc::new(
-            values.iter().map(|value| vm_string(value)).collect(),
-        ))
+        VmValue::list(values.iter().map(|value| vm_string(value)).collect())
     }
 
     fn result_transcript(value: &VmValue) -> VmValue {

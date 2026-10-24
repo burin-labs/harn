@@ -179,12 +179,7 @@ impl MachineSpendQuota {
         clock: Arc<dyn harn_clock::Clock>,
     ) -> Result<Self, VmError> {
         let scope = scope.into();
-        if !path.as_ref().is_absolute() || scope.trim().is_empty() || !policy.valid() {
-            return Err(error(
-                DenialKind::InvalidBudget,
-                "machine spend quota requires an absolute path, a scope, and valid limits",
-            ));
-        }
+        Self::validate_policy(path.as_ref(), &scope, &policy)?;
         let config = Arc::new(QuotaConfig {
             path: path.as_ref().to_path_buf(),
             scope,
@@ -205,6 +200,20 @@ impl MachineSpendQuota {
             ));
         }
         Ok(Self { inner: config })
+    }
+
+    pub(super) fn validate_policy(
+        path: &Path,
+        scope: &str,
+        policy: &MachineSpendPolicy,
+    ) -> Result<(), VmError> {
+        if !path.is_absolute() || scope.trim().is_empty() || !policy.valid() {
+            return Err(error(
+                DenialKind::InvalidBudget,
+                "machine spend quota requires an absolute path, a scope, and valid limits",
+            ));
+        }
+        Ok(())
     }
 
     pub fn policy(&self) -> Result<MachineSpendPolicy, VmError> {
@@ -541,11 +550,11 @@ fn connect(path: &Path) -> Result<Connection, VmError> {
             "spend ledger needs a parent directory",
         )
     })?;
-    std::fs::create_dir_all(parent).map_err(db_error)?;
-    let connection = Connection::open(path).map_err(db_error)?;
+    std::fs::create_dir_all(parent).map_err(|error| db_error_at("create_parent", error))?;
+    let connection = Connection::open(path).map_err(|error| db_error_at("open", error))?;
     connection
         .busy_timeout(Duration::from_secs(5))
-        .map_err(db_error)?;
+        .map_err(|error| db_error_at("busy_timeout", error))?;
     // WAL promotion belongs to `initialize_runtime_sqlite`, which does it under
     // a cross-process lock. Switching a fresh file here first raced every other
     // process opening it and failed about one round in twenty with
@@ -577,7 +586,7 @@ fn connect(path: &Path) -> Result<Connection, VmError> {
             Ok(())
         },
     )
-    .map_err(db_error)?;
+    .map_err(|error| db_error_at("initialize", error))?;
     Ok(connection)
 }
 
@@ -652,9 +661,16 @@ fn periods(now: OffsetDateTime) -> (String, String, i64, i64) {
 }
 
 /// A ledger failure that can say whether another connection held the lock.
-trait LedgerFailure: std::fmt::Display {
+trait LedgerFailure: std::error::Error + 'static {
     fn contended(&self) -> bool {
         false
+    }
+
+    fn diagnostic(&self) -> harn_sqlite::FailureDiagnostic
+    where
+        Self: Sized,
+    {
+        harn_sqlite::failure_diagnostic("ledger", self)
     }
 }
 
@@ -668,6 +684,10 @@ impl LedgerFailure for crate::runtime_sqlite::RuntimeSqliteError {
     fn contended(&self) -> bool {
         self.is_busy_or_locked()
     }
+
+    fn diagnostic(&self) -> harn_sqlite::FailureDiagnostic {
+        harn_sqlite::failure_diagnostic(self.stage(), self)
+    }
 }
 
 impl LedgerFailure for std::io::Error {}
@@ -675,6 +695,10 @@ impl LedgerFailure for std::io::Error {}
 /// An unreadable ledger is not an exhausted budget: a contended one is
 /// `resource_busy`, anything else an `environment` failure (harn#8818).
 fn db_error(error_value: impl LedgerFailure) -> VmError {
+    db_error_at("ledger", error_value)
+}
+
+fn db_error_at(operation: &'static str, error_value: impl LedgerFailure) -> VmError {
     let category = if error_value.contended() {
         ErrorCategory::ResourceBusy
     } else {
@@ -682,7 +706,10 @@ fn db_error(error_value: impl LedgerFailure) -> VmError {
     };
     unavailable(
         category,
-        &format!("machine spend ledger unavailable: {error_value}"),
+        &format!(
+            "machine spend ledger unavailable: operation={operation} {}",
+            error_value.diagnostic()
+        ),
     )
 }
 
@@ -1110,6 +1137,41 @@ mod tests {
             crate::value::error_to_category(&db_error(missing)),
             ErrorCategory::Environment
         );
+    }
+
+    #[test]
+    fn ledger_failures_keep_safe_codes_and_operation_without_source_values() {
+        let sqlite = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+            Some("fixture-secret-path-and-value".to_string()),
+        );
+        let error = db_error_at("open", sqlite);
+        assert_eq!(
+            crate::value::error_to_category(&error),
+            ErrorCategory::Environment
+        );
+        let message = error.to_string();
+        assert!(message.contains("operation=open"));
+        assert!(message.contains("sqlite_primary_code=14"));
+        assert!(!message.contains("fixture-secret"));
+        assert!(
+            !message.contains("PermissionDenied"),
+            "CANTOPEN does not prove an OS denial"
+        );
+
+        let temp = tempfile::tempdir().unwrap();
+        let parent = temp.path().join("fixture-private-parent");
+        std::fs::write(&parent, "unchanged").unwrap();
+        let error =
+            MachineSpendQuota::open(parent.join("ledger.sqlite"), "person", policy(1_000_000))
+                .unwrap_err();
+        assert_eq!(
+            crate::value::error_to_category(&error),
+            ErrorCategory::Environment
+        );
+        assert!(error.to_string().contains("operation=create_parent"));
+        assert!(!error.to_string().contains("fixture-private-parent"));
+        assert_eq!(std::fs::read_to_string(parent).unwrap(), "unchanged");
     }
 
     #[test]

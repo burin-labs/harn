@@ -11,7 +11,7 @@ use super::{child_text_by_kind, enum_case_symbol, field_symbol};
 
 pub(super) fn extract_typescript(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
     walk_named(root, None, &mut |node, container| {
-        let pos = point_pos(node);
+        let pos = declaration_position(node);
         match node.kind() {
             "class_declaration" => named_decl_with_keyword(NamedDeclArgs {
                 node,
@@ -87,7 +87,7 @@ pub(super) fn extract_typescript(root: Node<'_>, source: &str, out: &mut Vec<Sym
 
 pub(super) fn extract_javascript(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
     walk_named(root, None, &mut |node, container| {
-        let pos = point_pos(node);
+        let pos = declaration_position(node);
         match node.kind() {
             "class_declaration" => named_decl_with_keyword(NamedDeclArgs {
                 node,
@@ -133,6 +133,14 @@ pub(super) fn extract_javascript(root: Node<'_>, source: &str, out: &mut Vec<Sym
             _ => None,
         }
     });
+}
+
+fn declaration_position(node: Node<'_>) -> NodePos {
+    point_pos(
+        node.parent()
+            .filter(|parent| parent.kind() == "export_statement")
+            .unwrap_or(node),
+    )
 }
 
 fn push_field(
@@ -184,7 +192,7 @@ fn push_enum_body(node: Node<'_>, source: &str, container: Option<&str>, out: &m
 /// Arrow and function-expression bindings are functions. Other module-level
 /// bindings are variables.
 fn extract_bindings(node: Node<'_>, source: &str, container: Option<&str>, out: &mut Vec<Symbol>) {
-    let pos = point_pos(node);
+    let pos = declaration_position(node);
     for declarator in helpers::children(node) {
         if !declarator.is_named() || declarator.kind() != "variable_declarator" {
             continue;

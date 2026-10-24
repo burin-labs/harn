@@ -5,8 +5,8 @@
 .DESCRIPTION
     Downloads the signed Windows release archive matching this machine,
     verifies it against the release's SHA256SUMS manifest, extracts the
-    `harn`, `harn-dap`, and `harn-lsp` executables, and adds the install
-    directory to the current user's PATH.
+    `harn`, `harn-dap`, and `harn-lsp` executables, retains required license
+    material in `harn-licenses/`, and adds the install directory to PATH.
 
     Usage:
         irm https://harnlang.com/install.ps1 | iex
@@ -86,18 +86,48 @@ try {
         Write-Done 'Checksum verified.'
     }
 
+    $payload = Join-Path $workDir 'payload'
+    Expand-Archive -LiteralPath $archivePath -DestinationPath $payload
+    $legalFiles = @('LICENSE-MIT', 'LICENSE-APACHE', 'THIRD-PARTY-NOTICES.txt')
+    foreach ($name in @('harn.exe') + $legalFiles) {
+        $file = Get-Item -LiteralPath (Join-Path $payload $name) -Force -ErrorAction SilentlyContinue
+        if (-not $file -or $file.PSIsContainer -or $file.Length -eq 0 -or
+            ($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            throw "$asset has missing or invalid $name; expected a nonempty regular file"
+        }
+    }
+
     $installDir = $env:HARN_INSTALL_DIR
     if ([string]::IsNullOrWhiteSpace($installDir)) {
         $installDir = Join-Path $env:LOCALAPPDATA 'Programs\harn'
     }
     New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 
-    Write-Info "Installing to $installDir..."
-    Expand-Archive -Path $archivePath -DestinationPath $installDir -Force
+    $licenseDir = Join-Path $installDir 'harn-licenses'
+    $executables = @('harn.exe', 'harn-dap.exe', 'harn-lsp.exe')
+    $destinations = @($licenseDir) + @($legalFiles | ForEach-Object { Join-Path $licenseDir $_ }) +
+        @($executables | ForEach-Object { Join-Path $installDir $_ })
+    foreach ($destination in $destinations) {
+        $item = Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
+        if ($item -and (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+            ($destination -ne $licenseDir -and $item.PSIsContainer) -or
+            ($destination -eq $licenseDir -and -not $item.PSIsContainer))) {
+            throw "invalid install destination: $destination"
+        }
+    }
+    New-Item -ItemType Directory -Path $licenseDir -Force | Out-Null
+    foreach ($name in $legalFiles) {
+        Copy-Item -LiteralPath (Join-Path $payload $name) -Destination $licenseDir -Force
+    }
 
-    foreach ($exe in 'harn.exe', 'harn-dap.exe', 'harn-lsp.exe') {
-        $path = Join-Path $installDir $exe
-        if (-not (Test-Path $path)) {
+    Write-Info "Installing to $installDir..."
+
+    foreach ($exe in $executables) {
+        $source = Join-Path $payload $exe
+        if (Test-Path -LiteralPath $source -PathType Leaf) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $installDir $exe) -Force
+        }
+        else {
             Write-Warn "expected $exe was not found in the archive"
         }
     }

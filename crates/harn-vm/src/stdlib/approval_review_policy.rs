@@ -12,7 +12,6 @@ pub(crate) fn register_approval_review_policy_builtins(vm: &mut Vm) {
 /// Normalize an overlay against the one parsed policy owner before projection.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__approval_review_policy(policy?: dict) -> @APPROVAL_REVIEW_POLICY",
     category = "agent.policy"
 )]

@@ -5,7 +5,7 @@ use harn_fmt::{format_source_opts, line_width_violations, FmtOptions};
 use harn_parser::DiagnosticCode as Code;
 use serde::Serialize;
 
-use crate::commands::declares_expected_invalid;
+use crate::commands::{declares_expected_invalid, is_harn_program_file};
 use crate::json_envelope::{JsonEnvelope, JsonError};
 
 pub(crate) const FMT_SCHEMA_VERSION: u32 = 1;
@@ -143,11 +143,11 @@ pub(crate) fn fmt_targets_report(targets: &[&str], mode: FmtMode, opts: &FmtOpti
 
 /// Format a single file.
 fn fmt_file_inner(path: &str, mode: FmtMode, opts: &FmtOptions) -> FmtFileReport {
-    if !is_harn_source_path(Path::new(path)) {
+    if !is_harn_program_file(Path::new(path)) {
         return fmt_error(
             path,
             "unsupported_extension",
-            format!("harn fmt only formats .harn files; refusing explicit non-Harn target {path}"),
+            format!("harn fmt only formats .harn files and .harn.txt files; refusing explicit non-Harn target {path}"),
         );
     }
 
@@ -214,12 +214,6 @@ fn fmt_file_inner(path: &str, mode: FmtMode, opts: &FmtOptions) -> FmtFileReport
         diff_lines_changed: 0,
         diagnostics: Vec::new(),
     }
-}
-
-fn is_harn_source_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension == "harn")
 }
 
 fn fmt_error(path: &str, code: &str, message: String) -> FmtFileReport {

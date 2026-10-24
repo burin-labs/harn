@@ -1,5 +1,6 @@
 //! Build parser results retain terminal and capture completeness facts.
 use super::*;
+use harn_vm::value::VmDictExt as _;
 
 #[test]
 fn run_build_command_explicit_argv_runs_and_parses_diagnostics() {
@@ -39,7 +40,7 @@ fn partial_and_timed_out_builds_cannot_attest_complete_diagnostics() {
         let (_spawner, _controller, _guard) = install_mock_with(config);
         let mut req = dict_map();
         req.insert("argv".into(), vlist_str(&["compiler", "source"]));
-        req.insert("timeout_ms".into(), VmValue::Int(1000));
+        req.put_int("timeout_ms", 1000);
         let resp = require_dict(call_tool("hostlib_tools_run_build_command", req).unwrap());
         assert!(!require_bool(&resp, "diagnostics_complete"));
         assert_eq!(require_bool(&resp, "timed_out"), timed_out);

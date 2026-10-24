@@ -953,13 +953,10 @@ fn mock_error_to_vm_error(err: &MockError) -> VmError {
         );
         dict.put_str("message", message);
         if let Some(status) = err.status {
-            dict.insert("status".to_string(), VmValue::Int(i64::from(status)));
+            dict.put_int("status", i64::from(status));
         }
         if let Some(retry_after_ms) = err.retry_after_ms {
-            dict.insert(
-                "retry_after_ms".to_string(),
-                VmValue::Int(retry_after_ms as i64),
-            );
+            dict.put_int("retry_after_ms", retry_after_ms as i64);
         }
         return VmError::Thrown(VmValue::dict(dict));
     }

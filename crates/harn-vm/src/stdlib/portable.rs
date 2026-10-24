@@ -23,7 +23,6 @@ pub(crate) fn register_portable_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__portable_compile(source: string, entry: string, kind: string) -> dict",
     category = "portable"
 )]
@@ -60,7 +59,6 @@ fn portable_compile_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__portable_start(artifact: bytes, input: any, grants: dict) -> any",
     category = "portable"
 )]
@@ -77,7 +75,6 @@ fn portable_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__portable_resume(artifact: bytes, snapshot: bytes, outcome: dict, grants: dict) -> any",
     category = "portable"
 )]
@@ -329,11 +326,7 @@ mod tests {
             .expect("typed program");
         let artifact = program.get("artifact").cloned().expect("artifact");
         let invalid_grants = portable_start_impl(
-            &[
-                artifact.clone(),
-                VmValue::Int(40),
-                VmValue::List(Arc::new(vec![])),
-            ],
+            &[artifact.clone(), VmValue::Int(40), VmValue::list(vec![])],
             &mut String::new(),
         )
         .expect_err("bare grant lists are rejected");
@@ -342,7 +335,7 @@ mod tests {
             &[
                 artifact,
                 VmValue::Int(40),
-                VmValue::dict([("capabilities", VmValue::List(Arc::new(vec![])))]),
+                VmValue::dict([("capabilities", VmValue::list(vec![]))]),
             ],
             &mut String::new(),
         )
@@ -376,7 +369,7 @@ mod tests {
             &[
                 artifact,
                 string("Continue?"),
-                VmValue::dict([("capabilities", VmValue::List(Arc::new(vec![])))]),
+                VmValue::dict([("capabilities", VmValue::list(vec![]))]),
             ],
             &mut String::new(),
         )

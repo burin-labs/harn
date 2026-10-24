@@ -360,6 +360,19 @@ harn serve site --api-key "$HARN_SERVE_API_KEY" --bind 0.0.0.0:8788 server.harn
 harn serve site --tls self-signed-dev server.harn
 ```
 
+For a local tool, let the operating system choose a free port and publish its
+address to a new file:
+
+```bash
+harn serve site --bind 127.0.0.1:0 --ready-file /tmp/site-ready.json server.harn
+```
+
+The JSON receipt contains `schema_version: 1`, `pid`, and `url`. Its URL uses
+the actual listener address, even when `--public-url` advertises another URL.
+The complete receipt appears after routing, binding, and TLS setup succeed. Startup fails
+if the file already exists or cannot be written. Use a fresh path for each run.
+The receipt records startup; check the process or make a request for current health.
+
 Mapping:
 
 - the request dict mirrors the in-process `http_server` shape:

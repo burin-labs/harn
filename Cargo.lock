@@ -3417,7 +3417,7 @@ dependencies = [
 
 [[package]]
 name = "harn-aws-config"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -3452,7 +3452,7 @@ dependencies = [
 
 [[package]]
 name = "harn-builtin-macros"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
@@ -3463,14 +3463,14 @@ dependencies = [
 
 [[package]]
 name = "harn-builtin-meta"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-source-fingerprint-build",
 ]
 
 [[package]]
 name = "harn-builtin-registry"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-builtin-meta",
  "harn-source-fingerprint-build",
@@ -3478,7 +3478,7 @@ dependencies = [
 
 [[package]]
 name = "harn-capability-contracts"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-builtin-macros",
  "harn-builtin-meta",
@@ -3490,9 +3490,8 @@ dependencies = [
 
 [[package]]
 name = "harn-cli"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
- "arcstr",
  "async-trait",
  "axum",
  "axum-server",
@@ -3579,7 +3578,7 @@ dependencies = [
 
 [[package]]
 name = "harn-cli-aot-gen"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-modules",
  "harn-parser",
@@ -3595,7 +3594,7 @@ dependencies = [
 
 [[package]]
 name = "harn-clock"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -3606,7 +3605,7 @@ dependencies = [
 
 [[package]]
 name = "harn-dap"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "arcstr",
  "harn-modules",
@@ -3622,7 +3621,7 @@ dependencies = [
 
 [[package]]
 name = "harn-execution-policy"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-glob",
  "memchr",
@@ -3637,17 +3636,18 @@ dependencies = [
 
 [[package]]
 name = "harn-flock"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "harn-fmt"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-lexer",
  "harn-parser",
+ "rstest",
  "serde_json",
  "unicode-width",
 ]
@@ -3664,14 +3664,14 @@ dependencies = [
 
 [[package]]
 name = "harn-glob"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "globset",
 ]
 
 [[package]]
 name = "harn-guard"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-modules",
  "harn-vm",
@@ -3686,7 +3686,7 @@ dependencies = [
 
 [[package]]
 name = "harn-hostlib"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "arcstr",
  "async-trait",
@@ -3718,6 +3718,7 @@ dependencies = [
  "postcard",
  "regex",
  "regex-automata",
+ "rstest",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3767,7 +3768,7 @@ dependencies = [
 
 [[package]]
 name = "harn-ir"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
@@ -3778,7 +3779,7 @@ dependencies = [
 
 [[package]]
 name = "harn-kernel"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "arcstr",
  "blake3",
@@ -3798,11 +3799,11 @@ dependencies = [
 
 [[package]]
 name = "harn-languages"
-version = "0.10.175"
+version = "0.10.176"
 
 [[package]]
 name = "harn-lexer"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-source-fingerprint-build",
  "serde",
@@ -3810,7 +3811,7 @@ dependencies = [
 
 [[package]]
 name = "harn-lint"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-builtin-meta",
  "harn-fmt",
@@ -3823,13 +3824,14 @@ dependencies = [
  "harn-source-fingerprint-build",
  "harn-vm",
  "libloading 0.9.0",
+ "rstest",
  "tempfile",
  "tokio",
 ]
 
 [[package]]
 name = "harn-llm"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "arcstr",
  "harn-builtin-macros",
@@ -3857,7 +3859,7 @@ dependencies = [
 
 [[package]]
 name = "harn-lsp"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-builtin-meta",
  "harn-capability-contracts",
@@ -3884,7 +3886,7 @@ dependencies = [
 
 [[package]]
 name = "harn-mcp-compat"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "axum",
  "harn-modules",
@@ -3900,7 +3902,7 @@ dependencies = [
 
 [[package]]
 name = "harn-modules"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "blake3",
  "croner",
@@ -3921,7 +3923,7 @@ dependencies = [
 
 [[package]]
 name = "harn-opcode-macros"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3930,7 +3932,7 @@ dependencies = [
 
 [[package]]
 name = "harn-orchestration"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-clock",
  "harn-execution-policy",
@@ -3957,7 +3959,7 @@ dependencies = [
 
 [[package]]
 name = "harn-package"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "base64 0.23.1",
  "chrono-tz",
@@ -3996,7 +3998,7 @@ dependencies = [
 
 [[package]]
 name = "harn-parser"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-builtin-macros",
  "harn-builtin-meta",
@@ -4005,6 +4007,7 @@ dependencies = [
  "harn-lexer",
  "harn-source-fingerprint-build",
  "imbl",
+ "rstest",
  "serde",
  "serde_json",
  "strsim",
@@ -4023,11 +4026,11 @@ dependencies = [
 
 [[package]]
 name = "harn-prompt-syntax"
-version = "0.10.175"
+version = "0.10.176"
 
 [[package]]
 name = "harn-provider-catalog"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "chrono",
  "harn-clock",
@@ -4042,7 +4045,7 @@ dependencies = [
 
 [[package]]
 name = "harn-rules"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-hostlib",
  "harn-modules",
@@ -4058,7 +4061,7 @@ dependencies = [
 
 [[package]]
 name = "harn-rules-hostlib"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-builtin-meta",
  "harn-fmt",
@@ -4074,11 +4077,11 @@ dependencies = [
 
 [[package]]
 name = "harn-secret-catalog"
-version = "0.10.175"
+version = "0.10.176"
 
 [[package]]
 name = "harn-serve"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "arcstr",
  "async-compression",
@@ -4107,8 +4110,10 @@ dependencies = [
  "ipnet",
  "jsonschema",
  "jsonwebtoken",
+ "notify",
  "rcgen",
  "reqwest",
+ "rstest",
  "rusqlite",
  "rustls",
  "schemars",
@@ -4131,7 +4136,7 @@ dependencies = [
 
 [[package]]
 name = "harn-session-store"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4155,21 +4160,21 @@ dependencies = [
 
 [[package]]
 name = "harn-skills"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "harn-source-fingerprint"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "sha2-const",
 ]
 
 [[package]]
 name = "harn-source-fingerprint-build"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-source-fingerprint",
  "serde_json",
@@ -4179,7 +4184,7 @@ dependencies = [
 
 [[package]]
 name = "harn-sqlite"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-flock",
  "rusqlite",
@@ -4189,14 +4194,14 @@ dependencies = [
 
 [[package]]
 name = "harn-stdlib"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-stdlib-catalog",
 ]
 
 [[package]]
 name = "harn-stdlib-artifacts"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-stdlib",
  "harn-vm",
@@ -4206,11 +4211,11 @@ dependencies = [
 
 [[package]]
 name = "harn-stdlib-catalog"
-version = "0.10.175"
+version = "0.10.176"
 
 [[package]]
 name = "harn-terminal"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "portable-pty",
  "serde",
@@ -4220,7 +4225,7 @@ dependencies = [
 
 [[package]]
 name = "harn-test-runner"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-lexer",
  "harn-modules",
@@ -4232,7 +4237,7 @@ dependencies = [
 
 [[package]]
 name = "harn-vm"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "aes-gcm",
  "apple-native-keyring-store",
@@ -4313,6 +4318,7 @@ dependencies = [
  "reqwest",
  "rmcp",
  "roxmltree",
+ "rstest",
  "rusqlite",
  "rust_decimal",
  "rustls",
@@ -4378,7 +4384,7 @@ dependencies = [
 
 [[package]]
 name = "harn-vm-core"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "arcstr",
  "base64 0.23.1",
@@ -4403,6 +4409,7 @@ dependencies = [
  "hex",
  "imbl",
  "jsonschema",
+ "libc",
  "linkme",
  "parking_lot",
  "pin-project-lite",
@@ -4443,7 +4450,7 @@ dependencies = [
 
 [[package]]
 name = "harn-wasm"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "harn-kernel",
  "serde_json",
@@ -7491,6 +7498,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "relative-path"
+version = "1.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
+
+[[package]]
 name = "reqwest"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7616,6 +7629,32 @@ checksum = "c51c9ae4df8a7fba42103df5c621fa3c37eccf3a3c650879e90fc48b11cc192c"
 dependencies = [
  "hashbrown 0.16.1",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rstest"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b376e512f30a7686a8dbc6aeaace99b3ade1c26c1c63473473a817ade226dafc"
+dependencies = [
+ "rstest_macros",
+]
+
+[[package]]
+name = "rstest_macros"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88512dbfb5b73a0dfa38aef7bc73b5657035fce477b923faf12d332dd83051ea"
+dependencies = [
+ "cfg-if",
+ "glob",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "relative-path",
+ "rustc_version",
+ "syn 2.0.119",
+ "unicode-ident",
 ]
 
 [[package]]
@@ -9409,7 +9448,7 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-harn"
-version = "0.10.175"
+version = "0.10.176"
 dependencies = [
  "cc",
  "serde_json",

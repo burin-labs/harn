@@ -169,6 +169,57 @@ fn fix_resolves_warning_under_strict() {
 }
 
 #[test]
+fn explicit_pipeline_input_repair_removes_trailing_commas_and_keeps_comments() {
+    let dir = temp_root("trailing-pipeline-inputs");
+    let path = dir.join("surface.harn");
+    std::fs::write(
+        &path,
+        r#"// Unicode π keeps byte offsets visible.
+pipeline test_only(
+  _harness: Harness /* keep this comment */,
+) { assert_eq(1 + 1, 2) }
+
+pipeline test_all(
+  _harness: Harness,
+  _task: unknown, // keep this comment too
+) { assert_eq(2 + 2, 4) }
+
+pipeline test_survivor(
+  harness: Harness,
+  _task: unknown,
+) { harness.stdio.println("survived") }
+"#,
+    )
+    .unwrap();
+    let (stdout, stderr, code) = run(
+        &dir,
+        &[
+            "fix",
+            "--apply",
+            "--safety",
+            "surface-changing",
+            "--code",
+            "HARN-LNT-074",
+            "surface.harn",
+        ],
+    );
+    assert_eq!(
+        code, 0,
+        "repair must produce valid syntax: {stdout}\n{stderr}"
+    );
+    let repaired = std::fs::read_to_string(path).unwrap();
+    assert!(repaired.contains("/* keep this comment */"));
+    assert!(repaired.contains("// keep this comment too"));
+    let (stdout, stderr, code) = run(&dir, &["test", "surface.harn", "--json-out", "result.json"]);
+    assert_eq!(code, 0, "repaired tests must execute: {stdout}\n{stderr}");
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("result.json")).unwrap()).unwrap();
+    assert_eq!(report["summary"]["passed"], 3);
+    assert_eq!(report["summary"]["failed"], 0);
+    assert_eq!(report["summary"]["skipped"], 0);
+}
+
+#[test]
 fn fix_applies_prompt_template_filter_suggestion() {
     let dir = temp_root("prompt-filter");
     let path = dir.join("sample.harn.prompt");

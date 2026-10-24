@@ -26,9 +26,7 @@ async fn a_declared_tool_call_publishes_only_the_accepted_answer() {
 }
 
 async fn served_tool_fence(tool: &str, accepted: bool) {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let mocks = [
                 format!("Checking first.\n\n```tool\n{{\"name\":\"{tool}\",\"args\":{{\"path\":\"a\"}}}}\n```"),
                 if accepted { "Done. ##DONE##" } else { "Done." }.to_string(),
@@ -167,6 +165,5 @@ pipeline default(harness: Harness) {
                 "the call outcome must reach the host independently of draft text: {rows:#?}"
             );
             drop(request_tx);
-        })
-        .await;
+        }).await;
 }

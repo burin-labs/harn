@@ -59,14 +59,14 @@ use crate::tools::args::{
 use super::builtins::SharedIndex;
 use super::refactor_backend::{BackendChoice, BackendReport};
 use super::refactor_core::{
-    candidates_value, collect_identifier_spans, competing_declarations, edit_envelope,
-    failed_paths_value, file_plan_value, files_in_scope, first_syntax_error, is_identifier_token,
-    parse_kind, plan_file, read_source, resolve_seed, write_plans, EditEnvelope, EditSpan,
-    EditSymbol, FilePlan, Scope, SeedLookup, ShadowSite,
+    collect_identifier_spans, competing_declarations, edit_envelope, failed_paths_value,
+    file_plan_value, files_in_scope, first_syntax_error, is_identifier_token, parse_kind,
+    plan_file, read_source, resolve_seed_selected, write_plans, EditEnvelope, EditSpan, EditSymbol,
+    FilePlan, Scope, SeedLookup, ShadowSite,
 };
 #[cfg(test)]
 use super::state::IndexState;
-use super::symbol_graph::NodeKind;
+use super::symbol_graph::{NodeId, NodeKind, SymbolGraph};
 
 pub(super) const BUILTIN: &str = "hostlib_code_index_rename_symbol";
 
@@ -91,27 +91,22 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         }
     };
     let symbol_dict = symbol_ref.as_ref();
-    let symbol_name = require_string(BUILTIN, symbol_dict, "name")?;
+    let symbol_query = require_string(BUILTIN, symbol_dict, "name")?;
+    let symbol_name = symbol_query
+        .rsplit('.')
+        .next()
+        .unwrap_or(&symbol_query)
+        .to_string();
     let symbol_path = require_string(BUILTIN, symbol_dict, "path")?;
-    let symbol_line = match symbol_dict.get("line") {
-        None | Some(VmValue::Nil) => None,
-        Some(VmValue::Int(n)) if *n >= 1 => Some(*n as u32),
-        Some(VmValue::Int(n)) => {
-            return Err(HostlibError::InvalidParameter {
-                builtin: BUILTIN,
-                param: "symbol_ref.line",
-                message: format!("must be >= 1, got {n}"),
-            });
-        }
-        Some(other) => {
-            return Err(HostlibError::InvalidParameter {
-                builtin: BUILTIN,
-                param: "symbol_ref.line",
-                message: format!("expected integer, got {}", other.type_name()),
-            });
-        }
-    };
+    let symbol_line = super::builtin_args::optional_positive_u32(BUILTIN, symbol_dict, "line")?;
     let symbol_kind_raw = optional_string(BUILTIN, symbol_dict, "kind")?;
+    let symbol_col = super::builtin_args::optional_positive_u32(BUILTIN, symbol_dict, "col")?;
+    if symbol_col.is_some()
+        && Language::detect(Path::new(&symbol_path), None)
+            .is_some_and(|language| language != Language::Java)
+    {
+        return Err(unsupported_column_error());
+    }
     let symbol_kind = symbol_kind_raw
         .as_deref()
         .map(|raw| parse_kind(BUILTIN, raw))
@@ -191,16 +186,35 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         stale: Vec::new(),
         proof,
         preserved: None,
+        graph: &state.symbols,
     };
 
     let normalized_path = super::builtins::normalize_relative_path_for(state, &symbol_path);
-    let seed_node_id = match resolve_seed(
+    let seed = resolve_seed_selected(
         &state.symbols,
         &normalized_path,
-        &symbol_name,
+        &symbol_query,
         symbol_line,
+        symbol_col,
         symbol_kind,
-    ) {
+    );
+    let has_non_java_seed = match &seed {
+        SeedLookup::One(id) => state
+            .symbols
+            .node(*id)
+            .is_some_and(|node| node.language != "java"),
+        SeedLookup::Many(ids) => ids.iter().any(|id| {
+            state
+                .symbols
+                .node(*id)
+                .is_some_and(|node| node.language != "java")
+        }),
+        SeedLookup::None => false,
+    };
+    if symbol_col.is_some() && has_non_java_seed {
+        return Err(unsupported_column_error());
+    }
+    let seed_node_id = match seed {
         SeedLookup::One(id) => id,
         SeedLookup::None => return Ok(no_match_response(&env)),
         SeedLookup::Many(candidates) => return Ok(ambiguous_response(&env, &candidates)),
@@ -268,12 +282,12 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     // definitions and their unrelated uses.
     let competing =
         competing_declarations(&state.symbols, seed_node_id, &symbol_name, &in_scope_files);
-    if !competing.is_empty() {
-        let mut candidates = vec![(seed_path, seed_node.line, seed_node.kind.as_str())];
-        candidates.extend(competing);
+    let java_method = seed_node.language == "java"
+        && seed_node.kind == NodeKind::Function
+        && seed_node.owner_type.is_some();
+    if !java_method && !competing.is_empty() {
         return Ok(ambiguous_response_with_details(
             &env,
-            &candidates,
             "rename aborted without writes: the scope contains separate declarations with this name. Pinning the seed does not disambiguate their references; use a binding-aware LSP rename or narrow the scope.",
         ));
     }
@@ -291,10 +305,23 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let mut plans: Vec<FilePlan> = Vec::new();
     let mut shadows: Vec<ShadowSite> = Vec::new();
 
+    if java_method {
+        if let Err(detail) = super::rename_java::check_new_name(&new_name) {
+            return Ok(ambiguous_response_with_details(&env, &detail));
+        }
+    }
+
     for path in &in_scope_files {
         let Some(language) = Language::detect(Path::new(path), None) else {
             return Ok(unsupported_language_response(&env, path, None));
         };
+        if java_method && language != Language::Java {
+            return Ok(unsupported_language_response(
+                &env,
+                path,
+                Some(language.name()),
+            ));
+        }
         let source = read_source(BUILTIN, &state.root, path, session_id.as_deref())?;
         let tree = match ast_api::parse_tree(&source, language) {
             Ok(tree) => tree,
@@ -331,6 +358,29 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             &mut local_shadows,
         );
 
+        if java_method && language == Language::Java {
+            match super::rename_java::sites(
+                state,
+                seed_node,
+                path,
+                &source,
+                &tree,
+                targets,
+                local_shadows,
+            ) {
+                Ok(sites) => {
+                    targets = sites.targets;
+                    local_shadows = sites.shadows;
+                }
+                Err(detail) => {
+                    return Ok(ambiguous_response_with_details(
+                        &env,
+                        &format!("rename aborted without writes: {detail}"),
+                    ))
+                }
+            }
+        }
+
         if !local_shadows.is_empty() {
             shadows.extend(local_shadows);
             continue;
@@ -340,7 +390,6 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             if path == &seed_path {
                 return Ok(ambiguous_response_with_details(
                     &env,
-                    &[(seed_path, seed_node.line, seed_node.kind.as_str())],
                     "rename aborted without writes: the indexed declaration is absent from the current source; rebuild the code index",
                 ));
             }
@@ -358,27 +407,26 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             }
         }
 
-        if let Err(detail) = super::rename_binding::check(
-            super::rename_binding::Seed {
-                state,
-                node: seed_node,
-                name: &symbol_name,
-            },
-            path,
-            language,
-            &source,
-            &tree,
-            &targets,
-        ) {
-            return Ok(ambiguous_response_with_details(
-                &env,
-                &[(
-                    seed_node.path.to_string(),
-                    seed_node.line,
-                    seed_node.kind.as_str(),
-                )],
-                &format!("rename aborted without writes: {detail}; use a binding-aware LSP rename"),
-            ));
+        if !java_method {
+            if let Err(detail) = super::rename_binding::check(
+                super::rename_binding::Seed {
+                    state,
+                    node: seed_node,
+                    name: &symbol_name,
+                },
+                path,
+                language,
+                &source,
+                &tree,
+                &targets,
+            ) {
+                return Ok(ambiguous_response_with_details(
+                    &env,
+                    &format!(
+                        "rename aborted without writes: {detail}; use a binding-aware LSP rename"
+                    ),
+                ));
+            }
         }
 
         let edits: Vec<EditSpan> = targets
@@ -419,6 +467,14 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     Ok(applied_response(&env, &plans, dry_run, failed))
 }
 
+fn unsupported_column_error() -> HostlibError {
+    HostlibError::InvalidParameter {
+        builtin: BUILTIN,
+        param: "symbol_ref.col",
+        message: "column selectors are supported only for Java declarations".into(),
+    }
+}
+
 // === Response shaping ===
 //
 // Every response variant shares the same outer envelope shape (locked
@@ -444,6 +500,7 @@ struct ResponseEnv<'a> {
     stale: Vec<String>,
     proof: bool,
     preserved: Option<Vec<crate::edit_proof::PreservedSite>>,
+    graph: &'a SymbolGraph,
 }
 
 /// Per-variant overrides for the response envelope. Anything left as
@@ -451,6 +508,7 @@ struct ResponseEnv<'a> {
 /// only mentions the fields it actually carries data for.
 #[derive(Default)]
 struct ResponseExtras {
+    ambiguity_reason: Option<AmbiguityReason>,
     applied: bool,
     dry_run: bool,
     touched_files: Vec<VmValue>,
@@ -463,6 +521,21 @@ struct ResponseExtras {
     /// so the agent loop can fall back without a hard-coded language list.
     fallback_suggestion: Option<String>,
     proof: Option<VmValue>,
+}
+
+#[derive(Clone, Copy)]
+enum AmbiguityReason {
+    MultipleDefinitionSeeds,
+    UnresolvedReferenceBinding,
+}
+
+impl AmbiguityReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::MultipleDefinitionSeeds => "multiple_definition_seeds",
+            Self::UnresolvedReferenceBinding => "unresolved_reference_binding",
+        }
+    }
 }
 
 fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtras) -> VmValue {
@@ -486,7 +559,15 @@ fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtra
             match_count: extras.match_count,
             details: extras.details,
             fallback_suggestion: extras.fallback_suggestion,
-            extra: vec![("backend", env.backend.value())],
+            extra: vec![
+                ("backend", env.backend.value()),
+                (
+                    "ambiguity_reason",
+                    extras
+                        .ambiguity_reason
+                        .map_or(VmValue::Nil, |reason| str_value(reason.as_str())),
+                ),
+            ],
             proof: extras.proof,
         },
     )
@@ -563,28 +644,69 @@ fn no_match_response(env: &ResponseEnv<'_>) -> VmValue {
     )
 }
 
-fn ambiguous_response(
-    env: &ResponseEnv<'_>,
-    candidates: &[(String, u32, &'static str)],
-) -> VmValue {
-    ambiguous_response_with_details(
+fn ambiguous_response(env: &ResponseEnv<'_>, candidates: &[NodeId]) -> VmValue {
+    ambiguous_response_with_reason(
         env,
         candidates,
+        AmbiguityReason::MultipleDefinitionSeeds,
         "multiple symbols share `symbol_ref.name`; pass `symbol_ref.line` (and optionally `symbol_ref.kind`) to disambiguate. Candidates surfaced in the `warnings` field.",
     )
 }
 
-fn ambiguous_response_with_details(
+fn ambiguous_response_with_details(env: &ResponseEnv<'_>, details: &str) -> VmValue {
+    let candidates: Vec<_> = env
+        .graph
+        .nodes_named(env.symbol_name)
+        .iter()
+        .filter_map(|id| env.graph.node(*id))
+        .filter(|node| super::refactor_core::is_refactor_declaration(node))
+        .map(|node| node.id)
+        .collect();
+    ambiguous_response_with_reason(
+        env,
+        &candidates,
+        AmbiguityReason::UnresolvedReferenceBinding,
+        details,
+    )
+}
+
+fn ambiguous_response_with_reason(
     env: &ResponseEnv<'_>,
-    candidates: &[(String, u32, &'static str)],
+    candidates: &[NodeId],
+    reason: AmbiguityReason,
     details: &str,
 ) -> VmValue {
-    let candidate_list = candidates_value(candidates);
+    let candidate_list = candidates
+        .iter()
+        .filter_map(|id| env.graph.node(*id))
+        .map(|node| {
+            build_dict([
+                (
+                    "symbol",
+                    str_value(if node.language == "java" {
+                        node.qualified_name()
+                    } else {
+                        node.name.clone()
+                    }),
+                ),
+                ("qualified_name", str_value(node.qualified_name())),
+                ("path", str_value(node.path.as_ref())),
+                ("line", VmValue::Int(node.line as i64)),
+                (
+                    "col",
+                    node.col
+                        .map_or(VmValue::Nil, |col| VmValue::Int(col as i64)),
+                ),
+                ("kind", str_value(node.kind.as_str())),
+            ])
+        })
+        .collect();
     emit_response(
         env,
         "ambiguous_symbol",
         ResponseExtras {
             warnings: candidate_list,
+            ambiguity_reason: Some(reason),
             details: details.to_string(),
             ..Default::default()
         },

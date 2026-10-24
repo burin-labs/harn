@@ -4,6 +4,55 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn non_java_seed_selection_keeps_suffix_paths_and_legacy_name_ambiguity() {
+    let (_, state) = index(&[(
+        "src/lib/a.ts",
+        "export function getById() { return 1; }\nexport const result = getById();\n",
+    )]);
+    for path in ["src/lib/a.ts", "lib/a.ts", "a.ts"] {
+        assert!(
+            matches!(
+                resolve_seed_selected(&state.symbols, path, "getById", Some(1), Some(999), None),
+                SeedLookup::One(_)
+            ),
+            "{path}"
+        );
+    }
+    assert!(matches!(
+        resolve_seed_selected(&state.symbols, "missing.ts", "getById", None, None, None),
+        SeedLookup::One(_)
+    ));
+    assert!(
+        matches!(
+            resolve_seed(&state.symbols, "missing.ts", "getById", None, None),
+            SeedLookup::One(_)
+        ),
+        "move and signature callers keep the legacy fallback"
+    );
+    let (_, state) = index(&[(
+        "a.ts",
+        "class First { load() {} } class Second { load() {} }",
+    )]);
+    let SeedLookup::Many(candidates) =
+        resolve_seed_selected(&state.symbols, "a.ts", "load", Some(1), Some(40), None)
+    else {
+        panic!("a new column must not narrow the legacy non-Java resolver")
+    };
+    assert_eq!(candidates.len(), 2);
+    assert!(matches!(
+        resolve_seed_selected(
+            &state.symbols,
+            "a.ts",
+            "Second.load",
+            Some(1),
+            Some(40),
+            None
+        ),
+        SeedLookup::None
+    ));
+}
+
+#[test]
 fn refactor_proof_matches_written_images_and_is_absent_by_default() {
     use crate::test_support::*;
     use crate::{BuiltinRegistry, HostlibCapability};

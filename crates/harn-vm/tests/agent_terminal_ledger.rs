@@ -13,29 +13,24 @@ fn run_with_bridge(source: &str) -> Result<String, String> {
         .enable_all()
         .build()
         .map_err(|error| error.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let bridge = Arc::new(HostBridge::from_parts(
-                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                    Arc::new(AtomicBool::new(false)),
-                    Arc::new(Mutex::new(())),
-                    1,
-                ));
-                harn_vm::llm::install_current_host_bridge(bridge);
-                let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let result = vm
-                    .execute(&chunk)
-                    .await
-                    .map_err(|error: VmError| format!("{error:?}"));
-                harn_vm::llm::clear_current_host_bridge();
-                result?;
-                Ok(vm.output().to_string())
-            })
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let bridge = Arc::new(HostBridge::from_parts(
+            Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(())),
+            1,
+        ));
+        harn_vm::llm::install_current_host_bridge(bridge);
+        let mut vm = harn_vm::new_vm();
+        harn_vm::register_vm_stdlib(&mut vm);
+        let result = vm
+            .execute(&chunk)
             .await
-    })
+            .map_err(|error: VmError| format!("{error:?}"));
+        harn_vm::llm::clear_current_host_bridge();
+        result?;
+        Ok(vm.output().to_string())
+    }))
 }
 
 fn out_lines(raw: &str) -> Vec<String> {

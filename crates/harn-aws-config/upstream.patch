@@ -513,6 +513,23 @@
  use http::header::InvalidHeaderValue;
  use http::uri::{InvalidUri, PathAndQuery, Scheme};
  use http::{HeaderValue, Uri};
+@@ -442,11 +443,11 @@
+     }
+     // For HTTP URIs, we need to validate that it points to a valid IP
+     let host = uri.host().ok_or(InvalidFullUriErrorKind::MissingHost)?;
+-    let maybe_ip = if host.starts_with('[') && host.ends_with(']') {
+-        host[1..host.len() - 1].parse::<IpAddr>()
+-    } else {
+-        host.parse::<IpAddr>()
+-    };
++    let host_without_brackets = host
++        .strip_prefix('[')
++        .and_then(|host| host.strip_suffix(']'))
++        .unwrap_or(host);
++    let maybe_ip = host_without_brackets.parse::<IpAddr>();
+     let is_allowed = match maybe_ip {
+         Ok(addr) => is_full_uri_ip_allowed(&addr),
+         Err(_domain_name) => {
 @@ -503,6 +504,7 @@
  #[cfg(test)]
  mod test {
@@ -888,6 +905,19 @@
  
  use std::borrow::Cow;
  use std::path::{Path, PathBuf};
+--- a/src/sensitive_command.rs
++++ b/src/sensitive_command.rs
+@@ -34,8 +34,8 @@
+     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+         // Security: The arguments for command must be redacted since they can be sensitive
+         let command = self.0.as_ref();
+-        match command.find(char::is_whitespace) {
+-            Some(index) => write!(f, "{} ** arguments redacted **", &command[0..index]),
++        match command.split_once(char::is_whitespace) {
++            Some((program, _)) => write!(f, "{program} ** arguments redacted **"),
+             None => write!(f, "{command}"),
+         }
+     }
 diff --git a/Cargo.lock b/Cargo.lock.upstream
 similarity index 100%
 rename from Cargo.lock

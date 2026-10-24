@@ -295,10 +295,7 @@ async fn configured_vm(
             vm.set_source_dir(parent);
         }
     }
-    vm.set_global(
-        "argv",
-        harn_vm::VmValue::List(std::sync::Arc::new(Vec::new())),
-    );
+    vm.set_global("argv", harn_vm::VmValue::list(Vec::new()));
     vm.set_harness(harn_vm::Harness::real());
 
     let loaded = load_skills(&SkillLoaderInputs {

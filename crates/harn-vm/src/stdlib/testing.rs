@@ -43,7 +43,6 @@ impl Drop for ExecutionPolicyPopGuard {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__testing_call_body(body: any) -> any",
     kind = "async",
     category = "testing"
@@ -91,7 +90,6 @@ fn scoped_body_args(body: &VmValue, name: &str) -> Result<Vec<VmValue>, VmError>
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__testing_with_evaluation_fixtures(harness: Harness, fixtures: list, body: any) -> any",
     kind = "async",
     category = "testing"
@@ -144,7 +142,6 @@ async fn testing_with_evaluation_fixtures_impl(
 /// current capability policy is preserved.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__testing_with_nested_execution_budget(depth: int, body: any) -> any",
     kind = "async",
     category = "testing"
@@ -216,7 +213,6 @@ fn assert_message(args: &[VmValue], index: usize, default: impl FnOnce() -> Stri
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "assert(condition: any, message?: string) -> nil",
     category = "testing"
 )]
@@ -224,7 +220,7 @@ fn assert_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     let condition = args.first().unwrap_or(&VmValue::Nil);
     if !condition.is_truthy() {
         let msg = assert_message(args, 1, || "Assertion failed".to_string());
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
+        return Err(VmError::Thrown(VmValue::string(msg)));
     }
     Ok(VmValue::Nil)
 }
@@ -234,7 +230,6 @@ fn assert_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 /// skipped case into a pass.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "skip(reason: string) -> nil",
     category = "testing"
 )]
@@ -253,7 +248,7 @@ fn skip_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 /// Throws a Harn-level error carrying `text` — the shape every assertion
 /// failure takes, so `try`/`catch` sees a plain string it can match on.
 fn fail(text: String) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(text)))
+    VmError::Thrown(VmValue::string(text))
 }
 
 /// The two values under comparison, in the surface's fixed `(actual,
@@ -299,7 +294,6 @@ impl<'a> Comparison<'a> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "assert_eq(actual: any, expected: any, message?: string) -> nil",
     category = "testing"
 )]
@@ -313,7 +307,6 @@ fn assert_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "assert_ne(actual: any, expected: any, message?: string) -> nil",
     category = "testing"
 )]
@@ -331,7 +324,6 @@ const DEFAULT_APPROX_TOLERANCE: f64 = 1e-9;
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "assert_approx(actual: any, expected: any, tolerance?: float, message?: string) -> nil",
     category = "testing"
 )]
@@ -390,7 +382,6 @@ fn assert_approx_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "assert_matches(actual: any, pattern: string, message?: string) -> string",
     category = "testing"
 )]
@@ -417,11 +408,8 @@ fn assert_matches_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             pattern.type_name()
         )));
     };
-    let matches = harn_kernel::pure::regex_matches(pattern, text, "").map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "Invalid regex: {error}"
-        ))))
-    })?;
+    let matches = harn_kernel::pure::regex_matches(pattern, text, "")
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("Invalid regex: {error}"))))?;
     if !matches.is_empty() {
         return Ok(actual.clone());
     }
@@ -440,7 +428,6 @@ fn assert_matches_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "value_diff(actual: any, expected: any) -> string | nil",
     category = "testing"
 )]
@@ -448,14 +435,14 @@ fn value_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let cmp = Comparison::parse("value_diff", args)?;
     Ok(match render_diff(None, cmp.actual, cmp.expected) {
         None => VmValue::Nil,
-        Some(diff) => VmValue::String(arcstr::ArcStr::from(diff)),
+        Some(diff) => VmValue::string(diff),
     })
 }
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "error_category(error: any) -> string", category = "testing"
+    sig = "error_category(error: any) -> string",
+    category = "testing"
 )]
 fn error_category_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
@@ -465,21 +452,18 @@ fn error_category_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
                 .get("category")
                 .map(|v| v.display())
                 .unwrap_or_else(|| "generic".to_string());
-            Ok(VmValue::String(arcstr::ArcStr::from(cat)))
+            Ok(VmValue::string(cat))
         }
         VmValue::String(s) => {
             let err = VmError::Runtime(s.to_string());
-            Ok(VmValue::String(arcstr::ArcStr::from(
-                error_to_category(&err).as_str(),
-            )))
+            Ok(VmValue::string(error_to_category(&err).as_str()))
         }
-        _ => Ok(VmValue::String(arcstr::ArcStr::from("generic"))),
+        _ => Ok(VmValue::string("generic")),
     }
 }
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "throw_error(message: string, category?: string) -> never",
     category = "testing"
 )]
@@ -498,8 +482,8 @@ fn throw_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "is_timeout(error: any) -> bool", category = "testing"
+    sig = "is_timeout(error: any) -> bool",
+    category = "testing"
 )]
 fn is_timeout_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(error_has_category(
@@ -510,8 +494,8 @@ fn is_timeout_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "is_rate_limited(error: any) -> bool", category = "testing"
+    sig = "is_rate_limited(error: any) -> bool",
+    category = "testing"
 )]
 fn is_rate_limited_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(error_has_category(
@@ -526,7 +510,6 @@ fn is_rate_limited_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 /// `server_error`, ...) without the VM hand-wiring a predicate per variant.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "error_is(error: any, category: string) -> bool",
     category = "testing"
 )]
@@ -551,8 +534,8 @@ fn error_is_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 /// oracle, surfaced so tests can assert the retry decision directly.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "error_is_transient(error: any) -> bool", category = "testing"
+    sig = "error_is_transient(error: any) -> bool",
+    category = "testing"
 )]
 fn error_is_transient_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(
@@ -586,10 +569,7 @@ mod tests {
     use super::*;
 
     fn dict_err(category: &str) -> VmValue {
-        VmValue::dict(std::collections::BTreeMap::from([(
-            "category".to_string(),
-            VmValue::String(arcstr::ArcStr::from(category)),
-        )]))
+        VmValue::dict([("category", VmValue::string(category))])
     }
 
     fn as_bool(result: Result<VmValue, VmError>) -> bool {
@@ -601,7 +581,7 @@ mod tests {
 
     fn error_is(error: VmValue, category: &str) -> Result<VmValue, VmError> {
         let mut out = String::new();
-        let args = [error, VmValue::String(arcstr::ArcStr::from(category))];
+        let args = [error, VmValue::string(category)];
         error_is_impl(&args, &mut out)
     }
 
@@ -635,10 +615,7 @@ mod tests {
     #[test]
     fn assert_with_empty_string_message_uses_default() {
         let mut out = String::new();
-        let args = [
-            VmValue::Bool(false),
-            VmValue::String(arcstr::ArcStr::from("")),
-        ];
+        let args = [VmValue::Bool(false), VmValue::string("")];
         assert_eq!(
             thrown_message(assert_impl(&args, &mut out)),
             "Assertion failed"
@@ -653,10 +630,7 @@ mod tests {
     #[test]
     fn assert_with_message_equal_to_json_null_uses_default() {
         let mut out = String::new();
-        let args = [
-            VmValue::Bool(false),
-            VmValue::String(arcstr::ArcStr::from("null")),
-        ];
+        let args = [VmValue::Bool(false), VmValue::string("null")];
         assert_eq!(
             thrown_message(assert_impl(&args, &mut out)),
             "Assertion failed"
@@ -668,7 +642,7 @@ mod tests {
         let mut out = String::new();
         let args = [
             VmValue::Bool(false),
-            VmValue::String(arcstr::ArcStr::from("receipt was missing a field")),
+            VmValue::string("receipt was missing a field"),
         ];
         assert_eq!(
             thrown_message(assert_impl(&args, &mut out)),
@@ -749,7 +723,7 @@ mod tests {
     // ---------------------------------------------------------------------------------------------
 
     fn s(text: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(text))
+        VmValue::string(text)
     }
 
     /// The text an assertion throws, or a panic if it unexpectedly passed.

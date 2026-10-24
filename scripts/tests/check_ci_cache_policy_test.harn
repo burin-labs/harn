@@ -42,8 +42,11 @@ import {
   CI_CACHE_REFRESH_CONCURRENCY_GROUP,
   LIVE_ARTIFACT_CONSUMERS,
 } from "../ci_cache_policy/policy_core.harn"
+import { filter_matches_paths } from "../gh_check_state.harn"
 import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
+
+type PathFilters = dict<string, list<string>>
 
 @test
 pipeline test_direct_cli_consumers_require_a_successful_shared_producer(harness: Harness) {
@@ -63,6 +66,132 @@ pipeline test_direct_cli_consumers_require_a_successful_shared_producer(harness:
     unproved_producer.jobs[consumer].if = condition.replace(required, "")
     assert(ci_linux_lane_policy_errors(unproved_producer).contains(refusal))
   }
+}
+
+@test
+pipeline test_provider_probe_reuses_same_run_cli_without_live_authority(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const standalone = read_yaml(harness.fs, "../../.github/workflows/provider-contract-probe.yml")
+  const action = read_yaml(harness.fs, "../../.github/actions/provider-contract-probe/action.yml")
+  const probe = ci.jobs["provider-contract-probe"]
+  assert_eq(probe.needs, ["changes", "rust-cli"])
+  assert_eq(probe.permissions, {contents: "read"})
+  assert_eq(probe?.environment, nil)
+  assert_eq(probe.env.HARN_BIN_NO_BUILD, "1")
+  assert_eq(
+    probe.if,
+    "$"
+      + "{{ !cancelled() && needs.changes.outputs.provider_contract_probe == 'true' && needs.rust-cli.result == 'success' }}",
+  )
+  const checkout = probe.steps[0]
+  assert_eq(checkout.with.ref, "$" + "{{ github.sha }}")
+  const download = probe.steps[1]
+  assert_eq(download.uses, "./.github/actions/download-artifact-with-retry")
+  assert_eq(download.with.name, "harn-cli.tar.zst")
+  assert_eq(download.with?.["run-id"], nil)
+  const verify = probe.steps[2].run
+  assert(verify.contains("./scripts/ci/rust_artifact.sh restore-cli"))
+  assert(verify.contains("\"$GITHUB_SHA\" \"$GITHUB_ENV\""))
+  const campaign = probe.steps[3]
+  assert_eq(campaign.uses, "./.github/actions/provider-contract-probe")
+  assert_eq(campaign.with["harn-bin"], "$" + "{{ env.HARN_BIN }}")
+  assert_eq(campaign.with.live, "false")
+  assert_eq(campaign?.env, nil)
+  assert_eq(len(probe.steps), 4)
+  // The same measured path selection schedules the job and requires its result.
+  assert_eq(
+    ci.jobs.changes.outputs.provider_contract_probe,
+    "$" + "{{ steps.surface_filter.outputs.provider_contract_probe }}",
+  )
+  const filter = ci.jobs.changes.steps.filter({ step -> step?.id == "surface_filter" }).to_list()[0]
+  const filters = schema_expect(yaml_parse(filter.with.filters), schema_of(PathFilters))
+  const paths = filters["provider_contract_probe"] ?? []
+  assert(paths.contains("crates/harn-vm/src/llm/providers/**"))
+  assert(paths.contains("scripts/tests/provider_option_probe_test.harn"))
+  assert(paths.contains(".github/actions/provider-contract-probe/**"))
+  assert(!paths.contains("crates/**"))
+  const rust_filter = ci.jobs.changes.steps.filter({ step -> step?.id == "filter" }).to_list()[0]
+  const rust_filters = schema_expect(yaml_parse(rust_filter.with.filters), schema_of(PathFilters))
+  const rust_paths = rust_filters["rust"] ?? []
+  const without_catalog = paths.filter(
+    { path -> !path.starts_with("crates/harn-provider-catalog/") },
+  )
+    .to_list()
+  for path in [
+    "crates/harn-provider-catalog/Cargo.toml",
+    "crates/harn-provider-catalog/src/capabilities/option.rs",
+    "crates/harn-provider-catalog/src/capabilities/projection.rs",
+    "crates/harn-provider-catalog/src/capabilities/rule.rs",
+    "crates/harn-provider-catalog/src/config/query.rs",
+    "crates/harn-provider-catalog/src/capabilities.toml",
+  ] {
+    assert(harness.fs.exists("../../${path}"))
+    assert(filter_matches_paths(paths, [path]))
+    assert(filter_matches_paths(rust_paths, [path]))
+    assert(!filter_matches_paths(without_catalog, [path]))
+  }
+  assert(!filter_matches_paths(paths, ["crates/harn-fmt/src/lib.rs"]))
+  const status = ci.jobs["ci-status"]
+  assert(status.needs.contains("provider-contract-probe"))
+  const latency = unwrap(read_json_result(harness.fs, "../../.github/ci-latency.json"))
+  assert_eq(latency.required.jobs["provider-contract-probe"].budget_ms, 120000)
+  assert_eq(
+    status.steps[0].env.PROVIDER_CONTRACT_PROBE_EXPECTED,
+    "$" + "{{ needs.changes.outputs.provider_contract_probe }}",
+  )
+  assert(status.steps[0].run.contains("Provider contract probe scope was not measured."))
+  assert(status.steps[0].run.contains("test \"$PROVIDER_CONTRACT_PROBE_EXPECTED\" = \"false\""))
+  // Standalone live runs keep their original build, branch policy and notifier.
+  assert_eq(standalone.on?.pull_request, nil)
+  assert_eq(standalone.on?.push, nil)
+  assert_eq(standalone.on.schedule, [{cron: "17 11 * * 1"}])
+  assert_eq(standalone.on.workflow_dispatch.inputs.live.default, false)
+  assert_eq(standalone.jobs["notify-live-failure"].permissions.issues, "write")
+  assert(standalone.jobs.probe.steps.any({ step -> step?.run == "make build-harn" }))
+  assert(standalone.jobs.probe.environment.contains("'provider-probe'"))
+  assert_eq(action.inputs.live.default, "false")
+  assert_eq(action.runs.steps[0].env.HARN_EXT_PROVIDER_PROBE_BINARY, "$" + "{{ inputs.harn-bin }}")
+  assert(action.runs.steps[0].run.contains("--require-runtime-revision \"$(git rev-parse HEAD)\""))
+  assert_eq(action.runs.steps[1].if, "always()")
+  assert_eq(action.runs.steps[1].with["if-no-files-found"], "error")
+}
+
+@test
+pipeline test_sdk_mirror_check_cannot_be_removed_or_skipped_before_merge(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  assert_eq(ci_linux_lane_policy_errors(ci), [])
+  let missing_mirror = ci
+  missing_mirror.jobs["shell-gates"].steps = missing_mirror.jobs["shell-gates"].steps.filter(
+    fn(step: dict) -> bool { return step?.name != "Check recorded AWS SDK mirror" },
+  )
+    .to_list()
+  const refusal = "ci.yml:shell-gates must run and enforce the recorded AWS SDK mirror before merge"
+  assert(ci_linux_lane_policy_errors(missing_mirror).contains(refusal))
+  let skipped_mirror = ci
+  skipped_mirror.jobs["shell-gates"].steps = skipped_mirror.jobs["shell-gates"].steps.map(
+    fn(step: dict) -> dict {
+      if step?.name == "Check recorded AWS SDK mirror" {
+        return {...step, if: "github.event_name == 'push'"}
+      }
+      return step
+    },
+  )
+    .to_list()
+  assert(ci_linux_lane_policy_errors(skipped_mirror).contains(refusal))
+  let ignored_mirror = ci
+  ignored_mirror.jobs["shell-gates"].steps = ignored_mirror.jobs["shell-gates"].steps.map(
+    fn(step: dict) -> dict {
+      if step?.name == "Check recorded AWS SDK mirror" {
+        return {...step, "continue-on-error": true}
+      }
+      return step
+    },
+  )
+    .to_list()
+  assert(ci_linux_lane_policy_errors(ignored_mirror).contains(refusal))
+  let ignored_job = ci
+  ignored_job.jobs["shell-gates"]["continue-on-error"] = true
+  assert(ci_linux_lane_policy_errors(ignored_job).contains(refusal))
 }
 
 @test

@@ -47,7 +47,6 @@ fn make_fake(config: dict = {}) {
     remote_base_detail: "",
     remote_base_sequence: [],
     adopt_ok: true,
-    adopt_conflicts: [],
     adopt_detail: "",
     branch_matches: false,
     commit_oid: "c0ffee",
@@ -143,19 +142,9 @@ fn make_fake(config: dict = {}) {
     adopt_base: fn(request) {
       record("adopt_base", request)
       if !cfg.adopt_ok {
-        return {
-          ok: false,
-          adopted_oid: nil,
-          conflicts: cfg.adopt_conflicts,
-          detail: cfg.adopt_detail,
-        }
+        return {ok: false, adopted_oid: nil, detail: cfg.adopt_detail}
       }
-      return {
-        ok: true,
-        adopted_oid: request.to_oid,
-        conflicts: [],
-        detail: "adopted ${request.to_oid}",
-      }
+      return {ok: true, adopted_oid: request.to_oid, detail: "adopted ${request.to_oid}"}
     },
     find_bump_pr: fn() { return cfg.existing_pr },
     disable_auto_merge: fn(pr, base_sha) {
@@ -767,7 +756,6 @@ pipeline test_unreadable_base_advance_republishes_on_the_new_base(harness: Harne
       "adopt_base",
       "remote_base_head",
       "apply_version",
-      "run_validation",
       "remote_base_head",
       "publish_commit",
       "upsert_pr",
@@ -779,21 +767,15 @@ pipeline test_unreadable_base_advance_republishes_on_the_new_base(harness: Harne
 }
 
 /**
- * Control for the falsifier above. When the advanced base changed a path this
- * bump's refresh also authors, adopting it would decide a contest between two
- * writers inside this checkout. The attempt names the paths and requests a
- * fresh checkout, where the refresh can be derived from the new base.
+ * An advance after validation that changed a refreshed path is re-derived on
+ * the new base and published there, with one validation for the attempt. A
+ * second validation per adoption never converges on a base that merges faster
+ * than one validation runs.
  */
-pipeline test_advanced_base_touching_a_refreshed_path_aborts_as_a_conflict(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_advance_through_a_refreshed_path_rederives_without_revalidating() {
   const fake = make_fake(
     {
       base_change_paths: ["src/unrelated.harn", "harn.lock"],
-      adopt_ok: false,
-      adopt_conflicts: ["harn.lock"],
-      adopt_detail: "1 refreshed path(s) were also changed between base000 and base999",
       remote_base_sequence: [
         {available: true, oid: "base000", detail: ""},
         {available: true, oid: "base999", detail: ""},
@@ -801,21 +783,22 @@ pipeline test_advanced_base_touching_a_refreshed_path_aborts_as_a_conflict(
     },
   )
   const receipt = run_bump(opts(), fake.adapter)
-  assert_eq(receipt.outcome, "base_conflict")
+  assert_eq(receipt.outcome, "committed")
+  assert_eq(receipt.ok, true)
+  assert_eq(receipt.base_adoptions, 1)
+  assert_eq(receipt.validated_base_oid, "base000")
+  assert_eq(receipt.expected_base_oid, "base999")
   assert_eq(receipt.published_behind_base, false)
-  assert_eq(receipt.ok, false)
-  assert_eq(receipt.base_adoptions, 0)
-  assert_eq(receipt.pr_action, "none")
-  assert_eq(receipt.recovery, {kind: "fresh_base_retry", base_oid: "base999"})
+  assert_eq(receipt.auto_merge?.enabled, true)
   assert_eq(
-    receipt.notes,
-    [
-      "remote base advanced from base000 to base999",
-      "cannot adopt the advanced main: 1 refreshed path(s) were also changed between base000 and base999",
-      "the advanced main changed refreshed paths: harn.lock",
-      "retry the bump from a fresh checkout of main",
-    ],
+    contains(
+      receipt.notes,
+      "validation proved on base000 carries onto the tree re-derived on base999; the merge queue tests the merge",
+    ),
+    true,
   )
+  const publication = fake.calls().filter({ call -> call.name == "publish_commit" }).to_list()
+  assert_eq(publication[0].arg.base_sha, "base999")
   assert_eq(
     call_names(fake.calls()),
     [
@@ -825,8 +808,40 @@ pipeline test_advanced_base_touching_a_refreshed_path_aborts_as_a_conflict(
       "remote_base_head",
       "base_changes",
       "adopt_base",
+      "remote_base_head",
+      "apply_version",
+      "remote_base_head",
+      "publish_commit",
+      "upsert_pr",
+      "remote_base_head",
+      "enable_auto_merge",
     ],
   )
+}
+
+/** A failed verdict carried onto a re-derived tree still keeps it out of the merge queue. */
+pipeline test_rederived_tree_keeps_a_failed_validation_unarmed() {
+  const fake = make_fake(
+    {
+      validation_ok: false,
+      validation_detail: "package-policy failed",
+      base_change_paths: ["harn.lock"],
+      remote_base_sequence: [
+        {available: true, oid: "base000", detail: ""},
+        {available: true, oid: "base999", detail: ""},
+      ],
+    },
+  )
+  const receipt = run_bump(opts({publish_failure_for_repair: true}), fake.adapter)
+  assert_eq(receipt.outcome, "validation_failed")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.base_adoptions, 1)
+  assert_eq(receipt.pr_action, "created")
+  assert_eq(receipt.auto_merge, nil)
+  const publication = fake.calls().filter({ call -> call.name == "publish_commit" }).to_list()
+  assert_eq(publication[0].arg.base_sha, "base999")
+  assert_eq(len(fake.calls().filter({ call -> call.name == "run_validation" }).to_list()), 1)
+  assert_eq(len(fake.calls().filter({ call -> call.name == "enable_auto_merge" }).to_list()), 0)
 }
 
 /**
@@ -859,6 +874,7 @@ pipeline test_repeatedly_advancing_base_stops_after_three_adoptions(
   assert_eq(receipt.recovery, {kind: "fresh_base_retry", base_oid: "base004"})
   assert_eq(contains(receipt.notes, "exhausted 3 base adoptions without a stable main"), true)
   assert_eq(len(fake.calls().filter({ call -> call.name == "adopt_base" }).to_list()), 3)
+  assert_eq(len(fake.calls().filter({ call -> call.name == "run_validation" }).to_list()), 1)
   assert_eq(len(fake.calls().filter({ call -> call.name == "publish_commit" }).to_list()), 0)
 }
 
@@ -935,7 +951,6 @@ pipeline test_failed_adoption_stays_a_fresh_base_retry(harness: Harness, task: u
     {
       base_changes_ok: false,
       adopt_ok: false,
-      adopt_conflicts: [],
       adopt_detail: "advanced base base999 is still not present after fetching main",
       remote_base_sequence: [
         {available: true, oid: "base000", detail: ""},

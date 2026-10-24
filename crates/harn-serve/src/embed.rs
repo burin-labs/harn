@@ -846,11 +846,7 @@ mod tests {
     use super::*;
 
     fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime")
-            .block_on(future)
+        harn_clock::test_support::current_thread_runtime().block_on(future)
     }
 
     async fn recv_json(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Value {

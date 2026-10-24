@@ -818,11 +818,11 @@ pub async fn execute_stage_node(
         crate::llm::vm_value_to_json(&result)
     } else {
         let args = vec![
-            VmValue::String(arcstr::ArcStr::from(prepared.prompt.clone())),
+            VmValue::string(prepared.prompt.clone()),
             prepared
                 .system
                 .clone()
-                .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
+                .map(VmValue::string)
                 .unwrap_or(VmValue::Nil),
             VmValue::dict(prepared.llm_options.clone()),
         ];

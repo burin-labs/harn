@@ -1,40 +1,27 @@
 use super::*;
 
-#[test]
-fn request_approval_result_must_be_handled() {
-    let diags = lint_source(
-        r#"
+#[rstest::rstest]
+#[case::request_approval_result_must_be_handled(
+    r#"
 pipeline deploy(task) {
   request_approval("deploy prod", {reviewers: ["alice"]})
 }
 "#,
-    );
-    assert!(
-        has_rule(&diags, "unhandled-approval-result"),
-        "expected unhandled approval result warning, got: {diags:?}"
-    );
-}
-
-#[test]
-fn request_approval_bound_result_is_handled() {
-    let diags = lint_source(
-        r#"
+    "unhandled-approval-result",
+    true
+)]
+#[case::request_approval_bound_result_is_handled(
+    r#"
 pipeline deploy(task) {
   const approval = request_approval("deploy prod", {reviewers: ["alice"]})
   __io_println(approval.approved)
 }
 "#,
-    );
-    assert!(
-        !has_rule(&diags, "unhandled-approval-result"),
-        "bound approval records should not warn: {diags:?}"
-    );
-}
-
-#[test]
-fn request_approval_as_try_value_is_handled() {
-    let diags = lint_source(
-        r#"
+    "unhandled-approval-result",
+    false
+)]
+#[case::request_approval_as_try_value_is_handled(
+    r#"
 pipeline deploy(task) {
   const result = try {
     request_approval("deploy prod", {reviewers: ["alice"]})
@@ -42,9 +29,14 @@ pipeline deploy(task) {
   __io_println(is_ok(result))
 }
 "#,
-    );
-    assert!(
-        !has_rule(&diags, "unhandled-approval-result"),
-        "approval returned from try expression should not warn: {diags:?}"
+    "unhandled-approval-result",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }

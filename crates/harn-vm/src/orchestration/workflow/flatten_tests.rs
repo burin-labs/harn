@@ -460,21 +460,18 @@ fn expected_flatten_contract(
 
 fn representative_node() -> WorkflowNode {
     let mut raw_model_policy = BTreeMap::new();
-    raw_model_policy.insert("provider".to_string(), VmValue::string("anthropic"));
-    raw_model_policy.insert("temperature".to_string(), VmValue::Float(0.2));
+    raw_model_policy.put_str("provider", "anthropic");
+    raw_model_policy.put("temperature", VmValue::Float(0.2));
     // Nested command policy hoisted to the top level by the flattener.
     let mut nested_policy = BTreeMap::new();
-    nested_policy.insert("command_policy".to_string(), VmValue::string("worktree"));
-    raw_model_policy.insert("policy".to_string(), VmValue::dict(nested_policy));
+    nested_policy.put_str("command_policy", "worktree");
+    raw_model_policy.put("policy", VmValue::dict(nested_policy));
     // A nil entry must be skipped by the merge.
-    raw_model_policy.insert("nudge".to_string(), VmValue::Nil);
+    raw_model_policy.put("nudge", VmValue::Nil);
 
     let mut raw_auto_compact = BTreeMap::new();
-    raw_auto_compact.insert("keep_last".to_string(), VmValue::Int(4));
-    raw_auto_compact.insert(
-        "summarize_prompt".to_string(),
-        VmValue::string("summarize tersely"),
-    );
+    raw_auto_compact.put_int("keep_last", 4);
+    raw_auto_compact.put_str("summarize_prompt", "summarize tersely");
 
     WorkflowNode {
         id: Some("act".to_string()),

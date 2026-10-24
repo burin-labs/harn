@@ -393,11 +393,16 @@ SCRIPTING
     Contracts(ContractsArgs),
     /// Lint .harn files or directories for common issues.
     Lint(PathTargetsArgs),
-    /// Format .harn files or directories.
+    /// Format .harn and .harn.txt source files or directories.
     Fmt(FmtArgs),
     /// Manage downloadable on-device injection-detection models (Layer 2).
     Guard(GuardArgs),
     /// Run user tests or the conformance suite.
+    ///
+    /// Directory scans honor .gitignore and .agentignore and skip generated
+    /// files and runtime state such as .harn. Hidden source folders and
+    /// ordinary vendor folders remain eligible. Explicit file paths and
+    /// directory roots remain selectable.
     Test(TestArgs),
     /// Run a .harn script under a hermetic testbench (paused clock,
     /// optional LLM/process tapes, fs overlay, deny-by-default network).

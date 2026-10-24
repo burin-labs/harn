@@ -4,6 +4,9 @@
 
 use crate::package::*;
 
+#[cfg(test)]
+mod source_lifetime_tests;
+
 pub(crate) fn materialize_dependencies_from_lock(
     workspace: &PackageWorkspace,
     ctx: &ManifestContext,
@@ -42,7 +45,7 @@ fn materialize_lock_entries(
         let source =
             locked_package_source_dir(workspace, installed_sources, entry, refetch, offline)?;
         let dest_dir = packages_dir.join(alias);
-        copy_dir_recursive(&source, &dest_dir)?;
+        copy_dir_recursive(source.as_ref(), &dest_dir)?;
         write_cached_content_hash(&dest_dir, expected_hash)?;
         installed += 1;
     }
@@ -376,16 +379,19 @@ fn dependency_closure_lock(
         reachable.packages.push(entry.clone());
         let source_dir =
             locked_package_source_dir(workspace, installed_sources.as_ref(), entry, None, false)?;
-        let Some(manifest) = read_package_manifest_from_dir(&source_dir)? else {
+        let Some(manifest) = read_package_manifest_from_dir(source_dir.as_ref())? else {
             continue;
         };
         let mut dependencies = manifest.dependencies.into_iter().collect::<Vec<_>>();
         dependencies.sort_by(|left, right| left.0.cmp(&right.0));
         for (alias, dependency) in dependencies.into_iter().rev() {
+            if !entry.source.starts_with("path+") {
+                validate_remote_dependency(&entry.name, &alias, &dependency)?;
+            }
             pending.push(ReachableDependency {
                 alias,
                 dependency,
-                manifest_dir: source_dir.clone(),
+                manifest_dir: source_dir.as_ref().to_path_buf(),
             });
         }
     }
@@ -394,7 +400,7 @@ fn dependency_closure_lock(
 }
 
 struct InstalledPackageSources {
-    snapshot: harn_modules::package_snapshot::PackageSnapshot,
+    snapshot: std::sync::Arc<harn_modules::package_snapshot::PackageSnapshot>,
     lock: LockFile,
 }
 
@@ -408,18 +414,27 @@ impl InstalledPackageSources {
         let Some(lock) = LockFile::load(snapshot.lock_path())? else {
             return Ok(None);
         };
-        Ok(Some(Self { snapshot, lock }))
+        Ok(Some(Self {
+            snapshot: std::sync::Arc::new(snapshot),
+            lock,
+        }))
     }
 
-    fn source_for(&self, entry: &LockEntry) -> Option<PathBuf> {
-        let installed = self.lock.find(&entry.name)?;
+    fn source_for(&self, entry: &LockEntry) -> Result<Option<PackageSource>, PackageError> {
+        let Some(installed) = self.lock.find(&entry.name) else {
+            return Ok(None);
+        };
         if !installed.same_resolution(entry) {
-            return None;
+            return Ok(None);
         }
-        let directory = self.snapshot.packages_root().join(&entry.name);
-        let expected_hash = entry.content_hash.as_deref()?;
-        (directory.is_dir() && materialized_hash_matches(&directory, expected_hash))
-            .then_some(directory)
+        let Some(expected_hash) = entry.content_hash.as_deref() else {
+            return Ok(None);
+        };
+        PackageSource::installed(
+            std::sync::Arc::clone(&self.snapshot),
+            &entry.name,
+            expected_hash,
+        )
     }
 }
 
@@ -429,7 +444,7 @@ fn locked_package_source_dir(
     entry: &LockEntry,
     refetch: Option<&str>,
     offline: bool,
-) -> Result<PathBuf, PackageError> {
+) -> Result<PackageSource, PackageError> {
     resolve_locked_package_source_dir(workspace, installed, entry, refetch, offline).map_err(|error| {
         PackageError::Ops(format!(
             "package `{}` is not materialized: {error}\nMake its source available, then run `harn install`.",
@@ -444,16 +459,18 @@ fn resolve_locked_package_source_dir(
     entry: &LockEntry,
     refetch: Option<&str>,
     offline: bool,
-) -> Result<PathBuf, PackageError> {
+) -> Result<PackageSource, PackageError> {
     if entry.source.starts_with("path+") {
-        return path_from_source_uri(&entry.source);
+        return path_from_source_uri(&entry.source).map(PackageSource::local);
     }
     let expected_hash = entry
         .content_hash
         .as_deref()
         .ok_or_else(|| format!("missing content hash for {}", entry.name))?;
-    if let Some(source) = installed.and_then(|sources| sources.source_for(entry)) {
-        return Ok(source);
+    if let Some(installed) = installed {
+        if let Some(source) = installed.source_for(entry)? {
+            return Ok(source);
+        }
     }
     let refetch_this = refetch == Some("all") || refetch == Some(entry.name.as_str());
     if entry.source.starts_with("git+") {
@@ -462,7 +479,7 @@ fn resolve_locked_package_source_dir(
             .as_deref()
             .ok_or_else(|| format!("missing locked commit for {}", entry.name))?;
         let url = entry.source.trim_start_matches("git+");
-        ensure_git_cache_populated_in(
+        let source = ensure_git_cache_populated_in(
             workspace,
             url,
             &entry.source,
@@ -471,11 +488,11 @@ fn resolve_locked_package_source_dir(
             refetch_this,
             offline,
         )?;
-        return git_cache_dir_in(workspace, &entry.source, commit);
+        return Ok(source.into());
     }
     if entry.source.starts_with("archive+") {
         let url = archive_url_from_source_uri(&entry.source)?;
-        ensure_archive_cache_populated_in(
+        let source = ensure_archive_cache_populated_in(
             workspace,
             url,
             &entry.source,
@@ -483,7 +500,7 @@ fn resolve_locked_package_source_dir(
             refetch_this,
             offline,
         )?;
-        return archive_cache_dir_in(workspace, &entry.source, expected_hash);
+        return Ok(source.into());
     }
     Err(format!(
         "unsupported locked package source for {}: {}",

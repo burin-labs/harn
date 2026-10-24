@@ -94,10 +94,9 @@ fn double(self) -> int { return self.v * 2 }
     );
 }
 
-#[test]
-fn test_interface_constraint_satisfied() {
-    let warns = iface_errors(
-        r"pipeline t(task) {
+#[rstest::rstest]
+#[case::test_interface_constraint_satisfied(
+    r"pipeline t(task) {
   interface Sizable {
 fn size(self) -> int
   }
@@ -108,15 +107,11 @@ fn size(self) -> int { return self.width * self.height }
   fn measure<T>(item: T) where T: Sizable { log(item.size()) }
   measure(Box({width: 3, height: 4}))
 }",
-    );
-    assert!(warns.is_empty(), "expected no warnings, got: {warns:?}");
-}
-
-#[test]
-fn test_interface_constraint_untyped_impl_compatible() {
-    // Gradual typing: untyped impl return should not trigger warning
-    let warns = iface_errors(
-        r"pipeline t(task) {
+    true
+)]
+// Gradual typing: untyped impl return should not trigger warning
+#[case::test_interface_constraint_untyped_impl_compatible(
+    r"pipeline t(task) {
   interface Sizable {
 fn size(self) -> int
   }
@@ -127,15 +122,11 @@ fn size(self) { return self.width }
   fn measure<T>(item: T) where T: Sizable { log(item.size()) }
   measure(Box({width: 3}))
 }",
-    );
-    assert!(warns.is_empty(), "expected no warnings, got: {warns:?}");
-}
-
-#[test]
-fn test_interface_constraint_int_float_covariance() {
-    // int is compatible with float (covariance)
-    let warns = iface_errors(
-        r"pipeline t(task) {
+    true
+)]
+// int is compatible with float (covariance)
+#[case::test_interface_constraint_int_float_covariance(
+    r"pipeline t(task) {
   interface Measurable {
 fn value(self) -> float
   }
@@ -146,14 +137,10 @@ fn value(self) -> int { return self.v }
   fn read_val<T>(g: T) where T: Measurable { log(g.value()) }
   read_val(Gauge({v: 42}))
 }",
-    );
-    assert!(warns.is_empty(), "expected no warnings, got: {warns:?}");
-}
-
-#[test]
-fn test_interface_associated_type_constraint_satisfied() {
-    let warns = iface_errors(
-        r#"pipeline t(task) {
+    true
+)]
+#[case::test_interface_associated_type_constraint_satisfied(
+    r#"pipeline t(task) {
   interface Collection {
 type Item
 fn get(self, index: int) -> Item
@@ -167,8 +154,11 @@ log(collection.get(0))
   }
   first(Names {})
 }"#,
-    );
-    assert!(warns.is_empty(), "expected no warnings, got: {warns:?}");
+    true
+)]
+fn diagnostics_iface_errors(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = iface_errors(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
 }
 
 #[test]
@@ -197,31 +187,29 @@ log(collection.get(0))
     );
 }
 
-#[test]
-fn test_multiple_where_bounds_comma_form_resolve_methods() {
-    // `where T: A, T: B` must keep BOTH bounds — previously the second clause
-    // clobbered the first, so a method from A was wrongly reported missing.
-    let errs = errors(
-        r"pipeline t(task) {
+#[rstest::rstest]
+// `where T: A, T: B` must keep BOTH bounds — previously the second clause
+// clobbered the first, so a method from A was wrongly reported missing.
+#[case::test_multiple_where_bounds_comma_form_resolve_methods(
+    r"pipeline t(task) {
   interface A { fn a(self) -> string }
   interface B { fn b(self) -> string }
   fn run<T>(x: T) -> string where T: A, T: B { return x.a() + x.b() }
 }",
-    );
-    assert!(errs.is_empty(), "expected no errors, got: {errs:?}");
-}
-
-#[test]
-fn test_multiple_where_bounds_additive_form_resolve_methods() {
-    // `where T: A + B` is the additive spelling of the same constraint.
-    let errs = errors(
-        r"pipeline t(task) {
+    true
+)]
+// `where T: A + B` is the additive spelling of the same constraint.
+#[case::test_multiple_where_bounds_additive_form_resolve_methods(
+    r"pipeline t(task) {
   interface A { fn a(self) -> string }
   interface B { fn b(self) -> string }
   fn run<T>(x: T) -> string where T: A + B { return x.a() + x.b() }
 }",
-    );
-    assert!(errs.is_empty(), "expected no errors, got: {errs:?}");
+    true
+)]
+fn diagnostics_errors(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
 }
 
 #[test]

@@ -145,8 +145,8 @@ fn test_tool_registry_to_mcp_tools_invalid() {
 #[test]
 fn test_tool_registry_to_mcp_tools_empty() {
     let mut registry = crate::value::DictMap::new();
-    registry.insert("_type".into(), VmValue::string("tool_registry"));
-    registry.insert("tools".into(), VmValue::list(Vec::new()));
+    registry.put_str("_type", "tool_registry");
+    registry.put("tools", VmValue::list(Vec::new()));
     let result = tool_registry_to_mcp_tools(&VmValue::dict(registry));
     assert!(result.unwrap().is_empty());
 }
@@ -156,8 +156,8 @@ fn structured_tool_values_project_as_json_objects() {
     let value = VmValue::dict({
         let mut update = crate::value::DictMap::new();
         update.put_str("schema", "harn.ui_update.v1");
-        update.insert(
-            "effects".into(),
+        update.put(
+            "effects",
             VmValue::list(vec![VmValue::dict({
                 let mut effect = crate::value::DictMap::new();
                 effect.put_str("kind", "capture_canvas");
@@ -181,31 +181,25 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
     let handler = VmValue::Closure(Arc::new(empty_closure("echo")));
 
     let mut annotations = crate::value::DictMap::new();
-    annotations.insert("readOnlyHint".into(), VmValue::Bool(true));
-    annotations.insert("idempotentHint".into(), VmValue::Bool(true));
+    annotations.put_bool("readOnlyHint", true);
+    annotations.put_bool("idempotentHint", true);
 
     let icon = VmValue::dict({
         let mut icon = crate::value::DictMap::new();
-        icon.insert(
-            "src".into(),
-            VmValue::string("https://example.com/tool.png"),
-        );
-        icon.insert("mimeType".into(), VmValue::string("image/png"));
+        icon.put_str("src", "https://example.com/tool.png");
+        icon.put_str("mimeType", "image/png");
         icon
     });
 
     let mut tool = crate::value::DictMap::new();
-    tool.insert("name".into(), VmValue::string("echo"));
-    tool.insert("title".into(), VmValue::string("Echo"));
-    tool.insert("description".into(), VmValue::string("Echo input"));
+    tool.put_str("name", "echo");
+    tool.put_str("title", "Echo");
+    tool.put_str("description", "Echo input");
     tool.insert("handler".into(), handler);
-    tool.insert(
-        "parameters".into(),
-        VmValue::dict(crate::value::DictMap::new()),
-    );
-    tool.insert("annotations".into(), VmValue::dict(annotations));
-    tool.insert(
-        "meta".into(),
+    tool.put("parameters", VmValue::dict(crate::value::DictMap::new()));
+    tool.put("annotations", VmValue::dict(annotations));
+    tool.put(
+        "meta",
         VmValue::dict({
             let mut ui = crate::value::DictMap::new();
             ui.put_str("resourceUri", "ui://example/editor");
@@ -214,9 +208,9 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
             meta
         }),
     );
-    tool.insert("icons".into(), VmValue::list(vec![icon]));
-    tool.insert(
-        "outputSchema".into(),
+    tool.put("icons", VmValue::list(vec![icon]));
+    tool.put(
+        "outputSchema",
         VmValue::dict({
             let mut schema = crate::value::DictMap::new();
             schema.insert("type".into(), VmValue::string("string"));
@@ -225,11 +219,8 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
     );
 
     let mut registry = crate::value::DictMap::new();
-    registry.insert("_type".into(), VmValue::string("tool_registry"));
-    registry.insert(
-        "tools".into(),
-        VmValue::list(vec![VmValue::Dict(std::sync::Arc::new(tool))]),
-    );
+    registry.put_str("_type", "tool_registry");
+    registry.put("tools", VmValue::list(vec![VmValue::dict_map(tool)]));
 
     let tools = tool_registry_to_mcp_tools(&VmValue::dict(registry)).unwrap();
     assert_eq!(tools[0].catalog.title.as_deref(), Some("Echo"));
@@ -375,14 +366,14 @@ fn test_prompt_value_to_messages_list() {
     let items = vec![
         VmValue::dict({
             let mut d = crate::value::DictMap::new();
-            d.insert("role".into(), VmValue::string("user"));
-            d.insert("content".into(), VmValue::string("hi"));
+            d.put_str("role", "user");
+            d.put_str("content", "hi");
             d
         }),
         VmValue::dict({
             let mut d = crate::value::DictMap::new();
-            d.insert("role".into(), VmValue::string("assistant"));
-            d.insert("content".into(), VmValue::string("hello"));
+            d.put_str("role", "assistant");
+            d.put_str("content", "hello");
             d
         }),
     ];
@@ -395,13 +386,13 @@ fn test_prompt_value_to_messages_list() {
 fn test_prompt_value_to_messages_preserves_image_content() {
     let items = vec![VmValue::dict({
         let mut image = crate::value::DictMap::new();
-        image.insert("type".into(), VmValue::string("image"));
-        image.insert("data".into(), VmValue::string("ZmFrZQ=="));
-        image.insert("mimeType".into(), VmValue::string("image/png"));
+        image.put_str("type", "image");
+        image.put_str("data", "ZmFrZQ==");
+        image.put_str("mimeType", "image/png");
 
         let mut message = crate::value::DictMap::new();
-        message.insert("role".into(), VmValue::string("user"));
-        message.insert("content".into(), VmValue::dict(image));
+        message.put_str("role", "user");
+        message.put("content", VmValue::dict(image));
         message
     })];
     let msgs = prompt_value_to_messages(&VmValue::list(items));
@@ -432,9 +423,9 @@ fn test_match_uri_template_no_match() {
 #[test]
 fn test_annotations_to_json() {
     let mut d = crate::value::DictMap::new();
-    d.insert("title".into(), VmValue::string("My Tool"));
-    d.insert("readOnlyHint".into(), VmValue::Bool(true));
-    d.insert("destructiveHint".into(), VmValue::Bool(false));
+    d.put_str("title", "My Tool");
+    d.put_bool("readOnlyHint", true);
+    d.put_bool("destructiveHint", false);
     let json = annotations_to_json(&VmValue::dict(d)).unwrap();
     assert_eq!(json["title"], "My Tool");
     assert_eq!(json["readOnlyHint"], true);

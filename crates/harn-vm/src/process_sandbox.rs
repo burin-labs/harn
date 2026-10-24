@@ -30,10 +30,11 @@ pub use crate::stdlib::sandbox::{
     session_tokio_command, std_command_for, std_command_for_with_env_state, tokio_command_for,
     tokio_command_for_with_env_state, validate_command_environment, workspace_local_tmpdir,
     FsAccess, ProcessCommandConfig, ProcessSandboxAssessment, ProcessSandboxDenialReporting,
-    ProcessSandboxGrants, ProcessSandboxMechanism, ProcessSandboxOperation, ProcessSandboxRefusal,
-    ProcessSandboxReportingContext, ProcessSandboxScope, ProcessSandboxScopeGuard,
-    SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
-    SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV, SANDBOX_CONFINEMENT_SCHEMA,
+    ProcessSandboxGrants, ProcessSandboxMechanism, ProcessSandboxNetwork, ProcessSandboxOperation,
+    ProcessSandboxRefusal, ProcessSandboxReport, ProcessSandboxReportingContext,
+    ProcessSandboxScope, ProcessSandboxScopeGuard, SandboxMechanism, SandboxMechanismAvailability,
+    SandboxMechanismUnavailable, SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
+    SANDBOX_CONFINEMENT_SCHEMA,
 };
 
 pub use crate::stdlib::git_topology::check_repository_metadata_scope;
@@ -198,9 +199,9 @@ pub fn push_sandbox_profile_override(
             .map(|profile| format!("{:?}", profile.as_str()))
             .collect::<Vec<_>>()
             .join(", ");
-        crate::VmError::Thrown(crate::VmValue::String(arcstr::ArcStr::from(format!(
+        crate::VmError::Thrown(crate::VmValue::string(format!(
             "unknown sandbox_profile {value:?}; expected one of {expected}"
-        ))))
+        )))
     })?;
     let mut policy = crate::orchestration::current_execution_policy().unwrap_or_default();
     policy.sandbox_profile = profile;

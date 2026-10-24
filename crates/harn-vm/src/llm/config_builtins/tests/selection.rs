@@ -7,6 +7,7 @@ use super::super::selection_builtins::{
 };
 use super::fixtures::build_dict;
 use crate::llm_config;
+use crate::value::VmDictExt as _;
 use crate::value::VmValue;
 
 #[test]
@@ -42,7 +43,7 @@ fn escalation_target_options_cross_builtin_boundary() {
     let parsed = parse_escalation_target_options(Some(&build_dict(vec![
         ("primary", primary(" small ")),
         ("max_price_multiple", VmValue::Int(3)),
-        ("exclude", VmValue::list(vec![VmValue::string("fam-b")])),
+        ("exclude", VmValue::strings(["fam-b"])),
     ])))
     .expect("valid options");
     assert_eq!(parsed.primary_model, "small");
@@ -100,8 +101,8 @@ fn escalation_target_result_is_a_ladder_step_without_an_adapter() {
     );
 
     let mut call = crate::value::DictMap::new();
-    call.insert(
-        crate::value::intern_key("models"),
+    call.put(
+        "models",
         VmValue::list(vec![VmValue::string("gpt-4o-mini"), result.clone()]),
     );
     let policy = crate::llm::routing::build_model_ladder_policy(&call, "openai", "gpt-4o-mini")

@@ -15,6 +15,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
+mod diagnostic;
+pub use diagnostic::{failure_diagnostic, FailureDiagnostic};
+
 const SCHEMA_MARKER_TABLE: &str = "_harn_sqlite_schema_versions";
 const CREATE_SCHEMA_MARKER_TABLE: &str =
     "CREATE TABLE IF NOT EXISTS main._harn_sqlite_schema_versions (
@@ -236,6 +239,36 @@ impl<E: std::error::Error + 'static> std::error::Error for InitializationError<E
             | Self::WalNotEnabled { .. }
             | Self::WalBusyNotWal { .. }
             | Self::NewerSchemaVersion { .. } => None,
+        }
+    }
+}
+
+impl<E> InitializationError<E> {
+    /// Stable failure stage, without database paths, SQL, or stored values.
+    #[must_use]
+    pub fn stage(&self) -> &'static str {
+        match self {
+            Self::BusyTimeoutTooLarge { .. } | Self::BusyTimeout(_) => "busy_timeout",
+            Self::JournalModeQuery(_) => "journal_mode_query",
+            Self::DatabasePathUnavailable
+            | Self::DatabasePath { .. }
+            | Self::FileBackedTransient { .. } => "database_path",
+            Self::InitializationLockOpen { .. } => "initialization_lock_open",
+            Self::InitializationLockAcquire { .. } | Self::InitializationLock(_) => {
+                "initialization_lock_acquire"
+            }
+            Self::WalPragma(_)
+            | Self::WalNotEnabled { .. }
+            | Self::WalBusyNotWal { .. }
+            | Self::WalBusyQuery { .. } => "wal_promotion",
+            Self::Synchronous(_) => "synchronous",
+            Self::SchemaReadiness(_)
+            | Self::SchemaNotInitialized { .. }
+            | Self::NewerSchemaVersion { .. } => "schema_readiness",
+            Self::Transaction(_) => "schema_transaction",
+            Self::Initialize(_) => "schema_initialize",
+            Self::SchemaMarker(_) => "schema_marker",
+            Self::Commit(_) => "schema_commit",
         }
     }
 }

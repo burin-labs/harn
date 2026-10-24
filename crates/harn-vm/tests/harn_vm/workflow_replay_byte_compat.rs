@@ -47,19 +47,14 @@ fn run(source: &str) -> Result<String, String> {
             .enable_all()
             .build()
             .map_err(|e| e.to_string())?;
-        rt.block_on(async {
-            let local = tokio::task::LocalSet::new();
-            local
-                .run_until(async {
-                    let mut vm = harn_vm::new_vm();
-                    harn_vm::register_vm_stdlib(&mut vm);
-                    vm.execute(&chunk)
-                        .await
-                        .map_err(|e: VmError| format!("{e:?}"))?;
-                    Ok(vm.output().to_string())
-                })
+        rt.block_on(harn_clock::test_support::with_local_tasks(async {
+            let mut vm = harn_vm::new_vm();
+            harn_vm::register_vm_stdlib(&mut vm);
+            vm.execute(&chunk)
                 .await
-        })
+                .map_err(|e: VmError| format!("{e:?}"))?;
+            Ok(vm.output().to_string())
+        }))
     })
 }
 

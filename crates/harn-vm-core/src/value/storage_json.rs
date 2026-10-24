@@ -85,7 +85,7 @@ mod tests {
             "{direct}"
         );
 
-        let nested = VmValue::List(std::sync::Arc::new(vec![harness]));
+        let nested = VmValue::list(vec![harness]);
         let nested_error = vm_to_storage_json(&nested).unwrap_err().to_string();
         assert!(
             nested_error.contains("cannot be persisted as domain state"),

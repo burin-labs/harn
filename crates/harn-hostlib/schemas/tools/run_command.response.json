@@ -80,13 +80,35 @@
       "properties": {
         "kind": { "type": "string" },
         "enforced": { "type": "boolean" },
+        "network": {
+          "description": "Normalized spawn-time grants. Permission does not prove reachability or a denial. Unknown, inherited and unavailable states do not assert grants.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": { "const": "policy" },
+                "direct_network": { "type": "boolean" },
+                "tcp_loopback": { "type": "boolean" },
+                "managed_proxy": { "type": "boolean" }
+              },
+              "required": ["status", "direct_network", "tcp_loopback", "managed_proxy"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": { "status": { "enum": ["inherited", "unavailable", "unknown"] } },
+              "required": ["status"],
+              "additionalProperties": false
+            }
+          ]
+        },
         "denial_reporting": {
           "type": "string",
           "enum": ["not_enforced", "backend_unavailable", "inferred_only"],
           "description": "Coverage of mid-run sandbox denial reporting. inferred_only means a null denial is not proof that no operation was refused."
         }
       },
-      "required": ["kind", "enforced", "denial_reporting"],
+      "required": ["kind", "enforced", "denial_reporting", "network"],
       "additionalProperties": false
     },
     "denial": {

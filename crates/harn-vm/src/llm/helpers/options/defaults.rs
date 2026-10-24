@@ -63,8 +63,7 @@ pub(super) fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
         toml::Value::Table(table) => VmValue::dict(
             table
                 .iter()
-                .map(|(key, value)| (crate::value::intern_key(key), toml_value_to_vm_value(value)))
-                .collect::<crate::value::DictMap>(),
+                .map(|(key, value)| (crate::value::intern_key(key), toml_value_to_vm_value(value))),
         ),
     }
 }

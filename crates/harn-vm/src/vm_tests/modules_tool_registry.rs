@@ -1,5 +1,4 @@
 use crate::value::VmDictExt;
-use std::sync::Arc;
 
 use super::*;
 
@@ -19,13 +18,13 @@ fn stdlib_tool_registry_from_carries_cli_metadata_through_import_abi() {
         assert_eq!(registry_from.func.params.len(), 2);
 
         let mut cli = crate::value::DictMap::new();
-        cli.put("commands", VmValue::List(Arc::new(Vec::new())));
+        cli.put("commands", VmValue::list(Vec::new()));
         let mut options = crate::value::DictMap::new();
         options.put("cli", VmValue::dict(cli));
         let registry = vm
             .call_closure_pub(
                 registry_from,
-                &[VmValue::List(Arc::new(Vec::new())), VmValue::dict(options)],
+                &[VmValue::list(Vec::new()), VmValue::dict(options)],
             )
             .await
             .expect("tool_registry_from executes");

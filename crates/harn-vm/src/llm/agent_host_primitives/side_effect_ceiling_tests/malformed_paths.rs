@@ -187,10 +187,7 @@ impl Calls {
                 })),
             );
         }
-        let catalog = VmValue::dict([(
-            "tools",
-            VmValue::List(Arc::new(vec![VmValue::dict_map(entry)])),
-        )]);
+        let catalog = VmValue::dict([("tools", VmValue::list(vec![VmValue::dict_map(entry)]))]);
         let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let precheck = self.precheck.clone();

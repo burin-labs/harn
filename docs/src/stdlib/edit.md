@@ -790,7 +790,7 @@ Backed by the `harness.code_index.rename_symbol` builtin (issue
 
 | Field | Required | Notes |
 |---|---|---|
-| `symbol_ref` | yes | `{name, path, line?, kind?}`. `line` (1-based) and `kind` (`"Function" \| "Type" \| "Module"`) disambiguate when several symbols in the workspace share a name. |
+| `symbol_ref` | yes | `{name, path, line?, col?, kind?}`. Java methods accept a short name, `Store.load`, or `app.Store.load`, and require an exact defining path unless `.` searches the workspace. Java positions point at the method name; coordinates are 1-based, and `col` counts UTF-16 code units. Other languages retain bare names, suffix-path matching and symbol-start lines; supplying `col` is rejected. `kind` (`"Function" \| "Type" \| "Module"`) narrows the declaration kind. |
 | `new_name` | yes | Replacement identifier. Must be a valid identifier token and differ from `symbol_ref.name`. |
 | `scope` | yes | `"file"` \| `"module"` \| `"workspace"`. `file` and `module` are aliases today (one Module node per file); `workspace` adds every indexed file that declares the name or contains it as a whole word; each file is then parsed so only identifier occurrences change. |
 | `session_id` | no | Routes reads + writes through staged-fs (#1722). |
@@ -823,7 +823,7 @@ The enclosing `applied` and `dry_run` fields describe whether files were written
 or only planned. A staged filesystem session can defer persistence until commit.
 
 Supported languages (first batch): Harn, Rust, TypeScript/TSX, JavaScript/JSX,
-Python, Swift, Go. Other languages return `result ==
+Python, Swift, Go, and Java methods. Other languages return `result ==
 "unsupported_language"` instead of silently misrewriting.
 
 The host must prove that every occurrence belongs to the selected declaration
@@ -834,6 +834,23 @@ unresolved imports, receiver members, dynamic class namespaces, macros and
 escaped or normalized identifiers can also require a binding-aware LSP rename.
 These cases return `ambiguous_symbol` with an explanation in `details` and
 leave every file unchanged.
+
+Java methods use declared field, parameter, and local types, explicit imports,
+and `this.field` to separate calls on unrelated classes. Comments and strings
+stay unchanged. Unknown receivers, inferred types, patterns, inheritance,
+interface contracts, method references, and overloads can require a language
+server and return `ambiguous_symbol` before any write. A definition selector
+chooses the method; it does not prove these unresolved caller bindings.
+Java rename also requires a final declaring type or a private method, and
+refuses new names that may change an Object method contract.
+Ambiguous results include declaration metadata in `warnings`: `symbol`,
+`qualified_name`, `path`, `line`, `col`, and `kind`.
+`ambiguity_reason: "multiple_definition_seeds"` means a selector can choose a
+definition. `unresolved_reference_binding` means a caller binding remains
+unknown after selection; its candidate metadata does not provide a safe retry.
+Other result tags have a null reason. A null candidate
+column means the declaration name position is unavailable. Non-Java candidates
+retain bare `symbol` names and null columns.
 
 ### Result tags
 

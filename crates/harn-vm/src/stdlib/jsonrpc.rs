@@ -533,7 +533,7 @@ mod tests {
         // Simulate the call-site early-return when every slot is a
         // notification.
         let nils: Vec<VmValue> = slots.iter().map(|_| VmValue::Nil).collect();
-        let result = VmValue::List(std::sync::Arc::new(nils));
+        let result = VmValue::list(nils);
         let items = match result {
             VmValue::List(items) => items,
             other => panic!("expected list, got {other:?}"),

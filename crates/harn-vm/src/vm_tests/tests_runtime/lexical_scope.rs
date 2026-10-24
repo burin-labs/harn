@@ -5,10 +5,9 @@
 //! with them.
 
 use super::harness::*;
-#[test]
-fn test_if_else_has_lexical_block_scope() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
+#[rstest::rstest]
+#[case::test_if_else_has_lexical_block_scope(
+    r#"pipeline t(harness: Harness, task: unknown) {
 const x = "outer"
 if true {
   const x = "inner"
@@ -19,14 +18,10 @@ if true {
 }
 harness.stdio.log(x)
 }"#,
-    );
-    assert_eq!(out, "[harn] inner\n[harn] outer");
-}
-
-#[test]
-fn test_loop_and_catch_bindings_are_block_scoped() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
+    "[harn] inner\n[harn] outer"
+)]
+#[case::test_loop_and_catch_bindings_are_block_scoped(
+    r#"pipeline t(harness: Harness, task: unknown) {
 const label = "outer"
 for item in [1, 2] {
   const label = "loop ${item}"
@@ -39,11 +34,10 @@ try {
 }
 harness.stdio.log(label)
 }"#,
-    );
-    assert_eq!(
-        out,
-        "[harn] loop 1\n[harn] loop 2\n[harn] boom\n[harn] outer"
-    );
+    "[harn] loop 1\n[harn] loop 2\n[harn] boom\n[harn] outer"
+)]
+fn output_run_output(#[case] source: &str, #[case] expected: &str) {
+    assert_eq!(run_output(source), expected);
 }
 
 // --- Closure late-bind walk skip (Chunk::references_outer_names) ---

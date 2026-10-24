@@ -2,6 +2,8 @@ use super::*;
 use crate::llm::api::options::base_opts;
 use crate::llm::cost::LlmBudgetEnvelope;
 
+mod direct_providers;
+
 /// [`super::reserve`] with the attempt's token projection taken from `opts`,
 /// as an observed attempt does.
 fn reserve(

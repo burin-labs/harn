@@ -94,7 +94,7 @@ pub(crate) fn pipeline_parameter_removal_fix(
         return None;
     }
 
-    let (start, end, after_removed_previous) = if params.len() == 1 {
+    let (start, end, mut after_removed_previous) = if params.len() == 1 {
         (current.span.start, current.span.end, None)
     } else if let Some(next) = params.get(index + 1) {
         let between = source.get(current.span.end..next.span.start)?;
@@ -125,13 +125,35 @@ pub(crate) fn pipeline_parameter_removal_fix(
         )
     };
 
-    Some((
-        vec![FixEdit {
-            span: Span::with_offsets(start, end, current.span.line, current.span.column),
-            replacement: String::new(),
-        }],
-        after_removed_previous,
-    ))
+    let mut edits = vec![FixEdit {
+        span: Span::with_offsets(start, end, current.span.line, current.span.column),
+        replacement: String::new(),
+    }];
+    if index + 1 == params.len() {
+        // The last comma needs its own edit when every input is removed.
+        let next = Lexer::with_position_and_offset(
+            source.get(current.span.start..)?,
+            current.span.line,
+            current.span.column,
+            current.span.start,
+        )
+        .tokenize()
+        .ok()?
+        .into_iter()
+        .find(|token| token.span.start >= current.span.end);
+        if let Some(comma) = next.filter(|token| matches!(token.kind, TokenKind::Comma)) {
+            let edit = FixEdit {
+                span: comma.span,
+                replacement: String::new(),
+            };
+            if params.len() == 1 {
+                edits.push(edit);
+            } else if let Some(previous) = &mut after_removed_previous {
+                previous.push(edit);
+            }
+        }
+    }
+    Some((edits, after_removed_previous))
 }
 
 /// Find the syntactic separator in a trivia-only parameter gap. Lexing the

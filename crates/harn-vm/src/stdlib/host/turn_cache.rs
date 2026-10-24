@@ -386,16 +386,13 @@ mod tests {
             let namespace = |name: &str| {
                 (
                     crate::value::intern_key(name),
-                    VmValue::dict(DictMap::from_iter([(
-                        crate::value::intern_key("generation"),
-                        VmValue::Int(generation as i64),
-                    )])),
+                    VmValue::dict([("generation", VmValue::Int(generation as i64))]),
                 )
             };
-            super::super::host_call_ready(Ok(Some(VmValue::dict(DictMap::from_iter([
+            super::super::host_call_ready(Ok(Some(VmValue::dict([
                 namespace("facts"),
                 namespace("test"),
-            ])))))
+            ]))))
         }
     }
 
@@ -412,9 +409,9 @@ mod tests {
                 .unwrap()
                 .entry((capability.to_string(), operation.to_string()))
                 .or_insert(0) += 1;
-            super::super::host_call_ready(Ok(Some(VmValue::String(arcstr::ArcStr::from(format!(
+            super::super::host_call_ready(Ok(Some(VmValue::string(format!(
                 "{capability}.{operation}"
-            ))))))
+            )))))
         }
     }
 
@@ -423,13 +420,9 @@ mod tests {
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = ()>,
     {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime");
+        let rt = harn_clock::test_support::current_thread_runtime();
         rt.block_on(async {
-            let local = tokio::task::LocalSet::new();
-            local.run_until(test()).await;
+            harn_clock::test_support::with_local_tasks(test()).await;
         });
     }
 
@@ -521,21 +514,21 @@ mod tests {
             let descendant_facts = DictMap::from_iter([
                 (
                     crate::value::intern_key("dir"),
-                    VmValue::String(arcstr::ArcStr::from("src/nested")),
+                    VmValue::string("src/nested"),
                 ),
                 (
                     crate::value::intern_key("namespace"),
-                    VmValue::String(arcstr::ArcStr::from("facts")),
+                    VmValue::string("facts"),
                 ),
             ]);
             let descendant_test = DictMap::from_iter([
                 (
                     crate::value::intern_key("dir"),
-                    VmValue::String(arcstr::ArcStr::from("src/nested")),
+                    VmValue::string("src/nested"),
                 ),
                 (
                     crate::value::intern_key("namespace"),
-                    VmValue::String(arcstr::ArcStr::from("test")),
+                    VmValue::string("test"),
                 ),
             ]);
 
@@ -564,13 +557,10 @@ mod tests {
             );
 
             let ancestor_write = DictMap::from_iter([
-                (
-                    crate::value::intern_key("dir"),
-                    VmValue::String(arcstr::ArcStr::from("src")),
-                ),
+                (crate::value::intern_key("dir"), VmValue::string("src")),
                 (
                     crate::value::intern_key("namespace"),
-                    VmValue::String(arcstr::ArcStr::from("facts")),
+                    VmValue::string("facts"),
                 ),
                 (
                     crate::value::intern_key("value"),
@@ -667,7 +657,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let params = DictMap::new();
-        let cached = VmValue::String(arcstr::ArcStr::from("turn-1"));
+        let cached = VmValue::string("turn-1");
         super::store("runtime", "pipeline_input", &params, &cached);
         assert!(
             super::lookup("runtime", "pipeline_input", &params).is_some(),
@@ -693,10 +683,8 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         reset();
-        let params = DictMap::from_iter([(
-            crate::value::intern_key("dir"),
-            VmValue::String(arcstr::ArcStr::from("src")),
-        )]);
+        let params =
+            DictMap::from_iter([(crate::value::intern_key("dir"), VmValue::string("src"))]);
         let dispatch_epoch = super::current_epoch();
 
         // Models a metadata write completing while this read is in flight.
@@ -705,10 +693,7 @@ mod tests {
             "project",
             "metadata_get",
             &params,
-            &VmValue::dict(DictMap::from_iter([(
-                crate::value::intern_key("facts"),
-                VmValue::dict(DictMap::new()),
-            )])),
+            &VmValue::dict([("facts", VmValue::dict(DictMap::new()))]),
             dispatch_epoch,
         );
 
@@ -727,7 +712,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let params = DictMap::new();
-        let value = VmValue::String(arcstr::ArcStr::from("live"));
+        let value = VmValue::string("live");
         super::store("session", "active_roots", &params, &value);
         assert!(
             super::lookup("session", "active_roots", &params).is_none(),
@@ -745,7 +730,7 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         reset();
         let params = DictMap::new();
-        let value = VmValue::String(arcstr::ArcStr::from("shared"));
+        let value = VmValue::string("shared");
         super::store_by_name("runtime.pipeline_input", &params, &value);
         assert_eq!(
             super::lookup("runtime", "pipeline_input", &params).map(|v| v.display()),
