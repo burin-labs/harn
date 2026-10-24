@@ -372,13 +372,45 @@ where
 
 /// Total-order comparison used for sorting, `min`/`max`, and similar reductions.
 ///
-/// IEEE-754 NaN is *unordered*, so [`try_compare_values`] returns `None` for it;
-/// here we fall back to `0` (treat as equal) so a stray NaN does not destabilize
-/// a sort. Relational operators (`<`, `>`, `<=`, `>=`) must NOT use this fallback —
-/// they go through [`try_compare_values`] so that any comparison with NaN yields
-/// `false`, as the language spec and IEEE-754 require.
+/// IEEE-754 NaN is *unordered* and mixed-type values have no natural order, so
+/// [`try_compare_values`] cannot drive a sort: treating those pairs as equal
+/// breaks transitivity (`1 == NaN == 0.5` yet `1 > 0.5`), and Rust's sort
+/// panics on a comparator that is not a total order. Here values of different
+/// sort ranks order by rank — numbers, then NaN, then each other type grouped
+/// by name — and lists and pairs recurse through this total order. Relational
+/// operators (`<`, `>`, `<=`, `>=`) must NOT use this — they go through
+/// [`try_compare_values`] so that any comparison with NaN yields `false`, as
+/// the language spec and IEEE-754 require.
 pub fn compare_values(a: &VmValue, b: &VmValue) -> i32 {
-    try_compare_values(a, b).unwrap_or(0)
+    fn rank(value: &VmValue) -> (u8, &'static str) {
+        match value {
+            VmValue::Int(_) => (0, ""),
+            VmValue::Float(f) if !f.is_nan() => (0, ""),
+            VmValue::Float(_) => (1, ""),
+            other => (2, other.type_name()),
+        }
+    }
+    fn lexicographic<'a>(
+        x: impl ExactSizeIterator<Item = &'a VmValue>,
+        y: impl ExactSizeIterator<Item = &'a VmValue>,
+    ) -> i32 {
+        let lengths = x.len().cmp(&y.len()) as i32;
+        x.zip(y)
+            .map(|(a, b)| compare_values(a, b))
+            .find(|c| *c != 0)
+            .unwrap_or(lengths)
+    }
+    match rank(a).cmp(&rank(b)) {
+        std::cmp::Ordering::Equal => {}
+        unequal => return unequal as i32,
+    }
+    match (a, b) {
+        (VmValue::List(x), VmValue::List(y)) => guard_recursion(|| lexicographic(x.iter(), y.iter())),
+        (VmValue::Pair(x), VmValue::Pair(y)) => guard_recursion(|| {
+            lexicographic([&x.0, &x.1].into_iter(), [&y.0, &y.1].into_iter())
+        }),
+        _ => try_compare_values(a, b).unwrap_or(0),
+    }
 }
 
 /// Ordered comparison for relational operators. Returns `None` when the two
