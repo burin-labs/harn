@@ -64,6 +64,11 @@ on:
         required: false
         default: ''
         type: string
+      pull_request_cli_artifact:
+        description: Empty for that run's own CLI; harn-base-cli.tar.zst for the base CLI it built
+        required: false
+        default: ''
+        type: string
       release_producer_run_id:
         description: Current archive producer whose successful build and manifest jobs precede this rehearsal
         required: false
@@ -85,7 +90,9 @@ on:
 permissions: {}
 
 concurrency:
-  group: consumer-canary-${{ inputs.source_revision || (github.event_name == 'schedule' && 'scheduled-main' || github.run_id) }}
+  # A pull request run keys by its run too, so two pull requests rehearsing one
+  # base never queue behind, or evict, each other.
+  group: consumer-canary-${{ inputs.source_revision || (github.event_name == 'schedule' && 'scheduled-main' || github.run_id) }}${{ inputs.pull_request_cli_run && format('-run-{0}', inputs.pull_request_cli_run) || '' }}
   cancel-in-progress: ${{ github.event_name == 'schedule' && inputs.source_revision == '' }}
 
 jobs:
@@ -187,6 +194,7 @@ jobs:
           REHEARSAL_PROMOTION_READ_TOKEN: ${{ steps.history-token.outputs.token }}
           CANARY_PULL_REQUEST_CLI_RUN: ${{ inputs.pull_request_cli_run }}
           CANARY_PULL_REQUEST_BASE: ${{ inputs.pull_request_base }}
+          CANARY_PULL_REQUEST_CLI_ARTIFACT: ${{ inputs.pull_request_cli_artifact }}
           CANARY_RELEASE_PRODUCER_RUN_ID: ${{ inputs.release_producer_run_id }}
           CANARY_RELEASE_PRODUCER_RUN_ATTEMPT: ${{ inputs.release_producer_run_attempt }}
           PULL_REQUEST_BODY: ${{ inputs.pull_request_cli_run != '' && github.event.pull_request.body || '' }}
@@ -282,7 +290,7 @@ jobs:
         if: always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '' || steps.observe-4.outputs.failure-receipt != '' || steps.interrupted.outputs.failure_receipt != '')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: consumer-observer-failure-${{ github.run_attempt }}
+          name: consumer-observer-failure-${{ github.run_attempt }}-${{ needs.decide.outputs.source_revision }}
           path: ${{ steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt || steps.observe-4.outputs.failure-receipt || steps.interrupted.outputs.failure_receipt }}
           if-no-files-found: error
           retention-days: 7

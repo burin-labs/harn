@@ -51,6 +51,8 @@
 #   REHEARSAL_PROMOTION_READ_TOKEN  scoped read authority for the prior attempt.
 #   CANARY_PULL_REQUEST_CLI_RUN, CANARY_PULL_REQUEST_BASE  optional: the CI run
 #                      that built a pull request's CLI, and that pull request's base.
+#   CANARY_PULL_REQUEST_CLI_ARTIFACT  optional: harn-base-cli.tar.zst when that
+#                      run's base CLI is rehearsed at SOURCE_REVISION == the base.
 #   CANARY_RELEASE_PRODUCER_RUN_ID, CANARY_RELEASE_PRODUCER_RUN_ATTEMPT
 #                      optional current producer whose archives the consumer verifies.
 #   GH_TOKEN           may dispatch and read the consumer's workflow runs.
@@ -172,6 +174,16 @@ canary_dispatch() {
       || canary_fail pull_request_identity_invalid
     pull_request_inputs=(-f harn_cli_run="$CANARY_PULL_REQUEST_CLI_RUN" -f harn_base="$CANARY_PULL_REQUEST_BASE")
   fi
+  # The base rehearsal installs the CLI the same run built at the base.
+  case "${CANARY_PULL_REQUEST_CLI_ARTIFACT:-}" in
+    "") ;;
+    harn-base-cli.tar.zst)
+      [[ -n "${CANARY_PULL_REQUEST_CLI_RUN:-}" && "$revision" == "${CANARY_PULL_REQUEST_BASE:-}" ]] \
+        || canary_fail pull_request_identity_invalid
+      pull_request_inputs+=(-f harn_cli_artifact="$CANARY_PULL_REQUEST_CLI_ARTIFACT")
+      ;;
+    *) canary_fail pull_request_identity_invalid ;;
+  esac
   dispatched=$(gh workflow run "$workflow" -R "$repo" --ref "$ref" \
     -f target="$target_version" -f source_revision="$revision" -f legs=clean -f observer="$observer" \
     "${pull_request_inputs[@]}" "${producer_inputs[@]}" 2>&1) \
