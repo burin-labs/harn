@@ -388,24 +388,48 @@ fn a_read_only_mount_nested_in_the_workspace_matches_its_backend() {
     let beside = format!("echo x > '{}'", ws.join("ok.txt").display());
     let inside = format!("echo x > '{}'", nested.join("f").display());
 
-    assert!(shell_succeeds(&policy, &inside), "control: writable before the mount");
+    assert!(
+        shell_succeeds(&policy, &inside),
+        "control: writable before the mount"
+    );
     std::fs::remove_file(nested.join("f")).unwrap();
-    crate::agent_sessions::add_workspace_root(
+    push_execution_policy(policy.clone());
+    let mounted = crate::agent_sessions::add_workspace_root(
         &session,
         &nested.to_string_lossy(),
         Some(MountMode::ReadOnly),
         None,
-    )
-    .unwrap();
-    assert!(shell_succeeds(&policy, &beside), "the rest of the workspace stays writable");
+    );
+    pop_execution_policy();
+    assert!(
+        shell_succeeds(&policy, &beside),
+        "the rest of the workspace stays writable"
+    );
     let landed = shell_succeeds(&policy, &inside) && nested.join("f").exists();
     #[cfg(target_os = "macos")]
-    assert!(!landed, "macOS must refuse a write into the nested read-only mount");
+    {
+        mounted.unwrap();
+        assert!(
+            !landed,
+            "macOS must refuse a write into the nested read-only mount"
+        );
+    }
     #[cfg(target_os = "linux")]
-    assert_eq!(
-        landed,
-        child_write_disposition(&policy, &nested.join("f")) == ChildWriteDisposition::Writable,
-        "the backend's report must match what the child could do"
-    );
+    {
+        // Landlock cannot subtract the workspace grant, so the mount is
+        // refused rather than reported read-only while a child could write it.
+        assert!(
+            mounted.is_err_and(|error| error.contains("cannot subtract write access")),
+            "an unenforceable nested read-only mount must be refused"
+        );
+        assert!(
+            child_write_disposition(&policy, &nested.join("f")) == ChildWriteDisposition::Writable,
+            "the refusal rests on a measured Writable disposition"
+        );
+        assert!(
+            landed,
+            "control: the child really could write the nested path"
+        );
+    }
     eprintln!("NESTED-MOUNT-TEST-RAN landed={landed}");
 }

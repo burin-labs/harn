@@ -100,6 +100,17 @@ fn child_cannot_write(side_effect: Option<&str>, host_path: &str) -> bool {
     probe(&policy, std::path::Path::new(host_path))
 }
 
+/// The workspace root that classified a path: the host path with its
+/// workspace-relative tail removed.
+fn workspace_root_of(
+    host_path: &std::path::Path,
+    workspace_path: Option<&str>,
+) -> Option<std::path::PathBuf> {
+    let tail = std::path::Path::new(workspace_path?).components().count();
+    let keep = host_path.components().count().checked_sub(tail)?;
+    Some(host_path.components().take(keep).collect())
+}
+
 pub(super) fn default_guard(
     policy: &ToolApprovalPolicy,
     ctx: &EvaluationContext,
@@ -148,10 +159,15 @@ pub(super) fn default_guard(
             // A read-only session mount nested in the workspace wins over it.
             if !is_read_side(ctx.side_effect.as_deref(), ctx.tool_kind.as_deref()) {
                 if let Some(mount) = entry.host_path.as_deref().and_then(|host| {
-                    crate::agent_sessions::read_only_mount_overriding_anchor(
-                        &crate::stdlib::sandbox::paths::normalize_for_policy(std::path::Path::new(
-                            host,
-                        )),
+                    // The mount is the kernel's to hold when the child's own
+                    // profile refuses writes there, as for an external root.
+                    if child_cannot_write(ctx.side_effect.as_deref(), host) {
+                        return None;
+                    }
+                    let host_path = std::path::Path::new(host);
+                    crate::agent_sessions::read_only_mount_overriding_writable(
+                        &crate::stdlib::sandbox::paths::normalize_for_policy(host_path),
+                        workspace_root_of(host_path, entry.workspace_path.as_deref()).as_deref(),
                     )
                 }) {
                     return Some(Candidate {

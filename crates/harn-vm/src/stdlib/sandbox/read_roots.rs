@@ -45,6 +45,29 @@ pub(super) fn normalized_read_only_roots(policy: &CapabilityPolicy) -> Vec<PathB
     roots
 }
 
+/// The policy's named workspace roots, plus the writable mounts the host added
+/// to the session: a mount is part of the jail even when the policy names its
+/// roots explicitly.
+pub(super) fn declared_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = policy
+        .workspace_roots
+        .iter()
+        .map(|root| super::render_policy_root(root))
+        .collect();
+    for mounted in crate::agent_sessions::current_session_mounts() {
+        if matches!(
+            mounted.mount_mode,
+            crate::workspace_anchor::MountMode::Extend
+        ) {
+            let root = normalize_for_policy(&mounted.path);
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+    }
+    roots
+}
+
 pub(super) fn normalized_declared_read_only_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     for root in &policy.read_only_roots {

@@ -294,3 +294,50 @@ fn a_read_only_mount_inside_the_workspace_refuses_writes_at_the_boundary() {
     );
     crate::stdlib::process::set_thread_execution_context(None);
 }
+
+/// The execution workspace is a writable root of its own. A read-only mount
+/// nested in it must refuse writes even when the session anchor is elsewhere.
+#[test]
+fn a_read_only_mount_inside_the_execution_workspace_refuses_writes_off_anchor() {
+    use crate::workspace_anchor::{MountMode, WorkspaceAnchor};
+    crate::reset_thread_local_state();
+    let workspace = tempfile::tempdir().unwrap();
+    let anchor_dir = tempfile::tempdir().unwrap();
+    let ws = workspace.path().canonicalize().unwrap();
+    let vendor = ws.join("vendor");
+    std::fs::create_dir_all(&vendor).unwrap();
+    crate::stdlib::process::set_thread_execution_context(Some(
+        crate::orchestration::RunExecutionRecord {
+            cwd: Some(ws.to_string_lossy().into_owned()),
+            source_dir: Some(ws.to_string_lossy().into_owned()),
+            ..Default::default()
+        },
+    ));
+    let session = crate::agent_sessions::open_or_create_for_test(Some("nested-ro-c".to_string()));
+    let _current = crate::agent_sessions::enter_current_session(session.clone());
+    let anchor = WorkspaceAnchor {
+        primary: anchor_dir.path().canonicalize().unwrap(),
+        additional_roots: Vec::new(),
+        anchored_at: "0".to_string(),
+    };
+    crate::agent_sessions::set_workspace_anchor(&session, Some(anchor)).unwrap();
+    crate::agent_sessions::add_workspace_root(
+        &session,
+        &vendor.to_string_lossy(),
+        Some(MountMode::ReadOnly),
+        None,
+    )
+    .unwrap();
+    let policy = ToolApprovalPolicy::default();
+    let nested = vendor.join("f.txt").to_string_lossy().into_owned();
+    let write = evaluate_annotated(&policy, "write_file", ToolKind::Edit, &nested);
+    assert!(write.is_deny(), "off-anchor nested mount: {}", write.reason);
+    let beside = ws.join("a.txt").to_string_lossy().into_owned();
+    let other = evaluate_annotated(&policy, "write_file", ToolKind::Edit, &beside);
+    assert!(
+        other.is_allow(),
+        "the rest stays writable: {}",
+        other.reason
+    );
+    crate::stdlib::process::set_thread_execution_context(None);
+}

@@ -322,19 +322,27 @@ pub fn read_only_mount_overriding(
 }
 
 /// [`read_only_mount_overriding`] measured against the session's own writable
-/// roots: its primary anchor and `extend` mounts. `None` when the session has
-/// no anchor or no writable root covers `path`.
-pub fn read_only_mount_overriding_anchor(path: &std::path::Path) -> Option<std::path::PathBuf> {
-    let anchor = workspace_anchor(&current_session_id()?)?;
+/// roots (its primary anchor and `extend` mounts) and the execution workspace
+/// root that classified the path, which need not be the anchor. `None` when no
+/// writable root covers `path`.
+pub fn read_only_mount_overriding_writable(
+    path: &std::path::Path,
+    workspace_root: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
+    let anchor = workspace_anchor(&current_session_id()?);
     let normalize = crate::stdlib::sandbox::paths::normalize_for_policy;
-    let depth = std::iter::once(anchor.primary.clone())
-        .chain(
+    let anchor_roots = anchor.into_iter().flat_map(|anchor| {
+        std::iter::once(anchor.primary.clone()).chain(
             anchor
                 .additional_roots
                 .iter()
                 .filter(|m| matches!(m.mount_mode, crate::workspace_anchor::MountMode::Extend))
-                .map(|m| m.path.clone()),
+                .map(|m| m.path.clone())
+                .collect::<Vec<_>>(),
         )
+    });
+    let depth = anchor_roots
+        .chain(workspace_root.map(std::path::Path::to_path_buf))
         .map(|root| normalize(&root))
         .filter(|root| path.starts_with(root))
         .map(|root| root.components().count())
@@ -447,10 +455,89 @@ pub fn workspace_policy(id: &str) -> Option<WorkspacePolicy> {
     })
 }
 
+/// Refuse a `read_only` mount nested inside a writable root when the active
+/// policy's confined child would still be able to write it.
+///
+/// Landlock rules only add access, so a child keeps its parent root's write
+/// grant over the nested mount; the macOS profile re-denies it. A mount the
+/// kernel would not hold must not be reported as read-only. Only a measured
+/// `Writable` refuses: an unconfined or unmeasured child is left to the
+/// approval boundary, as for any other read-only root.
+fn refuse_unenforceable_nested_read_only(id: &str, root: &std::path::Path) -> Result<(), String> {
+    let Some(anchor) = workspace_anchor(id) else {
+        return Ok(());
+    };
+    // The probe reads the current session's mounts, so any other session's
+    // mount is unmeasured here and left to the approval boundary.
+    let mounted_read_only = anchor
+        .additional_roots
+        .iter()
+        .any(|entry| entry.path == root && matches!(entry.mount_mode, MountMode::ReadOnly));
+    if !mounted_read_only || current_session_id().as_deref() != Some(id) {
+        return Ok(());
+    }
+    let normalize = crate::stdlib::sandbox::paths::normalize_for_policy;
+    let nested = std::iter::once(&anchor.primary)
+        .chain(
+            anchor
+                .additional_roots
+                .iter()
+                .filter(|m| matches!(m.mount_mode, MountMode::Extend))
+                .map(|m| &m.path),
+        )
+        .map(|writable| normalize(writable))
+        .any(|writable| root != writable && root.starts_with(&writable));
+    let Some(policy) = crate::orchestration::current_execution_policy() else {
+        return Ok(());
+    };
+    if nested
+        && crate::stdlib::sandbox::child_write::child_write_disposition(&policy, root)
+            == crate::stdlib::sandbox::child_write::ChildWriteDisposition::Writable
+    {
+        return Err(format!(
+            "cannot mount '{}' read_only inside a writable root: this platform's sandbox cannot \
+             subtract write access from a nested path, so a command could still write it",
+            root.display()
+        ));
+    }
+    Ok(())
+}
+
 /// Validate and mount an additional workspace root on an anchored
 /// session. When the path is already mounted, updates its mount mode
 /// in place and refreshes its `mounted_at` timestamp.
 pub fn add_workspace_root(
+    id: &str,
+    root: &str,
+    mount_mode: Option<MountMode>,
+    reason: Option<String>,
+) -> Result<String, String> {
+    let normalized_root = validate_workspace_root_path(root)?;
+    let prior = workspace_anchor(id).and_then(|anchor| {
+        anchor
+            .additional_roots
+            .iter()
+            .find(|entry| entry.path == normalized_root)
+            .map(|entry| entry.mount_mode)
+    });
+    let mounted_at = mount_workspace_root(id, root, mount_mode, reason)?;
+    // The backend can only be asked about a mount that exists, since the
+    // mount is part of the profile it measures; undo it if it is not held.
+    if let Err(error) = refuse_unenforceable_nested_read_only(id, &normalized_root) {
+        match prior {
+            Some(mode) => {
+                mount_workspace_root(id, root, Some(mode), None)?;
+            }
+            None => {
+                remove_workspace_root(id, root)?;
+            }
+        }
+        return Err(error);
+    }
+    Ok(mounted_at)
+}
+
+fn mount_workspace_root(
     id: &str,
     root: &str,
     mount_mode: Option<MountMode>,
