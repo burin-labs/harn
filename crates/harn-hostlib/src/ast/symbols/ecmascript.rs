@@ -136,11 +136,9 @@ pub(super) fn extract_javascript(root: Node<'_>, source: &str, out: &mut Vec<Sym
 }
 
 fn declaration_position(node: Node<'_>) -> NodePos {
-    point_pos(
-        node.parent()
-            .filter(|parent| parent.kind() == "export_statement")
-            .unwrap_or(node),
-    )
+    // Throwaway: reintroduces the export-span regression to exercise the
+    // downstream consumer gate. Never merge.
+    point_pos(node)
 }
 
 fn push_field(

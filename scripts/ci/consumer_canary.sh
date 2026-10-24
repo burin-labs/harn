@@ -51,6 +51,8 @@
 #   REHEARSAL_PROMOTION_READ_TOKEN  scoped read authority for the prior attempt.
 #   CANARY_PULL_REQUEST_CLI_RUN, CANARY_PULL_REQUEST_BASE  optional: the CI run
 #                      that built a pull request's CLI, and that pull request's base.
+#   CANARY_PULL_REQUEST_CLI_ARTIFACT  optional: harn-base-cli.tar.zst when that
+#                      run's base CLI is rehearsed at SOURCE_REVISION == the base.
 #   CANARY_RELEASE_PRODUCER_RUN_ID, CANARY_RELEASE_PRODUCER_RUN_ATTEMPT
 #                      optional current producer whose archives the consumer verifies.
 #   GH_TOKEN           may dispatch and read the consumer's workflow runs.
@@ -85,7 +87,34 @@ canary_fail() {
     CANARY_RUN_ID="$CANARY_RUN_ID" node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-observer-failure.mjs" "$1" || true
   fi
   canary_say "::error::CONSUMER_CANARY reason=$1${2:+ $2}"
+  # A refused dispatch has no failure receipt, so it names its reason here.
+  if [[ "${CANARY_DISPATCHING:-}" == true && -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "reason=$1" >> "$GITHUB_OUTPUT"
+  fi
   exit 1
+}
+
+# Records what CI status needs to compare two rehearsals without reading
+# consumer content: the run's head commit, a digest of its job names, and the
+# named reason an unmeasured attempt ended with. Nothing here is printed.
+canary_record() {
+  local repo=${CANARY_REPOSITORY:-} run_id=${CANARY_RECORD_RUN:-} receipt=${CANARY_FAILURE_RECEIPT:-}
+  local reason=${CANARY_DISPATCH_REASON:-} head='' jobs digest=''
+  [[ -n "${GITHUB_OUTPUT:-}" ]] || { echo '::error::CONSUMER_CANARY reason=record_output_unset'; exit 1; }
+  if [[ -z "$reason" && -n "$receipt" && -f "$receipt" ]]; then
+    reason=$(jq -r '.reason // empty' "$receipt" 2> /dev/null || true)
+  fi
+  [[ "$reason" =~ ^[a-z_]*$ ]] || reason=failure_receipt_unreadable
+  if [[ "$repo" =~ ^[^/]+/[^/]+$ && "$run_id" =~ ^[1-9][0-9]*$ ]]; then
+    head=$(gh api "repos/$repo/actions/runs/$run_id" --jq .head_sha 2> /dev/null || true)
+    [[ "$head" =~ ^[0-9a-f]{40}$ ]] || head=''
+    if jobs=$(gh api --paginate "repos/$repo/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
+        --jq '.jobs[] | select(.conclusion != "skipped") | .name' 2> /dev/null) && [[ -n "$jobs" ]]; then
+      digest=$(LC_ALL=C sort <<< "$jobs" | sha256sum | cut -d' ' -f1)
+    fi
+  fi
+  printf 'consumer_head=%s\nconsumer_jobs=%s\nreason=%s\n' "$head" "$digest" "$reason" >> "$GITHUB_OUTPUT"
+  echo "CONSUMER_CANARY recorded run=${run_id:-none} head=${head:+measured} jobs=${digest:+measured} reason=${reason:-none}"
 }
 
 # The shared source selector owns pairing grammar. This legacy dispatcher
@@ -172,6 +201,16 @@ canary_dispatch() {
       || canary_fail pull_request_identity_invalid
     pull_request_inputs=(-f harn_cli_run="$CANARY_PULL_REQUEST_CLI_RUN" -f harn_base="$CANARY_PULL_REQUEST_BASE")
   fi
+  # The base rehearsal installs the CLI the same run built at the base.
+  case "${CANARY_PULL_REQUEST_CLI_ARTIFACT:-}" in
+    "") ;;
+    harn-base-cli.tar.zst)
+      [[ -n "${CANARY_PULL_REQUEST_CLI_RUN:-}" && "$revision" == "${CANARY_PULL_REQUEST_BASE:-}" ]] \
+        || canary_fail pull_request_identity_invalid
+      pull_request_inputs+=(-f harn_cli_artifact="$CANARY_PULL_REQUEST_CLI_ARTIFACT")
+      ;;
+    *) canary_fail pull_request_identity_invalid ;;
+  esac
   dispatched=$(gh workflow run "$workflow" -R "$repo" --ref "$ref" \
     -f target="$target_version" -f source_revision="$revision" -f legs=clean -f observer="$observer" \
     "${pull_request_inputs[@]}" "${producer_inputs[@]}" 2>&1) \
@@ -338,11 +377,13 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   case "${1:-}" in
     --decide) canary_decide ;;
     --dispatch)
+      CANARY_DISPATCHING=true
       canary_dispatch
       [[ -n "${GITHUB_OUTPUT:-}" ]] || canary_fail observation_output_unset
       printf 'run_id=%s\nstarted_at=%s\npaired_pull=%s\n' "$CANARY_RUN_ID" "$CANARY_STARTED_AT" "${CANARY_PAIRED_PULL:-}" >> "$GITHUB_OUTPUT"
       ;;
     --observe) canary_observe ;;
+    --record) canary_record ;;
     "") canary_main ;;
     *) canary_fail invocation_unrecognized ;;
   esac
