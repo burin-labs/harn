@@ -144,7 +144,12 @@ wasm-audit-imports: wasm-build
 
 # Browser tests are intentionally a real dedicated-worker path, not Node.
 wasm-test-browser: setup-wasm
-	@driver="$${HARN_CHROMEDRIVER:-$$(./scripts/resolve_chromedriver.sh)}"; \
+	@set -eu; driver="$${HARN_CHROMEDRIVER:-$$(./scripts/resolve_chromedriver.sh)}"; \
+	if [ -z "$${WASM_BINDGEN_TEST_WEBDRIVER_JSON:-}" ] && [ -n "$${HARN_CHROME_BIN:-}" ]; then \
+		capabilities="$$(mktemp)"; trap 'rm -f "$$capabilities"' EXIT; \
+		jq -n --arg binary "$$HARN_CHROME_BIN" '{"goog:chromeOptions": {binary: $$binary}}' > "$$capabilities"; \
+		export WASM_BINDGEN_TEST_WEBDRIVER_JSON="$$capabilities"; \
+	fi; \
 	cd crates/harn-wasm && "$(HARN_WASM_PACK)" test --headless --chrome --chromedriver "$$driver"
 
 wasm-check: check-wasm-wit wasm-build check-app-runtime wasm-audit-imports wasm-test-browser
