@@ -53,7 +53,7 @@ pipeline default(harness: Harness) {
   const arguments = searched.matches.filter({ row -> row.captures.argument?.text == "string" })
     .to_list()
   const comparisons = searched.matches.filter(
-    { row -> row.captures.comparison?.text.starts_with("1\n") ?? false },
+    { row -> (row.captures.comparison?.text ?? "").starts_with("1\n") },
   )
     .to_list()
   harness.stdio.println(len(negations) == 2 && len(arguments) == 2 && len(comparisons) == 1)
