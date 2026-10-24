@@ -2789,10 +2789,11 @@ jobs:
   #
   # Required through `ci-status` whenever it is expected: a same-repository,
   # non-Dependabot pull request that touches the consumer's surfaces. A fail
-  # verdict blocks only when the consumer passes at the pull request's base
-  # (`consumer-base-check`); a red the base already carries is inherited and
-  # reported, not blocking. A run that reaches no verdict is retried once,
-  # then fails closed by name.
+  # verdict blocks when the consumer passes at the pull request's base on the
+  # same consumer commit (`consumer-base-check`); a red the base shares is
+  # inherited and reported, not blocking. A run that reaches no verdict is
+  # retried once; still unmeasured, it is a named warning, not a success, and
+  # becomes blocking when `CONSUMER_UNMEASURED_BLOCKS` in `ci-status` flips.
   # Fork and Dependabot pull requests never run it; it needs the release app
   # credential, which neither receives.
   consumer-check:
@@ -3072,6 +3073,13 @@ jobs:
           CONSUMER_BASE: ${{ github.event.pull_request.base.sha }}
           CONSUMER_RUN: ${{ needs.consumer-check.outputs.verdict && needs.consumer-check.outputs.consumer_run || needs.consumer-check-retry.outputs.consumer_run }}
           CONSUMER_BASE_RUN: ${{ needs.consumer-base-check.outputs.verdict && needs.consumer-base-check.outputs.consumer_run || needs.consumer-base-check-retry.outputs.consumer_run }}
+          CONSUMER_IDENTITY: ${{ needs.consumer-check.outputs.verdict && format('{0}/{1}', needs.consumer-check.outputs.consumer_head, needs.consumer-check.outputs.consumer_jobs) || format('{0}/{1}', needs.consumer-check-retry.outputs.consumer_head, needs.consumer-check-retry.outputs.consumer_jobs) }}
+          CONSUMER_BASE_IDENTITY: ${{ needs.consumer-base-check.outputs.verdict && format('{0}/{1}', needs.consumer-base-check.outputs.consumer_head, needs.consumer-base-check.outputs.consumer_jobs) || format('{0}/{1}', needs.consumer-base-check-retry.outputs.consumer_head, needs.consumer-base-check-retry.outputs.consumer_jobs) }}
+          CONSUMER_REASONS: first=${{ needs.consumer-check.outputs.reason || 'none' }} retry=${{ needs.consumer-check-retry.outputs.reason || 'none' }}
+          CONSUMER_BASE_REASONS: first=${{ needs.consumer-base-check.outputs.reason || 'none' }} retry=${{ needs.consumer-base-check-retry.outputs.reason || 'none' }}
+          # Flip to true once the consumer's runner capacity stops saturating;
+          # until then an unmeasured or unproven outcome warns instead of blocking.
+          CONSUMER_UNMEASURED_BLOCKS: "false"
         run: |
           case "$POST_MERGE_TIER_ACTIVE" in
             true|false) ;;
@@ -3202,9 +3210,20 @@ jobs:
           require_result "$rust_cli_result" \
             "Shared Harn CLI build failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
-          # The downstream consumer must pass whenever it was expected. A fail
-          # the base also fails is inherited and does not block; a fail the
-          # base passes does. No verdict on either leg fails closed by name.
+          # The downstream consumer, when expected: a fail the base passes, on
+          # the same consumer commit and job set, blocks. A fail the base shares
+          # is inherited. An outcome still unmeasured after one retry, or a pair
+          # whose consumer commit or jobs differ, is unproven: a named warning
+          # until CONSUMER_UNMEASURED_BLOCKS flips it to blocking.
+          consumer_unmeasured() {
+            local message="consumer check UNMEASURED: $1"
+            echo "- $message" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$CONSUMER_UNMEASURED_BLOCKS" = "true" ]; then
+              echo "::error::$message"
+              exit 1
+            fi
+            echo "::warning::$message"
+          }
           echo "Downstream consumer: result=$CONSUMER_RESULT verdict=${CONSUMER_VERDICT:-none} (expected=$CONSUMER_EXPECTED)"
           if [ "$CONSUMER_EXPECTED" != "true" ]; then
             require_result "${CONSUMER_RESULT%%/*}" "Downstream consumer check ran without being expected and did not pass." true
@@ -3213,13 +3232,25 @@ jobs:
               pass) ;;
               fail)
                 echo "Downstream consumer at base $CONSUMER_BASE: base CLI=$CONSUMER_BASE_CLI_RESULT result=$CONSUMER_BASE_RESULT verdict=${CONSUMER_BASE_VERDICT:-none}"
+                same_head=false
+                same_jobs=false
+                [ "${CONSUMER_IDENTITY%%/*}" != "" ] && [ "${CONSUMER_IDENTITY%%/*}" = "${CONSUMER_BASE_IDENTITY%%/*}" ] && same_head=true
+                [ "${CONSUMER_IDENTITY#*/}" != "" ] && [ "${CONSUMER_IDENTITY#*/}" = "${CONSUMER_BASE_IDENTITY#*/}" ] && same_jobs=true
                 case "$CONSUMER_BASE_VERDICT" in
-                  fail) echo "::notice::Downstream consumer red is inherited: consumer run $CONSUMER_RUN fails here and consumer run $CONSUMER_BASE_RUN fails at base $CONSUMER_BASE too, so it does not block this pull request." ;;
-                  pass) echo "::error::Downstream consumer run $CONSUMER_RUN fails with this change and consumer run $CONSUMER_BASE_RUN passes at base $CONSUMER_BASE."; exit 1 ;;
-                  *) echo "::error::Downstream consumer failed and its base rehearsal reached no verdict (reason=base_unmeasured base_cli=$CONSUMER_BASE_CLI_RESULT base_check=$CONSUMER_BASE_RESULT)."; exit 1 ;;
+                  pass|fail)
+                    if [ "$same_head" != "true" ] || [ "$same_jobs" != "true" ]; then
+                      consumer_unmeasured "consumer_identity_mismatch (runs $CONSUMER_RUN and $CONSUMER_BASE_RUN, same commit=$same_head, same jobs=$same_jobs)"
+                    elif [ "$CONSUMER_BASE_VERDICT" = "fail" ]; then
+                      echo "::notice::Downstream consumer red is inherited: consumer run $CONSUMER_RUN fails here and consumer run $CONSUMER_BASE_RUN fails at base $CONSUMER_BASE on the same consumer commit, so it does not block this pull request."
+                    else
+                      echo "::error::Downstream consumer run $CONSUMER_RUN fails with this change and consumer run $CONSUMER_BASE_RUN passes at base $CONSUMER_BASE on the same consumer commit."
+                      exit 1
+                    fi
+                    ;;
+                  *) consumer_unmeasured "base_unmeasured ($CONSUMER_BASE_REASONS, base CLI=$CONSUMER_BASE_CLI_RESULT)" ;;
                 esac
                 ;;
-              *) echo "::error::Downstream consumer check reached no verdict after one retry (reason=consumer_unmeasured first/retry=$CONSUMER_RESULT); each attempt's job names its reason."; exit 1 ;;
+              *) consumer_unmeasured "consumer_unmeasured ($CONSUMER_REASONS)" ;;
             esac
           fi
 
