@@ -30,6 +30,7 @@ const CONTEXTUAL_VALUE_WORDS = [
   "deadline",
   "require",
   "emit",
+  "gen",
 ];
 
 module.exports = grammar({
@@ -60,6 +61,7 @@ module.exports = grammar({
     [$.typed_parameter, $.shape_field],
     [$.parallel_expression],
     [$.typed_parameter, $.type_annotation],
+    [$.type_arguments, $._type_argument_list],
     [$.shape_type],
     [$.select_block],
     [$.parallel_each_expression],
@@ -1268,7 +1270,9 @@ module.exports = grammar({
     // and line breaks between arguments (`Result<\n  Ok,\n  Err,\n>`).
     _type_argument_list: ($) =>
       seq(
-        "<",
+        // A closure parameter and a dictionary value share this prefix.
+        // Keep the generic-call token valid on the annotation branch too.
+        choice("<", token.immediate("<")),
         repeat(lineBreak($)),
         $.type_annotation,
         repeat(seq(",", repeat(lineBreak($)), $.type_annotation)),
