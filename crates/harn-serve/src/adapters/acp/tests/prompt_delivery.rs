@@ -176,23 +176,29 @@ pipeline default(harness: Harness, task: unknown) {{
     }
 
     async fn ticks_reach(&mut self, count: usize) {
-        for _ in 0..500 {
-            let ticks = std::fs::read_to_string(&self.ticks)
-                .map(|text| text.lines().count())
-                .unwrap_or(0);
-            if ticks >= count {
-                return;
-            }
-            while let Ok(line) = self.rx.try_recv() {
-                let message: serde_json::Value = serde_json::from_str(&line).expect("ACP JSON");
-                if message["method"] == "host/capabilities" {
-                    reply_empty_result(&self.tx, &message);
+        // Tick recording is a file write inside the VM, not an ACP message, so
+        // yield to the runtime (draining host callbacks) until the file shows
+        // the count; the hang ceiling fails a loop that never ticks.
+        let what = format!("the loop to reach {count} ticks");
+        harn_clock::test_support::within(&what, async {
+            loop {
+                let ticks = std::fs::read_to_string(&self.ticks)
+                    .map(|text| text.lines().count())
+                    .unwrap_or(0);
+                if ticks >= count {
+                    return;
                 }
-                self.seen.push(message);
+                while let Ok(line) = self.rx.try_recv() {
+                    let message: serde_json::Value = serde_json::from_str(&line).expect("ACP JSON");
+                    if message["method"] == "host/capabilities" {
+                        reply_empty_result(&self.tx, &message);
+                    }
+                    self.seen.push(message);
+                }
+                tokio::task::yield_now().await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        panic!("the loop never reached {count} ticks");
+        })
+        .await;
     }
 
     async fn state_update(&mut self, nth: usize, state: &str) -> (usize, serde_json::Value) {

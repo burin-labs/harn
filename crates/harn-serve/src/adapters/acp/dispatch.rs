@@ -13,7 +13,7 @@ impl AcpServer {
         preparation: PreparedSessionRequest,
     ) {
         if let PreparedSessionRequest::DrainPendingPrompts { session_id } = &preparation {
-            self.drain_pending_prompts(session_id).await;
+            Box::pin(self.drain_pending_prompts(session_id)).await;
             return;
         }
         if msg.get("method").is_none() && msg.get("id").is_some() {
@@ -190,10 +190,15 @@ impl AcpServer {
                     _ => None,
                 };
                 if params.get("delivery").is_some_and(|value| !value.is_null()) {
-                    self.handle_delivery_prompt(&id, &params).await;
+                    Box::pin(self.handle_delivery_prompt(&id, &params)).await;
                 } else {
-                    self.handle_session_prompt(&id, &params, cancellation, TurnReply::Response)
-                        .await;
+                    Box::pin(self.handle_session_prompt(
+                        &id,
+                        &params,
+                        cancellation,
+                        TurnReply::Response,
+                    ))
+                    .await;
                 }
             }
             "session/cancel" => {
