@@ -14,6 +14,7 @@
 #      head is in this repository, and every commit is GitHub-verified.
 #   2. Every changed file is one of three kinds. CHANGELOG.md gains lines and
 #      loses none. A changelog.d fragment is only deleted. Anything else must be
+#      edited in place (never added, removed, renamed or mode-changed) and
 #      version-only: once the old and new version strings are replaced by one
 #      token, the lines removed from the file equal the lines added to it. A new
 #      dependency, a changed checksum or a reordered table breaks that equality.
@@ -93,7 +94,8 @@ version_only() {
     .[]
     | select(.filename != "CHANGELOG.md" and (.filename | test("^changelog\\.d/[^/]+\\.md$") | not))
     | .filename as $f
-    | if (.patch // null) == null then "\($f): no textual patch"
+    | if .status != "modified" or (.previous_filename // null) != null then "\($f): status \(.status) is not an in-place edit"
+      elif (.patch // null) == null then "\($f): no textual patch"
       else
         (.patch | hunk_lines) as $l
         | [$l[] | select(startswith("-")) | .[1:] | norm] as $removed

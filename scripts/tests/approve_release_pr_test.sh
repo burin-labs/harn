@@ -114,6 +114,7 @@ changelog_rewrite() { edit files.json '.[0][3].patch += "\n-An old entry."'; }
 fragment_kept() { edit files.json '.[0][4].status = "modified"'; }
 changelog_no_patch() { edit files.json '.[0][3] |= del(.patch)'; }
 reordered_lines() { edit files.json '.[0][0].patch = "@@ -1,2 +1,2 @@\n-step_a\n-version = \"0.10.174-dev\"\n+version = \"0.10.174\"\n+step_a\n"'; }
+renamed_file() { edit files.json '.[0][0].status = "renamed" | .[0][0].previous_filename = "Cargo.old.toml"'; }
 thread_overflow() { edit review_state.json '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage = true'; }
 open_thread() { edit review_state.json '.data.repository.pullRequest.reviewThreads.nodes = [{isResolved: false}]'; }
 not_counted() { edit decision.json '.data.repository.pullRequest.reviewDecision = "REVIEW_REQUIRED"'; }
@@ -131,6 +132,7 @@ expect_refused changelog_rewrite 'removes lines'
 expect_refused fragment_kept 'not a deletion'
 expect_refused changelog_no_patch 'no textual patch'
 expect_refused reordered_lines 'changes more than the version'
+expect_refused renamed_file 'is not an in-place edit'
 expect_refused thread_overflow 'more threads than one page'
 expect_refused open_thread 'open review thread'
 expect_refused not_counted 'does not count' posted
