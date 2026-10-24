@@ -18,15 +18,17 @@ build = "build.rs"
 embed = ["dep:harn-vm", "dep:harn-runtime", "dep:harn-stdlib"]
 
 # Embedded bytecode is keyed by the complete builtin contract, which these
-# harn-vm families change. Select exactly the families the host's harn-vm
-# resolves to; each one reaches both harn-vm dependencies below, since
-# resolver v2 never unifies the build script's features with the host's.
+# families change. Select exactly the families the host's runtime resolves to;
+# each one reaches the build script's harn-vm and harn-runtime, since resolver
+# v2 never unifies the build script's features with the host's. Without the
+# harn-runtime half, the build script's compiler lacks the family's builtins
+# and skips every stdlib module that calls one.
 # `register` refuses a table whose contract differs from the running binary.
-full = ["harn-vm?/full"]
-postgres = ["harn-vm?/postgres"]
-sqlite = ["harn-vm?/sqlite"]
-content = ["harn-vm?/content"]
-compression = ["harn-vm?/compression"]
+full = ["harn-vm?/full", "harn-runtime?/full"]
+postgres = ["harn-vm?/postgres", "harn-runtime?/postgres"]
+sqlite = ["harn-vm?/sqlite", "harn-runtime?/sqlite"]
+content = ["harn-vm?/content", "harn-runtime?/content"]
+compression = ["harn-vm?/compression", "harn-runtime?/compression"]
 cloud-aws = ["harn-vm?/cloud-aws"]
 native-keyring = ["harn-vm?/native-keyring"]
 
