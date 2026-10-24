@@ -2387,9 +2387,9 @@ jobs:
           # handle the mounted target directory.
           CARGO_INCREMENTAL: "0"
         run: |
-          # Keep the broad workspace pass on production targets so unrelated
-          # dev-only dependencies cannot make this required lane brittle.
-          cross check --locked --workspace --target x86_64-pc-windows-gnu
+          # Include test targets: Windows-only test code (unused imports, items
+          # only a unix cfg reaches) otherwise first fails on native Windows.
+          cross check --locked --workspace --tests --target x86_64-pc-windows-gnu
           # harn-serve's hostlib-enabled tests exercise the platform process
           # boundary used by ACP cancellation. Compile that focused test surface
           # here because a missing Unix cfg once reached main and was detected
