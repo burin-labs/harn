@@ -133,7 +133,7 @@ fn entry_path(entry: &VmValue, builtin: &str, index: usize) -> Result<String, Vm
             if !path.is_empty()
                 && !path.starts_with('/')
                 && !path.contains('\\')
-                && !path.as_bytes().get(1).is_some_and(|b| *b == b':')
+                && path.as_bytes().get(1).is_none_or(|b| *b != b':')
                 && path.split('/').all(|part| part != "..") =>
         {
             Ok(path.to_string())
