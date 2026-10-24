@@ -45,7 +45,7 @@ fn positioned_seed_selection_is_exact_while_other_refactors_keep_legacy_paths() 
     };
     assert_eq!(candidates.len(), 2);
     let offset = source.rfind("load").unwrap();
-    let col = source[..offset].encode_utf16().count() as u32 + 1;
+    let col = source.get(..offset).unwrap().encode_utf16().count() as u32 + 1;
     let SeedLookup::One(selected) = resolve_seed_selected(
         &state.symbols,
         "a.ts",

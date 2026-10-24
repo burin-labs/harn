@@ -794,7 +794,7 @@ mod selector_tests {
             let source = format!("/* 🦀 */ {declaration}\n");
             for name in names {
                 let at = source.find(name).unwrap();
-                let col = source[..at].encode_utf16().count() as u32 + 1;
+                let col = source.get(..at).unwrap().encode_utf16().count() as u32 + 1;
                 assert_ne!(col, at as u32 + 1);
                 assert_eq!(
                     declaration_offset(&source, Language::TypeScript, name, 1, col, None),
@@ -828,7 +828,7 @@ mod selector_tests {
     fn exact_column_keeps_same_line_method_selectors_on_the_selected_declaration() {
         let source = "/* 🦀 */ class First { load() {} } class Second { load() {} }";
         let second = source.rfind("load").unwrap();
-        let col = source[..second].encode_utf16().count() as u32 + 1;
+        let col = source.get(..second).unwrap().encode_utf16().count() as u32 + 1;
         assert_ne!(col, second as u32 + 1);
         assert_eq!(
             declaration_offset(source, Language::TypeScript, "load", 1, col, Some("Second")),

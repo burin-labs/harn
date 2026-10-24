@@ -64,7 +64,7 @@ fn registered_positioned_rename_selects_exact_declarations_and_refuses_wrong_con
         let mut registry = BuiltinRegistry::new();
         capability.register_builtins(&mut registry);
         let offset = source.find("load").unwrap();
-        let col = source[..offset].encode_utf16().count() as i64 + 1;
+        let col = source.get(..offset).unwrap().encode_utf16().count() as i64 + 1;
         let request = |name: &str, path: &str, column: i64| {
             dict(&[
                 (

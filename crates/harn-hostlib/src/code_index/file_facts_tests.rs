@@ -203,7 +203,7 @@ fn plain_enum_cases_keep_their_actual_utf16_name_positions() {
     let (state, _) = IndexState::build_from_root(dir.path());
     for name in ["Ready", "Done"] {
         let offset = source.find(name).unwrap();
-        let col = source[..offset].encode_utf16().count() as i64 + 1;
+        let col = source.get(..offset).unwrap().encode_utf16().count() as i64 + 1;
         assert_ne!(col, offset as i64 + 1);
         let rows = execute(
             &format!("MATCH (d) WHERE d.name = '{name}' AND d.kind = 'EnumCase' RETURN d.line AS line, d.col AS col, d.qualified_name AS qualified"),
@@ -246,7 +246,7 @@ fn non_java_name_positions_and_aliases_survive_query_and_snapshot_projection() {
             ("First", source.find("load").unwrap()),
             ("Second", source.rfind("load").unwrap()),
         ] {
-            let col = source[..offset].encode_utf16().count() as i64 + 1;
+            let col = source.get(..offset).unwrap().encode_utf16().count() as i64 + 1;
             assert_ne!(col, offset as i64 + 1);
             let alias = format!("{owner}.load");
             let rows = execute(
