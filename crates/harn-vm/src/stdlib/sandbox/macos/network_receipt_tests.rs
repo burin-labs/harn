@@ -2,6 +2,88 @@ use super::*;
 use crate::stdlib::sandbox::{ProcessSandboxDenialReporting, ProcessSandboxNetwork};
 
 #[test]
+fn self_confined_child_reports_inherited_network_with_an_active_policy() {
+    use crate::process_sandbox::confine_current_process;
+    use crate::stdlib::sandbox::ProcessSandboxReportingContext;
+
+    const CHILD_WORKSPACE: &str = "HARN_NETWORK_RECEIPT_CONFINED_CHILD";
+    const RESULT_PREFIX: &str = "INHERITED_NETWORK_RECEIPT ";
+    if let Some(workspace) = std::env::var_os(CHILD_WORKSPACE) {
+        let mut outer = macos_policy_with_workspace_ops(&[]);
+        outer.workspace_roots = vec![std::path::PathBuf::from(workspace).display().to_string()];
+        outer.side_effect_level = Some("process_exec".into());
+        confine_current_process(&outer).expect("confine the test child");
+        assert!(super::super::nested::outer_denies("network-outbound", None));
+        let mut requested = outer;
+        requested.side_effect_level = Some("network".into());
+        crate::orchestration::push_execution_policy(requested.clone());
+        let context = ProcessSandboxReportingContext::current();
+        assert!(context.policy.is_some());
+        assert_eq!(context.network, ProcessSandboxNetwork::Inherited);
+        let output = Backend::run_to_output(
+            "/bin/echo",
+            &strings(["inherited-command-reached"]),
+            &ProcessCommandConfig::default(),
+            &requested,
+            SandboxProfile::Worktree,
+        )
+        .expect("spawn under the inherited profile");
+        crate::orchestration::pop_execution_policy();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"inherited-command-reached\n");
+        println!(
+            "{RESULT_PREFIX}{}",
+            serde_json::to_value(context.report()).unwrap()
+        );
+        return;
+    }
+
+    let workspace = tempfile::tempdir().expect("workspace");
+    let mut policy = macos_policy_with_workspace_ops(&[]);
+    policy.workspace_roots = vec![workspace.path().display().to_string()];
+    let availability = Backend::run_to_output(
+        "/usr/bin/true",
+        &[],
+        &ProcessCommandConfig::default(),
+        &policy,
+        SandboxProfile::Worktree,
+    );
+    if crate::sandbox_host::assert_unavailable_result(&availability) {
+        eprintln!("inherited network receipt not_measured: host process confinement unavailable");
+        return;
+    }
+    assert!(availability
+        .expect("sandboxed host control")
+        .status
+        .success());
+    let output = Command::new(std::env::current_exe().expect("test binary"))
+        .args([
+            "stdlib::sandbox::macos::tests::network_receipt::self_confined_child_reports_inherited_network_with_an_active_policy",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD_WORKSPACE, workspace.path())
+        .current_dir(workspace.path())
+        .output()
+        .expect("run the isolated confinement case");
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).expect("child stdout");
+    let report: serde_json::Value = serde_json::from_str(
+        stdout
+            .lines()
+            .find_map(|line| line.strip_prefix(RESULT_PREFIX))
+            .expect("actual child receipt"),
+    )
+    .expect("child receipt JSON");
+    assert_eq!(
+        report["network"],
+        serde_json::json!({"status": "inherited"})
+    );
+    assert_eq!(report["enforced"], true);
+}
+
+#[test]
 fn network_receipt_matches_the_rendered_process_grant() {
     let proxy = crate::orchestration::ProcessNetworkProxy {
         http_port: 3128,

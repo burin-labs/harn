@@ -27,6 +27,7 @@ impl ProcessSandboxNetwork {
     ) -> Self {
         match (reporting, policy) {
             (ProcessSandboxDenialReporting::BackendUnavailable, _) => Self::Unavailable,
+            (ProcessSandboxDenialReporting::InferredOnly, _) if inherited => Self::Inherited,
             (ProcessSandboxDenialReporting::InferredOnly, Some(policy)) => {
                 let grant = super::super::policy::ProcessNetworkGrant::for_policy(policy);
                 Self::Policy {
@@ -35,7 +36,6 @@ impl ProcessSandboxNetwork {
                     managed_proxy: grant.managed_proxy(),
                 }
             }
-            (ProcessSandboxDenialReporting::InferredOnly, None) if inherited => Self::Inherited,
             _ => Self::Unknown,
         }
     }
@@ -76,6 +76,37 @@ mod tests {
         let policy = CapabilityPolicy::default();
         assert_eq!(
             ProcessSandboxNetwork::capture(BackendUnavailable, Some(&policy), false),
+            ProcessSandboxNetwork::Unavailable,
+        );
+    }
+
+    #[test]
+    fn inherited_confinement_does_not_claim_the_active_policy_grants() {
+        let policy = CapabilityPolicy {
+            side_effect_level: Some("network".into()),
+            ..CapabilityPolicy::default()
+        };
+        let reporting = ProcessSandboxDenialReporting::InferredOnly;
+        assert_eq!(
+            ProcessSandboxNetwork::capture(reporting, Some(&policy), false),
+            ProcessSandboxNetwork::Policy {
+                direct_network: true,
+                tcp_loopback: true,
+                managed_proxy: false,
+            },
+        );
+        let inherited = ProcessSandboxNetwork::capture(reporting, Some(&policy), true);
+        assert_eq!(inherited, ProcessSandboxNetwork::Inherited);
+        assert_eq!(
+            serde_json::to_value(inherited).unwrap(),
+            serde_json::json!({"status": "inherited"}),
+        );
+        assert_eq!(
+            ProcessSandboxNetwork::capture(
+                ProcessSandboxDenialReporting::BackendUnavailable,
+                Some(&policy),
+                true,
+            ),
             ProcessSandboxNetwork::Unavailable,
         );
     }
