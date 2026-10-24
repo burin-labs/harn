@@ -14,6 +14,9 @@ pub fn force_link() {
 
 #[cfg(test)]
 mod tests {
+    /// One builtin from each family crate outside `harn-vm`.
+    const OWNED_ELSEWHERE: &[&str] = &["flow_invariant_allow"];
+
     #[test]
     fn every_family_crate_contributes_its_builtins() {
         super::force_link();
@@ -21,9 +24,9 @@ mod tests {
             .iter()
             .map(|entry| entry.name)
             .collect();
-        for owned_elsewhere in ["flow_invariant_allow"] {
+        for owned_elsewhere in OWNED_ELSEWHERE {
             assert!(
-                names.contains(&owned_elsewhere),
+                names.contains(owned_elsewhere),
                 "`{owned_elsewhere}` is missing: its family crate was not linked"
             );
         }
