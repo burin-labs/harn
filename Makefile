@@ -100,7 +100,7 @@ setup-wasm:
 	fi
 
 setup-wasm-tools:
-	@if [ ! -x "$(HARN_WASM_TOOLS)" ] || [ "$$($(HARN_WASM_TOOLS) --version)" != "wasm-tools $(HARN_WASM_TOOLS_VERSION)" ]; then \
+	@if [ ! -x "$(HARN_WASM_TOOLS)" ] || [ "$$($(HARN_WASM_TOOLS) --version | awk '{print $$1, $$2}')" != "wasm-tools $(HARN_WASM_TOOLS_VERSION)" ]; then \
 		cargo install --locked --root "$(HARN_WASM_COMPONENT_TOOLS_DIR)" --version "=$(HARN_WASM_TOOLS_VERSION)" wasm-tools; \
 	fi
 

@@ -43,6 +43,26 @@ fn is_filter_nil_value(value: &RuntimeValue) -> bool {
 }
 
 impl Machine<'_> {
+    pub(super) fn catch_builtin_error(
+        &mut self,
+        frames: &mut Vec<Frame>,
+        error: Diagnostic,
+    ) -> Result<(), Diagnostic> {
+        let value = RuntimeValue::String(Arc::from(format!("Runtime error: {}", error.message)));
+        self.charge_value_work(&value)?;
+        if handle_throw(
+            frames,
+            RuntimeException {
+                value,
+                declared: false,
+            },
+        ) {
+            Ok(())
+        } else {
+            Err(error)
+        }
+    }
+
     pub(super) fn call_builtin(&mut self, name: &str, args: Vec<RuntimeValue>) -> OpStep {
         if let Err(diagnostic) = self.charge_call_validation(&args) {
             return OpStep::Error(diagnostic);

@@ -602,20 +602,7 @@ impl<'a> Machine<'a> {
                     }
                 }
                 OpStep::RuntimeError(error) => {
-                    let value = RuntimeValue::String(Arc::from(format!(
-                        "Runtime error: {}",
-                        error.message
-                    )));
-                    if let Err(limit) = self.charge_value_work(&value) {
-                        return Step::Error(limit);
-                    }
-                    if !handle_throw(
-                        frames,
-                        RuntimeException {
-                            value,
-                            declared: false,
-                        },
-                    ) {
+                    if let Err(error) = self.catch_builtin_error(frames, error) {
                         return Step::Error(error);
                     }
                 }
