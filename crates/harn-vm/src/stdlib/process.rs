@@ -103,6 +103,8 @@ pub(crate) fn reset_process_state() {
     set_thread_execution_context(None);
 }
 
+harn_vm_core::stdlib_state_reset!(reset_process_state);
+
 /// The form of `path` a child process can actually be started in.
 ///
 /// Canonicalizing a path on Windows yields the extended-length `\\?\C:\...`

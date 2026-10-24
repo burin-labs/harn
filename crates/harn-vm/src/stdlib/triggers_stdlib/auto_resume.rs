@@ -135,6 +135,8 @@ pub(crate) fn reset_auto_resume_timeouts() {
     }
 }
 
+harn_vm_core::stdlib_state_reset!(reset_auto_resume_timeouts);
+
 fn sanitize_auto_resume_id(worker_id: &str) -> String {
     worker_id
         .chars()

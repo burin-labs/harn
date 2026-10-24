@@ -61,6 +61,8 @@ pub(crate) fn reset_compaction_state() {
     reset_registry();
 }
 
+harn_vm_core::stdlib_state_reset!(reset_compaction_state);
+
 // ---------------------------------------------------------------------------
 // compaction.policy
 // ---------------------------------------------------------------------------

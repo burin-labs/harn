@@ -32,8 +32,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
-use std::io;
-use std::io::Write as _;
+use std::io::{self, Write as _};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -216,6 +215,7 @@ pub(crate) enum SandboxFallback {
 pub(crate) fn reset_sandbox_state() {
     WARNED_KEYS.with(|keys| keys.borrow_mut().clear());
 }
+harn_vm_core::stdlib_state_reset!(reset_sandbox_state);
 
 /// A workspace-root scope violation: a path that resolved outside every
 /// configured workspace root under a restricted [`SandboxProfile`].

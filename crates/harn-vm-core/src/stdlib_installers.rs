@@ -9,6 +9,9 @@
 //! No two installers may register the same builtin name or capability method.
 //! That makes installation order irrelevant, so installers run sorted by name
 //! and a family cannot silently replace another family's handler.
+//!
+//! A family that keeps thread-local state declares its reset the same way,
+//! with [`stdlib_state_reset!`](crate::stdlib_state_reset).
 
 use crate::vm::Vm;
 
@@ -102,6 +105,83 @@ macro_rules! stdlib_installer {
                     tier: $crate::stdlib_installers::StdlibTier::$tier,
                     rebinds_execution_state: $rebinds,
                     install: $install,
+                };
+        };
+    };
+}
+
+/// Define a family's installer as "register every `#[harn_builtin]` declared
+/// in this module", and declare it.
+///
+/// ```ignore
+/// harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_math_builtins);
+/// ```
+#[macro_export]
+macro_rules! stdlib_module_installer {
+    ($(#[$attr:meta])* $tier:ident, $vis:vis fn $install:ident $(, $flag:ident)?) => {
+        $(#[$attr])*
+        $vis fn $install(vm: &mut $crate::vm::Vm) {
+            $crate::builtin_support::register_module_builtins(vm, module_path!());
+        }
+        $crate::stdlib_installer!($tier, $install $(, $flag)?);
+    };
+}
+
+/// A family's thread-local state reset, run between test runs and host
+/// sessions by [`reset_stdlib_state`].
+#[derive(Debug)]
+pub struct StdlibStateReset {
+    /// Unique identity: the declaring module path and reset function.
+    pub name: &'static str,
+    pub reset: fn(),
+}
+
+/// Every linked state reset contributes one entry.
+#[linkme::distributed_slice]
+pub static STDLIB_STATE_RESETS: [StdlibStateReset];
+
+/// Run every linked state reset, sorted by name.
+///
+/// # Panics
+/// Panics if two resets share a name.
+pub fn reset_stdlib_state() {
+    use std::sync::OnceLock;
+
+    static ORDERED: OnceLock<Vec<&'static StdlibStateReset>> = OnceLock::new();
+    let resets = ORDERED.get_or_init(|| {
+        let mut resets: Vec<_> = STDLIB_STATE_RESETS.iter().collect();
+        resets.sort_by_key(|reset| reset.name);
+        for pair in resets.windows(2) {
+            assert_ne!(
+                pair[0].name, pair[1].name,
+                "stdlib state reset `{}` is declared twice",
+                pair[0].name
+            );
+        }
+        resets
+    });
+    for reset in resets {
+        (reset.reset)();
+    }
+}
+
+/// Declare a function that resets a family's thread-local state.
+///
+/// ```ignore
+/// harn_vm_core::stdlib_state_reset!(reset_timing_state);
+/// ```
+#[macro_export]
+macro_rules! stdlib_state_reset {
+    ($reset:path) => {
+        const _: () = {
+            #[$crate::builtin_support::distributed_slice(
+                $crate::stdlib_installers::STDLIB_STATE_RESETS
+            )]
+            #[linkme(crate = $crate::builtin_support::linkme)]
+            static RESET: $crate::stdlib_installers::StdlibStateReset =
+                $crate::stdlib_installers::StdlibStateReset {
+                    name: concat!(module_path!(), "::", stringify!($reset)),
+                    reset: $reset,
                 };
         };
     };

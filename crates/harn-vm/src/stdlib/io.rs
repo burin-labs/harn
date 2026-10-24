@@ -123,6 +123,8 @@ pub(crate) fn reset_io_state() {
     COLOR_MODE.with(|m| *m.borrow_mut() = ColorMode::Auto);
 }
 
+harn_vm_core::stdlib_state_reset!(reset_io_state);
+
 /// Enable or disable direct stdout writes for CLI-style runs.
 ///
 /// The VM normally captures stdout in-memory so tests and embedding callers

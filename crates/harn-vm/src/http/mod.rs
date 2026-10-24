@@ -204,6 +204,8 @@ pub fn reset_http_state() {
     HTTP_SERVERS.with(|servers| servers.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_http_state);
+
 pub(super) fn vm_error(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::string(message.into()))
 }

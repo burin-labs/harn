@@ -667,6 +667,8 @@ pub(crate) fn reset_git_state() {
     WARNED_GIT_FAILURES.with(|keys| keys.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_git_state);
+
 async fn planned_or_noop_receipt(
     operation: &'static str,
     action: &'static str,

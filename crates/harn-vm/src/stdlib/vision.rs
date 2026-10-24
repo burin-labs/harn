@@ -214,6 +214,8 @@ pub(crate) fn reset_vision_state() {
     });
 }
 
+harn_vm_core::stdlib_state_reset!(reset_vision_state);
+
 #[cfg(test)]
 fn install_test_backend(backend: Arc<dyn OcrBackend>) {
     OCR_BACKEND_OVERRIDE.with(|slot| {

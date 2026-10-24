@@ -15,7 +15,6 @@ use crate::clock_mock;
 use crate::stdlib::macros::harn_builtin;
 use crate::testbench::tape::{self as tape, ClockSource, TapeRecordKind};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 static MONOTONIC_START: OnceLock<Instant> = OnceLock::new();
 
@@ -141,6 +140,8 @@ pub(crate) fn reset_clock_state() {
     clock_mock::clear_overrides();
 }
 
+harn_vm_core::stdlib_state_reset!(reset_clock_state);
+
 /// RAII guard that installs a clock mock for the lifetime of the
 /// guard and restores the previous state on drop. Use from Rust-side tests
 /// that exercise builtins (`elapsed`, `now_ms`, `timestamp`, `sleep_ms`)
@@ -180,11 +181,7 @@ impl MockClockGuard {
     }
 }
 
-pub(crate) fn register_clock_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
-
-harn_vm_core::stdlib_installer!(Host, register_clock_builtins);
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_clock_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",

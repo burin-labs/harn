@@ -433,9 +433,10 @@ pub fn exposure_is_source_nameable(exposure: harn_builtin_meta::BuiltinExposure)
     }
 }
 
-/// Reset thread-local stdlib state. Call between test runs.
+/// Reset thread-local stdlib state. Call between test runs. Each family
+/// declares its reset with `harn_vm_core::stdlib_state_reset!`.
 ///
-/// Note: `long_running::reset_state()` is intentionally NOT called here
+/// `long_running::reset_state()` is intentionally not declared
 /// because that store is process-global, not thread-local. Wiping it
 /// from a per-test reset hook lets one test cancel another test's
 /// in-flight worker thread (and lose its `agent_inbox::push`
@@ -446,45 +447,7 @@ pub fn exposure_is_source_nameable(exposure: harn_builtin_meta::BuiltinExposure)
 /// `long_running::reset_state()` explicitly while holding
 /// `LONG_RUNNING_TEST_LOCK`.
 pub fn reset_stdlib_state() {
-    logging::reset_logging_state();
-    process::reset_process_state();
-    clock::reset_clock_state();
-    io::reset_io_state();
-    sandbox::reset_sandbox_state();
-    git::reset_git_state();
-    fs::reset_fs_state();
-    json::reset_json_state();
-    json_stream::reset_json_stream_state();
-    host::reset_host_state();
-    host::reset_scoped_host_state();
-    observability::reset_observability_state();
-    timing::reset_timing_state();
-    durable_step::reset_durable_step_state();
-    crate::egress::reset_egress_policy_for_host();
-    hitl::reset_hitl_state();
-    crate::http::reset_http_state();
-    crate::external_agent::reset_external_agent_state();
-    monitors::reset_monitor_state();
-    waitpoint::reset_waitpoint_state();
-    triggers_stdlib::reset_auto_resume_timeouts();
-    compaction::reset_compaction_state();
-    agents::reset_agent_worker_state();
-    agents::workflow::reset_workflow_run_states();
-    pool::reset_pool_state();
-    #[cfg(feature = "postgres")]
-    postgres::reset_postgres_state();
-    #[cfg(feature = "sqlite")]
-    sqlite::reset_sqlite_state();
-    supervisor::reset_supervisor_state();
-    agents::records::reset_eval_metrics();
-    agents::records::reset_friction_events();
-    tools::clear_current_tool_registry();
-    tools::clear_tool_synthesis_cache();
-    vision::reset_vision_state();
-    crate::skills::clear_current_skill_registry();
-    template::reset_prompt_registry();
-    crate::triggers::clear_webhook_intake_state();
-    crate::llm::cache::reset_in_process_cache_state();
+    harn_vm_core::stdlib_installers::reset_stdlib_state();
 }
 
 #[cfg(test)]
@@ -918,5 +881,23 @@ mod installer_tests {
                 "no linked installer for {tier:?}"
             );
         }
+    }
+
+    #[test]
+    fn state_resets_clear_family_state() {
+        let names: Vec<_> = harn_vm_core::stdlib_installers::STDLIB_STATE_RESETS
+            .iter()
+            .map(|reset| reset.name)
+            .collect();
+        assert!(
+            names
+                .iter()
+                .any(|name| name.ends_with("::reset_timing_state")),
+            "timing's state reset is not linked: {names:?}"
+        );
+        assert!(
+            names.iter().all(|name| !name.contains("long_running")),
+            "the process-global long-running store must not reset per test"
+        );
     }
 }

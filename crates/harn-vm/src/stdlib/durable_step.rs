@@ -53,6 +53,8 @@ pub(crate) fn reset_durable_step_state() {
     STEP_CALL_COUNTS.with(|counts| counts.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_durable_step_state);
+
 pub(crate) fn register_durable_step_builtins(vm: &mut Vm) {
     register_step_namespace(vm);
     crate::stdlib::macros::register_module_builtins(vm, module_path!());

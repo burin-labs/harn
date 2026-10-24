@@ -490,6 +490,8 @@ pub fn reset_egress_policy_for_host() {
     clear_ssrf_guard_requirement_for_host();
 }
 
+harn_vm_core::stdlib_state_reset!(reset_egress_policy_for_host);
+
 fn configured_policy() -> Option<ConfiguredPolicy> {
     with_state_read(|state| state.policy.clone())
 }
