@@ -35,7 +35,7 @@ fn vm_value_layout_budget() {
 }
 
 fn s(val: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(val))
+    VmValue::string(val)
 }
 
 fn i(val: i64) -> VmValue {
@@ -43,16 +43,11 @@ fn i(val: i64) -> VmValue {
 }
 
 fn list(items: Vec<VmValue>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(items))
+    VmValue::list(items)
 }
 
 fn dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
-    VmValue::dict(
-        pairs
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect::<crate::value::DictMap>(),
-    )
+    VmValue::dict(pairs.into_iter().map(|(k, v)| (k.to_string(), v)))
 }
 
 #[test]
@@ -657,7 +652,7 @@ fn char_offset_conversions_round_trip() {
 
 #[test]
 fn isolate_clone_uses_cow_for_nested_data_and_rejects_runtime_handles() {
-    let original = VmValue::dict([("nested", VmValue::List(Arc::new(vec![VmValue::Int(1)])))]);
+    let original = VmValue::dict([("nested", VmValue::list(vec![VmValue::Int(1)]))]);
     let seed = original.try_into_isolate_value().unwrap();
     let original = seed.instantiate();
     let mut cloned = seed.instantiate();
@@ -680,9 +675,7 @@ fn isolate_clone_uses_cow_for_nested_data_and_rejects_runtime_handles() {
 
     let handle = VmValue::dict([(
         "nested_handle",
-        VmValue::List(Arc::new(vec![VmValue::TaskHandle(HarnStr::from(
-            "task_fixture",
-        ))])),
+        VmValue::list(vec![VmValue::TaskHandle(HarnStr::from("task_fixture"))]),
     )]);
     assert!(handle.try_into_isolate_value().is_err());
 }

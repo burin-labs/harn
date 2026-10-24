@@ -123,27 +123,22 @@ pipeline main(harness: Harness, _: unknown) {{
             ))
         });
         let chunk = harn_vm::compile_source(&source).expect("source compiles");
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = harn_clock::test_support::current_thread_runtime();
         rt.block_on(async {
-            let local = tokio::task::LocalSet::new();
-            local
-                .run_until(async {
-                    let bridge = Arc::new(HostBridge::from_parts(
-                        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                        Arc::new(AtomicBool::new(false)),
-                        Arc::new(Mutex::new(())),
-                        1,
-                    ));
-                    harn_vm::llm::install_current_host_bridge(bridge);
-                    let mut vm = harn_vm::new_vm();
-                    harn_vm::register_vm_stdlib(&mut vm);
-                    let _ = vm.execute(&chunk).await;
-                    harn_vm::llm::clear_current_host_bridge();
-                })
-                .await;
+            harn_clock::test_support::with_local_tasks(async {
+                let bridge = Arc::new(HostBridge::from_parts(
+                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+                    Arc::new(AtomicBool::new(false)),
+                    Arc::new(Mutex::new(())),
+                    1,
+                ));
+                harn_vm::llm::install_current_host_bridge(bridge);
+                let mut vm = harn_vm::new_vm();
+                harn_vm::register_vm_stdlib(&mut vm);
+                let _ = vm.execute(&chunk).await;
+                harn_vm::llm::clear_current_host_bridge();
+            })
+            .await;
         });
     });
     let updates = sink.updates.lock().unwrap();

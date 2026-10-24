@@ -247,7 +247,7 @@ fn register_call_tool(
             tool_calls.fetch_add(1, Ordering::Relaxed);
 
             let call = VmValue::dict([
-                ("name", VmValue::String(arcstr::ArcStr::from(name.as_str()))),
+                ("name", VmValue::string(name.as_str())),
                 ("arguments", tool_args),
             ]);
 

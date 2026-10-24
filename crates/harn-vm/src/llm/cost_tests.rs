@@ -504,26 +504,17 @@ fn cache_savings_uses_catalog_cache_pricing() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
 
-    let savings = cache_savings_usd_for_provider(
+    let detail = pricing_detail_for_usage(
         "anthropic",
         "claude-sonnet-4-20250514",
         1000,
-        1000,
-        0,
         settlement_now(),
-        None,
-    );
+    )
+    .expect("catalog pricing");
+    let savings = cache_savings_usd_for_pricing(Some(&detail), false, 1000, 0, None);
     assert!((savings - 0.0027).abs() < 0.0000001);
 
-    let write_delta = cache_savings_usd_for_provider(
-        "anthropic",
-        "claude-sonnet-4-20250514",
-        1000,
-        0,
-        1000,
-        settlement_now(),
-        None,
-    );
+    let write_delta = cache_savings_usd_for_pricing(Some(&detail), false, 0, 1000, None);
     assert!((write_delta + 0.00075).abs() < 0.0000001);
 
     crate::llm_config::clear_user_overrides();

@@ -7,6 +7,7 @@
 //! that a routed `Unimplemented` becomes a real return value — never a
 //! removed builtin.
 
+use harn_vm::value::VmDictExt as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
@@ -79,28 +80,20 @@ fn collect_into_registry<C: HostlibCapability>(cap: C) -> BuiltinRegistry {
 }
 
 fn execute_harn(source: &str) -> Result<VmValue, VmError> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut lexer = Lexer::new(source);
-                let tokens = lexer.tokenize().expect("tokenize");
-                let mut parser = Parser::new(tokens);
-                let program = parser.parse().expect("parse");
-                let chunk = Compiler::new().compile(&program).expect("compile");
+    let rt = harn_clock::test_support::current_thread_runtime();
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().expect("tokenize");
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().expect("parse");
+        let chunk = Compiler::new().compile(&program).expect("compile");
 
-                let mut vm = harn_vm::new_vm();
-                register_vm_stdlib(&mut vm);
-                let _ = harn_hostlib::install_default(&mut vm);
-                vm.set_harness(harn_vm::Harness::real());
-                vm.execute(&chunk).await
-            })
-            .await
-    })
+        let mut vm = harn_vm::new_vm();
+        register_vm_stdlib(&mut vm);
+        let _ = harn_hostlib::install_default(&mut vm);
+        vm.set_harness(harn_vm::Harness::real());
+        vm.execute(&chunk).await
+    }))
 }
 
 fn sha256_label(bytes: &[u8]) -> String {
@@ -571,7 +564,7 @@ fn host_lease_capability_registers_scoped_lifecycle() {
         .find("hostlib_host_lease_status")
         .expect("registered");
     let mut request_fields = harn_vm::value::DictMap::new();
-    request_fields.insert("host".into(), VmValue::String("".into()));
+    request_fields.put("host", VmValue::String("".into()));
     let request = VmValue::Dict(request_fields.into());
     let error = (entry.handler)(&[request]).expect_err("an empty host is not a default");
     let rendered = error.to_string();

@@ -7,9 +7,7 @@ use super::*;
 /// (<https://agentclientprotocol.com/protocol/slash-commands>).
 #[tokio::test(flavor = "current_thread")]
 async fn acp_advertises_and_dispatches_slash_commands() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let dir = tempfile::tempdir().expect("tempdir");
             let pipeline_path = dir.path().join("commands.harn");
             std::fs::write(
@@ -105,8 +103,7 @@ async fn acp_advertises_and_dispatches_slash_commands() {
 
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 /// Unknown slash invocations (i.e. `/typo args` when `typo` isn't
@@ -115,9 +112,7 @@ async fn acp_advertises_and_dispatches_slash_commands() {
 /// handle the literal slash.
 #[tokio::test(flavor = "current_thread")]
 async fn acp_unknown_slash_invocation_falls_through_to_default_pipeline() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let dir = tempfile::tempdir().expect("tempdir");
             let pipeline_path = dir.path().join("fallthrough.harn");
             std::fs::write(
@@ -192,8 +187,7 @@ async fn acp_unknown_slash_invocation_falls_through_to_default_pipeline() {
 
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 /// Inline-prompt mode (no `--pipeline`) has no surface for
@@ -260,9 +254,7 @@ async fn acp_inline_mode_rejects_slash_invocations_with_friendly_error() {
 /// emitted (idempotent advertise).
 #[tokio::test(flavor = "current_thread")]
 async fn acp_reemits_available_commands_on_pipeline_hot_reload() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let dir = tempfile::tempdir().expect("tempdir");
             let pipeline_path = dir.path().join("hot.harn");
             std::fs::write(
@@ -366,8 +358,7 @@ async fn acp_reemits_available_commands_on_pipeline_hot_reload() {
 
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 /// Drive an agent loop through a real ACP roundtrip and return the complete
@@ -420,53 +411,43 @@ async fn run_acp_agent_loop_prompt(prompt_body: &str) -> serde_json::Value {
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_prompt_reports_end_turn_when_loop_finishes_naturally() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let body = "harness.llm.mock_clear()\n\
+    harn_clock::test_support::with_local_tasks(async {
+        let body = "harness.llm.mock_clear()\n\
                             harness.llm.mock_enqueue({text: \"all done\"})\n\
                             agent_loop(harness, \"hello\", nil, {provider: \"mock\"})";
-            let result = run_acp_agent_loop_prompt(body).await;
-            assert_eq!(result["stopReason"], "end_turn");
-            assert_eq!(result["_meta"]["harn"]["terminal"]["kind"], "natural");
-            assert_eq!(result["_meta"]["harn"]["terminal"]["owner"], "agent");
-        })
-        .await;
+        let result = run_acp_agent_loop_prompt(body).await;
+        assert_eq!(result["stopReason"], "end_turn");
+        assert_eq!(result["_meta"]["harn"]["terminal"]["kind"], "natural");
+        assert_eq!(result["_meta"]["harn"]["terminal"]["owner"], "agent");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_prompt_reports_max_tokens_from_provider_signal() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let body = "harness.llm.mock_clear()\n\
                             harness.llm.mock_enqueue({text: \"truncated\", stop_reason: \"max_tokens\"})\n\
                             agent_loop(harness, \"hello\", nil, {provider: \"mock\"})";
             let result = run_acp_agent_loop_prompt(body).await;
             assert_eq!(result["stopReason"], "max_tokens");
-        })
-        .await;
+        }).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_prompt_reports_refusal_from_provider_signal() {
-    let local = tokio::task::LocalSet::new();
-    local
-            .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
                 let body = "harness.llm.mock_clear()\n\
                             harness.llm.mock_enqueue({text: \"I cannot assist with that.\", stop_reason: \"refusal\"})\n\
                             agent_loop(harness, \"hello\", nil, {provider: \"mock\"})";
                 let result = run_acp_agent_loop_prompt(body).await;
                 assert_eq!(result["stopReason"], "refusal");
-            })
-            .await;
+            }).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_prompt_reports_max_turn_requests_when_iteration_cap_hit() {
-    let local = tokio::task::LocalSet::new();
-    local
-            .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
                 // `loop_until_done: true` keeps the loop iterating on a
                 // text-only mock turn, and `max_iterations: 1` forces
                 // the cap to fire on iteration 1 → ACP `max_turn_requests`.
@@ -484,6 +465,5 @@ async fn acp_session_prompt_reports_max_turn_requests_when_iteration_cap_hit() {
                         "owner": "policy",
                     })
                 );
-            })
-            .await;
+            }).await;
 }

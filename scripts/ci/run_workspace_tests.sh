@@ -14,6 +14,8 @@ partition=${1:?partition or all required}
 [[ "$partition" =~ ^(all|tooling|vm-unit:[1-3]/3|vm-integration|cli-unit|cli-integration|rest:[1-4]/4)$ ]] || { echo 'Invalid workspace test partition' >&2; exit 1; }
 group=${partition%%:*}
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+harn=(env "HARN_EXT_BOOTSTRAP_INSTALLER=${HARN_BIN:-${HARN_EXT_BOOTSTRAP_INSTALLER:-}}"
+  "$script_dir/../bootstrap-harn.sh" --seed-command run --standalone --no-sandbox)
 host_bound_filter=$(bash "$script_dir/host_bound_rust_test_filter.sh")
 filter="not (${host_bound_filter})"
 if [[ "$group" == tooling ]]; then
@@ -110,12 +112,12 @@ else
     build_evidence="$RUNNER_TEMP/workspace-build-evidence"
     mkdir "$build_evidence"
     [[ -z "${GITHUB_OUTPUT:-}" ]] || echo 'workspace-build-evidence=true' >> "$GITHUB_OUTPUT"
-    node "$script_dir/workspace_build_evidence.cjs" snapshot "$GITHUB_WORKSPACE/target" "$build_evidence/before.json"
+    "${harn[@]}" "$script_dir/workspace_build_evidence.harn" -- snapshot "$GITHUB_WORKSPACE/target" "$build_evidence/before.json"
     build_options=(--timings)
   fi
   cargo-nextest nextest list "${args[@]}" "${build_options[@]}" --message-format json > "$census"
   if [[ -n "$build_evidence" ]]; then
-    node "$script_dir/workspace_build_evidence.cjs" report "$GITHUB_WORKSPACE/target" \
+    "${harn[@]}" "$script_dir/workspace_build_evidence.harn" -- report "$GITHUB_WORKSPACE/target" \
       "$build_evidence/report.json" "$build_evidence/before.json" "$census"
     cp "$GITHUB_WORKSPACE/target/cargo-timings/cargo-timing.html" "$build_evidence/compile-timings.html"
   fi
@@ -123,7 +125,7 @@ fi
 if [[ -n "${RUNNER_TEMP:-}" ]]; then
   cp "$census" "$RUNNER_TEMP/harn-nextest-inventory.json"
 fi
-eligible=$(node "$script_dir/nextest_inventory.mjs" "$census")
+eligible=$("${harn[@]}" "$script_dir/nextest_inventory.harn" -- "$census")
 echo "Workspace tests: packages=$selected eligible=$eligible partition=$partition"
 if [[ "$partition" == all ]]; then
   cargo-nextest nextest run "${args[@]}" --no-tests fail

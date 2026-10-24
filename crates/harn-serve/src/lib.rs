@@ -89,7 +89,7 @@ pub use adapters::mcp::{
 };
 pub use adapters::site::{
     SiteAuth, SiteAuthContext, SiteAuthOutcome, SiteHttpServeOptions, SiteServer, SiteServerConfig,
-    SiteStreamProvider,
+    SiteServerReady, SiteStreamProvider,
 };
 pub use adapters::worker::{
     run_job_from_files, run_job_from_files_with_options, run_job_once, run_job_once_with,

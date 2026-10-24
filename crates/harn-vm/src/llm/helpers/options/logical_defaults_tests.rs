@@ -54,7 +54,7 @@ fn logical_defaults_flow_through_request_options_with_caller_precedence() {
         }
     );
 
-    options.insert(crate::value::intern_key("temperature"), VmValue::Float(0.2));
+    options.put("temperature", VmValue::Float(0.2));
     options.put_str("effort", "low");
     let explicit = extract(options.clone()).expect("caller overrides");
     assert_eq!(explicit.temperature, Some(0.2));
@@ -67,7 +67,7 @@ fn logical_defaults_flow_through_request_options_with_caller_precedence() {
     );
 
     options.remove("effort");
-    options.insert(crate::value::intern_key("thinking"), VmValue::Bool(false));
+    options.put_bool("thinking", false);
     let disabled = extract(options).expect("explicit disabled thinking");
     assert_eq!(disabled.thinking, ThinkingConfig::Disabled);
 
@@ -110,7 +110,7 @@ temperature_supported = false
         .contains(&crate::llm::capabilities::PortableOption::Temperature));
 
     let mut explicit = base;
-    explicit.insert(crate::value::intern_key("temperature"), VmValue::Float(1.0));
+    explicit.put("temperature", VmValue::Float(1.0));
     let error = extract(explicit).expect_err("caller intent must be admitted");
     assert!(
         error

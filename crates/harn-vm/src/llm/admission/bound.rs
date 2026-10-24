@@ -4,21 +4,31 @@ use rust_decimal::Decimal;
 
 use super::{error, money, DenialKind};
 use crate::llm::api::{LlmRequestPayload, LlmResult, PromptCacheTtl};
+use crate::llm::usage::{InputTokenBasis, PromptTokenCounts};
 use crate::value::VmError;
 
 pub(super) struct AttemptBound {
     catalog_id: String,
+    provider: String,
     input_limit: i64,
     output_limit: i64,
     input_rate: Decimal,
     output_rate: Decimal,
-    fresh_input_basis: bool,
+    input_basis: InputTokenBasis,
 }
 
 impl AttemptBound {
     pub(super) fn for_request(request: &LlmRequestPayload) -> Result<Self, VmError> {
-        let anthropic = request.provider == "anthropic";
-        if !(request.provider == "openai" || anthropic)
+        let input_basis = direct_token_contract(&request.provider).ok_or_else(|| {
+            error(
+                DenialKind::UnsupportedBillingShape,
+                "conservative admission requires a verified direct-provider token contract",
+            )
+        })?;
+        let anthropic = input_basis == InputTokenBasis::Fresh;
+        let newly_supported = matches!(request.provider.as_str(), "fireworks" | "groq");
+        if !super::direct_endpoint::verified(&request.provider)
+            || (newly_supported && request.api_mode != crate::llm::api::LlmApiMode::ChatCompletions)
             || request.fast
             || request
                 .reasoning_mode
@@ -63,6 +73,12 @@ impl AttemptBound {
                 })?;
         let row = crate::llm_config::model_catalog_entry(&catalog_id)
             .ok_or_else(|| error(DenialKind::UnknownPricing, "missing catalog model"))?;
+        if newly_supported && row.availability != crate::llm_config::ModelAvailability::Serverless {
+            return Err(error(
+                DenialKind::UnsupportedBillingShape,
+                "direct token admission requires a verified serverless route",
+            ));
+        }
         let input_limit = i64::try_from(
             row.context_window
                 .max(row.runtime_context_window.unwrap_or(0)),
@@ -120,11 +136,12 @@ impl AttemptBound {
         }
         Ok(Self {
             catalog_id,
+            provider: request.provider.clone(),
             input_limit,
             output_limit: request.max_tokens,
             input_rate,
             output_rate,
-            fresh_input_basis: anthropic,
+            input_basis,
         })
     }
 
@@ -138,8 +155,10 @@ impl AttemptBound {
     }
 
     pub(super) fn known_contract_violation(&self, result: &LlmResult) -> bool {
-        crate::llm_config::model_catalog_id_for_route(&result.provider, &result.model).as_deref()
-            != Some(self.catalog_id.as_str())
+        result.provider != self.provider
+            || crate::llm_config::model_catalog_id_for_route(&result.provider, &result.model)
+                .as_deref()
+                != Some(self.catalog_id.as_str())
             || result
                 .telemetry
                 .server_prompt_tokens
@@ -148,7 +167,8 @@ impl AttemptBound {
                 .telemetry
                 .server_output_tokens
                 .is_some_and(|output| output > self.output_limit)
-            || (self.fresh_input_basis && result.input_tokens > self.input_limit)
+            || (self.input_basis == InputTokenBasis::Fresh
+                && result.input_tokens > self.input_limit)
     }
 
     /// Settle at the conservative rates, without claiming a billing receipt or
@@ -158,19 +178,33 @@ impl AttemptBound {
         let input = result.telemetry.server_prompt_tokens?;
         let output = result.telemetry.server_output_tokens?;
         let route = crate::llm_config::model_catalog_id_for_route(&result.provider, &result.model)?;
-        if (result.provider != "openai" && result.provider != "anthropic")
+        if result.provider != self.provider
+            || direct_token_contract(&result.provider) != Some(self.input_basis)
             || route != self.catalog_id
             || result.served_fast
             || input < 0
             || output < 0
-            || (!self.fresh_input_basis && input != result.input_tokens)
+            || (self.input_basis == InputTokenBasis::Inclusive && input != result.input_tokens)
             || output != result.output_tokens
+            || (self.input_basis == InputTokenBasis::Inclusive
+                && PromptTokenCounts::from_reported(
+                    input,
+                    result.cache_read_tokens,
+                    result.cache_write_tokens,
+                    self.input_basis,
+                )
+                .is_err())
+            || (self.input_basis == InputTokenBasis::Inclusive
+                && result
+                    .telemetry
+                    .server_total_tokens
+                    .is_some_and(|total| input.checked_add(output) != Some(total)))
         {
             return None;
         }
         // Anthropic's wire counter is fresh input. Only complete, consistent
         // cache categories can release the unused input reservation.
-        let input_upper = if self.fresh_input_basis {
+        let input_upper = if self.input_basis == InputTokenBasis::Fresh {
             match result.telemetry.reported_cache_usage.as_deref() {
                 Some(cache) if cache.read_tokens.is_some() && cache.write_tokens.is_some() => {
                     let total = cache.complete_prompt_tokens(input)?;
@@ -191,6 +225,21 @@ impl AttemptBound {
             self.cost(input_upper, output),
             input_upper > self.input_limit || output > self.output_limit,
         ))
+    }
+}
+
+/// This is a billing contract, not an OpenAI-compatible wire-format test.
+/// Direct Fireworks and Groq chat endpoints report inclusive prompt/completion
+/// totals (including generated reasoning) and honor the explicit output bound:
+/// https://docs.fireworks.ai/api-reference/post-chatcompletions
+/// https://console.groq.com/docs/api-reference
+/// Aggregators, custom endpoints and provider-hosted tools need their own
+/// verified physical-attempt/rate contract before joining this allowlist.
+fn direct_token_contract(provider: &str) -> Option<InputTokenBasis> {
+    match provider {
+        "openai" | "fireworks" | "groq" => Some(InputTokenBasis::Inclusive),
+        "anthropic" => Some(InputTokenBasis::Fresh),
+        _ => None,
     }
 }
 

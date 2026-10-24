@@ -8,7 +8,7 @@ use harn_vm::VmValue;
 use tempfile::NamedTempFile;
 
 pub(crate) fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
+    VmValue::string(s)
 }
 
 /// A dict value from `(key, value)` pairs.

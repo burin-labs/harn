@@ -325,13 +325,52 @@ fn passwd_name() -> Option<String> {
     None
 }
 
-/// Snapshot of currently visible processes. The current Harn process is
-/// always included. Other processes are listed but with limited
-/// metadata — name, pid, cpu%, memory bytes, and an `is_harn_owned`
-/// flag derived from the parent pid match or the explicit
-/// [`register_harn_owned_pid`] registry. We do not return command line
-/// arguments, environment, or working directory: those can leak
-/// credentials and prompts from peer agents.
+#[cfg(unix)]
+fn current_parent_pid() -> Option<u32> {
+    u32::try_from(unsafe { libc::getppid() })
+        .ok()
+        .filter(|pid| *pid != 0)
+}
+
+#[cfg(windows)]
+fn current_parent_pid() -> Option<u32> {
+    let pid = Pid::from_u32(std::process::id());
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        false,
+        ProcessRefreshKind::nothing(),
+    );
+    system.process(pid)?.parent().map(|parent| parent.as_u32())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn current_parent_pid() -> Option<u32> {
+    None
+}
+
+/// Observe only this process's parent, without scanning peer arguments or environment.
+pub fn parent_process_snapshot() -> Value {
+    use crate::process_liveness::{process_identity, process_liveness, ProcessLiveness};
+
+    let parent = current_parent_pid();
+    let (state, identity) = match parent.map(process_liveness) {
+        Some(ProcessLiveness::Alive) => (
+            "alive",
+            parent.and_then(process_identity).map(|id| id.to_string()),
+        ),
+        Some(ProcessLiveness::Dead) => ("dead", None),
+        Some(ProcessLiveness::Unknown) | None => ("unknown", None),
+    };
+    let latest = current_parent_pid();
+    if latest != parent {
+        return json!({"pid": latest, "identity": null, "state": "unknown"});
+    }
+    json!({"pid": parent, "identity": identity, "state": state})
+}
+
+/// Snapshot of visible processes. Peer entries omit arguments, environment,
+/// and working directories. Ownership follows the parent or registration.
 pub fn processes_snapshot() -> Value {
     let mut sys = System::new();
     sys.refresh_processes_specifics(
@@ -430,6 +469,21 @@ fn bytes_to_gb(bytes: u64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn parent_process_snapshot_matches_the_native_parent() {
+        let parent = current_parent_pid().expect("test runner has a parent");
+        let snapshot = parent_process_snapshot();
+        assert_eq!(snapshot["pid"], parent);
+        assert_ne!(parent, std::process::id());
+        assert_eq!(snapshot["state"], "alive");
+        let identity = crate::process_liveness::process_identity(parent)
+            .expect("test runner parent has a native identity")
+            .to_string();
+        assert_eq!(snapshot["identity"], identity);
+        assert_eq!(snapshot.as_object().expect("closed record").len(), 3);
+    }
 
     #[test]
     fn cpu_snapshot_reports_nonzero_count() {

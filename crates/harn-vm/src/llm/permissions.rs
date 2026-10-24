@@ -1263,8 +1263,8 @@ fn permission_request_value(
     request.put(
         "grant_options",
         VmValue::list(vec![
-            VmValue::String(arcstr::ArcStr::from("once")),
-            VmValue::String(arcstr::ArcStr::from("session")),
+            VmValue::string("once"),
+            VmValue::string("session"),
             VmValue::Bool(false),
         ]),
     );

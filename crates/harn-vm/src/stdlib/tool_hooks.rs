@@ -204,11 +204,10 @@ fn validate_rule_dict(
     rule.put("pattern", pattern.clone());
     rule.put(
         "applies_to",
-        VmValue::list(
+        VmValue::strings(
             applies_to
                 .into_iter()
-                .map(|stack| VmValue::String(arcstr::ArcStr::from(stack.as_str())))
-                .collect(),
+                .map(|stack| crate::value::HarnStr::from(stack.as_str())),
         ),
     );
     rule.put_str("severity", severity.as_str());
@@ -460,8 +459,8 @@ pub(crate) fn register_tool_hooks_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "tool_rule(config: dict) -> dict", category = "tool_hooks"
+    sig = "tool_rule(config: dict) -> dict",
+    category = "tool_hooks"
 )]
 fn tool_rule_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let config = require_dict(
@@ -476,8 +475,8 @@ fn tool_rule_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "catalogue(config: dict) -> dict", category = "tool_hooks"
+    sig = "catalogue(config: dict) -> dict",
+    category = "tool_hooks"
 )]
 fn catalogue_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let config = require_dict(
@@ -866,9 +865,7 @@ fn tool_hooks_inject_reminder_impl(
     // ttl/propagate/role_hint semantics stay in lockstep with
     // `transcript.inject_reminder`. We pass the dict directly; the
     // helper applies the same protocol defaults.
-    let reminder = crate::llm::helpers::reminder_from_vm_value(&VmValue::Dict(
-        std::sync::Arc::new(options.clone()),
-    ));
+    let reminder = crate::llm::helpers::reminder_from_vm_value(&VmValue::dict_map(options.clone()));
     // Body cannot be empty from the helper either, since we already
     // validated above. Replace whatever the helper produced with the
     // validated body to keep one source of truth.

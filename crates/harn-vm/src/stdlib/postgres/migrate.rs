@@ -363,7 +363,7 @@ fn build_response(
     table_name: &str,
 ) -> VmValue {
     fn str_list(items: Vec<String>) -> VmValue {
-        VmValue::list(items.into_iter().map(VmValue::string).collect())
+        VmValue::strings(items)
     }
 
     let mut response = BTreeMap::new();

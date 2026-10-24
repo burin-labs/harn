@@ -770,14 +770,11 @@ mod tests {
 
     #[test]
     fn parse_string_rule_branches_on_shape() {
-        let domain =
-            parse::rule_from_vm(&VmValue::String(arcstr::ArcStr::from("github.com"))).unwrap();
+        let domain = parse::rule_from_vm(&VmValue::string("github.com")).unwrap();
         assert!(matches!(domain.matcher, NetMatcher::Host(_)));
-        let wildcard =
-            parse::rule_from_vm(&VmValue::String(arcstr::ArcStr::from("*.github.com"))).unwrap();
+        let wildcard = parse::rule_from_vm(&VmValue::string("*.github.com")).unwrap();
         assert!(matches!(wildcard.matcher, NetMatcher::Suffix(_)));
-        let cidr_rule =
-            parse::rule_from_vm(&VmValue::String(arcstr::ArcStr::from("10.0.0.0/8"))).unwrap();
+        let cidr_rule = parse::rule_from_vm(&VmValue::string("10.0.0.0/8")).unwrap();
         assert!(matches!(cidr_rule.matcher, NetMatcher::Cidr(_)));
     }
 

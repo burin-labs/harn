@@ -95,7 +95,6 @@ fn lifecycle_receipts_snapshot_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "verify_lifecycle_receipt_signature(kind: string, payload: dict) -> dict",
     category = "lifecycle_receipts"
 )]
@@ -115,7 +114,6 @@ fn verify_lifecycle_receipt_signature_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "lifecycle_resume_input_hash(input: any) -> string",
     category = "lifecycle_receipts"
 )]

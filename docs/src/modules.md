@@ -1545,6 +1545,16 @@ Stable event families: `system_prompt`, `context_manifest`, `tool_schemas`, `rou
 transcripts and results (no `schema_version`) read as version 1; the current
 typed contract is version 2.
 
+### std/config
+
+`parse_env(text)` returns `Result<dict<string, string>, {line: int, message: string}>`.
+It reads literal `KEY=VALUE` lines, ignores blank lines and full-line comments,
+and strips an optional `export` prefix followed by a space and matching outer quotes. Later values
+replace earlier values for the same key. Shell commands, variable references,
+escape sequences, and inline comment text remain literal. Invalid lines and
+unfinished quotes return an error with its one-based line number; errors never
+include the input text or values. Parse a complete file before applying its values.
+
 ### std/os
 
 Environment and host diagnostic helpers:
@@ -1863,8 +1873,8 @@ operations that should not require a generic shell or `run_command` tool.
 | `git_tool_catalog(options?)` | Return searchable metadata for available git operations |
 | `git_find_tool(query, options?)` | Rank git operations for a natural-language query with a deterministic lexical scorer |
 | `git_run_tool(operation, args?, options?)` | Dispatch one catalogued git operation by id; mutating operations require `include_mutations: true` |
-| `git_tools(registry?, options?)` | Build an agent tool registry from selected granular git helpers |
-| `git_toolbox_tools(registry?, options?)` | Build a compact `find_git_tool` / `run_git_tool` registry for small/local models |
+| `git_tools(process, registry?, options?)` | Build an agent tool registry from selected granular git helpers |
+| `git_toolbox_tools(process, registry?, options?)` | Build a compact `find_git_tool` / `run_git_tool` registry for small/local models |
 
 Receipt-producing helpers export their canonical contracts, including
 `GitReceipt`, the operation-specific `GitStatusReceipt`,
@@ -1883,6 +1893,14 @@ their record shapes or widening them to `dict`.
 harnesses can expose just the git operations a model should be allowed to call.
 Pass `defer_loading`, `namespace`, or `tool_config` to make the generated tools
 participate in the existing Tool Vault / `tool_search` flow.
+
+`names` and `descriptions` map tool keys to strings. `annotations` maps tool
+keys to annotation dictionaries. `tool_config` maps tool keys to
+`ToolDefinitionConfig`, exported by `std/tools`. A `"*"` entry supplies shared
+annotations or configuration. Per-tool entries override shared values. Shared
+configuration overrides top-level `defer_loading` and `namespace` values.
+Import `GitToolCatalogOptions` and `GitToolRunArgs` from `std/git` to type catalog
+selection and execution arguments.
 
 Automation that must normalize a checkout should use `git_checkout_sync`
 instead of maintaining separate command labels and execution branches. The
@@ -1916,7 +1934,7 @@ silently mix preserved changes into a different checkout state. Tests can pass
 ```harn,ignore
 import { git_tools } from "std/git"
 
-const tools = git_tools(nil, {
+const tools = git_tools(harness.process, nil, {
   repo: repo_root,
   enabled_tools: ["git_status", "git_log", "git_switch"],
   names: {git_log: "release_git_log"},
@@ -1927,7 +1945,7 @@ For local models that do better with a tiny stable tool surface, use the
 two-tool toolbox:
 
 ```harn,ignore
-const tools = git_toolbox_tools(nil, {
+const tools = git_toolbox_tools(harness.process, nil, {
   repo: repo_root,
   include_mutations: true,
 })
@@ -1966,6 +1984,13 @@ such as `actions_workflow_dispatch(...)`, `repos_get_text(...)`,
 `github_latest_release(...)`, and `github_close_pr(...)`; the stdlib facade
 includes those aliases so release scripts can move between stdlib and package
 imports without changing call sites.
+
+Actions result types follow the connector's normalized contracts. A
+`GitHubActionsRun` carries `display_title` and `run_started_at`.
+`GitHubActionsJob` carries `head_sha` and typed `GitHubActionsStep` records.
+Use `url` for the run or job link. A `GitHubWorkflowDispatchReceipt` identifies
+the accepted run and its `created_at` time; call `workflow_run` to read that
+run's current status and conclusion.
 
 ### std/review
 
@@ -2540,6 +2565,19 @@ range, clones the git tag/rev/branch recorded by the registry index, and pins
 the resolved commit plus content hash in `harn.lock`. Frozen/offline installs
 reuse that lock entry and the local package cache without querying the
 registry again.
+
+Git and archive packages use the `v2` directory inside the package cache root
+selected by `HARN_CACHE_DIR` or the operating system's default cache location.
+Harn holds each cache entry's lock while it reads or copies that entry. Cache
+cleanup waits until those reads finish. This directory is separate from older
+cache layouts, so an older Harn process cannot clear entries in use by a newer
+one.
+
+Harn does not read entries from the older cache layout. If the required packages
+exist only there, fetch them once online before installing a fresh project offline.
+An existing installed generation can still be reused when its packages match
+the lock. `harn package cache list`, `verify`, and `clean` apply to the current
+cache layout.
 
 Canonical bootstrap for first-party packages:
 

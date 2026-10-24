@@ -24,82 +24,79 @@ fn cancelled_prompt_retains_persistence_failure_metadata() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn completed_prompt_is_durable_before_immediate_session_load() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let _reset = ResetActiveEventLog;
-            let _log = harn_vm::event_log::install_memory_for_current_thread(32);
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_channel_session().await;
-            let prompt = format!(
-                "__host_agent_emit_event(\"{session_id}\", \"progress_reported\", \
+    harn_clock::test_support::with_local_tasks(async {
+        let _reset = ResetActiveEventLog;
+        let _log = harn_vm::event_log::install_memory_for_current_thread(32);
+        let (request_tx, mut response_rx, server, session_id) = start_acp_channel_session().await;
+        let prompt = format!(
+            "__host_agent_emit_event(\"{session_id}\", \"progress_reported\", \
                  {{message: \"durable before prompt response\"}})"
-            );
+        );
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "session/prompt",
-                    "params": {
-                        "sessionId": session_id,
-                        "prompt": [{"type": "text", "text": prompt}],
-                    },
-                }))
-                .expect("send session/prompt");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id,
+                    "prompt": [{"type": "text", "text": prompt}],
+                },
+            }))
+            .expect("send session/prompt");
 
-            loop {
-                let message = recv_json(&mut response_rx).await;
-                if message["method"] == "host/capabilities" {
-                    reply_empty_result(&request_tx, &message);
-                } else if message["id"] == 2 {
-                    assert_eq!(message["result"]["stopReason"], "end_turn");
-                    break;
-                }
+        loop {
+            let message = recv_json(&mut response_rx).await;
+            if message["method"] == "host/capabilities" {
+                reply_empty_result(&request_tx, &message);
+            } else if message["id"] == 2 {
+                assert_eq!(message["result"]["stopReason"], "end_turn");
+                break;
             }
+        }
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "session/load",
-                    "params": {"sessionId": session_id},
-                }))
-                .expect("send immediate session/load");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/load",
+                "params": {"sessionId": session_id},
+            }))
+            .expect("send immediate session/load");
 
-            let mut replay_notification = None;
-            let loaded = loop {
-                let message = recv_json(&mut response_rx).await;
-                if message["id"] == 3 {
-                    break message;
-                }
-                if message["method"] == "session/update" && message["_harn"]["replayed"] == true {
-                    replay_notification = Some(message);
-                }
-            };
+        let mut replay_notification = None;
+        let loaded = loop {
+            let message = recv_json(&mut response_rx).await;
+            if message["id"] == 3 {
+                break message;
+            }
+            if message["method"] == "session/update" && message["_harn"]["replayed"] == true {
+                replay_notification = Some(message);
+            }
+        };
 
-            let replay_notification =
-                replay_notification.expect("session/load must replay the prompt event");
-            assert_eq!(
-                replay_notification["params"]["update"]["_meta"]["harn"]["message"],
-                "durable before prompt response"
-            );
-            let replayed = loaded["result"]["replayed"]
-                .as_array()
-                .expect("session/load replay list");
-            assert_eq!(
-                replayed
-                    .iter()
-                    .filter(|event| event["type"] == "progress_reported")
-                    .count(),
-                1,
-                "the completed prompt event must be persisted exactly once"
-            );
+        let replay_notification =
+            replay_notification.expect("session/load must replay the prompt event");
+        assert_eq!(
+            replay_notification["params"]["update"]["_meta"]["harn"]["message"],
+            "durable before prompt response"
+        );
+        let replayed = loaded["result"]["replayed"]
+            .as_array()
+            .expect("session/load replay list");
+        assert_eq!(
+            replayed
+                .iter()
+                .filter(|event| event["type"] == "progress_reported")
+                .count(),
+            1,
+            "the completed prompt event must be persisted exactly once"
+        );
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 /// A host that points `HARN_EVENT_LOG_DIR` at a directory reads each session's
@@ -116,11 +113,8 @@ fn prompt_events_reach_the_event_log_dir_session_file() {
     let events = tempfile::tempdir().expect("event log dir");
     std::env::set_var("HARN_EVENT_LOG_DIR", events.path());
     std::env::set_var("HARN_EVENT_LOG_BACKEND", "file");
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("test runtime")
-        .block_on(tokio::task::LocalSet::new().run_until(async {
+    harn_clock::test_support::current_thread_runtime().block_on(
+        tokio::task::LocalSet::new().run_until(async {
             harn_vm::reset_thread_local_state();
             let _reset = ResetActiveEventLog;
             let (request_tx, mut response_rx, server, session_id) =
@@ -162,5 +156,6 @@ fn prompt_events_reach_the_event_log_dir_session_file() {
                 session_file.display(),
                 persisted
             );
-        }));
+        }),
+    );
 }

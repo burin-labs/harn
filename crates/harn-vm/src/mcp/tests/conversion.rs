@@ -1,9 +1,10 @@
 use super::*;
+use crate::value::VmDictExt as _;
 
 #[test]
 fn vm_value_to_serde_preserves_supported_shapes() {
     let mut map = BTreeMap::new();
-    map.insert("key".to_string(), VmValue::Int(42));
+    map.put_int("key", 42);
 
     for (value, expected) in [
         (VmValue::string("hello"), serde_json::json!("hello")),

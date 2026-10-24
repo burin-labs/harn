@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::VmDictExt as _;
 
 pub(super) fn governor_throttle_signal_for_error(
     err: &VmError,
@@ -635,30 +636,24 @@ pub(super) fn provider_exhausted_error(
     let mut attempt = std::collections::BTreeMap::from([
         (
             "provider".to_string(),
-            VmValue::String(arcstr::ArcStr::from(opts.provider.clone())),
+            VmValue::string(opts.provider.clone()),
         ),
-        (
-            "model".to_string(),
-            VmValue::String(arcstr::ArcStr::from(opts.model.clone())),
-        ),
+        ("model".to_string(), VmValue::string(opts.model.clone())),
         (
             "attempt_count".to_string(),
             VmValue::Int(attempt_count as i64),
         ),
-        (
-            "reason".to_string(),
-            VmValue::String(arcstr::ArcStr::from(reason.as_str())),
-        ),
+        ("reason".to_string(), VmValue::string(reason.as_str())),
     ]);
     if let Some(duration_ms) = duration_ms {
-        attempt.insert("duration_ms".to_string(), VmValue::Int(duration_ms as i64));
+        attempt.put_int("duration_ms", duration_ms as i64);
     }
     super::routing::provider_exhausted_error(
         "circuit_open",
         reason.as_str(),
         attempt_count,
         message,
-        VmValue::List(std::sync::Arc::new(vec![VmValue::dict(attempt)])),
+        VmValue::list(vec![VmValue::dict(attempt)]),
     )
 }
 

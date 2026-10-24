@@ -196,8 +196,8 @@ fn host_current_tool_registry_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "plan_artifact(...args: any) -> PlanArtifact", category = "tools"
+    sig = "plan_artifact(...args: any) -> PlanArtifact",
+    category = "tools"
 )]
 fn plan_artifact_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = args.first().cloned().unwrap_or(VmValue::Nil);
@@ -208,8 +208,8 @@ fn plan_artifact_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "plan_entries(...args: any) -> list", category = "tools"
+    sig = "plan_entries(...args: any) -> list",
+    category = "tools"
 )]
 fn plan_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = args.first().cloned().unwrap_or(VmValue::Nil);
@@ -219,7 +219,6 @@ fn plan_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_list(registry: {_type: \"tool_registry\", tools: list} | closure) -> list",
     category = "tools"
 )]
@@ -253,7 +252,6 @@ fn tool_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_find(registry: {_type: \"tool_registry\", tools: list} | closure, name: string) -> dict?",
     category = "tools"
 )]
@@ -290,7 +288,6 @@ fn tool_find_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_select(registry: {_type: \"tool_registry\", tools: list} | closure, names: list) -> {_type: \"tool_registry\", tools: list}",
     category = "tools"
 )]
@@ -339,7 +336,6 @@ fn tool_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_describe(registry: {_type: \"tool_registry\", tools: list} | closure) -> string",
     category = "tools"
 )]
@@ -436,7 +432,6 @@ fn tool_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_count(registry: {_type: \"tool_registry\", tools: list} | closure) -> int",
     category = "tools"
 )]
@@ -458,7 +453,6 @@ fn tool_count_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 // reads from the active tool set to inject capability-gated instructions.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_define(registry: {_type: \"tool_registry\", tools: list} | closure, name: string, description: string, config: @TOOL_DEFINE_CONFIG) -> {_type: \"tool_registry\", tools: list}",
     category = "tools"
 )]
@@ -759,8 +753,8 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "tool_parse_call(text: string?) -> list", category = "tools"
+    sig = "tool_parse_call(text: string?) -> list",
+    category = "tools"
 )]
 #[expect(
     clippy::string_slice,
@@ -790,7 +784,6 @@ fn tool_parse_call_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_format_result(name: string, result: any) -> string",
     category = "tools"
 )]
@@ -813,7 +806,6 @@ fn tool_format_result_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_prompt(registry: {_type: \"tool_registry\", tools: list} | closure) -> string",
     category = "tools"
 )]
@@ -882,7 +874,6 @@ fn tool_prompt_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_surface_validate(surface?: any, input?: any) -> dict",
     category = "tools"
 )]
@@ -900,7 +891,6 @@ fn tool_surface_validate_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_bind(registry?: {_type: \"tool_registry\", tools: list} | closure) -> dict | nil",
     category = "tools"
 )]
@@ -926,8 +916,8 @@ fn tool_bind_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "tool_ref(name: string) -> string", category = "tools"
+    sig = "tool_ref(name: string) -> string",
+    category = "tools"
 )]
 fn tool_ref_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = match args.first() {
@@ -961,8 +951,8 @@ fn tool_ref_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "tool_def(name: string) -> dict", category = "tools"
+    sig = "tool_def(name: string) -> dict",
+    category = "tools"
 )]
 fn tool_def_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = match args.first() {
@@ -1197,11 +1187,10 @@ fn synthesized_tool_dry_run_result(spec: &SynthesizedToolSpec, call_args: VmValu
     result.put("args", call_args);
     result.put(
         "capabilities",
-        VmValue::list(
+        VmValue::strings(
             spec.capabilities
                 .iter()
-                .map(|capability| VmValue::String(arcstr::ArcStr::from(capability.as_str())))
-                .collect(),
+                .map(|capability| capability.as_str()),
         ),
     );
     result.put_str("side_effect_level", spec.side_effect_level.as_str());
@@ -1222,11 +1211,10 @@ fn synthesized_tool_spec_value(spec: &SynthesizedToolSpec) -> VmValue {
     value.put("return_type", spec.return_type.clone());
     value.put(
         "capabilities",
-        VmValue::list(
+        VmValue::strings(
             spec.capabilities
                 .iter()
-                .map(|capability| VmValue::String(arcstr::ArcStr::from(capability.as_str())))
-                .collect(),
+                .map(|capability| capability.as_str()),
         ),
     );
     value.put_str("side_effect_level", spec.side_effect_level.as_str());

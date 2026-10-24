@@ -107,21 +107,21 @@ async fn custom_compaction_summary(
         ));
     };
     let mut vm = ctx.child_vm();
-    let messages_vm = VmValue::List(std::sync::Arc::new(
+    let messages_vm = VmValue::list(
         old_messages
             .iter()
             .map(crate::stdlib::json_to_vm_value)
             .collect(),
-    ));
+    );
     let result = if policy.has_metadata()
         && (closure.func.params.len() >= 3 || closure.func.has_rest_param)
     {
-        let reminders_vm = VmValue::List(std::sync::Arc::new(reminders.to_vec()));
+        let reminders_vm = VmValue::list(reminders.to_vec());
         let policy_vm = compaction_policy_to_vm_value(policy);
         vm.call_closure_pub(&closure, &[messages_vm, reminders_vm, policy_vm])
             .await
     } else if closure.func.params.len() >= 2 || closure.func.has_rest_param {
-        let reminders_vm = VmValue::List(std::sync::Arc::new(reminders.to_vec()));
+        let reminders_vm = VmValue::list(reminders.to_vec());
         vm.call_closure_pub(&closure, &[messages_vm, reminders_vm])
             .await
     } else {
@@ -159,12 +159,12 @@ async fn invoke_mask_callback(
         ));
     };
     let mut vm = ctx.child_vm();
-    let messages_vm = VmValue::List(std::sync::Arc::new(
+    let messages_vm = VmValue::list(
         old_messages
             .iter()
             .map(crate::stdlib::json_to_vm_value)
             .collect(),
-    ));
+    );
     let result = vm.call_closure_pub(&closure, &[messages_vm]).await?;
     ctx.forward_output(&vm.take_output());
     let list = match result {
@@ -290,10 +290,7 @@ async fn invoke_compress_callback(
         ));
     };
     let mut vm = ctx.child_vm();
-    let args = [
-        VmValue::String(arcstr::ArcStr::from(content)),
-        VmValue::Int(max_chars as i64),
-    ];
+    let args = [VmValue::string(content), VmValue::Int(max_chars as i64)];
     let result = vm.call_closure_pub(&closure, &args).await?;
     ctx.forward_output(&vm.take_output());
     match result {

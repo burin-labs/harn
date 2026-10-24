@@ -67,6 +67,7 @@ define_portable_builtins! {
         RegexSplit => harn_builtin_meta::signatures::PORTABLE_REGEX_SPLIT,
         Sha256 => harn_builtin_meta::signatures::PORTABLE_SHA256,
         SecretScan => harn_builtin_meta::signatures::PORTABLE_SECRET_SCAN,
+        SecretPatternCatalog => harn_builtin_meta::signatures::PORTABLE_SECRET_PATTERN_CATALOG,
         PathJoin => harn_builtin_meta::signatures::PORTABLE_PATH_JOIN,
     }
     internal {

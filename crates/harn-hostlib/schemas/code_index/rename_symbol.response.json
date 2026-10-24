@@ -5,6 +5,11 @@
   "description": "Tagged result of a cross-file rename. `applied` carries the per-file edit list; `conflict` carries shadow sites the rename would have created; the other tags surface caller-visible failure modes without ever touching disk.",
   "type": "object",
   "properties": {
+    "ambiguity_reason": {
+      "type": ["string", "null"],
+      "enum": [null, "multiple_definition_seeds", "unresolved_reference_binding"],
+      "description": "multiple_definition_seeds means an exact definition selector can resolve the seed. unresolved_reference_binding means the seed is known but a reference binding could not be proved; selecting it again does not resolve that refusal. Null for other results."
+    },
     "proof": { "$ref": "https://harnlang.com/schemas/hostlib/edit-proof.json" },
     "result": {
       "type": "string",
@@ -97,8 +102,17 @@
     },
     "warnings": {
       "type": "array",
-      "description": "Best-effort flags (e.g. languages outside the first batch falling back to scope=file).",
-      "items": { "type": "string" }
+      "description": "Status notes, or exact definition selectors when the result is ambiguous_symbol. Selecting a definition does not prove unresolved receiver bindings.",
+      "items": { "oneOf": [ { "type": "string" }, {
+        "type": "object",
+        "properties": {
+          "symbol": { "type": "string" }, "qualified_name": { "type": "string" },
+          "path": { "type": "string" }, "line": { "type": "integer", "minimum": 1 },
+          "col": { "type": ["integer", "null"], "minimum": 1 }, "kind": { "type": "string" }
+        },
+        "required": ["symbol", "qualified_name", "path", "line", "col", "kind"],
+        "additionalProperties": false
+      } ] }
     },
     "failed_paths_with_reasons": {
       "type": "array",

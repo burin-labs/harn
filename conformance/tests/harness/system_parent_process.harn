@@ -1,0 +1,7 @@
+fn main(harness: Harness) -> nil {
+  const parent = harness.system.parent_process()
+  assert_eq(parent.state, "unknown")
+  assert_eq(parent.pid, nil)
+  assert_eq(parent.identity, nil)
+  harness.stdio.println("unmeasured")
+}

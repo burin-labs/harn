@@ -666,7 +666,7 @@ test-harn-scripts:
 	@echo "=== Running Harn script test suite ==="
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify personas/smart_ship --strict --json
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify scripts/package-release --strict --json
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ --parallel
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ scripts/github-actions-contracts/contract_test.harn --parallel
 # The denial arm of path_visibility cannot live in the suite above: `harn test`
 # runs without the worktree filesystem sandbox, so nothing is refusable in-process
 # and the arm would pass by measuring nothing. It runs here rather than in
@@ -781,7 +781,6 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/pre_push_signature_census_test.sh
 	./scripts/tests/ci_rust_test_lane_test.sh
 	bash ./scripts/tests/rust_test_duration_budget_test.sh
-	./scripts/tests/thread_parity_receipt_test.sh
 	./scripts/tests/macos_nightly_test_env_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
 	./scripts/tests/sccache_action_cache_size_test.sh
@@ -832,7 +831,6 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	node scripts/tests/cache_generation_retirement_test.cjs
 	node scripts/tests/workspace_warm_phase_test.cjs
 	node --test scripts/tests/workspace_artifact_retention_test.cjs
-	node --test scripts/tests/workspace_build_evidence_test.cjs
 	./scripts/tests/loadgen_postgres_gate_test.sh
 	./scripts/tests/test_focused_test.sh
 	./scripts/tests/test_one_test.sh

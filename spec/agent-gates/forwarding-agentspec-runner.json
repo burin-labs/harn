@@ -29,6 +29,20 @@
   },
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_provider_failure.harn",
+    "expression": "agent_session_record_usage(agent, session_id, settled_call, turn_llm_opts, state.iteration + 1)",
+    "owner": "agent_session_record_usage",
+    "evidence": "Consumer agent_session_record_usage.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_session_record_usage",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
     "expression": "__agent_loop_final_wrapup(\n        harness,\n        message,\n        session,\n        opts,\n        final_status,\n        stop_reason,\n        state.iteration,\n      )",
     "owner": "__agent_loop_final_wrapup",

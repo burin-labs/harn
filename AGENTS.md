@@ -270,9 +270,10 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 ## Merge overrides
 
-- Rare founder overrides for CI incidents, merge-queue cost spikes, or
-  fix-forward lands use the org-admin labels `bypass-ci`,
-  `bypass-merge-queue`, and `force-merge`.
+- Overrides for a red main, a release-train pull request, or a wedged queue
+  use the org-admin labels `bypass-ci`, `bypass-merge-queue`, and
+  `force-merge`. The workflow refuses a queue bypass when none of those holds;
+  a long queue is not one.
 - Labels are a trigger only. The workflow re-checks organization or repository
   admin permission and refuses fork PRs. See
   [Merge overrides](docs/src/dev/merge-overrides.md) and the

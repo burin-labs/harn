@@ -8,22 +8,20 @@ pub(crate) fn register_shape_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "keys(dict: dict) -> list", category = "shapes"
+    sig = "keys(dict: dict) -> list",
+    category = "shapes"
 )]
 fn keys_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().cloned().unwrap_or(VmValue::Nil) {
-        VmValue::Dict(map) => Ok(VmValue::list(
-            map.keys().map(|k| VmValue::string(k.as_str())).collect(),
-        )),
+        VmValue::Dict(map) => Ok(VmValue::strings(map.keys().map(|k| k.as_str()))),
         _ => Ok(VmValue::list(Vec::new())),
     }
 }
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "values(...args: any) -> list", category = "shapes"
+    sig = "values(...args: any) -> list",
+    category = "shapes"
 )]
 fn values_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().cloned().unwrap_or(VmValue::Nil) {
@@ -34,8 +32,8 @@ fn values_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "entries(dict: dict) -> list", category = "shapes"
+    sig = "entries(dict: dict) -> list",
+    category = "shapes"
 )]
 fn entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().cloned().unwrap_or(VmValue::Nil) {
@@ -54,9 +52,9 @@ fn entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 // method_names_csv.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     read_only_preparation = true,
-    runtime_only = true, category = "shapes"
+    runtime_only = true,
+    category = "shapes"
 )]
 fn __assert_interface(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().cloned().unwrap_or(VmValue::Nil);
@@ -92,9 +90,9 @@ fn __assert_interface(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     read_only_preparation = true,
-    runtime_only = true, category = "shapes"
+    runtime_only = true,
+    category = "shapes"
 )]
 fn __assert_dict(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().cloned().unwrap_or(VmValue::Nil);
@@ -110,9 +108,9 @@ fn __assert_dict(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     read_only_preparation = true,
-    runtime_only = true, category = "shapes"
+    runtime_only = true,
+    category = "shapes"
 )]
 fn __assert_list(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().cloned().unwrap_or(VmValue::Nil);
@@ -128,9 +126,9 @@ fn __assert_list(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     read_only_preparation = true,
-    runtime_only = true, category = "shapes"
+    runtime_only = true,
+    category = "shapes"
 )]
 fn __assert_pair(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().cloned().unwrap_or(VmValue::Nil);
@@ -157,9 +155,9 @@ fn __assert_pair(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 // existing runtime exposure, while declaring read-only preparation.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     read_only_preparation = true,
-    runtime_only = true, category = "shapes"
+    runtime_only = true,
+    category = "shapes"
 )]
 fn __assert_schema(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().cloned().unwrap_or(VmValue::Nil);
@@ -174,9 +172,9 @@ fn __assert_schema(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     read_only_preparation = true,
-    runtime_only = true, category = "shapes"
+    runtime_only = true,
+    category = "shapes"
 )]
 fn __dict_rest(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let dict = args.first().cloned().unwrap_or(VmValue::Nil);
@@ -210,9 +208,9 @@ fn __dict_rest(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 // this compiler helper internal and opt it into the existing preparation gate.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     read_only_preparation = true,
-    runtime_only = true, category = "shapes"
+    runtime_only = true,
+    category = "shapes"
 )]
 fn __make_struct(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let struct_name = args.first().map(|a| a.display()).unwrap_or_default();

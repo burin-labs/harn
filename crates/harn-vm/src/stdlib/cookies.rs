@@ -678,7 +678,6 @@ pub(crate) fn register_cookie_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "cookie_parse(header: string | dict | list) -> dict",
     category = "cookies"
 )]
@@ -688,7 +687,6 @@ fn cookie_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "cookie_serialize(name: string, value: string, options?: dict?) -> string",
     category = "cookies"
 )]
@@ -708,7 +706,6 @@ fn cookie_delete_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "cookie_sign(value: string, secret: string) -> string",
     category = "cookies"
 )]
@@ -718,7 +715,6 @@ fn cookie_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "cookie_verify(signed: string, secret: string) -> dict",
     category = "cookies"
 )]
@@ -728,7 +724,6 @@ fn cookie_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "session_sign(payload: any, secret: string) -> string",
     category = "cookies"
 )]
@@ -738,7 +733,6 @@ fn session_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "session_verify(token: string, secret: string) -> dict",
     category = "cookies"
 )]
@@ -748,7 +742,6 @@ fn session_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "session_cookie(name: string, payload: any, secret: string, options?: dict?) -> string",
     category = "cookies"
 )]
@@ -758,7 +751,6 @@ fn session_cookie_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "session_from_cookies(header: string | dict | list, name: string, secret: string) -> dict",
     category = "cookies"
 )]
@@ -768,7 +760,6 @@ fn session_from_cookies_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "cookie_round_trip(request_or_set_cookie: string | dict | list, set_cookie?: string | dict | list) -> dict",
     category = "cookies"
 )]
@@ -781,7 +772,7 @@ mod tests {
     use super::{
         parse_set_cookie, serialize_cookie_with_defaults, Cookie, CookieDefaults, SameSite,
     };
-    use crate::value::{intern_key, DictMap, VmValue};
+    use crate::value::{DictMap, VmDictExt};
 
     #[test]
     fn parse_set_cookie_trims_name_before_validation() {
@@ -808,10 +799,7 @@ mod tests {
                 .is_err()
         );
         let mut injected_path = DictMap::new();
-        injected_path.insert(
-            intern_key("path"),
-            VmValue::string("/; Secure; Domain=attacker.example"),
-        );
+        injected_path.put_str("path", "/; Secure; Domain=attacker.example");
         assert!(serialize_cookie_with_defaults(
             "sid",
             "value",
@@ -820,7 +808,7 @@ mod tests {
         )
         .is_err());
         let mut options = DictMap::new();
-        options.insert(intern_key("same_site"), VmValue::string("None"));
+        options.put_str("same_site", "None");
         let serialized =
             serialize_cookie_with_defaults("sid", "value", Some(&options), CookieDefaults::NONE)
                 .unwrap();

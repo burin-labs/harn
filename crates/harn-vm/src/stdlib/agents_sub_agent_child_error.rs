@@ -90,7 +90,7 @@ pub(super) fn child_error_outcome(
     let tokens_used = input_tokens.saturating_add(output_tokens);
     let envelope = wrap_sub_agent_error(
         String::new(),
-        VmValue::List(std::sync::Arc::new(Vec::new())),
+        VmValue::list(Vec::new()),
         0,
         &SubAgentUsage {
             tokens_used,
@@ -130,20 +130,14 @@ mod tests {
     use super::*;
 
     fn thrown(message: &str) -> VmError {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
+        VmError::Thrown(VmValue::string(message))
     }
 
     fn initialization_failure(message: &str) -> VmError {
-        VmError::Thrown(VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("kind"),
-                VmValue::String(arcstr::ArcStr::from("agent_loop_initialization_failed")),
-            ),
-            (
-                crate::value::intern_key("message"),
-                VmValue::String(arcstr::ArcStr::from(message)),
-            ),
-        ])))
+        VmError::Thrown(VmValue::dict([
+            ("kind", VmValue::string("agent_loop_initialization_failed")),
+            ("message", VmValue::string(message)),
+        ]))
     }
 
     #[test]
@@ -193,12 +187,9 @@ mod tests {
         let mut options = crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("provider"),
-                VmValue::String(arcstr::ArcStr::from("mock")),
+                VmValue::string("mock"),
             ),
-            (
-                crate::value::intern_key("model"),
-                VmValue::String(arcstr::ArcStr::from("mock")),
-            ),
+            (crate::value::intern_key("model"), VmValue::string("mock")),
             (crate::value::intern_key("max_iterations"), VmValue::Int(1)),
         ]);
         for (key, value) in extra {

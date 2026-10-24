@@ -117,11 +117,10 @@ impl super::super::Vm {
                     // Static entry keys: `intern_key` takes a process-global
                     // lock, which is pure overhead for two fixed literals on
                     // a per-iteration path.
-                    self.stack
-                        .push(VmValue::dict(crate::value::DictMap::from_iter([
-                            (arcstr::literal!("key"), VmValue::String(key)),
-                            (arcstr::literal!("value"), value),
-                        ])));
+                    self.stack.push(VmValue::dict([
+                        (arcstr::literal!("key"), VmValue::String(key)),
+                        (arcstr::literal!("value"), value),
+                    ]));
                 } else {
                     self.iterators.pop();
                     let frame = self.frames.last_mut().unwrap();

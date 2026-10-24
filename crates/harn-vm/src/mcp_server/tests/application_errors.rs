@@ -30,12 +30,9 @@ async fn prepared_tool_is_refused_before_mcp_handler_or_task_execution() {
         let mut tool = crate::value::DictMap::new();
         tool.put_str("name", "lookup");
         tool.put_str("description", "Look up a record");
-        tool.insert(
-            "parameters".into(),
-            VmValue::dict(crate::value::DictMap::new()),
-        );
-        tool.insert(
-            "handler".into(),
+        tool.put("parameters", VmValue::dict(crate::value::DictMap::new()));
+        tool.put(
+            "handler",
             VmValue::Closure(Arc::new(throwing_closure("lookup"))),
         );
         tool.insert(
@@ -43,8 +40,8 @@ async fn prepared_tool_is_refused_before_mcp_handler_or_task_execution() {
             crate::schema::json_to_vm_value(&serde_json::json!({"taskSupport": "optional"})),
         );
         if prepared {
-            tool.insert(
-                "prepare".into(),
+            tool.put(
+                "prepare",
                 VmValue::Closure(Arc::new(empty_closure("prepare"))),
             );
         }
@@ -58,7 +55,7 @@ async fn prepared_tool_is_refused_before_mcp_handler_or_task_execution() {
         );
         let mut registry = crate::value::DictMap::new();
         registry.put_str("_type", "tool_registry");
-        registry.insert("tools".into(), VmValue::list(vec![VmValue::dict(tool)]));
+        registry.put("tools", VmValue::list(vec![VmValue::dict(tool)]));
         let tools = tool_registry_to_mcp_tools(&VmValue::dict(registry)).unwrap();
         let registry = script_registry(tools);
         let params = serde_json::json!({"name": "lookup", "arguments": {}});

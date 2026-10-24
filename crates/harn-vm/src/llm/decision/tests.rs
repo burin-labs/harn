@@ -8,6 +8,7 @@
 #[path = "replay_tests.rs"]
 mod replay_tests;
 
+use crate::value::VmDictExt as _;
 use crate::NativeBuiltinCtxExt;
 use crate::NativeVmExt;
 use std::collections::BTreeMap;
@@ -509,10 +510,7 @@ fn runtime_policy_uses_the_closed_registry_and_optional_caps_are_explicit_in_ide
     assert_eq!(inherited.evaluation_cost_limit, None);
     assert_eq!(inherited.run_cost_limit, None);
     assert_ne!(explicit.digest(), inherited.digest());
-    fields.insert(
-        crate::value::intern_key("run_cost_limti"),
-        VmValue::Float(1.0),
-    );
+    fields.put("run_cost_limti", VmValue::Float(1.0));
     let error = EvaluationPolicy::from_value(&VmValue::dict(fields)).unwrap_err();
     assert!(error.contains("unknown field `run_cost_limti`"));
 }
@@ -527,10 +525,7 @@ fn chat_overrides_change_identity_and_admission_without_allowing_retry_options()
     effort_fields.remove("effort");
     let omitted = EvaluationPolicy::from_value(&VmValue::dict(effort_fields.clone())).unwrap();
     assert_eq!(omitted.effort, None);
-    effort_fields.insert(
-        crate::value::intern_key("effort"),
-        VmValue::String("none".into()),
-    );
+    effort_fields.put("effort", VmValue::String("none".into()));
     let explicit_none = EvaluationPolicy::from_value(&VmValue::dict(effort_fields)).unwrap();
     assert_eq!(explicit_none.effort.as_deref(), Some("none"));
     assert_ne!(omitted.digest(), explicit_none.digest());

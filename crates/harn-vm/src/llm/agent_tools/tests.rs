@@ -382,7 +382,7 @@ fn tools_dict(entries: Vec<(&str, crate::value::DictMap)>) -> VmValue {
         })
         .collect();
     let mut dict = crate::value::DictMap::new();
-    dict.insert(crate::value::intern_key("tools"), VmValue::list(list));
+    dict.put("tools", VmValue::list(list));
     VmValue::dict(dict)
 }
 
@@ -489,16 +489,10 @@ fn mcp_server_for_tool_finds_nested_function_annotation() {
     function.put_str("name", "create_issue");
     function.put_str("_mcp_server", "linear");
     let mut entry = crate::value::DictMap::new();
-    entry.insert(
-        crate::value::intern_key("function"),
-        VmValue::dict(function),
-    );
+    entry.put("function", VmValue::dict(function));
     // The outer entry has no `name` — fall back to function.name.
     let mut dict = crate::value::DictMap::new();
-    dict.insert(
-        crate::value::intern_key("tools"),
-        VmValue::list(vec![VmValue::Dict(std::sync::Arc::new(entry))]),
-    );
+    dict.put("tools", VmValue::list(vec![VmValue::dict_map(entry)]));
     let tools = VmValue::dict(dict);
     assert_eq!(
         mcp_server_for_tool(Some(&tools), "create_issue"),

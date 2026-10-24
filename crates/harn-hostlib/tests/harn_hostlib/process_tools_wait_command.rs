@@ -2,6 +2,7 @@
 
 #![cfg(unix)]
 
+use harn_vm::value::VmDictExt as _;
 use std::sync::mpsc;
 
 use harn_hostlib::process::{ExitStatus, MockProcessConfig};
@@ -19,7 +20,7 @@ fn wait_command_waits_for_live_handle_result_and_consumes_feedback() {
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sh", "-c", "echo direct"]));
-    req.insert("background".into(), VmValue::Bool(true));
+    req.put_bool("background", true);
     let start = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     let handle_id = require_str(&start, "handle_id");
     let cwd = require_str(&start, "cwd");
@@ -30,7 +31,7 @@ fn wait_command_waits_for_live_handle_result_and_consumes_feedback() {
         let _session_guard = harn_vm::agent_sessions::enter_current_session(wait_session_id);
         let mut wait_req = dict_map();
         wait_req.insert("handle_id".into(), vm_string(&wait_handle_id));
-        wait_req.insert("timeout_ms".into(), VmValue::Int(5_000));
+        wait_req.put_int("timeout_ms", 5_000);
         require_dict(call_tool("hostlib_tools_wait_command", wait_req).unwrap())
     });
 
@@ -90,7 +91,7 @@ fn background_finalization_reuses_active_artifact_lease() {
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sh", "-c", "echo leased"]));
-    req.insert("background".into(), VmValue::Bool(true));
+    req.put_bool("background", true);
     let start = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     let command_id = require_str(&start, "command_id");
     let handle_id = require_str(&start, "handle_id");
@@ -100,7 +101,7 @@ fn background_finalization_reuses_active_artifact_lease() {
         let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id);
         let mut wait_req = dict_map();
         wait_req.insert("handle_id".into(), vm_string(&handle_id));
-        wait_req.insert("timeout_ms".into(), VmValue::Int(5_000));
+        wait_req.put_int("timeout_ms", 5_000);
         let waited = require_dict(call_tool("hostlib_tools_wait_command", wait_req).unwrap());
         wait_tx.send(require_str(&waited, "status")).unwrap();
     });
@@ -133,7 +134,7 @@ fn long_running_result_notifier_fires_after_inbox_feedback_is_visible() {
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sh", "-c", "echo ordered"]));
-    req.insert("background".into(), VmValue::Bool(true));
+    req.put_bool("background", true);
     let start = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     let handle_id = require_str(&start, "handle_id");
     let result_rx = register_result_notifier(&handle_id).expect("handle should still be live");

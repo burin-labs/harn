@@ -89,7 +89,6 @@ async fn metrics_inc_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "connector_shared_verify_jwt_inline(token: string, jwks: dict, options?: dict) -> dict",
     kind = "async",
     category = "connectors"

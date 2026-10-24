@@ -1,7 +1,58 @@
 import { agent_capture_events } from "std/agent/events"
+import { AgentLoopFailure } from "std/agent/failure_types"
 import { agent_loop } from "std/agent/loop"
 import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
 import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test_configuration_failure_inhabits_loop_error_contract(harness: Harness) {
+  const tools = tool_define(
+    tool_registry(),
+    "inspect",
+    "Inspect a file",
+    {handler: { _ -> "inspected" }, parameters: {}, returns: {type: "string"}},
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("Opaque assistant response")],
+    { ->
+      const outcome = try {
+        agent_loop(
+          harness,
+          "Inspect the file",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "native",
+            tools: tools,
+            loop_until_done: true,
+            max_iterations: 3,
+            missing_tool_call_recovery: {
+              confidence_threshold: 2.0,
+              classifier: { _ -> {action: "ambiguous", confidence: 0.0} },
+            },
+          },
+        )
+      }
+      assert(is_err(outcome))
+      const error = unwrap_err(outcome)
+      assert_eq(error_category(error), "invalid_config")
+      assert_eq(error.error, "missing_tool_call.invalid_confidence_threshold")
+      assert_eq(error.actual, 2.0)
+      assert_eq(len(harness.llm.mock_calls()), 1)
+      schema_expect(error, schema_of(AgentLoopFailure))
+      assert(
+        is_err(
+          schema_parse(pick(error, ["error", "category", "message"]), schema_of(AgentLoopFailure)),
+        ),
+      )
+      assert(
+        is_err(
+          schema_parse(error + {component: "unowned_classifier"}, schema_of(AgentLoopFailure)),
+        ),
+      )
+    },
+  )
+}
 
 pipeline test_malformed_evaluation_fails_open_without_retry(harness: Harness) {
   const classify = missing_tool_call_classifier(

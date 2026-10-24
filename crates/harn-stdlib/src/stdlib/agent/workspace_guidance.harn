@@ -40,12 +40,14 @@ pub type GuidanceOmission = {path: string, reason: string, bytes: int}
 /**
  * One file the resolution depended on, and what became of it.
  *
- * `state` is `"read"` when the file was opened and its text used, and
- * otherwise names why an import was not followed: `"hop_limit"` when the
- * import budget was spent, `"cycle"` when the path was already being
+ * `state` is `"read"` when the file was opened successfully, including empty,
+ * duplicate, or over-budget sources. Otherwise it names why an import was
+ * not followed: `"hop_limit"` when the import budget was spent, `"cycle"`
+ * when the path was already being
  * expanded, `"unreadable"` when it could not be opened. A refused import is
  * still a dependency, because creating or fixing that file changes the next
- * resolution. Absence from this list means the resolver never looked.
+ * resolution. Files that cannot be opened during discovery and imports
+ * outside the allowed scope are excluded from this list.
  */
 pub type GuidanceDependency = {path: string, state: string}
 
@@ -281,6 +283,7 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
       continue
     }
     seen_paths = seen_paths + [full]
+    dependencies = dependencies + [{path: full, state: "read"}]
     const body = trim(__guidance_strip_comments(to_string(raw)))
     if body == "" || seen_bodies.contains(body) {
       continue
@@ -507,17 +510,13 @@ fn __guidance_subtree(
   return {dirs: bounded, files: files}
 }
 
-/** Read a file, returning nil when it is absent, unreadable, or empty. */
+/** Read a file, returning nil only when it is absent or unreadable. */
 fn __guidance_read(fs: HarnessFs, path: string) -> string? {
   const read = fs.read_text_result(path)
   if !is_ok(read) {
     return nil
   }
-  const text = to_string(unwrap(read))
-  if trim(text) == "" {
-    return nil
-  }
-  return text
+  return to_string(unwrap(read))
 }
 
 /**

@@ -968,8 +968,8 @@ pub fn register_step_builtins(vm: &mut crate::vm::Vm) {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    category = "step_runtime", runtime_only = true
+    category = "step_runtime",
+    runtime_only = true
 )]
 fn __register_step(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     register_step_from_dict(args.to_vec())
@@ -977,8 +977,8 @@ fn __register_step(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    category = "step_runtime", runtime_only = true
+    category = "step_runtime",
+    runtime_only = true
 )]
 fn __register_persona(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     register_persona_from_dict(args.to_vec())
@@ -986,7 +986,6 @@ fn __register_persona(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__persona_output_style(function?: string) -> dict",
     category = "step_runtime",
     runtime_only = true
@@ -1006,7 +1005,7 @@ mod tests {
 
     #[test]
     fn persona_output_style_reads_registry_and_active_stack() {
-        use crate::value::{intern_key, DictMap};
+        use crate::value::DictMap;
         fresh_state();
 
         // Register a persona whose metadata carries a table-form output style.
@@ -1015,16 +1014,12 @@ mod tests {
         style.put_str("instructions", "Be terse.");
         let mut meta = DictMap::new();
         meta.put_str("name", "Reviewer");
-        meta.insert(intern_key("output_style"), VmValue::dict(style));
-        register_persona_from_dict(vec![
-            VmValue::String(arcstr::ArcStr::from("reviewer_fn")),
-            VmValue::dict(meta),
-        ])
-        .expect("persona registers");
+        meta.put("output_style", VmValue::dict(style));
+        register_persona_from_dict(vec![VmValue::string("reviewer_fn"), VmValue::dict(meta)])
+            .expect("persona registers");
 
         // Lookup by function name returns the declared style.
-        let by_name =
-            persona_output_style(vec![VmValue::String(arcstr::ArcStr::from("reviewer_fn"))]);
+        let by_name = persona_output_style(vec![VmValue::string("reviewer_fn")]);
         let dict = by_name.as_dict().expect("dict");
         assert_eq!(
             dict.get("name").map(VmValue::display).as_deref(),
@@ -1039,7 +1034,7 @@ mod tests {
         assert!(matches!(persona_output_style(vec![]), VmValue::Nil));
         // Unknown persona → nil.
         assert!(matches!(
-            persona_output_style(vec![VmValue::String(arcstr::ArcStr::from("nope"))]),
+            persona_output_style(vec![VmValue::string("nope")]),
             VmValue::Nil
         ));
     }
@@ -1056,11 +1051,8 @@ mod tests {
         meta.put_str("error_boundary", "continue");
         meta.put("budget", VmValue::dict(budget));
 
-        register_step_from_dict(vec![
-            VmValue::String(arcstr::ArcStr::from("plan_step")),
-            VmValue::dict(meta),
-        ])
-        .expect("registration succeeds");
+        register_step_from_dict(vec![VmValue::string("plan_step"), VmValue::dict(meta)])
+            .expect("registration succeeds");
 
         assert!(maybe_push_active_step("plan_step", 3, &[]));
         assert_eq!(active_step_frame_depth(), Some(3));
@@ -1131,32 +1123,18 @@ mod tests {
         fresh_state();
         let mut meta: crate::value::DictMap = crate::value::DictMap::new();
         meta.put_str("name", "research");
-        register_step_from_dict(vec![
-            VmValue::String(arcstr::ArcStr::from("research_step")),
-            VmValue::dict(meta),
-        ])
-        .expect("step registration");
+        register_step_from_dict(vec![VmValue::string("research_step"), VmValue::dict(meta)])
+            .expect("step registration");
 
         let mut stage_dict: crate::value::DictMap = crate::value::DictMap::new();
         stage_dict.put_str("name", "research");
         // Stage tries to add `edit` on top of a parent that only allowed `read`.
-        stage_dict.insert(
-            crate::value::intern_key("allowed_tools"),
-            VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(arcstr::ArcStr::from("read")),
-                VmValue::String(arcstr::ArcStr::from("edit")),
-            ])),
-        );
+        stage_dict.put("allowed_tools", VmValue::strings(["read", "edit"]));
         let mut persona_meta: crate::value::DictMap = crate::value::DictMap::new();
         persona_meta.put_str("name", "scoped");
-        persona_meta.insert(
-            crate::value::intern_key("stages"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-                std::sync::Arc::new(stage_dict),
-            )])),
-        );
+        persona_meta.put("stages", VmValue::list(vec![VmValue::dict_map(stage_dict)]));
         register_persona_from_dict(vec![
-            VmValue::String(arcstr::ArcStr::from("scoped_persona")),
+            VmValue::string("scoped_persona"),
             VmValue::dict(persona_meta),
         ])
         .expect("persona registration");
@@ -1196,30 +1174,17 @@ mod tests {
         fresh_state();
         let mut meta: crate::value::DictMap = crate::value::DictMap::new();
         meta.put_str("name", "survey");
-        register_step_from_dict(vec![
-            VmValue::String(arcstr::ArcStr::from("survey_step")),
-            VmValue::dict(meta),
-        ])
-        .expect("step registration");
+        register_step_from_dict(vec![VmValue::string("survey_step"), VmValue::dict(meta)])
+            .expect("step registration");
 
         let mut stage_dict: crate::value::DictMap = crate::value::DictMap::new();
         stage_dict.put_str("name", "survey");
-        stage_dict.insert(
-            crate::value::intern_key("allowed_tools"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("read"),
-            )])),
-        );
+        stage_dict.put("allowed_tools", VmValue::strings(["read"]));
         let mut persona_meta: crate::value::DictMap = crate::value::DictMap::new();
         persona_meta.put_str("name", "ambient");
-        persona_meta.insert(
-            crate::value::intern_key("stages"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-                std::sync::Arc::new(stage_dict),
-            )])),
-        );
+        persona_meta.put("stages", VmValue::list(vec![VmValue::dict_map(stage_dict)]));
         register_persona_from_dict(vec![
-            VmValue::String(arcstr::ArcStr::from("ambient_persona")),
+            VmValue::string("ambient_persona"),
             VmValue::dict(persona_meta),
         ])
         .expect("persona registration");
@@ -1260,30 +1225,17 @@ mod tests {
         fresh_state();
         let mut meta: crate::value::DictMap = crate::value::DictMap::new();
         meta.put_str("name", "research");
-        register_step_from_dict(vec![
-            VmValue::String(arcstr::ArcStr::from("research_step")),
-            VmValue::dict(meta),
-        ])
-        .expect("step registration succeeds");
+        register_step_from_dict(vec![VmValue::string("research_step"), VmValue::dict(meta)])
+            .expect("step registration succeeds");
 
         let mut stage_dict: crate::value::DictMap = crate::value::DictMap::new();
         stage_dict.put_str("name", "research");
-        stage_dict.insert(
-            crate::value::intern_key("allowed_tools"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("read"),
-            )])),
-        );
+        stage_dict.put("allowed_tools", VmValue::strings(["read"]));
         let mut persona_meta: crate::value::DictMap = crate::value::DictMap::new();
         persona_meta.put_str("name", "scoped");
-        persona_meta.insert(
-            crate::value::intern_key("stages"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-                std::sync::Arc::new(stage_dict),
-            )])),
-        );
+        persona_meta.put("stages", VmValue::list(vec![VmValue::dict_map(stage_dict)]));
         register_persona_from_dict(vec![
-            VmValue::String(arcstr::ArcStr::from("scoped_persona")),
+            VmValue::string("scoped_persona"),
             VmValue::dict(persona_meta),
         ])
         .expect("persona registration succeeds");

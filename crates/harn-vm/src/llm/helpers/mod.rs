@@ -303,7 +303,7 @@ mod tests {
             "private-guard-label",
             || Ok(VmValue::Nil),
         ));
-        let nested = VmValue::List(std::sync::Arc::new(vec![guard]));
+        let nested = VmValue::list(vec![guard]);
         let error = vm_value_to_export_json_strict(&nested, "result")
             .expect_err("nested resource guard must not cross a portable boundary");
         assert!(error.contains("result[0]: resource_guard is not serializable"));
@@ -347,7 +347,7 @@ mod tests {
         // pre-fix code would have returned "local".
         let opts = Some(crate::value::DictMap::from_iter([(
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("anthropic/claude-sonnet-4-6")),
+            VmValue::string("anthropic/claude-sonnet-4-6"),
         )]));
         assert_eq!(vm_resolve_provider(&opts), "openrouter");
 
@@ -355,27 +355,18 @@ mod tests {
         // so users with a custom local server keep working.
         let opts_unknown = Some(crate::value::DictMap::from_iter([(
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("my-custom-local-tag")),
+            VmValue::string("my-custom-local-tag"),
         )]));
         assert_eq!(vm_resolve_provider(&opts_unknown), "local");
     }
 
     #[test]
     fn vm_messages_to_json_preserves_tool_message_fields() {
-        let message = VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("role"),
-                VmValue::String(arcstr::ArcStr::from("tool")),
-            ),
-            (
-                crate::value::intern_key("tool_call_id"),
-                VmValue::String(arcstr::ArcStr::from("call_123")),
-            ),
-            (
-                crate::value::intern_key("content"),
-                VmValue::String(arcstr::ArcStr::from("ok")),
-            ),
-        ]));
+        let message = VmValue::dict([
+            ("role", VmValue::string("tool")),
+            ("tool_call_id", VmValue::string("call_123")),
+            ("content", VmValue::string("ok")),
+        ]);
 
         let json = vm_messages_to_json(&[message]).expect("message json");
         assert_eq!(json[0]["role"], "tool_result");
@@ -412,16 +403,9 @@ mod tests {
         env.set("HARN_LLM_PROVIDER", "mock");
 
         let transcript = new_transcript_with(None, Vec::new(), None, None);
-        let options = VmValue::dict(crate::value::DictMap::from_iter([(
-            crate::value::intern_key("transcript"),
-            transcript,
-        )]));
-        let err = extract_llm_options(&[
-            VmValue::String(arcstr::ArcStr::from("")),
-            VmValue::Nil,
-            options,
-        ])
-        .expect_err("transcript option is rejected");
+        let options = VmValue::dict([("transcript", transcript)]);
+        let err = extract_llm_options(&[VmValue::string(""), VmValue::Nil, options])
+            .expect_err("transcript option is rejected");
         let msg = match err {
             crate::value::VmError::Thrown(VmValue::String(s)) => s.to_string(),
             other => panic!("unexpected error: {other:?}"),
@@ -443,7 +427,7 @@ mod tests {
 
         let options = Some(crate::value::DictMap::from_iter([(
             crate::value::intern_key("model_tier"),
-            VmValue::String(arcstr::ArcStr::from("small")),
+            VmValue::string("small"),
         )]));
         let provider = vm_resolve_provider(&options);
         let resolved = vm_resolve_model(&options, &provider).unwrap();
@@ -461,7 +445,7 @@ mod tests {
 
         let options = Some(crate::value::DictMap::from_iter([(
             crate::value::intern_key("model_tier"),
-            VmValue::String(arcstr::ArcStr::from("small")),
+            VmValue::string("small"),
         )]));
         let provider = vm_resolve_provider(&options);
         let resolved = vm_resolve_model(&options, &provider).unwrap();
@@ -479,7 +463,7 @@ mod tests {
 
         let options = Some(crate::value::DictMap::from_iter([(
             crate::value::intern_key("model_tier"),
-            VmValue::String(arcstr::ArcStr::from("small")),
+            VmValue::string("small"),
         )]));
         let provider = vm_resolve_provider(&options);
         let model = vm_resolve_model(&options, &provider).unwrap();
@@ -544,11 +528,11 @@ mod tests {
         let opts = crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("provider"),
-                VmValue::String(arcstr::ArcStr::from("auto")),
+                VmValue::string("auto"),
             ),
             (
                 crate::value::intern_key("model"),
-                VmValue::String(arcstr::ArcStr::from("unclassified-provider-model-for-test")),
+                VmValue::string("unclassified-provider-model-for-test"),
             ),
         ]);
 

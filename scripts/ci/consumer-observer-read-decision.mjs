@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import {observerContext,readConsumerContextDecision} from '../lib/consumer-observer.mjs';
+import {observerContext,readConsumerContextDecision, observerRefusal } from '../lib/consumer-observer.mjs';
 import {readConsumerDeadline,readConsumerRecoveryDecision} from '../lib/consumer-observer-window.mjs';
 
 async function main(){
@@ -40,7 +40,7 @@ async function main(){
 }
 
 main().catch(error=>{
-  const reason=/^CONSUMER_OBSERVER reason=([a-z_]+)$/.exec(error.message)?.[1]??'context_product_unmeasured';
-  console.error(`::error::CONSUMER_OBSERVER reason=${reason}`);
+  const {line} = observerRefusal(error, 'context_product_unmeasured');
+  console.error(`::error::${line}`);
   process.exitCode=1;
 });

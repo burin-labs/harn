@@ -232,8 +232,8 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "skill_registry() -> dict", category = "skills"
+    sig = "skill_registry() -> dict",
+    category = "skills"
 )]
 fn skill_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut registry = BTreeMap::new();
@@ -244,7 +244,6 @@ fn skill_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "skill_define(registry: dict, name: string, config: dict) -> dict",
     category = "skills"
 )]
@@ -378,8 +377,8 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "skill_list(registry: dict) -> list", category = "skills"
+    sig = "skill_list(registry: dict) -> list",
+    category = "skills"
 )]
 fn skill_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let registry = match args.first() {
@@ -413,7 +412,6 @@ fn skill_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "skills_catalog_entries(registry: dict) -> list",
     category = "skills"
 )]
@@ -434,7 +432,6 @@ fn skills_catalog_entries_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "skill_who_signed(registry: dict, name: string) -> dict",
     category = "skills"
 )]
@@ -458,7 +455,6 @@ fn skill_who_signed_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "render_always_on_catalog(entries_or_registry: list | dict, budget?: int) -> string",
     category = "skills"
 )]
@@ -589,12 +585,7 @@ fn build_registry_evidence(
 }
 
 fn string_list(values: &[String]) -> VmValue {
-    VmValue::list(
-        values
-            .iter()
-            .map(|value| VmValue::string(value.as_str()))
-            .collect(),
-    )
+    VmValue::strings(values.iter().map(|value| value.as_str()))
 }
 
 fn card_evidence_to_vm(card: &crate::skills::SkillCardEvidence) -> VmValue {
@@ -621,7 +612,7 @@ fn card_evidence_to_vm(card: &crate::skills::SkillCardEvidence) -> VmValue {
             out.put("matched", VmValue::dict(matched_dict));
         }
         None => {
-            out.insert("matched".to_string(), VmValue::Nil);
+            out.put("matched", VmValue::Nil);
         }
     }
     VmValue::dict(out)
@@ -653,7 +644,6 @@ fn parse_string_list(value: Option<&VmValue>) -> Vec<String> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "skills_activation_evidence(registry: dict, options?: dict) -> dict",
     category = "skills"
 )]
@@ -713,7 +703,6 @@ fn skills_activation_evidence_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "skill_find(registry: dict, name: string) -> dict?",
     category = "skills"
 )]
@@ -748,7 +737,6 @@ fn skill_find_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "skill_select(registry: dict, names: list) -> dict",
     category = "skills"
 )]
@@ -798,8 +786,8 @@ fn skill_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "skill_describe(registry: dict) -> string", category = "skills"
+    sig = "skill_describe(registry: dict) -> string",
+    category = "skills"
 )]
 fn skill_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let registry = match args.first() {
@@ -851,7 +839,6 @@ fn skill_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "skill_remove(registry: dict, name: string) -> dict",
     category = "skills"
 )]
@@ -998,8 +985,8 @@ async fn load_skill_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "skill_count(registry: dict) -> int", category = "skills"
+    sig = "skill_count(registry: dict) -> int",
+    category = "skills"
 )]
 fn skill_count_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let registry = match args.first() {
@@ -1107,29 +1094,20 @@ mod tests {
         parse_skill_render_session_id, render_catalog, skill_render_impl, vm_skill_catalog_entries,
         vm_skill_who_signed,
     };
+    use crate::value::VmDictExt;
     use crate::value::VmValue;
     use std::collections::BTreeMap;
-    use std::sync::Arc;
 
     fn who_signed_skill(name: &str, source: Option<&str>, author: &str) -> VmValue {
         let mut entry = BTreeMap::from([
-            (
-                "name".to_string(),
-                VmValue::String(arcstr::ArcStr::from(name)),
-            ),
+            ("name".to_string(), VmValue::string(name)),
             (
                 "provenance".to_string(),
-                VmValue::dict(BTreeMap::from([(
-                    "author".to_string(),
-                    VmValue::String(arcstr::ArcStr::from(author)),
-                )])),
+                VmValue::dict([("author", VmValue::string(author))]),
             ),
         ]);
         if let Some(source) = source {
-            entry.insert(
-                "source".to_string(),
-                VmValue::String(arcstr::ArcStr::from(source)),
-            );
+            entry.put_str("source", source);
         }
         VmValue::dict(entry)
     }
@@ -1151,34 +1129,16 @@ mod tests {
     #[test]
     fn catalog_entries_use_fully_qualified_ids_and_sort() {
         let skills = vec![
-            VmValue::dict(BTreeMap::from([
-                (
-                    "name".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("beta")),
-                ),
-                (
-                    "description".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("Second skill")),
-                ),
-            ])),
-            VmValue::dict(BTreeMap::from([
-                (
-                    "name".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("deploy")),
-                ),
-                (
-                    "namespace".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("acme/ops")),
-                ),
-                (
-                    "description".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("Deploy service")),
-                ),
-                (
-                    "when_to_use".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("Ship a release")),
-                ),
-            ])),
+            VmValue::dict([
+                ("name", VmValue::string("beta")),
+                ("description", VmValue::string("Second skill")),
+            ]),
+            VmValue::dict([
+                ("name", VmValue::string("deploy")),
+                ("namespace", VmValue::string("acme/ops")),
+                ("description", VmValue::string("Deploy service")),
+                ("when_to_use", VmValue::string("Ship a release")),
+            ]),
         ];
 
         let catalog = vm_skill_catalog_entries(&skills);
@@ -1192,34 +1152,16 @@ mod tests {
     #[test]
     fn render_catalog_is_deterministic_and_budgeted() {
         let entries = vec![
-            VmValue::dict(BTreeMap::from([
-                (
-                    "name".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("alpha")),
-                ),
-                (
-                    "description".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("First skill")),
-                ),
-                (
-                    "when_to_use".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("Use alpha first")),
-                ),
-            ])),
-            VmValue::dict(BTreeMap::from([
-                (
-                    "name".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("beta")),
-                ),
-                (
-                    "description".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("Second skill")),
-                ),
-                (
-                    "when_to_use".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("Use beta second")),
-                ),
-            ])),
+            VmValue::dict([
+                ("name", VmValue::string("alpha")),
+                ("description", VmValue::string("First skill")),
+                ("when_to_use", VmValue::string("Use alpha first")),
+            ]),
+            VmValue::dict([
+                ("name", VmValue::string("beta")),
+                ("description", VmValue::string("Second skill")),
+                ("when_to_use", VmValue::string("Use beta second")),
+            ]),
         ];
 
         let once = render_catalog(&entries, 10_000);
@@ -1231,16 +1173,10 @@ mod tests {
     }
 
     fn skill_entry(body: &str) -> VmValue {
-        VmValue::dict(BTreeMap::from([
-            (
-                "name".to_string(),
-                VmValue::String(arcstr::ArcStr::from("session-card")),
-            ),
-            (
-                "body".to_string(),
-                VmValue::String(arcstr::ArcStr::from(body)),
-            ),
-        ]))
+        VmValue::dict([
+            ("name", VmValue::string("session-card")),
+            ("body", VmValue::string(body)),
+        ])
     }
 
     fn render(args: Vec<VmValue>) -> String {
@@ -1259,11 +1195,8 @@ mod tests {
         }
         let rendered = render(vec![
             skill_entry("Session: ${HARN_SESSION_ID}"),
-            VmValue::List(Arc::new(Vec::new())),
-            VmValue::dict(BTreeMap::from([(
-                "session_id".to_string(),
-                VmValue::String(arcstr::ArcStr::from("sess-explicit")),
-            )])),
+            VmValue::list(Vec::new()),
+            VmValue::dict([("session_id", VmValue::string("sess-explicit"))]),
         ]);
         match previous {
             Some(value) => unsafe { std::env::set_var("HARN_SESSION_ID", value) },
@@ -1277,14 +1210,12 @@ mod tests {
         let rendered = render(vec![
             skill_entry("Session: ${HARN_SESSION_ID}"),
             VmValue::Nil,
-            VmValue::String(arcstr::ArcStr::from("sess-string")),
+            VmValue::string("sess-string"),
         ]);
         assert_eq!(rendered, "Session: sess-string");
         assert_eq!(
-            parse_skill_render_session_id(Some(&VmValue::String(arcstr::ArcStr::from(
-                "sess-string"
-            ))))
-            .expect("bare session id parses"),
+            parse_skill_render_session_id(Some(&VmValue::string("sess-string")))
+                .expect("bare session id parses"),
             Some("sess-string".to_string())
         );
     }

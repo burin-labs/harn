@@ -153,6 +153,7 @@ mod persistent_state;
 pub mod personas;
 pub mod portable;
 use harn_vm_core::prepared_module;
+pub use harn_vm_core::process_liveness;
 pub mod prepared_run;
 pub mod process_sandbox;
 pub mod profile;
@@ -1262,12 +1263,7 @@ mod reset_leak_tests {
     fn reset_drains_routing_policy_registry() {
         llm::routing::clear_policy_registry();
         let mut config: crate::value::DictMap = crate::value::DictMap::new();
-        config.insert(
-            crate::value::intern_key("chain"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("mock:mock"),
-            )])),
-        );
+        config.put("chain", VmValue::strings(["mock:mock"]));
         llm::routing::build_routing_policy(&config).expect("intern a routing policy");
         assert!(llm::routing::policy_registry_len() > 0);
         reset_thread_local_state();

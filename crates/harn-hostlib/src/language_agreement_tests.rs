@@ -2,6 +2,7 @@
 //! `harn-languages` registry. The sweep covers every registered extension
 //! and file name plus an unregistered control.
 
+use harn_vm::value::VmDictExt as _;
 use std::path::Path;
 
 use harn_languages::Language;
@@ -34,10 +35,7 @@ fn outline(dir: &Path, rel: &str) -> (Option<String>, String, Option<String>) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, "").unwrap();
     let mut args = harn_vm::value::DictMap::new();
-    args.insert(
-        harn_vm::value::intern_key("path"),
-        VmValue::string(path.to_string_lossy().as_ref()),
-    );
+    args.put_str("path", path.to_string_lossy().as_ref());
     let entry = registry.find("hostlib_tools_get_file_outline").unwrap();
     let result = (entry.handler)(&[VmValue::dict(args)]).unwrap();
     let VmValue::Dict(dict) = result else {

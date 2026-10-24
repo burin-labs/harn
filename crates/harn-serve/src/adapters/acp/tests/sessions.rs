@@ -9,9 +9,7 @@ use prompt_output::{run_json_prompt, run_prompt_with_project_capability};
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_server_handles_session_flow_and_prompt_updates() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let (request_tx, request_rx) = mpsc::unbounded_channel();
             let (response_tx, mut response_rx) = mpsc::unbounded_channel();
             let server = tokio::task::spawn_local(super::run_acp_channel_server(
@@ -183,15 +181,12 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
 
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_list_filters_by_workspace_anchor_and_cwd() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let dir = tempfile::tempdir().expect("tempdir");
             let primary = dir.path().join("project");
             let sibling = dir.path().join("project-tools");
@@ -313,279 +308,270 @@ async fn acp_session_list_filters_by_workspace_anchor_and_cwd() {
 
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_harn_workspace_anchor_methods_mutate_live_session() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            harn_vm::reset_thread_local_state();
-            let dir = tempfile::tempdir().expect("tempdir");
-            let primary = dir.path().join("project");
-            let sibling = dir.path().join("project-tools");
-            let target = dir.path().join("target");
-            std::fs::create_dir_all(&primary).expect("primary dir");
-            std::fs::create_dir_all(&sibling).expect("sibling dir");
-            std::fs::create_dir_all(&target).expect("target dir");
-            let canonical_sibling = sibling.canonicalize().expect("canonical sibling");
+    harn_clock::test_support::with_local_tasks(async {
+        harn_vm::reset_thread_local_state();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let primary = dir.path().join("project");
+        let sibling = dir.path().join("project-tools");
+        let target = dir.path().join("target");
+        std::fs::create_dir_all(&primary).expect("primary dir");
+        std::fs::create_dir_all(&sibling).expect("sibling dir");
+        std::fs::create_dir_all(&target).expect("target dir");
+        let canonical_sibling = sibling.canonicalize().expect("canonical sibling");
 
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_channel_session_with_config(
-                    AcpServerConfig::new(None),
-                    serde_json::json!(primary.display().to_string()),
-                )
-                .await;
+        let (request_tx, mut response_rx, server, session_id) =
+            start_acp_channel_session_with_config(
+                AcpServerConfig::new(None),
+                serde_json::json!(primary.display().to_string()),
+            )
+            .await;
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "harn.session_workspace_roots",
-                    "params": {"sessionId": session_id},
-                }))
-                .expect("send roots request");
-            let roots = recv_response_with_id(&mut response_rx, 2).await;
-            assert_eq!(
-                roots["result"]["workspaceAnchor"]["primary"],
-                serde_json::json!(primary.display().to_string())
-            );
-            assert_eq!(
-                harn_vm::agent_sessions::workspace_anchor(&session_id)
-                    .expect("live anchor")
-                    .primary,
-                primary
-            );
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "harn.session_workspace_roots",
+                "params": {"sessionId": session_id},
+            }))
+            .expect("send roots request");
+        let roots = recv_response_with_id(&mut response_rx, 2).await;
+        assert_eq!(
+            roots["result"]["workspaceAnchor"]["primary"],
+            serde_json::json!(primary.display().to_string())
+        );
+        assert_eq!(
+            harn_vm::agent_sessions::workspace_anchor(&session_id)
+                .expect("live anchor")
+                .primary,
+            primary
+        );
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "harn.session_add_root",
-                    "params": {
-                        "sessionId": session_id,
-                        "path": sibling.display().to_string(),
-                        "mountMode": "extend",
-                    },
-                }))
-                .expect("send add-root request");
-            let added = recv_response_with_id(&mut response_rx, 3).await;
-            let additional = added["result"]["workspaceAnchor"]["additional_roots"]
-                .as_array()
-                .expect("additional roots");
-            assert_eq!(additional.len(), 1);
-            assert_eq!(
-                additional[0]["path"],
-                serde_json::json!(canonical_sibling.display().to_string())
-            );
-            assert_eq!(additional[0]["mount_mode"], serde_json::json!("extend"));
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "harn.session_add_root",
+                "params": {
+                    "sessionId": session_id,
+                    "path": sibling.display().to_string(),
+                    "mountMode": "extend",
+                },
+            }))
+            .expect("send add-root request");
+        let added = recv_response_with_id(&mut response_rx, 3).await;
+        let additional = added["result"]["workspaceAnchor"]["additional_roots"]
+            .as_array()
+            .expect("additional roots");
+        assert_eq!(additional.len(), 1);
+        assert_eq!(
+            additional[0]["path"],
+            serde_json::json!(canonical_sibling.display().to_string())
+        );
+        assert_eq!(additional[0]["mount_mode"], serde_json::json!("extend"));
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 4,
-                    "method": "harn.session_reanchor",
-                    "params": {
-                        "sessionId": session_id,
-                        "path": target.display().to_string(),
-                        "reason": "test reanchor",
-                    },
-                }))
-                .expect("send reanchor request");
-            let reanchored = recv_response_with_id(&mut response_rx, 4).await;
-            assert_eq!(reanchored["result"]["changed"], serde_json::json!(true));
-            assert_eq!(
-                reanchored["result"]["previousWorkspaceAnchor"]["primary"],
-                serde_json::json!(primary.display().to_string())
-            );
-            assert_eq!(
-                reanchored["result"]["workspaceAnchor"]["primary"],
-                serde_json::json!(target.display().to_string())
-            );
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "harn.session_reanchor",
+                "params": {
+                    "sessionId": session_id,
+                    "path": target.display().to_string(),
+                    "reason": "test reanchor",
+                },
+            }))
+            .expect("send reanchor request");
+        let reanchored = recv_response_with_id(&mut response_rx, 4).await;
+        assert_eq!(reanchored["result"]["changed"], serde_json::json!(true));
+        assert_eq!(
+            reanchored["result"]["previousWorkspaceAnchor"]["primary"],
+            serde_json::json!(primary.display().to_string())
+        );
+        assert_eq!(
+            reanchored["result"]["workspaceAnchor"]["primary"],
+            serde_json::json!(target.display().to_string())
+        );
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 5,
-                    "method": "session/list",
-                    "params": {
-                        "workspaceAnchor": {"primary": target.display().to_string()},
-                    },
-                }))
-                .expect("send filtered session/list");
-            let listed = recv_response_with_id(&mut response_rx, 5).await;
-            assert_eq!(
-                listed["result"]["sessions"][0]["sessionId"],
-                serde_json::json!(session_id)
-            );
-            assert_eq!(
-                listed["result"]["sessions"][0]["workspaceAnchor"]["primary"],
-                serde_json::json!(target.display().to_string())
-            );
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "session/list",
+                "params": {
+                    "workspaceAnchor": {"primary": target.display().to_string()},
+                },
+            }))
+            .expect("send filtered session/list");
+        let listed = recv_response_with_id(&mut response_rx, 5).await;
+        assert_eq!(
+            listed["result"]["sessions"][0]["sessionId"],
+            serde_json::json!(session_id)
+        );
+        assert_eq!(
+            listed["result"]["sessions"][0]["workspaceAnchor"]["primary"],
+            serde_json::json!(target.display().to_string())
+        );
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_harn_session_reanchor_seeds_missing_anchor_from_live_cwd() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            harn_vm::reset_thread_local_state();
-            let dir = tempfile::tempdir().expect("tempdir");
-            let primary = dir.path().join("project");
-            let target = dir.path().join("target");
-            std::fs::create_dir_all(&primary).expect("primary dir");
-            std::fs::create_dir_all(&target).expect("target dir");
+    harn_clock::test_support::with_local_tasks(async {
+        harn_vm::reset_thread_local_state();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let primary = dir.path().join("project");
+        let target = dir.path().join("target");
+        std::fs::create_dir_all(&primary).expect("primary dir");
+        std::fs::create_dir_all(&target).expect("target dir");
 
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_channel_session_with_config(
-                    AcpServerConfig::new(None),
-                    serde_json::json!(primary.display().to_string()),
-                )
-                .await;
+        let (request_tx, mut response_rx, server, session_id) =
+            start_acp_channel_session_with_config(
+                AcpServerConfig::new(None),
+                serde_json::json!(primary.display().to_string()),
+            )
+            .await;
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "harn.session_reanchor",
-                    "params": {
-                        "sessionId": session_id,
-                        "path": target.display().to_string(),
-                    },
-                }))
-                .expect("send reanchor request");
-            let reanchored = recv_response_with_id(&mut response_rx, 2).await;
-            assert_eq!(
-                reanchored["result"]["previousWorkspaceAnchor"]["primary"],
-                serde_json::json!(primary.display().to_string())
-            );
-            assert_eq!(
-                reanchored["result"]["workspaceAnchor"]["primary"],
-                serde_json::json!(target.display().to_string())
-            );
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "harn.session_reanchor",
+                "params": {
+                    "sessionId": session_id,
+                    "path": target.display().to_string(),
+                },
+            }))
+            .expect("send reanchor request");
+        let reanchored = recv_response_with_id(&mut response_rx, 2).await;
+        assert_eq!(
+            reanchored["result"]["previousWorkspaceAnchor"]["primary"],
+            serde_json::json!(primary.display().to_string())
+        );
+        assert_eq!(
+            reanchored["result"]["workspaceAnchor"]["primary"],
+            serde_json::json!(target.display().to_string())
+        );
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_truncate_mutates_current_session_and_notifies_client() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            harn_vm::reset_thread_local_state();
-            let (request_tx, mut response_rx, server, session_id) = start_acp_code_session().await;
+    harn_clock::test_support::with_local_tasks(async {
+        harn_vm::reset_thread_local_state();
+        let (request_tx, mut response_rx, server, session_id) = start_acp_code_session().await;
 
-            let first = run_json_prompt(
-                &request_tx,
-                &mut response_rx,
-                &session_id,
-                2,
-                r#"
+        let first = run_json_prompt(
+            &request_tx,
+            &mut response_rx,
+            &session_id,
+            2,
+            r#"
 const sid = harness.agent.current_id()
 guard sid != nil else { throw "missing session id" }
 harness.agent.session_record_assistant(sid, {text: "alpha"})
 const messages = harness.agent.session_messages(sid)
 harness.stdio.println(json_stringify({len: len(messages), messages: messages}))
 "#,
-                Some("alpha"),
-            )
-            .await;
-            assert_eq!(first["len"], 1);
-            let second = run_json_prompt(
-                &request_tx,
-                &mut response_rx,
-                &session_id,
-                3,
-                r#"
+            Some("alpha"),
+        )
+        .await;
+        assert_eq!(first["len"], 1);
+        let second = run_json_prompt(
+            &request_tx,
+            &mut response_rx,
+            &session_id,
+            3,
+            r#"
 const sid = harness.agent.current_id()
 guard sid != nil else { throw "missing session id" }
 harness.agent.session_record_assistant(sid, {text: "beta"})
 const messages = harness.agent.session_messages(sid)
 harness.stdio.println(json_stringify({len: len(messages), messages: messages}))
 "#,
-                Some("beta"),
-            )
-            .await;
-            assert_eq!(second["len"], 2);
+            Some("beta"),
+        )
+        .await;
+        assert_eq!(second["len"], 2);
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 4,
-                    "method": "session/truncate",
-                    "params": {
-                        "sessionId": session_id.clone(),
-                        "keepFirst": 1,
-                        "reason": "user_edit",
-                    },
-                }))
-                .expect("send session/truncate");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "session/truncate",
+                "params": {
+                    "sessionId": session_id.clone(),
+                    "keepFirst": 1,
+                    "reason": "user_edit",
+                },
+            }))
+            .expect("send session/truncate");
 
-            let mut response = None;
-            let mut notification = None;
-            for _ in 0..4 {
-                let message = recv_json(&mut response_rx).await;
-                if message["id"] == 4 {
-                    response = Some(message);
-                } else if message["method"] == "session/update"
-                    && message["params"]["update"]["sessionUpdate"] == "session_truncated"
-                {
-                    notification = Some(message);
-                }
-                if response.is_some() && notification.is_some() {
-                    break;
-                }
+        let mut response = None;
+        let mut notification = None;
+        for _ in 0..4 {
+            let message = recv_json(&mut response_rx).await;
+            if message["id"] == 4 {
+                response = Some(message);
+            } else if message["method"] == "session/update"
+                && message["params"]["update"]["sessionUpdate"] == "session_truncated"
+            {
+                notification = Some(message);
             }
-            let response = response.expect("truncate response");
-            assert_eq!(response["result"]["sessionId"], session_id);
-            assert_eq!(response["result"]["keptTurnCount"], 1);
-            assert_eq!(response["result"]["removedTurnCount"], 1);
-            assert!(response["result"]["newTipTurnId"].is_string());
+            if response.is_some() && notification.is_some() {
+                break;
+            }
+        }
+        let response = response.expect("truncate response");
+        assert_eq!(response["result"]["sessionId"], session_id);
+        assert_eq!(response["result"]["keptTurnCount"], 1);
+        assert_eq!(response["result"]["removedTurnCount"], 1);
+        assert!(response["result"]["newTipTurnId"].is_string());
 
-            let notification = notification.expect("session_truncated notification");
-            assert_eq!(notification["params"]["sessionId"], session_id);
-            assert_eq!(notification["params"]["update"]["keptTurnCount"], 1);
-            assert_eq!(notification["params"]["update"]["removedTurnCount"], 1);
-            assert_eq!(notification["params"]["update"]["reason"], "user_edit");
+        let notification = notification.expect("session_truncated notification");
+        assert_eq!(notification["params"]["sessionId"], session_id);
+        assert_eq!(notification["params"]["update"]["keptTurnCount"], 1);
+        assert_eq!(notification["params"]["update"]["removedTurnCount"], 1);
+        assert_eq!(notification["params"]["update"]["reason"], "user_edit");
 
-            let snapshot = run_json_prompt(
-                &request_tx,
-                &mut response_rx,
-                &session_id,
-                5,
-                r#"
+        let snapshot = run_json_prompt(
+            &request_tx,
+            &mut response_rx,
+            &session_id,
+            5,
+            r#"
 const sid = harness.agent.current_id()
 guard sid != nil else { throw "missing session id" }
 const messages = harness.agent.session_messages(sid)
 harness.stdio.println(json_stringify({len: len(messages), messages: messages}))
 "#,
-                None,
-            )
-            .await;
-            assert_eq!(snapshot["len"], 1);
-            assert_eq!(snapshot["messages"][0]["content"], "alpha");
-
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
+            None,
+        )
         .await;
+        assert_eq!(snapshot["len"], 1);
+        assert_eq!(snapshot["messages"][0]["content"], "alpha");
+
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_mcp_catalog_projects_allowlist_over_advertised_items() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             harn_vm::reset_thread_local_state();
             let (request_tx, mut response_rx, server, _session_id) =
                 start_acp_channel_session().await;
@@ -635,296 +621,280 @@ async fn acp_mcp_catalog_projects_allowlist_over_advertised_items() {
 
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_mcp_authorize_requires_url() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (request_tx, mut response_rx, server, _session_id) =
-                start_acp_channel_session().await;
+    harn_clock::test_support::with_local_tasks(async {
+        let (request_tx, mut response_rx, server, _session_id) = start_acp_channel_session().await;
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 11,
-                    "method": "mcp/authorize",
-                    "params": {},
-                }))
-                .expect("send mcp/authorize");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "mcp/authorize",
+                "params": {},
+            }))
+            .expect("send mcp/authorize");
 
-            let mut response = None;
-            for _ in 0..6 {
-                let message = recv_json(&mut response_rx).await;
-                if message["id"] == 11 {
-                    response = Some(message);
-                    break;
-                }
+        let mut response = None;
+        for _ in 0..6 {
+            let message = recv_json(&mut response_rx).await;
+            if message["id"] == 11 {
+                response = Some(message);
+                break;
             }
-            let response = response.expect("mcp/authorize response");
-            assert_eq!(response["error"]["code"], -32602);
-            assert!(response["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("url"));
+        }
+        let response = response.expect("mcp/authorize response");
+        assert_eq!(response["error"]["code"], -32602);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("url"));
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_mcp_oauth_callback_validates_and_rejects_unknown_state() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (request_tx, mut response_rx, server, _session_id) =
-                start_acp_channel_session().await;
+    harn_clock::test_support::with_local_tasks(async {
+        let (request_tx, mut response_rx, server, _session_id) = start_acp_channel_session().await;
 
-            // Missing state/code → invalid params.
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 12,
-                    "method": "mcp/oauth_callback",
-                    "params": {"code": "abc"},
-                }))
-                .expect("send mcp/oauth_callback");
-            // Well-formed but no pending flow matches the state → -32000.
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 13,
-                    "method": "mcp/oauth_callback",
-                    "params": {"state": "no-such", "code": "abc"},
-                }))
-                .expect("send mcp/oauth_callback");
+        // Missing state/code → invalid params.
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 12,
+                "method": "mcp/oauth_callback",
+                "params": {"code": "abc"},
+            }))
+            .expect("send mcp/oauth_callback");
+        // Well-formed but no pending flow matches the state → -32000.
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 13,
+                "method": "mcp/oauth_callback",
+                "params": {"state": "no-such", "code": "abc"},
+            }))
+            .expect("send mcp/oauth_callback");
 
-            let mut invalid = None;
-            let mut unknown = None;
-            for _ in 0..8 {
-                let message = recv_json(&mut response_rx).await;
-                if message["id"] == 12 {
-                    invalid = Some(message);
-                } else if message["id"] == 13 {
-                    unknown = Some(message);
-                }
-                if invalid.is_some() && unknown.is_some() {
-                    break;
-                }
+        let mut invalid = None;
+        let mut unknown = None;
+        for _ in 0..8 {
+            let message = recv_json(&mut response_rx).await;
+            if message["id"] == 12 {
+                invalid = Some(message);
+            } else if message["id"] == 13 {
+                unknown = Some(message);
             }
-            assert_eq!(invalid.expect("invalid response")["error"]["code"], -32602);
-            let unknown = unknown.expect("unknown-state response");
-            assert_eq!(unknown["error"]["code"], -32000);
-            assert!(unknown["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("no pending MCP authorization"));
+            if invalid.is_some() && unknown.is_some() {
+                break;
+            }
+        }
+        assert_eq!(invalid.expect("invalid response")["error"]["code"], -32602);
+        let unknown = unknown.expect("unknown-state response");
+        assert_eq!(unknown["error"]["code"], -32000);
+        assert!(unknown["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no pending MCP authorization"));
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_truncate_validates_inputs() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_channel_session().await;
+    harn_clock::test_support::with_local_tasks(async {
+        let (request_tx, mut response_rx, server, session_id) = start_acp_channel_session().await;
 
-            for (id, params, expected) in [
-                (
-                    2,
-                    serde_json::json!({"sessionId": session_id.clone()}),
-                    "Missing keepFirst",
-                ),
-                (
-                    3,
-                    serde_json::json!({"sessionId": session_id.clone(), "keepFirst": -1}),
-                    "Invalid keepFirst: must be >= 0",
-                ),
-                (
-                    4,
-                    serde_json::json!({"sessionId": "missing-session", "keepFirst": 0}),
-                    "Unknown session: missing-session",
-                ),
-            ] {
-                request_tx
-                    .send(serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": id,
-                        "method": "session/truncate",
-                        "params": params,
-                    }))
-                    .expect("send session/truncate");
-                let response = recv_json(&mut response_rx).await;
-                assert_eq!(response["id"], id);
-                assert_eq!(response["error"]["code"], -32602);
-                assert_eq!(response["error"]["message"], expected);
-            }
+        for (id, params, expected) in [
+            (
+                2,
+                serde_json::json!({"sessionId": session_id.clone()}),
+                "Missing keepFirst",
+            ),
+            (
+                3,
+                serde_json::json!({"sessionId": session_id.clone(), "keepFirst": -1}),
+                "Invalid keepFirst: must be >= 0",
+            ),
+            (
+                4,
+                serde_json::json!({"sessionId": "missing-session", "keepFirst": 0}),
+                "Unknown session: missing-session",
+            ),
+        ] {
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "method": "session/truncate",
+                    "params": params,
+                }))
+                .expect("send session/truncate");
+            let response = recv_json(&mut response_rx).await;
+            assert_eq!(response["id"], id);
+            assert_eq!(response["error"]["code"], -32602);
+            assert_eq!(response["error"]["message"], expected);
+        }
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_profile_json_appends_one_line_per_prompt_turn() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let profile_path = dir.path().join("profile.ndjson");
-            let config = AcpServerConfig::new(None).with_profile(AcpProfileConfig {
-                text: false,
-                json_path: Some(profile_path.clone()),
-            });
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_channel_session_with_config(config, serde_json::json!(dir.path())).await;
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let profile_path = dir.path().join("profile.ndjson");
+        let config = AcpServerConfig::new(None).with_profile(AcpProfileConfig {
+            text: false,
+            json_path: Some(profile_path.clone()),
+        });
+        let (request_tx, mut response_rx, server, session_id) =
+            start_acp_channel_session_with_config(config, serde_json::json!(dir.path())).await;
 
-            for id in 2..=3 {
-                request_tx
-                    .send(serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": id,
-                        "method": "session/prompt",
-                        "params": {
-                            "sessionId": session_id.clone(),
-                            "prompt": [{"type": "text", "text": "harness.stdio.println(\"profiled\")"}],
-                        },
-                    }))
-                    .expect("send session/prompt");
+        for id in 2..=3 {
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "method": "session/prompt",
+                    "params": {
+                        "sessionId": session_id.clone(),
+                        "prompt": [{"type": "text", "text": "harness.stdio.println(\"profiled\")"}],
+                    },
+                }))
+                .expect("send session/prompt");
 
-                let mut saw_completed = false;
-                for _ in 0..16 {
-                    let message = recv_json(&mut response_rx).await;
-                    if message["method"] == "host/capabilities" {
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    if message["id"] == id {
-                        assert_eq!(message["result"]["stopReason"], "end_turn");
-                        saw_completed = true;
-                        break;
-                    }
+            let mut saw_completed = false;
+            for _ in 0..16 {
+                let message = recv_json(&mut response_rx).await;
+                if message["method"] == "host/capabilities" {
+                    reply_empty_result(&request_tx, &message);
                 }
-                assert!(saw_completed, "prompt should finish successfully");
+                if message["id"] == id {
+                    assert_eq!(message["result"]["stopReason"], "end_turn");
+                    saw_completed = true;
+                    break;
+                }
             }
+            assert!(saw_completed, "prompt should finish successfully");
+        }
 
-            let lines = std::fs::read_to_string(&profile_path).expect("read profile ndjson");
-            let entries = lines
-                .lines()
-                .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json line"))
-                .collect::<Vec<_>>();
-            assert_eq!(entries.len(), 2, "profile output:\n{lines}");
-            assert_eq!(entries[0]["session_id"], session_id);
-            assert_eq!(entries[0]["turn"], 1);
-            assert_eq!(entries[1]["turn"], 2);
-            assert!(entries[0]["rollup"]["by_kind"].is_array());
+        let lines = std::fs::read_to_string(&profile_path).expect("read profile ndjson");
+        let entries = lines
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json line"))
+            .collect::<Vec<_>>();
+        assert_eq!(entries.len(), 2, "profile output:\n{lines}");
+        assert_eq!(entries[0]["session_id"], session_id);
+        assert_eq!(entries[0]["turn"], 1);
+        assert_eq!(entries[1]["turn"], 2);
+        assert!(entries[0]["rollup"]["by_kind"].is_array());
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_close_and_stop_alias_free_active_session() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (request_tx, request_rx) = mpsc::unbounded_channel();
-            let (response_tx, mut response_rx) = mpsc::unbounded_channel();
-            let server = tokio::task::spawn_local(super::run_acp_channel_server(
-                AcpServerConfig::new(None),
-                request_rx,
-                response_tx,
-            ));
+    harn_clock::test_support::with_local_tasks(async {
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+        let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+        let server = tokio::task::spawn_local(super::run_acp_channel_server(
+            AcpServerConfig::new(None),
+            request_rx,
+            response_tx,
+        ));
 
-            for (index, method) in ["session/close", "session/stop"].into_iter().enumerate() {
-                let request_base = 10 + (index as i64 * 10);
-                request_tx
-                    .send(serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": request_base,
-                        "method": "session/new",
-                        "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
-                    }))
-                    .expect("send session/new");
-                let created = recv_json(&mut response_rx).await;
-                let session_id = created["result"]["sessionId"]
-                    .as_str()
-                    .expect("session id")
-                    .to_string();
-                assert!(harn_vm::agent_sessions::exists(&session_id));
+        for (index, method) in ["session/close", "session/stop"].into_iter().enumerate() {
+            let request_base = 10 + (index as i64 * 10);
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": request_base,
+                    "method": "session/new",
+                    "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
+                }))
+                .expect("send session/new");
+            let created = recv_json(&mut response_rx).await;
+            let session_id = created["result"]["sessionId"]
+                .as_str()
+                .expect("session id")
+                .to_string();
+            assert!(harn_vm::agent_sessions::exists(&session_id));
 
-                request_tx
-                    .send(serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": request_base + 1,
-                        "method": method,
-                        "params": {"sessionId": session_id},
-                    }))
-                    .expect("send session close request");
-                let closed = recv_json(&mut response_rx).await;
-                assert_eq!(closed["id"], request_base + 1);
-                assert_eq!(closed["result"], serde_json::json!({}));
-                assert!(
-                    !harn_vm::agent_sessions::exists(&session_id),
-                    "{method} should free VM session state"
-                );
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": request_base + 1,
+                    "method": method,
+                    "params": {"sessionId": session_id},
+                }))
+                .expect("send session close request");
+            let closed = recv_json(&mut response_rx).await;
+            assert_eq!(closed["id"], request_base + 1);
+            assert_eq!(closed["result"], serde_json::json!({}));
+            assert!(
+                !harn_vm::agent_sessions::exists(&session_id),
+                "{method} should free VM session state"
+            );
 
-                request_tx
-                    .send(serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": request_base + 2,
-                        "method": "session/list",
-                        "params": {},
-                    }))
-                    .expect("send session/list");
-                let listed = recv_json(&mut response_rx).await;
-                let sessions = listed["result"]["sessions"].as_array().unwrap();
-                assert!(
-                    sessions
-                        .iter()
-                        .all(|entry| entry["sessionId"].as_str() != Some(session_id.as_str())),
-                    "{method} should remove the active ACP session"
-                );
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": request_base + 2,
+                    "method": "session/list",
+                    "params": {},
+                }))
+                .expect("send session/list");
+            let listed = recv_json(&mut response_rx).await;
+            let sessions = listed["result"]["sessions"].as_array().unwrap();
+            assert!(
+                sessions
+                    .iter()
+                    .all(|entry| entry["sessionId"].as_str() != Some(session_id.as_str())),
+                "{method} should remove the active ACP session"
+            );
 
-                request_tx
-                    .send(serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": request_base + 3,
-                        "method": "session/prompt",
-                        "params": {
-                            "sessionId": session_id,
-                            "prompt": [{"type": "text", "text": "harness.stdio.println(\"closed\")"}],
-                        },
-                    }))
-                    .expect("send session/prompt");
-                let rejected = recv_json(&mut response_rx).await;
-                assert_eq!(rejected["id"], request_base + 3);
-                assert_eq!(rejected["error"]["code"], -32602);
-            }
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": request_base + 3,
+                    "method": "session/prompt",
+                    "params": {
+                        "sessionId": session_id,
+                        "prompt": [{"type": "text", "text": "harness.stdio.println(\"closed\")"}],
+                    },
+                }))
+                .expect("send session/prompt");
+            let rejected = recv_json(&mut response_rx).await;
+            assert_eq!(rejected["id"], request_base + 3);
+            assert_eq!(rejected["error"]["code"], -32602);
+        }
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_close_cancels_pending_host_bridge_call() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let (request_tx, mut response_rx, server, session_id) =
                 start_acp_channel_session().await;
 
@@ -974,58 +944,52 @@ async fn acp_session_close_cancels_pending_host_bridge_call() {
 
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_file_backed_pipeline_receives_explicit_harness_argument() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let pipeline_path = dir.path().join("harness.harn");
-            std::fs::write(
-                &pipeline_path,
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pipeline_path = dir.path().join("harness.harn");
+        std::fs::write(
+            &pipeline_path,
+            r#"
 import { env_int } from "std/config"
 
 pipeline default(harness: Harness, task: unknown) {
   harness.stdio.println(env_int(harness.env, "HARN_ACP_HARNESS_REGRESSION_UNSET", 7))
   harness.stdio.println("via-harness")
 }"#,
-            )
-            .expect("write pipeline");
+        )
+        .expect("write pipeline");
 
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_code_session_with_config(
-                    AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
-                    serde_json::json!(dir.path()),
-                )
-                .await;
-
-            let output = run_prompt_with_project_capability(
-                &request_tx,
-                &mut response_rx,
-                &session_id,
-                3,
-                "hello",
-                false,
-            )
-            .await;
-            assert_eq!(output, "7\nvia-harness\n");
-
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
+        let (request_tx, mut response_rx, server, session_id) = start_acp_code_session_with_config(
+            AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
+            serde_json::json!(dir.path()),
+        )
         .await;
+
+        let output = run_prompt_with_project_capability(
+            &request_tx,
+            &mut response_rx,
+            &session_id,
+            3,
+            "hello",
+            false,
+        )
+        .await;
+        assert_eq!(output, "7\nvia-harness\n");
+
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_file_backed_vm_baseline_keeps_prompt_turns_isolated() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let dir = tempfile::tempdir().expect("tempdir");
             let pipeline_path = dir.path().join("isolation.harn");
             let profile_path = dir.path().join("profile.ndjson");
@@ -1112,15 +1076,12 @@ pipeline default(harness: Harness, task: unknown) {
 
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_prompt_exposes_multimodal_prompt_messages() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let dir = tempfile::tempdir().expect("tempdir");
             let pipeline_path = dir.path().join("multimodal.harn");
             std::fs::write(
@@ -1211,15 +1172,12 @@ pipeline default(harness: Harness, task: unknown) {
             assert_eq!(output.trim(), ["true"; 11].join("\n"), "every prompt assertion must run");
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_prompt_surfaces_multimodal_capability_errors() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let dir = tempfile::tempdir().expect("tempdir");
             let pipeline_path = dir.path().join("unsupported_vision.harn");
             std::fs::write(
@@ -1279,8 +1237,7 @@ pipeline default(harness: Harness, task: unknown) {
             assert!(saw_error, "prompt should return a capability error");
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1353,281 +1310,272 @@ fn prepared_session_prompt_preserves_queued_cancel() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_cancel_kills_active_terminal() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_channel_session().await;
+    harn_clock::test_support::with_local_tasks(async {
+        let (request_tx, mut response_rx, server, session_id) = start_acp_channel_session().await;
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "session/prompt",
-                    "params": {
-                        "sessionId": session_id,
-                        // `run_command` shares ACP's terminal path with `exec`.
-                        "prompt": [{"type": "text", "text": "run_command(\"sleep 999\")"}],
-                    },
-                }))
-                .expect("send session/prompt");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id,
+                    // `run_command` shares ACP's terminal path with `exec`.
+                    "prompt": [{"type": "text", "text": "run_command(\"sleep 999\")"}],
+                },
+            }))
+            .expect("send session/prompt");
 
-            let terminal_id = "term-cancel-demo";
-            let mut saw_wait = false;
-            let mut saw_kill = false;
-            let mut saw_release = false;
-            let mut saw_cancelled_response = false;
-            for _ in 0..24 {
-                let message = recv_json(&mut response_rx).await;
-                match message.get("method").and_then(|value| value.as_str()) {
-                    Some("host/capabilities") => {
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    Some("terminal/create") => {
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {"terminalId": terminal_id},
-                            }))
-                            .expect("send terminal/create response");
-                    }
-                    Some("terminal/wait_for_exit") => {
-                        assert_eq!(message["params"]["terminalId"], terminal_id);
-                        saw_wait = true;
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "method": "session/cancel",
-                                "params": {"sessionId": session_id},
-                            }))
-                            .expect("send session/cancel");
-                    }
-                    Some("terminal/kill") => {
-                        assert_eq!(message["params"]["terminalId"], terminal_id);
-                        saw_kill = true;
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    Some("terminal/release") => {
-                        assert_eq!(message["params"]["terminalId"], terminal_id);
-                        saw_release = true;
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    _ if message["id"] == 2 => {
-                        assert_eq!(message["result"]["stopReason"], "cancelled");
-                        saw_cancelled_response = true;
-                        break;
-                    }
-                    _ => {}
+        let terminal_id = "term-cancel-demo";
+        let mut saw_wait = false;
+        let mut saw_kill = false;
+        let mut saw_release = false;
+        let mut saw_cancelled_response = false;
+        for _ in 0..24 {
+            let message = recv_json(&mut response_rx).await;
+            match message.get("method").and_then(|value| value.as_str()) {
+                Some("host/capabilities") => {
+                    reply_empty_result(&request_tx, &message);
                 }
+                Some("terminal/create") => {
+                    request_tx
+                        .send(serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": message["id"].clone(),
+                            "result": {"terminalId": terminal_id},
+                        }))
+                        .expect("send terminal/create response");
+                }
+                Some("terminal/wait_for_exit") => {
+                    assert_eq!(message["params"]["terminalId"], terminal_id);
+                    saw_wait = true;
+                    request_tx
+                        .send(serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "method": "session/cancel",
+                            "params": {"sessionId": session_id},
+                        }))
+                        .expect("send session/cancel");
+                }
+                Some("terminal/kill") => {
+                    assert_eq!(message["params"]["terminalId"], terminal_id);
+                    saw_kill = true;
+                    reply_empty_result(&request_tx, &message);
+                }
+                Some("terminal/release") => {
+                    assert_eq!(message["params"]["terminalId"], terminal_id);
+                    saw_release = true;
+                    reply_empty_result(&request_tx, &message);
+                }
+                _ if message["id"] == 2 => {
+                    assert_eq!(message["result"]["stopReason"], "cancelled");
+                    saw_cancelled_response = true;
+                    break;
+                }
+                _ => {}
             }
+        }
 
-            assert!(saw_wait, "prompt should block on terminal/wait_for_exit");
-            assert!(saw_kill, "session/cancel should issue terminal/kill");
-            assert!(
-                saw_release,
-                "cancelled terminal execution should still release the terminal"
-            );
-            assert!(
-                saw_cancelled_response,
-                "prompt should finish with stopReason=cancelled"
-            );
+        assert!(saw_wait, "prompt should block on terminal/wait_for_exit");
+        assert!(saw_kill, "session/cancel should issue terminal/kill");
+        assert!(
+            saw_release,
+            "cancelled terminal execution should still release the terminal"
+        );
+        assert!(
+            saw_cancelled_response,
+            "prompt should finish with stopReason=cancelled"
+        );
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_close_cancels_active_terminal_before_freeing_session() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_channel_session().await;
+    harn_clock::test_support::with_local_tasks(async {
+        let (request_tx, mut response_rx, server, session_id) = start_acp_channel_session().await;
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "session/prompt",
-                    "params": {
-                        "sessionId": session_id.clone(),
-                        "prompt": [{"type": "text", "text": "run_command(\"sleep 999\")"}],
-                    },
-                }))
-                .expect("send session/prompt");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id.clone(),
+                    "prompt": [{"type": "text", "text": "run_command(\"sleep 999\")"}],
+                },
+            }))
+            .expect("send session/prompt");
 
-            let terminal_id = "term-close-demo";
-            let mut saw_wait = false;
-            let mut saw_kill = false;
-            let mut saw_release = false;
-            let mut saw_cancelled_response = false;
-            let mut saw_close_response = false;
-            for _ in 0..32 {
-                let message = recv_json(&mut response_rx).await;
-                match message.get("method").and_then(|value| value.as_str()) {
-                    Some("host/capabilities") => {
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    Some("terminal/create") => {
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {"terminalId": terminal_id},
-                            }))
-                            .expect("send terminal/create response");
-                    }
-                    Some("terminal/wait_for_exit") => {
-                        assert_eq!(message["params"]["terminalId"], terminal_id);
-                        saw_wait = true;
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": 3,
-                                "method": "session/close",
-                                "params": {"sessionId": session_id.clone()},
-                            }))
-                            .expect("send session/close");
-                    }
-                    Some("terminal/kill") => {
-                        assert_eq!(message["params"]["terminalId"], terminal_id);
-                        saw_kill = true;
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    Some("terminal/release") => {
-                        assert_eq!(message["params"]["terminalId"], terminal_id);
-                        saw_release = true;
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    _ if message["id"] == 2 => {
-                        assert_eq!(message["result"]["stopReason"], "cancelled");
-                        saw_cancelled_response = true;
-                    }
-                    _ if message["id"] == 3 => {
-                        assert_eq!(message["result"], serde_json::json!({}));
-                        assert!(!harn_vm::agent_sessions::exists(&session_id));
-                        saw_close_response = true;
-                        break;
-                    }
-                    _ => {}
+        let terminal_id = "term-close-demo";
+        let mut saw_wait = false;
+        let mut saw_kill = false;
+        let mut saw_release = false;
+        let mut saw_cancelled_response = false;
+        let mut saw_close_response = false;
+        for _ in 0..32 {
+            let message = recv_json(&mut response_rx).await;
+            match message.get("method").and_then(|value| value.as_str()) {
+                Some("host/capabilities") => {
+                    reply_empty_result(&request_tx, &message);
                 }
+                Some("terminal/create") => {
+                    request_tx
+                        .send(serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": message["id"].clone(),
+                            "result": {"terminalId": terminal_id},
+                        }))
+                        .expect("send terminal/create response");
+                }
+                Some("terminal/wait_for_exit") => {
+                    assert_eq!(message["params"]["terminalId"], terminal_id);
+                    saw_wait = true;
+                    request_tx
+                        .send(serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": 3,
+                            "method": "session/close",
+                            "params": {"sessionId": session_id.clone()},
+                        }))
+                        .expect("send session/close");
+                }
+                Some("terminal/kill") => {
+                    assert_eq!(message["params"]["terminalId"], terminal_id);
+                    saw_kill = true;
+                    reply_empty_result(&request_tx, &message);
+                }
+                Some("terminal/release") => {
+                    assert_eq!(message["params"]["terminalId"], terminal_id);
+                    saw_release = true;
+                    reply_empty_result(&request_tx, &message);
+                }
+                _ if message["id"] == 2 => {
+                    assert_eq!(message["result"]["stopReason"], "cancelled");
+                    saw_cancelled_response = true;
+                }
+                _ if message["id"] == 3 => {
+                    assert_eq!(message["result"], serde_json::json!({}));
+                    assert!(!harn_vm::agent_sessions::exists(&session_id));
+                    saw_close_response = true;
+                    break;
+                }
+                _ => {}
             }
+        }
 
-            assert!(saw_wait, "prompt should block on terminal/wait_for_exit");
-            assert!(saw_kill, "session/close should issue terminal/kill");
-            assert!(
-                saw_release,
-                "closed terminal execution should still release the terminal"
-            );
-            assert!(
-                saw_cancelled_response,
-                "prompt should finish with stopReason=cancelled"
-            );
-            assert!(
-                saw_close_response,
-                "session/close should respond after cleanup"
-            );
+        assert!(saw_wait, "prompt should block on terminal/wait_for_exit");
+        assert!(saw_kill, "session/close should issue terminal/kill");
+        assert!(
+            saw_release,
+            "closed terminal execution should still release the terminal"
+        );
+        assert!(
+            saw_cancelled_response,
+            "prompt should finish with stopReason=cancelled"
+        );
+        assert!(
+            saw_close_response,
+            "session/close should respond after cleanup"
+        );
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_cancel_kills_terminal_created_during_cancel() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_channel_session().await;
+    harn_clock::test_support::with_local_tasks(async {
+        let (request_tx, mut response_rx, server, session_id) = start_acp_channel_session().await;
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "session/prompt",
-                    "params": {
-                        "sessionId": session_id,
-                        "prompt": [{"type": "text", "text": "run_command(\"sleep 999\")"}],
-                    },
-                }))
-                .expect("send session/prompt");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id,
+                    "prompt": [{"type": "text", "text": "run_command(\"sleep 999\")"}],
+                },
+            }))
+            .expect("send session/prompt");
 
-            let terminal_id = "term-created-during-cancel";
-            let mut saw_create = false;
-            let mut saw_wait = false;
-            let mut saw_kill = false;
-            let mut saw_release = false;
-            let mut saw_cancelled_response = false;
-            for _ in 0..24 {
-                let message = recv_json(&mut response_rx).await;
-                match message.get("method").and_then(|value| value.as_str()) {
-                    Some("host/capabilities") => {
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    Some("terminal/create") => {
-                        saw_create = true;
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "method": "session/cancel",
-                                "params": {"sessionId": session_id},
-                            }))
-                            .expect("send session/cancel");
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {"terminalId": terminal_id},
-                            }))
-                            .expect("send terminal/create response");
-                    }
-                    Some("terminal/wait_for_exit") => {
-                        saw_wait = true;
-                    }
-                    Some("terminal/kill") => {
-                        assert_eq!(message["params"]["terminalId"], terminal_id);
-                        saw_kill = true;
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    Some("terminal/release") => {
-                        assert_eq!(message["params"]["terminalId"], terminal_id);
-                        saw_release = true;
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    _ if message["id"] == 2 => {
-                        assert_eq!(message["result"]["stopReason"], "cancelled");
-                        saw_cancelled_response = true;
-                        break;
-                    }
-                    _ => {}
+        let terminal_id = "term-created-during-cancel";
+        let mut saw_create = false;
+        let mut saw_wait = false;
+        let mut saw_kill = false;
+        let mut saw_release = false;
+        let mut saw_cancelled_response = false;
+        for _ in 0..24 {
+            let message = recv_json(&mut response_rx).await;
+            match message.get("method").and_then(|value| value.as_str()) {
+                Some("host/capabilities") => {
+                    reply_empty_result(&request_tx, &message);
                 }
+                Some("terminal/create") => {
+                    saw_create = true;
+                    request_tx
+                        .send(serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "method": "session/cancel",
+                            "params": {"sessionId": session_id},
+                        }))
+                        .expect("send session/cancel");
+                    request_tx
+                        .send(serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": message["id"].clone(),
+                            "result": {"terminalId": terminal_id},
+                        }))
+                        .expect("send terminal/create response");
+                }
+                Some("terminal/wait_for_exit") => {
+                    saw_wait = true;
+                }
+                Some("terminal/kill") => {
+                    assert_eq!(message["params"]["terminalId"], terminal_id);
+                    saw_kill = true;
+                    reply_empty_result(&request_tx, &message);
+                }
+                Some("terminal/release") => {
+                    assert_eq!(message["params"]["terminalId"], terminal_id);
+                    saw_release = true;
+                    reply_empty_result(&request_tx, &message);
+                }
+                _ if message["id"] == 2 => {
+                    assert_eq!(message["result"]["stopReason"], "cancelled");
+                    saw_cancelled_response = true;
+                    break;
+                }
+                _ => {}
             }
+        }
 
-            assert!(saw_create, "prompt should request terminal/create");
-            assert!(
-                !saw_wait,
-                "cancellation after terminal/create should not wait for process exit"
-            );
-            assert!(
-                saw_kill,
-                "created terminal should be killed when create races cancellation"
-            );
-            assert!(
-                saw_release,
-                "created terminal should be released when create races cancellation"
-            );
-            assert!(
-                saw_cancelled_response,
-                "prompt should finish with stopReason=cancelled"
-            );
+        assert!(saw_create, "prompt should request terminal/create");
+        assert!(
+            !saw_wait,
+            "cancellation after terminal/create should not wait for process exit"
+        );
+        assert!(
+            saw_kill,
+            "created terminal should be killed when create races cancellation"
+        );
+        assert!(
+            saw_release,
+            "created terminal should be released when create races cancellation"
+        );
+        assert!(
+            saw_cancelled_response,
+            "prompt should finish with stopReason=cancelled"
+        );
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }

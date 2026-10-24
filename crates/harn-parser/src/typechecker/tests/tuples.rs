@@ -1,43 +1,97 @@
 use super::*;
 use crate::diagnostic_codes::Code;
 
-#[test]
-fn explicit_tuple_constructor_refines_constant_indexes() {
-    let errs = errors(
-        r#"pipeline t(task) {
+#[rstest::rstest]
+#[case::explicit_tuple_constructor_refines_constant_indexes(
+    r#"pipeline t(task) {
   const row = tuple(7, "seven")
   const first: int = row[0]
   const last: string = row[-1]
 }"#,
-    );
-    assert!(errs.is_empty(), "expected precise tuple reads: {errs:?}");
-}
-
-#[test]
-fn ordinary_bracket_literals_remain_lists_by_default() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  const value: string = ["a", "b"][0]
-}"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|error| error.contains("expected string, found string?")),
-        "default list inference must retain index soundness: {errs:?}"
-    );
-}
-
-#[test]
-fn source_function_can_shadow_tuple_builtin() {
-    let errs = errors(
-        r#"fn tuple(value: int) -> string { return "user:${value}" }
+    true
+)]
+#[case::source_function_can_shadow_tuple_builtin(
+    r#"fn tuple(value: int) -> string { return "user:${value}" }
 pipeline t(task) {
   const value: string = tuple(1)
 }"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "source call resolution must precede builtin tuple inference: {errs:?}"
+    true
+)]
+#[case::contextual_tuple_contracts_project_through_lists_dicts_shapes_and_aliases(
+    r#"type Row = tuple<string, int>
+type Payload = {primary: Row, rows: list<Row>}
+pipeline t(task) {
+  const payload: Payload = {
+    primary: ["first", 1],
+    rows: [["second", 2]],
+  }
+  const lookup: dict<string, Row> = {third: ["third", 3]}
+  const first: string = payload.primary[0]
+  const count: int = lookup.third[1]
+}"#,
+    true
+)]
+#[case::dynamic_tuple_read_is_union_with_nil(
+    r#"pipeline t(task) {
+  const row = tuple(7, "seven")
+  let index: int = 0
+  const value: int | string | nil = row[index]
+}"#,
+    true
+)]
+#[case::tuple_iteration_and_nested_list_preserve_positional_type(
+    r#"pipeline t(task) {
+  const rows: list<tuple<string, int>> = [["a", 1], ["b", 2]]
+  for row in rows {
+    const name: string = row[0]
+    const count: int = row[1]
+  }
+  for value in tuple(1, "one") {
+    const widened: int | string = value
+  }
+}"#,
+    true
+)]
+#[case::arity_changing_tuple_operations_widen_to_lists(
+    r#"pipeline t(task) {
+  const row = tuple(1, "one")
+  const appended: list<int | string | bool> = row + [true]
+  const sliced: list<int | string> = row[0:1]
+  const reversed: list<int | string> = row.reversed()
+}"#,
+    true
+)]
+fn diagnostics_errors(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
+}
+
+#[rstest::rstest]
+#[case::ordinary_bracket_literals_remain_lists_by_default(
+    r#"pipeline t(task) {
+  const value: string = ["a", "b"][0]
+}"#,
+    "expected string, found string?",
+    true
+)]
+#[case::tuple_positions_preserve_contextual_closure_checking(
+    r#"pipeline t(task) {
+  const callbacks: tuple<fn(int) -> int, string> = [
+    { value -> value + "wrong" },
+    "label",
+  ]
+}"#,
+    "can't add int and string",
+    true
+)]
+fn diagnostic_message_errors(#[case] source: &str, #[case] message: &str, #[case] present: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains(message)),
+        present,
+        "{message}: {diagnostics:?}"
     );
 }
 
@@ -81,27 +135,6 @@ pipeline t(task) {
 }
 
 #[test]
-fn contextual_tuple_contracts_project_through_lists_dicts_shapes_and_aliases() {
-    let ok = errors(
-        r#"type Row = tuple<string, int>
-type Payload = {primary: Row, rows: list<Row>}
-pipeline t(task) {
-  const payload: Payload = {
-    primary: ["first", 1],
-    rows: [["second", 2]],
-  }
-  const lookup: dict<string, Row> = {third: ["third", 3]}
-  const first: string = payload.primary[0]
-  const count: int = lookup.third[1]
-}"#,
-    );
-    assert!(
-        ok.is_empty(),
-        "tuple context should project through compound contracts: {ok:?}"
-    );
-}
-
-#[test]
 fn contextual_tuple_lists_validate_spread_sources() {
     let ok = errors(
         r#"pipeline t(task) {
@@ -128,23 +161,6 @@ fn contextual_tuple_lists_validate_spread_sources() {
 }
 
 #[test]
-fn tuple_positions_preserve_contextual_closure_checking() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  const callbacks: tuple<fn(int) -> int, string> = [
-    { value -> value + "wrong" },
-    "label",
-  ]
-}"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|error| error.contains("can't add int and string")),
-        "tuple context must reach closure parameter and return types: {errs:?}"
-    );
-}
-
-#[test]
 fn constant_tuple_out_of_bounds_is_a_static_error() {
     let diagnostics = check_source(
         r#"pipeline t(task) {
@@ -161,21 +177,6 @@ fn constant_tuple_out_of_bounds_is_a_static_error() {
         bounds.len(),
         2,
         "expected both bounds errors: {diagnostics:?}"
-    );
-}
-
-#[test]
-fn dynamic_tuple_read_is_union_with_nil() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  const row = tuple(7, "seven")
-  let index: int = 0
-  const value: int | string | nil = row[index]
-}"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "dynamic reads use the sound list rule: {errs:?}"
     );
 }
 
@@ -203,26 +204,6 @@ pipeline t(task) {
         bad.iter()
             .any(|error| error.contains("expected tuple<int, string>")),
         "an arbitrary list cannot prove tuple arity: {bad:?}"
-    );
-}
-
-#[test]
-fn tuple_iteration_and_nested_list_preserve_positional_type() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  const rows: list<tuple<string, int>> = [["a", 1], ["b", 2]]
-  for row in rows {
-    const name: string = row[0]
-    const count: int = row[1]
-  }
-  for value in tuple(1, "one") {
-    const widened: int | string = value
-  }
-}"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "iteration should preserve tuple contracts: {errs:?}"
     );
 }
 
@@ -265,21 +246,5 @@ fn tuple_destructuring_is_positional_and_dynamic_writes_are_safe() {
     assert!(
         !dynamic.is_empty(),
         "a dynamic heterogeneous tuple write cannot be sound for every slot"
-    );
-}
-
-#[test]
-fn arity_changing_tuple_operations_widen_to_lists() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  const row = tuple(1, "one")
-  const appended: list<int | string | bool> = row + [true]
-  const sliced: list<int | string> = row[0:1]
-  const reversed: list<int | string> = row.reversed()
-}"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "arity-changing operations should forget positions: {errs:?}"
     );
 }

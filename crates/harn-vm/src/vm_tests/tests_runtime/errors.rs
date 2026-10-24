@@ -130,18 +130,10 @@ fn test_int_division_overflow_promotes_instead_of_wrapping() {
     assert_eq!(out, "[harn] 9223372036854776000\n[harn] 0");
 }
 
-#[test]
-fn test_float_division_by_zero_uses_ieee_values() {
-    let out = run_vm(
-        "pipeline default(harness: Harness, task: unknown) { harness.stdio.log(is_nan(0.0 / 0.0))\nharness.stdio.log(is_infinite(1.0 / 0.0))\nharness.stdio.log(is_infinite(-1.0 / 0.0)) }",
-    );
-    assert_eq!(out, "[harn] true\n[harn] true\n[harn] true\n");
-}
-
-#[test]
-fn test_reusing_catch_binding_name_in_same_block() {
-    let out = run_vm(
-        r#"pipeline default(harness: Harness, task: unknown) {
+#[rstest::rstest]
+#[case::test_float_division_by_zero_uses_ieee_values("pipeline default(harness: Harness, task: unknown) { harness.stdio.log(is_nan(0.0 / 0.0))\nharness.stdio.log(is_infinite(1.0 / 0.0))\nharness.stdio.log(is_infinite(-1.0 / 0.0)) }", "[harn] true\n[harn] true\n[harn] true\n")]
+#[case::test_reusing_catch_binding_name_in_same_block(
+    r#"pipeline default(harness: Harness, task: unknown) {
 try {
     throw "a"
 } catch e {
@@ -153,8 +145,10 @@ try {
     harness.stdio.log(e)
 }
 }"#,
-    );
-    assert_eq!(out, "[harn] a\n[harn] b\n");
+    "[harn] a\n[harn] b\n"
+)]
+fn output_run_vm(#[case] source: &str, #[case] expected: &str) {
+    assert_eq!(run_vm(source), expected);
 }
 
 #[test]

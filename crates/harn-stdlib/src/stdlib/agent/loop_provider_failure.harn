@@ -11,7 +11,7 @@ import {
   __agent_loop_tracks_failure,
   __agent_loop_transport_abort_error,
 } from "std/agent/loop_turn_options"
-import { agent_emit_event } from "std/agent/state"
+import { agent_emit_event, agent_session_record_usage } from "std/agent/state"
 
 pub type AgentLoopProviderFailureState = {
   primary_provider: string,
@@ -94,6 +94,12 @@ pub fn agent_loop_provider_failure(
   turn_llm_opts: dict,
   state: AgentLoopProviderFailureState,
 ) -> AgentLoopProviderFailureOutcome {
+  // A call the budget refused at settlement completed and was paid for, so its
+  // usage joins the session totals that every stop and cost report reads.
+  const settled_call = call?.error?.settled_call
+  if settled_call != nil {
+    agent_session_record_usage(agent, session_id, settled_call, turn_llm_opts, state.iteration + 1)
+  }
   const failed_provider = to_string(turn_llm_opts?.provider ?? "")
   const failed_model = to_string(turn_llm_opts?.model ?? "")
   const was_escalated = (state.primary_provider != "" || state.primary_model != "")

@@ -25,22 +25,17 @@ use harn_parser::Parser;
 /// (Err). Single-threaded current-thread runtime; fully in-process.
 fn run(source: &str, options: CompilerOptions) -> Result<String, String> {
     let rt = crate::test_support::current_thread_runtime();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let tokens = Lexer::new(source).tokenize().map_err(|e| e.to_string())?;
-                let program = Parser::new(tokens).parse().map_err(|e| e.to_string())?;
-                let chunk = Compiler::with_options(options)
-                    .compile(&program)
-                    .map_err(|e| e.to_string())?;
-                let mut vm = crate::new_vm();
-                register_vm_stdlib(&mut vm);
-                vm.execute(&chunk).await.map_err(|e| e.to_string())?;
-                Ok(vm.output().trim_end().to_string())
-            })
-            .await
-    })
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let tokens = Lexer::new(source).tokenize().map_err(|e| e.to_string())?;
+        let program = Parser::new(tokens).parse().map_err(|e| e.to_string())?;
+        let chunk = Compiler::with_options(options)
+            .compile(&program)
+            .map_err(|e| e.to_string())?;
+        let mut vm = crate::new_vm();
+        register_vm_stdlib(&mut vm);
+        vm.execute(&chunk).await.map_err(|e| e.to_string())?;
+        Ok(vm.output().trim_end().to_string())
+    }))
 }
 
 /// Assert the optimized and unoptimized builds agree, and return the shared

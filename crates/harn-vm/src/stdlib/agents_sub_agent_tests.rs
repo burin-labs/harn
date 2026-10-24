@@ -138,11 +138,8 @@ fn base_envelope_carries_files_written_and_usage_then_drains() {
 
 fn assistant_message(text: &str) -> VmValue {
     VmValue::dict([
-        (
-            crate::value::intern_key("role"),
-            VmValue::string("assistant"),
-        ),
-        (crate::value::intern_key("content"), VmValue::string(text)),
+        ("role", VmValue::string("assistant")),
+        ("content", VmValue::string(text)),
     ])
 }
 
@@ -191,15 +188,9 @@ fn anchor_dict(primary: &str, additional: Vec<(&str, &str)>) -> VmValue {
     let mut roots = Vec::new();
     for (path, mount_mode) in additional {
         roots.push(VmValue::dict([
-            (crate::value::intern_key("path"), VmValue::string(path)),
-            (
-                crate::value::intern_key("mount_mode"),
-                VmValue::string(mount_mode),
-            ),
-            (
-                crate::value::intern_key("mounted_at"),
-                VmValue::string("2026-05-24T00:00:00Z"),
-            ),
+            ("path", VmValue::string(path)),
+            ("mount_mode", VmValue::string(mount_mode)),
+            ("mounted_at", VmValue::string("2026-05-24T00:00:00Z")),
         ]));
     }
     let mut anchor = crate::value::DictMap::from_iter([
@@ -284,10 +275,7 @@ fn parse_sub_agent_request_preserves_explicit_execution_cwd() {
         ("anchor", anchor_dict(&path_string(&child), Vec::new())),
         (
             "execution",
-            VmValue::dict([(
-                crate::value::intern_key("cwd"),
-                VmValue::string(explicit_cwd_text.clone()),
-            )]),
+            VmValue::dict([("cwd", VmValue::string(explicit_cwd_text.clone()))]),
         ),
     ])])
     .unwrap();

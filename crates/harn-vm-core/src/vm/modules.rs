@@ -1,3 +1,4 @@
+use crate::value::VmDictExt as _;
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -186,10 +187,7 @@ fn build_namespace_dict_with_state(
     state: &VmEnv,
 ) -> Result<VmValue, VmError> {
     let mut map = BTreeMap::new();
-    map.insert(
-        "_namespace".to_string(),
-        VmValue::String(arcstr::ArcStr::from(module_path)),
-    );
+    map.put_str("_namespace", module_path);
     let names = module_import_names(
         module_path,
         loaded,

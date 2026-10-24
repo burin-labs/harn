@@ -3,7 +3,7 @@
 // catalog or provider rate are NOT silently coerced to 0; two priced
 // entries sharing a key exercise the aggregation arithmetic that earlier
 // versions broke due to a `+` / `??` precedence pitfall.
-import { estimate_session_cost, format_usd } from "std/llm/economics"
+import { SessionModelCostEstimate, estimate_session_cost, format_usd } from "std/llm/economics"
 
 pipeline default(harness: Harness) {
   const summary = estimate_session_cost(
@@ -34,9 +34,13 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println("calls=" + to_string(summary.total_calls))
   harness.stdio.println("unknown=" + to_string(summary.unknown_calls))
-  harness.stdio.println("total=" + format_usd(summary.total_cost_usd))
+  harness.stdio.println("total_unknown=" + to_string(summary.total_cost_usd == nil))
   harness.stdio.println("known=" + format_usd(summary.known_cost_usd))
   harness.stdio.println("rows=" + to_string(len(summary.per_model)))
-  harness.stdio.println("top=" + summary.per_model[0].model)
-  harness.stdio.println("top_calls=" + to_string(summary.per_model[0].calls))
+  const top: SessionModelCostEstimate = schema_expect(
+    summary.per_model[0],
+    schema_of(SessionModelCostEstimate),
+  )
+  harness.stdio.println("top=${top.model}")
+  harness.stdio.println("top_calls=${top.calls}")
 }

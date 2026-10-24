@@ -13,7 +13,7 @@ use super::{
 };
 
 fn s(v: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(v))
+    VmValue::string(v)
 }
 
 fn make_dict(pairs: Vec<(&str, VmValue)>) -> crate::value::DictMap {
@@ -25,7 +25,7 @@ fn make_vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
 }
 
 fn make_list(items: Vec<VmValue>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(items))
+    VmValue::list(items)
 }
 
 fn assert_schema_error_contains(schema: &VmValue, expected: &str) {

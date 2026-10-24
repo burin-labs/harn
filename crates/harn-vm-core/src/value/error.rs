@@ -1149,10 +1149,7 @@ mod tests {
     fn thrown_value_passes_structured_thrown_through_unchanged() {
         // A user `throw` of a structured value keeps its exact shape — the
         // lowering seam must not stringify or re-wrap it.
-        let original = VmValue::dict(std::collections::BTreeMap::from([(
-            "code".to_string(),
-            VmValue::Int(7),
-        )]));
+        let original = VmValue::dict([("code", VmValue::Int(7))]);
         let VmValue::Dict(dict) = VmError::Thrown(original).thrown_value() else {
             panic!("thrown dict must pass through as a dict");
         };

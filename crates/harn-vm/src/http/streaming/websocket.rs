@@ -390,8 +390,7 @@ fn register_accepted_websocket(event: WebSocketServerEvent) -> Result<VmValue, V
         VmValue::dict(
             headers
                 .into_iter()
-                .map(|(name, value)| (name, VmValue::string(value)))
-                .collect::<crate::value::DictMap>(),
+                .map(|(name, value)| (name, VmValue::string(value))),
         ),
     );
     Ok(VmValue::dict(metadata))
@@ -1357,7 +1356,7 @@ mod tests {
 
         vm_websocket_send(
             &socket_id,
-            VmValue::String(arcstr::ArcStr::from("hello")),
+            VmValue::string("hello"),
             &crate::value::DictMap::new(),
         )
         .await

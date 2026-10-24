@@ -55,10 +55,7 @@ pub fn echo(harness: Harness, event: TriggerEvent) -> dict {
 "#,
         )
         .unwrap();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let runtime = harn_clock::test_support::current_thread_runtime();
         runtime.block_on(tokio::task::LocalSet::new().run_until(async {
             for number in [7, 8] {
                 let request = serde_json::json!({"number": number});

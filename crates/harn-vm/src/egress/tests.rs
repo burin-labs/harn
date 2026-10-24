@@ -33,19 +33,14 @@ fn install(config: &[(&str, VmValue)]) -> EgressTestEnvGuard {
 }
 
 fn strings(values: &[&str]) -> VmValue {
-    VmValue::List(std::sync::Arc::new(
-        values
-            .iter()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(*value)))
-            .collect(),
-    ))
+    VmValue::strings(values.iter().copied())
 }
 
 #[test]
 fn exact_host_and_port_restriction() {
     let _guard = install(&[
         ("allow", strings(&["api.example.com:443"])),
-        ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
+        ("default", VmValue::string("deny")),
     ]);
     assert!(check_url("http_get", "https://api.example.com/users")
         .unwrap()
@@ -61,7 +56,7 @@ fn exact_host_and_port_restriction() {
 fn suffix_wildcard_matches_subdomains_only() {
     let _guard = install(&[
         ("allow", strings(&["*.example.com"])),
-        ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
+        ("default", VmValue::string("deny")),
     ]);
     assert!(check_url("http_get", "https://api.example.com")
         .unwrap()
@@ -75,7 +70,7 @@ fn suffix_wildcard_matches_subdomains_only() {
 fn cidr_matches_ip_literals() {
     let _guard = install(&[
         ("allow", strings(&["127.0.0.0/8"])),
-        ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
+        ("default", VmValue::string("deny")),
     ]);
     assert!(check_url("http_get", "http://127.10.20.30:8080")
         .unwrap()
@@ -90,7 +85,7 @@ fn deny_overrides_allow() {
     let _guard = install(&[
         ("allow", strings(&["*.example.com"])),
         ("deny", strings(&["blocked.example.com"])),
-        ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
+        ("default", VmValue::string("deny")),
     ]);
     let blocked = check_url("http_get", "https://blocked.example.com")
         .unwrap()
@@ -100,7 +95,7 @@ fn deny_overrides_allow() {
 
 #[test]
 fn blocked_urls_redact_sensitive_query_values() {
-    let _guard = install(&[("default", VmValue::String(arcstr::ArcStr::from("deny")))]);
+    let _guard = install(&[("default", VmValue::string("deny"))]);
     let blocked = check_url(
         "http_get",
         "https://api.example.com/resource?access_token=secret-token&ok=1",
@@ -175,7 +170,7 @@ fn env_seeding_is_honored() {
 #[test]
 fn policy_context_propagates_only_to_bound_worker_threads() {
     let _scope = scope_egress_policy_for_current_thread();
-    let _guard = install(&[("default", VmValue::String(arcstr::ArcStr::from("deny")))]);
+    let _guard = install(&[("default", VmValue::string("deny"))]);
     let inherited = crate::runtime_stack::spawn(bind_policy_context(|| {
         check_url("connector", "https://blocked.example.test")
             .unwrap()
@@ -305,10 +300,7 @@ fn loopback_https_to_http_redirect_requires_loopback_hatch() {
     );
 
     install_test_policy(&[
-        (
-            "block_private",
-            VmValue::String(arcstr::ArcStr::from("private")),
-        ),
+        ("block_private", VmValue::string("private")),
         ("allow_loopback", VmValue::Bool(true)),
     ]);
     assert!(
@@ -399,10 +391,7 @@ fn write_http_redirect_response<T: Write>(stream: &mut T, location: &str) {
 /// Install an explicit `block_private:"private"` policy with default allow,
 /// so the SSRF block is the only thing that can deny.
 fn install_block_private() -> EgressTestEnvGuard {
-    install(&[(
-        "block_private",
-        VmValue::String(arcstr::ArcStr::from("private")),
-    )])
+    install(&[("block_private", VmValue::string("private"))])
 }
 
 #[test]
@@ -443,11 +432,8 @@ fn block_private_wins_over_allow_rule() {
     // Deny-private wins: an explicit allow for the literal must NOT re-open it.
     let _guard = install(&[
         ("allow", strings(&["127.0.0.1"])),
-        (
-            "block_private",
-            VmValue::String(arcstr::ArcStr::from("private")),
-        ),
-        ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
+        ("block_private", VmValue::string("private")),
+        ("default", VmValue::string("deny")),
     ]);
     assert!(check_url("http_get", "http://127.0.0.1").unwrap().is_some());
 }
@@ -472,10 +458,7 @@ fn block_private_redacts_secret_in_url() {
 #[test]
 fn allow_loopback_hatch_permits_loopback_literal() {
     let _guard = install(&[
-        (
-            "block_private",
-            VmValue::String(arcstr::ArcStr::from("private")),
-        ),
+        ("block_private", VmValue::string("private")),
         ("allow_loopback", VmValue::Bool(true)),
     ]);
     assert!(check_url("http_get", "http://127.0.0.1").unwrap().is_none());
@@ -507,10 +490,7 @@ fn default_on_blocks_loopback_under_run_scope() {
 #[test]
 fn block_private_off_opts_out_under_run_scope() {
     let _guard = test_env_guard();
-    install_test_policy(&[(
-        "block_private",
-        VmValue::String(arcstr::ArcStr::from("off")),
-    )]);
+    install_test_policy(&[("block_private", VmValue::string("off"))]);
     let _scope = require_ssrf_guard_for_host();
     // Explicit off overrides the default-on guard.
     assert!(check_url("http_get", "http://127.0.0.1").unwrap().is_none());
@@ -569,10 +549,7 @@ async fn install_ssrf_guard_blocks_loopback_hostname_and_passes_when_off() {
     let server = test_support::OneShotHttpServer::start();
     let client = {
         let _config = EgressTestConfigGuard::new();
-        install_test_policy(&[(
-            "block_private",
-            VmValue::String(arcstr::ArcStr::from("off")),
-        )]);
+        install_test_policy(&[("block_private", VmValue::string("off"))]);
         let _scope = require_ssrf_guard_for_host();
         install_ssrf_guard(reqwest::Client::builder())
             .build()
@@ -675,7 +652,7 @@ fn resolved_ip_in_allow_cidr_permits_hostname_under_default_deny() {
     // decision from the sync layer).
     let pol = policy(&[
         ("allow", strings(&["10.0.0.0/8"])),
-        ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
+        ("default", VmValue::string("deny")),
     ]);
     assert!(evaluate_resolved_addrs(
         Some(&pol),
@@ -692,7 +669,7 @@ fn resolved_ip_in_allow_cidr_permits_hostname_under_default_deny() {
 fn mixed_resolved_addresses_block_hostname_under_default_deny() {
     let pol = policy(&[
         ("allow", strings(&["203.0.113.0/24"])),
-        ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
+        ("default", VmValue::string("deny")),
     ]);
     let blocked = evaluate_resolved_addrs(
         Some(&pol),
@@ -710,7 +687,7 @@ fn mixed_resolved_addresses_block_hostname_under_default_deny() {
 fn resolved_ip_outside_allow_cidr_blocks_hostname_under_default_deny() {
     let pol = policy(&[
         ("allow", strings(&["10.0.0.0/8"])),
-        ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
+        ("default", VmValue::string("deny")),
     ]);
     let blocked = evaluate_resolved_addrs(
         Some(&pol),
@@ -731,7 +708,7 @@ fn deny_cidr_wins_over_allow_cidr_on_resolved_ip() {
     let pol = policy(&[
         ("allow", strings(&["10.0.0.0/8"])),
         ("deny", strings(&["10.6.0.0/16"])),
-        ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
+        ("default", VmValue::string("deny")),
     ]);
     let blocked = evaluate_resolved_addrs(
         Some(&pol),
@@ -796,10 +773,7 @@ fn port_scoped_deny_cidr_only_matches_that_port_on_resolved_ip() {
 fn ssrf_block_still_applies_to_resolved_ip() {
     // Even with no NetPolicy IP rules, block_private rejects a host that
     // resolves to a private address (existing behavior, kept).
-    let pol = policy(&[(
-        "block_private",
-        VmValue::String(arcstr::ArcStr::from("private")),
-    )]);
+    let pol = policy(&[("block_private", VmValue::string("private"))]);
     let blocked = evaluate_resolved_addrs(
         Some(&pol),
         "http_get",
@@ -822,7 +796,7 @@ fn check_url_defers_hostname_with_cidr_allowlist_under_default_deny() {
     // rule could still grant it after resolution.
     let _guard = install(&[
         ("allow", strings(&["10.0.0.0/8"])),
-        ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
+        ("default", VmValue::string("deny")),
     ]);
     match check_url_decision("http_get", "https://internal.example.com").unwrap() {
         SyncCheck::DeferToResolution(_) => {}
@@ -845,7 +819,7 @@ fn check_url_defers_hostname_with_cidr_allowlist_under_default_deny() {
     drop(_guard);
     let _guard = install(&[
         ("allow", strings(&["api.example.com"])),
-        ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
+        ("default", VmValue::string("deny")),
     ]);
     assert!(matches!(
         check_url_decision("http_get", "https://other.example.com").unwrap(),
@@ -868,7 +842,7 @@ fn resolved_ip_rules_for_drops_host_suffix_and_port_scoped_rules() {
                 "10.0.0.0/8:443",
             ]),
         ),
-        ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
+        ("default", VmValue::string("deny")),
     ]);
     let rules = resolved_ip_rules_for(&pol.policy);
     assert_eq!(
@@ -963,11 +937,8 @@ fn composition_cannot_loosen_a_restriction_another_source_declared() {
     guard.set(HARN_EGRESS_ALLOW_LOOPBACK_ENV, "true");
 
     let script = script_config(&[
-        ("default", VmValue::String(arcstr::ArcStr::from("allow"))),
-        (
-            "block_private",
-            VmValue::String(arcstr::ArcStr::from("off")),
-        ),
+        ("default", VmValue::string("allow")),
+        ("block_private", VmValue::string("off")),
         ("allow_loopback", VmValue::Bool(false)),
     ]);
     let (policy, declared) = policy_from_config(&script).expect("script policy parses");
