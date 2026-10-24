@@ -558,7 +558,8 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   for push_only in [
     "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success'",
     "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true' && needs.rust-cli.result == 'success'",
-    "$" + "{{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true' && needs.rust-cli.result == 'success' }}",
+    "$"
+      + "{{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true' && needs.rust-cli.result == 'success' }}",
   ] {
     let pr_policy = ci
     pr_policy.jobs["audit-scripts"].if = push_only
@@ -569,14 +570,21 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
       ),
     )
     assert(
-      refused.filter({ e -> contains(e, "ci.yml:audit-scripts is a cheap refusal and must carry no event condition") })
-        .count() > 0,
+      len(
+        refused.filter(
+          { e ->
+            contains(e, "ci.yml:audit-scripts is a cheap refusal and must carry no event condition")
+          },
+        ),
+      )
+        > 0,
     )
   }
   // Negative control: dropping the `rust` gate would run it on a docs-only
   // change, which has no CLI to run it with.
   let ungated_policy = ci
-  ungated_policy.jobs["audit-scripts"].if = "$" + "{{ !cancelled() && needs.rust-cli.result == 'success' }}"
+  ungated_policy.jobs["audit-scripts"].if = "$"
+    + "{{ !cancelled() && needs.rust-cli.result == 'success' }}"
   assert(
     minimal_pr_capacity_errors(ungated_policy, publish).contains(
       "ci.yml:audit-scripts must run on every change that selects Rust proof, gated on rust and the shared CLI only",
@@ -587,7 +595,8 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   push_only_status.jobs["ci-status"].steps[0].run = replace(
     push_only_status.jobs["ci-status"].steps[0].run,
     "  [ \"$" + "{{ needs.changes.outputs.rust }}\" != \"true\" ]\n\n# The one Windows",
-    "  test \"$" + "{EVENT_NAME}:$" + "{GIT_REF}\" != \"push:refs/heads/main\"\n\n# The one Windows",
+    "  test \"$" + "{EVENT_NAME}:$"
+      + "{GIT_REF}\" != \"push:refs/heads/main\"\n\n# The one Windows",
   )
   assert(
     minimal_pr_capacity_errors(push_only_status, publish).contains(

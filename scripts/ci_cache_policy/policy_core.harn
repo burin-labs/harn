@@ -331,7 +331,8 @@ pub const CHEAP_PR_REFUSAL_JOBS = [
  * spec, crates, workflows, changelog fragments) sits inside that filter, so
  * the job runs exactly when one of its inputs changes.
  */
-pub const SHARED_CLI_REFUSAL_IF = "$" + "{{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}"
+pub const SHARED_CLI_REFUSAL_IF = "$"
+  + "{{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}"
 
 /**
  * Event terms that put a job behind the merge.
@@ -2317,9 +2318,7 @@ fn proven_push_main_only_errors(jobs: dict) -> list<string> {
   const policy_call = status_requirement_text(status_run, "audit_scripts_result")
   if !contains(policy_call, POLICY_SKIP_ALLOWANCE) {
     errors = errors
-      + [
-        "ci.yml:ci-status must require repository policies on every run that selects Rust proof",
-      ]
+      + ["ci.yml:ci-status must require repository policies on every run that selects Rust proof"]
   }
   return errors
 }
