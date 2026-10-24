@@ -159,6 +159,8 @@ pub(crate) fn with_intent(mut params: JsonValue, intent: Option<&str>) -> JsonVa
             .pointer_mut("/toolCall/_meta/harn")
             .and_then(JsonValue::as_object_mut),
     ) {
+        // The label is model-authored and reaches the host outside `request_params`' masking.
+        let intent = crate::redact::current_policy().redact_string(intent);
         harn.insert("intent".to_string(), json!(intent));
     }
     params
@@ -384,6 +386,24 @@ pub(crate) fn parse_response(response: &JsonValue) -> WireOutcome {
 mod tests {
     use super::*;
     use crate::tool_annotations::ToolKind;
+
+    #[test]
+    fn with_intent_masks_a_credential_in_the_purpose_label() {
+        let params = request_params(
+            Some("session-1"),
+            "tool-1",
+            "edit",
+            &json!({"path": "src/lib.rs"}),
+            json!({"id": "tool-1", "action": "edit"}),
+            &json!({"decision": "ask"}),
+            None,
+            None,
+        );
+        let params = with_intent(params, Some("use key sk-abcdef0123456789abcdef to edit"));
+        let intent = params["toolCall"]["_meta"]["harn"]["intent"].to_string();
+        assert!(!intent.contains("sk-abcdef"), "{intent}");
+        assert!(intent.contains("to edit"), "{intent}");
+    }
 
     #[test]
     fn request_params_carry_canonical_options_and_tool_call() {
