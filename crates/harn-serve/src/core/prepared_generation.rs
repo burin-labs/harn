@@ -14,7 +14,7 @@ fn install_dispatch_vm_runtime(
     source: &str,
     cancel_token: Arc<AtomicBool>,
 ) {
-    harn_vm::register_vm_stdlib(vm);
+    harn_runtime::register_vm_stdlib(vm);
     #[cfg(feature = "hostlib")]
     crate::install_dispatch_hostlib(vm);
     let store_base = script_path.parent().unwrap_or(Path::new("."));

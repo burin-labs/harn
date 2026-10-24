@@ -11,11 +11,8 @@ use crate::llm::vm_value_to_json;
 use crate::stdlib::args::Args;
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, TY_ANY};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
-pub(crate) fn register_connector_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_connector_builtins);
 
 #[harn_builtin(
     exposure = "harness.net.connector_call",

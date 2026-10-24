@@ -49,7 +49,8 @@ use super::IndexState;
 /// annotated type parameters with unrelated classes of the same name.
 /// v10 rebuilds identifier positions missing from exported declaration spans.
 /// v11 rebuilds Java edges that could miss switch-local shadows or inherited member types.
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 11;
+/// v12 records non-Java declaration-name positions, including exported declarations.
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 12;
 
 /// The most runs graph nodes are split into, each decoded on its own thread.
 const NODE_SECTIONS: usize = 4;

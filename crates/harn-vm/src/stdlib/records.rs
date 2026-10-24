@@ -50,15 +50,13 @@ pub fn reset_eval_metrics() {
     EVAL_METRICS.with(|m| m.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_eval_metrics);
+
 pub fn reset_friction_events() {
     FRICTION_EVENTS.with(|events| events.borrow_mut().clear());
 }
 
-/// Peek at recorded eval metrics without consuming them.
-#[allow(dead_code)]
-pub(crate) fn peek_eval_metrics() -> Vec<EvalMetric> {
-    EVAL_METRICS.with(|m| m.borrow().clone())
-}
+harn_vm_core::stdlib_state_reset!(reset_friction_events);
 
 fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {
     let json = serde_json::to_value(value)

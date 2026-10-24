@@ -12,7 +12,6 @@ use backend::{
 use crate::stdlib::args::Args;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmResourceHandle, VmValue};
-use crate::vm::Vm;
 
 const HANDLE_TYPE: &str = "state_handle";
 const HANDOFF_KEY: &str = "__handoff.json";
@@ -28,9 +27,7 @@ pub use backend::{
     FilesystemBackend as AgentStateFilesystemBackend,
 };
 
-pub fn register_agent_state_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub fn register_agent_state_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",

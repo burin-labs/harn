@@ -188,6 +188,9 @@ __all__ = [
     "ACPHitlResolvedUpdateMetaHarn",
     "ACPHitlResolvedUpdateMeta",
     "ACPHitlResolvedUpdate",
+    "ACPInferenceSpeedUpdateMetaHarn",
+    "ACPInferenceSpeedUpdateMeta",
+    "ACPInferenceSpeedUpdate",
     "ACPLiveSessionClientUpdateMetaHarn",
     "ACPLiveSessionClientUpdateMeta",
     "ACPLiveSessionClientUpdate",
@@ -298,6 +301,7 @@ ACP_SESSION_UPDATES: tuple = (
     "handoff",
     "hitl_request",
     "hitl_resolved",
+    "inference_speed",
     "live_session_client",
     "log",
     "progress",
@@ -337,6 +341,7 @@ HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "handoff",
     "hitl_request",
     "hitl_resolved",
+    "inference_speed",
     "live_session_client",
     "log",
     "progress",
@@ -672,6 +677,7 @@ class ACPSessionUpdate(str, Enum):
     HANDOFF = "handoff"
     HITL_REQUEST = "hitl_request"
     HITL_RESOLVED = "hitl_resolved"
+    INFERENCE_SPEED = "inference_speed"
     LIVE_SESSION_CLIENT = "live_session_client"
     LOG = "log"
     PROGRESS = "progress"
@@ -1527,6 +1533,29 @@ class ACPHitlResolvedUpdateMeta(_HarnDataclass):
 class ACPHitlResolvedUpdate(_HarnDataclass):
     sessionUpdate: str
     _meta: ACPHitlResolvedUpdateMeta
+
+@dataclass
+class ACPInferenceSpeedUpdateMetaHarn(_HarnDataclass):
+    callId: str
+    provider: str
+    model: str
+    phase: str
+    isFinal: bool
+    elapsedMs: int
+    outputTokens: int
+    tokenSource: str
+    outputTokensPerSecond: Optional[float] = None
+    replayed: Optional[bool] = None
+    timeToFirstTokenMs: Optional[int] = None
+
+@dataclass
+class ACPInferenceSpeedUpdateMeta(_HarnDataclass):
+    harn: ACPInferenceSpeedUpdateMetaHarn
+
+@dataclass
+class ACPInferenceSpeedUpdate(_HarnDataclass):
+    sessionUpdate: str
+    _meta: ACPInferenceSpeedUpdateMeta
 
 @dataclass
 class ACPLiveSessionClientUpdateMetaHarn(_HarnDataclass):

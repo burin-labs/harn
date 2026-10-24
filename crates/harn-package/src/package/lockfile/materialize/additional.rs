@@ -107,7 +107,7 @@ fn cleanup_preserves_the_lifetime_lock_for_all_and_unused_entries() {
             "cleanup must retain the root lock's file identity"
         );
         drop(reader);
-        old_lock.try_lock().unwrap();
+        harn_flock::assert_released(&old_lock);
         old_lock.unlock().unwrap();
     }
 }

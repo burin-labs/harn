@@ -11,7 +11,6 @@ use chrono_tz::Tz;
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 use super::datetime::{datetime_from_arg, parse_timezone, timestamp_value, vm_error};
 
@@ -245,9 +244,7 @@ static COUNTRIES: &[CountryMeta] = &[
     },
 ];
 
-pub(crate) fn register_calendar_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_calendar_builtins);
 
 #[harn_builtin(
     exposure = "pure",

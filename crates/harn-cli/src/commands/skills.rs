@@ -1374,6 +1374,6 @@ mod tests {
         );
 
         drop(discovery);
-        lease.try_lock().unwrap();
+        harn_flock::assert_released(&lease);
     }
 }

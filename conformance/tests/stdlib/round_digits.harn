@@ -16,6 +16,8 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(round(2.675 + 0.005, 2))
   // Negative digits round to tens / hundreds buckets — for floats and ints.
   harness.stdio.log(round(1234.5678, -2))
+  harness.stdio.log(round(123456.0, -5))
+  harness.stdio.log(round(9000000000000000000, -19))
   harness.stdio.log(round(1250, -2))
   harness.stdio.log(round(-1250, -2))
   harness.stdio.log(round(1249, -2))

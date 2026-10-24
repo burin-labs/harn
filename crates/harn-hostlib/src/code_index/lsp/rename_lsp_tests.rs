@@ -89,9 +89,13 @@ fn server_rename_with_proof(
     new_name: &str,
     proof: bool,
 ) -> Option<VmValue> {
+    server_answer(|| rename_with_proof(capability, path, name, new_name, "language_server", proof))
+}
+
+fn server_answer(mut rename: impl FnMut() -> VmValue) -> Option<VmValue> {
     let mut last = None;
     for _ in 0..8 {
-        let result = rename_with_proof(capability, path, name, new_name, "language_server", proof);
+        let result = rename();
         if s(field(&result, "result")) != "backend_unavailable" {
             return Some(result);
         }
@@ -776,6 +780,84 @@ const TS_PROJECT: &[(&str, &str)] = &[
         "import { Reading, average } from \"./reading\";\nimport * as current from \"./reading\";\nexport { Reading as LegacyReading } from \"./reading\";\nexport { Reading } from \"./reading\";\n\nexport const labels = { Reading: \"sensor\", kind: \"Reading\", typed: null as Reading | null };\n\nexport function latest(all: Array<Reading>): current.Reading | undefined {\n  const first: Reading[] = all.slice(0, 1);\n  return first.length ? average(first) : undefined;\n}\n",
     ),
 ];
+
+#[test]
+fn typescript_server_renames_only_the_positioned_same_line_method() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    let source = "/* 🦀 */ export class First { load() { return 1; } } export class Second { load() { return 2; } }\nexport const first = new First().load();\nexport const second = new Second().load();\n";
+    write_tree(
+        dir.path(),
+        &[
+            (
+                "tsconfig.json",
+                "{\"compilerOptions\":{\"strict\":true},\"include\":[\"src/**/*.ts\"]}\n",
+            ),
+            ("src/handlers.ts", source),
+        ],
+    );
+    let capability = index(dir.path());
+    let second = source.lines().next().unwrap().rfind("load").unwrap();
+    let col = source.get(..second).unwrap().encode_utf16().count() as u32 + 1;
+    assert_ne!(
+        col,
+        second as u32 + 1,
+        "the fixture must distinguish UTF-16 from bytes"
+    );
+    let request = |name: &str, col: u32| {
+        let symbol = dict(&[
+            ("name", vm_string(name)),
+            ("path", vm_string("src/handlers.ts")),
+            ("line", VmValue::Int(1)),
+            ("col", VmValue::Int(i64::from(col))),
+            ("kind", vm_string("Function")),
+        ]);
+        let request = dict(&[
+            ("symbol_ref", symbol),
+            ("new_name", vm_string("fetch")),
+            ("scope", vm_string("workspace")),
+            ("backend", vm_string("language_server")),
+        ]);
+        crate::code_index::rename::run(&capability.shared(), &[request]).expect("rename runs")
+    };
+    for (name, wrong_col) in [
+        ("First.load", col),
+        ("Other.load", col),
+        ("Second.load", col - 1),
+        ("Second.load", second as u32 + 1),
+    ] {
+        let result = request(name, wrong_col);
+        assert_eq!(s(field(&result, "result")), "no_match", "{result:?}");
+        assert_eq!(
+            s(field(field(&result, "backend"), "name")),
+            "none",
+            "{result:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("src/handlers.ts")).unwrap(),
+            source
+        );
+    }
+    let Some(result) = server_answer(|| request("Second.load", col)) else {
+        return;
+    };
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    assert_eq!(
+        s(field(field(&result, "backend"), "name")),
+        "language_server",
+        "{result:?}"
+    );
+    let server = s(field(field(&result, "backend"), "server"));
+    assert!(
+        server == "typescript-language-server" || server == "tsc-lsp",
+        "{result:?}"
+    );
+    eprintln!("positioned same-line method rename served by {server}");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("src/handlers.ts")).unwrap(),
+        "/* 🦀 */ export class First { load() { return 1; } } export class Second { fetch() { return 2; } }\nexport const first = new First().load();\nexport const second = new Second().fetch();\n",
+    );
+}
 
 #[test]
 fn typescript_server_renames_array_types_namespaces_and_reexports() {

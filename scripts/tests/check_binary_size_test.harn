@@ -21,7 +21,6 @@ type ReleaseWorkflowStep = {
   uses?: string,
   run?: string,
   env?: {
-    CARGO_PROFILE_DIST_CODEGEN_UNITS?: string,
     HARN_REQUIRE_CLI_AOT?: string,
     BINARY_SIZE_FUSE_BYTES?: string,
     BINARY_SIZE_SOURCE_REF?: string,
@@ -35,7 +34,7 @@ type ReleaseWorkflow = {
     prepare_cli_aot: {needs: string, if: string, steps: list<ReleaseWorkflowStep>},
     build: {
       needs: list<string>,
-      env: {CARGO_PROFILE_DIST_CODEGEN_UNITS: string, HARN_REQUIRE_CLI_AOT: string},
+      env: {HARN_REQUIRE_CLI_AOT: string},
       steps: list<ReleaseWorkflowStep>,
     },
     collect_candidate_manifest: {needs: list<string>, if: string},
@@ -52,7 +51,6 @@ fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
       env: schema_field(
         schema_object(
           {
-            CARGO_PROFILE_DIST_CODEGEN_UNITS: schema_field(schema_string(), false),
             HARN_REQUIRE_CLI_AOT: schema_field(schema_string(), false),
             BINARY_SIZE_FUSE_BYTES: schema_field(schema_string(), false),
             BINARY_SIZE_SOURCE_REF: schema_field(schema_string(), false),
@@ -94,12 +92,7 @@ fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
                   {
                     needs: schema_field(schema_list(schema_string())),
                     env: schema_field(
-                      schema_object(
-                        {
-                          CARGO_PROFILE_DIST_CODEGEN_UNITS: schema_field(schema_string()),
-                          HARN_REQUIRE_CLI_AOT: schema_field(schema_string()),
-                        },
-                      ),
+                      schema_object({HARN_REQUIRE_CLI_AOT: schema_field(schema_string())}),
                     ),
                     steps: schema_field(schema_list(step_schema)),
                   },
@@ -720,22 +713,20 @@ pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness
   const build = release_workflow(harness.fs).jobs.build
   const steps = build.steps
   const bloat = release_workflow_step(steps, "Generate cargo-bloat report")
-  // `[profile.dist]` owns LTO and stripping. The per-target codegen-unit
-  // count is the one environment-backed profile setting, and it is job-wide
-  // so the canonical build and every later Cargo diagnostic share one
-  // fingerprint.
-  assert_eq(
-    build.env.CARGO_PROFILE_DIST_CODEGEN_UNITS,
-    gha_expression("matrix.release_codegen_units"),
+  // `[profile.dist]` owns LTO, codegen units, and stripping, so the canonical
+  // build and every later Cargo diagnostic share one fingerprint.
+  const release_workflow_text = harness.fs.read_text(
+    "../../.github/workflows/build-release-binaries.yml",
   )
   assert(
-    !harness.fs.read_text("../../.github/workflows/build-release-binaries.yml").contains(
-      "CARGO_PROFILE_RELEASE_",
-    ),
+    !release_workflow_text.contains("CARGO_PROFILE_DIST_"),
+    "Cargo.toml [profile.dist] owns the distributed build settings",
+  )
+  assert(
+    !release_workflow_text.contains("CARGO_PROFILE_RELEASE_"),
     "release builds use --profile dist; a CARGO_PROFILE_RELEASE_* override would not reach them",
   )
   const canonical_build = release_workflow_step(steps, "Build")
-  assert_eq(canonical_build.env?.CARGO_PROFILE_DIST_CODEGEN_UNITS, nil)
   assert(
     canonical_build.run?.contains("cargo build --locked --profile dist -p harn-cli --bin harn "),
   )

@@ -51,6 +51,8 @@ pub(crate) fn reset_json_state() {
     JSON_PARSE_CACHE.with(|cache| cache.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_json_state);
+
 fn require_args(args: &[VmValue], min: usize, name: &str) -> Result<(), VmError> {
     if args.len() < min {
         return Err(VmError::Thrown(VmValue::string(format!(
@@ -185,6 +187,8 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
     schema_witness::register_builtins(vm);
 }
+
+harn_vm_core::stdlib_installer!(Pure, register_json_builtins);
 
 #[harn_builtin(
     exposure = "pure",

@@ -41,6 +41,8 @@ pub(crate) fn reset_fs_state() {
     FILE_TEXT_CACHE.with(|cache| cache.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_fs_state);
+
 /// Invalidate the VM's read-through text caches after a host capability
 /// mutates a path outside the `harness.fs` builtins.
 ///
@@ -412,6 +414,8 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
         vm.register_builtin_def(def);
     }
 }
+
+harn_vm_core::stdlib_installer!(Host, register_fs_builtins);
 
 const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &READ_FILE_BUILTIN_DEF,

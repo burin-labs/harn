@@ -86,9 +86,13 @@ pub(crate) fn reset_host_state() {
     turn_cache::reset_local();
 }
 
+harn_vm_core::stdlib_state_reset!(reset_host_state);
+
 pub(crate) fn reset_scoped_host_state() {
     operation_registry::clear_scoped_mockable();
 }
+
+harn_vm_core::stdlib_state_reset!(reset_scoped_host_state);
 
 /// Push the current host-mock state onto an internal stack and start a
 /// fresh empty scope. Paired with `pop_host_mock_scope` for privileged
@@ -962,6 +966,8 @@ pub(crate) fn register_host_builtins(vm: &mut Vm) {
         vm.register_builtin_def(def);
     }
 }
+
+harn_vm_core::stdlib_installer!(Host, register_host_builtins);
 
 pub(crate) fn register_missing_host_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {

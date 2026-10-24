@@ -38,8 +38,10 @@ the policy, free to drift from the first. `lib/diagnostics.harn` now reads
 `resolution.complete` and names `resolution.defeaters` in the demoted line so
 the model can judge for itself.
 
-Because the rig reads a field that exists only in this worktree, `run.sh` uses
-the locally built harn rather than whatever is on `PATH`.
+`run.sh` and `calib.sh` start Harn drivers through the repository's binary
+resolver. Set `HARN_BIN` to use an already qualified binary. The drivers run
+with the shell's authority so each playground run can apply its own process
+policy, including on macOS where narrower sandboxes cannot be nested.
 
 `probe.harn` is the deterministic check that the tiers discriminate:
 
@@ -117,6 +119,7 @@ before it was found: the traceback showed corrected source while raising
 
 Mock mode cannot measure behaviour: a scripted model does not read what it is
 shown. It proves mechanism only. Every behavioural number needs `--mode live`.
+Mock mode needs no inference endpoint.
 
 Live mode pins the inference endpoint rather than inheriting it. The same port
 serves a different model on this machine's localhost, so an ambient base URL
@@ -127,6 +130,16 @@ Before spending anything, live mode requires `/v1/models` to answer 200 **and**
 to list the model that was requested. A 200 on its own is not enough: a
 reachable server with a different model loaded answers 200 and then measures
 something else entirely. A failed preflight exits 4 without starting a trial.
+The driver reads the provider's endpoint setting from Harn's runtime metadata,
+so the checked server is also the one selected for the child run. Model IDs
+must match exactly; a neighbouring ID or a mention in another field does not
+satisfy the check.
+
+Each sweep uses a new output file and log. The driver refuses to overwrite
+earlier results and requires one source-tagged row for every requested arm,
+fixture, and trial. It reports missing rows and failed commands and exits
+non-zero when the sweep is incomplete. Calibration also requires an empty
+transcript directory and preserves earlier captures.
 
 One JSON row per trial lands in the `--out` file: `passed`, `iterations`,
 `input_tokens`, `output_tokens`, `tool_calls`, `elapsed_ms`, `flush_count`,

@@ -5,7 +5,6 @@ use crate::text::case::{
 };
 use crate::value::VmDictExt;
 use crate::value::{values_equal, VmError, VmValue};
-use crate::vm::Vm;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -108,9 +107,7 @@ fn span_kind_label(kind: PromptSpanKind) -> &'static str {
     }
 }
 
-pub(crate) fn register_string_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_string_builtins);
 
 #[harn_builtin(
     exposure = "pure",
@@ -512,7 +509,7 @@ fn kebab_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 )]
 fn pascal_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::string(lowercase_first(&s)))
+    Ok(VmValue::string(words_to_camel(&split_camel(&s))))
 }
 
 #[harn_builtin(

@@ -31,8 +31,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+use harn_runtime::register_vm_stdlib;
 use harn_vm::value::VmClosure;
-use harn_vm::{compile_source, register_vm_stdlib, VmValue};
+use harn_vm::{compile_source, VmValue};
 
 /// Connection-URL env var the hostlib's real-Postgres tests already use.
 pub const DEFAULT_URL_ENV: &str = "HARN_TEST_POSTGRES_URL";

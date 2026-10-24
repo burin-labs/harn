@@ -145,6 +145,8 @@ pub(crate) fn register_iter_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_iter_builtins);
+
 // `iter` parser signature: union of list/dict/string/set/range/iter/Generator/stream/channel.
 // We express that as a hand-built signature via `sig_expr` so the `iter`, `Generator`, etc.
 // named types reach the parser as `Ty::Named("iter")`, matching the original entry.

@@ -27,7 +27,6 @@ use crate::stdlib::canonical_store::{store_hooks, CanonicalStore};
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
-use crate::vm::Vm;
 
 const LEGACY_STORE_DIR: &str = "session-store";
 const LEGACY_EVENT_FILE_EXT: &str = "jsonl";
@@ -63,9 +62,7 @@ const DEFAULT_ACTOR: &str = "harn";
 const DEFAULT_KIND_TYPE: &str = "LibrarianEntry";
 const LEGACY_IMPORT_FORMAT: &str = "harn.session.jsonl.v1";
 
-pub(crate) fn register_session_store_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_session_store_builtins);
 
 #[harn_builtin(
     exposure = "harness.agent.session_store_append",

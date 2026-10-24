@@ -56,7 +56,7 @@ fn load_fixture(name: &str) -> Fixture {
 fn setup_vm(fixture: &Fixture) -> harn_vm::Vm {
     harn_vm::reset_thread_local_state();
     let mut vm = harn_vm::new_vm();
-    harn_vm::register_vm_stdlib(&mut vm);
+    harn_runtime::register_vm_stdlib(&mut vm);
     vm.set_harness(harn_vm::Harness::real());
     vm.set_source_info(&fixture.path.to_string_lossy(), &fixture.source);
     if let Some(parent) = fixture.path.parent() {

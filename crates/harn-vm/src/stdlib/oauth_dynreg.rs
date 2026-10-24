@@ -128,6 +128,8 @@ pub(crate) fn register_oauth_dynreg_builtins(vm: &mut Vm) {
     }
 }
 
+harn_vm_core::stdlib_installer!(Host, register_oauth_dynreg_builtins);
+
 pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
     &OAUTH_DYNREG_STORE_HANDLE_IMPL_DEF,
     &OAUTH_DYNREG_VALIDATE_METADATA_IMPL_DEF,

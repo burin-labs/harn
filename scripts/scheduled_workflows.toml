@@ -36,7 +36,7 @@ path = ".github/workflows/bump-release.yml"
 name = "Open release PR"
 claim = "Unreleased changelog fragments on main have an open Release vX.Y.Z pull request"
 crons = ["29 15 * * *"]
-cadence_reason = "Daily bounds how long merged changes wait for a release; a run with nothing to release ends before any build."
+cadence_reason = "A green-checkpoint pass opens a due release at once; the daily run recovers a dropped event, and a run with nothing to release ends before any build."
 job_ids = ["open-release-pr"]
 health_failures = 3
 

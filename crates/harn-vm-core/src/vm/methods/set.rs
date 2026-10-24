@@ -15,24 +15,21 @@ impl crate::vm::Vm {
                 let needle = args.first().unwrap_or(&VmValue::Nil);
                 Ok(VmValue::Bool(set.contains(needle)))
             }
-            "union" => match args.first() {
-                Some(VmValue::Set(other)) => Ok(VmValue::set_value(set.union(other))),
-                _ => Ok(VmValue::Set(Arc::clone(set))),
-            },
-            "intersection" => match args.first() {
-                Some(VmValue::Set(other)) => Ok(VmValue::set_value(set.intersect(other))),
-                _ => Ok(VmValue::set_value(VmSet::new())),
-            },
-            "difference" => match args.first() {
-                Some(VmValue::Set(other)) => Ok(VmValue::set_value(set.difference(other))),
-                _ => Ok(VmValue::Set(Arc::clone(set))),
-            },
-            "symmetric_difference" => match args.first() {
-                Some(VmValue::Set(other)) => {
-                    Ok(VmValue::set_value(set.symmetric_difference(other)))
+            // Throw like the `set_union`/… builtins rather than silently
+            // treating a non-set argument as empty.
+            "union" | "intersection" | "difference" | "symmetric_difference" => {
+                match args.first() {
+                    Some(VmValue::Set(other)) => Ok(VmValue::set_value(match method {
+                        "union" => set.union(other),
+                        "intersection" => set.intersect(other),
+                        "difference" => set.difference(other),
+                        _ => set.symmetric_difference(other),
+                    })),
+                    _ => Err(VmError::Thrown(VmValue::string(format!(
+                        "set.{method}: argument must be a set"
+                    )))),
                 }
-                _ => Ok(VmValue::Set(Arc::clone(set))),
-            },
+            }
             "is_subset" => match args.first() {
                 Some(VmValue::Set(other)) => Ok(VmValue::Bool(set.is_subset(other))),
                 _ => Ok(VmValue::Bool(false)),

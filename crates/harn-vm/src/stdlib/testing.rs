@@ -14,6 +14,8 @@ pub(crate) fn register_testing_builtins(vm: &mut Vm) {
     }
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_testing_builtins);
+
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &TESTING_CALL_BODY_IMPL_DEF,
     &TESTING_WITH_EVALUATION_FIXTURES_IMPL_DEF,

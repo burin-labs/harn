@@ -9,7 +9,6 @@
 use crate::stdlib::macros::harn_builtin;
 use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 use crate::workspace_path::{
     canonicalize_existing_workspace_path, classify_workspace_path, is_absolute_path_syntax,
     normalize_workspace_path, WorkspacePathInfo,
@@ -198,9 +197,7 @@ fn workspace_root_from_args(args: &[VmValue]) -> std::path::PathBuf {
         .unwrap_or_else(crate::stdlib::process::execution_root_path)
 }
 
-pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_path_helper_builtins);
 
 #[harn_builtin(
     exposure = "pure",

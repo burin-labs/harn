@@ -15,7 +15,7 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
 
-use crate::ast::{api as ast_api, Language as AstLanguage, Symbol};
+use crate::ast::{api as ast_api, Language as AstLanguage, Symbol, SymbolKind};
 
 use super::file_table::fnv1a64;
 use super::imports;
@@ -119,6 +119,15 @@ impl GraphFacts {
                 let call_sites =
                     super::symbol_graph::extract_call_sites_from_tree(&tree, source, java.as_ref());
                 let positions = super::source_positions::LineIndex::new(source);
+                // Some enum grammars make the name itself the declaration.
+                // The symbol extractor owns which nodes have that meaning.
+                let enum_names: BTreeMap<_, _> = symbols
+                    .iter()
+                    .filter(|symbol| {
+                        language != AstLanguage::Java && symbol.kind == SymbolKind::EnumCase
+                    })
+                    .map(|symbol| ((symbol.start_row, symbol.start_col), symbol.name.as_str()))
+                    .collect();
                 let mut pending = vec![tree.root_node()];
                 let nodes = std::iter::from_fn(|| {
                     let node = pending.pop()?;
@@ -127,39 +136,50 @@ impl GraphFacts {
                     Some(node)
                 });
                 let mut declarations: BTreeMap<_, Vec<_>> = BTreeMap::new();
-                if let Some(java) = java.as_ref() {
-                    for node in nodes {
-                        if let Some(name) = node.child_by_field_name("name") {
-                            let Some(name_text) = source.get(name.byte_range()) else {
-                                continue;
-                            };
-                            let fact = DeclarationFact {
-                                name: name_text.to_string(),
-                                line: name.start_position().row as u32 + 1,
-                                col: positions
-                                    .position(
-                                        name.start_byte(),
-                                        super::source_positions::Encoding::Utf16,
-                                    )
-                                    .character
-                                    + 1,
-                                owner_type: java.definition_owner(node),
-                            };
-                            if matches!(node.kind(), "variable_declarator" | "type_spec") {
-                                if let Some(parent) = node.parent().filter(|parent| {
-                                    matches!(
-                                        parent.kind(),
-                                        "lexical_declaration"
-                                            | "variable_declaration"
-                                            | "field_declaration"
-                                            | "type_declaration"
-                                    )
-                                }) {
-                                    insert_declaration(&mut declarations, parent, &fact);
-                                }
-                            }
-                            insert_declaration(&mut declarations, node, &fact);
+                for node in nodes {
+                    let name = node.child_by_field_name("name").or_else(|| {
+                        if node.parent().is_some_and(|parent| {
+                            parent.start_position() == node.start_position()
+                                && parent.child_by_field_name("name") == Some(node)
+                        }) {
+                            return None;
                         }
+                        let start = node.start_position();
+                        enum_names
+                            .get(&(start.row as u32, start.column as u32))
+                            .is_some_and(|name| source.get(node.byte_range()) == Some(*name))
+                            .then_some(node)
+                    });
+                    if let Some(name) = name {
+                        let Some(name_text) = source.get(name.byte_range()) else {
+                            continue;
+                        };
+                        let fact = DeclarationFact {
+                            name: name_text.to_string(),
+                            line: name.start_position().row as u32 + 1,
+                            col: positions
+                                .position(
+                                    name.start_byte(),
+                                    super::source_positions::Encoding::Utf16,
+                                )
+                                .character
+                                + 1,
+                            owner_type: java.as_ref().and_then(|java| java.definition_owner(node)),
+                        };
+                        if matches!(node.kind(), "variable_declarator" | "type_spec") {
+                            if let Some(parent) = node.parent().filter(|parent| {
+                                matches!(
+                                    parent.kind(),
+                                    "lexical_declaration"
+                                        | "variable_declaration"
+                                        | "field_declaration"
+                                        | "type_declaration"
+                                )
+                            }) {
+                                insert_declaration(&mut declarations, parent, &fact);
+                            }
+                        }
+                        insert_declaration(&mut declarations, node, &fact);
                     }
                 }
                 Self {
@@ -187,14 +207,20 @@ impl GraphFacts {
 
 fn insert_declaration(
     declarations: &mut BTreeMap<(u32, u32), Vec<DeclarationFact>>,
-    node: tree_sitter::Node<'_>,
+    mut node: tree_sitter::Node<'_>,
     fact: &DeclarationFact,
 ) {
-    let start = node.start_position();
-    declarations
-        .entry((start.row as u32, start.column as u32))
-        .or_default()
-        .push(fact.clone());
+    loop {
+        let start = node.start_position();
+        declarations
+            .entry((start.row as u32, start.column as u32))
+            .or_default()
+            .push(fact.clone());
+        let Some(wrapper) = ast_api::declaration_wrapper(node) else {
+            break;
+        };
+        node = wrapper;
+    }
 }
 
 /// Read `job` and extract its facts. Reads nothing but the file.

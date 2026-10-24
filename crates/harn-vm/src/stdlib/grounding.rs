@@ -11,7 +11,6 @@ use crate::llm::helpers::vm_value_to_json;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 use super::process::resolve_source_relative_path;
 
@@ -71,9 +70,7 @@ impl Default for VerifyOptions {
     }
 }
 
-pub(crate) fn register_grounding_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_grounding_builtins);
 
 #[harn_builtin(
     exposure = "harness.fs.verify_imports",
