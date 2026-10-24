@@ -29,9 +29,12 @@ mkdir -p .harn-tmp
 # Banking a census that lost a crate is precisely the failure this whole gate
 # was rewritten over, so compare what it measured against what is already
 # banked before believing it.
-measured="$("$harn_bin" run scripts/check_stack_frames.harn -- \
+# The gate exits nonzero while main is over budget, which is exactly when a
+# bank is needed, so only the count it printed is read here.
+census_report="$("$harn_bin" run scripts/check_stack_frames.harn -- \
   --census .harn-tmp/stack-frame-census.json \
-  --today "$(date -u +%F)" --json | jq -r '.scanned_files')"
+  --today "$(date -u +%F)" --json || true)"
+measured="$(jq -er '.scanned_files | numbers' <<<"$census_report")"
 banked="$(jq -r '.files | length' "$budget")"
 floor=$(( banked * 9 / 10 ))
 if [ "$measured" -lt "$floor" ]; then
