@@ -743,6 +743,8 @@ public struct HarnRunViewStage: Codable, Sendable, Equatable {
 }
 
 public struct HarnRunViewUsage: Codable, Sendable, Equatable {
+    public var cacheReadTokens: Int? = nil
+    public var cacheWriteTokens: Int? = nil
     public var callCount: Int = 0
     public var costUsd: Double? = nil
     public var inputTokens: Int = 0
@@ -755,6 +757,8 @@ public struct HarnRunViewUsage: Codable, Sendable, Equatable {
     public var usageUnknownCalls: Int = 0
 
     enum CodingKeys: String, CodingKey {
+        case cacheReadTokens = "cache_read_tokens"
+        case cacheWriteTokens = "cache_write_tokens"
         case callCount = "call_count"
         case costUsd = "cost_usd"
         case inputTokens = "input_tokens"
@@ -769,6 +773,8 @@ public struct HarnRunViewUsage: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        if values.contains(.cacheReadTokens) { cacheReadTokens = try values.decode(Int?.self, forKey: .cacheReadTokens) }
+        if values.contains(.cacheWriteTokens) { cacheWriteTokens = try values.decode(Int?.self, forKey: .cacheWriteTokens) }
         if values.contains(.callCount) { callCount = try values.decode(Int.self, forKey: .callCount) }
         if values.contains(.costUsd) { costUsd = try values.decode(Double?.self, forKey: .costUsd) }
         if values.contains(.inputTokens) { inputTokens = try values.decode(Int.self, forKey: .inputTokens) }

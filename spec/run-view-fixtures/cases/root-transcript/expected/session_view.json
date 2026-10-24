@@ -29,8 +29,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:c741efa0675adee55a58720fe132e70b735dce3acc3bb27039e6c08463a959c3",
-    "projection_id": "session_view:session_root_transcript:c741efa0675a"
+    "projection_hash": "sha256:d8d105e57b5bf46071564eee76da8327f0373d17fb55d9ce4403782b3800dd85",
+    "projection_id": "session_view:session_root_transcript:d8d105e57b5b"
   },
   "runs": [
     {
@@ -143,8 +143,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:a32aafcafd9b5bda2e5dd6954c80d0da95c6b67a3625176629853f5d21d7a245",
-        "projection_id": "run_view:run_root_transcript:a32aafcafd9b"
+        "projection_hash": "sha256:7897590db08667af06058ad7bf5df67a2cc031be3f73859f20f11c4837de00e4",
+        "projection_id": "run_view:run_root_transcript:7897590db086"
       },
       "providers": [
         {
@@ -193,6 +193,8 @@
           "started_at": "2026-01-02T00:00:00Z",
           "status": "completed",
           "usage": {
+            "cache_read_tokens": null,
+            "cache_write_tokens": null,
             "call_count": 0,
             "cost_usd": null,
             "input_tokens": 0,
@@ -215,6 +217,8 @@
         "summary": "Root transcript captured the customer-safe answer."
       },
       "usage": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
         "call_count": 1,
         "cost_usd": null,
         "input_tokens": 12,
@@ -245,6 +249,8 @@
     "updated_at": "2026-01-02T00:00:03Z"
   },
   "usage": {
+    "cache_read_tokens": null,
+    "cache_write_tokens": null,
     "call_count": 1,
     "cost_usd": 0.02,
     "input_tokens": 12,

@@ -561,6 +561,8 @@
         "usage": {
           "$ref": "#/$defs/RunViewUsage",
           "default": {
+            "cache_read_tokens": null,
+            "cache_write_tokens": null,
             "call_count": 0,
             "cost_usd": null,
             "input_tokens": 0,
@@ -1139,6 +1141,8 @@
         "usage": {
           "$ref": "#/$defs/RunViewUsage",
           "default": {
+            "cache_read_tokens": null,
+            "cache_write_tokens": null,
             "call_count": 0,
             "cost_usd": null,
             "input_tokens": 0,
@@ -1163,6 +1167,23 @@
     },
     "RunViewUsage": {
       "properties": {
+        "cache_read_tokens": {
+          "default": null,
+          "description": "Cache tokens summed over the calls that reported cache accounting;\nnull when no call did, which is distinct from a measured zero.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cache_write_tokens": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "call_count": {
           "default": 0,
           "format": "int64",
@@ -1309,6 +1330,8 @@
         "usage": {
           "$ref": "#/$defs/RunViewUsage",
           "default": {
+            "cache_read_tokens": null,
+            "cache_write_tokens": null,
             "call_count": 0,
             "cost_usd": null,
             "input_tokens": 0,
