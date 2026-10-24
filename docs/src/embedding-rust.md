@@ -116,15 +116,19 @@ take effect in builds that do **not** pull in the full CLI.
 
 ## Construct a VM directly
 
-Add `harn-vm` and `harn-stdlib` at the same repository tag. Install the embedded
-standard library once during host startup, then construct the native interpreter
-and register its builtins:
+Add `harn-vm`, `harn-runtime`, and `harn-stdlib` at the same repository tag.
+Install the embedded standard library once during host startup, then construct
+the native interpreter and register its builtins:
 
 ```rust
 harn_stdlib::install().expect("install embedded standard library");
 let mut vm = harn_vm::new_vm();
-harn_vm::register_vm_stdlib(&mut vm);
+harn_runtime::register_vm_stdlib(&mut vm);
 ```
+
+`harn-runtime` links every crate that contributes builtin families, such as
+`harn-flow`. Registering through `harn_vm::register_vm_stdlib` instead installs
+only the families the linker happened to keep.
 
 Replace `Vm::new()` and `Vm::default()` with this factory. Import
 `harn_vm::NativeVmExt` when using `set_bridge`, `set_connector_clients`,

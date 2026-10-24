@@ -19,7 +19,7 @@ fn embedded_agent_modules_load_under_the_native_runtime_without_compiling() {
             .expect("native runtime")
             .block_on(async {
                 let mut vm = harn_vm::new_vm();
-                harn_vm::stdlib::register_vm_stdlib(&mut vm);
+                harn_runtime::register_vm_stdlib(&mut vm);
                 let recorder = vm.enable_module_phase_timing();
                 vm.load_module_exports_from_source(
                     PathBuf::from("<test>/embedded-agent.harn"),

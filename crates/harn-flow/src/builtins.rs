@@ -23,10 +23,10 @@ use crate::{
     PredicateRunner, Remediation, SemanticFallbackPolicy, Slice, SliceId, SliceStatus, Verdict,
 };
 use async_trait::async_trait;
-use harn_vm_core::value::json::vm_value_to_json;
-use harn_vm_core::value::args::{ArgError, Args, ErrorKind};
-use harn_vm_core::schema::json_to_vm_value;
 use harn_builtin_macros::harn_builtin;
+use harn_vm_core::schema::json_to_vm_value;
+use harn_vm_core::value::args::{ArgError, Args, ErrorKind};
+use harn_vm_core::value::json::vm_value_to_json;
 use harn_vm_core::value::{VmClosure, VmError, VmValue};
 use harn_vm_core::vm::{AsyncBuiltinCtx, Vm};
 

@@ -242,7 +242,7 @@ pipeline main(harness: Harness) {{
     );
     let chunk = harn_vm::compile_source(&source).expect("compile authority request");
     let mut vm = harn_vm::new_vm();
-    harn_vm::register_vm_stdlib(&mut vm);
+    harn_runtime::register_vm_stdlib(&mut vm);
     let (harness, _clock) = harn_vm::Harness::test();
     vm.set_harness(harness);
     let execution = vm.execute(&chunk);

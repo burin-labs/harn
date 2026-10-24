@@ -4,7 +4,8 @@
   serial `harn-vm` build. The new `harn-runtime` crate assembles the VM with
   every builtin family crate.
 
-  Migration: replace `harn_vm::flow::` paths with `harn_flow::`. A binary
-  that runs Harn code calls `harn_runtime::force_link()` instead of
-  `harn_vm::stdlib::force_link()`, so the linker keeps every family's
-  builtins.
+  Migration: replace `harn_vm::flow::` paths with `harn_flow::`. An embedder
+  that runs Harn code registers the standard library through
+  `harn_runtime::register_vm_stdlib` or `harn_runtime::register_core_stdlib`
+  instead of the `harn_vm` functions of the same name, so the linker keeps
+  every family's builtins.

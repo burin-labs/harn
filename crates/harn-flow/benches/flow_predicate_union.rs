@@ -16,11 +16,11 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use harn_lexer::Span;
 use harn_flow::{
     enforce_predicate_ceiling, resolve_predicates_for_touched_directories, DiscoveredInvariantFile,
     DiscoveredPredicate, PredicateCeiling, PredicateHash, PredicateKind,
 };
+use harn_lexer::Span;
 use std::path::PathBuf;
 
 fn discovered_predicate(name: &str) -> DiscoveredPredicate {

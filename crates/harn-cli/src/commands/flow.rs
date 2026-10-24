@@ -1258,9 +1258,9 @@ fn discovery_diagnostics(
 }
 
 fn has_discovery_error(diagnostics: &[(String, &harn_flow::DiscoveryDiagnostic)]) -> bool {
-    diagnostics.iter().any(|(_, diagnostic)| {
-        diagnostic.severity == harn_flow::DiscoveryDiagnosticSeverity::Error
-    })
+    diagnostics
+        .iter()
+        .any(|(_, diagnostic)| diagnostic.severity == harn_flow::DiscoveryDiagnosticSeverity::Error)
 }
 
 fn print_discovery_warnings(diagnostics: &[(String, &harn_flow::DiscoveryDiagnostic)]) {

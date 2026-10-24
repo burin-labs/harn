@@ -50,11 +50,7 @@ pub fn require_runtime_sqlite_initialized(
     busy_timeout: Duration,
     schema: &RuntimeSqliteSchema,
 ) -> Result<(), RuntimeSqliteError> {
-    crate::require_file_initialized::<rusqlite::Error>(
-        connection,
-        busy_timeout,
-        schema.marker(),
-    )
+    crate::require_file_initialized::<rusqlite::Error>(connection, busy_timeout, schema.marker())
 }
 
 pub fn initialize_transient_runtime_sqlite(

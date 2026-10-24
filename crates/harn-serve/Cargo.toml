@@ -31,6 +31,7 @@ harn-stdlib = { path = "../harn-stdlib", version = "=0.10.178-dev" }
 # the full set for CLI parity; Cargo's feature unification means any build
 # that includes harn-cli still gets everything.
 harn-vm = { path = "../harn-vm", version = "=0.10.178-dev", default-features = false }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.178-dev" }
 harn-hostlib = { path = "../harn-hostlib", version = "=0.10.178-dev", optional = true, default-features = false }
 hex = "0.4"
 hmac = "0.13"

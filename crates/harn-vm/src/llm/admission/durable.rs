@@ -14,8 +14,8 @@ use time::{Date, OffsetDateTime};
 use uuid::Uuid;
 
 use super::{error, unavailable, DenialKind};
-use harn_sqlite::schema::{initialize_runtime_sqlite_migrating, RuntimeSqliteSchema};
 use crate::value::{ErrorCategory, VmError};
+use harn_sqlite::schema::{initialize_runtime_sqlite_migrating, RuntimeSqliteSchema};
 
 const SCALE: i64 = 1_000_000;
 const LIFETIME_PERIOD: &str = "L";

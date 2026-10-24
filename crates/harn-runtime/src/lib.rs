@@ -6,6 +6,20 @@
 //! its builtins silently disappear, so every binary that runs or checks Harn
 //! source calls [`force_link`] at startup instead of naming each family crate.
 
+/// Register every builtin family on `vm`. Use this rather than
+/// `harn_vm::register_vm_stdlib`, which installs only the families `harn-vm`
+/// owns unless the binary already linked the rest.
+pub fn register_vm_stdlib(vm: &mut harn_vm::Vm) {
+    force_link();
+    harn_vm::register_vm_stdlib(vm);
+}
+
+/// Register the deterministic builtins of every family on `vm`.
+pub fn register_core_stdlib(vm: &mut harn_vm::Vm) {
+    force_link();
+    harn_vm::register_core_stdlib(vm);
+}
+
 /// Link every builtin family into the calling binary.
 pub fn force_link() {
     harn_vm::stdlib::force_link();
