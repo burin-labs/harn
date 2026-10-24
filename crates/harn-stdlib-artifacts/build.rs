@@ -55,6 +55,7 @@ fn embed(out_dir: &Path) -> Vec<(String, PathBuf)> {
     }
     std::fs::create_dir_all(&artifact_dir).expect("create stdlib artifact dir");
 
+    harn_runtime::force_link();
     harn_stdlib::install().expect("install the stdlib this script compiles");
     let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
     let build = harn_vm::compile_embedded_stdlib_artifacts(threads);

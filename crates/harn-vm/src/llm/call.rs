@@ -692,52 +692,56 @@ async fn execute_routing_schema_retry_loop(
     let mut usages = Vec::new();
 
     for attempt in 0..=schema_retries {
-        let (vm_result, raw_text, errors) =
-            match routing::execute_with_routing(&policy, opts.clone(), bridge, delta_sink.clone())
-                .await
-            {
-                Ok((result, trace)) => {
-                    usages.push(result.usage());
-                    let raw_text = result.text.clone();
-                    // Snap option metadata to the winning link so transcript / portal
-                    // payloads describe the call that actually ran.
-                    opts.provider = result.provider.clone();
-                    opts.model = result.model.clone();
-                    opts.routing_decision = Some(routing::trace_to_decision(&trace, &policy));
-                    let envelope = attach_routing_block(
-                        agent_config::build_llm_call_result(ctx, &result, &opts).await?,
-                        &trace,
-                        &policy,
-                    );
-                    if !expects_structured {
-                        return Ok(SchemaLoopOutcome {
-                            vm_result: envelope,
-                            raw_text,
-                            errors: Vec::new(),
-                            attempts: attempt + 1,
-                            schema_retries_budget: schema_retries,
-                            output_validation_mode,
-                            usages,
-                        });
-                    }
-                    let errors = structured_output_errors(&envelope, &opts);
-                    (envelope, raw_text, errors)
+        let (vm_result, raw_text, errors) = match Box::pin(routing::execute_with_routing(
+            &policy,
+            opts.clone(),
+            bridge,
+            delta_sink.clone(),
+        ))
+        .await
+        {
+            Ok((result, trace)) => {
+                usages.push(result.usage());
+                let raw_text = result.text.clone();
+                // Snap option metadata to the winning link so transcript / portal
+                // payloads describe the call that actually ran.
+                opts.provider = result.provider.clone();
+                opts.model = result.model.clone();
+                opts.routing_decision = Some(routing::trace_to_decision(&trace, &policy));
+                let envelope = attach_routing_block(
+                    agent_config::build_llm_call_result(ctx, &result, &opts).await?,
+                    &trace,
+                    &policy,
+                );
+                if !expects_structured {
+                    return Ok(SchemaLoopOutcome {
+                        vm_result: envelope,
+                        raw_text,
+                        errors: Vec::new(),
+                        attempts: attempt + 1,
+                        schema_retries_budget: schema_retries,
+                        output_validation_mode,
+                        usages,
+                    });
                 }
-                Err(error) => match parse_schema_stream_abort(&error) {
-                    Some(abort) => {
-                        // The provider billed the partial output it generated
-                        // before the stream was severed and never sent its
-                        // usage frame. Recording the attempt keeps it in the
-                        // ledger's request count with its cost refusing;
-                        // dropping it would let the call read as free.
-                        usages.push(super::usage::LlmUsage::stream_aborted_attempt());
-                        let errors = vec![schema_stream_abort_message(&abort)];
-                        let vm_result = schema_stream_aborted_result_value(&abort);
-                        (vm_result, String::new(), errors)
-                    }
-                    None => return Err(error),
-                },
-            };
+                let errors = structured_output_errors(&envelope, &opts);
+                (envelope, raw_text, errors)
+            }
+            Err(error) => match parse_schema_stream_abort(&error) {
+                Some(abort) => {
+                    // The provider billed the partial output it generated
+                    // before the stream was severed and never sent its
+                    // usage frame. Recording the attempt keeps it in the
+                    // ledger's request count with its cost refusing;
+                    // dropping it would let the call read as free.
+                    usages.push(super::usage::LlmUsage::stream_aborted_attempt());
+                    let errors = vec![schema_stream_abort_message(&abort)];
+                    let vm_result = schema_stream_aborted_result_value(&abort);
+                    (vm_result, String::new(), errors)
+                }
+                None => return Err(error),
+            },
+        };
         if errors.is_empty() {
             return Ok(SchemaLoopOutcome {
                 vm_result,

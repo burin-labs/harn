@@ -39,6 +39,6 @@ fn installed_source_holds_generation_lease_until_manifest_reads_finish() {
     );
     assert!(read_package_manifest_from_dir(directory).unwrap().is_some());
     drop(source);
-    contender.try_lock().unwrap();
+    harn_flock::assert_released(&contender);
     contender.unlock().unwrap();
 }

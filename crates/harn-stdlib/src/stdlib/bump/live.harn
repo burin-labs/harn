@@ -44,6 +44,9 @@ pub type LiveBumpConfig = {
   readiness_timeout_ms: int,
 }
 
+/** Produces fresh refresh-environment entries, such as a short-lived token. */
+pub type LiveBumpEnvironmentRenewal = fn() -> dict
+
 /** Verdict of an authenticated fetch of a commit into the local checkout. */
 pub type LiveBumpFetch = {ok: bool, detail: string}
 
@@ -119,13 +122,24 @@ fn __lines(text: string?) -> list<string> {
   }
 }
 
-fn __working_changes(tools: HarnessTools, repo_dir: string) -> BumpChangeSet {
+fn __untracked(tools: HarnessTools, repo_dir: string) -> list<string> {
+  return __lines(__git(tools, repo_dir, ["ls-files", "--others", "--exclude-standard"]).stdout)
+}
+
+/** `unrelated` names untracked files that predate the refresh; they are never bump output. */
+fn __working_changes(
+  tools: HarnessTools,
+  repo_dir: string,
+  unrelated: list<string> = [],
+) -> BumpChangeSet {
   const tracked_additions = __lines(
     __git(tools, repo_dir, ["diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"]).stdout,
   )
-  const untracked_additions = __lines(
-    __git(tools, repo_dir, ["ls-files", "--others", "--exclude-standard"]).stdout,
+  const skip = set(unrelated)
+  const untracked_additions = __untracked(tools, repo_dir).filter(
+    { name -> !set_contains(skip, name) },
   )
+    .to_list()
   return {
     additions: tracked_additions
       + untracked_additions.filter({ name -> !contains(tracked_additions, name) }).to_list(),
@@ -229,6 +243,7 @@ fn __apply_version(
   cfg: LiveBumpConfig,
   target: string,
   source_revision: string,
+  unrelated: list<string>,
 ) -> VersionApplyResult {
   const version_write = __write_version(fs, cfg.version_file, strip_v(target))
   const revision_write = if version_write.ok && source_revision != "" {
@@ -242,7 +257,7 @@ fn __apply_version(
     nil
   }
   const refresh_ok = refresh?.success ?? false
-  const changes = __working_changes(tools, cfg.repo_dir)
+  const changes = __working_changes(tools, cfg.repo_dir, unrelated)
   const refreshed = changes.additions + changes.deletions
   return {
     ok: version_write.ok && revision_write.ok && refresh_ok,
@@ -390,7 +405,20 @@ fn __adopt_base(
           + trim((tracked_result.stderr ?? "") + (tracked_result.stdout ?? "")),
       )
     }
-    const tracked = __lines(tracked_result.stdout)
+    // The index omits a staged deletion, so HEAD names the paths to bring back.
+    const committed_result = __git(
+      tools,
+      cfg.repo_dir,
+      ["--literal-pathspecs", "ls-tree", "-r", "--name-only", "HEAD", "--"] + cleanup_paths,
+    )
+    if !committed_result.success {
+      return __adoption_failure(
+        "discovering committed refresh output failed: "
+          + trim((committed_result.stderr ?? "") + (committed_result.stdout ?? "")),
+      )
+    }
+    const tracked = (__lines(tracked_result.stdout) + __lines(committed_result.stdout)).unique()
+      .to_list()
     if len(tracked) > 0 {
       const restore = __git(
         tools,
@@ -435,6 +463,10 @@ fn __release_finalized(release: LiveBumpRelease) -> bool {
 /**
  * Build the local adapter around one package-owned remote capability.
  *
+ * `renew_refresh_environment`, when given, runs before each refresh and its
+ * entries overlay `refresh_environment`, so short-lived credentials stay
+ * current without rebuilding the adapter and losing its per-run state.
+ *
  * @effects: [fs, process, net]
  * @errors: [invalid target tags or delegated local/provider failures]
  */
@@ -444,8 +476,12 @@ pub fn live_bump_adapter(
   remote: LiveBumpRemote,
   config: dict = {},
   fs: HarnessFs? = nil,
+  renew_refresh_environment: LiveBumpEnvironmentRenewal? = nil,
 ) -> BumpAdapter {
   const cfg = live_bump_config(config)
+  // Untracked files present before the first refresh are not bump output, so
+  // adoption cleanup never deletes them.
+  let unrelated: list<string>? = nil
   return {
     resolve_target_tag: fn(tag) {
       const requested = trim(tag ?? "")
@@ -503,8 +539,17 @@ pub fn live_bump_adapter(
       tag,
     ) },
     base_sha: fn() { return trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? "") },
-    apply_version:
-      fn(target, revision) { return __apply_version(fs, tools, cfg, target, revision) },
+    apply_version: fn(target, revision) {
+      if unrelated == nil {
+        unrelated = __untracked(tools, cfg.repo_dir)
+      }
+      const run_cfg = if renew_refresh_environment == nil {
+        cfg
+      } else {
+        cfg + {refresh_environment: cfg.refresh_environment + renew_refresh_environment()}
+      }
+      return __apply_version(fs, tools, run_cfg, target, revision, unrelated ?? [])
+    },
     preserve_repairs: fn(existing, base) { return replay_bump_repairs(
       tools,
       cfg.repo_dir,
@@ -529,7 +574,7 @@ pub fn live_bump_adapter(
         },
       }
     },
-    working_changes: fn() { return __working_changes(tools, cfg.repo_dir) },
+    working_changes: fn() { return __working_changes(tools, cfg.repo_dir, unrelated ?? []) },
     remote_base_head: remote.base_head,
     adopt_base: fn(request) { return __adopt_base(fs, tools, remote, cfg, request) },
     base_changes:

@@ -286,6 +286,8 @@ pub(crate) fn register_file_builtins(vm: &mut Vm) {
     vm.register_builtin_def(&FILES_UPLOAD_BUILTIN_DEF);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_file_builtins);
+
 #[harn_builtin(
     exposure = "runtime_internal",
     sig = "__files_upload(path: string, provider: string) -> string",

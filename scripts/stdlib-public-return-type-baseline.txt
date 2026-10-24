@@ -83,7 +83,7 @@
 # count    7  crates/harn-stdlib/src/stdlib/llm/budget.harn
 # count   11  crates/harn-stdlib/src/stdlib/llm/catalog.harn
 # count    8  crates/harn-stdlib/src/stdlib/llm/defaults.harn
-# count    7  crates/harn-stdlib/src/stdlib/llm/economics.harn
+# count    4  crates/harn-stdlib/src/stdlib/llm/economics.harn
 # count    4  crates/harn-stdlib/src/stdlib/llm/ensemble.harn
 # count   13  crates/harn-stdlib/src/stdlib/llm/handlers.harn
 # count    1  crates/harn-stdlib/src/stdlib/llm/judge.harn
@@ -715,11 +715,8 @@ crates/harn-stdlib/src/stdlib/llm/defaults.harn::pack_refine
 crates/harn-stdlib/src/stdlib/llm/defaults.harn::pack_summarize
 crates/harn-stdlib/src/stdlib/llm/economics.harn::cache_break_even
 crates/harn-stdlib/src/stdlib/llm/economics.harn::compare_model_costs
-crates/harn-stdlib/src/stdlib/llm/economics.harn::estimate_call_cost
-crates/harn-stdlib/src/stdlib/llm/economics.harn::estimate_session_cost
 crates/harn-stdlib/src/stdlib/llm/economics.harn::format_usd
 crates/harn-stdlib/src/stdlib/llm/economics.harn::pricing_for
-crates/harn-stdlib/src/stdlib/llm/economics.harn::volume_cost
 crates/harn-stdlib/src/stdlib/llm/ensemble.harn::best_of_n
 crates/harn-stdlib/src/stdlib/llm/ensemble.harn::parallel_judge
 crates/harn-stdlib/src/stdlib/llm/ensemble.harn::self_consistency

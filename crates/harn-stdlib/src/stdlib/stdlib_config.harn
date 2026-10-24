@@ -13,6 +13,16 @@ import { PROVIDER_NAMES } from "std/llm/provider_names"
 type ModelIdParts = {provider: string, model: string, raw: string}
 
 /**
+ * Parse literal KEY=VALUE lines without executing or expanding their contents.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn parse_env(text: string) -> Result<dict<string, string>, {line: int, message: string}> {
+  return parse_env_file(text)
+}
+
+/**
  * Read an env var as a non-empty string, returning nil when unset/blank.
  *
  * @effects: []

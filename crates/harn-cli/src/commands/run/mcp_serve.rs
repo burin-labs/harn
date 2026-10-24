@@ -82,7 +82,7 @@ pub(crate) async fn load_file_tool_registry_local(
 
     let mut vm = harn_vm::new_vm();
     vm.set_graph_link_table(link_table);
-    harn_vm::register_vm_stdlib(&mut vm);
+    harn_runtime::register_vm_stdlib(&mut vm);
     crate::install_default_hostlib(&mut vm);
     let source_parent = Path::new(path).parent().unwrap_or(Path::new("."));
     let project_root = harn_vm::stdlib::process::find_project_root(source_parent);

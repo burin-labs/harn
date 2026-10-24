@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {observeConsumerProduct,observerContext} from '../lib/consumer-observer.mjs';
+import {observeConsumerProduct,observerContext, observerRefusal } from '../lib/consumer-observer.mjs';
 import {consumerDeadlineReceipt,observerDeadlineFilename,observerDeadlineName,waitLegacyConsumerWindow} from '../lib/consumer-observer-window.mjs';
 
 async function main(){
@@ -28,7 +28,7 @@ async function main(){
 }
 
 main().catch(error=>{
-  const reason=/^CONSUMER_OBSERVER reason=([a-z_]+)$/.exec(error.message)?.[1]??'product_observation_unmeasured';
-  console.error(`::error::CONSUMER_OBSERVER reason=${reason}`);
+  const {line} = observerRefusal(error, 'product_observation_unmeasured');
+  console.error(`::error::${line}`);
   process.exitCode=1;
 });

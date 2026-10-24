@@ -83,6 +83,7 @@ pub mod eval;
 pub(crate) mod fake;
 pub(crate) mod first_token;
 mod hash_replay;
+pub mod inference_speed;
 pub use hash_replay::{scope_replay_mode, ReplayModeScope};
 pub(crate) mod helpers;
 pub use helpers::admit_reasoning_literals;
@@ -909,10 +910,13 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     cache::register_cache_builtins(vm);
     config_builtins::register_config_builtins(vm);
     cost::register_cost_builtins(vm);
+    usage::register_settlement_builtin(vm);
     rerank::register_rerank_builtins(vm);
     mock_builtins::register_llm_mock_builtins(vm);
     transcript_stats::register_transcript_builtins(vm);
 }
+
+harn_vm_core::stdlib_installer!(Host, register_llm_builtins);
 
 const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
     // trace

@@ -559,6 +559,8 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Host, register_git_builtins);
+
 async fn run_git_command(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     command: GitCommand,
@@ -664,6 +666,8 @@ fn warn_git_failure(operation: &str, exit_code: i64, stderr: &str) {
 pub(crate) fn reset_git_state() {
     WARNED_GIT_FAILURES.with(|keys| keys.borrow_mut().clear());
 }
+
+harn_vm_core::stdlib_state_reset!(reset_git_state);
 
 async fn planned_or_noop_receipt(
     operation: &'static str,

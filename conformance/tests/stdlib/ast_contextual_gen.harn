@@ -1,0 +1,32 @@
+fn count() -> int {
+  let gen = 1
+  gen = gen + 1
+  gen += 1
+  return gen
+}
+
+gen fn _values() -> Stream<int> {
+  emit 1
+}
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(count() == 3)
+  const source = harness.fs.read_text(path_join(harness.fs.source_dir(), "ast_contextual_gen.harn"))
+  const parsed = harness.ast.parse_errors({content: source, language: "harn"})
+  require parsed.supported == true && parsed.had_errors != nil, "missing parser observation"
+  harness.stdio.println(!parsed.had_errors)
+  const searched = harness.ast.search(
+    {
+      source: source,
+      language: "harn",
+      query:
+        "(assignment target: (identifier) @name) (compound_assignment target: (identifier) @name)",
+    },
+  )
+  require searched.result == "ok" && !searched.truncated && !searched.had_errors,
+    "cannot search incomplete syntax"
+  const mutations = searched.matches
+  harness.stdio.println(
+    len(mutations) == 2 && mutations.all({ row -> row.captures.name.text == "gen" }),
+  )
+}

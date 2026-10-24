@@ -115,9 +115,7 @@ thread_local! {
     static SUPERVISOR_COUNTER: RefCell<u64> = const { RefCell::new(0) };
 }
 
-pub(crate) fn register_supervisor_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_supervisor_builtins);
 
 #[harn_builtin(
     exposure = "harness.runtime.supervisor_start",
@@ -1108,6 +1106,8 @@ pub(crate) fn reset_supervisor_state() {
         *counter.borrow_mut() = 0;
     });
 }
+
+harn_vm_core::stdlib_state_reset!(reset_supervisor_state);
 
 fn event_value(event: &SupervisorEvent) -> VmValue {
     let mut dict = BTreeMap::new();

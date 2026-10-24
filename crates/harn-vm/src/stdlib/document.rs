@@ -13,7 +13,6 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::stdlib::args::Args;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmDictExt, VmError, VmValue};
-use crate::vm::Vm;
 
 const BUILTIN_RENDERER_ID: &str = "builtin_text_pdf";
 const BUILTIN_EXTRACTOR_ID: &str = "builtin_pdf_text";
@@ -170,9 +169,7 @@ fn positive_usize(value: Option<usize>, default: usize) -> usize {
     value.filter(|value| *value > 0).unwrap_or(default)
 }
 
-pub(crate) fn register_document_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_document_builtins);
 
 #[harn_builtin(
     exposure = "pure",

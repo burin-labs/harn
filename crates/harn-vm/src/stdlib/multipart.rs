@@ -8,7 +8,6 @@ use sha2::{Digest, Sha256};
 use crate::stdlib::args::Args;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 const DEFAULT_MAX_TOTAL_BYTES: usize = 8 * 1024 * 1024;
 const DEFAULT_MAX_FIELD_BYTES: usize = 8 * 1024 * 1024;
@@ -719,9 +718,7 @@ fn form_data_result(boundary: String, body: Vec<u8>) -> Result<VmValue, VmError>
     Ok(dict_value(result))
 }
 
-pub(crate) fn register_multipart_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_multipart_builtins);
 
 #[cfg(test)]
 mod tests {

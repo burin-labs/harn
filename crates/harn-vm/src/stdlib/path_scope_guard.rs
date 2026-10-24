@@ -17,7 +17,6 @@ use crate::orchestration::{
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 use crate::workspace_anchor::MountMode;
 
 const DEFAULT_ARG_KEYS: &[&str] = &[
@@ -35,9 +34,7 @@ const DEFAULT_ARG_KEYS: &[&str] = &[
 /// an unrelated tool failure.
 pub const PATH_SCOPE_VIOLATION_PREFIX: &str = "[path_scope_violation] ";
 
-pub fn register_path_scope_guard_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub fn register_path_scope_guard_builtins);
 
 /// Install a PreToolUse hook that denies (or emits a `<scope-alert>`
 /// reminder for) tool calls whose path-shaped args point outside the

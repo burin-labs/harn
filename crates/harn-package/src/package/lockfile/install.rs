@@ -77,7 +77,9 @@ pub(crate) fn install_packages_in_locked(
     } else {
         desired.save(&ctx.lock_path())?;
     }
-    materialize_dependencies_from_lock(workspace, &ctx, &desired, refetch, offline)
+    let count = materialize_dependencies_from_lock(workspace, &ctx, &desired, refetch, offline)?;
+    seed_cache_from_current_generation(workspace, &ctx, &desired)?;
+    Ok(count)
 }
 
 pub fn install_packages(frozen: bool, refetch: Option<&str>, offline: bool, json: bool) {

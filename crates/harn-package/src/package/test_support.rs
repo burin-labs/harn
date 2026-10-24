@@ -201,7 +201,7 @@ pub(crate) struct TriggerTables {
 #[cfg(test)]
 pub(crate) fn test_vm() -> harn_vm::Vm {
     let mut vm = harn_vm::new_vm();
-    harn_vm::register_vm_stdlib(&mut vm);
+    harn_runtime::register_vm_stdlib(&mut vm);
     vm
 }
 

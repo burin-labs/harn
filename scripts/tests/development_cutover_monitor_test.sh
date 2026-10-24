@@ -87,6 +87,26 @@ fi
 grep -Fq 'expected_development_version=1.2.5-dev' "$tmp_root/published.log"
 git -C "$fixture" tag -d v1.2.4 >/dev/null
 
+# A retired, never-published version leaves main's stable version more than one
+# patch ahead of the latest tag. That is still publication pending, not owed.
+printf '[workspace.package]\nversion = "1.2.6"\n' > "$fixture/Cargo.toml"
+git -C "$fixture" add Cargo.toml
+git -C "$fixture" commit --quiet -m 'Release v1.2.6 after retired v1.2.5'
+git -C "$fixture" update-ref refs/remotes/origin/main HEAD
+git -C "$fixture" tag v1.2.4
+skipped_log="$tmp_root/skipped.log"
+skipped_output="$tmp_root/skipped-output"
+HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
+HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
+GITHUB_OUTPUT="$skipped_output" \
+  "$repo_root/scripts/check_development_cutover.sh" >"$skipped_log" 2>&1 || {
+  cat "$skipped_log" >&2
+  exit 1
+}
+grep -Fxq 'state=pending' "$skipped_output"
+grep -Fq 'publication pending: main 1.2.6, latest tag v1.2.4' "$skipped_log"
+git -C "$fixture" tag -d v1.2.4 >/dev/null
+
 # Any other version is unhealthy. Merely differing from the latest tag must
 # not collapse an older stable or a skipped development target into green.
 for wrong_version in 1.2.2 1.2.5-dev; do

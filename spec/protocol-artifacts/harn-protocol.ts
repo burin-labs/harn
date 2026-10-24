@@ -93,6 +93,7 @@ export const ACP_SESSION_UPDATES = [
   "handoff",
   "hitl_request",
   "hitl_resolved",
+  "inference_speed",
   "live_session_client",
   "log",
   "progress",
@@ -117,6 +118,7 @@ export const HARN_ACP_SESSION_UPDATE_EXTENSIONS = [
   "handoff",
   "hitl_request",
   "hitl_resolved",
+  "inference_speed",
   "live_session_client",
   "log",
   "progress",
@@ -1365,6 +1367,29 @@ export interface ACPHitlResolvedUpdate {
   _meta: ACPHitlResolvedUpdateMeta
 }
 
+export interface ACPInferenceSpeedUpdateMetaHarn {
+  callId: string
+  provider: string
+  model: string
+  phase: string
+  isFinal: boolean
+  elapsedMs: number
+  outputTokens: number
+  tokenSource: string
+  outputTokensPerSecond?: number
+  replayed?: boolean
+  timeToFirstTokenMs?: number
+}
+
+export interface ACPInferenceSpeedUpdateMeta {
+  harn: ACPInferenceSpeedUpdateMetaHarn
+}
+
+export interface ACPInferenceSpeedUpdate {
+  sessionUpdate: "inference_speed"
+  _meta: ACPInferenceSpeedUpdateMeta
+}
+
 export interface ACPLiveSessionClientUpdateMetaHarn {
   action: string
   state: ACPValue
@@ -1647,6 +1672,7 @@ export type ACPTypedSessionUpdate =
   | ACPHandoffUpdate
   | ACPHitlRequestUpdate
   | ACPHitlResolvedUpdate
+  | ACPInferenceSpeedUpdate
   | ACPLiveSessionClientUpdate
   | ACPLogUpdate
   | ACPProgressUpdate

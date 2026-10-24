@@ -5,11 +5,12 @@ use std::time::Instant;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use futures::future::join_all;
+use harn_runtime::register_vm_stdlib;
 use harn_vm::orchestration::{
     clear_runtime_hooks, matching_vm_lifecycle_hooks, register_vm_hook,
     run_lifecycle_hooks_with_ctx, HookEvent,
 };
-use harn_vm::{register_vm_stdlib, reset_thread_local_state, AsyncBuiltinCtx, Vm};
+use harn_vm::{reset_thread_local_state, AsyncBuiltinCtx, Vm};
 use serde_json::{json, Value as JsonValue};
 use tokio::runtime::{Builder, Runtime};
 

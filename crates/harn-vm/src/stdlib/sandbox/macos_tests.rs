@@ -659,6 +659,9 @@ fn sandbox_profile_only_allows_network_at_the_network_ceiling() {
     assert!(allowed_profile.contains("(allow network*)"));
 }
 
+#[path = "macos/network_receipt_tests.rs"]
+mod network_receipt;
+
 #[test]
 fn tcp_loopback_policy_does_not_open_remote_network() {
     let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
@@ -1072,7 +1075,7 @@ fn read_only_root_deny_is_omitted_when_no_workspace_write() {
     );
 }
 
-fn strings(values: impl IntoIterator<Item = &'static str>) -> Vec<String> {
+fn strings<'a>(values: impl IntoIterator<Item = &'a str>) -> Vec<String> {
     values.into_iter().map(str::to_string).collect()
 }
 

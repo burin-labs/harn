@@ -269,6 +269,12 @@ fn native_decoder_preserves_replay_and_required_nulls_and_rejects_bad_identity()
             "is below its minimum",
         ),
         (
+            "inference_speed",
+            "outputTokensPerSecond",
+            serde_json::json!(-0.5),
+            "is below its minimum",
+        ),
+        (
             "skill_activated",
             "skillName",
             serde_json::json!(" "),

@@ -441,7 +441,7 @@ mod tests {
         let runtime = harn_clock::test_support::current_thread_runtime();
         runtime.block_on(harn_clock::test_support::with_local_tasks(async move {
             let mut vm = harn_vm::new_vm();
-            harn_vm::register_vm_stdlib(&mut vm);
+            harn_runtime::register_vm_stdlib(&mut vm);
             format!("{:?}", vm.execute(&chunk).await.expect("source executes"))
         }))
     }

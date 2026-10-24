@@ -33,10 +33,12 @@ expected_version="$(release_next_patch_development "${latest_tag#v}")" || {
 }
 expected_branch="automation/development-$expected_version"
 
-# The next stable workspace lands before its tag. Until publication catches
-# up, the preceding release's development identity is no longer a useful debt.
+# A stable workspace ahead of the latest tag awaits publication. Ordering is
+# semantic, not next-patch equality: a retired unpublished version is skipped.
 # This is an unproven publication state, never a successful cutover verdict.
-if [[ "$workspace_version" == "${expected_version%-"${HARN_RELEASE_DEVELOPMENT_PRERELEASE}"}" ]]; then
+if release_version_is_canonical "$workspace_version" \
+  && ! release_version_is_prerelease "$workspace_version" \
+  && release_workspace_supersedes_source "${latest_tag#v}" "$workspace_version"; then
   description="publication pending: main $workspace_version, latest tag $latest_tag"
   echo "main_ref=$main_ref"
   echo "main_version=$workspace_version"

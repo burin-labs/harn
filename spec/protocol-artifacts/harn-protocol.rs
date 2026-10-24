@@ -2226,6 +2226,7 @@ pub const ACP_SESSION_UPDATE_FS_WATCH: &str = "fs_watch";
 pub const ACP_SESSION_UPDATE_HANDOFF: &str = "handoff";
 pub const ACP_SESSION_UPDATE_HITL_REQUEST: &str = "hitl_request";
 pub const ACP_SESSION_UPDATE_HITL_RESOLVED: &str = "hitl_resolved";
+pub const ACP_SESSION_UPDATE_INFERENCE_SPEED: &str = "inference_speed";
 pub const ACP_SESSION_UPDATE_LIVE_SESSION_CLIENT: &str = "live_session_client";
 pub const ACP_SESSION_UPDATE_LOG: &str = "log";
 pub const ACP_SESSION_UPDATE_PROGRESS: &str = "progress";
@@ -2262,6 +2263,7 @@ pub const ACP_SESSION_UPDATES: &[&str] = &[
     "handoff",
     "hitl_request",
     "hitl_resolved",
+    "inference_speed",
     "live_session_client",
     "log",
     "progress",
@@ -2285,6 +2287,7 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSION_FS_WATCH: &str = "fs_watch";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_HANDOFF: &str = "handoff";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_HITL_REQUEST: &str = "hitl_request";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_HITL_RESOLVED: &str = "hitl_resolved";
+pub const HARN_ACP_SESSION_UPDATE_EXTENSION_INFERENCE_SPEED: &str = "inference_speed";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_LIVE_SESSION_CLIENT: &str = "live_session_client";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_LOG: &str = "log";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_PROGRESS: &str = "progress";
@@ -2308,6 +2311,7 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "handoff",
     "hitl_request",
     "hitl_resolved",
+    "inference_speed",
     "live_session_client",
     "log",
     "progress",
@@ -3298,6 +3302,44 @@ pub struct ACPHitlResolvedUpdate {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ACPInferenceSpeedUpdateMetaHarn {
+    #[serde(rename = "callId")]
+    pub call_id: String,
+    pub provider: String,
+    pub model: String,
+    pub phase: String,
+    #[serde(rename = "isFinal")]
+    pub is_final: bool,
+    #[serde(rename = "elapsedMs")]
+    pub elapsed_ms: u64,
+    #[serde(rename = "outputTokens")]
+    pub output_tokens: u64,
+    #[serde(rename = "tokenSource")]
+    pub token_source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "outputTokensPerSecond")]
+    pub output_tokens_per_second: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replayed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "timeToFirstTokenMs")]
+    pub time_to_first_token_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ACPInferenceSpeedUpdateMeta {
+    pub harn: ACPInferenceSpeedUpdateMetaHarn,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ACPInferenceSpeedUpdate {
+    #[serde(rename = "sessionUpdate")]
+    pub session_update: String,
+    #[serde(rename = "_meta")]
+    pub meta: ACPInferenceSpeedUpdateMeta,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ACPLiveSessionClientUpdateMetaHarn {
     pub action: String,
     pub state: Value,
@@ -3777,8 +3819,8 @@ fn validate_session_update(
             }
             SessionUpdateRule::Minimum(minimum)
                 if field
-                    .and_then(Value::as_i64)
-                    .is_some_and(|number| number < *minimum) =>
+                    .and_then(Value::as_f64)
+                    .is_some_and(|number| number < *minimum as f64) =>
             {
                 Some("is below its minimum")
             }
@@ -3840,6 +3882,7 @@ pub enum ACPTypedSessionUpdate {
     Handoff(ACPHandoffUpdate),
     HitlRequest(ACPHitlRequestUpdate),
     HitlResolved(ACPHitlResolvedUpdate),
+    InferenceSpeed(ACPInferenceSpeedUpdate),
     LiveSessionClient(ACPLiveSessionClientUpdate),
     Log(ACPLogUpdate),
     Progress(ACPProgressUpdate),
@@ -3937,6 +3980,32 @@ const HITL_RESOLVED_RULES: &[(&str, SessionUpdateRule)] = &[
             ("/_meta/harn/outcome", SessionUpdateRule::Required),
             ("/_meta/harn/requestId", SessionUpdateRule::Required),
             ("/_meta/harn/requestId", SessionUpdateRule::MinLen(1)),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const INFERENCE_SPEED_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/callId", SessionUpdateRule::Required),
+            ("/_meta/harn/callId", SessionUpdateRule::MinLen(1)),
+            ("/_meta/harn/elapsedMs", SessionUpdateRule::Required),
+            ("/_meta/harn/elapsedMs", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/isFinal", SessionUpdateRule::Required),
+            ("/_meta/harn/model", SessionUpdateRule::Required),
+            ("/_meta/harn/outputTokens", SessionUpdateRule::Required),
+            ("/_meta/harn/outputTokens", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/outputTokensPerSecond", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/phase", SessionUpdateRule::Required),
+            ("/_meta/harn/phase", SessionUpdateRule::Choices(&["awaiting_first_token", "reasoning", "responding", "calling_tool", "complete"])),
+            ("/_meta/harn/provider", SessionUpdateRule::Required),
+            ("/_meta/harn/timeToFirstTokenMs", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/tokenSource", SessionUpdateRule::Required),
+            ("/_meta/harn/tokenSource", SessionUpdateRule::Choices(&["estimated", "provider", "server"])),
         ])),
     ])),
     ("/sessionUpdate", SessionUpdateRule::Required),
@@ -4216,6 +4285,9 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                 }),
                 Some("hitl_resolved") => (HITL_RESOLVED_RULES, |value| {
                     serde_json::from_value(value).map(Self::HitlResolved)
+                }),
+                Some("inference_speed") => (INFERENCE_SPEED_RULES, |value| {
+                    serde_json::from_value(value).map(Self::InferenceSpeed)
                 }),
                 Some("live_session_client") => (LIVE_SESSION_CLIENT_RULES, |value| {
                     serde_json::from_value(value).map(Self::LiveSessionClient)

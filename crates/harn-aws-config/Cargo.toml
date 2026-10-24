@@ -68,7 +68,6 @@ credentials-login = [
     "dep:p256",
     "p256?/arithmetic",
     "p256?/pem",
-    "dep:rand",
 ]
 credentials-process = ["tokio/process"]
 default = [
@@ -180,17 +179,8 @@ optional = true
 version = "1"
 
 [dependencies.p256]
-version = "0.13.2"
+version = "0.14.0"
 optional = true
-
-[dependencies.rand]
-version = "0.8.5"
-features = [
-    "std",
-    "std_rng",
-]
-optional = true
-default-features = false
 
 [dependencies.sha1]
 version = "0.10"

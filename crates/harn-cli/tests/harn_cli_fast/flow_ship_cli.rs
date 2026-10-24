@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use ed25519_dalek::SigningKey;
 use harn_cli::commands::flow::{ship_watch_payload, FlowShipWatchInputs};
-use harn_vm::flow::{Atom, AtomId, Provenance, SqliteFlowStore, TextOp, VcsBackend};
+use harn_flow::{Atom, AtomId, Provenance, SqliteFlowStore, TextOp, VcsBackend};
 use tempfile::TempDir;
 use time::OffsetDateTime;
 

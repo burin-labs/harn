@@ -31,6 +31,11 @@ pub(crate) trait SandboxBackend {
 
     fn available() -> bool;
 
+    /// Whether native parent confinement makes the child's network grants inherited.
+    fn inherits_network_grants() -> bool {
+        false
+    }
+
     /// How the filesystem mechanism on this host falls short of the backend's
     /// enforcement row. Empty when it holds everything the row states.
     fn mechanism_limits() -> Vec<super::enforcement::MechanismLimit> {

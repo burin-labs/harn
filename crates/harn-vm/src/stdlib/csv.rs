@@ -10,7 +10,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 fn opt_bool(opts: Option<&crate::value::DictMap>, key: &str, default: bool) -> bool {
     opts.and_then(|d| match d.get(key) {
@@ -43,9 +42,7 @@ fn opt_delimiter(
     Ok(bytes[0])
 }
 
-pub(crate) fn register_csv_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_csv_builtins);
 
 #[harn_builtin(
     exposure = "pure",
@@ -194,6 +191,7 @@ fn csv_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vm::Vm;
 
     fn vm() -> Vm {
         let mut vm = crate::new_vm();

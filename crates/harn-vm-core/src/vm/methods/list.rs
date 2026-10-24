@@ -127,69 +127,7 @@ impl crate::vm::Vm {
                 let n = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
                 Ok(VmValue::list(items.iter().skip(n).cloned().collect()))
             }
-            "sum" => {
-                let mut int_sum: i64 = 0;
-                let mut overflowed = false;
-                let mut has_float = false;
-                let mut float_sum: f64 = 0.0;
-                let mut has_decimal = false;
-                let mut decimal_sum = rust_decimal::Decimal::ZERO;
-                let mut decimal_overflow = false;
-                for item in items.iter() {
-                    match item {
-                        VmValue::Int(n) => {
-                            // Promote to float on i64 overflow rather than
-                            // silently wrapping (matching `abs`/`pow`); the
-                            // float accumulator below is the fallback value.
-                            match int_sum.checked_add(*n) {
-                                Some(sum) => int_sum = sum,
-                                None => overflowed = true,
-                            }
-                            float_sum += *n as f64;
-                            // Also fold into the decimal accumulator so an
-                            // int+decimal list promotes ints exactly. Only used
-                            // when the list actually contains a decimal.
-                            match decimal_sum.checked_add(rust_decimal::Decimal::from(*n)) {
-                                Some(sum) => decimal_sum = sum,
-                                None => decimal_overflow = true,
-                            }
-                        }
-                        VmValue::Float(n) => {
-                            has_float = true;
-                            float_sum += n;
-                        }
-                        VmValue::Decimal(d) => {
-                            has_decimal = true;
-                            match decimal_sum.checked_add(**d) {
-                                Some(sum) => decimal_sum = sum,
-                                None => decimal_overflow = true,
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                // A decimal in the list makes the whole sum a decimal (ints
-                // promote exactly); mixing with float is refused, not silently
-                // dropped, mirroring the arithmetic operators.
-                if has_decimal {
-                    if has_float {
-                        return Some(Err(VmError::TypeError(
-                            "sum: cannot mix decimal and float values".to_string(),
-                        )));
-                    }
-                    if decimal_overflow {
-                        return Some(Err(VmError::Runtime(
-                            "sum: decimal addition overflowed".to_string(),
-                        )));
-                    }
-                    return Some(Ok(VmValue::decimal(decimal_sum)));
-                }
-                if has_float || overflowed {
-                    Ok(VmValue::Float(float_sum))
-                } else {
-                    Ok(VmValue::Int(int_sum))
-                }
-            }
+            "sum" => sum_values(items.iter()),
             "min" => {
                 if items.is_empty() {
                     return Some(Ok(VmValue::Nil));
@@ -587,5 +525,74 @@ impl crate::vm::Vm {
                 method,
             )),
         }
+    }
+}
+
+/// Sum of the numeric values: ints promote to float on overflow, a decimal
+/// makes the whole sum decimal, and non-numeric values are skipped. Shared by
+/// `list.sum()` and `iter.sum()` so the two cannot drift.
+pub(super) fn sum_values<'a>(
+    items: impl IntoIterator<Item = &'a VmValue>,
+) -> Result<VmValue, VmError> {
+    let mut int_sum: i64 = 0;
+    let mut overflowed = false;
+    let mut has_float = false;
+    let mut float_sum: f64 = 0.0;
+    let mut has_decimal = false;
+    let mut decimal_sum = rust_decimal::Decimal::ZERO;
+    let mut decimal_overflow = false;
+    for item in items {
+        match item {
+            VmValue::Int(n) => {
+                // Promote to float on i64 overflow rather than
+                // silently wrapping (matching `abs`/`pow`); the
+                // float accumulator below is the fallback value.
+                match int_sum.checked_add(*n) {
+                    Some(sum) => int_sum = sum,
+                    None => overflowed = true,
+                }
+                float_sum += *n as f64;
+                // Also fold into the decimal accumulator so an
+                // int+decimal list promotes ints exactly. Only used
+                // when the list actually contains a decimal.
+                match decimal_sum.checked_add(rust_decimal::Decimal::from(*n)) {
+                    Some(sum) => decimal_sum = sum,
+                    None => decimal_overflow = true,
+                }
+            }
+            VmValue::Float(n) => {
+                has_float = true;
+                float_sum += n;
+            }
+            VmValue::Decimal(d) => {
+                has_decimal = true;
+                match decimal_sum.checked_add(**d) {
+                    Some(sum) => decimal_sum = sum,
+                    None => decimal_overflow = true,
+                }
+            }
+            _ => {}
+        }
+    }
+    // A decimal in the list makes the whole sum a decimal (ints
+    // promote exactly); mixing with float is refused, not silently
+    // dropped, mirroring the arithmetic operators.
+    if has_decimal {
+        if has_float {
+            return Err(VmError::TypeError(
+                "sum: cannot mix decimal and float values".to_string(),
+            ));
+        }
+        if decimal_overflow {
+            return Err(VmError::Runtime(
+                "sum: decimal addition overflowed".to_string(),
+            ));
+        }
+        return Ok(VmValue::decimal(decimal_sum));
+    }
+    if has_float || overflowed {
+        Ok(VmValue::Float(float_sum))
+    } else {
+        Ok(VmValue::Int(int_sum))
     }
 }

@@ -85,14 +85,13 @@ jq -e '
   (.targets | type == "array" and length > 0) and
   ([.targets[].target] | length == (unique | length)) and
   all(.targets[];
-    (keys == ["glibc_max", "release_codegen_units", "runners", "sccache_backend", "target", "use_sccache"]) and
+    (keys == ["glibc_max", "runners", "sccache_backend", "target", "use_sccache"]) and
     (.runners | keys == ["fast", "primary", "recovery", "standard", "warm"]) and
     (.target | type == "string" and length > 0) and
     (if (.target | endswith("unknown-linux-gnu"))
       then .glibc_max == "2.35"
       else .glibc_max == null
       end) and
-    (.release_codegen_units | type == "number" and floor == . and . >= 1 and . <= 256) and
     (.use_sccache == "true" or .use_sccache == "false") and
     (.sccache_backend == "sticky"
       or .sccache_backend == "local"
@@ -171,7 +170,6 @@ jq -c \
           glibc_max,
           runner: .runners[$runner_key],
           rust_cache_broad_restore_prefix: rust_cache_broad_restore_prefix(.target),
-          release_codegen_units,
           use_sccache,
           sccache_backend
         }]

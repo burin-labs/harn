@@ -298,7 +298,15 @@ fn locate_symbol(
     };
 
     let decl_line_zero = matched.start_row as usize;
-    let preamble_start_zero = find_preamble_start(lines, decl_line_zero, language);
+    let starts_after_indentation = lines
+        .get(decl_line_zero)
+        .and_then(|line| line.get(..matched.start_col as usize))
+        .is_some_and(|prefix| prefix.bytes().all(|byte| matches!(byte, b' ' | b'\t')));
+    let preamble_start_zero = if starts_after_indentation {
+        find_preamble_start(lines, decl_line_zero, language)
+    } else {
+        decl_line_zero
+    };
     let start_line = preamble_start_zero + 1;
     let end_line = (matched.end_row as usize)
         .saturating_add(1)

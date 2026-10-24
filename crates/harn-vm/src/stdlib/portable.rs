@@ -13,13 +13,10 @@ use harn_kernel::{
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 const PROGRAM_SCHEMA: &str = "harn.portable_program.v1";
 
-pub(crate) fn register_portable_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_portable_builtins);
 
 #[harn_builtin(
     exposure = "pure",

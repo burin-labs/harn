@@ -354,6 +354,13 @@ capability_method!(
     "Read temperature sensors."
 );
 capability_method!(
+    system_parent_process,
+    "harness.system.parent_process",
+    ["host.read@const=parent-process"],
+    r#"__cap_system_parent_process() -> {pid: int?, identity: string?, state: "alive" | "dead" | "unknown"}"#,
+    "Read the current parent process ID, opaque native identity, and liveness. No arguments or environment values are returned."
+);
+capability_method!(
     system_processes,
     "harness.system.processes",
     ["host.read@const=process-table"],

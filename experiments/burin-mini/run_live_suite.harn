@@ -1,0 +1,212 @@
+import { help_requested, parse_typed, parser } from "std/cli/argparse"
+import { invoke, runtime } from "./lib/driver"
+
+pub type SuiteOptions = {model: string, mock: bool, output: string}
+
+pub type SuiteResult = {suite_root: string, tasks: int, failed: list<string>}
+
+type Report = {task_id: string, run_path: string, verdict: string}
+
+type Grade = {overall_verdict: string}
+
+const TASKS = [
+  {id: "explain_repo", prompt: "Explain this repo to me in simple terms", fixture: "explain.jsonl"},
+  {id: "comment_file", prompt: "Comment what this file does", fixture: "comment.jsonl"},
+  {
+    id: "rate_limit_auth",
+    prompt: "Add rate limiting middleware to the auth module",
+    fixture: "rate-limit.jsonl",
+  },
+]
+
+fn copy_tree(fs: HarnessFs, source: string, destination: string) -> nil {
+  fs.mkdir(destination)
+  let copied = 0
+  for entry in fs.walk(source, {ignore_policy: "project", follow_symlinks: false}) {
+    require entry.is_dir || entry.is_file, "Unsupported copy entry: ${entry.path}"
+    if !entry.is_file {
+      continue
+    }
+    const relative = path_relative_to(entry.path, source)
+    require relative != nil, "Source escaped copy root: ${entry.path}"
+    const target = path_join(destination, relative)
+    fs.mkdir(dirname(target))
+    fs.copy(entry.path, target)
+    copied = copied + 1
+  }
+  require copied > 0, "No files copied from ${source}"
+}
+
+fn copy_experiment(fs: HarnessFs, source: string, destination: string) -> nil {
+  for name in ["lib", "workspace", "fixtures"] {
+    copy_tree(fs, path_join(source, name), path_join(destination, name))
+  }
+  for entry in fs.walk(source, {max_depth: 1, ignore_policy: "project", follow_symlinks: false}) {
+    if entry.is_file && (entry.path.ends_with(".harn") || entry.path.ends_with(".harn.prompt")) {
+      fs.copy(entry.path, path_join(destination, basename(entry.path)))
+    }
+  }
+}
+
+pub fn run_suite(
+  harness: Harness,
+  binary: string,
+  options: SuiteOptions,
+  settings: dict<string, string> = {},
+) -> SuiteResult {
+  const here = harness.fs.source_dir()
+  const provider = settings["BURIN_MINI_PROVIDER"] ?? harness.env.get("BURIN_MINI_PROVIDER")
+    ?? "ollama"
+  const output = if options.output == "" {
+    path_join(
+      here,
+      "evals/live",
+      "${regex_replace(r"[^0-9TZ]", "", harness.clock.date_iso())}-${harness.random.uuid_v7()}",
+    )
+  } else {
+    path_normalize(path_join(harness.fs.cwd(), options.output))
+  }
+  require !harness.fs.exists(output), "Refusing to reuse suite output: ${output}"
+  harness.fs.mkdir(output)
+  const scratch = harness.fs.mkdtemp("burin-mini-live-")
+  defer {
+    harness.fs.delete(scratch)
+  }
+  let failed: list<string> = []
+  for task in TASKS {
+    const directory = path_join(output, task.id)
+    harness.fs.mkdir(directory)
+    const experiment = path_join(scratch, task.id)
+    copy_experiment(harness.fs, here, experiment)
+    let env: dict<string, string> = settings
+      + {
+        BURIN_MINI_PROVIDER: if options.mock {
+          "mock"
+        } else {
+          provider
+        },
+        BURIN_MINI_GENERATOR_MODEL: if options.mock {
+          "mock"
+        } else {
+          options.model
+        },
+        BURIN_MINI_EVALUATOR_MODEL: if options.mock {
+          "mock"
+        } else {
+          settings["BURIN_MINI_EVALUATOR_MODEL"] ?? harness.env.get("BURIN_MINI_EVALUATOR_MODEL")
+            ?? options.model
+        },
+        HARN_LLM_TRANSCRIPT_DIR: path_join(directory, "llm"),
+        HARN_EVENT_LOG_DIR: path_join(directory, "events"),
+      }
+    if options.mock {
+      env["BURIN_MINI_SEMANTIC_EVAL_MODE"] = "heuristic"
+    }
+    harness.stdio.println("=== ${task.id} ===")
+    const model_args = if options.mock {
+      ["--llm-mock", path_join(experiment, "fixtures", task.fixture)]
+    } else {
+      ["--llm", "${provider}:${options.model}"]
+    }
+    const result = invoke(
+      harness,
+      binary,
+      [
+        "playground",
+        "--host",
+        path_join(experiment, "host.harn"),
+        "--script",
+        path_join(experiment, "pipeline.harn"),
+        "--task",
+        task.prompt,
+      ]
+        + model_args,
+      experiment,
+      env,
+      path_join(directory, "output.txt"),
+    )
+    require result.success, "Task command failed: ${task.id} (exit ${result.exit_code})"
+    const source = path_join(experiment, "evals/generated/${task.id}-latest.json")
+    const report = unwrap(json_decode(harness.fs.read_text(source), schema_of(Report)))
+    require report.task_id == task.id, "Report belongs to a different task: ${source}"
+    harness.fs.copy(source, path_join(directory, "report.json"))
+    if report.run_path != "" {
+      harness.fs.copy(report.run_path, path_join(directory, "run_record.json"))
+    }
+    const graded = invoke(
+      harness,
+      binary,
+      [
+        "run",
+        "--read-only-root",
+        output,
+        "--read-only-root",
+        scratch,
+        "--write-root",
+        output,
+        path_join(here, "evaluator.harn"),
+        "--",
+        path_join(directory, "report.json"),
+        path_join(directory, "semantic_eval.json"),
+        directory,
+      ],
+      here,
+      env,
+      path_join(directory, "semantic_eval_output.txt"),
+    )
+    require graded.success, "Semantic evaluator failed: ${task.id} (exit ${graded.exit_code})"
+    const grade = unwrap(
+      json_decode(
+        harness.fs.read_text(path_join(directory, "semantic_eval.json")),
+        schema_of(Grade),
+      ),
+    )
+    if report.verdict != "pass" || grade.overall_verdict != "pass" {
+      failed.push(task.id)
+    }
+    copy_tree(
+      harness.fs,
+      path_join(experiment, "workspace"),
+      path_join(directory, "workspace_after"),
+    )
+  }
+  const summary: SuiteResult = {suite_root: output, tasks: TASKS.count, failed: failed}
+  harness.fs.write_text(path_join(output, "summary.json"), "${json_stringify_pretty(summary)}\n")
+  harness.stdio.println(
+    "Tasks: ${TASKS.count} measured; ${failed.count} failed: ${failed.join(", ")}",
+  )
+  harness.stdio.println("suite_root=${output}")
+  return summary
+}
+
+fn main(harness: Harness) -> nil {
+  if help_requested(argv) {
+    harness.stdio.println("Usage: run_live_suite.sh [MODEL] [--mock] [--output DIR]")
+    return
+  }
+  const parsed = parse_typed(
+    parser(
+      {
+        name: "burin-mini-suite",
+        args: [
+          {
+            kind: "positional",
+            name: "model",
+            required: false,
+            default: harness.env.get("BURIN_MINI_OLLAMA_MODEL") ?? "qwen3.5:35b-a3b-coding-nvfp4",
+          },
+          {kind: "switch", name: "mock", long: "--mock"},
+          {kind: "flag", name: "output", long: "--output", default: ""},
+        ],
+      },
+    ),
+    argv,
+    schema_of(SuiteOptions),
+  )
+  if is_err(parsed) {
+    harness.stdio.eprintln(unwrap_err(parsed).message)
+    harness.runtime.exit(2)
+  }
+  const result = run_suite(harness, runtime(harness), unwrap(parsed).options)
+  require result.failed.count == 0, "Suite contains failed tasks: ${result.failed.join(", ")}"
+}

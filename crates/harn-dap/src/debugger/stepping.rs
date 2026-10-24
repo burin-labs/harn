@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use harn_runtime::register_vm_stdlib;
 use harn_vm::llm::enable_tracing;
 use harn_vm::{
     clear_host_call_bridge, register_checkpoint_builtins, register_metadata_builtins,
-    register_store_builtins, register_vm_stdlib, set_host_call_bridge, DebugAction, VmError,
+    register_store_builtins, set_host_call_bridge, DebugAction, VmError,
 };
 use serde_json::json;
 

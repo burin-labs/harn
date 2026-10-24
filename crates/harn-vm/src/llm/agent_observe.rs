@@ -444,6 +444,7 @@ pub(crate) struct ObservedAttemptToken {
     reasoning_receipts: super::reasoning_receipt::RequestReceipts,
     rate_limit: super::rate_limit::LlmCallAdmission,
     token_projection: super::cost_context::LlmCallTokenProjection,
+    inference_speed: super::inference_speed::InferenceMeter,
 }
 
 impl ObservedAttemptToken {
@@ -452,13 +453,24 @@ impl ObservedAttemptToken {
         call_id: &str,
         token_projection: super::cost_context::LlmCallTokenProjection,
     ) -> Self {
+        let session_id = super::agent_runtime::current_agent_session_id();
         Self {
-            session_id: super::agent_runtime::current_agent_session_id(),
+            inference_speed: super::inference_speed::InferenceMeter::new(
+                session_id.clone(),
+                call_id,
+                &opts.provider,
+                &opts.model,
+            ),
+            session_id,
             dispatches: super::provider_dispatch::ProviderDispatchLedger::for_current_attempt(),
             reasoning_receipts: super::reasoning_receipt::RequestReceipts::for_call(opts, call_id),
             rate_limit: super::rate_limit::LlmCallAdmission::for_attempt(opts, token_projection),
             token_projection,
         }
+    }
+
+    pub(crate) fn inference_speed(&self) -> &super::inference_speed::InferenceMeter {
+        &self.inference_speed
     }
 
     /// The attempt's context-token projection, which cost admission charges.
@@ -749,6 +761,22 @@ pub(crate) async fn observed_llm_call(
             provider_call,
         )
         .await;
+        // A call the budget refused at settlement still completed and was paid
+        // for, so it is recorded before its stop takes the error path.
+        let llm_result = match llm_result {
+            Ok(settled) => match settled.stop {
+                None => Ok(settled.result),
+                Some(stop) => {
+                    super::agent_session_host::record_completed_call_usage(
+                        opts,
+                        &settled.result,
+                        &call_id,
+                    );
+                    Err(super::api::settlement_stop_error(&stop, &settled.result))
+                }
+            },
+            Err(error) => Err(error),
+        };
         let duration_ms = start.elapsed().as_millis() as u64;
         let attempt_count = attempt + 1;
         physical_attempts = physical_attempts.saturating_add(

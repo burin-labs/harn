@@ -13,7 +13,8 @@ use std::path::PathBuf;
 
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_vm::{register_vm_stdlib, Compiler, VmValue};
+use harn_runtime::register_vm_stdlib;
+use harn_vm::{Compiler, VmValue};
 
 use super::support::*;
 
@@ -39,8 +40,8 @@ fn run_harn(source: &str) -> VmValue {
 
 #[test]
 fn librarian_query_meets_ground_truth_recall() {
-    let corpus = fixture_root().join("corpus");
-    let root_str = corpus.to_string_lossy().replace('\\', "/");
+    let corpus = private_fixture_copy(&fixture_root().join("corpus"));
+    let root_str = corpus.path().to_string_lossy().replace('\\', "/");
 
     let qa_text =
         std::fs::read_to_string(fixture_root().join("queries.json")).expect("read queries.json");
@@ -149,8 +150,8 @@ pipeline default(harness: Harness, _task) {{
 fn librarian_who_calls_returns_call_sites() {
     // Reuse the same fixture: `fetchUser` is called from
     // `src/auth.ts` and `src/router.ts` per Q19 in queries.json.
-    let corpus = fixture_root().join("corpus");
-    let root_str = corpus.to_string_lossy().replace('\\', "/");
+    let corpus = private_fixture_copy(&fixture_root().join("corpus"));
+    let root_str = corpus.path().to_string_lossy().replace('\\', "/");
     let source = format!(
         r#"
 import "std/code_librarian"
@@ -210,8 +211,8 @@ pipeline default(harness: Harness, _task) {{
 
 #[test]
 fn librarian_freshness_and_overlay_roundtrip() {
-    let corpus = fixture_root().join("corpus");
-    let root_str = corpus.to_string_lossy().replace('\\', "/");
+    let corpus = private_fixture_copy(&fixture_root().join("corpus"));
+    let root_str = corpus.path().to_string_lossy().replace('\\', "/");
     let source = format!(
         r#"
 import "std/code_librarian"

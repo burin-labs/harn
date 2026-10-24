@@ -710,7 +710,7 @@ mod tests {
         assert!(lease.try_lock().is_err());
         guard.verify_entry(&entry).unwrap();
         drop(guard);
-        lease.try_lock().unwrap();
+        harn_flock::assert_released(&lease);
     }
 
     #[test]

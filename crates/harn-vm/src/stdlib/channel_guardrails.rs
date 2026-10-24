@@ -14,15 +14,12 @@
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 fn err(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::string(message.into()))
 }
 
-pub(crate) fn register_channel_guardrail_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_channel_guardrail_builtins);
 
 #[harn_builtin(
     exposure = "harness.channels.guardrail_register",

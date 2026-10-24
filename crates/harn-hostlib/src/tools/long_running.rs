@@ -53,6 +53,9 @@ use crate::process::{
 use crate::tools::args::to_agent_path;
 use crate::tools::proc::{self, CaptureConfig, CommandStatus, EnvMode};
 
+#[path = "long_running_response.rs"]
+mod response;
+
 /// Atomic counter for generating unique handle IDs within this process.
 static HANDLE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -305,6 +308,8 @@ pub struct LongRunningHandleInfo {
     pub command_display: String,
     /// Opaque verification snapshot binding provided by the caller.
     pub snapshot_binding: Option<harn_vm::value::DictMap>,
+    /// Sandbox metadata captured for the spawned child, independent of its waiter.
+    pub sandbox_report: harn_vm::process_sandbox::ProcessSandboxReport,
 }
 
 /// Default ceiling for the progress-emission backoff schedule when the caller
@@ -389,32 +394,7 @@ struct ProgressThreadContext {
     max_interval: Duration,
     max_inline_bytes: usize,
     snapshot_binding: Option<harn_vm::value::DictMap>,
-}
-
-impl LongRunningHandleInfo {
-    /// Convert into the standard handle response dict returned to the agent.
-    pub fn into_handle_response(self) -> VmValue {
-        let Self {
-            command_id,
-            handle_id,
-            started_at,
-            cwd,
-            pid,
-            process_group_id,
-            command_display,
-            snapshot_binding,
-        } = self;
-        proc::running_response(
-            command_id,
-            handle_id,
-            pid,
-            process_group_id,
-            started_at,
-            &cwd,
-            command_display,
-            snapshot_binding.as_ref(),
-        )
-    }
+    sandbox_report: harn_vm::process_sandbox::ProcessSandboxReport,
 }
 
 /// Spawn the argv as a long-running child process and return a handle.
@@ -461,6 +441,7 @@ pub(crate) fn spawn_long_running_with_options(
     let requested_cwd = cwd.as_ref().map(to_agent_path);
     let effective_cwd = proc::resolve_effective_cwd(builtin, cwd.as_deref())?;
     let sandbox_reporting = harn_vm::process_sandbox::ProcessSandboxReportingContext::current();
+    let sandbox_report = sandbox_reporting.report();
     let mut env = env;
     proc::apply_toolchain_path(Some(&effective_cwd), &mut env, options.env_mode);
     let spec = SpawnSpec {
@@ -559,6 +540,7 @@ pub(crate) fn spawn_long_running_with_options(
         process_group_id,
         command_display,
         snapshot_binding: options.snapshot_binding,
+        sandbox_report,
     })
 }
 
@@ -642,6 +624,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
                 max_interval,
                 max_inline_bytes: context.progress_max_inline_bytes,
                 snapshot_binding: context.snapshot_binding.clone(),
+                sandbox_report: context.sandbox_reporting.report(),
             })
         });
 
@@ -793,7 +776,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     );
     payload.insert(
         "sandbox".into(),
-        crate::json::vm_dict_to_json(&proc::sandbox_response(sandbox_assessment.reporting)),
+        serde_json::to_value(&sandbox_assessment.report).expect("typed process sandbox report"),
     );
     payload.insert(
         "denial".into(),
@@ -999,6 +982,7 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
                 "silence_ms": silence_ms,
                 "line_count": stdout.iter().chain(stderr.iter()).filter(|byte| **byte == b'\n').count() as i64,
                 "process_group_id": context.process_group_id,
+                "sandbox": &context.sandbox_report,
             });
             if let (Some(object), Some(snapshot_binding)) =
                 (payload.as_object_mut(), context.snapshot_binding.as_ref())

@@ -1,0 +1,61 @@
+type Answer = {question: string, answer: string}
+
+pipeline test_qmode_driver_preserves_questions_answers_and_terminal_exit_codes(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("qmode-driver-")
+  const here = path_normalize(path_join(harness.fs.source_dir(), "../../experiments/burin-mini"))
+  const id = "tooling-${harness.random.uuid_v7()}"
+  const task = path_join(here, ".qmode", id)
+  defer {
+    if harness.fs.exists(task) {
+      harness.fs.delete(task)
+    }
+  }
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const driver = path_join(here, "run_qmode.harn")
+  const fixture = path_join(root, "question.jsonl")
+  harness.fs.write_text(
+    fixture,
+    "${json_stringify({tool_calls: [{name: "ask_question", args: {question: "Use the existing store?"}}]})}\n",
+  )
+  const base = {
+    program: binary,
+    cwd: here,
+    env: {
+      HARN_BIN: binary,
+      QMODE_PROVIDER: "mock",
+      QMODE_MODEL: "mock",
+      QMODE_MOCK_FIXTURE: fixture,
+    },
+  }
+  const prefix = ["run", "--no-sandbox", driver, "--"]
+  const first = harness.process.run(base + {args: prefix + ["init", id, "Plan a cache"]})
+  assert_eq(first.exit_code, 10, first.stderr)
+  assert(first.stdout.contains("Use the existing store?"), first.stdout)
+  assert(harness.fs.exists(path_join(task, "pending.json")))
+  const plan_fixture = path_join(root, "plan.jsonl")
+  harness.fs.write_text(
+    plan_fixture,
+    "${json_stringify({tool_calls: [{name: "exit_plan_mode", args: {plan: json_stringify({mode: "plan_then_execute", direction: "Use the existing store", targets: [], grounding: [], tasks: ["Add a cache"], verification: ["Run tests"], ready: true})}}]})}\n",
+  )
+  const next = harness.process.run(
+    base
+      + {env: base.env + {QMODE_MOCK_FIXTURE: plan_fixture}, args: prefix + ["answer", id, "Yes"]},
+  )
+  assert_eq(next.exit_code, 0, next.stderr)
+  assert(harness.fs.exists(path_join(task, "plan.json")))
+  assert(!harness.fs.exists(path_join(task, "pending.json")))
+  const qa = unwrap(
+    json_decode(harness.fs.read_text(path_join(task, "qa.jsonl")).trim(), schema_of(Answer)),
+  )
+  assert_eq(qa.question, "Use the existing store?")
+  assert_eq(qa.answer, "Yes")
+  const shown = harness.process.run(base + {args: prefix + ["show", id]})
+  assert_eq(shown.exit_code, 0, shown.stderr)
+  assert(shown.stdout.contains("Use the existing store"))
+  const refused = harness.process.run(base + {args: prefix + ["reset", "../workspace"]})
+  assert(refused.exit_code != 0)
+  assert(harness.fs.exists(path_join(here, "workspace/package.json")))
+  const reset = harness.process.run(base + {args: prefix + ["reset", id]})
+  assert_eq(reset.exit_code, 0, reset.stderr)
+  assert(!harness.fs.exists(task))
+}
