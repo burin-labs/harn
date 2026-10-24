@@ -80,7 +80,7 @@ const TOKIO_SLEEP_ALLOWLIST: list<string> = [
   // instead — the very regression the test exists to catch.
   "crates/harn-vm/src/llm/api/transport/sse_telemetry_tests.rs",
   "crates/harn-vm/src/agent_sessions_tests.rs",
-  "crates/harn-vm/src/flow/predicates/executor_tests.rs",
+  "crates/harn-flow/src/predicates/executor_tests.rs",
   "crates/harn-cli/tests/harn_cli_fast/orchestrator_http/support.rs",
   // Stop controls: two distinct real-time needs, neither expressible on a
   // paused clock. One bounded poll waits on a tick file the *running agent
@@ -514,9 +514,9 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/corrections/mod.rs",
   "crates/harn-vm/src/event_log/mod.rs",
   "crates/harn-vm/src/event_log/util.rs",
-  "crates/harn-vm/src/flow/atom.rs",
-  "crates/harn-vm/src/flow/fixer.rs",
-  "crates/harn-vm/src/flow/predicates/executor.rs",
+  "crates/harn-flow/src/atom.rs",
+  "crates/harn-flow/src/fixer.rs",
+  "crates/harn-flow/src/predicates/executor.rs",
   "crates/harn-vm/src/http/client.rs",
   "crates/harn-vm/src/http/streaming/websocket.rs",
   "crates/harn-vm/src/llm/agent_observe.rs",

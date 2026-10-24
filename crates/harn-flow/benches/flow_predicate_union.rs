@@ -17,7 +17,7 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use harn_lexer::Span;
-use harn_vm::flow::{
+use harn_flow::{
     enforce_predicate_ceiling, resolve_predicates_for_touched_directories, DiscoveredInvariantFile,
     DiscoveredPredicate, PredicateCeiling, PredicateHash, PredicateKind,
 };
@@ -28,7 +28,7 @@ fn discovered_predicate(name: &str) -> DiscoveredPredicate {
         name: name.to_string(),
         kind: PredicateKind::Deterministic,
         fallback: None,
-        fallback_policy: harn_vm::flow::SemanticFallbackPolicy::Enforce,
+        fallback_policy: harn_flow::SemanticFallbackPolicy::Enforce,
         archivist: None,
         retroactive: false,
         source_hash: PredicateHash::new(format!("sha256:bench/{name}")),

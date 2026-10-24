@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 
 use super::compose::verdict_strictness;
-use crate::flow::{InvariantBlockError, InvariantResult, PredicateHash, Slice};
+use crate::{InvariantBlockError, InvariantResult, PredicateHash, Slice};
 
 const DEFAULT_DETERMINISTIC_BUDGET: Duration = Duration::from_millis(50);
 const DEFAULT_SEMANTIC_BUDGET: Duration = Duration::from_secs(2);

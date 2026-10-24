@@ -14,8 +14,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::flow::{Atom, AtomId};
-use crate::value::VmValue;
+use crate::{Atom, AtomId};
+use harn_vm_core::value::VmValue;
 
 /// Predicate result returned by every invariant evaluation attempt.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -116,7 +116,7 @@ impl InvariantResult {
     /// flow builtins so predicate authors receive idiomatic record values.
     pub fn to_vm_value(&self) -> VmValue {
         let json = serde_json::to_value(self).unwrap_or(serde_json::Value::Null);
-        crate::stdlib::json_to_vm_value(&json)
+        harn_vm_core::schema::json_to_vm_value(&json)
     }
 
     /// Decode an `InvariantResult` from a [`VmValue`] produced by the stdlib

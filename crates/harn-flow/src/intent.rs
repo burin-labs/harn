@@ -555,7 +555,7 @@ mod tests {
     fn atom(suffix: &str, run_id: &str, transcript_ref: &str, tool_call_id: Option<&str>) -> Atom {
         let principal = deterministic_signing_key(1);
         let persona = deterministic_signing_key(2);
-        let mut provenance = crate::flow::Provenance {
+        let mut provenance = crate::Provenance {
             principal: "user:alice".to_string(),
             persona: "ship-captain".to_string(),
             agent_run_id: run_id.to_string(),
@@ -566,7 +566,7 @@ mod tests {
         };
         provenance.timestamp += time::Duration::seconds(suffix.len() as i64);
         Atom::sign(
-            vec![crate::flow::TextOp::Insert {
+            vec![crate::TextOp::Insert {
                 offset: suffix.len() as u64,
                 content: suffix.to_string(),
             }],

@@ -15,7 +15,7 @@ use harn_parser::{peel_attributes, Attribute, AttributeArg, Node, Parser};
 use sha2::{Digest, Sha256};
 
 use super::executor::{PredicateKind, SemanticFallbackPolicy};
-use crate::flow::slice::PredicateHash;
+use crate::slice::PredicateHash;
 
 /// Filename used for per-directory Flow invariant declarations.
 pub const INVARIANTS_FILE: &str = "invariants.harn";
@@ -457,7 +457,7 @@ fn relative_dir_label(root: &Path, dir: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::resolve_predicates;
+    use crate::resolve_predicates;
     use std::fs;
     use tempfile::TempDir;
 

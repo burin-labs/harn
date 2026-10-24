@@ -1,7 +1,7 @@
 use std::process::Command;
 
 use ed25519_dalek::SigningKey;
-use harn_vm::flow::{Atom, Provenance, ShadowGitBackend, TextOp, VcsBackend};
+use harn_flow::{Atom, Provenance, ShadowGitBackend, TextOp, VcsBackend};
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
@@ -39,7 +39,7 @@ fn signing_key(seed: u8) -> SigningKey {
     SigningKey::from_bytes(&[seed; 32])
 }
 
-fn atom(index: usize, parent: Option<harn_vm::flow::AtomId>) -> Atom {
+fn atom(index: usize, parent: Option<harn_flow::AtomId>) -> Atom {
     let principal = signing_key(1);
     let persona = signing_key(2);
     Atom::sign(

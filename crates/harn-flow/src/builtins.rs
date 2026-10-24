@@ -1,13 +1,13 @@
 //! Harn-side bindings for Flow predicate result construction.
 //!
 //! These builtins let `.harn` predicate authors return idiomatic
-//! [`InvariantResult`](crate::flow::InvariantResult) values: graded verdicts
+//! [`InvariantResult`](crate::InvariantResult) values: graded verdicts
 //! (`Allow`, `Warn`, `Block`, `RequireApproval`), structured evidence, and
 //! optional remediation suggestions.
 //!
 //! See issue #581 for the type contract and parent epic #571 for the wider
 //! Harn Flow shipping substrate. The Rust types live in
-//! `crates/harn-vm/src/flow/predicates/result.rs`; this module is a thin layer
+//! `crates/harn-flow/src/predicates/result.rs`; this module is a thin layer
 //! that constructs equivalent record values via the VM and exposes a few
 //! introspection helpers (`flow_invariant_kind`, `flow_invariant_is_blocking`,
 //! `flow_invariant_confidence`).
@@ -17,18 +17,18 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::flow::{
+use crate::{
     parse_invariants_source, Approver, AtomId, ByteSpan, EvidenceItem, InvariantBlockError,
     InvariantResult, PredicateExecutor, PredicateExecutorConfig, PredicateHash, PredicateKind,
     PredicateRunner, Remediation, SemanticFallbackPolicy, Slice, SliceId, SliceStatus, Verdict,
 };
-use crate::llm::helpers::vm_value_to_json;
-use crate::stdlib::args::{ArgError, Args, ErrorKind};
-use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::harn_builtin;
-use crate::value::{VmClosure, VmError, VmValue};
-use crate::vm::{AsyncBuiltinCtx, Vm};
 use async_trait::async_trait;
+use harn_vm_core::value::json::vm_value_to_json;
+use harn_vm_core::value::args::{ArgError, Args, ErrorKind};
+use harn_vm_core::schema::json_to_vm_value;
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::value::{VmClosure, VmError, VmValue};
+use harn_vm_core::vm::{AsyncBuiltinCtx, Vm};
 
 const DEFAULT_FEEDBACK_MAX_ITEMS: usize = 8;
 const HARD_FEEDBACK_MAX_ITEMS: usize = 50;
@@ -38,7 +38,7 @@ const DEFAULT_FEEDBACK_MAX_MESSAGE_CHARS: usize = 240;
 const HARD_FEEDBACK_MAX_MESSAGE_CHARS: usize = 2_000;
 
 pub(crate) fn register_flow_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
     vm.register_async_capability_method(
         harn_builtin_meta::CapabilityId::Runtime,
         "flow_evaluate_invariants",
@@ -289,8 +289,8 @@ async fn flow_evaluate_invariants_impl(
     for diagnostic in &parsed.diagnostics {
         diagnostics.push(serde_json::json!({
             "severity": match diagnostic.severity {
-                crate::flow::DiscoveryDiagnosticSeverity::Warning => "warning",
-                crate::flow::DiscoveryDiagnosticSeverity::Error => "error",
+                crate::DiscoveryDiagnosticSeverity::Warning => "warning",
+                crate::DiscoveryDiagnosticSeverity::Error => "error",
             },
             "code": discovery_diagnostic_code(&diagnostic.message),
             "message": diagnostic.message,
@@ -304,7 +304,7 @@ async fn flow_evaluate_invariants_impl(
     if parsed
         .diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.severity == crate::flow::DiscoveryDiagnosticSeverity::Error)
+        .any(|diagnostic| diagnostic.severity == crate::DiscoveryDiagnosticSeverity::Error)
     {
         return Ok(json_to_vm_value(&serde_json::json!({
             "ok": false,
@@ -517,7 +517,7 @@ impl PredicateRunner for HarnPredicateRunner {
             .clone()
     }
 
-    async fn evaluate(&self, _context: crate::flow::PredicateContext) -> InvariantResult {
+    async fn evaluate(&self, _context: crate::PredicateContext) -> InvariantResult {
         let Some(closure) = self.closure.as_ref() else {
             return InvariantResult::block(InvariantBlockError::new(
                 "predicate_missing_export",
@@ -717,7 +717,7 @@ fn discovery_diagnostic_code(message: &str) -> &'static str {
 
 fn serde_to_vm<T: serde::Serialize>(value: &T) -> VmValue {
     let json = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
-    crate::stdlib::json_to_vm_value(&json)
+    harn_vm_core::schema::json_to_vm_value(&json)
 }
 
 fn required_string(
@@ -791,8 +791,8 @@ fn require_invariant(
         .map_err(|error| VmError::Runtime(format!("{builtin}: {error}")))
 }
 
-fn parse_atom_id(hex_str: &str, builtin: &str) -> Result<crate::flow::AtomId, VmError> {
-    crate::flow::AtomId::from_hex(hex_str)
+fn parse_atom_id(hex_str: &str, builtin: &str) -> Result<crate::AtomId, VmError> {
+    crate::AtomId::from_hex(hex_str)
         .map_err(|error| VmError::Runtime(format!("{builtin}: invalid atom id: {error}")))
 }
 
@@ -891,14 +891,14 @@ impl FlowFeedbackOptions {
 }
 
 fn feedback_bool_option(
-    opts: &crate::value::DictMap,
+    opts: &harn_vm_core::value::DictMap,
     key: &'static str,
 ) -> Result<Option<bool>, VmError> {
     Args::runtime_options("flow_invariant_feedback", Some(opts)).opt_bool(key)
 }
 
 fn feedback_usize_option(
-    opts: &crate::value::DictMap,
+    opts: &harn_vm_core::value::DictMap,
     key: &'static str,
     default: usize,
     hard_max: usize,
@@ -1169,7 +1169,7 @@ fn json_str(value: &serde_json::Value) -> Option<&str> {
 
 fn feedback_compact(value: &str, max_chars: usize) -> String {
     let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    crate::text::truncate_end(&compact, max_chars)
+    harn_vm_core::text::truncate_end(&compact, max_chars)
 }
 
 fn decode_evidence_item(value: &VmValue) -> Result<EvidenceItem, VmError> {

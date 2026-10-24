@@ -1,8 +1,8 @@
 use super::*;
-use crate::vm::Vm;
+use harn_vm_core::vm::Vm;
 
 fn vm_with_flow_builtins() -> Vm {
-    let mut vm = crate::new_vm();
+    let mut vm = harn_vm::new_vm();
     register_flow_builtins(&mut vm);
     // The VM crate cannot depend on harn-hostlib (hostlib already depends on
     // the VM), so model the one read-only AST method this executor test needs.
@@ -17,7 +17,7 @@ fn vm_with_flow_builtins() -> Vm {
             })))
         },
     );
-    vm.set_harness(crate::Harness::real());
+    vm.set_harness(harn_vm::Harness::real());
     vm
 }
 

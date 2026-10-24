@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::discovery::{DiscoveredInvariantFile, DiscoveredPredicate};
 use super::result::{Approver, InvariantBlockError, InvariantResult, Verdict};
-use crate::flow::{PredicateHash, PredicateKind};
+use crate::{PredicateHash, PredicateKind};
 
 /// Stable error code attached to a `Block` produced by ceiling enforcement.
 pub const PREDICATE_COUNT_EXPLOSION_CODE: &str = "predicate_count_explosion";
@@ -480,7 +480,7 @@ fn is_ancestor_dir(ancestor: &str, descendant: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::{Approver, InvariantBlockError, PredicateHash, PredicateKind};
+    use crate::{Approver, InvariantBlockError, PredicateHash, PredicateKind};
     use harn_lexer::Span;
     use std::path::PathBuf;
 
@@ -489,7 +489,7 @@ mod tests {
             name: name.to_string(),
             kind: PredicateKind::Deterministic,
             fallback: None,
-            fallback_policy: crate::flow::SemanticFallbackPolicy::Enforce,
+            fallback_policy: crate::SemanticFallbackPolicy::Enforce,
             archivist: None,
             retroactive: false,
             source_hash: PredicateHash::new(format!("sha256:{name}")),

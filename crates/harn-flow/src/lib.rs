@@ -52,3 +52,9 @@ pub use slice::{
     SliceDerivationInput, SliceId, SliceStatus, TestId, UnresolvedParent,
 };
 pub use store::{AtomDelta, SqliteFlowStore, StateVector, StoredDerivedSlice};
+
+mod builtins;
+
+/// Reference this crate so a binary links its builtins. Called by
+/// `harn_runtime::force_link`.
+pub fn force_link() {}

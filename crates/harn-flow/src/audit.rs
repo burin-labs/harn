@@ -117,7 +117,7 @@ pub fn replay_audit_report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::{Approval, AtomId, InvariantResult, PredicateKind, SliceStatus, TestId};
+    use crate::{Approval, AtomId, InvariantResult, PredicateKind, SliceStatus, TestId};
     use harn_lexer::Span;
 
     fn slice(applied: Vec<PredicateHash>) -> Slice {
@@ -147,7 +147,7 @@ mod tests {
                 name: name.to_string(),
                 kind: PredicateKind::Deterministic,
                 fallback: None,
-                fallback_policy: crate::flow::SemanticFallbackPolicy::Enforce,
+                fallback_policy: crate::SemanticFallbackPolicy::Enforce,
                 archivist: None,
                 retroactive,
                 source_hash: PredicateHash::new(hash),

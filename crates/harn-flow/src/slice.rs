@@ -493,7 +493,7 @@ fn compute_slice_id(slice: &Slice) -> Result<SliceId, SliceDerivationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::{AtomSignature, Provenance, TextOp};
+    use crate::{AtomSignature, Provenance, TextOp};
     use proptest::prelude::*;
     use time::OffsetDateTime;
 

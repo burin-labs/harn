@@ -2,7 +2,7 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use ed25519_dalek::SigningKey;
-use harn_vm::flow::{Atom, Provenance, SqliteFlowStore, TextOp};
+use harn_flow::{Atom, Provenance, SqliteFlowStore, TextOp};
 use time::OffsetDateTime;
 
 fn key(seed: u8) -> SigningKey {

@@ -483,7 +483,7 @@ fn git_output_at_owned(
     args: &[String],
     stdin: Option<&[u8]>,
 ) -> Result<String, VcsBackendError> {
-    let mut command = crate::process_sandbox::session_std_command("git")
+    let mut command = harn_vm::process_sandbox::session_std_command("git")
         .map_err(|error| VcsBackendError::Invalid(format!("git session environment: {error}")))?;
     command.args(args).current_dir(repo_root);
     clear_git_env(&mut command);

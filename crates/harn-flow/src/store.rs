@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::runtime_sqlite::{
+use harn_sqlite::schema::{
     initialize_runtime_sqlite, initialize_transient_runtime_sqlite, RuntimeSqliteSchema,
     DEFAULT_BUSY_TIMEOUT,
 };
@@ -1038,7 +1038,7 @@ fn u64_from_i64(value: i64, field: &str) -> Result<u64, VcsBackendError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::{Approval, CoverageMap, PredicateHash, Slice, SliceStatus, TestId, TextOp};
+    use crate::{Approval, CoverageMap, PredicateHash, Slice, SliceStatus, TestId, TextOp};
     use ed25519_dalek::SigningKey;
     use tempfile::TempDir;
     use time::OffsetDateTime;
@@ -1057,7 +1057,7 @@ mod tests {
                 content: format!("atom-{index}"),
             }],
             parents,
-            crate::flow::Provenance {
+            crate::Provenance {
                 principal: "user:alice".to_string(),
                 persona: "ship-captain".to_string(),
                 agent_run_id: format!("run-{index}"),
@@ -1177,7 +1177,7 @@ mod tests {
         let intent = Intent::new(
             vec![first.id],
             "ship the smallest possible change",
-            crate::flow::TranscriptSpan::new("transcript-1", 1, 1).unwrap(),
+            crate::TranscriptSpan::new("transcript-1", 1, 1).unwrap(),
             0.9,
         )
         .unwrap();
@@ -1190,10 +1190,7 @@ mod tests {
             id: SliceId([3; 32]),
             atoms: vec![first.id],
             intents: vec![intent.id],
-            invariants_applied: vec![(
-                PredicateHash::new("pred"),
-                crate::flow::InvariantResult::allow(),
-            )],
+            invariants_applied: vec![(PredicateHash::new("pred"), crate::InvariantResult::allow())],
             required_tests: vec![TestId::new("flow-store")],
             approval_chain: vec![Approval {
                 reviewer: "alice".to_string(),
@@ -1220,7 +1217,7 @@ mod tests {
             intents: Vec::new(),
             invariants_applied: vec![(
                 PredicateHash::new("sha256:retro"),
-                crate::flow::InvariantResult::allow(),
+                crate::InvariantResult::allow(),
             )],
             required_tests: vec![TestId::new("flow-store")],
             approval_chain: Vec::new(),

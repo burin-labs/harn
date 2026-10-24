@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use rusqlite::{params, Connection, ErrorCode, TransactionBehavior};
 
-use crate::runtime_sqlite::{initialize_runtime_sqlite, RuntimeSqliteError, RuntimeSqliteSchema};
+use harn_sqlite::schema::{initialize_runtime_sqlite, RuntimeSqliteError, RuntimeSqliteSchema};
 use crate::stdlib::args::{Args, ErrorKind};
 use crate::stdlib::macros::harn_builtin;
 use crate::stdlib::sandbox::{self, FsAccess};

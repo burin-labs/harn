@@ -33,7 +33,7 @@ use super::discovery::{
     parse_invariants_source, ArchivistMetadata, DiagnosticSeverity, DiscoveryDiagnostic,
 };
 use super::result::{Approver, InvariantBlockError, Verdict};
-use crate::flow::slice::PredicateHash;
+use crate::slice::PredicateHash;
 
 /// Filename used for the repo-root bootstrap policy file.
 pub const META_INVARIANTS_FILE: &str = "meta-invariants.harn";

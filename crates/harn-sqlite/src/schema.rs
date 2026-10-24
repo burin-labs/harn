@@ -1,20 +1,22 @@
+//! Schema-owning initialization for a database whose tables are one SQL batch.
+
 use std::time::Duration;
 
-use harn_sqlite::{InitializationError, SchemaVersion};
+use crate::{InitializationError, SchemaVersion};
 use rusqlite::Connection;
 
-pub(crate) const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+pub const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub(crate) type RuntimeSqliteError = InitializationError<rusqlite::Error>;
+pub type RuntimeSqliteError = InitializationError<rusqlite::Error>;
 
-pub(crate) struct RuntimeSqliteSchema {
+pub struct RuntimeSqliteSchema {
     name: &'static str,
     version: i64,
     sql: &'static str,
 }
 
 impl RuntimeSqliteSchema {
-    pub(crate) const fn new(name: &'static str, version: i64, sql: &'static str) -> Self {
+    pub const fn new(name: &'static str, version: i64, sql: &'static str) -> Self {
         Self { name, version, sql }
     }
 
@@ -23,7 +25,7 @@ impl RuntimeSqliteSchema {
     }
 }
 
-pub(crate) fn initialize_runtime_sqlite(
+pub fn initialize_runtime_sqlite(
     connection: &Connection,
     busy_timeout: Duration,
     schema: &RuntimeSqliteSchema,
@@ -31,36 +33,36 @@ pub(crate) fn initialize_runtime_sqlite(
     initialize_runtime_sqlite_migrating(connection, busy_timeout, schema, |_| Ok(()))
 }
 
-pub(crate) fn initialize_runtime_sqlite_migrating(
+pub fn initialize_runtime_sqlite_migrating(
     connection: &Connection,
     busy_timeout: Duration,
     schema: &RuntimeSqliteSchema,
     migrate: impl FnOnce(&rusqlite::Transaction<'_>) -> rusqlite::Result<()>,
 ) -> Result<(), RuntimeSqliteError> {
-    harn_sqlite::initialize_file(connection, busy_timeout, schema.marker(), |transaction| {
+    crate::initialize_file(connection, busy_timeout, schema.marker(), |transaction| {
         transaction.execute_batch(schema.sql)?;
         migrate(transaction)
     })
 }
 
-pub(crate) fn require_runtime_sqlite_initialized(
+pub fn require_runtime_sqlite_initialized(
     connection: &Connection,
     busy_timeout: Duration,
     schema: &RuntimeSqliteSchema,
 ) -> Result<(), RuntimeSqliteError> {
-    harn_sqlite::require_file_initialized::<rusqlite::Error>(
+    crate::require_file_initialized::<rusqlite::Error>(
         connection,
         busy_timeout,
         schema.marker(),
     )
 }
 
-pub(crate) fn initialize_transient_runtime_sqlite(
+pub fn initialize_transient_runtime_sqlite(
     connection: &Connection,
     busy_timeout: Duration,
     schema: &RuntimeSqliteSchema,
 ) -> Result<(), RuntimeSqliteError> {
-    harn_sqlite::initialize_transient(
+    crate::initialize_transient(
         connection,
         busy_timeout,
         SchemaVersion::new(schema.name, schema.version),

@@ -16,6 +16,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 mod diagnostic;
+pub mod schema;
 pub use diagnostic::{failure_diagnostic, FailureDiagnostic};
 
 const SCHEMA_MARKER_TABLE: &str = "_harn_sqlite_schema_versions";

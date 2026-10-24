@@ -267,7 +267,7 @@ fn follow_up_intent_id(blocked_slice: SliceId, remediation_atoms: &[AtomId]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::{AtomSignature, InvariantBlockError, PredicateHash, SliceStatus, TextOp};
+    use crate::{AtomSignature, InvariantBlockError, PredicateHash, SliceStatus, TextOp};
 
     fn key(seed: u8) -> SigningKey {
         SigningKey::from_bytes(&[seed; 32])

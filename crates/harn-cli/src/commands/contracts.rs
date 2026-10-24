@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn builtin_export_projects_typed_exposure_and_effect_contracts() {
-        harn_vm::stdlib::force_link();
+        harn_runtime::force_link();
         let value = builtin_contract_value(&ContractsOutputArgs { pretty: false });
         assert_eq!(value["version"], 3);
 

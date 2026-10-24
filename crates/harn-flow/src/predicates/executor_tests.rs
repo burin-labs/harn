@@ -1,5 +1,5 @@
 use super::*;
-use crate::flow::{Approval, AtomId, PredicateHash, Slice, SliceId, SliceStatus, TestId};
+use crate::{Approval, AtomId, PredicateHash, Slice, SliceId, SliceStatus, TestId};
 
 fn slice() -> Slice {
     Slice {
@@ -348,7 +348,7 @@ async fn semantic_and_fallback_agree_records_both_results() {
     assert_eq!(semantic.fallback_hash, Some(PredicateHash::new("fallback")));
     assert!(matches!(
         semantic.result.verdict,
-        crate::flow::Verdict::Warn { .. }
+        crate::Verdict::Warn { .. }
     ));
 }
 

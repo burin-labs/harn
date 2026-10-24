@@ -116,7 +116,7 @@ pub fn run() {
     // (linkme issue #36). Without this touch the linker can drop every
     // builtin's distributed-slice entry, leaving `ALL_BUILTIN_DEFS` empty
     // and surfacing as a swarm of `HARN-NAM-002` errors at first call.
-    harn_vm::stdlib::force_link();
+    harn_runtime::force_link();
 
     #[cfg(target_os = "linux")]
     if let Err(error) = commands::serve::confine_before_runtime(&raw_args) {
