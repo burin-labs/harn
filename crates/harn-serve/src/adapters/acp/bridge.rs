@@ -53,6 +53,11 @@ pub enum AcpOutput {
     Channel(mpsc::UnboundedSender<String>),
     /// Invoke a host callback for each ACP JSON-RPC line.
     Callback(Arc<dyn Fn(&str) + Send + Sync + 'static>),
+    /// Forward every line to `inner` after showing it to a module-progress gate.
+    Observed {
+        inner: Box<AcpOutput>,
+        gate: super::module_progress::ModuleProgressGate,
+    },
 }
 
 impl AcpOutput {
@@ -93,9 +98,29 @@ impl AcpOutput {
         })
     }
 
+    pub(super) fn observed_by(self, gate: super::module_progress::ModuleProgressGate) -> Self {
+        Self::Observed {
+            inner: Box::new(self),
+            gate,
+        }
+    }
+
+    pub(super) fn module_progress_gate(
+        &self,
+    ) -> Option<&super::module_progress::ModuleProgressGate> {
+        match self {
+            Self::Observed { gate, .. } => Some(gate),
+            _ => None,
+        }
+    }
+
     /// Write a serialized ACP JSON-RPC message to this sink.
     pub fn write_line(&self, line: &str) {
         match self {
+            Self::Observed { inner, gate } => {
+                gate.observe_frame(line);
+                inner.write_line(line);
+            }
             Self::Stdout(lock) => {
                 let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
                 let mut stdout = std::io::stdout().lock();
