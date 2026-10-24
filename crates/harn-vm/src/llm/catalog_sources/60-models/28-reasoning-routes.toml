@@ -30,6 +30,7 @@ strengths = ["speed", "reasoning", "tool_use", "long_context"]
 name = "Inkling (Together)"
 provider = "together"
 wire_model = "thinkingmachines/Inkling"
+deprecation_note = "Together retires this route on 2026-11-06 per its notice to account holders. The notice is not yet listed on https://docs.together.ai/docs/deprecations (read 2026-10-24), which does list the earlier 2026-09-14 retirement of Inkling Small. No replacement is named."
 context_window = 524288
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
 pricing = { input_per_mtok = 1.00, output_per_mtok = 4.05, cache_read_per_mtok = 0.17 }

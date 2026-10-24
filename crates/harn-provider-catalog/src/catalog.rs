@@ -48,6 +48,8 @@ mod pricing_tests;
 #[cfg(test)]
 mod refresh_tests;
 #[cfg(test)]
+mod retirement_tests;
+#[cfg(test)]
 mod schema_shape_tests;
 #[cfg(test)]
 mod tests_parity_provenance;

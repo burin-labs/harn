@@ -38239,7 +38239,8 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "Together retires this route on 2026-11-06 per its notice to account holders. The notice is not yet listed on https://docs.together.ai/docs/deprecations (read 2026-10-24), which does list the earlier 2026-09-14 retirement of Inkling Small. No replacement is named."
       },
       "availability": "serverless",
       "quality_tags": [],
