@@ -11,10 +11,11 @@ use harn_vm::VmValue;
 
 use crate::ast::{api as ast_api, Language};
 use crate::error::HostlibError;
+use crate::host_call::{HostCallContext, Interrupt, Phase};
 
 use super::super::builtins::SharedIndex;
 use super::super::lsp::{self, RenameRequest, Resolution};
-use super::super::refactor_backend::{BackendOutcome, FileEdits, ServerRun};
+use super::super::refactor_backend::{BackendOutcome, FileEdits, ServerRun, Unanswered};
 use super::super::refactor_core::{
     collect_identifier_spans, files_in_scope, first_syntax_error, plan_file, read_source,
     write_plans, EditSpan, FilePlan, Scope, ShadowSite,
@@ -29,13 +30,29 @@ pub(super) enum Answer {
     /// The server could not answer; carries why, for the response's
     /// `backend.fallback_reason`.
     Fallback(String),
+    /// The caller stopped the rename; nothing was written and no other
+    /// engine may run.
+    Interrupted(Interrupt),
 }
 
-pub(super) type WarmResult = Result<lsp::Warmed, (String, Option<ServerRun>)>;
+impl From<Unanswered> for Answer {
+    fn from(unanswered: Unanswered) -> Self {
+        match unanswered {
+            Unanswered::Unavailable(reason) => Self::Fallback(reason),
+            Unanswered::Interrupted(interrupt) => Self::Interrupted(interrupt),
+        }
+    }
+}
+
+pub(super) type WarmResult = Result<lsp::Warmed, (Unanswered, Option<ServerRun>)>;
 
 /// Warm the server for `symbol_path` without holding the code-index lock.
 /// `None` when no server could serve the file's language.
-pub(super) fn warm(index: &SharedIndex, symbol_path: &str) -> Option<WarmResult> {
+pub(super) fn warm(
+    index: &SharedIndex,
+    symbol_path: &str,
+    call: &HostCallContext,
+) -> Option<WarmResult> {
     let (root, path) = {
         let guard = index.lock().expect("code_index mutex poisoned");
         let state = guard.as_ref()?;
@@ -45,7 +62,7 @@ pub(super) fn warm(index: &SharedIndex, symbol_path: &str) -> Option<WarmResult>
         )
     };
     let language = Language::detect(Path::new(&path), None)?;
-    lsp::serves(language).then(|| lsp::warm(&root, &path, language))
+    lsp::serves(language).then(|| lsp::warm(&root, &path, language, call))
 }
 
 pub(super) struct Request<'a> {
@@ -56,6 +73,7 @@ pub(super) struct Request<'a> {
     pub dry_run: bool,
     pub validate: bool,
     pub warmed: Option<WarmResult>,
+    pub call: &'a HostCallContext,
 }
 
 pub(super) fn rename(
@@ -108,9 +126,9 @@ pub(super) fn rename(
     };
     let warmed = match request.warmed.take() {
         Some(Ok(warmed)) => warmed,
-        Some(Err((reason, run))) => {
+        Some(Err((unanswered, run))) => {
             env.backend.language_server = run;
-            return Ok(Answer::Fallback(reason));
+            return Ok(unanswered.into());
         }
         None => {
             return Ok(Answer::Fallback(format!(
@@ -129,6 +147,7 @@ pub(super) fn rename(
         new_name: env.new_name,
         session_id: request.session_id,
         mentions: &mentions,
+        call: request.call,
     };
     let (outcome, run) = lsp::rename(&lsp_request, &warmed);
     env.backend.language_server = Some(run);
@@ -145,6 +164,7 @@ pub(super) fn rename(
             )))
         }
         BackendOutcome::Unavailable(reason) => return Ok(Answer::Fallback(reason)),
+        BackendOutcome::Interrupted(interrupt) => return Ok(Answer::Interrupted(interrupt)),
     };
     // The server's edit proves where references are; check the scope before
     // any fallback, which would rename only inside the scope.
@@ -190,7 +210,7 @@ pub(super) fn rename(
                 .collect();
             let resolutions = match lsp::resolve(&lsp_request, &warmed, &queries, false) {
                 Ok(resolutions) => resolutions,
-                Err(reason) => return Ok(Answer::Fallback(reason)),
+                Err(unanswered) => return Ok(unanswered.into()),
             };
             let seed_file = request
                 .state
@@ -259,7 +279,7 @@ pub(super) fn rename(
     let stop_at_miss = env.scope == Scope::Workspace;
     let resolutions = match lsp::resolve(&lsp_request, &warmed, &queries, stop_at_miss) {
         Ok(resolutions) => resolutions,
-        Err(reason) => return Ok(Answer::Fallback(reason)),
+        Err(unanswered) => return Ok(unanswered.into()),
     };
     let mut preserved_sites = Vec::new();
     let missed: Vec<(&Site, Resolution)> = sites
@@ -372,6 +392,10 @@ pub(super) fn rename(
     let failed = if request.dry_run {
         Vec::new()
     } else {
+        if let Some(interrupt) = request.call.interrupted() {
+            return Ok(Answer::Interrupted(interrupt));
+        }
+        request.call.report(Phase::Applying, BUILTIN);
         let failed = write_plans(BUILTIN, &request.state.root, &plans, request.session_id)?;
         if request.session_id.is_none() {
             let written: Vec<String> = plans.iter().map(|plan| plan.path.clone()).collect();

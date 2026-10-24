@@ -679,14 +679,17 @@ impl HostlibCapability for CodeIndexCapability {
 
         // Cross-file safe rename (issue #2508). Builds on the typed
         // symbol graph (#2434) and routes writes through staged-fs
-        // (#1722) so all touched files succeed or none do.
-        register(
-            registry,
-            self.index.clone(),
-            rename::BUILTIN,
-            "rename_symbol",
-            rename::run,
-        );
+        // (#1722) so all touched files succeed or none do. A language-server
+        // rename can wait on a cold server, so its caller must be able to
+        // stop it and see its progress.
+        let index = self.index.clone();
+        let handler: SyncHandler = Arc::new(move |args| rename::run(&index, args));
+        registry.register_interruptible(RegisteredBuiltin {
+            name: rename::BUILTIN,
+            module: "code_index",
+            method: "rename_symbol",
+            handler,
+        });
         register(
             registry,
             self.index.clone(),

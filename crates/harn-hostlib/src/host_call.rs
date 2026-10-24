@@ -1,0 +1,202 @@
+//! The context one hostlib builtin call runs under: the caller's deadline and
+//! cancel signal, and a typed progress channel on the dispatching tool call.
+//!
+//! The registry installs a context around every builtin that may wait on an
+//! external process; [`HostCallContext::current`] hands any other caller an
+//! empty one. Deadline and cancellation come from the VM's interrupt sources
+//! installed on the same thread, so a call stopped by its tool-call handle,
+//! its VM, or its scope deadline observes it the same way.
+
+use std::cell::{Cell, RefCell};
+use std::time::{Duration, Instant};
+
+use harn_vm::agent_events::{AgentEvent, ToolCallStatus, ToolMutationStatus};
+
+/// How often a wait that a caller can stop rechecks its interrupt sources.
+pub(crate) const INTERRUPT_POLL: Duration = Duration::from_millis(50);
+/// How often a long wait reports that it is still in the same phase.
+pub(crate) const PROGRESS_HEARTBEAT: Duration = Duration::from_secs(1);
+
+/// Why a call stopped before finishing its work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Interrupt {
+    /// The tool call, its VM, or its session was cancelled.
+    Cancelled,
+    /// The caller's deadline or the request's own budget passed.
+    DeadlineExceeded,
+}
+
+/// What a call is doing, reported on its tool call's progress channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Phase {
+    /// Starting a language server and waiting until it can answer.
+    ServerStart,
+    /// Waiting for a server to finish loading the project.
+    Indexing,
+    /// Asking a server for edits or what names refer to.
+    Resolving,
+    /// Writing the planned edits.
+    Applying,
+}
+
+impl Phase {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ServerStart => "server_start",
+            Self::Indexing => "indexing",
+            Self::Resolving => "resolving",
+            Self::Applying => "applying",
+        }
+    }
+}
+
+/// The tool call a builtin runs for, so progress reaches its host.
+#[derive(Clone, Debug)]
+pub(crate) struct CallAddress {
+    pub session_id: String,
+    pub tool_call_id: String,
+    pub tool_name: String,
+}
+
+impl CallAddress {
+    /// The tool call dispatching the current task, if any. Read it on the
+    /// VM's thread: the dispatch scope is task-local.
+    pub(crate) fn current() -> Option<Self> {
+        let session_id = harn_vm::agent_sessions::current_session_id()?;
+        let tool_call_id = harn_vm::agent_sessions::current_tool_call_id()?;
+        let tool_name =
+            harn_vm::tool_call_cancellations::lookup(&session_id, &tool_call_id)?.tool_name;
+        Some(Self {
+            session_id,
+            tool_call_id,
+            tool_name,
+        })
+    }
+}
+
+/// Deadline, cancellation, and progress for one builtin call.
+#[derive(Clone, Debug)]
+pub(crate) struct HostCallContext {
+    call: Option<CallAddress>,
+    /// The request's own budget, beside the caller's deadline.
+    budget: Option<Instant>,
+    started: Instant,
+    last_report: Cell<Option<Instant>>,
+}
+
+thread_local! {
+    static CURRENT: RefCell<Option<HostCallContext>> = const { RefCell::new(None) };
+}
+
+/// Restores the previous context on drop.
+pub(crate) struct HostCallGuard(Option<HostCallContext>);
+
+impl Drop for HostCallGuard {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        CURRENT.with(|slot| *slot.borrow_mut() = previous);
+    }
+}
+
+impl HostCallContext {
+    pub(crate) fn new(call: Option<CallAddress>) -> Self {
+        Self {
+            call,
+            budget: None,
+            started: Instant::now(),
+            last_report: Cell::new(None),
+        }
+    }
+
+    /// The context the registry installed for this call, or an empty one.
+    pub(crate) fn current() -> Self {
+        CURRENT
+            .with(|slot| slot.borrow().clone())
+            .unwrap_or_else(|| Self::new(None))
+    }
+
+    /// Install this context on the current thread until the guard drops.
+    pub(crate) fn enter(self) -> HostCallGuard {
+        HostCallGuard(CURRENT.with(|slot| slot.borrow_mut().replace(self)))
+    }
+
+    /// This context, also bounded by a request's own `budget`.
+    pub(crate) fn with_budget(mut self, budget: Duration) -> Self {
+        let until = Instant::now() + budget;
+        self.budget = Some(self.budget.map_or(until, |earlier| earlier.min(until)));
+        self
+    }
+
+    /// The earliest instant the caller or the request stops this call.
+    pub(crate) fn deadline(&self) -> Option<Instant> {
+        match (harn_vm::op_interrupt::deadline(), self.budget) {
+            (Some(caller), Some(budget)) => Some(caller.min(budget)),
+            (caller, budget) => caller.or(budget),
+        }
+    }
+
+    /// Why the call must stop now, if it must.
+    pub(crate) fn interrupted(&self) -> Option<Interrupt> {
+        if harn_vm::op_interrupt::cancel_requested() {
+            return Some(Interrupt::Cancelled);
+        }
+        let expired = harn_vm::op_interrupt::requested()
+            || self.budget.is_some_and(|budget| Instant::now() >= budget);
+        expired.then_some(Interrupt::DeadlineExceeded)
+    }
+
+    /// Report entering `phase`.
+    pub(crate) fn report(&self, phase: Phase, detail: &str) {
+        let now = Instant::now();
+        self.last_report.set(Some(now));
+        let elapsed_ms = now.duration_since(self.started).as_millis() as u64;
+        tracing::debug!(
+            target: "harn_hostlib::host_call",
+            phase = phase.as_str(),
+            detail,
+            elapsed_ms,
+            "host call progress",
+        );
+        let Some(call) = &self.call else {
+            return;
+        };
+        harn_vm::agent_events::emit_event(&AgentEvent::ToolCallUpdate {
+            session_id: call.session_id.clone(),
+            tool_call_id: call.tool_call_id.clone(),
+            tool_name: call.tool_name.clone(),
+            status: ToolCallStatus::InProgress,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            mutation_status: ToolMutationStatus::Unknown,
+            changed_paths: None,
+            data: Some(serde_json::json!({
+                "progress": {
+                    "phase": phase.as_str(),
+                    "detail": detail,
+                    "elapsed_ms": elapsed_ms,
+                    "cancellable": true,
+                },
+            })),
+            health: None,
+            executor: None,
+            parsing: None,
+            raw_input: None,
+            raw_input_partial: None,
+            audit: None,
+        });
+    }
+
+    /// Report `phase` again when a wait has been quiet for a heartbeat.
+    pub(crate) fn heartbeat(&self, phase: Phase, detail: &str) {
+        let quiet = self
+            .last_report
+            .get()
+            .is_none_or(|last| last.elapsed() >= PROGRESS_HEARTBEAT);
+        if quiet {
+            self.report(phase, detail);
+        }
+    }
+}

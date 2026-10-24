@@ -17,6 +17,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::host_call::{HostCallContext, Interrupt, Phase, INTERRUPT_POLL};
 use crate::process::{
     spawn_process, EnvMode, OutputCapture, OwnerDeathPolicy, ProcessKiller, SpawnSpec,
 };
@@ -39,6 +40,8 @@ pub(crate) enum RpcError {
         message: String,
     },
     Protocol(String),
+    /// The caller stopped the call before the server answered.
+    Interrupted(Interrupt),
 }
 
 impl RpcError {
@@ -55,6 +58,8 @@ impl std::fmt::Display for RpcError {
             Self::Exited(tail) => write!(f, "server exited: {tail}"),
             Self::Server { code, message } => write!(f, "server error {code}: {message}"),
             Self::Protocol(detail) => write!(f, "protocol error: {detail}"),
+            Self::Interrupted(Interrupt::Cancelled) => f.write_str("cancelled"),
+            Self::Interrupted(Interrupt::DeadlineExceeded) => f.write_str("deadline exceeded"),
         }
     }
 }
@@ -161,6 +166,7 @@ impl Connection {
         method: &str,
         params: P,
         timeout: Duration,
+        call: &HostCallContext,
     ) -> Result<R, RpcError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = channel();
@@ -174,15 +180,23 @@ impl Connection {
             return Err(RpcError::Exited(self.shared.stderr_tail()));
         }
         self.write(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))?;
-        let value = match rx.recv_timeout(timeout) {
-            Ok(reply) => reply?,
-            Err(RecvTimeoutError::Timeout) => {
-                self.forget(id);
-                let _ = self.notify("$/cancelRequest", json!({"id": id}));
+        let deadline = Instant::now() + timeout;
+        let value = loop {
+            if let Some(interrupt) = call.interrupted() {
+                self.abandon(id);
+                return Err(RpcError::Interrupted(interrupt));
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                self.abandon(id);
                 return Err(RpcError::Timeout);
             }
-            Err(RecvTimeoutError::Disconnected) => {
-                return Err(RpcError::Exited(self.shared.stderr_tail()))
+            match rx.recv_timeout(INTERRUPT_POLL.min(deadline - now)) {
+                Ok(reply) => break reply?,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(RpcError::Exited(self.shared.stderr_tail()))
+                }
             }
         };
         serde_json::from_value(value).map_err(|err| RpcError::Protocol(format!("{method}: {err}")))
@@ -190,6 +204,12 @@ impl Connection {
 
     pub(crate) fn notify<P: Serialize>(&self, method: &str, params: P) -> Result<(), RpcError> {
         self.write(&json!({"jsonrpc": "2.0", "method": method, "params": params}))
+    }
+
+    /// Stop waiting for request `id` and tell the server to drop it.
+    fn abandon(&self, id: i64) {
+        self.forget(id);
+        let _ = self.notify("$/cancelRequest", json!({"id": id}));
     }
 
     fn forget(&self, id: i64) {
@@ -221,6 +241,8 @@ impl Connection {
         ends_before: Option<u64>,
         grace: Duration,
         deadline: Instant,
+        call: &HostCallContext,
+        server: &str,
     ) -> Result<bool, RpcError> {
         let grace_until = Instant::now() + grace;
         let mut status = self.shared.status.lock().expect("lsp status poisoned");
@@ -239,6 +261,10 @@ impl Connection {
             if now >= deadline {
                 return Ok(false);
             }
+            if let Some(interrupt) = call.interrupted() {
+                return Err(RpcError::Interrupted(interrupt));
+            }
+            call.heartbeat(Phase::Indexing, server);
             let until = if status.active_progress.is_empty() {
                 grace_until.min(deadline)
             } else {
@@ -247,7 +273,10 @@ impl Connection {
             status = self
                 .shared
                 .changed
-                .wait_timeout(status, until.saturating_duration_since(now))
+                .wait_timeout(
+                    status,
+                    INTERRUPT_POLL.min(until.saturating_duration_since(now)),
+                )
                 .expect("lsp status poisoned")
                 .0;
         }
@@ -267,6 +296,8 @@ impl Connection {
         &self,
         readiness: Readiness,
         deadline: Instant,
+        call: &HostCallContext,
+        server: &str,
     ) -> Result<bool, RpcError> {
         if readiness != Readiness::Quiescent {
             return Ok(true);
@@ -284,10 +315,14 @@ impl Connection {
             if now >= deadline {
                 return Ok(false);
             }
+            if let Some(interrupt) = call.interrupted() {
+                return Err(RpcError::Interrupted(interrupt));
+            }
+            call.heartbeat(Phase::ServerStart, server);
             status = self
                 .shared
                 .changed
-                .wait_timeout(status, deadline - now)
+                .wait_timeout(status, INTERRUPT_POLL.min(deadline - now))
                 .expect("lsp status poisoned")
                 .0;
         }
