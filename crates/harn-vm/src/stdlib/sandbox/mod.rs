@@ -1463,11 +1463,25 @@ fn base_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
             &crate::stdlib::process::execution_root_path(),
         )];
     }
-    policy
+    let mut roots: Vec<PathBuf> = policy
         .workspace_roots
         .iter()
         .map(|root| render_policy_root(root))
-        .collect()
+        .collect();
+    // A writable mount the host added to the session is part of the jail even
+    // when the policy names its roots explicitly.
+    for mounted in crate::agent_sessions::current_session_mounts() {
+        if matches!(
+            mounted.mount_mode,
+            crate::workspace_anchor::MountMode::Extend
+        ) {
+            let root = normalize_for_policy(&mounted.path);
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+    }
+    roots
 }
 
 pub(crate) fn process_sandbox_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {

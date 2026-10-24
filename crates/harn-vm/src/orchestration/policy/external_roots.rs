@@ -148,6 +148,38 @@ impl<'de> Deserialize<'de> for ExternalRoot {
     }
 }
 
+/// The policy's declared roots plus the roots mounted on the active session.
+///
+/// A mount is the runtime form of the same grant: `read_only` is a `read` root
+/// and `extend` a `read_write` one, so the boundary, the file builtins and the
+/// child profile never disagree about a root the host added mid-session. A
+/// `sandboxed` mount is isolated from the primary anchor and grants nothing
+/// here. A declared root naming the same path wins over its mount.
+pub(crate) fn effective_roots(declared: &[ExternalRoot]) -> Vec<ExternalRoot> {
+    use crate::workspace_anchor::MountMode;
+    let mut roots = declared.to_vec();
+    for mounted in crate::agent_sessions::current_session_mounts() {
+        let access = match mounted.mount_mode {
+            MountMode::ReadOnly => ExternalRootAccess::Read,
+            MountMode::Extend => ExternalRootAccess::ReadWrite,
+            MountMode::Sandboxed => continue,
+        };
+        let mount = ExternalRoot {
+            path: mounted.path.to_string_lossy().into_owned(),
+            access,
+        };
+        // Compared as the boundary compares them, so a symlink spelling of a
+        // declared root cannot widen it.
+        let declared_alias = roots
+            .iter()
+            .any(|root| root.normalized() == mount.normalized());
+        if !declared_alias {
+            roots.push(mount);
+        }
+    }
+    roots
+}
+
 /// The root that governs `path`: the deepest entry containing it, so a host
 /// can carve a read-only subtree out of a writable root or the reverse.
 ///

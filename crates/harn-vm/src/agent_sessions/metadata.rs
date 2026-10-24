@@ -284,6 +284,64 @@ pub fn set_workspace_anchor(id: &str, anchor: Option<WorkspaceAnchor>) -> Result
 }
 
 /// Read the session's typed workspace anchor, if any.
+/// The roots mounted on the active session alongside its primary anchor.
+///
+/// This is the one place a runtime grant is read. The approval boundary, the
+/// in-process file builtins and the OS profile for a confined child all ask it,
+/// so a mount made mid-session reaches every gate on the next call.
+pub fn current_session_mounts() -> Vec<crate::workspace_anchor::MountedRoot> {
+    current_session_id()
+        .and_then(|id| workspace_anchor(&id))
+        .map(|anchor| anchor.additional_roots)
+        .unwrap_or_default()
+}
+
+/// The deepest `read_only` mount of the active session that covers `path`, if
+/// a narrower read-only grant sits inside a wider writable one.
+///
+/// A mount below the workspace (or below an `extend` mount) must win over the
+/// wider writable grant, so callers that admit a path as "inside a writable
+/// root" ask this first for a write. `writable_depth` is the component count of
+/// the writable root that admitted the path; only a strictly deeper read-only
+/// mount overrides it.
+pub fn read_only_mount_overriding(
+    path: &std::path::Path,
+    writable_depth: usize,
+) -> Option<std::path::PathBuf> {
+    current_session_mounts()
+        .into_iter()
+        .filter(|mounted| {
+            matches!(
+                mounted.mount_mode,
+                crate::workspace_anchor::MountMode::ReadOnly
+            )
+        })
+        .map(|mounted| crate::stdlib::sandbox::paths::normalize_for_policy(&mounted.path))
+        .filter(|root| path.starts_with(root) && root.components().count() > writable_depth)
+        .max_by_key(|root| root.components().count())
+}
+
+/// [`read_only_mount_overriding`] measured against the session's own writable
+/// roots: its primary anchor and `extend` mounts. `None` when the session has
+/// no anchor or no writable root covers `path`.
+pub fn read_only_mount_overriding_anchor(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let anchor = workspace_anchor(&current_session_id()?)?;
+    let normalize = crate::stdlib::sandbox::paths::normalize_for_policy;
+    let depth = std::iter::once(anchor.primary.clone())
+        .chain(
+            anchor
+                .additional_roots
+                .iter()
+                .filter(|m| matches!(m.mount_mode, crate::workspace_anchor::MountMode::Extend))
+                .map(|m| m.path.clone()),
+        )
+        .map(|root| normalize(&root))
+        .filter(|root| path.starts_with(root))
+        .map(|root| root.components().count())
+        .max()?;
+    read_only_mount_overriding(path, depth)
+}
+
 pub fn workspace_anchor(id: &str) -> Option<WorkspaceAnchor> {
     SESSIONS.with(|s| {
         s.borrow()

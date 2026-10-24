@@ -28,8 +28,10 @@ pub(super) fn evaluate_context(
     policy: &ToolApprovalPolicy,
     ctx: &mut EvaluationContext,
 ) -> Option<PolicyEvaluation> {
-    ctx.external_roots =
-        super::super::external_roots::governing_roots(&policy.external_roots, &ctx.path_entries);
+    ctx.external_roots = super::super::external_roots::governing_roots(
+        &super::super::external_roots::effective_roots(&policy.external_roots),
+        &ctx.path_entries,
+    );
     default_guard(policy, ctx).map(|candidate| evaluation_from_candidate(candidate, ctx))
 }
 
@@ -120,6 +122,7 @@ pub(super) fn default_guard(
         }
     }
 
+    let external_roots = super::super::external_roots::effective_roots(&policy.external_roots);
     // The external-root mode is checked even when `allow_external_paths` opts
     // out of the boundary: that switch admits paths no root names, and a root
     // the host declared `read` is still a declaration that it is read-only.
@@ -142,12 +145,40 @@ pub(super) fn default_guard(
             });
         }
         if entry.workspace_path.is_some() {
+            // A read-only session mount nested in the workspace wins over it.
+            if !is_read_side(ctx.side_effect.as_deref(), ctx.tool_kind.as_deref()) {
+                if let Some(mount) = entry.host_path.as_deref().and_then(|host| {
+                    crate::agent_sessions::read_only_mount_overriding_anchor(
+                        &crate::stdlib::sandbox::paths::normalize_for_policy(std::path::Path::new(
+                            host,
+                        )),
+                    )
+                }) {
+                    return Some(Candidate {
+                        source: SOURCE_DEFAULT_EXTERNAL_PATH.to_string(),
+                        source_rank: PolicyRuleSource::Policy,
+                        index: None,
+                        id: Some(EXTERNAL_ROOT_READ_ONLY.to_string()),
+                        action: PolicyAction::Deny,
+                        reason: format!(
+                            "path '{}' is under read-only mount '{}'; tool '{}' may only read there",
+                            entry.display_path(),
+                            mount.display(),
+                            ctx.tool_name,
+                        ),
+                        approval: ApprovalShape::default(),
+                        risk_labels: vec![EXTERNAL_ROOT_READ_ONLY.to_string()],
+                        denied_paths: vec![entry.display_path().to_string()],
+                        contributing_rules: Vec::new(),
+                    });
+                }
+            }
             continue;
         }
         let Some(host_path) = entry.host_path.as_deref() else {
             continue;
         };
-        if let Some(root) = governing_root(host_path, &policy.external_roots) {
+        if let Some(root) = governing_root(host_path, &external_roots) {
             if root.access == ExternalRootAccess::Read
                 && !is_read_side(ctx.side_effect.as_deref(), ctx.tool_kind.as_deref())
                 && !child_cannot_write(ctx.side_effect.as_deref(), host_path)
