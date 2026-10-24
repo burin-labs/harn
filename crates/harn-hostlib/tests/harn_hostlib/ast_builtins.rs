@@ -316,6 +316,102 @@ fn symbol_replace_owns_the_export_wrapper_and_keeps_neighbors(
     );
 }
 
+/// A caller replaces a whole declaration, so a replacement that restates the
+/// declaration's modifiers, decorators, attributes or doc comments must not
+/// leave a second copy of them in the file.
+#[test]
+fn symbol_replace_never_duplicates_restated_modifiers_or_wrappers() {
+    let registry = ast_registry();
+    // (language, symbol, source, new_text, expected source)
+    let cases: &[(&str, &str, &str, &str, &str)] = &[
+        (
+            "typescript",
+            "loadConfig",
+            "export function loadConfig(): number {\n  return 1\n}\n\nexport const keep = 2\n",
+            "export function loadConfig(): number {\n  return 42\n}",
+            "export function loadConfig(): number {\n  return 42\n}\n\nexport const keep = 2\n",
+        ),
+        (
+            "typescript",
+            "loadConfig",
+            "export default function loadConfig(): number {\n  return 1\n}\nconst keep = 2\n",
+            "export default function loadConfig(): number {\n  return 42\n}",
+            "export default function loadConfig(): number {\n  return 42\n}\nconst keep = 2\n",
+        ),
+        (
+            "typescript",
+            "Widget",
+            "@Component({})\nexport class Widget {\n  size = 1\n}\nconst keep = 2\n",
+            "@Component({})\nexport class Widget {\n  size = 2\n}",
+            "@Component({})\nexport class Widget {\n  size = 2\n}\nconst keep = 2\n",
+        ),
+        (
+            "javascript",
+            "loadConfig",
+            "export function loadConfig() {\n  return 1\n}\nconst keep = 2\n",
+            "export function loadConfig() {\n  return 42\n}",
+            "export function loadConfig() {\n  return 42\n}\nconst keep = 2\n",
+        ),
+        (
+            "rust",
+            "load_config",
+            "#[inline]\npub fn load_config() -> i32 {\n    1\n}\n\nfn keep() {}\n",
+            "#[inline]\npub fn load_config() -> i32 {\n    42\n}",
+            "#[inline]\npub fn load_config() -> i32 {\n    42\n}\n\nfn keep() {}\n",
+        ),
+        (
+            "python",
+            "load_config",
+            "@cache\ndef load_config():\n    return 1\n\n\ndef keep():\n    pass\n",
+            "@cache\ndef load_config():\n    return 42",
+            "@cache\ndef load_config():\n    return 42\n\n\ndef keep():\n    pass\n",
+        ),
+        (
+            "java",
+            "loadConfig",
+            "class Config {\n    @Override\n    public int loadConfig() { return 1; }\n    int keep() { return 2; }\n}\n",
+            "@Override\npublic int loadConfig() { return 42; }",
+            "class Config {\n    @Override\n    public int loadConfig() { return 42; }\n    int keep() { return 2; }\n}\n",
+        ),
+        (
+            "kotlin",
+            "loadConfig",
+            "@JvmStatic\nprivate fun loadConfig(): Int = 1\n\nfun keep() {}\n",
+            "@JvmStatic\nprivate fun loadConfig(): Int = 42",
+            "@JvmStatic\nprivate fun loadConfig(): Int = 42\n\nfun keep() {}\n",
+        ),
+        (
+            "go",
+            "LoadConfig",
+            "package main\n\n// LoadConfig reads it.\nfunc LoadConfig() int {\n\treturn 1\n}\n\nfunc keep() {}\n",
+            "// LoadConfig reads it.\nfunc LoadConfig() int {\n\treturn 42\n}",
+            "package main\n\n// LoadConfig reads it.\nfunc LoadConfig() int {\n\treturn 42\n}\n\nfunc keep() {}\n",
+        ),
+    ];
+    for (language, symbol, source, new_text, expected) in cases {
+        let result = call(
+            &registry,
+            "hostlib_ast_symbol_replace",
+            dict(&[
+                ("source", vm_string(source)),
+                ("language", vm_string(language)),
+                ("symbol_name", vm_string(symbol)),
+                ("new_text", vm_string(new_text)),
+            ]),
+        );
+        assert_eq!(
+            as_string(&dict_field(&result, "result")),
+            "replaced",
+            "{language} {symbol}"
+        );
+        assert_eq!(
+            as_string(&dict_field(&result, "source")),
+            *expected,
+            "{language} {symbol}"
+        );
+    }
+}
+
 #[test]
 fn symbol_replace_inherits_local_layout_without_rewriting_neighbors() {
     let registry = ast_registry();
