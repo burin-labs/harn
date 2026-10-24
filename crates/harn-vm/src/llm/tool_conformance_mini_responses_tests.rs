@@ -8,13 +8,14 @@ fn mini_probe_requests_use_responses_function_tools_and_input() {
             ToolProbeCase::SingleToolCall,
             ToolProbeCase::LargeStringArgument,
         ] {
+            let expected_value = case.expected_value("mini-response-marker");
             let payload = probe_request_payload(
                 "openai",
                 "gpt-5.4-mini",
                 mode,
                 case,
                 ToolProbeRequestProfile::CatalogDefault,
-                "mini-response-marker",
+                &expected_value,
             )
             .expect("mini probe payload");
             assert_eq!(payload.api_mode, LlmApiMode::Responses);
