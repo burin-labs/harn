@@ -13,7 +13,8 @@ use std::path::PathBuf;
 
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_vm::{register_vm_stdlib, Compiler, VmValue};
+use harn_runtime::register_vm_stdlib;
+use harn_vm::{Compiler, VmValue};
 
 use super::support::*;
 

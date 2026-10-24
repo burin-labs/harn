@@ -288,7 +288,7 @@ fn build_expected(
 }
 
 fn compile_cli_source(source_path: &Path, source: &str) -> Result<harn_vm::Chunk, String> {
-    harn_vm::stdlib::force_link();
+    harn_runtime::force_link();
     harn_parser::install_builtin_manifest(harn_vm::stdlib::all_builtin_manifest());
     let program = harn_parser::parse_source(source).map_err(|error| error.to_string())?;
     let graph = harn_modules::build_with_standalone_source(source_path, source);

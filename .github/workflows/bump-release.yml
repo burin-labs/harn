@@ -13,20 +13,32 @@ name: Open release PR
 # a certified tree. Fragments that landed on main after green wait for the
 # next release. The pull request still targets main.
 #
-# The schedule and a manual dispatch run the same decision. Each run is a
-# no-op with a notice when main has no unreleased fragments or is not on a
-# development version. When a `Release vX.Y.Z` pull request is already open,
-# the run verifies its immutable attempt and leaves it unchanged. A push to
-# main only checks existing releases; later fragments wait for the next version.
+# A completed green-checkpoint pass, the schedule and a manual dispatch run the
+# same decision, so a release opens as soon as green holds unreleased fragments
+# instead of at the next scheduled run. Each run is a no-op with a notice when
+# main has no unreleased fragments or is not on a development version. When a
+# `Release vX.Y.Z` pull request is already open, the run verifies its immutable
+# attempt and leaves it unchanged. A push to main only checks existing
+# releases; later fragments wait for the next version.
+#
+# The prepare step runs Harn tools, so it needs a Harn built from green. Green's
+# own CI run already built and uploaded that exact binary, so the run restores
+# it, verified against green's commit, instead of compiling it twice (about 20
+# minutes). It builds only when no unexpired artifact exists.
 on:
   workflow_dispatch:
   schedule:
     - cron: "29 15 * * *"
+  workflow_run: # zizmor: ignore[dangerous-triggers] runs trusted main code and reads only run metadata; no run artifact or code is consumed
+    workflows: [Green checkpoint]
+    types: [completed]
+    branches: [main]
   push:
     branches: [main]
     paths: ["changelog.d/**"]
 
 permissions:
+  actions: read
   contents: read
   pull-requests: read
 
@@ -37,6 +49,7 @@ concurrency:
 jobs:
   open-release-pr:
     name: Open release PR
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -46,7 +59,7 @@ jobs:
           persist-credentials: false
 
       - name: Set the current invocation receipt path
-        run: printf 'HARN_EXT_RELEASE_OPENER_RECEIPT=%s/release-opener-%s-%s.json\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+        run: printf 'HARN_EXT_RELEASE_OPENER_RECEIPT=%s/release-opener-%s-%s.json\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV" # zizmor: ignore[github-env] writes only runner-controlled paths and run ids
 
       # Decide before building anything: most scheduled runs end here.
       - name: Decide whether a release pull request is due
@@ -69,8 +82,36 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - name: Configure isolated Harn build
+      - name: Find the Harn that green's CI built
+        id: green-cli
         if: steps.plan.outputs.action == 'open'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash scripts/ci/find_merge_group_cli.sh "$(git rev-parse HEAD)" push >> "$GITHUB_OUTPUT"
+
+      - name: Download green's Harn
+        if: steps.green-cli.outputs.found == 'true'
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+          run-id: ${{ steps.green-cli.outputs.run_id }}
+
+      # Refuses a bundle built from another commit, toolchain or profile, and
+      # exports HARN_BIN and HARN_RELEASE_CLI_AOT_GEN_BIN for the prepare step.
+      - name: Verify green's Harn
+        if: steps.green-cli.outputs.found == 'true'
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli-green"
+          "$(git rev-parse HEAD)"
+          "$GITHUB_ENV"
+
+      - name: Configure isolated Harn build
+        if: steps.plan.outputs.action == 'open' && steps.green-cli.outputs.found != 'true'
         run: make setup-rust
 
       - name: Prepare and open the release pull request
@@ -78,9 +119,17 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           OPENER_SCOPE: ${{ github.event_name == 'push' && '--existing-only' || '' }}
+          GREEN_CLI_FOUND: ${{ steps.green-cli.outputs.found }}
         run: |
           set -euo pipefail
-          harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
+          if [[ "$GREEN_CLI_FOUND" == true ]]; then
+            # The restored binary is exact-source, so prepare's tools run on it
+            # rather than building their own.
+            harn_bin="$HARN_BIN"
+            export HARN_RELEASE_TOOLS_BIN="$HARN_BIN"
+          else
+            harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
+          fi
           HARN_BIN="$harn_bin" ./scripts/open_release_pr.sh ${OPENER_SCOPE:+"$OPENER_SCOPE"}
 
       - name: Publish the observed opener outcome

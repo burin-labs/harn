@@ -14,8 +14,8 @@ use time::{Date, OffsetDateTime};
 use uuid::Uuid;
 
 use super::{error, unavailable, DenialKind};
-use crate::runtime_sqlite::{initialize_runtime_sqlite_migrating, RuntimeSqliteSchema};
 use crate::value::{ErrorCategory, VmError};
+use harn_sqlite::schema::{initialize_runtime_sqlite_migrating, RuntimeSqliteSchema};
 
 const SCALE: i64 = 1_000_000;
 const LIFETIME_PERIOD: &str = "L";
@@ -680,7 +680,7 @@ impl LedgerFailure for rusqlite::Error {
     }
 }
 
-impl LedgerFailure for crate::runtime_sqlite::RuntimeSqliteError {
+impl LedgerFailure for harn_sqlite::schema::RuntimeSqliteError {
     fn contended(&self) -> bool {
         self.is_busy_or_locked()
     }

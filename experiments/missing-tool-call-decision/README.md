@@ -177,7 +177,7 @@ All three analysis reports now count tool agreement only when both backends
 actually recover. Earlier output vacuously counted non-recovery pairs as tool
 matches. Eligible and matching counts are respectively 30/30 in development,
 15/15 in the conditional holdout, and 12/12 in the placement study. Recovery
-and action agreement counts are unchanged. `agreement-control.mjs` exercises
+and action agreement counts are unchanged. The [tooling controls](TOOLING.md) exercise
 the same analyzer with a nonempty zero-eligible case, a measured match, and a
 measured mismatch. None is a model-quality trial.
 

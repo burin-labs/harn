@@ -187,6 +187,10 @@ where
                 }
             }
         } else if !thinking.is_empty() {
+            crate::llm::inference_speed::observe_output(
+                crate::llm::inference_speed::OutputKind::Reasoning,
+                thinking,
+            );
             thinking_text.push_str(thinking);
             append_coalesced_text_block(&mut blocks, "reasoning", thinking, "private");
         }

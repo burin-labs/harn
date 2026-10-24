@@ -125,10 +125,28 @@ fn entry_field<'a>(entry: &'a VmValue, field: &str) -> Option<&'a VmValue> {
 
 fn entry_path(entry: &VmValue, builtin: &str, index: usize) -> Result<String, VmError> {
     match entry_field(entry, "path") {
-        Some(VmValue::String(path)) if !path.is_empty() => Ok(path.to_string()),
-        Some(VmValue::String(_)) => Err(builtin_error(
+        // Refuse escaping paths for every archive format, judged the same way
+        // on every host: `\` separators and drive prefixes escape on Windows
+        // extractors even though a Unix `Path` reads them as plain names.
+        Some(VmValue::String(path))
+            if !path.is_empty()
+                && !path.starts_with('/')
+                && !path.contains('\\')
+                && path.as_bytes().get(1).is_none_or(|b| *b != b':')
+                && path.split('/').all(|part| part != "..") =>
+        {
+            Ok(path.to_string())
+        }
+        Some(VmValue::String(path)) if path.is_empty() => Err(builtin_error(
             builtin,
             format!("entry {} path must not be empty", index + 1),
+        )),
+        Some(VmValue::String(_)) => Err(builtin_error(
+            builtin,
+            format!(
+                "entry {} invalid path: must be relative without `..`",
+                index + 1
+            ),
         )),
         Some(other) => Err(builtin_error(
             builtin,
@@ -337,22 +355,6 @@ fn tar_create_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
             let content = entry_content(entry, "tar_create", index)?;
             let mode = entry_mode(entry, "tar_create", index)?;
 
-            // `append_data` checks only the first 100 bytes of a long name, so
-            // refuse escaping paths here for every length.
-            if std::path::Path::new(&path).components().any(|part| {
-                !matches!(
-                    part,
-                    std::path::Component::Normal(_) | std::path::Component::CurDir
-                )
-            }) {
-                return Err(builtin_error(
-                    "tar_create",
-                    format!(
-                        "entry {} invalid path: must be relative without `..`",
-                        index + 1
-                    ),
-                ));
-            }
             let mut header = tar::Header::new_gnu();
             header.set_size(content.len() as u64);
             header.set_mode(mode);

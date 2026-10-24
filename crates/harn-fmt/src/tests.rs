@@ -504,6 +504,21 @@ fn test_preserves_parens_lower_precedence_right() {
 }
 
 #[test]
+fn test_preserves_parens_around_try_star_operand() {
+    // `try*` takes a unary operand, so dropping these parens would move the
+    // member access and `?` inside what it wraps.
+    for kept in ["(try* fetch()).body", "(try* r)?"] {
+        let source = format!("pipeline default(task) {{\n  let x = {kept}\n}}");
+        let result = format_source(&source).unwrap();
+        assert!(
+            result.contains(kept),
+            "Expected `{kept}` kept, got:\n{result}"
+        );
+        assert_roundtrip(&source);
+    }
+}
+
+#[test]
 fn test_preserves_parens_right_subtraction() {
     // a - (b - c) — without parens this becomes a - b - c which differs
     let source = r"pipeline default(task) {

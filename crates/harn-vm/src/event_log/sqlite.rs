@@ -6,7 +6,7 @@ use bytes::Bytes;
 use futures::stream::BoxStream;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
-use crate::runtime_sqlite::{
+use harn_sqlite::schema::{
     initialize_runtime_sqlite, require_runtime_sqlite_initialized, RuntimeSqliteSchema,
     DEFAULT_BUSY_TIMEOUT,
 };

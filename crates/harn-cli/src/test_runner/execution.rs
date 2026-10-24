@@ -278,7 +278,7 @@ async fn execute_compiled(
                 harn_vm::security::SessionEnvironment::inherited(),
             );
             vm.set_prepared_module_cache(prepared_module_cache.clone());
-            harn_vm::register_vm_stdlib(&mut vm);
+            harn_runtime::register_vm_stdlib(&mut vm);
             crate::install_default_hostlib(&mut vm);
             let source_parent = case.file.parent().unwrap_or(Path::new("."));
             let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
