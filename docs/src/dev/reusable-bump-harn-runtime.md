@@ -216,8 +216,11 @@ arbitrary orchestration ref.
   `already_current` no-op, and a newer or divergent source revision is a
   `revision_conflict` with no mutation. Otherwise it re-runs apply and repair
   replay, holding the disarm lease. The obsolete refresh is never merged into
-  the adopted checkout. Unrelated untracked files survive, and incomplete
-  cleanup aborts the adoption before the checkout moves.
+  the adopted checkout. Cleanup restores every refreshed path that exists at
+  the checkout's HEAD, including one the refresh deleted and staged. Untracked
+  files that existed before the first refresh are never treated as refresh
+  output, so adoption never removes them. Incomplete cleanup aborts
+  the adoption before the checkout moves.
 - Validation runs once per attempt. An adoption after validation re-derives
   the refresh and carries the verdict onto the new tree instead of validating
   again, because a base that merges faster than one validation would otherwise
@@ -226,6 +229,9 @@ arbitrary orchestration ref.
   `validated_base_oid` names the base the verdict was proved on; when it
   differs from `expected_base_oid`, the published tree was re-derived after
   validation. A failed verdict that publishes for repair stays unarmed.
+  Because a re-derived tree is armed without its own validation run, the
+  consumer's base branch must require status checks or a merge queue before
+  merging. Without one, auto-merge can land a tree nothing has validated.
 - Three adoptions are allowed per attempt; `base_adoptions` in the receipt
   reports how many were made. After that, or when the remote head cannot be
   read at all, the attempt returns `outcome: base_advanced` with a
