@@ -14,6 +14,10 @@ The Make targets install pinned `wasm-pack` and `wasm-tools` binaries plus the
 Rust Wasm target outside the checkout. Mutable Cargo and Wasm outputs remain
 worktree-local.
 
+Set `HARN_CHROME_BIN` when Chrome is outside its usual install location. Set
+`HARN_CHROMEDRIVER` to use an existing compatible driver; otherwise the build
+downloads a driver for the installed Chrome version.
+
 ## Build and verify
 
 From the repository root:
