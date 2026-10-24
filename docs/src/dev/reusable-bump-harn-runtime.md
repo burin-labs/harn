@@ -39,9 +39,12 @@ those commits carry the same evidence. Every other commit is a repair; an
 unavailable identity lookup fails the run. A refresh refuses to publish under
 any other headline, so its own output stays recognizable. A merge commit whose
 incoming side the base already contains, such as a merge of the base branch
-into the bump branch, is skipped and named in the receipt notes: the refresh
-re-derives whatever its conflict resolution touched. Any other merge commit is
-refused with `repair_conflict`, naming the merge and the commits it brings in.
+into the bump branch, is skipped and named in the receipt notes only when its
+tree is exactly what `git merge-tree` produces from its two parents. A merge
+that carries a hand conflict resolution or any other edit of its own is refused
+with `repair_conflict`, naming the merge and the paths that differ, because
+skipping it would drop that edit. A merge that brings in commits the base lacks
+is refused the same way, naming those commits.
 A patch conflict
 returns `repair_conflict` without publishing or arming auto-merge. Publication
 also rechecks the inspected pull-request head and refuses an observed change

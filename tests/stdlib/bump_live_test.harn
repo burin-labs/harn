@@ -181,9 +181,21 @@ pipeline test_refresh_refuses_a_conflicting_repair_before_validation_and_publica
  * Merge `incoming` into the fixture's bump branch the way a person clearing a
  * conflict would, then run one bump from `base` through the live adapter.
  */
-fn bump_over_branch_merge(harness: Harness, fixture: dict, incoming: string, base: string) {
+fn bump_over_branch_merge(
+  harness: Harness,
+  fixture: dict,
+  incoming: string,
+  base: string,
+  hand_edit: bool = false,
+) {
   git_ok(harness.tools, fixture.root, ["checkout", "--quiet", "--detach", fixture.repair])
   git_ok(harness.tools, fixture.root, ["merge", "--quiet", "--no-ff", "-m", "sync", incoming])
+  if hand_edit {
+    // An edit folded into the merge commit, as a hand conflict resolution is.
+    harness.fs.write_text(path_join(fixture.root, "hand.txt"), "human repair\n")
+    git_ok(harness.tools, fixture.root, ["add", "hand.txt"])
+    git_ok(harness.tools, fixture.root, ["commit", "--quiet", "--amend", "--no-edit"])
+  }
   const merge = git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"])
   git_ok(harness.tools, fixture.root, ["checkout", "--quiet", "--detach", base])
   let published = nil
@@ -245,7 +257,30 @@ pipeline test_base_sync_merge_on_the_bump_branch_is_skipped(harness: Harness) {
   harness.fs.delete(fixture.root)
 }
 
-/** A merge that brings in commits the base lacks cannot be replayed, and is named. */
+/**
+ * A merge that brings in commits the base lacks cannot be replayed, and is named.
+ * A base-sync merge carrying its own edit is refused: skipping it would drop that edit.
+ */
+pipeline test_base_sync_merge_with_a_hand_edit_is_refused(harness: Harness) {
+  const fixture = repair_fixture(pick(harness, ["fs", "tools"]))
+  harness.fs.write_text(path_join(fixture.root, "other.txt"), "main moved\n")
+  git_ok(harness.tools, fixture.root, ["add", "other.txt"])
+  git_ok(harness.tools, fixture.root, ["commit", "--quiet", "-m", "main advances"])
+  const advanced = git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"])
+  const run = bump_over_branch_merge(harness, fixture, advanced, advanced, true)
+  assert_eq(run.receipt.outcome, "repair_conflict")
+  assert_eq(run.receipt.repair_conflicts, [run.merge])
+  assert_eq(run.published, nil)
+  assert(
+    contains(
+      run.receipt.notes,
+      "repair merge ${run.merge} differs from a mechanical merge of its parents in hand.txt; "
+        + "replay it as a single-parent commit",
+    ),
+  )
+  harness.fs.delete(fixture.root)
+}
+
 pipeline test_merge_of_a_foreign_branch_is_refused_by_name(harness: Harness) {
   const fixture = repair_fixture(pick(harness, ["fs", "tools"]))
   harness.fs.write_text(path_join(fixture.root, "side.txt"), "unmerged work\n")
