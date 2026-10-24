@@ -147,7 +147,7 @@ wasm-test-browser: setup-wasm
 	@set -eu; driver="$${HARN_CHROMEDRIVER:-$$(./scripts/resolve_chromedriver.sh)}"; \
 	if [ -z "$${WASM_BINDGEN_TEST_WEBDRIVER_JSON:-}" ] && [ -n "$${HARN_CHROME_BIN:-}" ]; then \
 		capabilities="$$(mktemp)"; trap 'rm -f "$$capabilities"' EXIT; \
-		jq -n --arg binary "$$HARN_CHROME_BIN" '{"goog:chromeOptions": {binary: $$binary}}' > "$$capabilities"; \
+		node -e 'process.stdout.write(JSON.stringify({"goog:chromeOptions": {binary: process.env.HARN_CHROME_BIN}}))' > "$$capabilities"; \
 		export WASM_BINDGEN_TEST_WEBDRIVER_JSON="$$capabilities"; \
 	fi; \
 	cd crates/harn-wasm && "$(HARN_WASM_PACK)" test --headless --chrome --chromedriver "$$driver"
