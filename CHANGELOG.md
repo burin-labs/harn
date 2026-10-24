@@ -9,7 +9,7 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.10.177
 
 ### Breaking
 
@@ -48,6 +48,67 @@ or parse without headers to keep ragged rows. Remove XML DTDs and declare any
 namespace prefixes before parsing. Malformed XML now raises an error.
 Use bytes, which XML stores as base64, for data with forbidden text characters.
 
+- Command results now capture direct-network, TCP-loopback and managed-proxy grants in
+  `sandbox.network`. Background handles, progress and completion retain the
+  spawn-time record across policy changes. Unknown, inherited and unavailable
+  states don't fabricate grants. This metadata describes permission, not observed
+  network activity or denial coverage.
+
+  Migration: Rust callers now read `ProcessSandboxAssessment.report.denial_reporting`
+  instead of `ProcessSandboxAssessment.reporting`. Custom command adapters that
+  provide sandbox metadata must include the new `network` record; `std/command`
+  exports `CommandSandboxReport` and `CommandNetworkGrants` for that shape.
+- **Java method references and rename (#10374).** Call lookup and method rename
+  use explicit receiver types to keep unrelated methods with the same name
+  separate. Rename accepts qualified names and exact declaration positions,
+  and refuses unsupported receiver bindings before writing.
+  Saved code indexes rebuild automatically to apply the receiver rules.
+
+  `harn_hostlib::code_index::Node` now has optional `col` and `owner_type`
+  fields and is `#[non_exhaustive]`. The 0.10.177 patch release adopts this
+  construction policy so future metadata can be added without another
+  external struct-literal break.
+
+  Migration: replace external struct literals with
+  `Node::new(kind, name, file_id, path, line, language)`. The constructor sets
+  `id` to zero, leaves optional metadata absent and starts with an empty
+  signature. Assign the public fields when their facts are known. For Java,
+  use a measured 1-based UTF-16 identifier column and the actual fully qualified
+  declaring or receiver type. Keep an unknown column as `None`.
+- CI test inventory, completion receipts, and workspace build evidence now use Harn.
+  The shell callers reuse an explicit Harn binary or the verified bootstrap seed,
+  so they work before a source CLI is built. Completion requires a nonempty,
+  consistent inventory and one terminal event per selected test. Build evidence
+  reads fingerprint hash markers and file sizes without opening fingerprint JSON.
+
+  Migration: The CI-only language-server fixture switch `HARN_LSP_FIXTURES_REQUIRED` is now
+  `HARN_EXT_LSP_FIXTURES_REQUIRED`. Update local exports of the old name. The
+  extension prefix keeps this test-runner setting separate from runtime settings,
+  so older bootstrap releases can run while CI still requires the language servers.
+- The native process-liveness probe and its Rust enum now live in `harn-vm-core`.
+  `harn-vm` and `harn-hostlib` re-export that owner instead of defining another probe.
+
+  Migration: rebuild Rust consumers against the matching Harn release. Existing
+  `harn_hostlib::process_liveness` imports remain available. Code that names the
+  defining crate for `ProcessLiveness` should use
+  `harn_vm_core::process_liveness::ProcessLiveness`.
+- `harn serve site --ready-file PATH` atomically publishes the actual bound URL
+  and process ID as JSON. `SiteHttpServeOptions` adds the optional `ready_file`
+  field for Rust callers. Failed listener or TLS setup publishes no receipt.
+
+  Migration: Add `ready_file: None` to existing `SiteHttpServeOptions` struct
+  literals, or set it to a new receipt path when the launcher needs that endpoint.
+- **Shared call-cost settlement.** Rust hosts, `std/llm/economics.settle_call_cost`, and the existing
+  `estimate_call_cost` helper now price normalized usage through the runtime's settlement owner.
+  They apply request-time prices, input bands, one-hour cache writes, hosted tools, and audio rates.
+  Partial estimates keep the subtotal and name missing prices; monthly account allowances remain
+  explicitly unapplied. Downstream hosts can use this shared pricing boundary.
+  Free inference does not hide a hosted-tool fee or a missing hosted price.
+
+  Migration: handle nil `estimate_session_cost(...).total_cost_usd` and per-model `cost_usd` when any
+  call is unpriced. Use `known_cost_usd` for the subtotal. Call estimates reject negative or
+  contradictory token counts, and their breakdown adds `adjustments_usd` for hosted-tool and audio charges.
+
 ### Added
 
 - `harn bench --output <path>` writes iteration samples and timing statistics as
@@ -70,6 +131,13 @@ Use bytes, which XML stores as base64, for data with forbidden text characters.
   preserving the same allowance and uncertain attempts across restarts without
   exposing policy contents in parse or storage diagnostics.
 
+- `std/config.parse_env` parses literal environment files with typed errors and no shell execution.
+  Coding-agent evaluations and provider probe campaigns share the parser and reject malformed lines
+  or unfinished quotes. Evaluations restore earlier environment settings when loading fails.
+- Scripts can read their current parent process ID, native identity, and liveness
+  through `harness.system.parent_process()` without launching a process-table tool.
+  Unknown observations remain explicit and contain no process arguments or environment.
+
 ### Changed
 
 - Workflow scheduling now uses typed join policies, edges, and readiness results.
@@ -82,6 +150,10 @@ Use bytes, which XML stores as base64, for data with forbidden text characters.
   includes the export wrapper and keeps neighboring code unchanged.
 - Run the step-judge study through a typed Harn driver. Reports refuse missing,
   partial, or infrastructure-error measurements and preserve unknown cost.
+
+- Mini-model suite, reasoning-matrix, and planner drivers now use Harn instead of shell orchestration.
+  They reuse the repository runtime, keep output paths and task state explicit, and report measured failures.
+  Matrix environment files use literal values, and the runner no longer unloads shared model servers.
 
 ### Fixed
 
@@ -150,9 +222,52 @@ Use bytes, which XML stores as base64, for data with forbidden text characters.
   matching the Unix installer. It rejects incomplete license payloads before
   changing an existing installation.
 
+- Java method rename ignores existing names on unrelated receiver types while
+  retaining same-type conflicts and refusing unproved receiver bindings,
+  inherited member types, switch-local shadows and unsafe dispatch changes.
+  Saved indexes rebuild to discard older unproved Java call edges.
+- Direct GPT-5.4-mini requests with reasoning and function tools now use OpenAI's
+  Responses API. Explicit effort `none` keeps Chat Completions available, and
+  aggregator routes retain their own endpoint rules.
+- Completion calls now consume CLI replay tapes and scoped mock fixtures through
+  the same mock owner as ordinary LLM calls. Matching, usage, errors and response
+  order are preserved. Native completion responses are also included in mock
+  recordings; chat fallback responses remain recorded once.
+- The Harn bump runtime skips a merge of the base branch into an open bump pull
+  request instead of stopping every later run with `repair_conflict`. A merge
+  that brings in commits the base lacks is still refused, and the refusal names
+  the merge and those commits.
+- `harn install` now records every locked package in the shared package cache
+  even when the project's current generation already satisfied the lock. A later
+  `harn install --frozen --offline` from a fresh project resolves from that cache
+  instead of failing with a missing cache entry.
+- Symbol replacement preserves preceding code and its comments when the
+  selected declaration shares a line with another statement.
+- The Harn bump runtime now converges when the base branch changes a refreshed
+  file during validation. It re-derives the refresh on the advanced base and
+  publishes there, validating once per attempt, instead of failing with
+  `base_conflict` after a full validation. The `base_conflict` outcome is
+  removed, and the receipt adds `validated_base_oid`.
+- Include invalid missing-tool-call classifier settings in the exported agent-loop error contract,
+  preserving the configuration code, field, and offending value.
+- Git tool registries check custom names, descriptions, and tool configuration
+  before execution. They reuse the shared `std/tools.ToolDefinitionConfig` type
+  and preserve shared and per-tool override order.
+  `std/git` also exports its catalog option and execution argument types.
+- **VS Code extension.** Include the language client and its runtime dependencies
+  in the extension package so language features and commands can load.
+
 ### Security
 
 - Update Tokio to 1.53.3 to address RUSTSEC-2026-0386 in its Unix asynchronous file-descriptor constructors.
+
+- **AWS login signing.** The AWS login provider signs its DPoP proof with p256 0.14
+  and a deterministic RFC 6979 nonce, which moves the build to crypto-bigint 0.7.6
+  and clears RUSTSEC-2026-0387.
+- **Dependency audit.** `cargo deny` ignores RUSTSEC-2026-0387 until 2026-10-31 while
+  the AWS login provider moves to p256 0.14 (#10421).
+- **VS Code extension packaging.** Use MSAL Node 7.1.0 in Azure Identity to
+  address GHSA-xcx6-jx8p-x3h5 in the extension packaging tools.
 
 ## v0.10.176 (never published)
 
