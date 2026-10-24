@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -13,7 +13,10 @@ static ARTIFACTS: LazyLock<Mutex<ArtifactRegistry>> =
     LazyLock::new(|| Mutex::new(ArtifactRegistry::default()));
 static ACTIVE_ARTIFACT_LEASES: LazyLock<Mutex<BTreeMap<PathBuf, File>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
-static LAST_RETENTION_SWEEP: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
+/// When the last sweep ran, and whether it left the namespace over its cap
+/// because live owners still hold the remaining directories.
+static LAST_RETENTION_SWEEP: LazyLock<Mutex<Option<(Instant, bool)>>> =
+    LazyLock::new(|| Mutex::new(None));
 /// One descriptor per artifact namespace, held for the life of the process,
 /// standing in for the one this process used to hold per completed command.
 /// In production a process uses a single namespace, so this is one descriptor.
@@ -830,14 +833,17 @@ fn maybe_sweep_stale_artifacts(current_dir: Option<&Path>) {
         let mut last = LAST_RETENTION_SWEEP
             .lock()
             .expect("command artifact retention state poisoned");
-        if last
-            .map(|last_run| now.duration_since(last_run) < SWEEP_INTERVAL)
-            .unwrap_or(false)
-            && !command_artifact_dir_count_exceeds(&temp_dir, max_dirs)
-        {
-            return;
+        // Over the cap only re-sweeps early when the last sweep got under it:
+        // directories live owners hold stay, and re-checking them on every
+        // command cost one lock-file open per directory per command.
+        if let Some((last_run, left_over_cap)) = *last {
+            if now.duration_since(last_run) < SWEEP_INTERVAL
+                && (left_over_cap || !command_artifact_dir_count_exceeds(&temp_dir, max_dirs))
+            {
+                return;
+            }
         }
-        *last = Some(now);
+        *last = Some((now, false));
     }
     let _ = with_artifact_namespace_lock(
         &temp_dir,
@@ -851,13 +857,16 @@ fn maybe_sweep_stale_artifacts(current_dir: Option<&Path>) {
                 max_dirs,
                 expired_before,
             );
-            sweep_command_artifact_dirs_except(
+            let left_over_cap = sweep_command_artifact_dirs_except(
                 &temp_dir,
                 retention,
                 max_dirs,
                 SystemTime::now(),
                 current_dir,
             );
+            *LAST_RETENTION_SWEEP
+                .lock()
+                .expect("command artifact retention state poisoned") = Some((now, left_over_cap));
             Ok(())
         },
     );
@@ -945,18 +954,20 @@ fn sweep_command_artifact_dirs(
     retention: Duration,
     max_dirs: usize,
     now: SystemTime,
-) {
-    sweep_command_artifact_dirs_except(temp_dir, retention, max_dirs, now, None);
+) -> bool {
+    sweep_command_artifact_dirs_except(temp_dir, retention, max_dirs, now, None)
 }
 
+/// Returns whether the namespace is still over `max_dirs` afterwards.
 fn sweep_command_artifact_dirs_except(
     temp_dir: &Path,
     retention: Duration,
     max_dirs: usize,
     now: SystemTime,
     current_dir: Option<&Path>,
-) {
+) -> bool {
     sweep_stale_session_leases(temp_dir);
+    let mut owners = OwnerLiveness::default();
     let mut dirs = collect_command_artifact_dirs(temp_dir);
     dirs.sort_by_key(|dir| dir.modified);
     let mut live_count = dirs.len();
@@ -971,7 +982,7 @@ fn sweep_command_artifact_dirs_except(
         {
             continue;
         }
-        if should_preserve_artifact_dir(dir) {
+        if should_preserve_artifact_dir(dir, &mut owners) {
             continue;
         }
         if remove_artifact_dir(&dir.path) {
@@ -979,7 +990,7 @@ fn sweep_command_artifact_dirs_except(
         }
     }
     if max_dirs == 0 || live_count <= max_dirs {
-        return;
+        return false;
     }
     for dir in &dirs {
         if live_count <= max_dirs {
@@ -987,13 +998,28 @@ fn sweep_command_artifact_dirs_except(
         }
         if !dir.path.exists()
             || current_dir == Some(dir.path.as_path())
-            || should_preserve_artifact_dir(dir)
+            || should_preserve_artifact_dir(dir, &mut owners)
         {
             continue;
         }
         if remove_artifact_dir(&dir.path) {
             live_count = live_count.saturating_sub(1);
         }
+    }
+    live_count > max_dirs
+}
+
+/// Each owner's session liveness, asked once per sweep: a namespace holds many
+/// directories per owner, and the answer is one lock-file open.
+#[derive(Default)]
+struct OwnerLiveness(HashMap<u32, bool>);
+
+impl OwnerLiveness {
+    fn is_live(&mut self, namespace: &Path, owner: u32) -> bool {
+        *self
+            .0
+            .entry(owner)
+            .or_insert_with(|| owner_session_is_live(namespace, owner))
     }
 }
 
@@ -1100,7 +1126,7 @@ fn dir_is_registered(path: &Path) -> bool {
         .any(|artifact| artifact.path == path)
 }
 
-fn should_preserve_artifact_dir(dir: &ArtifactDir) -> bool {
+fn should_preserve_artifact_dir(dir: &ArtifactDir, owners: &mut OwnerLiveness) -> bool {
     if ACTIVE_ARTIFACT_LEASES
         .lock()
         .expect("active command artifact lease store poisoned")
@@ -1122,7 +1148,7 @@ fn should_preserve_artifact_dir(dir: &ArtifactDir) -> bool {
                 if dir_is_registered(&dir.path) {
                     return true;
                 }
-            } else if owner_session_is_live(namespace, owner) {
+            } else if owners.is_live(namespace, owner) {
                 return true;
             }
         }
