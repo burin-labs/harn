@@ -1012,6 +1012,9 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 self.emit_agent_event_ext("iteration_start", session_id, payload);
             }
+            AgentEvent::InferenceSpeed { .. } => {
+                self.write_notification(meta::inference_speed_notification(event));
+            }
             AgentEvent::IterationEnd {
                 session_id,
                 iteration,

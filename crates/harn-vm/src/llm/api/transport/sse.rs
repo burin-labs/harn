@@ -1,5 +1,6 @@
 use super::stream_fold::{StreamFold, StreamPart};
 use super::*;
+use crate::llm::inference_speed::{observe_output, OutputKind};
 use crate::llm::usage::ProviderUsageReceipt;
 
 /// Consume an SSE streaming response from an already-sent request.
@@ -503,6 +504,8 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     // the visible remainder is forwarded live. The folded body keeps the raw
     // content and the shared parser splits it the same way.
     let mut live_text = ThinkingStreamSplitter::new();
+    // Per tool slot, how many argument bytes the inference meter has seen.
+    let mut metered_tool_arguments: Vec<usize> = Vec::new();
     let mut forwarded_text = false;
     // Most recent SSE `event:` name. Consumed with the next `data:` frame so
     // named `event: error` payloads classify before delta parsing.
@@ -554,11 +557,30 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                     let visible = if protocol == StreamProtocol::AnthropicSse {
                         raw
                     } else {
-                        live_text.push(&raw)
+                        let hidden_before = live_text.thinking.len();
+                        let visible = live_text.push(&raw);
+                        observe_output(
+                            OutputKind::Reasoning,
+                            live_text.thinking.get(hidden_before..).unwrap_or_default(),
+                        );
+                        visible
                     };
                     forward_text(&visible, &delta_tx, &mut schema_watch, &mut forwarded_text)?;
                 }
-                StreamPart::ToolCall(slot) => progress.observe(&mut fold, slot),
+                StreamPart::Reasoning(text) => observe_output(OutputKind::Reasoning, &text),
+                StreamPart::ToolCall(slot) => {
+                    let metered = metered_tool_arguments.get(slot).copied().unwrap_or(0);
+                    let arguments = &fold.tool(slot).arguments;
+                    observe_output(
+                        OutputKind::ToolArguments,
+                        arguments.get(metered..).unwrap_or_default(),
+                    );
+                    if metered_tool_arguments.len() <= slot {
+                        metered_tool_arguments.resize(slot + 1, 0);
+                    }
+                    metered_tool_arguments[slot] = arguments.len();
+                    progress.observe(&mut fold, slot);
+                }
             }
         }
         let managed_receipt_frame = managed_transport

@@ -330,6 +330,15 @@ pub enum AgentEvent {
         /// reported one.
         iteration_info: serde_json::Value,
     },
+    /// Speed of one provider attempt: live estimates while it streams, then
+    /// one settled snapshot (`speed.is_final`) when it ends.
+    InferenceSpeed {
+        session_id: String,
+        call_id: String,
+        provider: String,
+        model: String,
+        speed: crate::llm::inference_speed::InferenceSpeed,
+    },
     /// Emitted when a first-class agent session is explicitly closed by
     /// `agent_session_close`. This gives event-log consumers a typed
     /// terminal marker even when no final model turn runs.

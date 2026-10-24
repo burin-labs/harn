@@ -589,12 +589,36 @@ async fn dispatch_provider_request(
 ) -> Result<LlmResult, VmError> {
     let _permit = observed.admit_provider_request().await?;
     observed.record_provider_dispatch();
-    let mut result = vm_call_llm_api(request, delta_tx).await?;
+    let meter = observed.inference_speed().clone();
+    meter.start();
+    let (delta_tx, text_tee) = match delta_tx {
+        Some(tx) => {
+            let (tx, tee) = meter.tee_text(tx);
+            (Some(tx), Some(tee))
+        }
+        None => (None, None),
+    };
+    let outcome =
+        super::inference_speed::scope(meter.clone(), Box::pin(vm_call_llm_api(request, delta_tx)))
+            .await;
+    if let Some(tee) = text_tee {
+        // The tee drains once the adapter drops its sender; a sender an
+        // adapter leaked must not hold the call open.
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(200), tee).await;
+    }
+    let mut result = match outcome {
+        Ok(result) => result,
+        Err(error) => {
+            meter.abandon();
+            return Err(error);
+        }
+    };
     result.telemetry.inference_boundary_rule = boundary_rule;
     super::mock::mark_live_after_mock_prefix(request, &mut result);
     if let Some(recording) = recording {
         recording.record(&result);
     }
+    meter.finish(&mut result);
     record_cli_llm_result(request, &result);
     Ok(result)
 }

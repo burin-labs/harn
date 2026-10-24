@@ -31,15 +31,18 @@ actor.
 ## When to use an override
 
 `bypass-merge-queue` and `force-merge` land outside the queue, which rebuilds
-every queued merge group. The workflow allows them only when one of three
+every queued merge group. The workflow allows them only when one of four
 measured signals holds, and refuses the label otherwise:
 
 - Main is red: an open `[CI] Main is red` issue, or the newest conclusive `CI`
-  run on `main` failed.
+  run on `main` failed. The run is read from the `CI` workflow's own history,
+  so unrelated workflow runs cannot push it out of view.
 - The pull request is a release-train pull request: a repin, a version-only
   bump, or one labeled `release-blocker`.
 - The merge queue is wedged: the pull request has been queued for 90 minutes or
   more and no merge group run is active on `main`.
+- The automated reviewer is down: it posted its did-not-finish marker for the
+  current head and nothing has approved that head since.
 
 The reason text is never evidence; the signals are read at decision time. See
 the [org contract](https://github.com/burin-labs/.github#what-refuses-an-override)

@@ -270,10 +270,10 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 ## Merge overrides
 
-- Overrides for a red main, a release-train pull request, or a wedged queue
-  use the org-admin labels `bypass-ci`, `bypass-merge-queue`, and
-  `force-merge`. The workflow refuses a queue bypass when none of those holds;
-  a long queue is not one.
+- Overrides for a red main, a release-train pull request, a wedged queue, or
+  an automated reviewer that did not finish on the head use the org-admin
+  labels `bypass-ci`, `bypass-merge-queue`, and `force-merge`. The workflow
+  refuses a queue bypass when none of those holds; a long queue is not one.
 - Labels are a trigger only. The workflow re-checks organization or repository
   admin permission and refuses fork PRs. See
   [Merge overrides](docs/src/dev/merge-overrides.md) and the
