@@ -629,16 +629,17 @@ pub(crate) fn cache_hit_ratio(input_tokens: i64, cache_read_tokens: i64) -> f64 
     }
 }
 
-pub(crate) fn cache_savings_usd_for_provider(
-    provider: &str,
-    model: &str,
-    input_tokens: i64,
+pub(crate) fn cache_savings_usd_for_pricing(
+    detail: Option<&PricingDetail>,
+    free_inference: bool,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
-    at: OffsetDateTime,
     cache_ttl: Option<PromptCacheTtl>,
 ) -> f64 {
-    let Some(detail) = pricing_detail_for_usage(provider, model, input_tokens, at) else {
+    if free_inference {
+        return 0.0;
+    }
+    let Some(detail) = detail else {
         return 0.0;
     };
     let input_rate = detail.input_per_1k;

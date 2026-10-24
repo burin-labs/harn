@@ -748,13 +748,11 @@ impl LlmUsage {
             cache_supported: result.cache_supported,
             cache_accounting_declared: result.telemetry.cache_accounting_declared,
             cache_hit_ratio,
-            cache_savings_usd: super::cost::cache_savings_usd_for_provider(
-                &result.provider,
-                &result.model,
-                result.input_tokens,
+            cache_savings_usd: super::cost::cache_savings_usd_for_pricing(
+                detail.as_ref(),
+                free_route,
                 result.cache_read_tokens,
                 result.cache_write_tokens,
-                at,
                 cache_ttl,
             ),
             cache_hit: result.cache_read_tokens > 0,
@@ -886,13 +884,11 @@ impl LlmUsage {
             cache_hit_ratio: (receipt.cache_accounting_declared == Some(true)
                 && receipt.cache_supported)
                 .then(|| super::cost::cache_hit_ratio(input_tokens, receipt.cache_read_tokens)),
-            cache_savings_usd: super::cost::cache_savings_usd_for_provider(
-                provider,
-                model,
-                input_tokens,
+            cache_savings_usd: super::cost::cache_savings_usd_for_pricing(
+                detail.as_ref(),
+                free_route,
                 receipt.cache_read_tokens,
                 receipt.cache_write_tokens,
-                at,
                 cache_ttl,
             ),
             cache_hit: receipt.cache_read_tokens > 0,

@@ -180,9 +180,25 @@ fn a_real_hosted_fee_card_prices_free_inference_without_token_or_audio_charges()
             ..Default::default()
         }
         .usage();
-        assert!((native.cost_usd.unwrap() - expected).abs() < 1e-12);
-        assert_eq!(native.unpriced_calls, 0);
-        assert_eq!(native.pricing.as_deref(), Some(&facts));
+        let receipt = ProviderUsageReceipt {
+            input_tokens: Some(request.input_tokens),
+            output_tokens: Some(request.output_tokens),
+            cache_read_tokens: request.cache_read_tokens,
+            cache_write_tokens: request.cache_write_tokens,
+            started_at_ms: Some(request.started_at_ms),
+            prompt_cache_ttl: request.prompt_cache_ttl,
+            billing: Some(Box::new(request.billing.clone())),
+            ..Default::default()
+        };
+        for native in [
+            native,
+            LlmUsage::from_provider_receipt(&request.provider, &request.model, &receipt),
+        ] {
+            assert!((native.cost_usd.unwrap() - expected).abs() < 1e-12);
+            assert_eq!(native.unpriced_calls, 0);
+            assert_eq!(native.pricing.as_deref(), Some(&facts));
+            assert_eq!(native.cache_savings_usd, 0.0);
+        }
     }
     crate::llm_config::clear_user_overrides();
 }
