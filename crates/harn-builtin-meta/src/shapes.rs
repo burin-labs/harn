@@ -41,6 +41,20 @@ const TY_STRING_OR_DICT_OR_NIL: Ty = Ty::Union(&[TY_STRING, TY_DICT, TY_NIL]);
 const TY_STRING_OR_LIST: Ty = Ty::Union(&[TY_STRING, TY_LIST]);
 const TY_TOOL_REGISTRY_OR_LIST: Ty = Ty::Union(&[TY_LIST, TY_DICT]);
 
+pub const SECRET_FINDING: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("detector", TY_STRING),
+    ShapeFieldDescriptor::new("source", TY_STRING),
+    ShapeFieldDescriptor::new("title", TY_STRING),
+    ShapeFieldDescriptor::new("precision", TY_STRING),
+    ShapeFieldDescriptor::new("line", TY_INT),
+    ShapeFieldDescriptor::new("column_start", TY_INT),
+    ShapeFieldDescriptor::new("column_end", TY_INT),
+    ShapeFieldDescriptor::new("start_offset", TY_INT),
+    ShapeFieldDescriptor::new("end_offset", TY_INT),
+    ShapeFieldDescriptor::new("redacted", TY_STRING),
+    ShapeFieldDescriptor::new("fingerprint", TY_STRING),
+]);
+
 /// Native hosts supply facts; the canonical approval evaluator owns their meaning.
 pub const TOOL_APPROVAL_REQUEST: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("tool_name", TY_STRING),

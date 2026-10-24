@@ -227,8 +227,7 @@ fn parse_append_options(args: &[VmValue]) -> Result<AppendPageOptions, VmValue> 
 
 #[cfg(unix)]
 fn file_identity(_file: &std::fs::File, metadata: &std::fs::Metadata) -> std::io::Result<String> {
-    use std::os::unix::fs::MetadataExt;
-    Ok(format!("unix:{}:{}", metadata.dev(), metadata.ino()))
+    Ok(super::metadata::unix_file_identity(metadata))
 }
 
 #[cfg(windows)]

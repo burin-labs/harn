@@ -601,6 +601,11 @@ impl<'a> Machine<'a> {
                         ));
                     }
                 }
+                OpStep::RuntimeError(error) => {
+                    if let Err(error) = self.catch_builtin_error(frames, error) {
+                        return Step::Error(error);
+                    }
+                }
                 OpStep::Error(error) => return Step::Error(error),
             }
             if frames
@@ -1424,6 +1429,7 @@ enum OpStep {
     Return(RuntimeValue),
     Suspend(CapabilityRequest),
     Throw(RuntimeException),
+    RuntimeError(Diagnostic),
     Error(Diagnostic),
 }
 

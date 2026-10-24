@@ -1,0 +1,51 @@
+pipeline default(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("file-metadata-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const file = path_join(root, "file")
+  harness.fs.write_text(file, "abc")
+  const actual = harness.fs.stat(file)
+  assert_eq(actual.size, 3)
+  assert(actual.is_file && !actual.is_dir && !actual.is_symlink)
+  assert_eq(harness.fs.stat(file, {}).is_file, true)
+  assert_eq(harness.fs.stat(file, nil).is_file, true)
+  assert_eq(harness.fs.stat(file, {follow_symlinks: false}).size, actual.size)
+  const directory = harness.fs.stat(root, {follow_symlinks: false})
+  assert(directory.is_dir && !directory.is_file && !directory.is_symlink)
+  if harness.system.platform().os == "windows" {
+    assert(actual.mode == nil)
+    assert(actual.identity == nil)
+  } else {
+    assert(actual.identity != nil && actual.identity != "")
+    const hard_link = path_join(root, "hard-link")
+    const copy = path_join(root, "copy")
+    assert(harness.process.run({program: "ln", args: [file, hard_link]}).success)
+    harness.fs.copy(file, copy)
+    assert_eq(harness.fs.stat(hard_link).identity, actual.identity)
+    assert(harness.fs.stat(copy).identity != actual.identity)
+    assert(harness.process.run({program: "chmod", args: ["751", file]}).success)
+    assert_eq(harness.fs.stat(file).mode! % 512, 489)
+    const link = path_join(root, "link")
+    const dangling = path_join(root, "dangling")
+    assert(harness.process.run({program: "ln", args: ["-s", "file", link]}).success)
+    assert(harness.process.run({program: "ln", args: ["-s", "missing", dangling]}).success)
+    const target = harness.fs.stat(link)
+    assert(target.is_file && !target.is_symlink)
+    assert_eq(target.identity, actual.identity)
+    assert_eq(target.size, 3)
+    const entry = harness.fs.stat(link, {follow_symlinks: false})
+    assert(entry.is_symlink && !entry.is_file && !entry.is_dir)
+    assert(entry.identity != actual.identity)
+    assert(harness.fs.stat(dangling, {follow_symlinks: false}).is_symlink)
+    assert(
+      is_err(
+        try {
+          harness.fs.stat(dangling)
+        },
+      ),
+      "following a dangling link must fail",
+    )
+  }
+  harness.stdio.println("file metadata verified")
+}
