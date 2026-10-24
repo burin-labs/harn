@@ -52,6 +52,10 @@ impl SandboxBackend for Backend {
         Path::new(SANDBOX_EXEC_PATH).exists()
     }
 
+    fn inherits_network_grants() -> bool {
+        nested::process_is_sandboxed()
+    }
+
     fn filesystem_available() -> bool {
         Self::available() && parent_environment::available()
     }

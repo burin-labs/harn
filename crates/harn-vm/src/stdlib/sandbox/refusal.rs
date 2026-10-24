@@ -294,13 +294,14 @@ impl ProcessSandboxReportingContext {
             None if inherited => ProcessSandboxDenialReporting::InferredOnly,
             None => ProcessSandboxDenialReporting::NotEnforced,
         };
+        let network_inherited = inherited || ActiveBackend::inherits_network_grants();
         Self {
             backend: super::active_backend_filesystem_mechanism().to_string(),
             reporting,
             network: ProcessSandboxNetwork::capture(
                 reporting,
                 policy.as_ref().map(|(policy, _)| policy),
-                inherited,
+                network_inherited,
             ),
             policy: policy.map(|(policy, _)| Box::new(policy)),
         }
