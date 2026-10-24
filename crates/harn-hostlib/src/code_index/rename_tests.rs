@@ -635,6 +635,16 @@ fn ambiguous_symbol_without_disambiguator() {
     ]);
     let result = rename(&capability, symbol_ref, "renamed", "workspace");
     assert_eq!(s(field(&result, "result")), "ambiguous_symbol");
+    let VmValue::List(warnings) = field(&result, "warnings") else {
+        panic!("warnings must be a list");
+    };
+    assert_eq!(warnings.len(), 2);
+    for warning in warnings.iter() {
+        assert_eq!(
+            s(field(warning, "symbol")),
+            s(field(warning, "qualified_name"))
+        );
+    }
 }
 
 #[test]
