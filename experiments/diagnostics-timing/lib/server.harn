@@ -1,0 +1,42 @@
+type Endpoint = {base_url_env: string}
+
+type Models = {data: list<{id: string}>}
+
+pub fn endpoint_setting(llm: HarnessLlm, selector: string) -> Result<string, string> {
+  const colon = selector.index_of(":")
+  if colon <= 0 || colon >= selector.len() - 1 {
+    return Err("Live mode requires --llm provider:model")
+  }
+  const provider = selector.substring(0, colon)
+  const configured = schema_parse(llm.config(provider), schema_of(Endpoint))
+  if is_err(configured) || unwrap(configured).base_url_env == "" {
+    return Err("Provider '${provider}' does not declare an endpoint setting")
+  }
+  return Ok(unwrap(configured).base_url_env)
+}
+
+pub fn check_server_model(
+  net: HarnessNet,
+  base_url: string,
+  selector: string,
+) -> Result<nil, string> {
+  const colon = selector.index_of(":")
+  if colon <= 0 || colon >= selector.len() - 1 {
+    return Err("Live mode requires --llm provider:model")
+  }
+  const wanted = selector.substring(colon + 1)
+  const url = "${regex_replace(r"/+$", "", base_url)}/v1/models"
+  const received = try {
+    net.get(url, {timeout_ms: 20000})
+  }
+  if is_err(received) {
+    return Err("Cannot reach the pinned inference server")
+  }
+  const response = unwrap(received)
+  const models = json_decode(response.body, schema_of(Models))
+  if response.status != 200 || is_err(models)
+    || !unwrap(models).data.any({ model -> model.id == wanted }) {
+    return Err("The pinned server must return 200 and list the exact model '${wanted}'")
+  }
+  return Ok(nil)
+}

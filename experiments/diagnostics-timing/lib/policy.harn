@@ -63,7 +63,7 @@ const ARMS = {
   },
 }
 
-pub fn arm_names() -> list {
+pub fn arm_names() -> list<string> {
   return ARMS.keys()
 }
 
