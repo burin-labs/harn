@@ -52,6 +52,9 @@ on:
       source_revision:
         description: Exact source rehearsed by this invocation
         value: ${{ inputs.source_revision }}
+      observer_context:
+        description: Issued public context selecting this observer's authenticated measurement
+        value: ${{ jobs.consumers.outputs.observer_context }}
     inputs:
       source_revision:
         required: true
@@ -155,6 +158,7 @@ jobs:
       actions: read
       contents: read
     outputs:
+      observer_context: ${{ steps.observer.outputs.context }}
       verdict: ${{ steps.observe-1.outputs.verdict || steps.observe-2.outputs.verdict || steps.observe-3.outputs.verdict || steps.observe-4.outputs.verdict }}
       consumer_run: ${{ steps.canary.outputs.run_id }}
       consumer_head: ${{ steps.record.outputs.consumer_head }}
