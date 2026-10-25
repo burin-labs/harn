@@ -53,6 +53,38 @@ fn container_kind(language: Language, node: Node<'_>) -> Option<&'static str> {
             _ => None,
         },
         Language::Python => (kind == "class_definition").then_some("class"),
+        Language::Kotlin => match kind {
+            "class_declaration" => Some("class"),
+            "object_declaration" => Some("object"),
+            _ => None,
+        },
+        Language::Scala => match kind {
+            "class_definition" => Some("class"),
+            "object_definition" => Some("object"),
+            "trait_definition" => Some("trait"),
+            _ => None,
+        },
+        Language::Swift => match kind {
+            "class_declaration" => Some("class"),
+            "protocol_declaration" => Some("protocol"),
+            _ => None,
+        },
+        Language::Php => match kind {
+            "class_declaration" => Some("class"),
+            "interface_declaration" => Some("interface"),
+            "trait_declaration" => Some("trait"),
+            _ => None,
+        },
+        Language::Ruby => match kind {
+            "class" => Some("class"),
+            "module" => Some("module"),
+            _ => None,
+        },
+        Language::Cpp => match kind {
+            "class_specifier" => Some("class"),
+            "struct_specifier" => Some("struct"),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -64,8 +96,17 @@ fn describe(language: Language, node: Node<'_>, source: &[u8]) -> Option<Contain
     } else {
         "name"
     };
-    let name = node
-        .child_by_field_name(name_field)
+    // Grammars without a `name` field (Kotlin) put the identifier first.
+    let mut cursor = node.walk();
+    let named = node.child_by_field_name(name_field).or_else(|| {
+        node.named_children(&mut cursor).find(|child| {
+            matches!(
+                child.kind(),
+                "type_identifier" | "simple_identifier" | "identifier"
+            )
+        })
+    });
+    let name = named
         .and_then(|n| n.utf8_text(source).ok())
         .unwrap_or_default()
         .to_string();
@@ -290,5 +331,67 @@ mod tests {
         );
         assert_eq!(candidates(&result).len(), super::MAX_CANDIDATES);
         assert!(b(field(&result, "candidates_truncated")));
+    }
+
+    #[test]
+    fn every_language_with_classes_lists_them() {
+        let cases: [(&str, &str, &str, &str, &str); 6] = [
+            (
+                "kt",
+                "interface Named {\n}\nclass A {\n}\nobject B {\n}\n",
+                "((_) @anchor (#eq? @anchor \"nope\"))",
+                "class",
+                "A",
+            ),
+            (
+                "scala",
+                "trait Named {}\nclass A {}\nobject B {}\n",
+                "((_) @anchor (#eq? @anchor \"nope\"))",
+                "class",
+                "A",
+            ),
+            (
+                "php",
+                "<?php\ninterface Named {}\nclass A {}\ntrait T {}\n",
+                "((_) @anchor (#eq? @anchor \"nope\"))",
+                "class",
+                "A",
+            ),
+            (
+                "rb",
+                "class A\nend\nmodule M\nend\n",
+                "((_) @anchor (#eq? @anchor \"nope\"))",
+                "class",
+                "A",
+            ),
+            (
+                "swift",
+                "protocol Named {}\nclass A {}\n",
+                "((_) @anchor (#eq? @anchor \"nope\"))",
+                "class",
+                "A",
+            ),
+            (
+                "cpp",
+                "class A {};\nstruct S {};\n",
+                "((_) @anchor (#eq? @anchor \"nope\"))",
+                "class",
+                "A",
+            ),
+        ];
+        for (extension, source, query, kind, name) in cases {
+            let result = insert(extension, source, query, "x");
+            assert_eq!(
+                s(field(&result, "result")),
+                "no_match",
+                "{extension}: {result:?}"
+            );
+            let found = candidates(&result);
+            assert!(
+                found.iter().any(|(_, k, n)| k == kind && n == name),
+                "{extension}: {found:?}"
+            );
+            assert!(found.len() >= 2, "{extension}: {found:?}");
+        }
     }
 }

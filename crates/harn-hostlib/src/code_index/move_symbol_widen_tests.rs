@@ -574,3 +574,21 @@ fn rust_widening_leaves_a_same_named_member_of_another_type_alone() {
         &widening_args("run", "src/a.rs", "src/b.rs", Some("pub")),
     );
 }
+
+#[test]
+fn rust_widening_requires_the_receiver_to_be_the_owning_type() {
+    // The function names `Buffer` and calls `flush`, but on a `Stdout`.
+    let fixture = Fixture::new(&[
+        KIT,
+        ("src/lib.rs", "pub mod a;\npub mod b;\n"),
+        (
+            "src/a.rs",
+            "pub struct Buffer;\n\nimpl Buffer {\n    fn flush(&self) {}\n}\n\npub fn run(_buf: &Buffer, out: &mut std::io::Stdout) {\n    use std::io::Write;\n    out.flush().unwrap();\n}\n",
+        ),
+        ("src/b.rs", "pub fn other() {}\n"),
+    ]);
+    fixture.refused(
+        "visibility_required",
+        &widening_args("run", "src/a.rs", "src/b.rs", Some("pub")),
+    );
+}

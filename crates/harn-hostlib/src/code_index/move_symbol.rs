@@ -671,7 +671,7 @@ fn plan(
             &src.source,
             &src.tree,
             &members,
-            &free,
+            item_node,
             (&source_module, &dest_module),
         ));
     }
