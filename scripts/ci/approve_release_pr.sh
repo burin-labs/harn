@@ -53,9 +53,10 @@ title=$(jq -r '.title' <<< "$meta")
 [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]] || refuse "its head SHA is malformed"
 
 # The branch names the version; the title must say the same thing. Docs and
-# manifests mention either the new version or the stable one before it, in
-# stable or -dev form, so those four strings are the only ones a version-only
-# change may rewrite.
+# manifests mention the new version, the patch before it, or the latest
+# published release (which differs from the patch before it after a retired,
+# never-published version), in stable or -dev form. Those are the only strings
+# a version-only change may rewrite.
 if [[ "$head_ref" =~ ^release/v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
   major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
   [[ "$title" == "Release v$major.$minor.$patch" ]] || refuse "title '$title' does not match branch $head_ref"
@@ -70,6 +71,11 @@ fi
 ((patch > 0)) || refuse "version $major.$minor.$patch has no previous patch"
 new="$major.$minor.$patch"
 old="$major.$minor.$((patch - 1))"
+# After a retirement the stable files name the published predecessor, which is
+# older than the previous patch. An unreadable or malformed tag adds nothing.
+published=$(gh api "repos/$repo/releases/latest" --jq '.tag_name' 2> /dev/null || true)
+published=${published#v}
+[[ "$published" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$published" != "$new" ]] || published=$old
 
 commits=$(gh api --paginate --slurp "repos/$repo/pulls/$pr/commits?per_page=100" | jq 'add // []') \
   || refuse "the commits could not be read"
@@ -86,10 +92,10 @@ count=$(jq 'length' <<< "$files")
 # lines is a behavior change, not a version move. Patch lines starting `---`/`+++`
 # are content here, not headers, because the API patch carries only hunks.
 version_only() {
-  jq -r --arg old "$old" --arg new "$new" '
+  jq -r --arg old "$old" --arg new "$new" --arg published "$published" '
     # Longest first: X.Y.Z-dev contains X.Y.Z.
     def lit($v): "(?<![0-9.])" + ($v | gsub("\\."; "\\.")) + "(?![0-9])";
-    def norm: reduce ([$new + "-dev", $old + "-dev", $new, $old] | .[]) as $v (.; gsub(lit($v); "@V@"));
+    def norm: reduce ([$new + "-dev", $old + "-dev", $published + "-dev", $new, $old, $published] | .[]) as $v (.; gsub(lit($v); "@V@"));
     def hunk_lines: split("\n") | map(select(test("^[-+]") ));
     .[]
     | select(.filename != "CHANGELOG.md" and (.filename | test("^changelog\\.d/[^/]+\\.md$") | not))
@@ -104,12 +110,21 @@ version_only() {
       end' <<< "$files"
 }
 
-problems=$(jq -r '
+# A release folds the parked or fragment-built `## Unreleased` heading into
+# `## v<new>`: that one removed line is allowed, and only when the very next
+# patch line is its replacement, so the notes under it keep their heading.
+problems=$(jq -r --arg new "$new" '
   .[]
   | if .filename == "CHANGELOG.md" then
       # No patch means a truncated or binary diff that cannot be shown to add only lines.
       (if (.patch // null) == null or .status != "modified" then "CHANGELOG.md: no textual patch to check"
-       elif .patch | split("\n") | any(test("^-")) then "CHANGELOG.md: removes lines"
+       elif (.patch | split("\n")) as $l
+            | [$l[] | select(test("^-") and . != "-## Unreleased")] | length > 0
+         then "CHANGELOG.md: removes lines"
+       elif (.patch | split("\n")) as $l
+            | [range(0; $l | length) | select($l[.] == "-## Unreleased") | select($l[. + 1] != "+## v" + $new)]
+            | length > 0
+         then "CHANGELOG.md: drops the Unreleased heading without renaming it in place to v\($new)"
        else empty end)
     elif (.filename | test("^changelog\\.d/[^/]+\\.md$")) then
       (if .status == "removed" then empty else "\(.filename): not a deletion" end)

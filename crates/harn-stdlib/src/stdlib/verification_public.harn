@@ -13,6 +13,7 @@ import { shell_quote } from "std/runtime"
 import { regex_first_capture, truncate_text } from "std/text"
 import "std/verification_core"
 import "std/verification_ladder"
+import "std/verification_reuse"
 import "std/verification_targets"
 import "std/verification_types"
 
@@ -613,7 +614,14 @@ pub fn verification_record_check_result(
   const opts = __verification_opts(options)
   const observation = verification_observation_from_command_result(agent, result, opts)
   const row = runtime.verification_profile_record_run(row_id, observation, opts?.dir)
-  return {result: result, observation: observation, row: row, snapshot: nil}
+  return {
+    result: result,
+    observation: observation,
+    row: row,
+    snapshot: nil,
+    execution: "observed",
+    binding: nil,
+  }
 }
 
 /**
@@ -626,6 +634,10 @@ pub fn verification_record_check_result(
  * - `snapshot`: explicit file->hash map when the caller already captured one.
  * - `record`: set `false` to run and build the observation without updating
  *   the profile store.
+ * - `reuse`: a `VerificationReuse` with a run-scoped key, a complete input-state
+ *   reader, and the check's positive-verdict callback. Unknown or changed
+ *   inputs force execution; hits return `execution: "reused"` without adding
+ *   a profile timing sample.
  * - any `verification_observation_from_command_result` option.
  *
  * @effects: [process, host, fs, state]
@@ -642,6 +654,17 @@ pub fn verification_run_check(
   if opts?.command_options?.background == true {
     throw "verification_run_check: background command_options are not supported; use verification_start_check"
   }
+  const reuse: VerificationReuse? = opts?.reuse
+  const inputs = __verification_reuse_inputs(reuse)
+  const invocation = if inputs == nil {
+    ""
+  } else {
+    sha256(json_stringify({row_id: row_id, spec: spec, options: opts + {reuse: nil}}))
+  }
+  const cached = __verification_reuse_lookup(harness.runtime, reuse, invocation, inputs)
+  if cached != nil {
+    return cached
+  }
   const captured = __verification_capture_snapshot(harness.code_index, opts)
   const result = command_run(harness.tools, spec, opts?.command_options)
   const observation = verification_observation_from_command_result(
@@ -653,7 +676,15 @@ pub fn verification_run_check(
   if opts?.record != false {
     row = harness.runtime.verification_profile_record_run(row_id, observation, opts?.dir)
   }
-  return {result: result, observation: observation, row: row, snapshot: captured.fact}
+  const check: VerificationRecordedCheck = {
+    result: result,
+    observation: observation,
+    row: row,
+    snapshot: captured.fact,
+    execution: "executed",
+    binding: nil,
+  }
+  return __verification_reuse_store(harness.runtime, reuse, invocation, inputs, check)
 }
 
 /**
@@ -730,7 +761,14 @@ pub fn verification_finish_check(
       observation_options?.dir,
     )
   }
-  return {result: result, observation: observation, row: row, snapshot: started_check?.snapshot}
+  return {
+    result: result,
+    observation: observation,
+    row: row,
+    snapshot: started_check?.snapshot,
+    execution: "executed",
+    binding: nil,
+  }
 }
 
 /**

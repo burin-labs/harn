@@ -23,7 +23,7 @@ expect() {
     CONSUMER_RUN=11 CONSUMER_BASE_RUN=22 CONSUMER_BASE="$HEAD_B" \
     CONSUMER_IDENTITY="$HEAD_A/jobs" CONSUMER_BASE_IDENTITY="$HEAD_A/jobs" \
     CONSUMER_FAILURES="$TESTS_FAILED" CONSUMER_BASE_CLI_RESULT=success \
-    CONSUMER_BASE_RESULT=failure/skipped CONSUMER_UNMEASURED_BLOCKS=false \
+    CONSUMER_BASE_RESULT=failure/skipped \
     CONSUMER_REASONS='first=none retry=none' CONSUMER_BASE_REASONS='first=none retry=none' \
     "$@" bash "$verdict" 2>&1)
   status=$?
@@ -49,8 +49,9 @@ expect 1 'rehearsed a different consumer' CONSUMER_BASE_VERDICT=fail CONSUMER_BA
 expect 0 'red is inherited' CONSUMER_BASE_VERDICT=fail CONSUMER_BASE_FAILURES="$TESTS_FAILED"
 
 expect 0 'verdict=pass' CONSUMER_VERDICT=pass
-expect 0 '::warning::consumer check UNMEASURED' CONSUMER_VERDICT=
-expect 1 '::error::consumer check UNMEASURED' CONSUMER_VERDICT= CONSUMER_UNMEASURED_BLOCKS=true
+expect 1 '::error::consumer check UNMEASURED' CONSUMER_VERDICT=
+expect 1 '::error::consumer check UNMEASURED' CONSUMER_VERDICT= CONSUMER_REASONS='first=no_verdict_before_deadline retry=observation_window_elapsed'
+expect 1 '::error::consumer check UNMEASURED' CONSUMER_VERDICT= CONSUMER_RESULT=cancelled/cancelled
 expect 0 'expected=false' CONSUMER_EXPECTED=false CONSUMER_RESULT=skipped/skipped
 expect 1 'ran without being expected' CONSUMER_EXPECTED=false CONSUMER_RESULT=failure/skipped
 echo "consumer verdict: OK"

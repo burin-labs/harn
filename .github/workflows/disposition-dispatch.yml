@@ -33,11 +33,14 @@ jobs:
     # A comment only wakes the relay when it is a command on a pull request
     # from someone the repository already trusts to write. The review side
     # checks for an administrator again; this keeps strangers from filling the
-    # review repository's run list.
+    # review repository's run list. The fleet control App is named because
+    # GitHub reports an App's association as NONE; the [bot] suffix is
+    # reserved, so no person can hold that login.
     if: >-
       github.event.issue.pull_request != null
       && startsWith(github.event.comment.body, '/automated-disposition')
-      && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      && (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      || github.event.comment.user.login == 'burin-control[bot]')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

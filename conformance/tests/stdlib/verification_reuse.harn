@@ -1,0 +1,232 @@
+import { shell_quote } from "std/runtime"
+import { with_temp_dir } from "std/testing"
+import { VerificationInputState, verification_run_check } from "std/verification"
+
+fn launch_count(fs: HarnessFs, receipt: string) -> int {
+  const text = trim(fs.read_text(receipt) ?? "")
+  assert(text != "", "the child must leave a nonempty launch receipt")
+  return len(split(text, "\n"))
+}
+
+fn bump_revision(fs: HarnessFs, path: string) -> nil {
+  const previous = to_int(fs.read_text(path)) ?? -1
+  assert(previous >= 0, "a measured revision is required")
+  fs.write_text(path, to_string(previous + 1))
+  return nil
+}
+
+/** Schedule an edit and undo around the child without timing or background workers. */
+fn check_change_and_restore(harness: Harness, root: string) -> nil {
+  const dependency = path_join(root, "aba-dependency")
+  const receipt = path_join(root, "aba-launches")
+  harness.fs.write_text(dependency, "broken")
+  let interleave = true
+  let restore = false
+  let revision = 0
+  const options = {
+    record: false,
+    reuse: {
+      scope: "change-and-restore/${root}",
+      inputs: { ->
+        const inputs = {
+          revision: revision,
+          workspace: root,
+          source: "fixture",
+          dependencies: sha256(harness.fs.read_text(dependency)),
+          environment: "fixture",
+        }
+        if interleave {
+          interleave = false
+          restore = true
+          harness.fs.write_text(dependency, "good")
+          revision = revision + 1
+        }
+        return inputs
+      },
+      accept: { result ->
+        if restore {
+          restore = false
+          harness.fs.write_text(dependency, "broken")
+          revision = revision + 1
+        }
+        return result.success
+      },
+    },
+  }
+  const spec = {
+    mode: "shell",
+    command:
+      "echo launch >> ${shell_quote(receipt)}; test \"$(cat ${shell_quote(dependency)})\" = good",
+    cwd: root,
+  }
+  const first = verification_run_check(harness, "fixture", spec, options)
+  assert(first.result.success, "the first child must observe the temporary passing dependency")
+  assert_eq(harness.fs.read_text(dependency), "broken", "the endpoints must have equal content")
+  assert_eq(revision, 2, "both intervening changes must be observed by the input owner")
+  const second = verification_run_check(harness, "fixture", spec, options)
+  assert(
+    first.binding == nil && !second.result.success && launch_count(harness.fs, receipt) == 2,
+    "change-and-restore must not bind a temporary pass: ${json_stringify({first: first.execution, bound: first.binding != nil, second: second.execution, passed: second.result.success, launches: launch_count(harness.fs, receipt)})}",
+  )
+  return nil
+}
+
+pipeline test(harness: Harness) {
+  if harness.system.platform().os == "windows" {
+    skip("the real-child control uses a POSIX shell")
+  }
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const source = path_join(root, "source")
+      const dependency = path_join(root, "dependency")
+      const receipt = path_join(root, "launches")
+      const revision_path = path_join(root, "revision")
+      harness.fs.write_text(source, "good")
+      harness.fs.write_text(dependency, "good")
+      harness.fs.write_text(revision_path, "0")
+      let environment = "environment-a"
+      let known = true
+      let acceptable = true
+      let readable = true
+      const inputs = { ->
+        if !readable {
+          throw "fixture input reader unavailable"
+        }
+        if !known {
+          return nil
+        }
+        const state: VerificationInputState = {
+          revision: to_int(harness.fs.read_text(revision_path)) ?? -1,
+          workspace: root,
+          source: sha256(harness.fs.read_text(source)),
+          dependencies: sha256(harness.fs.read_text(dependency)),
+          environment: environment,
+        }
+        return state
+      }
+      const spec = {
+        mode: "shell",
+        command:
+          "echo launch >> ${shell_quote(receipt)}; test \"$(cat ${shell_quote(source)})\" = good && test \"$(cat ${shell_quote(dependency)})\" = good",
+        cwd: root,
+      }
+      const options = {
+        record: false,
+        reuse: {
+          scope: "verification-reuse/${root}",
+          inputs: inputs,
+          accept: { result -> result.success && acceptable },
+        },
+      }
+      const first = verification_run_check(harness, "fixture", spec, options)
+      assert(first.result.success && first.execution == "executed")
+      assert(first.binding != nil, "an accepted stable check carries its input binding")
+      assert_eq(launch_count(harness.fs, receipt), 1)
+      const repeated = verification_run_check(harness, "fixture", spec, options)
+      assert(repeated.result.success && repeated.execution == "reused")
+      assert_eq(repeated.binding, first.binding)
+      assert_eq(launch_count(harness.fs, receipt), 1)
+      harness.fs.write_text(dependency, "broken")
+      bump_revision(harness.fs, revision_path)
+      const changed_dependency = verification_run_check(harness, "fixture", spec, options)
+      assert(!changed_dependency.result.success && changed_dependency.execution == "executed")
+      assert_eq(changed_dependency.binding, nil)
+      assert_eq(launch_count(harness.fs, receipt), 2)
+      const repeated_failure = verification_run_check(harness, "fixture", spec, options)
+      assert(!repeated_failure.result.success && repeated_failure.execution == "executed")
+      assert_eq(launch_count(harness.fs, receipt), 3)
+      harness.fs.write_text(dependency, "good")
+      bump_revision(harness.fs, revision_path)
+      const repaired = verification_run_check(harness, "fixture", spec, options)
+      assert(repaired.result.success && repaired.execution == "executed")
+      assert_eq(launch_count(harness.fs, receipt), 4)
+      environment = "environment-b"
+      bump_revision(harness.fs, revision_path)
+      assert_eq(verification_run_check(harness, "fixture", spec, options).execution, "executed")
+      assert_eq(launch_count(harness.fs, receipt), 5)
+      harness.fs.write_text(source, "broken")
+      bump_revision(harness.fs, revision_path)
+      assert(!verification_run_check(harness, "fixture", spec, options).result.success)
+      assert_eq(launch_count(harness.fs, receipt), 6)
+      harness.fs.write_text(source, "good")
+      bump_revision(harness.fs, revision_path)
+      assert(verification_run_check(harness, "fixture", spec, options).result.success)
+      assert_eq(launch_count(harness.fs, receipt), 7)
+      known = false
+      assert_eq(verification_run_check(harness, "fixture", spec, options).execution, "executed")
+      assert_eq(verification_run_check(harness, "fixture", spec, options).execution, "executed")
+      assert_eq(launch_count(harness.fs, receipt), 9)
+      known = true
+      assert_eq(verification_run_check(harness, "fixture", spec, options).execution, "executed")
+      assert_eq(launch_count(harness.fs, receipt), 10)
+      const fresh = verification_run_check(harness, "fixture", spec, {record: false})
+      assert(fresh.result.success && fresh.execution == "executed")
+      assert_eq(launch_count(harness.fs, receipt), 11)
+      assert(verification_run_check(harness, "fixture", spec, {record: false}).result.success)
+      assert_eq(
+        launch_count(harness.fs, receipt),
+        12,
+        "the no-reuse control launches both children",
+      )
+      acceptable = false
+      const rejected = verification_run_check(harness, "fixture", spec, options)
+      assert(rejected.result.success && rejected.execution == "executed")
+      assert_eq(rejected.binding, nil, "an exit-zero rejected verdict is not reusable evidence")
+      assert_eq(verification_run_check(harness, "fixture", spec, options).execution, "executed")
+      assert_eq(launch_count(harness.fs, receipt), 14)
+      acceptable = true
+      environment = ""
+      bump_revision(harness.fs, revision_path)
+      assert_eq(verification_run_check(harness, "fixture", spec, options).binding, nil)
+      assert_eq(verification_run_check(harness, "fixture", spec, options).binding, nil)
+      assert_eq(launch_count(harness.fs, receipt), 16, "an empty identity is unknown, not a match")
+      environment = "recovered-environment"
+      bump_revision(harness.fs, revision_path)
+      assert_eq(verification_run_check(harness, "fixture", spec, options).execution, "executed")
+      assert_eq(launch_count(harness.fs, receipt), 17)
+      const spawn_error = try {
+        verification_run_check(
+          harness,
+          "fixture",
+          {argv: [path_join(root, "absent-checker")]},
+          options,
+        )
+      }
+      assert(is_err(spawn_error), "the missing checker must exercise dispatch-error handling")
+      assert_eq(verification_run_check(harness, "fixture", spec, options).execution, "executed")
+      assert_eq(
+        launch_count(harness.fs, receipt),
+        18,
+        "a failed dispatch must retire the older green",
+      )
+      const race_receipt = path_join(root, "race-launches")
+      const changing = {
+        mode: "shell",
+        command:
+          "echo launch >> ${shell_quote(race_receipt)}; if [ \"$(cat ${shell_quote(dependency)})\" != broken ]; then printf broken > ${shell_quote(dependency)}; rev=$(cat ${shell_quote(revision_path)}); printf '%s' \"$((rev + 1))\" > ${shell_quote(revision_path)}; fi",
+        cwd: root,
+      }
+      const during = verification_run_check(harness, "fixture", changing, options)
+      assert(during.result.success && during.binding == nil, "changed inputs must not bind a green")
+      const stable = verification_run_check(harness, "fixture", changing, options)
+      assert(stable.result.success && stable.binding != nil && stable.execution == "executed")
+      assert_eq(verification_run_check(harness, "fixture", changing, options).execution, "reused")
+      assert_eq(launch_count(harness.fs, race_receipt), 2)
+      harness.fs.write_text(dependency, "good")
+      bump_revision(harness.fs, revision_path)
+      readable = false
+      const unreadable = verification_run_check(harness, "fixture", spec, options)
+      assert(unreadable.result.success && unreadable.execution == "executed")
+      assert_eq(unreadable.binding, nil)
+      assert_eq(verification_run_check(harness, "fixture", spec, options).execution, "executed")
+      assert_eq(
+        launch_count(harness.fs, receipt),
+        20,
+        "unavailable input readers must force execution",
+      )
+      check_change_and_restore(harness, root)
+    },
+  )
+  harness.stdio.println("verification reuse ok")
+}

@@ -1354,7 +1354,7 @@ fn walk_import_graph_fingerprinted(
                 visited.insert(
                     canonical.clone(),
                     ImportNode::Resolved {
-                        content: Arc::clone(module.text()),
+                        source: Arc::clone(&module),
                     },
                 );
                 match ManifestFile::observe(&canonical, &module) {
@@ -1415,13 +1415,8 @@ fn walk_import_graph_fingerprinted(
             .files
             .iter()
             .map(|file| match visited.get(&file.path) {
-                Some(ImportNode::Resolved { content }) => {
-                    ModuleCompilationContext::for_source_in_graph(
-                        &graph,
-                        &file.path,
-                        content.as_ref(),
-                    )
-                    .ok()
+                Some(ImportNode::Resolved { source }) => {
+                    ModuleCompilationContext::for_module_source_in_graph(&graph, &file.path, source)
                 }
                 _ => None,
             })

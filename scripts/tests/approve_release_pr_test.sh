@@ -30,6 +30,7 @@ case "$args" in
   *"-X POST"*"/reviews"*) echo "$args" >> "$FIXTURE/approvals"; echo '{}' ;;
   *graphql*"reviewDecision"*"reviewThreads"*) emit "$FIXTURE/review_state.json" ;;
   *graphql*) emit "$FIXTURE/decision.json" ;;
+  *"/releases/latest"*) emit "$FIXTURE/latest.json" ;;
   *"/commits"*) cat "$FIXTURE/commits.json" ;;
   *"/files"*) cat "$FIXTURE/files.json" ;;
   *"/pulls/"*) cat "$FIXTURE/pr.json" ;;
@@ -56,6 +57,7 @@ fixture() {
     {filename:"CHANGELOG.md",status:"modified",patch:"@@ -1,1 +1,3 @@\n+## v0.10.174\n+- A change.\n "},
     {filename:"changelog.d/1.added.md",status:"removed",patch:"@@ -1 +0,0 @@\n-A change.\n"}
   ]]' > "$dir/files.json"
+  echo '{"tag_name":"v0.10.173"}' > "$dir/latest.json"
   echo '{"reviewThreads":{"nodes":[]},"reviews":{"totalCount":0}}' > "$dir/review_state.json"
   echo '{"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED"}}}}' > "$dir/decision.json"
   # The stub applies the script's own --jq to these.
@@ -103,6 +105,22 @@ development() {
   edit pr.json '.title = "[Release] Start 0.10.174-dev development" | .head.ref = "automation/development-0.10.174-dev"'
   jq -n '[[{filename: "Cargo.toml", status: "modified", patch: "@@ -1 +1 @@\n-version = \"0.10.173\"\n+version = \"0.10.174-dev\"\n"}]]' > "$dir/files.json"
 }
+# After a retired, never-published version the stable files name the published
+# predecessor (0.10.177), not the previous patch, and the release folds a parked
+# `## Unreleased` heading.
+retired_predecessor() {
+  edit pr.json '.title = "Release v0.10.179" | .head.ref = "release/v0.10.179"'
+  echo '{"tag_name":"v0.10.177"}' > "$dir/latest.json"
+  jq -n '[[
+    {filename:"Cargo.toml",status:"modified",patch:"@@ -1,2 +1,2 @@\n-version = \"0.10.179-dev\"\n+version = \"0.10.179\"\n"},
+    {filename:"docs/src/embedding-rust.md",status:"modified",patch:"@@ -1 +1 @@\n-tag = \"v0.10.177\"\n+tag = \"v0.10.179\"\n"},
+    {filename:"CHANGELOG.md",status:"modified",patch:"@@ -1,3 +1,3 @@\n-## Unreleased\n+## v0.10.179\n+- A change.\n "}
+  ]]' > "$dir/files.json"
+}
+retired_predecessor_unpublished() { retired_predecessor; echo '{"tag_name":"v0.10.173"}' > "$dir/latest.json"; }
+fold_without_heading() { retired_predecessor; edit files.json '.[0][2].patch = "@@ -1,2 +1,1 @@\n-## Unreleased\n+- A change.\n "'; }
+heading_elsewhere() { retired_predecessor; edit files.json '.[0][2].patch = "@@ -1,4 +1,4 @@\n-## Unreleased\n+- A change.\n ## v0.10.177\n+## v0.10.179\n "'; }
+removes_other_heading() { retired_predecessor; edit files.json '.[0][2].patch += "\n-## v0.10.177"'; }
 human_author() { edit pr.json '.user.login = "someone" | .user.type = "User"'; }
 wrong_branch() { edit pr.json '.head.ref = "feature/x"'; }
 title_mismatch() { edit pr.json '.title = "Release v0.10.175"'; }
@@ -121,6 +139,11 @@ not_counted() { edit decision.json '.data.repository.pullRequest.reviewDecision 
 
 expect_approved release
 expect_approved development
+expect_approved retired_predecessor
+expect_refused retired_predecessor_unpublished 'changes more than the version'
+expect_refused fold_without_heading 'without renaming it in place to v0.10.179'
+expect_refused heading_elsewhere 'without renaming it in place to v0.10.179'
+expect_refused removes_other_heading 'removes lines'
 expect_refused human_author 'not harn-release-bot'
 expect_refused wrong_branch 'not a release or development-bump branch'
 expect_refused title_mismatch 'does not match branch'

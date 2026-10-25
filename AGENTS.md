@@ -274,8 +274,11 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   an automated reviewer that did not finish on the head use the org-admin
   labels `bypass-ci`, `bypass-merge-queue`, and `force-merge`. The workflow
   refuses a queue bypass when none of those holds; a long queue is not one.
+- GitHub identities: author as `burin-labs-agent`; control actions and bulk
+  reads run as the `burin-control` App. See
+  [Agent GitHub identities](https://github.com/burin-labs/.github/blob/main/docs/agent-identity.md).
 - Labels are a trigger only. The workflow re-checks organization or repository
-  admin permission and refuses fork PRs. See
+  admin permission (or the `burin-control` App) and refuses fork PRs. See
   [Merge overrides](docs/src/dev/merge-overrides.md) and the
   [`burin-labs/.github` README](https://github.com/burin-labs/.github#merge-overrides).
 - Ship a ready PR by adding the `ship` label (Smart Ship arms it, lands it, and
