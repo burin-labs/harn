@@ -154,7 +154,7 @@ fn a_cancel_stops_the_wait_within_a_heartbeat_and_writes_nothing() {
     });
     harn_vm::agent_events::register_sink(session, progress.clone());
     let cancel = Arc::new(AtomicBool::new(false));
-    let canceller = std::thread::spawn({
+    let canceller = harn_parser::runtime_stack::spawn({
         let cancel = cancel.clone();
         move || {
             harn_clock::test_support::recv_within("the wait's heartbeat", &heartbeat_rx);
@@ -358,7 +358,7 @@ fn another_writer_waits_until_the_commit_has_written_every_file() {
                     ("path", vm_string(&other_path.to_string_lossy())),
                     ("content", vm_string(other_text)),
                 ]);
-                let thread = std::thread::spawn({
+                let thread = harn_parser::runtime_stack::spawn({
                     let done = done.clone();
                     let write_file = write_file.clone();
                     move || {
