@@ -212,9 +212,8 @@ fn stopping_one_tool_call_stops_a_waiting_rename_without_writes() {
     // SAFETY: set before any thread of this test binary reads the variable.
     unsafe { std::env::set_var("HARN_LSP_SERVER_RUST_ANALYZER", &program) };
     // This test proves that a stop reaches the rename through the agent loop,
-    // not how OS confinement treats a language server. macOS Seatbelt stops
-    // the shell stand-in from starting inside a tool, which turns the wait
-    // into a fallback, so OS confinement is off for this binary.
+    // not how OS confinement treats a language server, so a host without a
+    // process sandbox must still start the stand-in.
     // SAFETY: as above.
     unsafe { std::env::set_var("HARN_HANDLER_SANDBOX", "off") };
     // The agent loop confines tools to the working directory's workspace.
@@ -240,11 +239,21 @@ fn stopping_one_tool_call_stops_a_waiting_rename_without_writes() {
             harn_vm::stdlib::process::set_session_environment(Some(
                 harn_vm::security::SessionEnvironment::inherited(),
             ));
+            // A host installs its policy before the loop runs. Without one, a
+            // top-level loop requires OS confinement, which refuses to start
+            // any program on a host without a process sandbox.
+            harn_vm::orchestration::push_execution_policy(
+                harn_vm::orchestration::CapabilityPolicy {
+                    sandbox_profile: harn_vm::orchestration::SandboxProfile::Worktree,
+                    ..Default::default()
+                },
+            );
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             let _ = harn_hostlib::install_default(&mut vm);
             vm.set_harness(harn_vm::Harness::real());
             let result = vm.execute(&chunk).await;
+            harn_vm::orchestration::pop_execution_policy();
             harn_vm::stdlib::process::set_session_environment(None);
             harn_vm::llm::clear_current_host_bridge();
             result.expect("script runs");
