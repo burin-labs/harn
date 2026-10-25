@@ -542,7 +542,9 @@ fn workspace_rename_leaves_prose_files_and_renames_the_code() {
     assert!(warnings.contains("README.md"), "{warnings}");
     // Markup can still use the old name, so the warning asks for a review.
     assert!(
-        warnings.contains("index.html (html file left unchanged; it may still reference `Widget`, so review it)"),
+        warnings.contains(
+            "index.html (html file left unchanged; it may still reference `Widget`, so review it)"
+        ),
         "{warnings}"
     );
 }

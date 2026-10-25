@@ -1,6 +1,6 @@
 //! Rust arm of `move_symbol`: crate-rooted module paths and use-trees.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::ops::Range;
 use std::path::PathBuf;
 
@@ -742,7 +742,9 @@ pub(crate) fn field_reads(
         let built = match node.kind() {
             "call_expression" => node.child_by_field_name("function").zip(tuple_field),
             "tuple_struct_pattern" => node.child_by_field_name("type").zip(tuple_field),
-            "struct_expression" if has_base(node) => node.child_by_field_name("name").zip(named_field),
+            "struct_expression" if has_base(node) => {
+                node.child_by_field_name("name").zip(named_field)
+            }
             _ => None,
         };
         if let Some((path, hidden)) = built {
@@ -761,7 +763,11 @@ pub(crate) fn field_reads(
 fn has_base(struct_expression: Node<'_>) -> bool {
     struct_expression
         .child_by_field_name("body")
-        .is_some_and(|body| text::members(body).iter().any(|m| m.kind() == "base_field_initializer"))
+        .is_some_and(|body| {
+            text::members(body)
+                .iter()
+                .any(|m| m.kind() == "base_field_initializer")
+        })
 }
 
 /// Whether the path `node` ends in `name`, or is `Self` inside an `impl` of it.
@@ -772,7 +778,9 @@ fn names_type(node: Node<'_>, source: &str, name: &str) -> bool {
         _ => Some(node),
     };
     let tail = tail.map(|tail| match tail.kind() {
-        "scoped_identifier" | "scoped_type_identifier" => tail.child_by_field_name("name").unwrap_or(tail),
+        "scoped_identifier" | "scoped_type_identifier" => {
+            tail.child_by_field_name("name").unwrap_or(tail)
+        }
         _ => tail,
     });
     match tail.map(|tail| text::text(tail, source)) {

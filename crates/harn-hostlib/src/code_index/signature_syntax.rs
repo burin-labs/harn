@@ -417,7 +417,9 @@ fn fixes_signature(tokens: &[Node<'_>], bytes: &[u8]) -> bool {
                 .skip(1)
                 .any(|applied| fixes_signature(applied, bytes))
         }
-        _ => tokens.iter().any(|token| names_fixing_attribute(*token, bytes)),
+        _ => tokens
+            .iter()
+            .any(|token| names_fixing_attribute(*token, bytes)),
     }
 }
 

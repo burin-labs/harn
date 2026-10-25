@@ -64,7 +64,7 @@ mod rust;
 mod script;
 mod text;
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
 use std::path::Path;
 
@@ -78,9 +78,8 @@ use crate::tools::args::{dict_arg, optional_bool, optional_string};
 
 use super::builtins::SharedIndex;
 use super::refactor_core::{
-    contained_path, files_in_scope, first_syntax_error, parse_kind, plan_file, read_source,
-    reference_sites, resolve_seed, resolves_inside, write_plans, ReferenceKind, ReferenceSite,
-    Scope, SeedLookup,
+    contained_path, first_syntax_error, parse_kind, plan_file, read_source, reference_sites,
+    resolve_seed, resolves_inside, write_plans, ReferenceKind, ReferenceSite, SeedLookup,
 };
 use super::state::IndexState;
 use super::symbol_graph::NodeKind;

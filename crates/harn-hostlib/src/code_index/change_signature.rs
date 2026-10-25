@@ -364,7 +364,7 @@ fn plan(
         )));
     }
     // The selector may be qualified (`Store.load`); syntax matches the bare name.
-    let name = seed_node.name.to_string();
+    let name = seed_node.name.clone();
     let seed_path = seed_node.path.to_string();
     let seed_line = seed_node.line;
     let Some(language) = Language::detect(Path::new(&seed_path), None) else {
