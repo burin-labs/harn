@@ -361,6 +361,18 @@ fn floor_does_not_block_a_doas_permit_check_that_launches_nothing() {
 }
 
 #[test]
+fn the_privilege_label_matches_the_doas_word_not_a_prefix() {
+    for command in ["doas-helper --version", "echo doasdoas", "ls doas.conf"] {
+        let scan = command_risk_scan_json(&shell_ctx(command), None);
+        assert!(!labels(&scan).contains(&"sudo".to_string()), "{command}");
+    }
+    for command in ["doas ls", "true && doas ls", "echo x; doas ls"] {
+        let scan = command_risk_scan_json(&shell_ctx(command), None);
+        assert!(labels(&scan).contains(&"sudo".to_string()), "{command}");
+    }
+}
+
+#[test]
 fn deterministic_scan_projects_privilege_wrappers_to_the_launched_command() {
     for (command, argv) in [
         (
