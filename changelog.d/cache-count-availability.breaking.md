@@ -6,3 +6,15 @@
   recorded before that flag existed read as unreported. Session-projected run
   records drop the `metadata.cache_tokens` block, which summed unreported zeros,
   and their per-call `llm_call` spans omit cache counts the call did not report.
+
+  Migration: `LlmUsageRecord` and `RunViewUsage` gain two public fields, so a
+  struct literal must set them. Use `None` when the record has no cache
+  accounting, and read a count as unreported when it is `None`.
+
+  ```rust
+  LlmUsageRecord {
+      cache_read_tokens: None,
+      cache_write_tokens: None,
+      ..existing_fields
+  }
+  ```
