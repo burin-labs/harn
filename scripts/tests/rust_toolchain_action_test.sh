@@ -68,6 +68,7 @@ run_case() {
     GITHUB_ENV="$state/github_env" \
     RUNNER_OS="${CASE_RUNNER_OS:-Linux}" \
     RUNNER_TEMP="$state/runner-temp" \
+    HARN_RUSTC_FRONTEND_THREADS="${CASE_FRONTEND_THREADS:-8}" \
     RUNNER_ENVIRONMENT="${CASE_RUNNER_ENVIRONMENT:-self-hosted}" \
     TOOLCHAIN_TEST_STATE="$state" \
     TOOLCHAIN_TEST_MODE="$mode" \
@@ -144,7 +145,7 @@ env | grep -E '^(RUSTC_BOOTSTRAP|CARGO_BIN_EXE_echo-env)='
 printf 'last-arg %s\n' "${!#}"
 SCRIPT
 chmod +x "$tmp_root/fake-rustc"
-diff -u - <(env 'CARGO_BIN_EXE_echo-env=/bin/echo' "$wrapper" "$tmp_root/fake-rustc" --crate-name t | sort) <<'EXPECTED'
+diff -u - <(env 'CARGO_BIN_EXE_echo-env=/bin/echo' 'HARN_RUSTC_FRONTEND_THREADS=8' "$wrapper" "$tmp_root/fake-rustc" --crate-name t | sort) <<'EXPECTED'
 CARGO_BIN_EXE_echo-env=/bin/echo
 RUSTC_BOOTSTRAP=1
 last-arg -Zthreads=8
@@ -152,7 +153,7 @@ EXPECTED
 # Windows cannot run the shell wrapper, and the opt-out leaves the job serial.
 CASE_RUNNER_OS=Windows run_case frontend-windows cargo-transient 0
 [[ ! -s "$tmp_root/frontend-windows/github_env" ]]
-HARN_RUSTC_FRONTEND_THREADS=1 run_case frontend-off cargo-transient 0
+CASE_FRONTEND_THREADS=1 run_case frontend-off cargo-transient 0
 [[ ! -s "$tmp_root/frontend-off/github_env" ]]
 
 echo 'rust toolchain action tests passed'

@@ -337,6 +337,10 @@ fn sandboxed_process_config_switches_off_a_wrapper_that_cannot_run() {
         cwd: Some(cwd.clone()),
         env: vec![
             ("RUSTC_WRAPPER".into(), "/definitely/missing/wrapper".into()),
+            // An inherited workspace wrapper would otherwise join the command
+            // Cargo runs, so the decision would not name this wrapper alone.
+            ("RUSTC_WORKSPACE_WRAPPER".into(), String::new()),
+            ("CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER".into(), String::new()),
             (
                 "CARGO_TARGET_DIR".into(),
                 caller_target.display().to_string(),

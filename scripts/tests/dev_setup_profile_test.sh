@@ -47,6 +47,8 @@ trap cleanup EXIT
 # Cases that want one set it explicitly.
 export HARN_DEV_TARGET_WORKTREE_PATH=
 export CODEX_WORKTREE_PATH=
+# The front-end default, whatever the developer running the test opted into.
+export HARN_RUSTC_FRONTEND_THREADS=8
 
 make_fixture_repo() {
   local name="$1"
