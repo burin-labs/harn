@@ -1172,10 +1172,19 @@ pipeline test_unresolved_xargs_forms_still_refuse_stash_writes(harness: Harness,
     "xargs -a input -n 1 git stash pop",
     "xargs --arg-file=input git stash",
     "xargs -a input git -C /workspace stash clear",
+    "xargs -a input sh -c 'git stash drop'",
+    "xargs -a input bash -lc \"git -C /workspace stash pop\"",
+    "xargs -a input env GIT_DIR=/x git stash",
+    "xargs -a input -I{} sh -c 'git stash drop {}'",
   ] {
     assert(!verdict(claude_payload(command)).allow, command + " writes the shared stash list")
   }
-  for command in ["xargs -a input git status", "xargs -a input git stash list", "xargs -a input rm"] {
+  for command in [
+    "xargs -a input git status",
+    "xargs -a input git stash list",
+    "xargs -a input rm",
+    "xargs -a input sh -c 'git status'",
+  ] {
     const allowed = verdict(claude_payload(command))
     assert(allowed.allow, command + " does not write the stash list: " + allowed.reason)
   }
