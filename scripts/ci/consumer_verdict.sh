@@ -3,9 +3,8 @@
 # fail is excused as inherited only when the base rehearsal also measured a
 # fail on the same consumer commit and job set, failing in exactly the same
 # job steps. Any other base outcome (passed, unmeasured, failed elsewhere, or
-# a different consumer) leaves the pull request's measured fail blocking. An
-# unmeasured pull request outcome is a named warning until
-# CONSUMER_UNMEASURED_BLOCKS flips it to blocking.
+# a different consumer) leaves the pull request's measured fail blocking.
+# An expected consumer check without a measured verdict also blocks.
 #
 # Inputs are the CONSUMER_* variables CI status sets. Exit 1 blocks.
 set -uo pipefail
@@ -17,12 +16,8 @@ summary() {
 unmeasured() {
   local message="consumer check UNMEASURED: $1"
   summary "$message"
-  if [ "${CONSUMER_UNMEASURED_BLOCKS:-false}" = "true" ]; then
-    echo "::error::$message"
-    exit 1
-  fi
-  echo "::warning::$message"
-  exit 0
+  echo "::error::$message"
+  exit 1
 }
 
 block() {
