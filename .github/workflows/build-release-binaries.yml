@@ -801,11 +801,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # Both GNU/Linux release legs intentionally build on the same pinned
-      # x86_64 Ubuntu baseline. ARM64 therefore needs the complete target
-      # C toolchain: gcc-aarch64-linux-gnu only recommends (and does not own)
-      # the target libc development headers that native build scripts load.
-      # The native ARM64 runner remains reserved for artifact smoke testing.
+      # The ARM64 leg builds natively on ubuntu-22.04-arm (free for public
+      # repositories, glibc 2.35 like the x86_64 leg). The cross toolchain
+      # below runs only when policy routes the target to an x86 host.
       - name: Install Linux ARM64 cross toolchain (x86 host only)
         if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.arch == 'X64'
         uses: ./.github/actions/apt-install
