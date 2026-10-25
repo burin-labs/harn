@@ -4,21 +4,32 @@ use super::*;
 fn failed_hash_refresh_preserves_all_previous_classifications() {
     let base = temp_path("failed-refresh");
     std::fs::create_dir(base.path().join("a-valid")).unwrap();
+    std::fs::create_dir(base.path().join("z-missing")).unwrap();
+    let stored = compute_structure_hash(&base.path().join("a-valid")).unwrap();
     let mut state = MetadataState::new(base.path());
     for dir in ["a-valid", "z-missing"] {
         state.set_namespace(
             dir,
             "classification",
-            BTreeMap::from([("structureHash".into(), serde_json::json!("previous"))]),
+            BTreeMap::from([("structureHash".into(), serde_json::json!(stored))]),
         );
     }
+    assert!(matches!(
+        metadata_stale_value(&state, base.path()).as_dict().unwrap()["any_stale"],
+        VmValue::Bool(false)
+    ));
+    assert_eq!(
+        metadata_inspect_stale_flags(base.path(), "z-missing", &state.entries["z-missing"]),
+        (false, false)
+    );
+    std::fs::remove_dir(base.path().join("z-missing")).unwrap();
     state.dirty = false;
     assert!(refresh_metadata_hashes(&mut state).is_err());
     assert!(!state.dirty);
     for dir in ["a-valid", "z-missing"] {
         assert_eq!(
             classification_string(&state.entries[dir], "structureHash").as_deref(),
-            Some("previous")
+            Some(stored.as_str())
         );
     }
     let stale = metadata_stale_value(&state, base.path());
