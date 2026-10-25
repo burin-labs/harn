@@ -27,6 +27,12 @@ fn floor_blocks_find_deleting_outside_the_workspace_or_the_whole_root() {
         "find . -printf '%p\\n' -delete",
         "find . -fprint /dev/null -delete",
         "find . -prune -delete",
+        "find . -printf -name -delete",
+        "find . -fprintf /dev/null -name -delete",
+        "find -O3 / -name '*.bak' -delete",
+        "find -D tree / -name '*.bak' -delete",
+        "find -H -L /etc -delete",
+        "find -files0-from list.txt -name x -delete",
     ] {
         assert!(
             is_cat_root(cmd),
