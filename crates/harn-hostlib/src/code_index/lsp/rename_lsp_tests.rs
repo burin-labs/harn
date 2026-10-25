@@ -517,19 +517,28 @@ fn a_method_rename_leaves_a_free_function_path_in_a_macro_alone() {
         format!("{declaration}\n\n#[macro_export]\nmacro_rules! run {{\n    () => {{\n        $crate::{path}()\n    }};\n}}\n")
     };
     // `$crate::parser::parse` names the module's free function, never the
-    // method. A conditional `mod`, or a path through the type, may reach it.
+    // method. A conditional `mod` or module file, or a path through the
+    // type, may reach it.
     let cases = [
-        ("pub mod parser;", "parser::parse", true),
+        ("pub mod parser;", "", "parser::parse", true),
         (
             "#[cfg(not(any()))]\npub mod parser;",
+            "",
             "parser::parse",
             false,
         ),
-        ("pub mod parser;", "parser::Parser::parse", false),
+        (
+            "pub mod parser;",
+            "#![cfg(not(any()))] ",
+            "parser::parse",
+            false,
+        ),
+        ("pub mod parser;", "", "parser::Parser::parse", false),
     ];
-    for (declaration, path, applies) in cases {
+    for (declaration, inner, path, applies) in cases {
         let dir = tempdir().unwrap();
         let lib = macro_lib(declaration, path);
+        let parser = format!("{inner}{parser}");
         write_tree(
             dir.path(),
             &[
@@ -538,7 +547,7 @@ fn a_method_rename_leaves_a_free_function_path_in_a_macro_alone() {
                     "[package]\nname = \"small\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
                 ),
                 ("src/lib.rs", &lib),
-                ("src/parser.rs", parser),
+                ("src/parser.rs", &parser),
             ],
         );
         let capability = index(dir.path());
@@ -569,7 +578,7 @@ fn a_method_rename_leaves_a_free_function_path_in_a_macro_alone() {
             assert_eq!(
                 s(field(&result, "result")),
                 "backend_unavailable",
-                "{declaration} {path}: {result:?}"
+                "{declaration} {inner}{path}: {result:?}"
             );
             assert!(
                 s(field(&result, "details")).contains("src/lib.rs:"),

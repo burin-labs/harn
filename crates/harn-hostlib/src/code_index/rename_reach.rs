@@ -57,6 +57,13 @@ impl Reach {
             return Self::Anywhere;
         };
         let local = match language {
+            // A declaration file exports every top-level declaration unless it
+            // has an export statement of its own, so leave it to the server.
+            Language::TypeScript | Language::Tsx | Language::JavaScript | Language::Jsx
+                if is_declaration_file(path) =>
+            {
+                false
+            }
             Language::TypeScript | Language::Tsx | Language::JavaScript | Language::Jsx => {
                 script_file_local(&tree, source, identifier, name)
             }
@@ -113,7 +120,7 @@ impl<'a> Exclusions<'a> {
         match &self.reach {
             Reach::Anywhere => Ok(None),
             Reach::FileLocal { path: own } => {
-                if path != own {
+                if !maybe_same_file(&self.state.root, path, own) {
                     return Ok(Some(
                         "the declaration is local to its own file, so another file cannot reference it",
                     ));
@@ -162,6 +169,8 @@ impl<'a> Exclusions<'a> {
 
     /// Whether `root` declares the module chain `modules` with plain,
     /// unconditional `mod` items, so every build resolves the path to it.
+    /// Neither the `mod` item nor the module's own file or body may carry a
+    /// `cfg` or `path` attribute.
     fn declares_modules(
         &self,
         crate_dir: &str,
@@ -170,21 +179,16 @@ impl<'a> Exclusions<'a> {
     ) -> Result<bool, HostlibError> {
         let mut parent = root.to_string();
         for (depth, module) in modules.iter().enumerate() {
-            if !self.state.root.join(&parent).is_file() {
-                return Ok(false);
-            }
-            let source = read_source(self.builtin, &self.state.root, &parent, self.session_id)?;
-            let Ok(tree) = ast_api::parse_tree(&source, Language::Rust) else {
+            let Some((source, tree)) = self.parse_rust(&parent)? else {
                 return Ok(false);
             };
             let Some(item) = unconditional_mod(tree.root_node(), &source, module) else {
                 return Ok(false);
             };
-            if depth + 1 == modules.len() {
-                return Ok(true);
-            }
-            if item.child_by_field_name("body").is_some() {
-                return Ok(false);
+            let last = depth + 1 == modules.len();
+            if let Some(body) = item.child_by_field_name("body") {
+                // An inline module's children are not followed further.
+                return Ok(last && !inner_conditional(body, &source));
             }
             let dir = Path::new(crate_dir)
                 .join("src")
@@ -194,13 +198,90 @@ impl<'a> Exclusions<'a> {
                 .filter(|file| self.state.root.join(file).is_file())
                 .map(|file| file.to_string_lossy().replace('\\', "/"))
                 .collect();
-            let [next] = candidates.as_slice() else {
+            let [file] = candidates.as_slice() else {
                 return Ok(false);
             };
-            parent = next.clone();
+            let Some((module_source, module_tree)) = self.parse_rust(file)? else {
+                return Ok(false);
+            };
+            if inner_conditional(module_tree.root_node(), &module_source) {
+                return Ok(false);
+            }
+            if last {
+                return Ok(true);
+            }
+            parent = file.clone();
         }
         Ok(false)
     }
+
+    /// The source and syntax tree of the Rust file `rel`, if it exists and parses.
+    fn parse_rust(&self, rel: &str) -> Result<Option<(String, Tree)>, HostlibError> {
+        if !self.state.root.join(rel).is_file() {
+            return Ok(None);
+        }
+        let source = read_source(self.builtin, &self.state.root, rel, self.session_id)?;
+        Ok(ast_api::parse_tree(&source, Language::Rust)
+            .ok()
+            .map(|tree| (source, tree)))
+    }
+}
+
+/// `.d.ts`, `.d.mts` or `.d.cts`.
+fn is_declaration_file(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    [".d.ts", ".d.mts", ".d.cts"]
+        .iter()
+        .any(|suffix| lower.ends_with(suffix))
+}
+
+/// Whether index-relative paths `a` and `b` may name one file. Index paths
+/// and paths mapped back from a server's edit can spell one file
+/// differently (case, a symlinked directory, a hard link), and treating the
+/// declaration's own file as another would skip a real reference, so any
+/// doubt answers yes.
+fn maybe_same_file(root: &Path, a: &str, b: &str) -> bool {
+    if a.eq_ignore_ascii_case(b) {
+        return true;
+    }
+    let (Ok(left), Ok(right)) = (
+        std::fs::metadata(root.join(a)),
+        std::fs::metadata(root.join(b)),
+    ) else {
+        return true;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        left.dev() == right.dev() && left.ino() == right.ino()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (left, right);
+        match (root.join(a).canonicalize(), root.join(b).canonicalize()) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => true,
+        }
+    }
+}
+
+/// Whether a module's own file or inline body opens with an inner `cfg` or
+/// `path` attribute (`#![cfg(...)]`), which makes the module conditional.
+fn inner_conditional(container: Node<'_>, source: &str) -> bool {
+    let mut cursor = container.walk();
+    for node in container.named_children(&mut cursor) {
+        match node.kind() {
+            "inner_attribute_item" => {
+                let text = node.utf8_text(source.as_bytes()).unwrap_or_default();
+                if text.contains("cfg") || text.contains("path") {
+                    return true;
+                }
+            }
+            "line_comment" | "block_comment" => {}
+            _ => break,
+        }
+    }
+    false
 }
 
 /// A top-level `mod name` item with no `cfg` or `path` attribute.
@@ -380,12 +461,51 @@ mod tests {
                 false,
             ),
             ("namespace N {\n  const length = 1;\n}\n", "length", false),
+            (
+                "declare module \"x\" {\n  const length: number;\n}\n",
+                "length",
+                false,
+            ),
         ] {
             let source = format!("{module}{body}");
             assert_eq!(reach("a.ts", ts, &source, name, f), local, "{source}");
         }
         // A script's top-level bindings are global.
         assert!(!reach("a.ts", ts, "const length = 1;\n", "length", f));
+        // A declaration file exports its top-level declarations implicitly.
+        let declarations = "import type { Base } from \"./base\";\ninterface Options extends Base {}\nexport interface Config { options: Options }\n";
+        assert!(reach(
+            "types.ts",
+            ts,
+            declarations,
+            "Options",
+            NodeKind::Type
+        ));
+        for path in ["types.d.ts", "types.d.mts", "types.d.cts", "Types.D.TS"] {
+            assert!(
+                !reach(path, ts, declarations, "Options", NodeKind::Type),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn file_identity_doubts_answer_same_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.ts"), "").unwrap();
+        std::fs::write(root.join("src/b.ts"), "").unwrap();
+        assert!(!maybe_same_file(root, "src/a.ts", "src/b.ts"));
+        assert!(maybe_same_file(root, "src/a.ts", "SRC/A.ts"));
+        assert!(maybe_same_file(root, "src/a.ts", "src/missing.ts"));
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("src"), root.join("linked")).unwrap();
+            std::fs::hard_link(root.join("src/a.ts"), root.join("src/hard.ts")).unwrap();
+            assert!(maybe_same_file(root, "src/a.ts", "linked/a.ts"));
+            assert!(maybe_same_file(root, "src/a.ts", "src/hard.ts"));
+        }
     }
 
     #[test]
