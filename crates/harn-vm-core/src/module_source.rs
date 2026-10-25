@@ -32,6 +32,7 @@ pub struct ModuleSource {
     text: Arc<str>,
     sha256: OnceLock<[u8; 32]>,
     imports: OnceLock<Vec<Arc<str>>>,
+    needs_imported_symbols: OnceLock<Option<bool>>,
 }
 
 impl ModuleSource {
@@ -44,6 +45,7 @@ impl ModuleSource {
             text: text.into(),
             sha256: OnceLock::new(),
             imports: OnceLock::new(),
+            needs_imported_symbols: OnceLock::new(),
         }
     }
 
@@ -79,6 +81,16 @@ impl ModuleSource {
                 .into_iter()
                 .map(Arc::from)
                 .collect()
+        })
+    }
+
+    /// Whether lowering this source consults imported names, or `None` when it
+    /// does not parse. One parse per file version, however many graphs hold it.
+    pub(crate) fn needs_imported_symbols(&self, path: &Path) -> Option<bool> {
+        *self.needs_imported_symbols.get_or_init(|| {
+            crate::module_artifact::ModuleCompilationContext::source_needs_imported_symbols(
+                path, &self.text,
+            )
         })
     }
 }
