@@ -8677,6 +8677,8 @@ On Unix, a runtime rooted directly in the system temporary directory uses
 `harn-user-<effective-uid>/.harn-runs` beneath that directory instead.
 The per-user directory is created with mode `0700`; persistence refuses an
 existing symlink, another owner's directory, or group or world access.
+Temporary ancestors must be owned by the effective user or root; a shared
+writable ancestor must have the sticky bit to prevent namespace replacement.
 This separates privileged and ordinary command drivers.
 An explicit `HARN_RUN_DIR` takes precedence.
 

@@ -102,7 +102,7 @@ fn generated_precompile_driver_uses_user_run_store_in_shared_temp() {
 fn generated_precompile_driver_refuses_unsafe_user_run_store() {
     use std::os::unix::fs::{symlink, PermissionsExt};
 
-    for alias in [false, true] {
+    for unsafe_kind in ["public", "symlink", "parent"] {
         let temporary = tempfile::tempdir().expect("isolated shared temp");
         let project = tempfile::tempdir().expect("project");
         let outside = tempfile::tempdir().expect("other account's directory");
@@ -110,8 +110,11 @@ fn generated_precompile_driver_refuses_unsafe_user_run_store() {
         // SAFETY: geteuid has no arguments or preconditions.
         let uid = unsafe { libc::geteuid() };
         let private = temporary.path().join(format!("harn-user-{uid}"));
-        if alias {
+        if unsafe_kind == "symlink" {
             symlink(outside.path(), &private).expect("plant namespace symlink");
+        } else if unsafe_kind == "parent" {
+            std::fs::set_permissions(temporary.path(), std::fs::Permissions::from_mode(0o777))
+                .unwrap();
         } else {
             std::fs::create_dir(&private).unwrap();
             std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -136,7 +139,7 @@ fn generated_precompile_driver_refuses_unsafe_user_run_store() {
             "unsafe namespace accepted: {stderr}"
         );
         assert!(
-            stderr.contains("shared-temp run directory must be private"),
+            stderr.contains("shared-temp run directory"),
             "the persistence boundary did not refuse the unsafe namespace: {stderr}"
         );
         assert!(!private.join(".harn-runs").exists());
