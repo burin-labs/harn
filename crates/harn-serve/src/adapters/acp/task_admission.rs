@@ -87,6 +87,8 @@ pub enum TaskAdmissionError {
     TaskNotRunnable,
     TaskNotCurrent,
     StorageUnavailable,
+    /// The session is being closed and no longer admits delivery prompts.
+    SessionClosing,
 }
 
 impl TaskAdmissionError {
@@ -95,6 +97,7 @@ impl TaskAdmissionError {
             Self::InvalidTaskContext => -32602,
             Self::TaskNotSteerable | Self::TaskNotRunnable | Self::TaskNotCurrent => -32000,
             Self::StorageUnavailable => TASK_ADMISSION_STORAGE_UNAVAILABLE_RPC_CODE,
+            Self::SessionClosing => -32004,
         }
     }
 
@@ -105,6 +108,7 @@ impl TaskAdmissionError {
             Self::TaskNotRunnable => "task cannot dispatch this session prompt",
             Self::TaskNotCurrent => "task does not own the current session prompt",
             Self::StorageUnavailable => "durable task storage is unavailable",
+            Self::SessionClosing => "session is closing and no longer accepts prompts",
         }
     }
 }
@@ -179,13 +183,15 @@ impl ConcurrentSessionControls {
                     if let Some(projection) = projection {
                         meta["harn"]["taskMessage"] = projection;
                     }
-                    self.pending_prompts.register(
-                        session_id,
-                        command.request_id,
-                        message_id,
-                        command.delivery,
-                        meta,
-                    );
+                    self.pending_prompts
+                        .register(
+                            session_id,
+                            command.request_id,
+                            message_id,
+                            command.delivery,
+                            meta,
+                        )
+                        .map_err(|()| TaskAdmissionError::SessionClosing)?;
                     super::core::record_and_emit_control(self, session_id, control);
                     Ok(delivery_owner)
                 },

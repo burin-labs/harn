@@ -159,6 +159,13 @@ impl AcpServer {
             return;
         };
 
+        // Stop admitting delivery prompts before sweeping the pending ones, so
+        // a prompt racing this close is refused with an error. Held until the
+        // close ends: on failure the session stays open and admits again.
+        let _closed = self
+            .concurrent_controls
+            .pending_prompts
+            .close_delivery(session_id);
         session.cancellation.cancel();
         self.concurrent_controls
             .cancel_pending_prompts(session_id, "session_closed", &self.output)

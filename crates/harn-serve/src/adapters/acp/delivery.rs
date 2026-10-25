@@ -21,8 +21,13 @@ struct PendingPrompt {
     /// it. The request stays here, cancellable, until the turn claims
     /// admission; the turn is then the only thing that answers it.
     admitting: bool,
-    /// A cancel or close reached the prompt while it was admitting.
+    /// A cancel or close reached the prompt before its turn claimed it.
     withdrawn: Option<String>,
+    /// The turn claimed admission: a cancel no longer withdraws the prompt,
+    /// and its receipt waits for the message's insertion.
+    claimed: bool,
+    /// Set when the receipt is sent, so the turn knows its request is answered.
+    inserted: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// How a turn's claim on its delivery prompt ended.
@@ -34,7 +39,40 @@ pub(super) enum AdmissionClaim {
 
 /// Every unanswered delivery prompt this connection sent, in arrival order.
 #[derive(Clone, Default)]
-pub(super) struct PendingPrompts(Arc<std::sync::Mutex<Vec<PendingPrompt>>>);
+pub(super) struct PendingPrompts(Arc<std::sync::Mutex<PendingState>>);
+
+/// The pending list and the sessions that no longer admit delivery prompts,
+/// under one lock so closing and registering cannot interleave.
+#[derive(Default)]
+struct PendingState {
+    prompts: Vec<PendingPrompt>,
+    closed: std::collections::BTreeSet<String>,
+}
+
+impl std::ops::Deref for PendingState {
+    type Target = Vec<PendingPrompt>;
+    fn deref(&self) -> &Self::Target {
+        &self.prompts
+    }
+}
+
+impl std::ops::DerefMut for PendingState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.prompts
+    }
+}
+
+/// Keeps a session's delivery admission closed until dropped.
+pub(super) struct DeliveryClosure {
+    pending: PendingPrompts,
+    session_id: String,
+}
+
+impl Drop for DeliveryClosure {
+    fn drop(&mut self) {
+        self.pending.lock().closed.remove(&self.session_id);
+    }
+}
 
 /// What the router did with a `session/prompt`.
 pub(super) enum DeliveryRoute {
@@ -60,17 +98,22 @@ impl PromptReceipts {
     }
 
     pub(super) fn inserted(&self, session_id: &str, message_id: &str) {
-        if let Some((request_id, meta)) = self.pending.take(session_id, message_id) {
+        if let Some((request_id, meta, inserted)) =
+            self.pending.take_inserted(session_id, message_id)
+        {
+            inserted.store(true, std::sync::atomic::Ordering::SeqCst);
             send_receipt(&self.output, &request_id, message_id, Some(meta));
         }
     }
 }
 
 impl PendingPrompts {
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<PendingPrompt>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, PendingState> {
         self.0.lock().unwrap_or_else(|error| error.into_inner())
     }
 
+    /// Queue a request's pending entry. Refused once the session no longer
+    /// admits delivery prompts.
     pub(super) fn register(
         &self,
         session_id: &str,
@@ -78,8 +121,12 @@ impl PendingPrompts {
         message_id: &str,
         delivery: AcpPromptDelivery,
         meta: serde_json::Value,
-    ) {
-        self.lock().push(PendingPrompt {
+    ) -> Result<(), ()> {
+        let mut state = self.lock();
+        if state.closed.contains(session_id) {
+            return Err(());
+        }
+        state.prompts.push(PendingPrompt {
             session_id: session_id.to_string(),
             request_id,
             message_id: message_id.to_string(),
@@ -87,7 +134,39 @@ impl PendingPrompts {
             meta,
             admitting: false,
             withdrawn: None,
+            claimed: false,
+            inserted: Arc::default(),
         });
+        Ok(())
+    }
+
+    /// Stop admitting delivery prompts for a session that is being retired.
+    /// Call before sweeping its pending prompts: a prompt registering after
+    /// this is refused and answered with an error, never left unanswered.
+    pub(super) fn close_delivery(&self, session_id: &str) -> DeliveryClosure {
+        self.lock().closed.insert(session_id.to_string());
+        DeliveryClosure {
+            pending: self.clone(),
+            session_id: session_id.to_string(),
+        }
+    }
+
+    /// Remove an entry a checkpoint or turn inserted, with what answers it.
+    fn take_inserted(
+        &self,
+        session_id: &str,
+        message_id: &str,
+    ) -> Option<(
+        serde_json::Value,
+        serde_json::Value,
+        Arc<std::sync::atomic::AtomicBool>,
+    )> {
+        let mut pending = self.lock();
+        let position = pending.iter().position(|prompt| {
+            prompt.session_id == session_id && prompt.message_id == message_id
+        })?;
+        let prompt = pending.remove(position);
+        Some((prompt.request_id, prompt.meta, prompt.inserted))
     }
 
     fn contains(&self, session_id: &str, message_id: &str) -> bool {
@@ -115,13 +194,21 @@ impl PendingPrompts {
         &self,
         session_id: &str,
         message_id: &str,
-    ) -> Option<(serde_json::Value, serde_json::Value)> {
+    ) -> Option<(
+        serde_json::Value,
+        serde_json::Value,
+        Arc<std::sync::atomic::AtomicBool>,
+    )> {
         let mut pending = self.lock();
         let prompt = pending.iter_mut().find(|prompt| {
             prompt.session_id == session_id && prompt.message_id == message_id && !prompt.admitting
         })?;
         prompt.admitting = true;
-        Some((prompt.request_id.clone(), prompt.meta.clone()))
+        Some((
+            prompt.request_id.clone(),
+            prompt.meta.clone(),
+            prompt.inserted.clone(),
+        ))
     }
 
     /// The turn's one decision point: past it, a cancel no longer withdraws
@@ -134,10 +221,12 @@ impl PendingPrompts {
         else {
             return AdmissionClaim::Admitted;
         };
-        match pending.remove(position).withdrawn {
-            Some(reason) => AdmissionClaim::Withdrawn(reason),
-            None => AdmissionClaim::Admitted,
+        if let Some(reason) = pending[position].withdrawn.clone() {
+            pending.remove(position);
+            return AdmissionClaim::Withdrawn(reason);
         }
+        pending[position].claimed = true;
+        AdmissionClaim::Admitted
     }
 
     /// Flag the prompts `select` picks as withdrawn and return the ones still
@@ -151,7 +240,10 @@ impl PendingPrompts {
     ) -> Vec<(String, String)> {
         let mut pending = self.lock();
         let mut queued = Vec::new();
-        for prompt in pending.iter_mut().filter(|prompt| select(prompt)) {
+        for prompt in pending
+            .iter_mut()
+            .filter(|prompt| !prompt.claimed && select(prompt))
+        {
             // Flag every selected prompt at selection: the revocation that
             // follows awaits, and a drain may admit the prompt meanwhile.
             prompt.withdrawn.get_or_insert_with(|| reason.to_string());
@@ -429,7 +521,7 @@ impl AcpServer {
             else {
                 return;
             };
-            let Some((request_id, meta)) = self
+            let Some((request_id, meta, inserted)) = self
                 .concurrent_controls
                 .pending_prompts
                 .begin_admission(session_id, &message_id)
@@ -452,7 +544,7 @@ impl AcpServer {
                 &request_id,
                 &params,
                 None,
-                TurnReply::receipt(message.message_id, meta),
+                TurnReply::receipt(message.message_id, meta, inserted),
             )
             .await;
             self.concurrent_controls
@@ -569,35 +661,34 @@ pub(super) enum TurnReply {
     Receipt {
         message_id: String,
         meta: serde_json::Value,
-        inserted: std::cell::Cell<bool>,
+        /// Set when the receipt goes out with the message's insertion.
+        inserted: Arc<std::sync::atomic::AtomicBool>,
     },
 }
 
 impl TurnReply {
-    fn receipt(message_id: String, meta: serde_json::Value) -> Self {
+    fn receipt(
+        message_id: String,
+        meta: serde_json::Value,
+        inserted: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
         Self::Receipt {
             message_id,
             meta,
-            inserted: std::cell::Cell::new(false),
+            inserted,
         }
     }
 
     pub(super) fn is_inserted(&self) -> bool {
-        matches!(self, Self::Receipt { inserted, .. } if inserted.get())
+        matches!(self, Self::Receipt { inserted, .. } if inserted.load(std::sync::atomic::Ordering::SeqCst))
     }
 }
 
 impl AcpServer {
-    /// The turn was admitted: a delivery prompt's message is now inserted.
-    pub(super) fn turn_started(&self, id: &serde_json::Value, session_id: &str, reply: &TurnReply) {
-        if let TurnReply::Receipt {
-            message_id,
-            meta,
-            inserted,
-        } = reply
-        {
-            inserted.set(true);
-            send_receipt(&self.output, id, message_id, Some(meta.clone()));
+    /// The turn was admitted. The receipt is not sent here: it goes out with
+    /// the message's insertion into the transcript (`PromptReceipts::inserted`).
+    pub(super) fn turn_started(&self, session_id: &str, reply: &TurnReply) {
+        if matches!(reply, TurnReply::Receipt { .. }) {
             self.send_state_update(session_id, serde_json::json!({"state": "running"}));
         }
     }
@@ -768,13 +859,15 @@ mod tests {
 
     fn registered() -> PendingPrompts {
         let pending = PendingPrompts::default();
-        pending.register(
-            "s",
-            serde_json::json!(7),
-            "m7",
-            AcpPromptDelivery::Queue,
-            serde_json::Value::Null,
-        );
+        pending
+            .register(
+                "s",
+                serde_json::json!(7),
+                "m7",
+                AcpPromptDelivery::Queue,
+                serde_json::Value::Null,
+            )
+            .expect("session admits prompts");
         pending
     }
 
@@ -809,6 +902,58 @@ mod tests {
             pending.claim_admission("s", "m7"),
             AdmissionClaim::Withdrawn(reason) if reason == "request_cancelled"
         ));
+    }
+
+    /// A prompt racing session close is refused, so its request is answered
+    /// with an error instead of waiting on a session that is going away.
+    #[test]
+    fn a_prompt_registering_after_delivery_closes_is_refused() {
+        let pending = PendingPrompts::default();
+        let closure = pending.close_delivery("s");
+        let refused = pending.register(
+            "s",
+            serde_json::json!(8),
+            "m8",
+            AcpPromptDelivery::Steer,
+            serde_json::Value::Null,
+        );
+        assert!(refused.is_err());
+        assert!(!pending.contains("s", "m8"));
+        // Other sessions still admit, and the closure's end reopens this one.
+        assert!(registered().contains("s", "m7"));
+        drop(closure);
+        assert!(pending
+            .register(
+                "s",
+                serde_json::json!(9),
+                "m9",
+                AcpPromptDelivery::Steer,
+                serde_json::Value::Null,
+            )
+            .is_ok());
+    }
+
+    /// Past the claim the prompt is the turn's: a cancel cannot withdraw it,
+    /// and its receipt waits for the insertion.
+    #[test]
+    fn a_claimed_prompt_keeps_its_entry_until_its_message_is_inserted() {
+        let pending = registered();
+        let (_, _, inserted) = pending.begin_admission("s", "m7").expect("admitting");
+        assert!(matches!(
+            pending.claim_admission("s", "m7"),
+            AdmissionClaim::Admitted
+        ));
+        assert!(pending.contains("s", "m7"));
+        let queued = pending.select_for_withdrawal(|_| true, "request_cancelled");
+        assert!(queued.is_empty());
+        assert!(matches!(
+            pending.claim_admission("s", "m7"),
+            AdmissionClaim::Admitted
+        ));
+        assert!(!inserted.load(std::sync::atomic::Ordering::SeqCst));
+        let (request_id, _, flag) = pending.take_inserted("s", "m7").expect("entry");
+        assert_eq!(request_id, serde_json::json!(7));
+        assert!(Arc::ptr_eq(&flag, &inserted));
     }
 
     #[test]

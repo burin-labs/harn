@@ -406,7 +406,7 @@ impl AcpServer {
                 return;
             }
         };
-        self.turn_started(id, &session_id, reply);
+        self.turn_started(&session_id, reply);
         let output = self
             .output
             .for_prompt(prompt.correlation.clone(), owner.task().cloned());

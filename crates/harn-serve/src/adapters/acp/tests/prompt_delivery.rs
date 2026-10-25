@@ -296,10 +296,13 @@ async fn queued_prompt_starts_its_own_turn_after_the_running_one() {
         assert!(first_end_at < receipt_at);
         let (running_at, _) = h.state_update(0, "running").await;
         let (idle_at, idle) = h.state_update(0, "idle").await;
-        assert!(receipt_at < running_at && running_at < idle_at);
         assert_eq!(idle["stopReason"], "end_turn");
         let inserted_at = h.user_message("m4").expect("queued prompt opened its turn");
-        assert!(running_at < inserted_at && inserted_at < idle_at);
+        assert!(
+            running_at < inserted_at && inserted_at < receipt_at,
+            "receipt preceded the queued prompt's insertion"
+        );
+        assert!(receipt_at < idle_at);
         h.finish().await;
     })
     .await;
@@ -316,7 +319,12 @@ async fn delivery_prompt_to_an_idle_session_starts_a_turn() {
         assert_eq!(receipt["result"]["messageId"], "m3");
         let (running_at, _) = h.state_update(0, "running").await;
         let (idle_at, idle) = h.state_update(0, "idle").await;
-        assert!(receipt_at < running_at && running_at < idle_at);
+        let inserted_at = h.user_message("m3").expect("idle prompt opened its turn");
+        assert!(
+            running_at < inserted_at && inserted_at < receipt_at,
+            "receipt preceded the idle prompt's insertion"
+        );
+        assert!(receipt_at < idle_at);
         assert_eq!(idle["stopReason"], "end_turn");
         assert!(
             idle["_meta"]["harn"]["terminal"]["kind"].is_string(),
@@ -426,12 +434,16 @@ async fn session_cancel_keeps_pending_prompts_for_the_next_turns() {
         let (queued_at, queued) = h.reply(5).await;
         assert_eq!(queued["result"]["messageId"], "m5");
         let (queue_turn_at, _) = h.state_update(1, "running").await;
-        assert!(cancelled_at < steer_at && steer_at < steer_turn_at);
-        assert!(steer_end_at < queued_at && queued_at < queue_turn_at);
         let m4 = h.user_message("m4").expect("steer inserted");
+        let m5 = h.user_message("m5").expect("queued prompt inserted");
         assert!(
-            steer_turn_at < m4 && m4 < steer_end_at,
-            "the pending steer opens the turn after the cancelled one"
+            cancelled_at < steer_turn_at && steer_turn_at < m4 && m4 < steer_at,
+            "the pending steer opens the turn after the cancelled one, receipt after insertion"
+        );
+        assert!(steer_at < steer_end_at);
+        assert!(
+            steer_end_at < queue_turn_at && queue_turn_at < m5 && m5 < queued_at,
+            "the queued prompt's receipt follows its insertion"
         );
         h.finish().await;
     })
@@ -470,14 +482,24 @@ async fn steers_that_miss_their_turn_open_the_next_one_together() {
         let first = h.reply(4).await.0;
         let second = h.reply(6).await.0;
         let queued = h.reply(5).await.0;
-        assert!(hold_end_at < first && first < steer_turn_at);
+        let m4 = h.user_message("m4").expect("first steer inserted");
+        let m5 = h.user_message("m5").expect("queued prompt inserted");
+        let m6 = h.user_message("m6").expect("second steer inserted");
         assert!(
-            steer_turn_at < second && second < steer_end_at,
+            hold_end_at < steer_turn_at && steer_turn_at < m4 && m4 < first,
+            "the first steer's receipt follows its insertion"
+        );
+        assert!(
+            m6 < second && second < steer_end_at && first < steer_end_at,
             "both steers belong to the first owed turn"
         );
-        assert!(steer_end_at < queued && queued < queue_turn_at && queue_turn_at < queue_end_at);
-        let m4 = h.user_message("m4").expect("first steer inserted");
-        let m6 = h.user_message("m6").expect("second steer inserted");
+        assert!(
+            steer_end_at < queue_turn_at
+                && queue_turn_at < m5
+                && m5 < queued
+                && queued < queue_end_at,
+            "the queued prompt's receipt follows its insertion"
+        );
         assert!(m4 < m6, "steers keep arrival order");
         h.finish().await;
     })
