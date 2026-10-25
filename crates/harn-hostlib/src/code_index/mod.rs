@@ -106,6 +106,7 @@ mod refactor_core;
 mod rename;
 mod rename_binding;
 mod rename_java;
+mod rename_reach;
 mod rename_rust_residue;
 mod repo_map;
 mod signature_syntax;

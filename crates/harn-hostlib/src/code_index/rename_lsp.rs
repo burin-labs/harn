@@ -20,6 +20,7 @@ use super::super::refactor_core::{
     collect_identifier_spans, files_in_scope, first_syntax_error, plan_file, read_source, EditSpan,
     FilePlan, Scope, ShadowSite,
 };
+use super::super::rename_reach::{Exclusions, Reach};
 use super::super::rename_rust_residue::{doc_link_mentions, span_at, Residue};
 use super::super::state::IndexState;
 use super::super::symbol_graph::Node as SymbolNode;
@@ -263,15 +264,26 @@ pub(super) fn rename(
 
     // Every mention the edit leaves must be something else, by the server's
     // own resolution. One it cannot resolve sits in code it did not analyze
-    // (an unloaded module, an inactive `cfg`, an unexpanded macro).
-    let sites = remaining_mentions(&request, env.symbol_name, language, &checked, &changeset)?;
-    if sites.len() > MAX_RESOLVED_MENTIONS {
-        return Ok(Answer::Fallback(format!(
-            "{} mentions of `{}` are left after the server's edit; more than the {MAX_RESOLVED_MENTIONS} Harn checks",
-            sites.len(),
-            env.symbol_name
-        )));
-    }
+    // (an unloaded module, an inactive `cfg`, an unexpanded macro), unless a
+    // language rule already puts it out of the declaration's reach. The
+    // resolve pass has one time budget; past it the rename is refused.
+    let reach = Reach::of(
+        seed_path,
+        language,
+        &source,
+        offset,
+        env.symbol_name,
+        request.seed.kind,
+    );
+    let mut exclusions = Exclusions::new(reach, request.state, BUILTIN, request.session_id);
+    let Leftovers { sites, unreachable } = remaining_mentions(
+        &request,
+        env.symbol_name,
+        language,
+        &checked,
+        &changeset,
+        &mut exclusions,
+    )?;
     let queries: Vec<(String, usize)> = sites
         .iter()
         .map(|site| (site.path.clone(), site.offset))
@@ -281,14 +293,20 @@ pub(super) fn rename(
         Ok(resolutions) => resolutions,
         Err(unanswered) => return Ok(unanswered.into()),
     };
-    let mut preserved_sites = Vec::new();
+    let mut preserved_sites: Vec<(&Site, &str)> = unreachable
+        .iter()
+        .map(|(site, reason)| (site, *reason))
+        .collect();
     let missed: Vec<(&Site, Resolution)> = sites
         .iter()
         .zip(resolutions)
         .filter(|(site, resolution)| {
             let elsewhere = resolution.is_elsewhere();
             if env.proof && elsewhere {
-                preserved_sites.push(*site);
+                preserved_sites.push((
+                    *site,
+                    "language server resolved this name to another binding",
+                ));
             }
             !elsewhere
         })
@@ -311,7 +329,7 @@ pub(super) fn rename(
 
     if env.proof && env.scope == Scope::Workspace {
         let mut preserved = Vec::new();
-        for site in preserved_sites {
+        for (site, reason) in preserved_sites {
             let source = read_source(BUILTIN, &request.state.root, &site.path, request.session_id)?;
             preserved.push(crate::edit_proof::PreservedSite {
                 path: site.path.clone(),
@@ -321,7 +339,7 @@ pub(super) fn rename(
                     .nth(site.line.saturating_sub(1))
                     .unwrap_or("")
                     .to_owned(),
-                reason: "language server resolved this name to another binding".into(),
+                reason: reason.into(),
             });
         }
         env.preserved = Some(preserved);
@@ -416,9 +434,6 @@ pub(super) fn rename(
     )))
 }
 
-/// Upper bound on leftover mentions resolved through the server per rename.
-const MAX_RESOLVED_MENTIONS: usize = 200;
-
 /// A mention of the old name the edit leaves in place.
 struct Site {
     path: String,
@@ -463,15 +478,18 @@ fn scope_exceeded(env: &ResponseEnv<'_>, in_scope: &[String], paths: &[&str]) ->
 }
 
 /// Identifier-position mentions of `name`, outside strings and comments, in
-/// files the same server serves, that `changeset` does not rewrite.
+/// files the same server serves, that `changeset` does not rewrite: the ones
+/// to resolve, and the ones `exclusions` puts out of reach, with why.
 fn remaining_mentions(
     request: &Request<'_>,
     name: &str,
     language: Language,
     mentions: &[String],
     changeset: &[FileEdits],
-) -> Result<Vec<Site>, HostlibError> {
+    exclusions: &mut Exclusions<'_>,
+) -> Result<Leftovers, HostlibError> {
     let mut sites = Vec::new();
+    let mut unreachable = Vec::new();
     for path in mentions {
         let Some(file_language) = Language::detect(Path::new(path), None) else {
             continue;
@@ -516,19 +534,31 @@ fn remaining_mentions(
                     .iter()
                     .any(|edit| edit.span.start_byte == span.start_byte)
             });
-            if !covered {
-                sites.push(Site {
-                    path: path.clone(),
-                    offset: span.start_byte,
-                    line: span.start_row + 1,
-                    qualifies: false,
-                    renameable: true,
-                });
+            if covered {
+                continue;
+            }
+            let site = Site {
+                path: path.clone(),
+                offset: span.start_byte,
+                line: span.start_row + 1,
+                qualifies: false,
+                renameable: true,
+            };
+            match exclusions.reason(path, &source, &tree, span.start_byte)? {
+                Some(reason) => unreachable.push((site, reason)),
+                None => sites.push(site),
             }
         }
     }
     sites.sort_by(|left, right| (&left.path, left.offset).cmp(&(&right.path, right.offset)));
-    Ok(sites)
+    Ok(Leftovers { sites, unreachable })
+}
+
+/// Mentions an edit left: ones the server must resolve, and ones a language
+/// rule puts out of the declaration's reach, each with its reason.
+struct Leftovers {
+    sites: Vec<Site>,
+    unreachable: Vec<(Site, &'static str)>,
 }
 
 /// Intra-doc-link mentions of `name` in Rust `paths` that `changeset` does

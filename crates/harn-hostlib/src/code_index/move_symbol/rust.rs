@@ -19,6 +19,9 @@ struct CrateInfo {
     dir: String,
     ident: String,
     has_lib: bool,
+    /// The manifest moves the library root out of `src/lib.rs`, so module
+    /// paths do not follow the `src/` layout.
+    custom_lib: bool,
 }
 
 /// Where one file sits: inside the library's module tree (`in_lib`), or in
@@ -68,11 +71,13 @@ impl Workspace {
             .ok()
             .and_then(|toml| parse_manifest(&toml))
             .map(|(package, lib_name, lib_path)| {
+                let custom_lib = lib_path.as_deref().is_some_and(|path| path != "src/lib.rs");
                 let lib_rel = lib_path.unwrap_or_else(|| "src/lib.rs".to_string());
                 CrateInfo {
                     dir: dir.to_string(),
                     ident: lib_name.unwrap_or(package).replace('-', "_"),
                     has_lib: self.root.join(dir).join(lib_rel).exists(),
+                    custom_lib,
                 }
             });
         self.crates.insert(dir.to_string(), info.clone());
@@ -117,6 +122,23 @@ impl Workspace {
             crate_dir: ctx.krate.dir,
             path: ctx.module,
         })
+    }
+
+    /// The crate directory and root files (`src/lib.rs`, `src/main.rs`) of
+    /// whichever module tree holds `rel`: a file under `src/` can belong to
+    /// either root. `None` outside a `src/` module tree.
+    pub(crate) fn crate_roots(&mut self, rel: &str) -> Option<(String, Vec<String>)> {
+        let ctx = self.file_ctx(rel)?;
+        if !ctx.in_lib || ctx.krate.custom_lib {
+            return None;
+        }
+        let dir = ctx.krate.dir;
+        let roots: Vec<String> = ["src/lib.rs", "src/main.rs"]
+            .iter()
+            .map(|root| join_rel(&dir, root))
+            .filter(|root| self.root.join(root).is_file())
+            .collect();
+        (!roots.is_empty()).then_some((dir, roots))
     }
 
     /// Whether `module` names a module file of the library.
@@ -1049,6 +1071,14 @@ fn leaf_removal(leaf: Node<'_>, decl: Node<'_>) -> Range<usize> {
 
 /// `(package name, [lib] name, [lib] path)` from a manifest, or `None`
 /// when it declares no package (a virtual workspace root).
+fn join_rel(dir: &str, rest: &str) -> String {
+    if dir.is_empty() {
+        rest.to_string()
+    } else {
+        format!("{dir}/{rest}")
+    }
+}
+
 fn parse_manifest(toml: &str) -> Option<(String, Option<String>, Option<String>)> {
     let mut section = "";
     let mut package = None;

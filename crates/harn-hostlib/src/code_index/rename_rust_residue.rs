@@ -255,7 +255,7 @@ pub(super) fn span_at(source: &str, start: usize, end: usize) -> IdentifierSpan 
 
 /// The path segments written before the identifier at `start`, outermost
 /// first: `$crate::span::Span` yields `["$crate", "span"]`.
-fn qualifier(source: &str, start: usize) -> Vec<String> {
+pub(super) fn qualifier(source: &str, start: usize) -> Vec<String> {
     let mut segments = Vec::new();
     let mut rest = source.get(..start).unwrap_or_default();
     loop {
