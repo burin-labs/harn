@@ -2960,11 +2960,16 @@ jobs:
           ./scripts/ci/rust_artifact.sh build-cli
           "$RUNNER_TEMP/harn-cli.tar.zst"
           "$BASE_SHA"
+      # With `archive: false` the artifact takes the file's name and ignores
+      # `name`, so a file left as harn-cli.tar.zst duplicates the pull
+      # request's CLI artifact and the consumer can select neither.
+      - name: Name the base's Harn CLI
+        run: mv "$RUNNER_TEMP/harn-cli.tar.zst" "$RUNNER_TEMP/harn-base-cli.tar.zst"
       - name: Upload the base's Harn CLI
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-base-cli.tar.zst
-          path: ${{ runner.temp }}/harn-cli.tar.zst
+          path: ${{ runner.temp }}/harn-base-cli.tar.zst
           archive: false
           if-no-files-found: error
           retention-days: 1
