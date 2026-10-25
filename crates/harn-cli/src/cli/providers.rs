@@ -18,6 +18,8 @@ pub(crate) enum ProviderCatalogCommand {
     Validate(ProvidersValidateArgs),
     /// Generate or check every provider catalog artifact from source fragments.
     Generate(ProvidersGenerateArgs),
+    /// Update the pinned Models.dev source, validating every selected fact first.
+    UpdateSource(ProvidersUpdateSourceArgs),
     /// Export the embedded provider catalog, with optional overlays.
     Export(ProvidersExportArgs),
     /// Report overlay entries the baseline catalog already covers.
@@ -103,6 +105,19 @@ pub(crate) struct ProvidersGenerateArgs {
     /// Check whether every generated artifact is up to date without writing.
     #[arg(long)]
     pub check: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProvidersUpdateSourceArgs {
+    /// Read an already downloaded Models.dev v2.0 response instead of the network.
+    #[arg(long, required_unless_present = "live", conflicts_with = "live")]
+    pub input: Option<PathBuf>,
+    /// Download the current Models.dev v2.0 response explicitly.
+    #[arg(long)]
+    pub live: bool,
+    /// Catalog sources whose Models.dev bindings select imported facts.
+    #[arg(long, default_value = "crates/harn-vm/src/llm/catalog_sources")]
+    pub source_dir: PathBuf,
 }
 
 #[derive(Debug, Args)]

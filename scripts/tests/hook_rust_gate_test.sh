@@ -69,7 +69,7 @@ chmod +x "$work/.githooks/pre-commit" "$work/.githooks/pre-push"
 
 cat > "$work/Cargo.toml" <<'TOML'
 [workspace]
-members = ["crates/harn-lint", "crates/harn-other", "crates/harn-vm"]
+members = ["crates/harn-lint", "crates/harn-other", "crates/harn-provider-catalog", "crates/harn-vm"]
 resolver = "2"
 TOML
 cat > "$work/crates/harn-lint/Cargo.toml" <<'TOML'
@@ -87,6 +87,12 @@ TOML
 cat > "$work/crates/harn-vm/Cargo.toml" <<'TOML'
 [package]
 name = "harn-vm"
+version = "0.0.0"
+edition = "2021"
+TOML
+cat > "$work/crates/harn-provider-catalog/Cargo.toml" <<'TOML'
+[package]
+name = "harn-provider-catalog"
 version = "0.0.0"
 edition = "2021"
 TOML
@@ -212,12 +218,7 @@ fi
 
 git -C "$work" checkout --quiet -B provider-catalog-feature origin/main
 printf 'base = false\n' > "$work/crates/harn-provider-catalog/src/capabilities.toml"
-printf 'native_tools = true\n' > "$work/crates/harn-vm/src/llm/capability_sources/20-providers/20-local-ollama.toml"
-printf '{"models":[]}\n' > "$work/spec/provider-catalog/provider-catalog.json"
-git -C "$work" add \
-  crates/harn-provider-catalog/src/capabilities.toml \
-  crates/harn-vm/src/llm/capability_sources/20-providers/20-local-ollama.toml \
-  spec/provider-catalog/provider-catalog.json
+git -C "$work" add crates/harn-provider-catalog/src/capabilities.toml
 git -C "$work" commit --quiet --no-verify -m "update provider catalog data"
 provider_catalog_sha=$(git -C "$work" rev-parse HEAD)
 
@@ -237,9 +238,7 @@ provider_catalog_sha=$(git -C "$work" rev-parse HEAD)
 )
 
 cat > "$tmp_root/expected-provider-catalog-pre-push.txt" <<'EOF'
-make -s check-provider-catalog
-make -s check-provider-matrix
-make -s check-provider-support
+make -s check-provider-catalog check-provider-matrix check-provider-support
 harn provider capabilities audit
 EOF
 if ! diff -u "$tmp_root/expected-provider-catalog-pre-push.txt" "$record"; then
@@ -395,6 +394,7 @@ fi
 
 cat > "$tmp_root/provider-catalog-files.txt" <<'EOF'
 crates/harn-provider-catalog/src/capabilities.toml
+crates/harn-vm/src/llm/catalog_sources/models-dev.json
 crates/harn-vm/src/llm/capability_sources/20-providers/20-local-ollama.toml
 spec/provider-catalog/provider-catalog.json
 EOF
