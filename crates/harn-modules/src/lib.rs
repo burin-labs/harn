@@ -15,6 +15,7 @@ pub mod fingerprint;
 pub mod host_capabilities;
 pub mod host_capability_config;
 mod import_recording;
+mod load_memo;
 pub mod manifest_walk;
 mod namespace_imports;
 mod namespace_signatures;
@@ -98,7 +99,7 @@ pub struct ModuleGraphBuild {
     pub parsed_sources: HashMap<PathBuf, ParsedModuleSource>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct ModuleInfo {
     /// All declarations visible in this module (for local symbol lookup and
     /// go-to-definition resolution).
@@ -1333,43 +1334,53 @@ fn load_module(
     let Some(source) = source else {
         return (ModuleInfo::default(), None);
     };
-    let mut lexer = harn_lexer::Lexer::new(&source);
-    let tokens = match lexer.tokenize() {
-        Ok(tokens) => tokens,
-        Err(error) => {
-            if let Some(observer) = observer {
-                observer(path, &source, None);
-            }
-            let module = ModuleInfo {
-                load_error: Some(ModuleLoadError {
-                    message: error.to_string(),
-                    span: error.span(),
-                }),
-                ..ModuleInfo::default()
-            };
+    // A retained program or an observer needs this load's own syntax tree.
+    let memoized = !retain_parsed_source && observer.is_none();
+    if memoized {
+        if let Some(module) = load_memo::recall(path, &source, package_snapshots) {
             return (module, None);
         }
+    }
+    let (module, program) = project_module(path, &source, package_snapshots, observer);
+    if memoized {
+        load_memo::remember(path, source, &module);
+        return (module, None);
+    }
+    let parsed = program
+        .filter(|_| retain_parsed_source)
+        .map(|program| ParsedModuleSource { source, program });
+    (module, parsed)
+}
+
+/// Lex, parse, and project one module's source. The program is `None` when
+/// lexing or parsing failed; the failure is recorded on the module instead.
+fn project_module(
+    path: &Path,
+    source: &str,
+    package_snapshots: &[PackageSnapshot],
+    observer: Option<&ModuleObserver<'_>>,
+) -> (ModuleInfo, Option<Vec<SNode>>) {
+    let failed = |message: String, span: Span| {
+        if let Some(observer) = observer {
+            observer(path, source, None);
+        }
+        let module = ModuleInfo {
+            load_error: Some(ModuleLoadError { message, span }),
+            ..ModuleInfo::default()
+        };
+        (module, None)
     };
-    let mut parser = Parser::new(tokens);
-    let program = match parser.parse() {
+    let tokens = match harn_lexer::Lexer::new(source).tokenize() {
+        Ok(tokens) => tokens,
+        Err(error) => return failed(error.to_string(), error.span()),
+    };
+    let program = match Parser::new(tokens).parse() {
         Ok(program) => program,
-        Err(error) => {
-            if let Some(observer) = observer {
-                observer(path, &source, None);
-            }
-            let module = ModuleInfo {
-                load_error: Some(ModuleLoadError {
-                    message: error.to_string(),
-                    span: error.span(),
-                }),
-                ..ModuleInfo::default()
-            };
-            return (module, None);
-        }
+        Err(error) => return failed(error.to_string(), error.span()),
     };
 
     if let Some(observer) = observer {
-        observer(path, &source, Some(&program));
+        observer(path, source, Some(&program));
     }
     let mut module = ModuleInfo::default();
     for node in &program {
@@ -1391,8 +1402,7 @@ fn load_module(
     module
         .exports
         .extend(module.selective_re_exports.keys().cloned());
-    let parsed = retain_parsed_source.then_some(ParsedModuleSource { source, program });
-    (module, parsed)
+    (module, Some(program))
 }
 
 /// Extract the stdlib module name when `path` is a `<std>/<name>`
