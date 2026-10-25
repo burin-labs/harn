@@ -486,7 +486,6 @@ fn spawned_process_observes_workspace_toolchain_environment() {
         "UV_CACHE_DIR",
         "NPM_CONFIG_CACHE",
         "YARN_CACHE_FOLDER",
-        "PNPM_HOME",
         "CCACHE_DIR",
         "CCACHE_TEMPDIR",
     ] {
@@ -495,7 +494,7 @@ fn spawned_process_observes_workspace_toolchain_environment() {
     }
     // The child must inherit the user's real HOME and user-site. See the
     // matching unit test in `workspace_env.rs` for why.
-    for key in ["HOME", "PYTHONUSERBASE"] {
+    for key in ["HOME", "PYTHONUSERBASE", "PNPM_HOME"] {
         let value = PathBuf::from(values.get(key).map(String::as_str).unwrap_or_default());
         assert!(
             !value.starts_with(&cache),
