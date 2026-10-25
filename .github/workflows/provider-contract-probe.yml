@@ -122,9 +122,15 @@ jobs:
           RETIREMENT_SWEEP_DATE="$(date -u +%F)" cargo test --locked -p harn-provider-catalog --lib -- --ignored lapsed_retirements_are_not_left_routable >"$RUNNER_TEMP/sweep.log" 2>&1 || status=$?
           cat "$RUNNER_TEMP/sweep.log"
           echo "status=$status" >> "$GITHUB_OUTPUT"
+          # Only the named assertion is a lapse; a compile or harness failure is not.
+          if [ "$status" -ne 0 ] && grep -q "retirements past their date:" "$RUNNER_TEMP/sweep.log"; then
+            echo "lapsed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "lapsed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: File or update the lapsed-retirement issue
-        if: steps.sweep.outputs.status != '0'
+        if: steps.sweep.outputs.lapsed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -141,6 +147,12 @@ jobs:
           else
             gh issue create --repo "$GH_REPO" --title "$title" --body "$body" --assignee ksinder
           fi
+
+      - name: Fail when the sweep could not run
+        if: steps.sweep.outputs.status != '0' && steps.sweep.outputs.lapsed != 'true'
+        run: |
+          echo "::error::The retirement sweep failed for a reason other than a lapsed retirement, so it checked nothing."
+          exit 1
 
   notify-live-failure:
     needs: probe
