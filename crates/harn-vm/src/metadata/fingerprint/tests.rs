@@ -54,10 +54,7 @@ fn missing_directory_is_not_an_empty_directory() {
 
 #[cfg(unix)]
 #[test]
-fn entry_names_cannot_alias_record_separators_or_lossy_unicode() {
-    use std::ffi::OsString;
-    use std::os::unix::ffi::OsStringExt;
-
+fn entry_names_cannot_alias_record_separators() {
     let pair = tempfile::tempdir().unwrap();
     for name in ["a", "b"] {
         write_at(&pair.path().join(name), b"alpha", 100_000_000);
@@ -74,6 +71,14 @@ fn entry_names_cannot_alias_record_separators_or_lossy_unicode() {
         compute_content_hash_for_dir(pair.path()).unwrap(),
         compute_content_hash_for_dir(single.path()).unwrap()
     );
+}
+
+// macOS filesystems reject these names before directory enumeration.
+#[cfg(target_os = "linux")]
+#[test]
+fn non_utf8_entry_names_remain_distinct() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
 
     let raw = tempfile::tempdir().unwrap();
     let first = raw.path().join(OsString::from_vec(vec![b'a', 0x80]));
