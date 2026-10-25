@@ -1116,6 +1116,9 @@ pipeline test_git_stash_writes_are_denied_across_parser_shapes(harness: Harness,
     "git add -A && git stash && make test",
     "bash -lc 'git stash pop'",
     "sh -c \"git -C /workspace stash push\"",
+    "xargs -n 1 git stash drop",
+    "printf x | xargs git stash",
+    "xargs -0 -I {} git -C /workspace stash pop",
   ] {
     const refused = verdict(claude_payload(command))
     assert(!refused.allow, command + " writes the shared stash list")
@@ -1145,6 +1148,8 @@ pipeline test_git_stash_reads_and_lookalikes_are_allowed(harness: Harness, task:
     "git commit -am 'stash the cache'",
     "echo git stash",
     "grep stash docs/notes.md",
+    "xargs git stash list",
+    "xargs -n 1 git log",
     "git reset --soft HEAD~1",
   ] {
     const allowed = verdict(claude_payload(command))

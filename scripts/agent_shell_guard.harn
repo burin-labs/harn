@@ -63,9 +63,19 @@ pub type ShellGuardDecision = {allow: bool, reason: string}
  */
 pub type WorktreeAdmission = {available: bool, command: string, denial: string}
 
-type ShellCommandStage = {text: string, argv: list<string>, writes_to_file: bool}
+type ShellCommandStage = {
+  text: string,
+  argv: list<string>,
+  xargs_child_argv: list<string>,
+  writes_to_file: bool,
+}
 
-const EMPTY_SHELL_STAGE: ShellCommandStage = {text: "", argv: [], writes_to_file: false}
+const EMPTY_SHELL_STAGE: ShellCommandStage = {
+  text: "",
+  argv: [],
+  xargs_child_argv: [],
+  writes_to_file: false,
+}
 
 fn command_groups(command: string) -> list<list<ShellCommandStage>> {
   const scan = command_risk_scan({request: {mode: "shell", command: command}})
@@ -847,7 +857,13 @@ pub fn disposable_trash_violation(command: string) -> string {
 fn git_stash_write_in(command: string, depth: int) -> bool {
   for group in command_groups(command) {
     for stage in group {
-      const argv = launched_argv(stage.argv, 0)
+      // `xargs` launches its operands, so the stash rule reads the child the scanner resolved.
+      const launched = if len(stage.xargs_child_argv) > 0 {
+        stage.xargs_child_argv
+      } else {
+        stage.argv
+      }
+      const argv = launched_argv(launched, 0)
       if argv_program(argv) == "git" {
         const args = git_subcommand_args(argv)
         // Git reads the verb only from the token right after `stash`; an option

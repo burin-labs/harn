@@ -44,6 +44,7 @@ pub(super) fn scan_command_risk_scan_json(
                     serde_json::json!({
                         "text": stage.text,
                         "argv": stage.argv,
+                        "xargs_child_argv": super::catastrophic::xargs_child_argv(&stage.argv),
                         "writes_to_file": writes_to_file,
                     })
                 })

@@ -20,7 +20,7 @@ mod tracked_writes;
 
 use project_delete::argv_deletes_project;
 pub(super) use semantic_shell::{
-    analyze_argv, analyze_shell, analyze_shell_dialect, ShellAnalysis,
+    analyze_argv, analyze_shell, analyze_shell_dialect, xargs_child_argv, ShellAnalysis,
 };
 use shell::*;
 

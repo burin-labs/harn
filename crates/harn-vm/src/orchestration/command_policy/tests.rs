@@ -355,16 +355,19 @@ fn deterministic_scan_projects_quote_aware_shell_command_groups() {
                 {
                     "text": "ps -axo command",
                     "argv": ["ps", "-axo", "command"],
+                    "xargs_child_argv": [],
                     "writes_to_file": false,
                 },
                 {
                     "text": "rg 'rustc .*harn_vm|cargo build --locked'",
                     "argv": ["rg", "rustc .*harn_vm|cargo build --locked"],
+                    "xargs_child_argv": [],
                     "writes_to_file": false,
                 },
                 {
                     "text": "head -n 20",
                     "argv": ["head", "-n", "20"],
+                    "xargs_child_argv": [],
                     "writes_to_file": false,
                 },
             ],
@@ -372,10 +375,28 @@ fn deterministic_scan_projects_quote_aware_shell_command_groups() {
                 {
                     "text": "git status --short",
                     "argv": ["git", "status", "--short"],
+                    "xargs_child_argv": [],
                     "writes_to_file": false,
                 },
             ],
         ])
+    );
+}
+
+#[test]
+fn deterministic_scan_projects_the_command_an_xargs_stage_launches() {
+    let scan = command_risk_scan_json(&shell_ctx("printf x | xargs -n 1 git stash drop"), None);
+    assert_eq!(
+        scan["shell_command_groups"][0][1]["xargs_child_argv"],
+        serde_json::json!(["git", "stash", "drop"])
+    );
+    let unresolved = command_risk_scan_json(
+        &shell_ctx("printf x | xargs --unknown git stash drop"),
+        None,
+    );
+    assert_eq!(
+        unresolved["shell_command_groups"][0][1]["xargs_child_argv"],
+        serde_json::json!([])
     );
 }
 
