@@ -95,6 +95,8 @@ pub(crate) struct Connection {
     shared: Arc<Shared>,
     next_id: AtomicI64,
     killer: Arc<dyn ProcessKiller>,
+    #[cfg(test)]
+    pid: Option<u32>,
 }
 
 impl Connection {
@@ -119,6 +121,8 @@ impl Connection {
         })
         .map_err(|err| format!("could not start `{program}`: {err}"))?;
         let killer = handle.killer();
+        #[cfg(test)]
+        let pid = handle.pid();
         let (Some(stdin), Some(stdout), Some(stderr)) = (
             handle.take_stdin(),
             handle.take_stdout(),
@@ -138,6 +142,8 @@ impl Connection {
             shared: shared.clone(),
             next_id: AtomicI64::new(1),
             killer,
+            #[cfg(test)]
+            pid,
         };
         let stderr_shared = shared.clone();
         harn_parser::runtime_stack::builder()
@@ -149,8 +155,9 @@ impl Connection {
             .name(format!("lsp-reader-{}", launch.id))
             .spawn(move || {
                 read_loop(stdout, &shared, &writer, settings);
-                // Keep the child alive until the reader is done, then reap it.
-                drop(handle);
+                // The server closed its output, so it has exited or is being
+                // killed; wait for it so no zombie outlives the session.
+                let _ = handle.wait();
             })
             .map_err(|err| format!("spawn reader: {err}"))?;
         Ok(connection)
@@ -455,4 +462,35 @@ fn answer_server_request(
         }
     };
     json!({"jsonrpc": "2.0", "id": id, "result": result})
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+    use crate::code_index::lsp::servers;
+
+    /// A server that ends with its session must be reaped then, not when the
+    /// host exits: an unreaped child stays a zombie with a `/proc` entry.
+    #[test]
+    fn a_dropped_session_reaps_its_server() {
+        let spec = servers::for_language(crate::ast::Language::Rust).expect("rust spec");
+        let launch = &spec.launches[0];
+        let _env = crate::process::test_support::declare_inherited();
+        let root = tempfile::tempdir().unwrap();
+        let connection = Connection::spawn(spec, launch, "cat", root.path()).expect("spawn");
+        let pid = connection.pid.expect("pid");
+        let status = format!("/proc/{pid}/status");
+        assert!(Path::new(&status).exists());
+        drop(connection);
+        let until = Instant::now() + Duration::from_secs(10);
+        while Path::new(&status).exists() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let state = std::fs::read_to_string(&status).unwrap_or_default();
+        assert!(
+            !Path::new(&status).exists(),
+            "server {pid} was not reaped: {}",
+            state.lines().find(|l| l.starts_with("State")).unwrap_or("")
+        );
+    }
 }
