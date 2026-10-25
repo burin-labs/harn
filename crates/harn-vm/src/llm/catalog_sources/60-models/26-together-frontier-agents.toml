@@ -14,15 +14,13 @@ logical_model = "moonshot-kimi-k3"
 equivalence_group = "moonshot-kimi-k3"
 served_variant = "together"
 api_dialect = "openai_chat"
-context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 # Together's model library and authenticated inventory agreed on this rate and
 # route shape on 2026-08-26.
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+models_dev = {provider = "togetherai", model = "moonshotai/Kimi-K3", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."Qwen/Qwen3.8-2.4T-A95B"]
 name = "Qwen3.8 2.4T A95B (Together)"
@@ -45,9 +43,7 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepse
 [models."Qwen/Qwen3.7-Max"]
 name = "Qwen3.7 Max (Together)"
 provider = "together"
-context_window = 1000000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 2.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.50 }
 
 tier = "frontier"
 open_weight = true
@@ -61,6 +57,7 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen",
 # Together's public model page lists this dated successor on serverless and
 # dedicated infrastructure with a 1.05M-token context window. Pricing and
 # route metadata were verified there on 2026-08-26.
+models_dev = {provider = "togetherai", model = "Qwen/Qwen3.7-Max", fields = ["context_window", "pricing"]}
 [models."deepseek-ai/DeepSeek-V4-Pro-0813"]
 name = "DeepSeek V4 Pro 0813 (Together)"
 provider = "together"
@@ -69,12 +66,9 @@ logical_model = "deepseek-v4-pro-0813"
 equivalence_group = "deepseek-v4-pro-0813"
 served_variant = "together"
 api_dialect = "openai_chat"
-context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok = 0.13 }
 architecture = { parameter_count_b = 1600.0, active_parameter_count_b = 49.0, moe = true, license = "MIT", source_url = "https://www.together.ai/models/deepseek-v4-pro-0813", last_verified = "2026-08-26" }
 tier = "frontier"
-open_weight = true
 strengths = ["reasoning", "coding", "agentic", "tool_use", "long_context"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
 
@@ -83,23 +77,21 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen",
 # Pricing read from Together's `/v1/models` rate card on 2026-08-15:
 # $0.14 in / $0.28 out / $0.03 cached-input per MTok. Native tool calling
 # verified clean the same day.
+models_dev = {provider = "togetherai", model = "deepseek-ai/DeepSeek-V4-Pro-0813", fields = ["context_window", "open_weight", "pricing"]}
 [models."deepseek-ai/DeepSeek-V4-Flash-0731"]
 name = "DeepSeek V4 Flash 0731 (Together)"
 provider = "together"
-context_window = 1048576
 logical_model = "deepseek-v4-flash"
 equivalence_group = "deepseek-v4-flash"
 served_variant = "together"
 wire_model = "deepseek-ai/DeepSeek-V4-Flash-0731"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.03 }
 deprecated = true
 deprecation_note = "Together's public deprecations page (https://docs.together.ai/docs/deprecations, read 2026-10-11) confirms removal from serverless inference on 2026-10-22 and names deepseek-ai/DeepSeek-V4.1-Flash as the replacement."
 sunset_date = "2026-10-22"
 superseded_by = "deepseek-ai/DeepSeek-V4.1-Flash"
 tier = "mid"
-open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 
 # DeepSeek V4.1 Flash on Together serverless (launched 2026-09-11 per Together's
@@ -110,10 +102,10 @@ strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 # Together endpoint: a native tool call, the tool-result round trip, a
 # required tool choice, reasoning off (zero reasoning tokens) and effort
 # `high` all returned 200. The direct Together adapter was not call-verified.
+models_dev = {provider = "togetherai", model = "deepseek-ai/DeepSeek-V4-Flash-0731", fields = ["context_window", "open_weight", "pricing"]}
 [models."deepseek-ai/DeepSeek-V4.1-Flash"]
 name = "DeepSeek V4.1 Flash (Together)"
 provider = "together"
-context_window = 1048576
 released = "2026-09-11"
 logical_model = "deepseek-v4.1-flash"
 equivalence_group = "deepseek-v4.1-flash"
@@ -121,44 +113,39 @@ served_variant = "together"
 wire_model = "deepseek-ai/DeepSeek-V4.1-Flash"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.006 }
 tier = "mid"
-open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 
 # 2026-08-15 reachability sweep: Together serves `zai-org/GLM-5.1` only via a
 # provisioned dedicated endpoint, so every serverless call returns HTTP 400
 # `model_not_available`. GLM-5.2 below is the serverless Together GLM route.
+models_dev = {provider = "togetherai", model = "deepseek-ai/DeepSeek-V4.1-Flash", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."zai-org/GLM-5.2"]
 name = "GLM 5.2 (Together)"
 provider = "together"
 # Together's models API reports the full 1M-token serverless window.
-context_window = 1048575
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"
-open_weight = true
 strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 
 # MiniMax M3 on Together — 524K serverless window, billed at the same
 # $0.30/$1.20 rate as the first-party API. Verified 2026-07-02.
+models_dev = {provider = "togetherai", model = "zai-org/GLM-5.2", fields = ["context_window", "open_weight", "pricing"]}
 [models."MiniMaxAI/MiniMax-M3"]
 name = "MiniMax M3 (Together)"
 provider = "together"
-context_window = 524288
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
 
 # Kimi K2.7 Code on Together — int4-native weights at the first-party
 # list rate. Verified 2026-07-02.
 # Together lists this model but a 2026-09-29 chat call returned "Unable to
 # access non-serverless model"; it needs a dedicated endpoint.
+models_dev = {provider = "togetherai", model = "MiniMaxAI/MiniMax-M3", fields = ["context_window", "open_weight", "pricing"]}
 [models."moonshotai/Kimi-K2.7-Code"]
 name = "Kimi K2.7 Code (Together)"
 provider = "together"
@@ -175,13 +162,10 @@ strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning"]
 name = "MiniMax M2.7 (Together)"
 provider = "together"
 availability = "dedicated"
-context_window = 196608
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
 # Inline metadata matches the minimax-m2.7 equivalence group and keeps this row
 # independent of fragment-order defaults.
 tier = "frontier"
-open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
 
 # Reliable Together serverless sample routes (harn#3645 §4). The prior
@@ -197,22 +181,19 @@ strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_contex
 # Turbo).
 # Together lists this model but a 2026-09-29 chat call returned "Unable to
 # access non-serverless model"; it needs a dedicated endpoint.
+models_dev = {provider = "togetherai", model = "MiniMaxAI/MiniMax-M2.7", fields = ["context_window", "open_weight", "pricing"]}
 [models."Qwen/Qwen2.5-7B-Instruct-Turbo"]
 name = "Qwen2.5 7B Instruct Turbo (Together)"
 provider = "together"
 availability = "dedicated"
-context_window = 32768
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 0.30 }
 tier = "small"
-open_weight = true
 strengths = ["speed", "cheap", "tool_use"]
+models_dev = {provider = "togetherai", model = "Qwen/Qwen2.5-7B-Instruct-Turbo", fields = ["context_window", "open_weight", "pricing"]}
 [models."meta-llama/Llama-3.3-70B-Instruct-Turbo"]
 name = "Llama 3.3 70B Instruct Turbo (Together)"
 provider = "together"
-context_window = 131072
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 1.04, output_per_mtok = 1.04 }
 deprecated = true
 deprecation_note = "Together's public deprecations page (https://docs.together.ai/docs/deprecations, read 2026-10-11) confirms removal from serverless inference on 2026-10-22 and recommends meta-models/Muse-Glimmer-30B."
 sunset_date = "2026-10-22"
@@ -221,5 +202,5 @@ equivalence_group = "llama-3.3-70b-instruct"
 served_variant = "together"
 api_dialect = "openai_chat"
 tier = "mid"
-open_weight = true
 strengths = ["tool_use", "cheap"]
+models_dev = {provider = "togetherai", model = "meta-llama/Llama-3.3-70B-Instruct-Turbo", fields = ["context_window", "open_weight", "pricing"]}

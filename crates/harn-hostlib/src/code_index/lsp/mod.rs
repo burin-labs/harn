@@ -6,6 +6,7 @@
 //! the same workspace is answered by the server.
 
 mod edits;
+mod install;
 mod servers;
 mod transport;
 
@@ -253,6 +254,55 @@ pub(super) fn same_server(a: Language, b: Language) -> bool {
 /// Whether a server is registered for `language`; no process is started.
 pub(super) fn serves(language: Language) -> bool {
     servers::for_language(language).is_some()
+}
+
+/// Which server a rename of `path` would start, found the way [`warm`] finds
+/// it but without starting anything.
+pub(super) struct ServerLookup {
+    pub language: Option<Language>,
+    /// The launch that resolved, and its executable.
+    pub server: Option<(&'static str, String)>,
+    /// Why no server resolves; `None` when one does.
+    pub reason: Option<String>,
+}
+
+pub(super) fn lookup_server(index_root: &Path, path: &str) -> ServerLookup {
+    let file = index_root.join(path);
+    let Some(language) = Language::detect(&file, None) else {
+        return ServerLookup {
+            language: None,
+            server: None,
+            reason: Some(format!("no language is recognized for {path}")),
+        };
+    };
+    let unresolved = |reason: String| ServerLookup {
+        language: Some(language),
+        server: None,
+        reason: Some(reason),
+    };
+    let Some(spec) = servers::for_language(language) else {
+        return unresolved(format!(
+            "no language server is registered for {}",
+            language.name()
+        ));
+    };
+    let Some(root) = spec.workspace_root(&file, index_root) else {
+        return unresolved(format!("no {} project root contains {path}", spec.id));
+    };
+    let mut reasons = Vec::new();
+    for launch in spec.launches {
+        match launch.resolve_program(&root) {
+            Ok(program) => {
+                return ServerLookup {
+                    language: Some(language),
+                    server: Some((launch.id, program)),
+                    reason: None,
+                }
+            }
+            Err(reason) => reasons.push(reason),
+        }
+    }
+    unresolved(reasons.join("; "))
 }
 
 /// A server that answered the readiness check for a rename's file.

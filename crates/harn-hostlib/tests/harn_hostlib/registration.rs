@@ -236,6 +236,7 @@ fn code_index_capability_registers_documented_methods() {
             "hostlib_code_index_branch_overlay",
             "hostlib_code_index_freshness",
             "hostlib_code_index_module_graph",
+            "hostlib_code_index_language_server",
             // Cross-file safe rename (#2508).
             "hostlib_code_index_rename_symbol",
             "hostlib_code_index_change_signature",
