@@ -56,6 +56,11 @@ impl PrecompiledInterface {
         self.module_graph.as_ref()
     }
 
+    /// As [`Self::module_graph`], moving the graph out of this interface.
+    pub fn take_module_graph(&mut self) -> Option<harn_modules::ModuleGraph> {
+        self.module_graph.take()
+    }
+
     pub fn package_import_aliases(&self) -> &[String] {
         &self.payload.package_import_aliases
     }
