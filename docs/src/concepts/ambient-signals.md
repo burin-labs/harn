@@ -5,7 +5,7 @@ the default branch went red, that a runner pool went offline, or that a
 production alert fired. The agent could act on that news, but nothing tells it
 mid-conversation. Ambient signals close that gap. A configured condition becomes
 an alert. Harn routes the alert to the best running agent session on the machine
-and delivers it as a reminder at the session's next safe point. The agent then
+and delivers it as a system reminder at the session's next safe point. The agent then
 handles it or decides it is not its job.
 
 This page explains the design and its security model. For setup, see
@@ -31,40 +31,63 @@ title, whether it is busy or idle, and when it was last seen.
 The **router** decides which session should hear about each signal.
 
 **Delivery adapters** hand a routed reminder to a session: a hook command for
-Claude Code and Codex, and the in-process Rust API for hosts that speak ACP,
-which deliver through `session/prompt` with `delivery: "queue"` or
-`delivery: "steer"`.
+Claude Code and Codex, and the `std/signals` builtins for an agent session
+running in the Harn VM, which deliver through the session's system reminders.
+Every adapter renders a reminder as a system or developer note. None delivers
+it as a user message, because an alert must never carry the user's authority.
 
 **Monitors** are Harn scripts that poll a source on a schedule and fire or
 resolve signals. Webhook payloads from alerting tools enter the same way,
 normalized to the envelope.
 
-## One reminder per state change
+## One reminder per state change, delivered at least once
 
 A signal is `fired`, `resolved`, or `expired`. Firing a signal that is already
 fired is not news, so the inbox treats it as a refresh: it updates the stored
 content and delivers nothing. Each real transition increments the signal's
-generation, and each generation is delivered to exactly one session, exactly
-once. A monitor that polls every minute while CI stays red therefore produces
-one reminder when CI breaks and one when it recovers, not sixty an hour.
+generation, and each generation is owed to one session. A monitor that polls
+every minute while CI stays red therefore produces one reminder when CI breaks
+and one when it recovers, not sixty an hour.
+
+Delivery is at least once. When a session checks in, the inbox **leases** it
+the reminders routed to it; it does not mark them delivered. The session's next
+check-in acks those leases, because a session that runs another hook or turn
+evidently received the previous output. A lease that is not acked within the
+lease window (ten minutes by default) lapses, and the reminder is leased again,
+to the same session if it is still live or to another one. A harness that
+crashes between leasing and rendering therefore loses nothing; it may see the
+same reminder twice. Rendering is keyed by the reminder's id, `key#generation`,
+so a redelivery reads the same, says it was sent again, and replaces rather
+than repeats an in-process reminder. A design that marked reminders delivered
+when they were taken would lose every reminder taken just before a crash.
 
 Expiry exists for conditions that may never be explicitly resolved, such as a
 one-off production alert. An expired signal produces a reminder only if its
-fired reminder was delivered. A session that was told about something learns
+fired reminder was leased to a session. A session that was told about something learns
 that it lapsed; a session that never heard about it is not told about it now.
 
 The signal's identity is the triage envelope's `dedupe_key`, which hashes
 source provenance rather than delivery ids. A redelivered webhook therefore
 maps to the same signal.
 
-## Severity chooses the delivery mode
+## Severity decides what may interrupt
 
-Severity is `info`, `warning`, or `urgent`. The first two are delivered in
-`queue` mode: the reminder waits for the session's next safe point and never
-interrupts. `urgent` is delivered in `steer` mode: the session is asked to
-consider the reminder now, and an idle session may be woken for it. Steering
-is reserved for urgent signals because an interruption has a cost, and an
-agent that is interrupted for every red pull request stops making progress.
+Severity is `info`, `warning`, or `urgent`. Every severity reaches a working
+session at its next safe point. Only `urgent` keeps a session that is about to
+stop working, or wakes an idle one. Interruption is reserved for urgent signals
+because it has a cost: an agent interrupted for every red pull request stops
+making progress.
+
+## One owner for muting, minimum severity, and quiet hours
+
+The inbox applies the delivery policy when it routes, from `config.toml` in the
+inbox directory. A muted signal, one below the minimum severity, or a
+non-urgent signal during quiet hours is held: it stays in the inbox, unrouted,
+and routes when the policy allows. Holding it in the router means every
+harness, pipeline, and host that reads the inbox agrees on what reaches a
+session, and a held signal is never leased, so it cannot be lost to a consumer
+that filtered it after taking it. A host with its own settings screen writes
+those settings into `config.toml` rather than filtering on its side.
 
 ## Routing
 
@@ -81,7 +104,7 @@ Routing is deterministic first:
 Ties go to the most recently seen session, then to the lexically smallest
 session id, so two concurrent routing passes reach the same answer. Once a
 generation is assigned to a session, the assignment sticks until the session
-goes stale, which keeps a reminder from bouncing between sessions.
+goes stale or ends, which keeps a reminder from bouncing between sessions.
 
 The rule step is a trait, not a hard-coded function, so a triage pipeline can
 replace it. That pipeline is an LLM-gated Harn workflow that uses the trigger
@@ -92,14 +115,14 @@ signal is a cost and a latency the deterministic rules usually do not need.
 ## Why the inbox is one file under a lock
 
 Many sessions on one machine run hooks concurrently, and every hook may write:
-it records a heartbeat, takes delivery of reminders, and acks them. The inbox
+it records a heartbeat, acks its previous leases, and leases reminders. The inbox
 is a single JSON document, `inbox.json`, that carries a schema version. Every
 transaction takes an exclusive advisory lock on a sibling lock file, reads the
 document, applies the change, writes a temporary file, and renames it into
 place. Readers therefore never see a torn write, and two writers never lose
 each other's changes. Routing runs inside the same transaction as delivery,
-which is what makes "exactly one session" true: two sessions cannot both claim
-a generation, because the second one reads the first one's assignment.
+so two sessions cannot both hold a lease on one generation: the second reads
+the first one's assignment.
 
 The alternative, one file per signal, makes routing a multi-file transaction.
 SQLite would work, but a small, inspectable document is enough for the volume
@@ -112,8 +135,9 @@ removed.
 A session is live while its last heartbeat is newer than the stale threshold.
 A busy session heartbeats on every hook. An idle session would look dead, so
 the idle watcher that can wake it also heartbeats while it waits. When a
-harness reports that a session ended, its registry entry is removed and any
-reminders assigned to it but not yet delivered return to the router.
+harness reports that a session ended, its registry entry is removed and every
+reminder assigned to it and not yet acked, leased or not, returns to the
+router.
 
 ## Delivery at safe points
 
@@ -121,15 +145,24 @@ A reminder arrives where the harness already pauses: after a tool call, when
 the person submits a prompt, when a session starts, and when the agent tries to
 stop.
 
-- After a tool call, on prompt submit, and at session start, every pending
-  reminder for the session is added to the model's context.
-- When the agent tries to stop, only `steer` reminders keep it going. A `queue`
-  reminder waits for the next prompt, which is what queueing means.
-- An idle session can be woken only for `steer` reminders, through a watcher
-  that waits in the background and exits with the reminder when one arrives.
+- After a tool call, on prompt submit, and at session start, up to three
+  pending reminders are added to the model's context, and the output says how
+  many more wait for the next safe point. Three worst-case reminders fit inside
+  the smallest hook budget a supported harness enforces: Claude Code caps
+  `additionalContext` at 10,000 characters, and Codex caps model-visible hook
+  output near 2,500 tokens.
+- When the agent tries to stop, only urgent reminders keep it going. Others
+  wait for the next prompt.
+- An idle Claude Code session can be woken only for urgent reminders, through
+  an `asyncRewake` watcher that waits in the background and exits with the
+  reminder when one arrives. One watcher runs per session: a second one exits
+  at once, so repeated stops never stack watchers.
 
-Hooks that cannot add context at a given point are documented as gaps instead
-of being emulated.
+Codex differs at two points. Its `Stop` hook can keep a session going only by
+turning its reason into a new user prompt, so the Codex adapter never delivers
+there, and an urgent signal reaches a stopping Codex session at its next prompt
+or tool call. Codex has no hook that wakes an idle session. These are gaps, not
+emulated behavior.
 
 ## Security model
 
@@ -140,14 +173,22 @@ directing it. Nothing in the signal path takes an action.
 
 **Source content is untrusted.** A Sentry error message, a pull request title,
 or a webhook body can contain text written to look like an instruction. The
-renderer places every source-derived field inside a fenced data block whose
-boundary carries a random nonce chosen per render, and it neutralizes anything
-in the content that could close the fence or impersonate harness markup. The
-model sees exactly one authoritative frame, written by Harn, around data it
-should read but not obey.
+renderer places every source-derived field inside a `signal-data` block and
+substitutes `&`, `<`, `>`, and `"` with their entities, so no content can close
+the block or impersonate harness markup; nothing is deleted, so the agent still
+reads what the source said. Every field is capped in length. The model sees
+exactly one frame, written by Harn, around data it should read but not obey.
 
-**Provenance is mandatory.** Every signal carries the envelope's `source_url`,
-so an agent can check the claim at its source before acting on it.
+**Provenance is mandatory.** Every signal names its producer, such as
+`std/signals.monitor_github_ci`, and its signature status: `verified` for a
+webhook whose signature the receiving trigger checked, `unverified` for one it
+did not, and `local` for a condition observed on the machine. The reminder
+shows both beside the envelope's `source_url`, so an agent can weigh the claim
+and check it at its source.
+
+**The proposed action is Harn's.** The monitor pack and the alert normalizers
+write why a signal matters and what to do next themselves; they copy only the
+summary and the link from a payload, never a suggested action.
 
 **The store is private to the user.** The inbox directory is created with
 owner-only permissions. Signals keep the normalized envelope; producers should

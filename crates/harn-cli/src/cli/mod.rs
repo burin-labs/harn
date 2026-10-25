@@ -68,6 +68,7 @@ mod scan;
 mod self_toolchain;
 mod serve;
 mod session;
+mod signals;
 mod skill;
 mod skills;
 mod supervisor;
@@ -248,6 +249,10 @@ pub(crate) use session::{
     SessionListArgs, SessionPublicationEvidenceArgs, SessionSchemaArgs, SessionValidateArgs,
     SessionViewFixturesArgs,
 };
+pub(crate) use signals::{
+    SignalSeverityArg, SignalSignatureArg, SignalsArgs, SignalsCommand, SignalsFireArgs,
+    SignalsHookArgs, SignalsHookEvent, SignalsHookFormat,
+};
 pub(crate) use skill::{
     SkillArgs, SkillCommand, SkillEndorseArgs, SkillKeyCommand, SkillKeyGenerateArgs,
     SkillSignArgs, SkillTrustAddArgs, SkillTrustCommand, SkillTrustListArgs, SkillVerifyArgs,
@@ -382,6 +387,9 @@ SCRIPTING
     Tokens(TokensArgs),
     /// Inspect, validate, and emit schemas for layered Harn runtime config.
     Config(ConfigArgs),
+    /// Route ambient alerts (CI red, production alerts, ...) into running agent
+    /// sessions through a per-machine inbox, and act as their delivery hook.
+    Signals(SignalsArgs),
     /// Explain a diagnostic. Pass a stable `HARN-<CAT>-<NNN>` code
     /// (optionally with `--json` for the structured envelope), or the
     /// legacy `--invariant <NAME> <FUNCTION> <FILE>` form to walk the

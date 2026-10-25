@@ -1,0 +1,9 @@
+quiet: 0
+0
+delivered: 1
+system reminders 1, transcript messages 0
+advisory
+true
+redelivered 1, pending 1
+true
+acked 1, delivered 0

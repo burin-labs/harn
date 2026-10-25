@@ -1,0 +1,65 @@
+import { ci_branch_decision, signal_apply } from "std/signals"
+
+/** A session's leases: acked by its next check-in, redelivered when they lapse. */
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(1800000000000)
+  const options = {dir: harness.fs.mkdtemp_in_workspace("signals-")}
+  const a = {id: "a", harness: "claude-code", cwd: "/work/api", repo: "acme/api", activity: "busy"}
+  const red = [
+    {
+      workflow_id: 7,
+      name: "CI",
+      status: "completed",
+      conclusion: "failure",
+      html_url: "https://github.com/acme/api/actions/runs/2",
+    },
+  ]
+  harness.runtime.signal_register(a, options)
+  signal_apply(harness.runtime, ci_branch_decision("acme/api", "main", red), options)
+  const first = harness.runtime.signal_check_in(a, options)
+  const reminder = first.reminders[0]
+  harness.stdio.println(
+    "leased " + reminder.key + "#" + to_string(reminder.generation) + " attempt "
+      + to_string(reminder.attempt),
+  )
+  const text = harness.runtime.signal_render(first.reminders)
+  harness.stdio.println(contains(text, "github.ci:acme/api@main#1"))
+  harness.stdio.println(contains(text, "Reported by std/signals.monitor_github_ci"))
+  harness.stdio.println(contains(text, "observed on this machine"))
+  // The session crashed before the reminder reached the model: no check-in
+  // inside the ten-minute lease, so the same generation comes back.
+  harness.testing.clock_advance(11 * 60 * 1000)
+  const again = harness.runtime.signal_check_in(a, options)
+  harness.stdio.println(
+    "acked " + to_string(len(again.acked)) + ", redelivered attempt "
+      + to_string(again.reminders[0]?.attempt),
+  )
+  // The next check-in is the evidence it was rendered.
+  harness.testing.clock_advance(1000)
+  const settled = harness.runtime.signal_check_in(a, options)
+  harness.stdio.println(
+    "acked " + to_string(len(settled.acked)) + ", leased " + to_string(len(settled.reminders)),
+  )
+  // Recovery goes to the session that heard the failure; an explicit ack
+  // settles it without another check-in.
+  signal_apply(harness.runtime, ci_branch_decision("acme/api", "main", []), options)
+  const recovery = harness.runtime.signal_check_in(a, options)
+  harness.stdio.println(recovery.reminders[0]?.state)
+  const acked = harness.runtime.signal_ack(
+    "a",
+    [{key: "github.ci:acme/api@main", generation: 2}],
+    options,
+  )
+  harness.stdio.println(len(acked))
+  // A lease held by a session that ends moves to another live session.
+  signal_apply(harness.runtime, ci_branch_decision("acme/api", "main", red), options)
+  harness.stdio.println(len(harness.runtime.signal_check_in(a, options).reminders))
+  harness.runtime.signal_end_session("a", options)
+  const b = {id: "b", harness: "codex", cwd: "/work/api2", repo: "acme/api", activity: "busy"}
+  const handed = harness.runtime.signal_check_in(b, options)
+  harness.stdio.println(
+    "b leased " + to_string(handed.reminders[0]?.generation) + " attempt "
+      + to_string(handed.reminders[0]?.attempt),
+  )
+  harness.testing.clock_reset()
+}

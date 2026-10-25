@@ -417,6 +417,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "external_agent" => "stdlib/stdlib_external_agent.harn",
     "triggers" => "stdlib/stdlib_triggers.harn",
     "triage" => "stdlib/stdlib_triage.harn",
+    "signals" => "stdlib/stdlib_signals.harn",
     "dashboard/jobs" => "stdlib/dashboard/jobs.harn",
     "ui_resource" => "stdlib/stdlib_ui_resource.harn",
     "handoffs" => "stdlib/stdlib_handoffs.harn",
@@ -472,6 +473,7 @@ pub const CONNECTOR_EVENT_SCHEMAS_SOURCE: &str = include_str!("stdlib/stdlib_eve
 
 pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = embedded_catalog!(StdlibPromptAsset, path, [
     "eval/hypothesis/prompts/intake.harn.prompt" => "stdlib/eval/hypothesis/prompts/intake.harn.prompt",
+    "signals/prompts/reminder.harn.prompt" => "stdlib/signals/prompts/reminder.harn.prompt",
     "agent/prompts/tool_contract_text.harn.prompt" => "stdlib/agent/prompts/tool_contract_text.harn.prompt",
     "agent/prompts/tool_contract_json.harn.prompt" => "stdlib/agent/prompts/tool_contract_json.harn.prompt",
     "agent/prompts/tool_contract_native.harn.prompt" => "stdlib/agent/prompts/tool_contract_native.harn.prompt",

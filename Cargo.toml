@@ -12,6 +12,7 @@ members = [
     "crates/harn-opcode-macros",
     "crates/harn-clock",
     "crates/harn-flock",
+    "crates/harn-signals",
     "crates/harn-glob",
     "crates/harn-languages",
     "crates/harn-secret-catalog",

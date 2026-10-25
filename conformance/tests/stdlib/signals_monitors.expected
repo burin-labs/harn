@@ -1,0 +1,22 @@
+changed fired 1
+unchanged fired 1
+changed resolved 2
+unchanged resolved 2
+changed fired 3
+CI is failing on main of acme/api: CI
+https://github.com/acme/api/actions/runs/2
+true
+false
+github.runners:acme/linux:gpu,x64
+false
+std/signals.monitor_github_ci local
+true
+false
+grafana:a1 true urgent HighLatency: p99 over 2s
+grafana:b2 false warning DiskFull
+sentry:991 false
+honeycomb:trg_1 true
+false
+std/signals.alert_webhook_decisions(honeycomb) unverified
+verified
+0
