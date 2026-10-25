@@ -341,6 +341,12 @@ fn catastrophic_floor_reaches_commands_inside_substitutions() {
 }
 
 #[test]
+fn floor_does_not_block_a_doas_permit_check_that_launches_nothing() {
+    assert!(!is_cat_root("doas -C /etc/doas.conf rm -rf /"));
+    assert!(is_cat_root("doas -u root rm -rf /"));
+}
+
+#[test]
 fn deterministic_scan_projects_privilege_wrappers_to_the_launched_command() {
     for (command, argv) in [
         (

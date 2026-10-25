@@ -202,8 +202,12 @@ pub(super) fn skip_doas_wrapper(tokens: &[String], start: usize, end: usize) -> 
         if !token.starts_with('-') {
             break;
         }
+        // `-C file` only checks the permit rules for the command; nothing launches.
+        if token == "-C" {
+            return end;
+        }
         index += 1;
-        if matches!(token.as_str(), "-a" | "-C" | "-u") && index < end {
+        if matches!(token.as_str(), "-a" | "-u") && index < end {
             index += 1;
         }
     }
