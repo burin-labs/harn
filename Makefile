@@ -791,6 +791,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/ci_rust_test_lane_test.sh
 	bash ./scripts/tests/rust_test_duration_budget_test.sh
 	./scripts/tests/macos_nightly_test_env_test.sh
+	./scripts/tests/bound_persistent_target_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
 	./scripts/tests/sccache_action_cache_size_test.sh
 	./scripts/tests/check_release_warm_build_budget_test.sh
