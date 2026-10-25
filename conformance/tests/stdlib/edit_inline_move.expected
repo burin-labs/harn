@@ -16,3 +16,8 @@ true
 unsupported_language
 true
 no_match
+visibility_required
+export
+applied
+[unexported>export@1]
+true

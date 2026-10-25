@@ -1,0 +1,11 @@
+`code_index.move_symbol` takes `allow_visibility_widening` (`pub(super)`,
+`pub(crate)`, `pub`, or `export` for TypeScript). A move that would leave a
+declaration unreachable still refuses by default and now names the narrowest
+fix in `required_visibility`; with the parameter it widens exactly the blocking
+declarations, each to the narrowest level within the allowance, and lists them
+in `widened`. A refused `ast.insert_at_anchor` (`no_match`, `ambiguous`) now
+lists the containers a retry can target in `candidates`. The qualification
+probe's `insert_method` arm targets traits and interfaces, and its class query
+no longer matches unrelated classes.
+A Rust move no longer skips the source's own import of the moved item when only a
+nested module, such as `mod tests`, already imported it.

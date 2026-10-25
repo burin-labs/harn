@@ -10,6 +10,7 @@ use crate::code_index::refactor_core::{
 };
 use crate::tools::args::{build_dict, str_value};
 
+use super::widen::Widening;
 use super::{text, Request};
 
 // === Response ===
@@ -67,6 +68,10 @@ pub(crate) struct Response {
     pub(crate) occurrences_replaced: usize,
     pub(crate) call_sites_updated: usize,
     pub(crate) moved_lines: Option<(u32, u32)>,
+    /// Declarations the move widened under `allow_visibility_widening`.
+    pub(crate) widened: Vec<Widening>,
+    /// The narrowest level that would unblock a `visibility_required` refusal.
+    pub(crate) required_visibility: Option<String>,
 }
 
 pub(crate) struct Outcome {
@@ -144,6 +149,30 @@ pub(crate) fn respond(
             ),
             ("moved_lines", moved_lines),
             ("sites", sites(&response.sites)),
+            (
+                "widened",
+                VmValue::list(
+                    response
+                        .widened
+                        .iter()
+                        .map(|w| {
+                            build_dict([
+                                ("path", str_value(&w.path)),
+                                ("line", VmValue::Int(w.line as i64)),
+                                ("from", str_value(&w.from)),
+                                ("to", str_value(w.to.as_str())),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
+            (
+                "required_visibility",
+                response
+                    .required_visibility
+                    .as_deref()
+                    .map_or(VmValue::Nil, str_value),
+            ),
             (
                 "comments_left_behind",
                 sites(&response.comments_left_behind),

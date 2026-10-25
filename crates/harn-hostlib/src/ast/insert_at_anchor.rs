@@ -54,6 +54,7 @@ use super::edit_common::{
     check_post_edit, lossy_str, no_match_response, non_verified_response, prepare_edit, sha256_hex,
     write_source, PostEditRejection, PreparedEdit, UNVALIDATED_WRITE,
 };
+use super::insert_containers::{self, Candidates};
 use super::language::Language;
 use super::parse::max_bytes_arg;
 
@@ -156,15 +157,24 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let anchors = collect_anchors(&query, &tree, &source, target_index);
     if anchors.is_empty() {
-        return Ok(source_health.attach_to(no_match_response(
-            &path_str,
-            &query_text,
-            &target_capture,
-            "query produced zero anchors",
+        let candidates = insert_containers::in_file(language, &tree, &source, &path_str);
+        return Ok(source_health.attach_to(with_candidates(
+            no_match_response(
+                &path_str,
+                &query_text,
+                &target_capture,
+                "query produced zero anchors; `candidates` lists the containers in this file",
+            ),
+            candidates,
         )));
     }
     if anchors.len() > 1 {
-        return Ok(source_health.attach_to(ambiguous_response(&anchors)));
+        let spans: Vec<(usize, usize)> =
+            anchors.iter().map(|a| (a.start_byte, a.end_byte)).collect();
+        let candidates = insert_containers::around(language, &tree, &source, &path_str, &spans);
+        return Ok(
+            source_health.attach_to(with_candidates(ambiguous_response(&anchors), candidates))
+        );
     }
 
     // Re-borrow the matched node so we can inspect its children — the
@@ -613,6 +623,20 @@ fn applied_response(
         ("after_sha256", str_value(sha256_hex(after))),
         ("preview", str_value(lossy_str(after))),
     ])
+}
+
+/// Adds the retry targets to a refusal: `candidates` (path, line, kind, name),
+/// and `candidates_truncated` when the list was cut.
+fn with_candidates(response: VmValue, candidates: Candidates) -> VmValue {
+    let VmValue::Dict(map) = response else {
+        return response;
+    };
+    let mut fields = (*map).clone();
+    fields.insert("candidates".into(), VmValue::list(candidates.values));
+    if candidates.truncated {
+        fields.insert("candidates_truncated".into(), VmValue::Bool(true));
+    }
+    VmValue::dict(fields)
 }
 
 fn ambiguous_response(anchors: &[AnchorSpan]) -> VmValue {

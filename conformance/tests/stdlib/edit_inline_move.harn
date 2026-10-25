@@ -114,4 +114,33 @@ pipeline default(harness: Harness) {
   harness.stdio.println(
     edit_move_decl(harness.code_index, {path: "a.py", symbol: "nope", to_path: "b.py"}).result,
   )
+  // 8) A private helper blocks the move until the caller allows widening.
+  write_fixture(
+    harness.fs,
+    root,
+    "orders.ts",
+    "function helper(): number {\n  return 1\n}\n\nexport function caller(): number {\n  return helper()\n}\n",
+  )
+  write_fixture(harness.fs, root, "models.ts", "export const B = 1\n")
+  harness.code_index.rebuild({root: root})
+  const blocked = edit_move_decl(
+    harness.code_index,
+    {path: "orders.ts", symbol: "caller", to_path: "models.ts"},
+  )
+  harness.stdio.println(blocked.result)
+  harness.stdio.println(blocked.required_visibility)
+  const widened = edit_move_decl(
+    harness.code_index,
+    {
+      path: "orders.ts",
+      symbol: "caller",
+      to_path: "models.ts",
+      allow_visibility_widening: "export",
+    },
+  )
+  harness.stdio.println(widened.result)
+  harness.stdio.println(widened.widened.map({ w -> w.from + ">" + w.to + "@" + to_string(w.line) }))
+  harness.stdio.println(
+    contains(harness.fs.read_text(path_join(root, "orders.ts")), "export function helper"),
+  )
 }
