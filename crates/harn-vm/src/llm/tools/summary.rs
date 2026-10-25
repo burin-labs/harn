@@ -274,11 +274,13 @@ mod tests {
     #[test]
     fn a_trailing_period_after_an_ordinary_word_still_ends_the_sentence() {
         let summary = tool_summary(
-            "Run the configured verifier and report the result to the caller. Use it after edits.",
+            "Run the configured verifier against the changed files and report the structured \
+             result back to the caller. Use it after edits.",
         );
         assert_eq!(
             summary,
-            "Run the configured verifier and report the result to the caller."
+            "Run the configured verifier against the changed files and report the structured \
+             result back to the caller."
         );
     }
 }
