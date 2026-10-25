@@ -5,6 +5,7 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline main(harness: Harness) {
   const disabled = agent_completion_signal("##DONE##", nil, "##DONE##")
   assert_eq(disabled, {declared: false, source: "disabled"})
+  assert_eq(agent_completion_signal("Still working.", ""), {declared: false, source: "disabled"})
   const bare = agent_completion_signal("Finished.\n##DONE##", "##DONE##", "")
   assert_eq(bare, {declared: true, source: "raw_text"})
   const absent = agent_completion_signal("Still working.", "##DONE##")

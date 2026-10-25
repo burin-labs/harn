@@ -20,7 +20,7 @@ pub fn agent_completion_signal(
   done_sentinel: string?,
   parsed_done_marker: string? = nil,
 ) -> AgentCompletionSignal {
-  if done_sentinel == nil {
+  if done_sentinel == nil || done_sentinel == "" {
     return {declared: false, source: "disabled"}
   }
   if parsed_done_marker != nil && parsed_done_marker != "" {
