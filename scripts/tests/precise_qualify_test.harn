@@ -122,3 +122,16 @@ pipeline test_an_oracle_that_passes_a_broken_file_is_blind(harness: Harness) {
   assert_eq(partial.reason, "oracle_blind")
   assert(partial.detail.contains("src/other.rs"))
 }
+
+/** A setup file reaches the scratch clone, so a generated config can widen the oracle. */
+@serial(group: "code_index")
+pipeline test_setup_files_widen_the_oracle(harness: Harness) {
+  const fx = fixture(harness, ["grep", "-q", "pub fn", "extra.cfg"])
+  const head = harness.process.run({program: "git", args: ["rev-parse", "HEAD"], cwd: fx.root})
+  const commit = trim(head.stdout)
+  const repo = fx.repo + {commit: commit, setup_files: {"extra.cfg": "pub fn\n"}}
+  const work = harness.fs.mkdtemp_in_workspace("precise-qualify-work-")
+  const prepared = prepare_repo(harness, repo, work)
+  assert_eq(prepared.ok, true)
+  assert_eq(harness.fs.read_text(prepared.root + "/extra.cfg"), "pub fn\n")
+}

@@ -12,7 +12,10 @@
  *
  * The plan names a seed, how many functions and types to sample per
  * repository, a time budget, and per repository its URL, commit, a local
- * checkout at that commit, setup commands and oracle commands. Arms:
+ * checkout at that commit, setup commands, optional `setup_files` (path to
+ * text, written into the scratch clone before setup, for example a tsconfig
+ * that makes the oracle cover files the repository's own configs skip) and
+ * oracle commands. Arms:
  * `rename_symbol` on each backend, `change_signature` (one appended
  * parameter), `move_symbol` (top-level declarations into a sibling file),
  * `insert_method` (`ast.insert_at_anchor` as the last member of a class or
@@ -45,6 +48,7 @@ pub type RepoPlan = {
   commit: string,
   checkout: string,
   setup: list<list<string>>,
+  setup_files?: dict<string, string>,
   oracle: list<list<string>>,
   exclude_prefixes?: list<string>,
 }
@@ -691,6 +695,10 @@ pub fn prepare_repo(harness: Harness, repo: RepoPlan, work_dir: string) -> dict 
     return {ok: false, reason: "clone_failed", detail: head_of(clone.output)}
   }
   run_cmd(harness, ["git", "checkout", "-q", repo.commit], root, 60000)
+  const setup_files = repo.setup_files ?? {}
+  for path in setup_files.keys().sorted() {
+    harness.fs.write_text(path_join(root, path), setup_files[path])
+  }
   for argv in repo.setup {
     const res = run_cmd(harness, argv, root, 1800000)
     if !res.success {

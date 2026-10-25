@@ -1,0 +1,1 @@
+- `scripts/precise_qualify.harn` plans accept `setup_files`, text written into the scratch clone before setup, so a generated tsconfig can make the oracle cover sampled files that a repository's own configs skip.
