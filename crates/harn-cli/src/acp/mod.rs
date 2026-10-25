@@ -83,7 +83,9 @@ impl WorkspaceHostlib {
         entry.handles.clone()
     }
 
-    fn close_session(&self, project_root: &Path) {
+    /// Returns the thread that releases a root whose index work outlived its
+    /// last session, if one was scheduled.
+    fn close_session(&self, project_root: &Path) -> Option<std::thread::JoinHandle<()>> {
         let mut by_root = self.lock();
         if let Some(entry) = by_root.get_mut(project_root) {
             entry.open_sessions = entry.open_sessions.saturating_sub(1);
@@ -91,27 +93,25 @@ impl WorkspaceHostlib {
         Self::release_unused(&mut by_root);
         // No later session event is guaranteed, so a root no session needs
         // but whose index work is still running is released when it ends.
-        let Some(entry) = by_root
+        let entry = by_root
             .get(project_root)
-            .filter(|entry| entry.open_sessions == 0)
-        else {
-            return;
-        };
+            .filter(|entry| entry.open_sessions == 0)?;
         let code_index = entry.handles.code_index.clone();
         let map = Arc::clone(&self.by_root);
-        let spawned = std::thread::Builder::new()
+        std::thread::Builder::new()
             .name("harn-acp-index-release".to_string())
             .spawn(move || {
                 code_index.wait_until_idle();
                 Self::release_unused(&mut Self::lock_map(&map));
-            });
-        if let Err(error) = spawned {
-            tracing::warn!(
-                target: "harn_cli::acp",
-                %error,
-                "could not schedule the code-index release; it waits for the next session event",
-            );
-        }
+            })
+            .inspect_err(|error| {
+                tracing::warn!(
+                    target: "harn_cli::acp",
+                    %error,
+                    "could not schedule the code-index release; it waits for the next session event",
+                );
+            })
+            .ok()
     }
 }
 
@@ -213,8 +213,9 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
     }
 
     fn release_session_workspace(&self, project_root: &Path) {
+        // The release thread runs detached; only tests join it.
         #[cfg(feature = "hostlib")]
-        self.hostlib.close_session(project_root);
+        drop(self.hostlib.close_session(project_root));
         #[cfg(not(feature = "hostlib"))]
         let _ = project_root;
     }
@@ -444,21 +445,16 @@ pub fn on_tick(_event) -> nil {
         let shared = configurator.hostlib.handles_for(&root).code_index.shared();
         let publish_gate = shared.lock().unwrap();
         assert!(publish_gate.is_none(), "the warm finished before the gate");
-        configurator.release_session_workspace(&root);
-        let retained = |configurator: &CliAcpRuntimeConfigurator| {
-            configurator.hostlib.lock().contains_key(&root)
-        };
-        assert!(retained(&configurator), "in-flight work keeps the root");
+        let release = configurator.hostlib.close_session(&root);
+        let retained = || configurator.hostlib.lock().contains_key(&root);
+        assert!(retained(), "in-flight work keeps the root");
 
         drop(publish_gate);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while retained(&configurator) && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        assert!(
-            !retained(&configurator),
-            "the root must be released once its warm ends"
-        );
+        release
+            .expect("a release is scheduled for in-flight work")
+            .join()
+            .unwrap();
+        assert!(!retained(), "the root must be released once its warm ends");
     }
 
     /// A second workspace opening must not strand the first one's warm: the
