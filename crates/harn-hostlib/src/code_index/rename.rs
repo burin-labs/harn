@@ -56,7 +56,7 @@ use harn_vm::VmValue;
 
 use crate::ast::{api as ast_api, Language, TEXT_PATCH_FALLBACK};
 use crate::error::HostlibError;
-use crate::host_call::{HostCallContext, Interrupt, Phase};
+use crate::host_call::{HostCallContext, Interrupt};
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_string, require_string, str_value,
 };
@@ -565,10 +565,10 @@ fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtra
     )
 }
 
-/// The commit point. A stop requested before it leaves every file as it was.
-/// Once it passes the write runs to completion, so a cancel can never leave
-/// some files renamed and others not. A file another writer changed after it
-/// was read refuses the whole rename.
+/// Write the plans past the call's commit point: a stop before it writes
+/// nothing, and once it passes every file is written. The plans were read
+/// without the write lease, so a file another builtin changed since then
+/// refuses the whole rename.
 fn commit(
     env: &ResponseEnv<'_>,
     call: &HostCallContext,
@@ -576,13 +576,13 @@ fn commit(
     plans: &[FilePlan],
     session_id: Option<&str>,
 ) -> Result<Result<Vec<(String, String)>, VmValue>, HostlibError> {
-    if let Some(interrupt) = call.interrupted() {
-        return Ok(Err(interrupted_response(env, interrupt)));
-    }
-    call.report(Phase::Applying, BUILTIN);
-    let changed = super::refactor_core::changed_since_planned(BUILTIN, root, plans, session_id);
-    if !changed.is_empty() {
-        return Ok(Err(emit_response(
+    let committed = call.commit(BUILTIN, |writes| {
+        let changed =
+            super::refactor_core::changed_since_planned(BUILTIN, root, plans, session_id);
+        if changed.is_empty() {
+            return write_plans(BUILTIN, root, plans, session_id, writes).map(Ok);
+        }
+        Ok(Err(emit_response(
             env,
             "refused",
             ResponseExtras {
@@ -593,9 +593,9 @@ fn commit(
                 warnings: changed.into_iter().map(str_value).collect(),
                 ..Default::default()
             },
-        )));
-    }
-    write_plans(BUILTIN, root, plans, session_id).map(Ok)
+        )))
+    });
+    committed.unwrap_or_else(|interrupt| Ok(Err(interrupted_response(env, interrupt))))
 }
 
 /// The caller stopped the rename before it wrote anything.

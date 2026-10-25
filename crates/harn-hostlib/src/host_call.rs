@@ -8,6 +8,7 @@
 //! its VM, or its scope deadline observes it the same way.
 
 use std::cell::{Cell, RefCell};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use harn_vm::agent_events::{AgentEvent, ToolCallStatus, ToolMutationStatus};
@@ -16,6 +17,25 @@ use harn_vm::agent_events::{AgentEvent, ToolCallStatus, ToolMutationStatus};
 pub(crate) const INTERRUPT_POLL: Duration = Duration::from_millis(50);
 /// How often a long wait reports that it is still in the same phase.
 pub(crate) const PROGRESS_HEARTBEAT: Duration = Duration::from_secs(1);
+
+static WORKSPACE_WRITES: Mutex<()> = Mutex::new(());
+
+/// Proof that the holder is the only hostlib builtin writing files in this
+/// process. Every writing builtin holds one for its whole write, so a builtin
+/// running off the VM's thread never interleaves its writes with another's.
+/// Take it after the code-index lock, never before.
+pub(crate) struct WorkspaceWrites(#[allow(dead_code)] MutexGuard<'static, ()>);
+
+/// Wait until no other builtin is writing, then hold the write lease. Every
+/// holder writes without waiting on anything a caller can stop, so this wait
+/// is bounded by one write.
+pub(crate) fn workspace_writes() -> WorkspaceWrites {
+    WorkspaceWrites(
+        WORKSPACE_WRITES
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner),
+    )
+}
 
 /// Why a call stopped before finishing its work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,6 +155,23 @@ impl HostCallContext {
         let expired = harn_vm::op_interrupt::requested()
             || self.budget.is_some_and(|budget| Instant::now() >= budget);
         expired.then_some(Interrupt::DeadlineExceeded)
+    }
+
+    /// The commit point. A stop requested before it returns the interrupt and
+    /// `write` never runs. Past it, `write` runs to completion under the
+    /// workspace write lease, so a later stop cannot leave a partial write and
+    /// no other builtin's writes interleave with it.
+    pub(crate) fn commit<T>(
+        &self,
+        detail: &str,
+        write: impl FnOnce(&WorkspaceWrites) -> T,
+    ) -> Result<T, Interrupt> {
+        if let Some(interrupt) = self.interrupted() {
+            return Err(interrupt);
+        }
+        let writes = workspace_writes();
+        self.report(Phase::Applying, detail);
+        Ok(write(&writes))
     }
 
     /// Report entering `phase`.

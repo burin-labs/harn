@@ -34,7 +34,8 @@ done
 head -c "$len" > /dev/null
 body='{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"renameProvider":true}}}'
 printf 'Content-Length: %s\r\n\r\n%s' "${#body}" "$body"
-exec cat > /dev/null
+# fd 3 keeps the reply pipe open, so the client never reads an exit.
+exec cat 3>&1 > /dev/null
 "#;
 
 const CRATE: &[(&str, &str)] = &[
@@ -156,7 +157,9 @@ fn a_cancel_stops_the_wait_within_a_heartbeat_and_writes_nothing() {
     let canceller = std::thread::spawn({
         let cancel = cancel.clone();
         move || {
-            heartbeat_rx.recv().expect("the wait reports a heartbeat");
+            heartbeat_rx
+                .recv_timeout(std::time::Duration::from_secs(20))
+                .expect("the wait reports a heartbeat");
             cancel.store(true, Ordering::SeqCst);
             Instant::now()
         }
@@ -322,5 +325,195 @@ fn a_file_changed_by_another_writer_refuses_the_whole_rename() {
         snapshot(fixture.workspace.path()),
         expected,
         "only the other writer's change may land"
+    );
+}
+
+#[test]
+fn another_writer_waits_until_the_commit_has_written_every_file() {
+    let fixture = fixture();
+    let mut tools = crate::registry::BuiltinRegistry::new();
+    crate::registry::HostlibCapability::register_builtins(
+        &crate::tools::ToolsCapability,
+        &mut tools,
+    );
+    let write_file = tools
+        .iter()
+        .find(|builtin| builtin.name == "hostlib_tools_write_file")
+        .expect("write_file is registered")
+        .handler
+        .clone();
+    let other_path = fixture.workspace.path().join("src/use_it.rs");
+    let other_text = "// written by another tool\n";
+    let wrote_during_commit = Arc::new(AtomicBool::new(false));
+    let writer = Arc::new(Mutex::new(None));
+
+    let result = syntax_rename_at_commit(
+        &fixture,
+        "host-call-lease",
+        Arc::new(AtomicBool::new(false)),
+        {
+            let wrote_during_commit = wrote_during_commit.clone();
+            let writer = writer.clone();
+            move || {
+                let done = Arc::new(AtomicBool::new(false));
+                let request = dict(&[
+                    ("path", vm_string(&other_path.to_string_lossy())),
+                    ("content", vm_string(other_text)),
+                ]);
+                let thread = std::thread::spawn({
+                    let done = done.clone();
+                    let write_file = write_file.clone();
+                    move || {
+                        write_file(&[request]).expect("the other write lands");
+                        done.store(true, Ordering::SeqCst);
+                    }
+                });
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                wrote_during_commit.store(done.load(Ordering::SeqCst), Ordering::SeqCst);
+                *writer.lock().unwrap() = Some(thread);
+            }
+        },
+    );
+    writer
+        .lock()
+        .unwrap()
+        .take()
+        .expect("the commit point reported applying")
+        .join()
+        .unwrap();
+
+    assert!(
+        !wrote_during_commit.load(Ordering::SeqCst),
+        "another builtin wrote while the rename was committing"
+    );
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    let read = |path: &str| fs::read_to_string(fixture.workspace.path().join(path)).unwrap();
+    assert_eq!(read("src/reading.rs"), "pub struct Measurement;\n");
+    assert_eq!(
+        read("src/use_it.rs"),
+        other_text,
+        "the waiting write lands after"
+    );
+}
+
+/// A gopls stand-in that loads the project once, then renames every whole
+/// word matching the one at the position across its open documents.
+const RENAMING_SERVER: &str = r#"#!/usr/bin/env python3
+import json, re, sys
+inp, out = sys.stdin.buffer, sys.stdout.buffer
+docs, loaded = {}, False
+def send(msg):
+    body = json.dumps(msg).encode()
+    out.write(b"Content-Length: %d\r\n\r\n" % len(body) + body)
+    out.flush()
+def read():
+    length = None
+    while True:
+        line = inp.readline()
+        if not line:
+            return None
+        line = line.strip()
+        if not line:
+            break
+        key, _, value = line.partition(b":")
+        if key.lower() == b"content-length":
+            length = int(value)
+    return json.loads(inp.read(length))
+while True:
+    msg = read()
+    if msg is None or msg.get("method") == "exit":
+        break
+    method, mid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"capabilities": {"renameProvider": True}}})
+    elif method == "textDocument/didOpen":
+        docs[params["textDocument"]["uri"]] = params["textDocument"]["text"]
+        if not loaded:
+            loaded = True
+            for kind in ("begin", "end"):
+                send({"jsonrpc": "2.0", "method": "$/progress", "params": {"token": "load", "value": {"kind": kind, "title": "load"}}})
+    elif method == "textDocument/didChange":
+        docs[params["textDocument"]["uri"]] = params["contentChanges"][-1]["text"]
+    elif method == "textDocument/rename":
+        pos = params["position"]
+        line = docs[params["textDocument"]["uri"]].split("\n")[pos["line"]]
+        word = next(w.group() for w in re.finditer(r"\w+", line) if w.start() <= pos["character"] <= w.end())
+        changes = {}
+        for uri, text in docs.items():
+            edits = [
+                {"range": {"start": {"line": i, "character": w.start()}, "end": {"line": i, "character": w.end()}}, "newText": params["newName"]}
+                for i, row in enumerate(text.split("\n"))
+                for w in re.finditer(r"\b%s\b" % re.escape(word), row)
+            ]
+            if edits:
+                changes[uri] = edits
+        send({"jsonrpc": "2.0", "id": mid, "result": {"changes": changes}})
+    elif mid is not None:
+        send({"jsonrpc": "2.0", "id": mid, "result": None})
+"#;
+
+#[test]
+fn progress_phases_arrive_in_order() {
+    let _env = crate::process::test_support::declare_inherited();
+    let server = tempdir().unwrap();
+    let program = server.path().join("gopls");
+    fs::write(&program, RENAMING_SERVER).unwrap();
+    fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+    super::test_override::set("gopls", &program.to_string_lossy());
+    let workspace = tempdir().unwrap();
+    fs::write(workspace.path().join("go.mod"), "module small\n\ngo 1.21\n").unwrap();
+    let source = "package small\n\ntype Reading struct{}\n\nfunc Keep(value Reading) Reading {\n\treturn value\n}\n";
+    fs::write(workspace.path().join("reading.go"), source).unwrap();
+    let capability = CodeIndexCapability::new();
+    let (state, _) = IndexState::build_from_root(workspace.path());
+    *capability.shared().lock().unwrap() = Some(state);
+
+    let session = "host-call-phases";
+    let progress = Arc::new(Progress {
+        phases: Mutex::new(Vec::new()),
+        heartbeat: Mutex::new(None),
+    });
+    harn_vm::agent_events::register_sink(session, progress.clone());
+    let _interrupt = harn_vm::op_interrupt::install(Some(Arc::new(AtomicBool::new(false))), None);
+    let _call = HostCallContext::new(Some(CallAddress {
+        session_id: session.into(),
+        tool_call_id: "rename-phases".into(),
+        tool_name: "rename_symbol".into(),
+    }))
+    .enter();
+    let request = dict(&[
+        (
+            "symbol_ref",
+            dict(&[
+                ("name", vm_string("Reading")),
+                ("path", vm_string("reading.go")),
+                ("kind", vm_string("Type")),
+            ]),
+        ),
+        ("new_name", vm_string("Measurement")),
+        ("scope", vm_string("workspace")),
+        ("backend", vm_string("language_server")),
+    ]);
+    let result =
+        crate::code_index::rename::run(&capability.shared(), &[request]).expect("rename runs");
+    harn_vm::agent_events::clear_session_sinks(session);
+
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    assert_eq!(
+        fs::read_to_string(workspace.path().join("reading.go")).unwrap(),
+        source.replace("Reading", "Measurement")
+    );
+    let mut phases: Vec<String> = progress
+        .phases
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(phase, _)| phase.clone())
+        .collect();
+    phases.dedup();
+    assert_eq!(
+        phases,
+        ["server_start", "indexing", "resolving", "applying"],
+        "{result:?}"
     );
 }

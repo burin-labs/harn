@@ -176,6 +176,28 @@ impl BuiltinRegistry {
         });
     }
 
+    /// [`register_fn`](Self::register_fn) for a builtin that writes files: it
+    /// holds the workspace write lease for its whole run, so its writes never
+    /// interleave with those of a builtin running off the VM's thread.
+    pub(crate) fn register_writer_fn(
+        &mut self,
+        module: &'static str,
+        name: &'static str,
+        method: &'static str,
+        runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
+    ) {
+        let handler: SyncHandler = Arc::new(move |args| {
+            let _writes = crate::host_call::workspace_writes();
+            runner(args)
+        });
+        self.register(RegisteredBuiltin {
+            name,
+            module,
+            method,
+            handler,
+        });
+    }
+
     /// Register a deterministic command-execution builtin whose request must
     /// cross the VM command-policy boundary before the hostlib handler runs.
     pub(crate) fn register_command_fn(

@@ -99,7 +99,7 @@ impl HostlibCapability for WorkspaceCheckpointCapability {
             call_end_builtin,
         );
         registry.register_fn("fs", PLAN_BUILTIN, "checkpoint_plan", plan_builtin);
-        registry.register_fn("fs", RESTORE_BUILTIN, "checkpoint_restore", restore_builtin);
+        registry.register_writer_fn("fs", RESTORE_BUILTIN, "checkpoint_restore", restore_builtin);
         registry.register_fn("fs", DROP_BUILTIN, "checkpoint_drop", drop_builtin);
     }
 }

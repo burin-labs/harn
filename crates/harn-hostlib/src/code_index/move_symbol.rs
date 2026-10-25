@@ -223,6 +223,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
                 &state.root,
                 &outcome.response.plans,
                 request.session_id.as_deref(),
+                &crate::host_call::workspace_writes(),
             )?;
             if request.session_id.is_none() {
                 for plan in &outcome.response.plans {

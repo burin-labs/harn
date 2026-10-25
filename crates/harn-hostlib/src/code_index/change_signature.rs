@@ -1263,6 +1263,7 @@ fn finish(
             &state.root,
             &planned.plans,
             request.session_id.as_deref(),
+            &crate::host_call::workspace_writes(),
         )?
     };
     let details = if request.dry_run {

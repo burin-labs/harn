@@ -32,7 +32,8 @@ done
 head -c "$len" > /dev/null
 body='{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"renameProvider":true}}}'
 printf 'Content-Length: %s\r\n\r\n%s' "${#body}" "$body"
-exec cat > /dev/null
+# fd 3 keeps the reply pipe open, so the client never reads an exit.
+exec cat 3>&1 > /dev/null
 "#;
 
 const CRATE: &[(&str, &str)] = &[
@@ -54,6 +55,13 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     while let Some(dir) = pending.pop() {
         for entry in fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
+            // The code index keeps its snapshot in a hidden directory.
+            if path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+            {
+                continue;
+            }
             if path.is_dir() {
                 pending.push(path);
             } else {
@@ -70,10 +78,25 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
 struct StopOnHeartbeat {
     phases: Mutex<Vec<String>>,
     cancelled_at: Mutex<Option<Instant>>,
+    /// When the loop reported the stopped call's terminal update.
+    call_ended_at: Mutex<Option<Instant>>,
 }
 
 impl AgentEventSink for StopOnHeartbeat {
     fn handle_event(&self, event: &AgentEvent) {
+        if let AgentEvent::ToolCallUpdate {
+            tool_call_id,
+            error: Some(_),
+            ..
+        } = event
+        {
+            if tool_call_id == CALL {
+                self.call_ended_at
+                    .lock()
+                    .unwrap()
+                    .get_or_insert_with(Instant::now);
+            }
+        }
         let AgentEvent::ToolCallUpdate {
             data: Some(data), ..
         } = event
@@ -163,6 +186,8 @@ fn stopping_one_tool_call_stops_a_waiting_rename_without_writes() {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     }
+    // The agent loop confines tools to the working directory's workspace.
+    std::env::set_current_dir(workspace.path()).unwrap();
     let before = snapshot(workspace.path());
     let root = workspace.path().to_string_lossy().replace('\\', "/");
     let chunk = harn_vm::compile_source(&script(&root)).expect("compile");
@@ -207,9 +232,15 @@ fn stopping_one_tool_call_stops_a_waiting_rename_without_writes() {
         .lock()
         .unwrap()
         .expect("the rename reported a heartbeat while it waited");
+    let call_ended_at = sink
+        .call_ended_at
+        .lock()
+        .unwrap()
+        .expect("the stopped call reported its end");
     eprintln!(
-        "total {:?}; cancel to script end {:?}; lines {lines:?}",
+        "total {:?}; cancel to call end {:?}; cancel to script end {:?}; lines {lines:?}",
         finished - started,
+        call_ended_at - cancelled_at,
         finished - cancelled_at
     );
     assert_eq!(lines.first(), Some(&"status=done"), "{lines:?}");
@@ -221,10 +252,16 @@ fn stopping_one_tool_call_stops_a_waiting_rename_without_writes() {
         phases.iter().any(|phase| phase == "server_start"),
         "{phases:?}"
     );
-    // The cold start budget is 30 s; the loop and the refused call together
-    // must finish far inside it.
+    // The cold start budget is 30 s. The stopped call ends at once; the rest
+    // of the loop and the refused call, in a debug build on a loaded host,
+    // still finish well inside that budget.
     assert!(
-        finished - cancelled_at < Duration::from_secs(5),
+        call_ended_at - cancelled_at < Duration::from_secs(2),
+        "the stopped call ended {:?} after the cancel",
+        call_ended_at - cancelled_at
+    );
+    assert!(
+        finished - cancelled_at < Duration::from_secs(20),
         "the loop ran on {:?} after the cancel",
         finished - cancelled_at
     );

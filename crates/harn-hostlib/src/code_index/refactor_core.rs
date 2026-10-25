@@ -789,6 +789,7 @@ pub(super) fn write_plans(
     root: &Path,
     plans: &[FilePlan],
     session_id: Option<&str>,
+    _writes: &crate::host_call::WorkspaceWrites,
 ) -> Result<Vec<(String, String)>, HostlibError> {
     let targets = plans
         .iter()
