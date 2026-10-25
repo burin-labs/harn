@@ -31,7 +31,7 @@ type ReleaseWorkflowStep = {
 type ReleaseWorkflow = {
   jobs: {
     setup: {outputs: {binary_size_fuse_bytes: string}, steps: list<ReleaseWorkflowStep>},
-    prepare_cli_aot: {needs: string, if: string, steps: list<ReleaseWorkflowStep>},
+    prepare_cli_aot: {needs: list<string>, if: string, steps: list<ReleaseWorkflowStep>},
     build: {
       needs: list<string>,
       env: {HARN_REQUIRE_CLI_AOT: string},
@@ -81,7 +81,7 @@ fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
               prepare_cli_aot: schema_field(
                 schema_object(
                   {
-                    needs: schema_field(schema_string()),
+                    needs: schema_field(schema_list(schema_string())),
                     if: schema_field(schema_string()),
                     steps: schema_field(schema_list(step_schema)),
                   },
@@ -808,7 +808,7 @@ pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targ
   const build = release_workflow_step(workflow.jobs.build.steps, "Build")
   const aot_condition =
     "needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'"
-  assert_eq(workflow.jobs.prepare_cli_aot.needs, "setup")
+  assert_eq(workflow.jobs.prepare_cli_aot.needs, ["setup", "source-ci"])
   assert_eq(workflow.jobs.prepare_cli_aot.if, "needs.setup.outputs.should_build_binaries == 'true'")
   assert_eq(checkout.if, aot_condition)
   assert_eq(generator.if, aot_condition)
