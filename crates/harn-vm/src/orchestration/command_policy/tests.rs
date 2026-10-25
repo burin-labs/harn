@@ -1,6 +1,7 @@
 use super::*;
 use crate::value::VmDictExt;
 
+mod find_delete;
 mod git_discard;
 mod git_push;
 mod preflight;

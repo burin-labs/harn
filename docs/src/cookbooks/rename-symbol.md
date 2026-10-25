@@ -44,6 +44,17 @@ server's executable, where `<ID>` is `RUST_ANALYZER`,
 `TYPESCRIPT_LANGUAGE_SERVER`, `TSC_LSP`, `PYRIGHT` or `GOPLS`; a path that does not
 exist forces the fallback.
 
+A rename runs off the VM's thread, so its caller can stop it while it waits on
+a server. Stopping the tool call, its VM or its session returns `cancelled`.
+`deadline_ms`, or a `deadline` scope around the call, bounds the whole rename:
+when it passes first the result is `refused` rather than a fallback, with
+`retry_after_ms` (how long a cold server may keep starting in the background)
+and `alternative: {"backend": "syntax_tree"}` (a request that never waits on a
+server). Neither writes a file. While it waits, the rename reports progress on
+its tool call's `tool_call_update` as `_meta.harn.data.progress`: `phase` is
+`server_start`, `indexing`, `resolving` or `applying`, with `detail` (the
+server), `elapsed_ms` and `cancellable`, repeated every second during a wait.
+
 When the host runs with a staged-fs session (`harness.fs.set_mode`), every
 touched file lands in the overlay; one `harness.fs.commit_staged` flips them
 atomically. Without a session, the host still buffers the full plan in memory
@@ -164,6 +175,8 @@ pipeline rename_would_shadow(harness: Harness) {
 | `"declined"`            | the language server refused the rename; see `details`.        |
 | `"scope_exceeded"`      | references exist outside `scope`, listed in `warnings`.       |
 | `"backend_unavailable"` | `backend: "language_server"` and no server could answer.      |
+| `"cancelled"`           | the call was stopped before it wrote anything.                |
+| `"refused"`             | `deadline_ms` or the caller's deadline passed first; no writes.|
 
 Each entry in `touched_files` carries the workspace-relative `path`, the
 detected `language`, `before_sha256` / `after_sha256` (over the full file

@@ -4,6 +4,7 @@ import {
   classify_edit,
   classify_references,
   render_markdown,
+  run_passed,
   summarize,
   totals,
 } from "../precise_qualify_report.harn"
@@ -156,4 +157,26 @@ pipeline test_wrong_counts_lead_the_table() {
   assert_eq(rows[1]?.refusal_reasons?.["overrides_present"], 1)
   const table = render_markdown("t", rows, [], [])
   assert(table.starts_with("# t\n\n**applied_wrong: 1**"))
+}
+
+/**
+ * The run exits 1 unless it judged every attempt, judged nothing wrong, and measured every repo.
+ */
+pipeline test_a_run_passes_only_when_every_repo_was_judged_clean() {
+  const clean = {
+    planned: 2,
+    applied_correct: 1,
+    applied_wrong: 0,
+    refused: 1,
+    crashed: 0,
+    pending: 0,
+  }
+  assert(run_passed(clean, 0))
+  assert(!run_passed(clean + {applied_wrong: 1}, 0))
+  assert(!run_passed(clean + {crashed: 1}, 0))
+  // An attempt the time budget cut off has no verdict.
+  assert(!run_passed(clean + {planned: 3, pending: 1}, 0))
+  // A repo with no candidates or a blind oracle is unmeasured.
+  assert(!run_passed(clean, 1))
+  assert(!run_passed(totals(summarize([])), 0))
 }

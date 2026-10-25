@@ -32,7 +32,6 @@ pub mod grounding;
 pub mod hitl_read;
 pub mod http_response;
 pub mod jsonrpc;
-pub mod junit;
 pub mod lifecycle_receipts;
 #[cfg(feature = "content")]
 pub mod markup;

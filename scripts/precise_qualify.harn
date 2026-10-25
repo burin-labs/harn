@@ -33,6 +33,7 @@ import {
   classify_edit,
   classify_references,
   render_markdown,
+  run_passed,
   summarize,
   totals,
 } from "./precise_qualify_report.harn"
@@ -670,7 +671,11 @@ pub fn run_symbol(
     .to_list()
 }
 
-fn prepare_repo(harness: Harness, repo: RepoPlan, work_dir: string) -> dict {
+pub fn prepare_repo(harness: Harness, repo: RepoPlan, work_dir: string) -> dict {
+  // With no oracle command nothing judges an edit, so every apply would read correct.
+  if len(repo.oracle) == 0 {
+    return {ok: false, reason: "oracle_missing", detail: "the plan gives no oracle command"}
+  }
   const head = run_cmd(harness, ["git", "rev-parse", "HEAD"], repo.checkout, 60000)
   if !head.success || trim(head.output) != repo.commit {
     return {ok: false, reason: "checkout_not_at_commit", detail: trim(head.output)}
@@ -697,6 +702,34 @@ fn prepare_repo(harness: Harness, repo: RepoPlan, work_dir: string) -> dict {
     return {ok: false, reason: "baseline_oracle_failed", baseline: baseline, root: root}
   }
   return index_clone(harness, root) + {root: root, baseline: baseline}
+}
+
+/**
+ * Break each sampled file in turn and require the oracle to fail before
+ * trusting it with edits there; a `cargo check` of another crate or a
+ * tsconfig that includes no files passes anything.
+ */
+pub fn oracle_control(harness: Harness, repo: RepoPlan, root: string, paths: list<string>) -> dict {
+  let checked: list<string> = []
+  for path in paths {
+    if checked.contains(path) {
+      continue
+    }
+    checked = checked + [path]
+    const abs = path_join(root, path)
+    const original = harness.fs.read_text(abs)
+    harness.fs.write_text(abs, original + "\n@@@ precise-qualify oracle control @@@\n")
+    const res = run_oracle(harness, repo, root)
+    harness.fs.write_text(abs, original)
+    if res.passed {
+      return {
+        ok: false,
+        reason: "oracle_blind",
+        detail: "the oracle passed with " + path + " broken",
+      }
+    }
+  }
+  return {ok: true, paths: checked}
 }
 
 /**
@@ -772,13 +805,6 @@ fn main(harness: Harness) -> int {
   }
   const plan = json_decode(harness.fs.read_text(argv[0]), schema_of(Plan))?
   const out_dir = argv[1]
-  // With no oracle command nothing compiles an edit, so every apply would read correct.
-  const unchecked = plan.repos.filter({ repo -> len(repo.oracle) == 0 }).map({ repo -> repo.id })
-    .to_list()
-  if len(unchecked) > 0 {
-    harness.stdio.eprintln("every repo needs an oracle command; none for " + unchecked.join(", "))
-    return 2
-  }
   if harness.fs.exists(path_join(out_dir, "receipt.json")) {
     harness.stdio.eprintln("refusing to overwrite an existing receipt in " + out_dir)
     return 2
@@ -803,7 +829,7 @@ fn main(harness: Harness) -> int {
   write_receipt(harness.fs, out_dir, state)
   for repo in plan.repos {
     harness.stdio.eprintln("[precise-qualify] preparing " + repo.id)
-    const prepared = prepare_repo(harness, repo, work_dir)
+    let prepared = prepare_repo(harness, repo, work_dir)
     let symbols: list<Symbol> = []
     let candidates = {}
     if prepared.ok {
@@ -811,6 +837,15 @@ fn main(harness: Harness) -> int {
       const types = sample(harness, repo, plan, "Type", plan.types)
       symbols = functions.picked + types.picked
       candidates = {functions: functions.candidates, types: types.candidates}
+      if len(symbols) == 0 {
+        prepared = prepared + {ok: false, reason: "no_candidates"}
+      } else {
+        const paths = symbols.map({ symbol -> symbol.path }).to_list()
+        const control = oracle_control(harness, repo, prepared.root, paths)
+        if !control.ok {
+          prepared = prepared + {ok: false, reason: control.reason, detail: control.detail}
+        }
+      }
     }
     state = state
       + {
@@ -930,6 +965,12 @@ fn main(harness: Harness) -> int {
     path_join(out_dir, "table.md"),
     render_markdown("Precise-edit qualification", rows, wrong, notes),
   )
-  harness.stdio.println(json_stringify(totals(rows)))
-  return 0
+  const t = totals(rows)
+  harness.stdio.println(json_stringify(t))
+  const unmeasured = state.repos.filter({ repo -> !repo.prepared.ok }).to_list()
+  return if run_passed(t, len(unmeasured)) {
+    0
+  } else {
+    1
+  }
 }

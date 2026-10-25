@@ -17,7 +17,9 @@
         "error",
         "destination_conflict",
         "visibility_required",
-        "import_cycle"
+        "import_cycle",
+        "nested_import",
+        "not_top_level"
       ]
     },
     "applied": { "type": "boolean", "description": "True when every planned file was written: false on refusals, dry runs, and failed writes." },
@@ -76,7 +78,7 @@
     "scope": { "type": "string", "const": "workspace" },
     "conflicts": { "type": "array", "maxItems": 0, "description": "Always empty: a move never shadows. Kept for the shared envelope." },
     "match_count": { "type": "integer", "minimum": 0, "description": "Edits across every touched file." },
-    "sites": { "$ref": "#/$defs/sites", "description": "Locations that block a `destination_conflict`, `visibility_required`, or `import_cycle` refusal." },
+    "sites": { "$ref": "#/$defs/sites", "description": "Locations that block a `destination_conflict`, `visibility_required`, `import_cycle`, or `nested_import` refusal." },
     "comments_left_behind": { "$ref": "#/$defs/sites", "description": "Comment blocks above the item but separated from it by a blank line; they stay in the source." },
     "warnings": {
       "type": "array",

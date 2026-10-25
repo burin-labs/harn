@@ -375,7 +375,7 @@ harness.stdio.log(bytes_to_hex(uploaded))
 | `abs(n)` | n: int or float | int or float | Absolute value |
 | `ceil(n)` | n: float | int | Ceiling (rounds up). Ints pass through unchanged |
 | `floor(n)` | n: float | int | Floor (rounds down). Ints pass through unchanged |
-| `round(n, digits?)` | n: float, digits: int (optional) | int or float | Round to nearest integer (halves away from zero). Ints pass through unchanged. With `digits`, rounds to that many decimal places and keeps the input type: `round(2.567, 2)` is `2.57`; negative digits round to tens/hundreds buckets (`round(1250, -2)` is `1300`) |
+| `round(n, digits?)` | n: number or decimal, digits: int (optional) | number or decimal | Round to nearest integer (halves away from zero for floats). Ints pass through unchanged. With `digits`, rounds to that many decimal places and keeps the input type: `round(2.567, 2)` is `2.57`; negative digits round to tens/hundreds buckets (`round(1250, -2)` is `1300`) |
 | `sqrt(n)` | n: int or float | float | Square root |
 | `pow(base, exp)` | base: number, exp: number | int or float | Exponentiation. Returns int when both args are int and exp is non-negative |
 | `min(a, b, ...)` | two or more numbers | int, float, or decimal | Smallest argument. Returns float if any argument is float |
@@ -394,6 +394,11 @@ harness.stdio.log(bytes_to_hex(uploaded))
 | `variance(items, sample?)` | items: list[number], sample: bool | float | Population variance, or sample variance when `sample = true` |
 | `stddev(items, sample?)` | items: list[number], sample: bool | float | Population standard deviation, or sample mode when `sample = true` |
 | `percentile(items, p)` | items: list[number], p: 0..100 | float | R-7 percentile interpolation |
+
+Decimal rounding keeps the decimal type and uses midpoint-to-even rounding.
+A decimal precision below `-29` returns decimal zero, including the minimum `int` value.
+Rounding throws when the nearest bucket is outside the decimal range.
+Finite averages and percentiles stay finite when an intermediate sum or endpoint difference would overflow.
 
 ### Trigonometry
 

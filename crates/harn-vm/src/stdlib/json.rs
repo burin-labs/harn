@@ -19,7 +19,7 @@ const JSON_PARSE_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_json_parse_cach
 
 /// Serde JSON's default container recursion boundary. Detect it before serde
 /// so callers receive a stable structural kind instead of parser prose.
-const JSON_PARSE_MAX_CONTAINER_DEPTH: usize = 127;
+pub(super) const JSON_PARSE_MAX_CONTAINER_DEPTH: usize = 127;
 
 /// Deepest `VmValue` nesting we will hand to a third-party recursive encoder
 /// (pretty JSON via `serde_json`, YAML via `crate::yaml`). Our own JSON writer

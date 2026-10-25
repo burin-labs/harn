@@ -1,4 +1,11 @@
-import { RepoPlan, Symbol, index_clone, run_symbol } from "../precise_qualify.harn"
+import {
+  RepoPlan,
+  Symbol,
+  index_clone,
+  oracle_control,
+  prepare_repo,
+  run_symbol,
+} from "../precise_qualify.harn"
 
 const LIB =
   "pub fn helper() -> i32 {\n    1\n}\n\npub fn user() -> i32 {\n    helper() + helper()\n}\n"
@@ -85,4 +92,33 @@ pipeline test_an_applied_rename_the_oracle_accepts_is_correct(harness: Harness) 
   assert_eq(references.outcome, "applied_correct")
   assert_eq(references.oracle_source, "rename_symbol:syntax_tree")
   assert_eq(harness.fs.read_text(fx.root + "/src/lib.rs"), LIB)
+}
+
+/** An oracle that judges nothing must leave the repo unmeasured, never pass. */
+pipeline test_a_repo_without_an_oracle_is_not_measured(harness: Harness) {
+  const fx = fixture(harness, ["true"])
+  const prepared = prepare_repo(harness, fx.repo + {oracle: []}, fx.root)
+  assert_eq(prepared.ok, false)
+  assert_eq(prepared.reason, "oracle_missing")
+}
+
+@serial(group: "code_index")
+pipeline test_an_oracle_that_passes_a_broken_file_is_blind(harness: Harness) {
+  const blind = fixture(harness, ["true"])
+  const control = oracle_control(harness, blind.repo, blind.root, ["src/lib.rs"])
+  assert_eq(control.reason, "oracle_blind")
+  assert_eq(harness.fs.read_text(blind.root + "/src/lib.rs"), LIB)
+  const sighted = fixture(harness, ["sh", "-c", "! grep -q @@@ src/lib.rs"])
+  assert(oracle_control(harness, sighted.repo, sighted.root, ["src/lib.rs", "src/lib.rs"]).ok)
+  assert_eq(harness.fs.read_text(sighted.root + "/src/lib.rs"), LIB)
+  // Every sampled file is checked: the oracle above never reads `src/other.rs`.
+  harness.fs.write_text(sighted.root + "/src/other.rs", "pub fn other() {}\n")
+  const partial = oracle_control(
+    harness,
+    sighted.repo,
+    sighted.root,
+    ["src/lib.rs", "src/other.rs"],
+  )
+  assert_eq(partial.reason, "oracle_blind")
+  assert(partial.detail.contains("src/other.rs"))
 }

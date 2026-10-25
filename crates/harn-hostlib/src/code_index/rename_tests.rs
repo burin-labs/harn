@@ -519,6 +519,11 @@ fn workspace_rename_leaves_prose_files_and_renames_the_code() {
         "# Usage\n\nCreate a `Widget` first.\n",
     )
     .unwrap();
+    fs::write(
+        root.join("index.html"),
+        "<script type=\"module\">new Widget();</script>\n",
+    )
+    .unwrap();
     let capability = build_index(root);
     let symbol_ref = dict(&[
         ("name", vm_string("Widget")),
@@ -535,6 +540,13 @@ fn workspace_rename_leaves_prose_files_and_renames_the_code() {
         .contains("`Widget`"));
     let warnings = format!("{:?}", field(&result, "warnings"));
     assert!(warnings.contains("README.md"), "{warnings}");
+    // Markup can still use the old name, so the warning asks for a review.
+    assert!(
+        warnings.contains(
+            "index.html (html file left unchanged; it may still reference `Widget`, so review it)"
+        ),
+        "{warnings}"
+    );
 }
 
 #[test]

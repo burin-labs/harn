@@ -16,6 +16,7 @@
 //!
 //! See `CONTRIBUTING.md` ("Adding a stdlib builtin") for the full template.
 
+pub mod junit;
 pub mod macros;
 
 pub(crate) use crate::value::args;

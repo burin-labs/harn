@@ -718,10 +718,23 @@ pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness
   const release_workflow_text = harness.fs.read_text(
     "../../.github/workflows/build-release-binaries.yml",
   )
-  assert(
-    !release_workflow_text.contains("CARGO_PROFILE_DIST_"),
-    "Cargo.toml [profile.dist] owns the distributed build settings",
-  )
+  // The one exception scopes targets whose fat-LTO build does not fit a
+  // hosted runner; it never touches the size-measured target.
+  const profile_scope = release_workflow_step(
+    steps,
+    "Scope the dist profile to what the runner can link",
+  ).run
+    ?? ""
+  assert(profile_scope.contains("CARGO_PROFILE_DIST_LTO=thin"))
+  assert(!profile_scope.contains("x86_64-unknown-linux-gnu"))
+  for line in release_workflow_text.split("\n") {
+    if line.contains("CARGO_PROFILE_DIST_") {
+      assert(
+        profile_scope.contains(line.trim()),
+        "Cargo.toml [profile.dist] owns the distributed build settings",
+      )
+    }
+  }
   assert(
     !release_workflow_text.contains("CARGO_PROFILE_RELEASE_"),
     "release builds use --profile dist; a CARGO_PROFILE_RELEASE_* override would not reach them",

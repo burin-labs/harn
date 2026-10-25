@@ -13,6 +13,7 @@
 /// not an executable command (fork-bomb grammar and tracked-file redirects).
 use std::path::Path;
 
+mod find_delete;
 mod project_delete;
 mod semantic_shell;
 mod shell;
@@ -213,6 +214,7 @@ fn invocation_catastrophe(
     match command {
         "git" => git_catastrophe(args),
         "rm" => rm_escape_catastrophe(args, roots),
+        "find" => find_delete::find_delete_catastrophe(args, roots),
         "dd" => dd_catastrophe(args),
         "mkfs" | "mke2fs" => Some(format!(
             "`{command}` (filesystem format) is blocked: it would destroy a device"

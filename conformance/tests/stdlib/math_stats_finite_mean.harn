@@ -1,0 +1,15 @@
+fn main(harness: Harness) -> nil {
+  const large = to_float("1e308")
+  const tiny = to_float("5e-324")
+  assert(large > 0)
+  assert(tiny > 0)
+  assert_eq(mean([large, large]), large)
+  assert_eq(variance([large, large]), 0)
+  assert_eq(stddev([large, large]), 0)
+  assert_eq(mean([-large, large]), 0)
+  assert_eq(mean([tiny, tiny]), tiny)
+  assert_eq(mean([0, 0]), 0)
+  assert_eq(mean([2, 4, 6]), 4)
+  assert_eq(variance([1, 2, 3, 4]), 1.25)
+  harness.stdio.println("finite mean and variance ok")
+}

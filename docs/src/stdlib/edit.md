@@ -1141,7 +1141,7 @@ The three parameter refactorings take `harness.code_index` instead of the
 site across the indexed workspace and returns its own tagged result
 in `rename_symbol`'s envelope (`applied` with `dry_run`, `no_match`,
 `ambiguous_symbol`, plus `parameter_in_use | value_reference |
-unsupported_call_site | overrides_present`) with the rewritten or blocking
+unsupported_call_site | overrides_present | fixed_signature`) with the rewritten or blocking
 `sites`. Rebuild the index (`harness.code_index.rebuild`)
 before calling them.
 

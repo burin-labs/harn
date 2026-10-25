@@ -14,11 +14,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use harn_runtime::register_vm_stdlib;
 use harn_vm::orchestration::{
     pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
 };
-use harn_vm::{compile_source, VmValue};
+use harn_vm::{compile_source, register_vm_stdlib, VmValue};
 use tempfile::TempDir;
 
 use super::{
