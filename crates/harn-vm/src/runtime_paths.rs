@@ -54,6 +54,40 @@ pub fn self_ignore_default_run_root(written: &Path) {
     }
 }
 
+/// Prepare a record's parent before any record or transcript writes. Shared
+/// temporary stores require a private directory owned by the effective user.
+pub(crate) fn prepare_run_record_parent(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+
+        if let Ok(temporary) = std::env::temp_dir().canonicalize() {
+            // SAFETY: geteuid has no arguments or preconditions.
+            let uid = unsafe { libc::geteuid() };
+            let private = temporary.join(format!("harn-user-{uid}"));
+            if path.starts_with(&private) {
+                match std::fs::DirBuilder::new().mode(0o700).create(&private) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(error) => return Err(error),
+                }
+                let metadata = std::fs::symlink_metadata(&private)?;
+                if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o077 != 0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "shared-temp run directory must be private, owned by the effective user, and not a symlink",
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+        self_ignore_default_run_root(parent);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
     use std::sync::{Mutex, OnceLock};
