@@ -318,78 +318,113 @@ fn build_inner(
 /// serial walk; unset defaults to the machine's available parallelism.
 pub const MODULE_GRAPH_JOBS_ENV: &str = "HARN_MODULE_GRAPH_JOBS";
 
-/// Load one BFS wave of module paths, in parallel when the wave is large
-/// enough to pay for the threads. Results are index-aligned with `paths`.
+type LoadedModule = (Arc<ModuleInfo>, Option<ParsedModuleSource>);
+
+/// Load one BFS wave of module paths. Remembered modules cost a read and a
+/// comparison, so they load here; only the rest reach the parse workers.
+/// Results are index-aligned with `paths`.
 fn load_wave(
     paths: &[PathBuf],
     package_snapshots: &[PackageSnapshot],
     parsed_source_retention: ParsedSourceRetention<'_>,
     source_overrides: Option<&HashMap<PathBuf, String>>,
     observer: Option<&ModuleObserver<'_>>,
-) -> Vec<(Arc<ModuleInfo>, Option<ParsedModuleSource>)> {
+) -> Vec<LoadedModule> {
+    let mut loaded: Vec<Option<LoadedModule>> = Vec::with_capacity(paths.len());
+    let mut pending = Vec::new();
+    for path in paths {
+        let source = wave_module_source(path, source_overrides);
+        // A retained program or an observer needs this load's own syntax tree.
+        let memoized = !parsed_source_retention.retains(path) && observer.is_none();
+        let remembered = match &source {
+            Ok(Some(text)) if memoized => load_memo::recall(path, text, package_snapshots),
+            _ => None,
+        };
+        if remembered.is_none() {
+            pending.push((loaded.len(), path, source));
+        }
+        loaded.push(remembered.map(|module| (module, None)));
+    }
+    let parsed = parse_wave(
+        paths.len(),
+        &pending,
+        package_snapshots,
+        parsed_source_retention,
+        observer,
+    );
+    for ((index, _, _), module) in pending.iter().zip(parsed) {
+        loaded[*index] = Some(module);
+    }
+    loaded
+        .into_iter()
+        .map(|module| module.expect("every wave path was loaded"))
+        .collect()
+}
+
+type PendingModule<'a> = (usize, &'a PathBuf, Result<Option<String>, String>);
+
+/// Parse the modules a wave could not recall, index-aligned with `pending`.
+///
+/// Whether a module parses on a worker still follows the size of its whole
+/// wave, as it did before recall: workers carry the runtime parse stack, and a
+/// caller thread may not.
+fn parse_wave(
+    wave_len: usize,
+    pending: &[PendingModule<'_>],
+    package_snapshots: &[PackageSnapshot],
+    parsed_source_retention: ParsedSourceRetention<'_>,
+    observer: Option<&ModuleObserver<'_>>,
+) -> Vec<LoadedModule> {
     const MIN_PARALLEL_WAVE: usize = 8;
+    let load = |(_, path, source): &PendingModule<'_>| {
+        load_module(
+            path,
+            source,
+            package_snapshots,
+            parsed_source_retention.retains(path),
+            observer,
+        )
+    };
     let configured = std::env::var(MODULE_GRAPH_JOBS_ENV)
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|&jobs| jobs > 0);
-    let workers = configured
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism()
-                .map(std::num::NonZeroUsize::get)
-                .unwrap_or(1)
-        })
-        .min(paths.len());
-    if workers <= 1 || paths.len() < MIN_PARALLEL_WAVE {
-        return paths
-            .iter()
-            .map(|path| {
-                load_module(
-                    path,
-                    package_snapshots,
-                    source_overrides,
-                    parsed_source_retention.retains(path),
-                    observer,
-                )
+    let pool = configured.unwrap_or_else(|| {
+        std::thread::available_parallelism()
+            .map(std::num::NonZeroUsize::get)
+            .unwrap_or(1)
+    });
+    if pending.is_empty() || pool.min(wave_len) <= 1 || wave_len < MIN_PARALLEL_WAVE {
+        return pending.iter().map(load).collect();
+    }
+    let workers = pool.min(pending.len());
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut produced: Vec<(usize, LoadedModule)> = harn_parser::runtime_stack::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope
+                    .spawn_named("harn-module-parse", || {
+                        let mut local = Vec::new();
+                        loop {
+                            let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let Some(module) = pending.get(index) else {
+                                break;
+                            };
+                            local.push((index, load(module)));
+                        }
+                        local
+                    })
+                    .expect("spawn module-parse worker")
             })
             .collect();
-    }
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let mut produced: Vec<(usize, (Arc<ModuleInfo>, Option<ParsedModuleSource>))> =
-        harn_parser::runtime_stack::scope(|scope| {
-            let handles: Vec<_> = (0..workers)
-                .map(|_| {
-                    scope
-                        .spawn_named("harn-module-parse", || {
-                            let mut local = Vec::new();
-                            loop {
-                                let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                let Some(path) = paths.get(index) else {
-                                    break;
-                                };
-                                local.push((
-                                    index,
-                                    load_module(
-                                        path,
-                                        package_snapshots,
-                                        source_overrides,
-                                        parsed_source_retention.retains(path),
-                                        observer,
-                                    ),
-                                ));
-                            }
-                            local
-                        })
-                        .expect("spawn module-parse worker")
-                })
-                .collect();
-            handles
-                .into_iter()
-                .flat_map(|handle| match handle.join() {
-                    Ok(local) => local,
-                    Err(panic) => std::panic::resume_unwind(panic),
-                })
-                .collect()
-        });
+        handles
+            .into_iter()
+            .flat_map(|handle| match handle.join() {
+                Ok(local) => local,
+                Err(panic) => std::panic::resume_unwind(panic),
+            })
+            .collect()
+    });
     produced.sort_unstable_by_key(|(index, _)| *index);
     produced.into_iter().map(|(_, loaded)| loaded).collect()
 }
@@ -1310,50 +1345,50 @@ impl SelectiveImportIssue {
     }
 }
 
+/// A module's text: the caller's override, the embedded stdlib, or disk.
+/// `Ok(None)` is a missing file.
+fn wave_module_source(
+    path: &Path,
+    source_overrides: Option<&HashMap<PathBuf, String>>,
+) -> Result<Option<String>, String> {
+    match source_overrides.and_then(|overrides| overrides.get(&normalize_path(path))) {
+        Some(source) => Ok(Some(source.clone())),
+        None => source_reads::read_module_source_checked(path),
+    }
+}
+
 fn load_module(
     path: &Path,
+    source: &Result<Option<String>, String>,
     package_snapshots: &[PackageSnapshot],
-    source_overrides: Option<&HashMap<PathBuf, String>>,
     retain_parsed_source: bool,
     observer: Option<&ModuleObserver<'_>>,
-) -> (Arc<ModuleInfo>, Option<ParsedModuleSource>) {
-    let source = match source_overrides
-        .and_then(|overrides| overrides.get(&normalize_path(path)).cloned())
-    {
-        Some(source) => Some(source),
-        None => match source_reads::read_module_source_checked(path) {
-            Ok(source) => source,
-            Err(message) => {
-                let module = ModuleInfo {
-                    load_error: Some(ModuleLoadError {
-                        message,
-                        span: Span::dummy(),
-                    }),
-                    ..ModuleInfo::default()
-                };
-                return (Arc::new(module), None);
-            }
-        },
-    };
-    let Some(source) = source else {
-        return (Arc::default(), None);
-    };
-    // A retained program or an observer needs this load's own syntax tree.
-    let memoized = !retain_parsed_source && observer.is_none();
-    if memoized {
-        if let Some(module) = load_memo::recall(path, &source, package_snapshots) {
-            return (module, None);
+) -> LoadedModule {
+    let source = match source {
+        Ok(Some(source)) => source,
+        Ok(None) => return (Arc::default(), None),
+        Err(message) => {
+            let module = ModuleInfo {
+                load_error: Some(ModuleLoadError {
+                    message: message.clone(),
+                    span: Span::dummy(),
+                }),
+                ..ModuleInfo::default()
+            };
+            return (Arc::new(module), None);
         }
-    }
-    let (module, program) = project_module(path, &source, package_snapshots, observer);
+    };
+    let (module, program) = project_module(path, source, package_snapshots, observer);
     let module = Arc::new(module);
-    if memoized {
-        load_memo::remember(path, source, &module);
-        return (module, None);
+    if !retain_parsed_source && observer.is_none() {
+        load_memo::remember(path, source.clone(), &module);
     }
     let parsed = program
         .filter(|_| retain_parsed_source)
-        .map(|program| ParsedModuleSource { source, program });
+        .map(|program| ParsedModuleSource {
+            source: source.clone(),
+            program,
+        });
     (module, parsed)
 }
 
