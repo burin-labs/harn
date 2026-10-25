@@ -355,7 +355,7 @@ fn registration_failure_releases_active_lease_without_namespace_reacquisition() 
         .write(true)
         .open(dir.join(ACTIVE_LEASE_FILE))
         .unwrap();
-    probe.try_lock().unwrap();
+    harn_flock::assert_released(&probe);
     probe.unlock().unwrap();
     drop(probe);
     holder.unlock().unwrap();
@@ -483,9 +483,42 @@ fn command_artifact_pressure_sweep_removes_oldest_dead_dirs_over_limit() {
     set_dir_mtime(&second, now - Duration::from_mins(20));
     set_dir_mtime(&third, now - Duration::from_mins(10));
 
-    sweep_command_artifact_dirs(temp.path(), Duration::from_hours(1), 2, now);
+    assert!(!sweep_command_artifact_dirs(
+        temp.path(),
+        Duration::from_hours(1),
+        2,
+        now
+    ));
 
     assert!(!first.exists());
     assert!(second.exists());
     assert!(third.exists());
+}
+
+#[test]
+fn a_live_owner_over_the_cap_is_reported_so_the_next_command_skips_the_sweep() {
+    let temp = tempdir().unwrap();
+    let now = fixed_now();
+    let owner = dead_pid() - 1;
+    let lease = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(session_lease_path(temp.path(), owner))
+        .unwrap();
+    lease.lock().unwrap();
+    let dirs: Vec<_> = (1..=3)
+        .map(|seq| create_artifact_dir(temp.path(), owner, seq * 100, 1))
+        .collect();
+    for dir in &dirs {
+        set_dir_mtime(dir, now - Duration::from_mins(30));
+    }
+
+    assert!(
+        sweep_command_artifact_dirs(temp.path(), Duration::from_hours(1), 2, now),
+        "directories a live owner holds keep the namespace over its cap"
+    );
+    assert!(dirs.iter().all(|dir| dir.exists()));
+    lease.unlock().unwrap();
 }

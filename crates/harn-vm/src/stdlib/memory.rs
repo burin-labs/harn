@@ -26,7 +26,6 @@ use serde_json::Value as JsonValue;
 use crate::stdlib::host::dispatch_host_operation;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 const MEMORY_TYPE: &str = "memory_record";
 const EVENT_LOG_FILE: &str = "events.jsonl";
@@ -215,9 +214,7 @@ struct CachedEmbedding {
     vector: Vec<f64>,
 }
 
-pub(crate) fn register_memory_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_memory_builtins);
 
 /// Reserved cache namespace for standalone `__embed` calls. Keeps the
 /// content-addressed embedding cache for ad-hoc embeds (e.g. the semantic

@@ -394,6 +394,7 @@ impl AcpServer {
         let output = self
             .output
             .for_prompt(prompt.correlation.clone(), owner.task().cloned());
+        let output = super::module_progress::ModuleProgressGate::default().observe(output);
         // Durable subscribers stay session-owned; this transport stays with its turn.
         clear_session_sinks(&session_id);
         if let Some(sink) = durable_sink {

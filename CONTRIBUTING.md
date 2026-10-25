@@ -466,9 +466,15 @@ Wire-up checklist:
    their initialization alongside registration.
 3. The macro contributes definitions to `all_builtin_defs()` automatically.
    Do not add a parallel membership list.
-4. Make sure your module's `register_*_builtins(vm)` is called from one of
-   `register_core_stdlib`, `register_io_stdlib`, or
-   `register_agent_stdlib_{before,after}_llm` in the same file.
+4. Declare the module's installer. When it registers exactly the module's
+   `#[harn_builtin]`s, write
+   `harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_x_builtins);`;
+   otherwise declare a hand-written installer beside it with
+   `harn_vm_core::stdlib_installer!(Pure, register_x_builtins);`. Use `Pure`
+   for deterministic builtins with no I/O and `Host` for everything else.
+   Installers must not register a name another installer registers. A
+   module that keeps thread-local state declares its reset with
+   `harn_vm_core::stdlib_state_reset!(reset_x_state);`.
 5. Read the arguments through `Args` / `Options` (see
    [Reading arguments](#reading-arguments)).
 6. Add or update a `harn explain <name>` snapshot / conformance fixture

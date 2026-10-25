@@ -180,6 +180,8 @@ pub(crate) fn reset_workflow_run_states() {
     WORKFLOW_RUN_STATES.with(|states| states.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_workflow_run_states);
+
 /// Number of interned workflow run states on this thread. Test-only.
 #[cfg(test)]
 pub(crate) fn workflow_run_state_count() -> usize {

@@ -321,12 +321,12 @@ MAX_BYTES_OVERRIDE=1 \
 # restore-candidate: a release candidate archive, checked against the candidate
 # manifest the build wrote at the same commit.
 candidate_target=x86_64-unknown-linux-gnu
-candidate_file="harn-${candidate_target}.tar.gz"
+candidate_file="harn-${candidate_target}.tar.xz"
 mkdir -p "$tmpdir/candidate-src" "$tmpdir/candidate"
 printf '#!/usr/bin/env bash\necho candidate-harn\n' > "$tmpdir/candidate-src/harn"
 chmod +x "$tmpdir/candidate-src/harn"
 ln -s harn "$tmpdir/candidate-src/harn-lsp"
-tar -czf "$tmpdir/candidate/$candidate_file" -C "$tmpdir/candidate-src" harn harn-lsp
+tar -cJf "$tmpdir/candidate/$candidate_file" -C "$tmpdir/candidate-src" harn harn-lsp
 candidate_sha="$(sha256sum "$tmpdir/candidate/$candidate_file" | cut -d ' ' -f 1)"
 write_candidate_manifest() {
   local output=$1 source_commit=$2 digest=$3

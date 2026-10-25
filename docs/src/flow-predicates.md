@@ -223,7 +223,7 @@ bootstrap edits. A maintainer entry is `"role:<name>"` (matched as
 predicate-count ceiling.
 
 Two Rust functions in
-`crates/harn-vm/src/flow/predicates/bootstrap.rs` carry the policy:
+`crates/harn-flow/src/predicates/bootstrap.rs` carry the policy:
 
 - `validate_predicate_edit(proposed_source, author, previous_policy)` runs
   the bootstrap rules against a proposed `invariants.harn` edit. Missing
@@ -317,7 +317,7 @@ The v0 rule is:
 
 ### Default ceiling
 
-The `PredicateCeiling::default()` in `crates/harn-vm/src/flow/predicates/compose.rs`
+The `PredicateCeiling::default()` in `crates/harn-flow/src/predicates/compose.rs`
 sets:
 
 - `require_approval_threshold = 256` — at this size the `flow-platform` role
@@ -326,7 +326,7 @@ sets:
   stable error code `predicate_count_explosion`.
 
 These limits are operational, not perf. The
-`crates/harn-vm/benches/flow_predicate_union.rs` benchmarks measure resolve and
+`crates/harn-flow/benches/flow_predicate_union.rs` benchmarks measure resolve and
 ceiling-check cost across normal, high-fanout, and pathological fixtures: the
 union itself is microsecond-scale even at ~2000 predicates and the ceiling
 check is sub-100µs. The binding constraint is downstream evaluation —

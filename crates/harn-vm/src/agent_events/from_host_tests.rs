@@ -1419,3 +1419,16 @@ fn dropped_key_details(
         })
         .collect()
 }
+
+#[test]
+fn recorded_tool_update_masks_credentials_in_data_and_error() {
+    let secret = "sk-abcdef0123456789abcdef";
+    let mut payload = json!({
+        "status": "failed",
+        "data": {"token": secret, "rows": 3},
+        "error": format!("upstream rejected key {secret}"),
+    });
+    super::from_host::redact_recorded_tool_payload("tool_call_update", &mut payload);
+    assert!(!payload.to_string().contains("sk-abcdef"), "{payload}");
+    assert_eq!(payload["data"]["rows"], 3);
+}

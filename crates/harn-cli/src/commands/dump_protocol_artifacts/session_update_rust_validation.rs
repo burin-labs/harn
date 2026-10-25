@@ -21,7 +21,7 @@ fn validate_session_update(value: &Value, rules: &[(&str, SessionUpdateRule)]) -
         let reason = match rule {
             SessionUpdateRule::Required if field.is_none() => Some("is required"),
             SessionUpdateRule::MinLen(minimum) if field.and_then(Value::as_str).is_some_and(|text| (text.chars().count() as u64) < *minimum) => Some("is too short"),
-            SessionUpdateRule::Minimum(minimum) if field.and_then(Value::as_i64).is_some_and(|number| number < *minimum) => Some("is below its minimum"),
+            SessionUpdateRule::Minimum(minimum) if field.and_then(Value::as_f64).is_some_and(|number| number < *minimum as f64) => Some("is below its minimum"),
             SessionUpdateRule::NonBlank if field.and_then(Value::as_str).is_some_and(|text| text.trim().is_empty()) => Some("must not be blank"),
             SessionUpdateRule::Choices(choices) if field.and_then(Value::as_str).is_some_and(|text| !choices.contains(&text)) => Some("has an unknown value"),
             SessionUpdateRule::Present(children) if field.is_some() => { validate_session_update(value, children)?; None },

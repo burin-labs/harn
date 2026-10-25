@@ -54,6 +54,8 @@ pub(crate) fn reset_agent_worker_state() {
     reset_worker_registry();
 }
 
+harn_vm_core::stdlib_state_reset!(reset_agent_worker_state);
+
 pub(crate) use self::records::{parse_artifact_list, parse_context_policy};
 fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {
     let json = serde_json::to_value(value)
@@ -96,6 +98,8 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
     records::register_record_builtins(vm);
     workflow::register_workflow_builtins(vm);
 }
+
+harn_vm_core::stdlib_installer!(Host, register_agent_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",

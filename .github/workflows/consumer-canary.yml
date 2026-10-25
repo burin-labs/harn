@@ -34,6 +34,18 @@ on:
       verdict:
         description: Actual downstream pass or fail; empty means unmeasured
         value: ${{ jobs.consumers.outputs.verdict }}
+      consumer_run:
+        description: The consumer run's numeric id, which this workflow already prints
+        value: ${{ jobs.consumers.outputs.consumer_run }}
+      consumer_head:
+        description: The consumer run's head commit, compared between two rehearsals and never printed
+        value: ${{ jobs.consumers.outputs.consumer_head }}
+      consumer_jobs:
+        description: A digest of the consumer run's job names
+        value: ${{ jobs.consumers.outputs.consumer_jobs }}
+      reason:
+        description: The named reason an attempt failed or stayed unmeasured
+        value: ${{ jobs.consumers.outputs.reason }}
       source_revision:
         description: Exact source rehearsed by this invocation
         value: ${{ inputs.source_revision }}
@@ -64,6 +76,11 @@ on:
         required: false
         default: ''
         type: string
+      pull_request_cli_artifact:
+        description: Empty for that run's own CLI; harn-base-cli.tar.zst for the base CLI it built
+        required: false
+        default: ''
+        type: string
       release_producer_run_id:
         description: Current archive producer whose successful build and manifest jobs precede this rehearsal
         required: false
@@ -85,7 +102,9 @@ on:
 permissions: {}
 
 concurrency:
-  group: consumer-canary-${{ inputs.source_revision || (github.event_name == 'schedule' && 'scheduled-main' || github.run_id) }}
+  # A pull request run keys by its run too, so two pull requests rehearsing one
+  # base never queue behind, or evict, each other.
+  group: consumer-canary-${{ inputs.source_revision || (github.event_name == 'schedule' && 'scheduled-main' || github.run_id) }}${{ inputs.pull_request_cli_run && format('-run-{0}', inputs.pull_request_cli_run) || '' }}
   cancel-in-progress: ${{ github.event_name == 'schedule' && inputs.source_revision == '' }}
 
 jobs:
@@ -126,6 +145,10 @@ jobs:
       contents: read
     outputs:
       verdict: ${{ steps.observe-1.outputs.verdict || steps.observe-2.outputs.verdict || steps.observe-3.outputs.verdict || steps.observe-4.outputs.verdict }}
+      consumer_run: ${{ steps.canary.outputs.run_id }}
+      consumer_head: ${{ steps.record.outputs.consumer_head }}
+      consumer_jobs: ${{ steps.record.outputs.consumer_jobs }}
+      reason: ${{ steps.record.outputs.reason }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -187,6 +210,7 @@ jobs:
           REHEARSAL_PROMOTION_READ_TOKEN: ${{ steps.history-token.outputs.token }}
           CANARY_PULL_REQUEST_CLI_RUN: ${{ inputs.pull_request_cli_run }}
           CANARY_PULL_REQUEST_BASE: ${{ inputs.pull_request_base }}
+          CANARY_PULL_REQUEST_CLI_ARTIFACT: ${{ inputs.pull_request_cli_artifact }}
           CANARY_RELEASE_PRODUCER_RUN_ID: ${{ inputs.release_producer_run_id }}
           CANARY_RELEASE_PRODUCER_RUN_ATTEMPT: ${{ inputs.release_producer_run_attempt }}
           PULL_REQUEST_BODY: ${{ inputs.pull_request_cli_run != '' && github.event.pull_request.body || '' }}
@@ -282,10 +306,21 @@ jobs:
         if: always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '' || steps.observe-4.outputs.failure-receipt != '' || steps.interrupted.outputs.failure_receipt != '')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: consumer-observer-failure-${{ github.run_attempt }}
+          name: consumer-observer-failure-${{ github.run_attempt }}-${{ needs.decide.outputs.source_revision }}-${{ steps.canary.outputs.run_id || 'undispatched' }}
           path: ${{ steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt || steps.observe-4.outputs.failure-receipt || steps.interrupted.outputs.failure_receipt }}
           if-no-files-found: error
           retention-days: 7
+      - name: Record the consumer run's identity and reason
+        id: record
+        if: always() && steps.cleanup-token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.cleanup-token.outputs.token }}
+          CANARY_OWNER: ${{ github.repository_owner }}
+          CANARY_NAME: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          CANARY_RECORD_RUN: ${{ steps.canary.outputs.run_id }}
+          CANARY_DISPATCH_REASON: ${{ steps.canary.outputs.reason }}
+          CANARY_FAILURE_RECEIPT: ${{ steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt || steps.observe-4.outputs.failure-receipt || steps.interrupted.outputs.failure_receipt }}
+        run: CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" bash scripts/ci/consumer_canary.sh --record
       - name: Reconcile the ended observer's exact child
         if: always() && steps.cleanup-token.outcome == 'success'
         env:

@@ -740,6 +740,8 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Host, register_mcp_builtins);
+
 pub(crate) fn mcp_roots_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::list(
         current_mcp_roots()

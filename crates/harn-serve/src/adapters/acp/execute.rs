@@ -153,7 +153,7 @@ async fn configure_stable_vm(
     project_root: Option<&Path>,
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
 ) -> Result<String, String> {
-    harn_vm::register_vm_stdlib(vm);
+    harn_runtime::register_vm_stdlib(vm);
     // Metadata/store rooted at the launched project when supplied by the host,
     // otherwise at harn.toml when present.
     let project_root = acp_project_root(source_path, cwd, project_root);
@@ -788,7 +788,8 @@ require_declared_operations_served = true
         });
         let bridge = Arc::new(AcpBridge {
             session_id: "module-progress-test".to_string(),
-            output: super::super::AcpOutput::Channel(tx),
+            output: super::super::AcpOutput::Channel(tx)
+                .observed_by(super::super::module_progress::ModuleProgressGate::default()),
             pending: client_pending,
             next_id_counter: AtomicU64::new(1),
             cancellation: cancellation.clone(),
@@ -922,6 +923,15 @@ require_declared_operations_served = true
                 .and_then(|value| value.as_str()),
             Some("completed"),
             "the terminal live frame must preserve the final timing receipt"
+        );
+        assert_eq!(
+            module_progress
+                .iter()
+                .filter(|meta| meta.pointer("/data/state").and_then(|v| v.as_str())
+                    == Some("completed"))
+                .count(),
+            1,
+            "completion is reported once"
         );
     }
 }

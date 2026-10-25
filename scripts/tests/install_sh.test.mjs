@@ -35,12 +35,12 @@ function fixture(target, invalid, existing = false, badChecksum = false, invalid
       if (invalid.kind === 'directory') mkdirSync(path);
       if (invalid.kind === 'symlink') symlinkSync(invalid.name === 'harn' ? 'LICENSE-MIT' : 'harn', path);
     }
-    const archive = join(root, `harn-${triple}.tar.gz`);
-    const tar = spawnSync('tar', ['-czf', archive, '-C', paths.archive, '.'], { encoding: 'utf8' });
+    const archive = join(root, `harn-${triple}.tar.xz`);
+    const tar = spawnSync('tar', ['-cJf', archive, '-C', paths.archive, '.'], { encoding: 'utf8' });
     assert.equal(tar.status, 0, tar.stderr);
     const digest = createHash('sha256').update(readFileSync(archive)).digest('hex');
     const checksums = join(root, 'SHA256SUMS');
-    writeFileSync(checksums, `${badChecksum ? '0'.repeat(64) : digest}  harn-${triple}.tar.gz\n`);
+    writeFileSync(checksums, `${badChecksum ? '0'.repeat(64) : digest}  harn-${triple}.tar.xz\n`);
     writeFileSync(join(paths.shim, 'uname'), '#!/bin/sh\ncase "$1" in -s) echo "$FIXTURE_OS";; -m) echo "$FIXTURE_ARCH";; *) exit 1;; esac\n', { mode: 0o755 });
     // Only the two exact download URLs are accepted. No network-capable command
     // is reached, while the real installer still verifies the real tar digest.
@@ -52,7 +52,7 @@ while [ "$#" -gt 1 ]; do
 done
 printf '%s\\n' "$1" >> "$FIXTURE_REQUESTS"
 case "$1" in
-  "$FIXTURE_BASE/harn-$FIXTURE_TARGET.tar.gz") /bin/cp "$FIXTURE_ARCHIVE" "$dest";;
+  "$FIXTURE_BASE/harn-$FIXTURE_TARGET.tar.xz") /bin/cp "$FIXTURE_ARCHIVE" "$dest";;
   "$FIXTURE_BASE/SHA256SUMS") /bin/cp "$FIXTURE_CHECKSUMS" "$dest";;
   *) exit 91;;
 esac
@@ -161,3 +161,14 @@ for (const name of legalFiles) {
     test(`real installer preflights existing ${kind} destination ${name}`, () => fixture(targets[0], undefined, true, false, { name, kind }));
   }
 }
+
+test('every installer names the first xz release the same way', () => {
+  const read = (file) => readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
+  const shell = (file) => read(file).match(/^XZ_FIRST_RELEASE=(\d+\.\d+\.\d+)$/m)?.[1];
+  const harn = read('crates/harn-stdlib/src/stdlib/runtime/install.harn').match(/^const XZ_FIRST_RELEASE = "(\d+\.\d+\.\d+)"$/m)?.[1];
+  const rust = read('crates/harn-cli/src/commands/upgrade.rs').match(/^const XZ_FIRST_RELEASE: \[u64; 3\] = \[(\d+), (\d+), (\d+)\];$/m)?.slice(1).join('.');
+  assert.ok(harn, 'install.harn declares XZ_FIRST_RELEASE');
+  assert.equal(shell('install.sh'), harn);
+  assert.equal(shell('scripts/bootstrap-harn.sh'), harn);
+  assert.equal(rust, harn);
+});

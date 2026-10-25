@@ -16,6 +16,8 @@ pub(crate) fn register_project_builtins(vm: &mut Vm) {
     register_project_enrich_builtin(vm);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_project_builtins);
+
 pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
     &PROJECT_CONTEXT_PROFILE_NATIVE_IMPL_DEF,
     &PROJECT_FINGERPRINT_IMPL_DEF,

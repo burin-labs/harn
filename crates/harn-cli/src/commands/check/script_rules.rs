@@ -103,7 +103,7 @@ mod imp {
     /// engine, but no default host I/O.
     fn sandbox_vm() -> harn_vm::Vm {
         let mut vm = harn_vm::new_vm();
-        harn_vm::register_vm_stdlib(&mut vm);
+        harn_runtime::register_vm_stdlib(&mut vm);
         harn_rules_hostlib::install(&mut vm);
         vm
     }

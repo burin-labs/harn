@@ -1,0 +1,49 @@
+import { check_server_model, endpoint_setting } from "../lib/server"
+
+pipeline test_server_check_requires_the_exact_model_and_uses_the_runtime_endpoint_contract(
+  harness: Harness,
+) {
+  assert_eq(unwrap(endpoint_setting(harness.llm, "llamacpp:wanted")), "LLAMACPP_BASE_URL")
+  assert_eq(unwrap(endpoint_setting(harness.llm, "ollama:wanted")), "OLLAMA_HOST")
+  assert(is_err(endpoint_setting(harness.llm, "wanted")))
+  const url = "http://timing.test/v1/models"
+  defer {
+    harness.testing.http_mock_clear()
+  }
+  for response in [
+    {status: 200, body: r#"{"data":[{"id":"wanted"}]}"#, accepted: true},
+    {status: 200, body: r#"{"data":[{"id":"wanted-neighbor"}]}"#, accepted: false},
+    {status: 200, body: r#"{"data":[],"note":"wanted"}"#, accepted: false},
+    {status: 200, body: "{}", accepted: false},
+    {status: 503, body: r#"{"data":[{"id":"wanted"}]}"#, accepted: false},
+  ] {
+    harness.testing.http_mock_clear()
+    harness.testing.http_mock("GET", url, {status: response.status, body: response.body})
+    const result = check_server_model(
+      harness.net,
+      harness.llm,
+      "http://timing.test/",
+      "llamacpp:wanted",
+    )
+    assert_eq(is_ok(result), response.accepted)
+    assert_eq(harness.testing.http_mock_calls().count, 1)
+  }
+  const tags = "http://timing.test/api/tags"
+  for response in [
+    {body: r#"{"models":[{"name":"wanted:latest"}]}"#, accepted: true},
+    {body: r#"{"models":[{"name":"wanted"}]}"#, accepted: true},
+    {body: r#"{"models":[{"name":"wanted-neighbor:latest"}]}"#, accepted: false},
+    {body: r#"{"data":[{"id":"wanted"}]}"#, accepted: false},
+  ] {
+    harness.testing.http_mock_clear()
+    harness.testing.http_mock("GET", tags, {status: 200, body: response.body})
+    const result = check_server_model(
+      harness.net,
+      harness.llm,
+      "http://timing.test/",
+      "ollama:wanted",
+    )
+    assert_eq(is_ok(result), response.accepted)
+    assert_eq(harness.testing.http_mock_calls().count, 1)
+  }
+}

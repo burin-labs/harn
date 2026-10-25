@@ -5,11 +5,9 @@ use crate::external_agent::{
 use crate::llm::vm_value_to_json;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::{AsyncBuiltinCtx, Vm};
+use crate::vm::AsyncBuiltinCtx;
 
-pub(crate) fn register_external_agent_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_external_agent_builtins);
 
 #[harn_builtin(
     exposure = "harness.agent.external_agent_delegate",

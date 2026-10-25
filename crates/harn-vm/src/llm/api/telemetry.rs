@@ -202,6 +202,9 @@ pub struct ProviderTelemetry {
     /// than reporting a value the sibling field cannot be differenced with.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_first_frame_ms: Option<u64>,
+    /// Settled speed of this attempt, measured at the dispatch boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_speed: Option<Box<crate::llm::inference_speed::InferenceSpeed>>,
     /// Context window the model was loaded with (where the runtime
     /// reports it; `/api/ps` for Ollama).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -299,6 +302,7 @@ impl ProviderTelemetry {
             started_at_ms,
             prompt_cache_ttl,
             client_first_frame_ms,
+            inference_speed,
             runtime_context_length,
             runtime_loaded_model,
             response_model,
@@ -332,6 +336,7 @@ impl ProviderTelemetry {
             && started_at_ms.is_none()
             && prompt_cache_ttl.is_none()
             && client_first_frame_ms.is_none()
+            && inference_speed.is_none()
             && runtime_context_length.is_none()
             && runtime_loaded_model.is_none()
             && response_model.is_none()
@@ -650,6 +655,14 @@ impl ProviderTelemetry {
             "client_first_frame_ms",
             self.client_first_frame_ms,
         );
+        if let Some(speed) = &self.inference_speed {
+            dict.insert(
+                "inference_speed".into(),
+                crate::schema::json_to_vm_value(
+                    &serde_json::to_value(speed).expect("inference speed serializes"),
+                ),
+            );
+        }
         insert_opt_u64(
             &mut dict,
             "runtime_context_length",
@@ -1109,6 +1122,15 @@ mod tests {
             started_at_ms: Some(1_780_000_000_000),
             prompt_cache_ttl: Some("1h".to_string()),
             client_first_frame_ms: Some(1_500),
+            inference_speed: Some(Box::new(crate::llm::inference_speed::InferenceSpeed {
+                phase: crate::llm::inference_speed::InferencePhase::Complete,
+                is_final: true,
+                elapsed_ms: 2_000,
+                time_to_first_token_ms: Some(1_500),
+                output_tokens: 5,
+                output_tokens_per_second: None,
+                token_source: crate::llm::inference_speed::TokenCountSource::Provider,
+            })),
             runtime_context_length: Some(8_192),
             runtime_loaded_model: Some("served-model".to_string()),
             response_model: Some("response-model".to_string()),

@@ -35,6 +35,7 @@ impl GenerateContentStream {
     /// Merge one append-only response chunk and return its visible text.
     fn push(&mut self, frame: &Value) -> Option<String> {
         let delta = visible_text(frame);
+        observe_unforwarded_output(frame);
         merge_response(&mut self.envelope, frame);
         (!delta.is_empty()).then_some(delta)
     }
@@ -281,6 +282,27 @@ fn visible_text(envelope: &Value) -> String {
         .filter(|part| part.get("thought").and_then(Value::as_bool) != Some(true))
         .filter_map(|part| part.get("text").and_then(Value::as_str))
         .collect()
+}
+
+/// Meter the chunk's thought text and function-call arguments, which never
+/// reach the text channel.
+fn observe_unforwarded_output(frame: &Value) {
+    use crate::llm::inference_speed::{observe_output, OutputKind};
+    for part in frame["candidates"][0]["content"]["parts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        if part.get("thought").and_then(Value::as_bool) == Some(true) {
+            observe_output(
+                OutputKind::Reasoning,
+                part.get("text").and_then(Value::as_str).unwrap_or_default(),
+            );
+        }
+        if let Some(arguments) = part.pointer("/functionCall/args") {
+            observe_output(OutputKind::ToolArguments, &arguments.to_string());
+        }
+    }
 }
 
 #[cfg(test)]

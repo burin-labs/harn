@@ -25,7 +25,7 @@ use crate::stdlib::waitpoint::{
 };
 use crate::triggers::dispatcher::current_dispatch_context;
 use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
-use crate::vm::{AsyncBuiltinCtx, Vm};
+use crate::vm::AsyncBuiltinCtx;
 
 mod fixtures;
 mod response;
@@ -273,9 +273,7 @@ enum WaitpointOutcome {
     },
 }
 
-pub(crate) fn register_hitl_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_hitl_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",
@@ -335,6 +333,8 @@ pub(crate) fn reset_hitl_state() {
         *slot.borrow_mut() = RequestSequenceState::default();
     });
 }
+
+harn_vm_core::stdlib_state_reset!(reset_hitl_state);
 
 pub(crate) fn take_hitl_state() -> RequestSequenceState {
     REQUEST_SEQUENCE.with(|slot| std::mem::take(&mut *slot.borrow_mut()))

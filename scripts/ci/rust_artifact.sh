@@ -591,7 +591,7 @@ restore_candidate() {
 
   mkdir -p "$destination"
   case "$file" in
-    *.tar.gz) tar -xzf "$archive" -C "$destination" ;;
+    *.tar.xz) tar -xf "$archive" -C "$destination" ;;
     *.zip)
       if command -v unzip >/dev/null 2>&1; then
         unzip -q "$archive" -d "$destination"

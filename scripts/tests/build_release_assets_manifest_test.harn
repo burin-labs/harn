@@ -22,8 +22,8 @@ pipeline test_target_triples_order(harness: Harness, task: unknown) {
 @test
 pipeline test_target_meta_darwin(harness: Harness, task: unknown) {
   const m = target_meta("aarch64-apple-darwin")
-  assert_eq(m.filename, "harn-aarch64-apple-darwin.tar.gz")
-  assert_eq(m.format, "tar.gz")
+  assert_eq(m.filename, "harn-aarch64-apple-darwin.tar.xz")
+  assert_eq(m.format, "tar.xz")
   assert_eq(m.binaries, ["harn", "harn-dap", "harn-lsp"])
 }
 
@@ -80,7 +80,7 @@ pipeline test_posix_path_str_keeps_dotdot(harness: Harness, task: unknown) {
 
 @test
 pipeline test_join_path(harness: Harness, task: unknown) {
-  assert_eq(join_path("artifacts", "harn-x.tar.gz"), "artifacts/harn-x.tar.gz")
+  assert_eq(join_path("artifacts", "harn-x.tar.xz"), "artifacts/harn-x.tar.xz")
   assert_eq(join_path("./artifacts", "f.zip"), "artifacts/f.zip")
   assert_eq(join_path("/tmp/arts", "f.tar.gz"), "/tmp/arts/f.tar.gz")
   // A bare "." directory yields just the filename, matching `Path(".") / f`.
@@ -92,11 +92,11 @@ pipeline test_join_path(harness: Harness, task: unknown) {
 pipeline test_asset_record_shape(harness: Harness, task: unknown) {
   const base = "https://github.com/burin-labs/harn/releases/download/v0.8.21"
   const rec = asset_record("aarch64-apple-darwin", base, "deadbeef", 1234)
-  assert_eq(rec.filename, "harn-aarch64-apple-darwin.tar.gz")
-  assert_eq(rec.url, base + "/harn-aarch64-apple-darwin.tar.gz")
+  assert_eq(rec.filename, "harn-aarch64-apple-darwin.tar.xz")
+  assert_eq(rec.url, base + "/harn-aarch64-apple-darwin.tar.xz")
   assert_eq(rec.sha256, "deadbeef")
   assert_eq(rec.size, 1234)
-  assert_eq(rec.format, "tar.gz")
+  assert_eq(rec.format, "tar.xz")
   assert_eq(rec.binaries, ["harn", "harn-dap", "harn-lsp"])
 }
 
@@ -105,12 +105,12 @@ pipeline test_missing_message_sorts(harness: Harness, task: unknown) {
   // Accumulation order is TARGETS order; the message sorts before joining.
   const missing = [
     "harn-x86_64-pc-windows-msvc.zip",
-    "harn-aarch64-apple-darwin.tar.gz",
-    "harn-x86_64-apple-darwin.tar.gz",
+    "harn-aarch64-apple-darwin.tar.xz",
+    "harn-x86_64-apple-darwin.tar.xz",
   ]
   assert_eq(
     missing_message(missing),
-    "release-assets manifest is missing required archives: harn-aarch64-apple-darwin.tar.gz, harn-x86_64-apple-darwin.tar.gz, harn-x86_64-pc-windows-msvc.zip",
+    "release-assets manifest is missing required archives: harn-aarch64-apple-darwin.tar.xz, harn-x86_64-apple-darwin.tar.xz, harn-x86_64-pc-windows-msvc.zip",
   )
 }
 
@@ -124,7 +124,7 @@ pipeline test_missing_message_single(harness: Harness, task: unknown) {
 
 @test
 pipeline test_build_manifest_shape(harness: Harness, task: unknown) {
-  const assets = {"aarch64-apple-darwin": {filename: "harn-aarch64-apple-darwin.tar.gz"}}
+  const assets = {"aarch64-apple-darwin": {filename: "harn-aarch64-apple-darwin.tar.xz"}}
   const m = build_manifest("0.8.21", "v0.8.21", "https://x/tag", assets)
   assert_eq(m.version, "0.8.21")
   assert_eq(m.tag, "v0.8.21")
@@ -150,7 +150,7 @@ pipeline test_full_manifest_json_byte_format(harness: Harness, task: unknown) {
     assets,
   )
   const expected =
-    "{\n  \"assets\": {\n    \"aarch64-apple-darwin\": {\n      \"binaries\": [\n        \"harn\",\n        \"harn-dap\",\n        \"harn-lsp\"\n      ],\n      \"filename\": \"harn-aarch64-apple-darwin.tar.gz\",\n      \"format\": \"tar.gz\",\n      \"sha256\": \"aaa\",\n      \"size\": 100,\n      \"url\": \"https://github.com/burin-labs/harn/releases/download/v0.8.21/harn-aarch64-apple-darwin.tar.gz\"\n    }\n  },\n  \"release_url\": \"https://github.com/burin-labs/harn/releases/tag/v0.8.21\",\n  \"tag\": \"v0.8.21\",\n  \"version\": \"0.8.21\"\n}"
+    "{\n  \"assets\": {\n    \"aarch64-apple-darwin\": {\n      \"binaries\": [\n        \"harn\",\n        \"harn-dap\",\n        \"harn-lsp\"\n      ],\n      \"filename\": \"harn-aarch64-apple-darwin.tar.xz\",\n      \"format\": \"tar.xz\",\n      \"sha256\": \"aaa\",\n      \"size\": 100,\n      \"url\": \"https://github.com/burin-labs/harn/releases/download/v0.8.21/harn-aarch64-apple-darwin.tar.xz\"\n    }\n  },\n  \"release_url\": \"https://github.com/burin-labs/harn/releases/tag/v0.8.21\",\n  \"tag\": \"v0.8.21\",\n  \"version\": \"0.8.21\"\n}"
   assert_eq(json_stringify_pretty(manifest), expected)
 }
 

@@ -7,7 +7,6 @@ use std::process::Stdio;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 const CLEAR_SEQUENCE: &str = "\x1b[2J\x1b[H";
 const DEFAULT_TERMINAL_WIDTH: usize = 80;
@@ -28,9 +27,7 @@ enum PageFormat {
     Markdown,
 }
 
-pub(crate) fn register_tui_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_tui_builtins);
 
 /// Render a text or markdown page through a pager when appropriate.
 #[harn_builtin(

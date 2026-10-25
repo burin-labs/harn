@@ -446,7 +446,7 @@ async fn suspend_then_resume_then_close_is_idempotent_and_emits_events() {
 async fn suspend_registers_auto_resume_trigger_and_operator_resume_unregisters() {
     let _guard = suspend_test_lock().await;
     crate::triggers::clear_trigger_registry();
-    crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+    crate::stdlib::triggers_stdlib::auto_resume::reset_auto_resume_timeouts();
     let (worker_id, dir) = seed_test_worker("worker-auto-resume-register");
 
     let suspended = suspend_agent_builtin(
@@ -479,14 +479,14 @@ async fn suspend_registers_auto_resume_trigger_and_operator_resume_unregisters()
 
     teardown(&dir, &worker_id);
     crate::triggers::clear_trigger_registry();
-    crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+    crate::stdlib::triggers_stdlib::auto_resume::reset_auto_resume_timeouts();
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn top_level_suspend_registers_auto_resume_trigger() {
     let _guard = suspend_test_lock().await;
     crate::triggers::clear_trigger_registry();
-    crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+    crate::stdlib::triggers_stdlib::auto_resume::reset_auto_resume_timeouts();
     let dir = std::env::temp_dir().join(format!(
         "harn-top-level-suspend-test-{}",
         uuid::Uuid::now_v7()
@@ -522,7 +522,7 @@ async fn top_level_suspend_registers_auto_resume_trigger() {
 
     teardown(&dir, &worker_id);
     crate::triggers::clear_trigger_registry();
-    crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+    crate::stdlib::triggers_stdlib::auto_resume::reset_auto_resume_timeouts();
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -532,7 +532,7 @@ async fn matching_trigger_event_auto_resumes_worker_and_unregisters() {
     harn_clock::test_support::with_local_tasks(async {
         let _guard = suspend_test_lock().await;
         crate::triggers::clear_trigger_registry();
-        crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+        crate::stdlib::triggers_stdlib::auto_resume::reset_auto_resume_timeouts();
         let log = crate::event_log::install_memory_for_current_thread(128);
         let (worker_id, dir) = seed_test_worker("worker-auto-resume-dispatch");
 
@@ -600,7 +600,7 @@ async fn matching_trigger_event_auto_resumes_worker_and_unregisters() {
 
         teardown(&dir, &worker_id);
         crate::triggers::clear_trigger_registry();
-        crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+        crate::stdlib::triggers_stdlib::auto_resume::reset_auto_resume_timeouts();
     })
     .await;
 }
@@ -1283,7 +1283,7 @@ async fn concurrent_warm_resume_reports_sus_006() {
 async fn raw_suspend_trigger_registration_reports_sus_007() {
     let _guard = suspend_test_lock().await;
     crate::triggers::clear_trigger_registry();
-    crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+    crate::stdlib::triggers_stdlib::auto_resume::reset_auto_resume_timeouts();
     let (worker_id, dir) = seed_test_worker("worker-trigger-registration-error");
     let invalid_trigger = VmValue::dict([("trigger", VmValue::dict(crate::value::DictMap::new()))]);
 
@@ -1301,14 +1301,14 @@ async fn raw_suspend_trigger_registration_reports_sus_007() {
 
     teardown(&dir, &worker_id);
     crate::triggers::clear_trigger_registry();
-    crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+    crate::stdlib::triggers_stdlib::auto_resume::reset_auto_resume_timeouts();
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn raw_suspend_timeout_action_reports_sus_008() {
     let _guard = suspend_test_lock().await;
     crate::triggers::clear_trigger_registry();
-    crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+    crate::stdlib::triggers_stdlib::auto_resume::reset_auto_resume_timeouts();
     let (worker_id, dir) = seed_test_worker("worker-timeout-action-error");
 
     let err = suspend_agent_builtin(
@@ -1328,7 +1328,7 @@ async fn raw_suspend_timeout_action_reports_sus_008() {
 
     teardown(&dir, &worker_id);
     crate::triggers::clear_trigger_registry();
-    crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+    crate::stdlib::triggers_stdlib::auto_resume::reset_auto_resume_timeouts();
 }
 
 #[tokio::test(flavor = "current_thread")]
