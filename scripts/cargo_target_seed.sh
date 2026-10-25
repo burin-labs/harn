@@ -8,8 +8,6 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-# shellcheck source=scripts/lib/rustc_frontend.sh
-source "${repo_root}/scripts/lib/rustc_frontend.sh"
 
 usage() {
   echo "usage: $0 <restore|publish|key> [target-dir storage-root]" >&2
@@ -27,15 +25,10 @@ seed_key() {
   fi
   command -v rustc >/dev/null 2>&1 || return 1
   command -v cargo >/dev/null 2>&1 || return 1
-  # Front-end flags are part of every dependency's fingerprint, so a seed
-  # built with other flags would be rebuilt rather than reused.
-  local frontend_flags
-  frontend_flags="$(harn_rustc_frontend_flags)" || return 1
   {
     printf 'harn-cargo-target-seed:v1\n'
     rustc -vV
     cargo -V
-    printf 'rustc-frontend:%s\n' "${frontend_flags}"
   } | shasum -a 256 | awk '{print $1}'
 }
 
