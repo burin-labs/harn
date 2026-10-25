@@ -1,5 +1,6 @@
 //! CALLS edges must not depend on the order files reach the index.
 
+use harn_vm::value::VmDictExt as _;
 use std::fs;
 use std::path::Path;
 
@@ -203,10 +204,7 @@ fn restored_module_imports_keep_callers_when_only_the_declaration_changes() {
     let mut registry = BuiltinRegistry::new();
     capability.register_builtins(&mut registry);
     let mut request = harn_vm::value::DictMap::new();
-    request.insert(
-        harn_vm::value::intern_key("path"),
-        VmValue::String(arcstr::ArcStr::from("Sources/Core/Decl.swift")),
-    );
+    request.put_str("path", "Sources/Core/Decl.swift");
     let result = (registry
         .find("hostlib_code_index_reindex_file")
         .unwrap()

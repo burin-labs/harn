@@ -21,7 +21,7 @@ use crate::triggers::dispatcher::{
 };
 use crate::triggers::registry::{resolve_live_or_as_of, RecordedTriggerBinding};
 use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
-use crate::vm::{AsyncBuiltinCtx, Vm};
+use crate::vm::AsyncBuiltinCtx;
 
 const WAITPOINT_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 const WAITPOINT_WAITS_TOPIC: &str = "waitpoint.waits";
@@ -161,9 +161,7 @@ enum WaiterResolution {
     TimedOut,
 }
 
-pub(crate) fn register_waitpoint_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_waitpoint_builtins);
 
 #[harn_builtin(
     exposure = "harness.runtime.waitpoint_create",
@@ -225,6 +223,8 @@ pub(crate) fn reset_waitpoint_state() {
     CREATE_SEQUENCE.with(|slot| *slot.borrow_mut() = SequenceState::default());
     WAIT_SEQUENCE.with(|slot| *slot.borrow_mut() = SequenceState::default());
 }
+
+harn_vm_core::stdlib_state_reset!(reset_waitpoint_state);
 
 pub(crate) async fn create_waitpoint(
     explicit_id: Option<String>,

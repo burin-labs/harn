@@ -101,10 +101,10 @@ pub fn build_batched_event_public(
 
 #[cfg(test)]
 pub(crate) use state::with_replay_scope;
-pub(crate) use state::{
+pub use state::{
     current_dispatch_context, current_dispatch_is_replay, current_dispatch_wait_lease, is_replay,
 };
-pub(crate) use types::{DispatchContext, DispatchWaitLease, TriggerInboxTopicScope};
+pub use types::{DispatchContext, DispatchWaitLease, TriggerInboxTopicScope};
 
 use action_graph::{
     dispatch_entry_edge_kind, dispatch_error_label, dispatch_error_metadata, dispatch_node_id,

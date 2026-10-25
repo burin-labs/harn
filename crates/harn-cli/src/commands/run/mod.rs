@@ -31,9 +31,10 @@ mod outcome;
 mod reporting;
 mod watch;
 
+pub(crate) use outcome::return_value_error;
 use outcome::{
     finalize_harnpack_dry_run, finalize_harnpack_error, finalize_run_error,
-    finalize_run_error_with_details, render_return_value_error, JsonRunSession,
+    finalize_run_error_with_details, JsonRunSession,
 };
 pub(crate) mod sandbox;
 
@@ -130,7 +131,7 @@ pub(crate) fn build_denied_builtins(
 
         // Create a temporary VM with stdlib registered to enumerate all builtin names.
         let mut tmp = harn_vm::new_vm();
-        harn_vm::register_vm_stdlib(&mut tmp);
+        harn_runtime::register_vm_stdlib(&mut tmp);
         harn_vm::register_store_builtins(&mut tmp, std::path::Path::new("."));
         harn_vm::register_metadata_builtins(&mut tmp, std::path::Path::new("."));
 
@@ -1006,7 +1007,7 @@ async fn execute_run_inner_scoped(
         vm.install_interrupt_signal_token(interrupt_tokens.signal_token);
         vm.install_cancel_token(interrupt_tokens.cancel_token);
     }
-    harn_vm::register_vm_stdlib(&mut vm);
+    harn_runtime::register_vm_stdlib(&mut vm);
     crate::install_default_hostlib(&mut vm);
     // A project that declares `[check].trusted_host_dispatch` has declared
     // itself a privileged embedder. `check`, `lint`, and `test` all honor it;
@@ -1136,12 +1137,9 @@ async fn execute_run_inner_scoped(
     // Always set so scripts can rely on `len(argv)`.
     let argv_values: Vec<harn_vm::VmValue> = script_argv
         .iter()
-        .map(|s| harn_vm::VmValue::String(arcstr::ArcStr::from(s.as_str())))
+        .map(|s| harn_vm::VmValue::string(s.as_str()))
         .collect();
-    vm.set_global(
-        "argv",
-        harn_vm::VmValue::List(std::sync::Arc::new(argv_values)),
-    );
+    vm.set_global("argv", harn_vm::VmValue::list(argv_values));
 
     // Install the script's `Harness` capability handle so the auto-call
     // emitted by `Compiler::compile()` for `fn main(harness: Harness)`

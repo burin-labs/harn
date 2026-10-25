@@ -375,7 +375,7 @@ harness.stdio.log(bytes_to_hex(uploaded))
 | `abs(n)` | n: int or float | int or float | Absolute value |
 | `ceil(n)` | n: float | int | Ceiling (rounds up). Ints pass through unchanged |
 | `floor(n)` | n: float | int | Floor (rounds down). Ints pass through unchanged |
-| `round(n, digits?)` | n: float, digits: int (optional) | int or float | Round to nearest integer (halves away from zero). Ints pass through unchanged. With `digits`, rounds to that many decimal places and keeps the input type: `round(2.567, 2)` is `2.57`; negative digits round to tens/hundreds buckets (`round(1250, -2)` is `1300`) |
+| `round(n, digits?)` | n: number or decimal, digits: int (optional) | number or decimal | Round to nearest integer (halves away from zero for floats). Ints pass through unchanged. With `digits`, rounds to that many decimal places and keeps the input type: `round(2.567, 2)` is `2.57`; negative digits round to tens/hundreds buckets (`round(1250, -2)` is `1300`) |
 | `sqrt(n)` | n: int or float | float | Square root |
 | `pow(base, exp)` | base: number, exp: number | int or float | Exponentiation. Returns int when both args are int and exp is non-negative |
 | `min(a, b, ...)` | two or more numbers | int, float, or decimal | Smallest argument. Returns float if any argument is float |
@@ -394,6 +394,11 @@ harness.stdio.log(bytes_to_hex(uploaded))
 | `variance(items, sample?)` | items: list[number], sample: bool | float | Population variance, or sample variance when `sample = true` |
 | `stddev(items, sample?)` | items: list[number], sample: bool | float | Population standard deviation, or sample mode when `sample = true` |
 | `percentile(items, p)` | items: list[number], p: 0..100 | float | R-7 percentile interpolation |
+
+Decimal rounding keeps the decimal type and uses midpoint-to-even rounding.
+A decimal precision below `-29` returns decimal zero, including the minimum `int` value.
+Rounding throws when the nearest bucket is outside the decimal range.
+Finite averages and percentiles stay finite when an intermediate sum or endpoint difference would overflow.
 
 ### Trigonometry
 
@@ -495,6 +500,12 @@ line-, token-, or pattern-oriented scan suffices.
 
 ### Collection helper builtins
 
+`csv_parse(text, options?)` reads CSV as lists of cells. With `{headers: true}`,
+it returns dict rows and rejects duplicate headers or rows with more cells than
+headers. Missing cells become empty strings. Without headers, rows can have
+different lengths. `csv_stringify(rows, options?)` writes list or dict rows;
+`{headers: true}` adds sorted column names for dict rows.
+
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `chunk(list, size)` | list: list, size: int | list | Split into chunks of size |
@@ -510,8 +521,8 @@ line-, token-, or pattern-oriented scan suffices.
 | `unique(list)` | list: list | list | Remove duplicates, preserving first-seen order. Structural equality |
 | `dict_from_pairs(pairs)` | pairs: list of `[key, value]` | dict | Build a dict from a list of pairs (later pairs override earlier ones) |
 | `index_by(items, fn)` | items: list, fn: closure | dict | Build a lookup table keyed by `fn(item)` |
-| `to_xml(value, options?)` | value: any, options: dict (`root`, `item_tag`, `pretty`, `declaration`) | string | Convert a Harn value into XML. Dicts → tag trees; lists → repeated `<item>` children |
-| `from_xml(text, options?)` | text: string, options: dict (`preserve_repeated_tag`) | dict | Parse XML back into a dict tree. Repeated children collapse into a list by default; `preserve_repeated_tag: true` keeps the inner tag |
+| `to_xml(value, options?)` | value: any, options: dict (`root`, `item_tag`, `pretty`, `declaration`) | string | Convert a Harn value into valid XML. Dict keys become tags; punctuation, including colons, becomes `_`. Lists become repeated `<item>` children. Throws if text contains characters XML cannot represent |
+| `from_xml(text, options?)` | text: string, options: dict (`preserve_repeated_tag`) | dict | Parse one complete XML document into a dict tree; empty input returns `{}`. Accepts Unicode names and preserves declared namespace prefixes and spaces within text. Rejects malformed XML and DTDs. Repeated children collapse into a list by default; `preserve_repeated_tag: true` keeps the inner tag |
 | `jsonrpc_call(url, method, params?, options?)` | url: string, method: string, params: any, options: dict (`headers`, `id`, `notify`, `timeout_ms`) | any | POST a JSON-RPC 2.0 envelope. Returns `result` on success, raises a structured error dict on failure |
 | `jsonrpc_batch(url, calls, options?)` | url: string, calls: list of `{method, params?, id?, notify?}` dicts, options: dict (`headers`, `timeout_ms`) | list | POST a JSON-RPC 2.0 batch. Returns a list aligned with input order; per-call errors arrive as `{jsonrpc_error: true, ...}` dicts inside the list |
 
@@ -816,7 +827,7 @@ builtins were deleted.
 | `harness.fs.find_text(root, pattern, options?)` | root: string, pattern: string, options: dict | list, bool, int, or handle dict | Search files under a root and return `{path, line, col, column, text}` hits. Options: `mode` (`hits`, `exists`, `count`), `preset` (`default`, `source`), `ignore_policy` (`none`, `builtin`, `project`; default `project`), `include`, `exclude`, `max_depth`, `max_filesize`/`max_file_size`, `threads`, `parallel`, `follow_symlinks`, `include_hidden`, `case_sensitive`/`case_insensitive`, `fixed_strings`, `max_matches`, `background` |
 | `harness.fs.find_evidence(roots, patterns, options?)` | roots: list, patterns: list, options: dict | receipt or handle dict | Walk labeled roots once for labeled literal patterns. Returns deterministic path-relative hits and settled per-root status. Options: `preset`, `ignore_policy` (`none`, `builtin`, `project`; default `project`), `include`, `exclude`, `max_depth`, `max_filesize`/`max_file_size`, `threads`, `follow_symlinks`, `include_hidden`, ASCII `case_insensitive`, `max_matches`, `max_matches_per_root`, `background` |
 | `harness.fs.mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
-| `harness.fs.stat(path)` | path: string | dict | File metadata: `{size, is_file, is_dir, readonly, modified}`. Throws on failure |
+| `harness.fs.stat(path, options?)` | path: string, options?: `{follow_symlinks?: bool}` | `{size, is_file, is_dir, is_symlink, readonly, modified?, mode?, identity?}` | File metadata. Follows symbolic links by default; set `follow_symlinks: false` to inspect the link itself. Unix hosts report permission bits in `mode` and an opaque file `identity`; other hosts omit both. Throws on failure |
 | `harness.fs.temp_dir()` | none | string | System temporary directory path |
 | `harness.fs.workspace_temp_dir()` | none | string | Return a workspace-local scratch directory, creating it lazily |
 | `harness.fs.mkdtemp_in_workspace(prefix?)` | prefix: string (default `"harn-"`) | string | Create a uniquely named directory under `harness.fs.workspace_temp_dir()` |
@@ -1169,7 +1180,7 @@ helpers such as `add_business_days` and `next_business_day`.
 | `date_in_zone(dt, tz)` | dt: float, int, or dict; tz: IANA timezone string | dict | Convert a timestamp into timezone-local fields: `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `zone`, `offset_seconds`, `timestamp`, and `iso8601` |
 | `date_to_zone(dt, tz)` | dt: float, int, or dict; tz: IANA timezone string | string | Convert a timestamp to an RFC 3339 string with the timezone's offset |
 | `date_from_components(parts, tz?)` | parts: dict; tz: IANA timezone string (default UTC) | int or float | Build a Unix timestamp from `{year, month, day, hour?, minute?, second?}` interpreted in the given timezone |
-| `date_add(dt, duration)` | dt: float, int, or dict; duration: duration | int or float | Add a duration to a timestamp |
+| `date_add(dt, duration)` | dt: float, int, or dict; duration: duration | int or float | Add a duration to a timestamp, keeping fractional seconds within floating-point precision. Throws if the result is outside the supported date range |
 | `date_diff(a, b)` | a, b: float, int, or dict | duration | Return the signed duration `a - b` |
 | `duration_ms(n)` | n: number | duration | Create a duration from milliseconds |
 | `duration_seconds(n)` | n: number | duration | Create a duration from seconds |
@@ -1874,14 +1885,14 @@ versioned schema and operation literals are stable orchestration
 discriminants; diagnostic policy/approval/output details may expand
 additively.
 
-`git_tools(registry?, options?)` builds a selected tool registry from those
+`git_tools(process, registry?, options?)` builds a selected tool registry from those
 functions. It defaults to read-only git inspection helpers and only exposes
 checkout-changing helpers such as `git_switch` or `git_pull_ff_only` when they
 are explicitly included in `enabled_tools`. It accepts the same Tool Vault
 metadata knobs used by host tool helpers: `defer_loading`, `namespace`, and
 per-tool `tool_config`.
 
-For small/local models, `git_toolbox_tools(registry?, options?)` exposes a
+For small/local models, `git_toolbox_tools(process, registry?, options?)` exposes a
 compact two-tool surface: `find_git_tool` ranks available git operations with a
 deterministic lexical scorer, and `run_git_tool` executes one returned operation
 id. Mutating operations stay unavailable unless the toolbox is configured with
@@ -2514,12 +2525,17 @@ without a `files` section load unchanged.
 | `harness.project.metadata_save(request)` | request: dict | nil | Flush metadata to disk |
 | `harness.project.metadata_stale(request?)` | request: `{project?}` | dict | Check staleness: `{any_stale, tier1, tier2}` |
 | `harness.project.metadata_status(request?)` | request: `{namespace?}` | dict | Summarize directory counts, namespaces, missing hashes, and stale state |
-| `harness.project.metadata_refresh_hashes(request)` | request: dict | nil | Recompute content hashes |
-| `harness.project.content_hash(dir)` | dir: string | string | Hash of directory contents |
+| `harness.project.metadata_refresh_hashes(request)` | request: dict | nil | Refresh structure hashes for live directories. Removed directories retain their previous hashes and stay stale. Other read failures leave all previous hashes intact and raise an error. |
+| `harness.project.content_hash(dir)` | dir: string | string | Fingerprint immediate entry names, types, sizes, and modification times, including available subsecond precision. Raises an error if a directory or entry cannot be read. |
 | `harness.project.path_metadata_get(request)` | request: `{path, namespace?, kind?}` | dict \| nil | Read metadata at an exact path. File entries (default) do not inherit; `kind: "dir"` falls back to hierarchical resolution. |
 | `harness.project.path_metadata_set(request)` | request: `{path, namespace, value, kind?}` | nil | Write metadata durably at an exact path before returning. Defaults to `kind: "file"`. |
 | `harness.project.path_metadata_entries(request?)` | request: `{namespace?, kind?}` | list | List stored entries keyed by normalized relative path. Defaults to files only. |
 | `harness.project.scan_directory(path?, options?)` | path: string, options: dict | list | Enumerate files and directories with optional `pattern`, `max_depth`, `include_hidden`, `include_dirs`, and `include_files` |
+
+Directory fingerprints detect metadata staleness; they do not hash file bytes or
+recurse into subdirectories. Fingerprint encodings can change between runtime
+versions. A stored fingerprint from an older encoding becomes stale and must be
+refreshed. Staleness checks treat unreadable directories as stale.
 
 ## Verification profiles
 
@@ -2594,8 +2610,28 @@ advisory only), or `unbound` (no binding; advisory only).
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `secret_scan(content)` | content: string | list | Scan text or diffs for high-signal leaked credentials and return redacted findings with detector metadata and source locations |
+| `secret_scan(content, hashes?)` | content: string, hashes: `list<string>` | list of typed findings | Scan for leaked credentials, or use a supplied SHA-256 token denylist |
+| `secret_pattern_catalog()` | none | list of records | Read the compiled catalog in detector order, with `redaction_name`, `detector`, `source`, `title`, `regex`, and `precision` string fields |
 | `self_review(diff, rubric?, max_rounds?)` | diff: string, rubric: string, max_rounds: int | dict | Run a structured pre-PR self-review over a diff, merge in `secret_scan` blockers, and append a `pr.self_review` trust-graph record with review metadata |
+
+With a `hashes` list, `secret_scan` checks only tokens matching
+`[A-Za-z0-9._-]+`. It lowercases each token before hashing, so a hostname and
+its longer domain form are distinct tokens. Each hash must be a lowercase,
+64-character SHA-256 digest. Empty or invalid lists fail rather than report a
+clean scan. Omit `hashes`, or pass `nil`, to use the credential-pattern scan.
+
+Hash findings contain `detector`, `source`, `title`, `precision`, `line`,
+`column_start`, `column_end`, `start_offset`, `end_offset`, `redacted`, and
+`fingerprint`. Lines and character columns start at 1; byte offsets start at 0
+and end just after the match. `redacted` is always `[hash match]`, and
+`fingerprint` is the complete lowercase digest. No part of a matched token is
+returned. The same implementation runs in native and portable programs.
+
+Use `precision == "high"` for self-identifying token patterns that a host can
+compile with its own regex engine. Heuristic patterns need context checks beyond
+their regex; use `secret_scan` to classify text. The catalog contains public
+pattern definitions, not credential values, and is available in native and
+portable execution without file or network access.
 
 `self_review(...)` uses the existing tier-based model resolver with
 `model_tier: "small"` today, so it benefits from Harn's current

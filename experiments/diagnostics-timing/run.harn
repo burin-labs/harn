@@ -1,0 +1,236 @@
+import { help_requested, parse_typed, parser } from "std/cli/argparse"
+import { fixture_names } from "./lib/fixtures"
+import { arm_names } from "./lib/policy"
+import { check_server_model, endpoint_setting } from "./lib/server"
+
+type Options = {
+  mode: "mock" | "live",
+  llm: string,
+  trials: int,
+  out: string,
+  arms: string,
+  fixtures: string,
+  max_iter: int,
+  base_url: string,
+}
+
+type Trial = {
+  schema_version: int,
+  arm: string,
+  fixture: string,
+  trial: int,
+  passed: bool,
+  status: string,
+  provenance: {rig_sha: string},
+}
+
+fn words(text: string) -> list<string> {
+  return regex_replace(r"\s+", " ", text.trim()).split(" ").filter({ word: string -> word != "" })
+    .to_list()
+}
+
+fn run_study(harness: Harness, options: Options, transcript: string = "") -> nil {
+  require options.trials > 0 && options.max_iter > 0, "Trial and iteration counts must be positive"
+  const arms = words(options.arms)
+  const fixtures = words(options.fixtures)
+  require arms.count > 0 && fixtures.count > 0, "Select at least one arm and fixture"
+  require unique(arms).count == arms.count && unique(fixtures).count == fixtures.count,
+    "Arm and fixture selections cannot repeat"
+  require arms.all({ arm: string -> arm_names().contains(arm) }), "Unknown diagnostic timing arm"
+  require fixtures.all({ fixture: string -> fixture_names().contains(fixture) }), "Unknown fixture"
+  const here = harness.fs.source_dir()
+  const output = path_normalize(path_join(here, options.out))
+  require !harness.fs.exists(output), "Refusing to overwrite earlier measurements: ${output}"
+  const log = "${output}.log"
+  require !harness.fs.exists(log), "Refusing to overwrite an earlier log: ${log}"
+  let endpoint_key = ""
+  if options.mode == "live" {
+    require options.base_url != "", "Set DIAG_TIMING_BASE_URL or --base-url for live mode"
+    const setting = endpoint_setting(harness.llm, options.llm)
+    if is_err(setting) {
+      harness.stdio.eprintln(unwrap_err(setting))
+      harness.runtime.exit(4)
+    }
+    endpoint_key = unwrap(setting)
+    const checked = check_server_model(harness.net, harness.llm, options.base_url, options.llm)
+    if is_err(checked) {
+      harness.stdio.eprintln(unwrap_err(checked))
+      harness.runtime.exit(4)
+    }
+    harness.stdio.eprintln("Server check passed for ${options.llm}")
+  }
+  if transcript != "" {
+    harness.fs.mkdir(transcript)
+    require harness.fs.list_dir(transcript).count == 0,
+      "Use an empty transcript directory: ${transcript}"
+  }
+  if options.mode == "mock" {
+    for fixture in fixtures {
+      require harness.fs.exists(path_join(here, "fixtures/${fixture}.mock.jsonl")),
+        "Missing mock trajectory: ${fixture}"
+    }
+  }
+  const revision = harness.process.run(
+    {program: "git", args: ["-C", here, "rev-parse", "--short", "HEAD"]},
+  )
+  require revision.success, "Cannot record the experiment source revision: ${revision.stderr}"
+  const sha = harness.env.get("EXP_RIG_SHA") ?? revision.stdout.trim()
+  let binary = harness.env.get("HARN") ?? harness.env.get("HARN_BIN") ?? ""
+  if binary == "" {
+    const resolved = harness.process.run(
+      {program: path_join(here, "../../scripts/harn_bin.sh"), args: ["--print"]},
+    )
+    require resolved.success && resolved.stdout.trim() != "",
+      "Cannot resolve Harn: ${resolved.stderr}"
+    binary = resolved.stdout.trim()
+  }
+  harness.fs.mkdir(dirname(output))
+  let failures: list<string> = []
+  for fixture in fixtures {
+    for arm in arms {
+      for trial in range(1, options.trials + 1) {
+        const name = "${fixture}/${arm}/${trial}"
+        harness.stdio.eprintln("Running ${name}")
+        let env: dict<string, string> = {
+          EXP_ARM: arm,
+          EXP_FIXTURE: fixture,
+          EXP_TRIAL: to_string(trial),
+          EXP_LLM: options.llm,
+          EXP_OUT: output,
+          EXP_MAX_ITER: to_string(options.max_iter),
+          EXP_RIG_SHA: sha,
+        }
+        if options.mode == "live" {
+          env[endpoint_key] = options.base_url
+          env["EXP_ENDPOINT"] = options.base_url
+        }
+        if transcript != "" {
+          env["HARN_LLM_TRANSCRIPT_DIR"] = transcript
+        }
+        const model_args = if options.mode == "mock" {
+          ["--llm-mock", "fixtures/${fixture}.mock.jsonl"]
+        } else {
+          ["--llm", options.llm]
+        }
+        const result = harness.process.run(
+          {
+            program: binary,
+            cwd: here,
+            env: env,
+            args: [
+              "playground",
+              "--host",
+              "host.harn",
+              "--script",
+              "rig.harn",
+              "--task",
+              "diagnostics-timing",
+            ]
+              + model_args,
+          },
+        )
+        harness.fs.append(log, "${name}\n${result.stderr}\n")
+        if !result.success {
+          failures.push(name)
+        }
+      }
+    }
+  }
+  let rows: list<Trial> = []
+  if harness.fs.exists(output) {
+    for line in harness.fs.read_text(output).split("\n").filter(
+      { line: string -> line.trim() != "" },
+    ) {
+      rows.push(unwrap(json_decode(line, schema_of(Trial))))
+    }
+  }
+  let seen: dict<string, bool> = {}
+  for row in rows {
+    const key = "${row.fixture}/${row.arm}/${row.trial}"
+    require row.schema_version == 1 && row.provenance.rig_sha == sha && row.status != "",
+      "Trial has missing or mismatched source identity: ${key}"
+    require fixtures.contains(row.fixture) && arms.contains(row.arm) && row.trial > 0
+      && row.trial <= options.trials
+      && seen[key] == nil,
+      "Unexpected or repeated trial: ${key}"
+    seen[key] = true
+  }
+  const expected = fixtures.count * arms.count * options.trials
+  harness.stdio.eprintln(
+    "Trials: ${rows.count}/${expected} recorded; ${failures.count} failed: ${failures.join(", ")}",
+  )
+  require rows.count == expected && failures.count == 0, "Incomplete study; see ${log}"
+  harness.stdio.eprintln("Wrote ${output}")
+}
+
+pub fn calibrate(harness: Harness, args: list<string>) -> nil {
+  require args.count <= 3, "Usage: calib.sh [ARM] [FIXTURE] [OUTPUT]"
+  const output = args[2] ?? "runs/calib-debug.jsonl"
+  const selected_transcript = harness.env.get("HARN_LLM_TRANSCRIPT_DIR")
+    ?? path_join(harness.fs.source_dir(), "runs", "calibration-${harness.random.uuid_v7()}")
+  const transcript = path_normalize(path_join(harness.fs.source_dir(), selected_transcript))
+  run_study(
+    harness,
+    {
+      mode: "live",
+      llm: "llamacpp:qwen3.6-35b-a3b-ud-q4-k-xl",
+      trials: 1,
+      out: output,
+      arms: args[0] ?? "A-push-all",
+      fixtures: args[1] ?? "rename-single-file",
+      max_iter: to_int(harness.env.get("EXP_MAX_ITER") ?? "15") ?? 15,
+      base_url: harness.env.get("DIAG_TIMING_BASE_URL") ?? "",
+    },
+    transcript,
+  )
+  harness.stdio.eprintln("Transcripts: ${transcript}")
+}
+
+fn main(harness: Harness) -> nil {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "Usage: run.sh [--mode mock|live] [--llm provider:model] [--trials N] [--out FILE] [--arms 'NAMES'] [--fixtures 'NAMES'] [--max-iter N] [--base-url URL]",
+    )
+    return
+  }
+  const parsed = parse_typed(
+    parser(
+      {
+        name: "diagnostics-timing",
+        args: [
+          {kind: "flag", name: "mode", long: "--mode", default: "mock"},
+          {kind: "flag", name: "llm", long: "--llm", default: ""},
+          {kind: "flag", name: "trials", long: "--trials", parse: "int", default: 1},
+          {kind: "flag", name: "out", long: "--out", default: "runs/sweep.jsonl"},
+          {
+            kind: "flag",
+            name: "arms",
+            long: "--arms",
+            default: "A-push-all B-verify-time C-settle D-pull E-hybrid F-hybrid-batch",
+          },
+          {
+            kind: "flag",
+            name: "fixtures",
+            long: "--fixtures",
+            default:
+              "rename-single-file rename-cross-file genuine-typo dynamic-runtime-names clean-control",
+          },
+          {kind: "flag", name: "max_iter", long: "--max-iter", parse: "int", default: 20},
+          {
+            kind: "flag",
+            name: "base_url",
+            long: "--base-url",
+            default: harness.env.get("DIAG_TIMING_BASE_URL") ?? "",
+          },
+        ],
+      },
+    ),
+    argv,
+    schema_of(Options),
+  )
+  if is_err(parsed) {
+    harness.stdio.eprintln(unwrap_err(parsed).message)
+    harness.runtime.exit(2)
+  }
+  run_study(harness, unwrap(parsed).options)
+}

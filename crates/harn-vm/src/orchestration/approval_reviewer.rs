@@ -585,11 +585,11 @@ mod tests {
         for (key, value) in pairs {
             map.insert(arcstr::ArcStr::from(*key), value.clone());
         }
-        VmValue::Dict(std::sync::Arc::new(map))
+        VmValue::dict_map(map)
     }
 
     fn text(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
+        VmValue::string(value)
     }
 
     #[test]

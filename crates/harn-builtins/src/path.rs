@@ -1,0 +1,566 @@
+//! std/path — pure string-level path manipulation.
+//!
+//! All functions normalise input on `/` and emit forward slashes. No
+//! filesystem I/O happens here; that lives in `stdlib/fs.rs`. The goal is
+//! that these helpers are deterministic and OS-agnostic so they can be
+//! called from Harn code without surprises when a Windows-style path
+//! crosses the wire.
+
+use harn_vm::stdlib::macros::harn_builtin;
+use harn_vm_core::value::VmDictExt;
+use harn_vm_core::value::{VmError, VmValue};
+use harn_vm_core::workspace_path::{
+    canonicalize_existing_workspace_path, classify_workspace_path, is_absolute_path_syntax,
+    normalize_workspace_path, WorkspacePathInfo,
+};
+
+/// Convert all backslashes to forward slashes.
+fn to_posix(s: &str) -> String {
+    s.replace('\\', "/")
+}
+
+fn to_native(s: &str) -> String {
+    let posix = to_posix(s);
+    if cfg!(windows) {
+        posix.replace('/', "\\")
+    } else {
+        posix
+    }
+}
+
+/// Split a path into segments, preserving whether it was absolute.
+///
+/// The second element is the root to reprint ahead of the segments: a drive
+/// (`C:`), a verbatim prefix and its drive (`//?/C:`), or a bare verbatim
+/// prefix ahead of a UNC share (`//?/`). Everything after it is ordinary
+/// segment arithmetic.
+fn split_segments(p: &str) -> (bool, Option<String>, Vec<String>) {
+    harn_vm_core::workspace_path::split_segments(p)
+}
+
+/// Normalise a path: collapse `..`, dedupe `/`, strip trailing slashes.
+fn normalize(p: &str) -> String {
+    if p.is_empty() {
+        return String::new();
+    }
+    harn_vm_core::workspace_path::normalize_lexical(p)
+}
+
+/// Extract the file name (last segment) of a path.
+fn basename(p: &str) -> String {
+    let (_, _, segments) = split_segments(p);
+    segments.last().cloned().unwrap_or_default()
+}
+
+/// Extract the parent directory of a path (everything before the last
+/// segment). Returns empty string for single-segment relative paths and
+/// `/` for root paths.
+fn parent(p: &str) -> String {
+    let (absolute, drive, mut segments) = split_segments(p);
+    if segments.len() <= 1 && !absolute {
+        return String::new();
+    }
+    segments.pop();
+    let mut out = String::new();
+    if let Some(d) = drive {
+        out.push_str(&d);
+    }
+    if absolute {
+        out.push('/');
+    }
+    out.push_str(&segments.join("/"));
+    if out.is_empty() && absolute {
+        "/".into()
+    } else {
+        out
+    }
+}
+
+/// Extract the extension including the leading dot, or empty string if none.
+#[expect(clippy::string_slice, reason = "idx is an rfind('.') char boundary")]
+fn extension(p: &str) -> String {
+    let name = basename(p);
+    if let Some(idx) = name.rfind('.') {
+        if idx == 0 {
+            // Leading dot → hidden file, no extension.
+            return String::new();
+        }
+        return name[idx..].to_string();
+    }
+    String::new()
+}
+
+/// Extract the file stem (basename minus extension).
+#[expect(clippy::string_slice, reason = "idx is an rfind('.') char boundary")]
+fn stem(p: &str) -> String {
+    let name = basename(p);
+    if let Some(idx) = name.rfind('.') {
+        if idx == 0 {
+            return name;
+        }
+        return name[..idx].to_string();
+    }
+    name
+}
+
+fn join_parent_child(parent_dir: &str, child: &str) -> String {
+    if parent_dir.is_empty() {
+        child.to_string()
+    } else if parent_dir.ends_with('/') {
+        format!("{parent_dir}{child}")
+    } else {
+        format!("{parent_dir}/{child}")
+    }
+}
+
+/// Replace the extension on a path. `new_ext` may include or omit the
+/// leading dot.
+fn with_extension(p: &str, new_ext: &str) -> String {
+    let normalized_ext = if new_ext.is_empty() || new_ext.starts_with('.') {
+        new_ext.to_string()
+    } else {
+        format!(".{new_ext}")
+    };
+    let parent_dir = parent(p);
+    let stem_name = stem(p);
+    let new_name = format!("{stem_name}{normalized_ext}");
+    join_parent_child(&parent_dir, &new_name)
+}
+
+/// Replace the file stem on a path, keeping the extension.
+fn with_stem(p: &str, new_stem: &str) -> String {
+    let ext = extension(p);
+    let parent_dir = parent(p);
+    let new_name = format!("{new_stem}{ext}");
+    join_parent_child(&parent_dir, &new_name)
+}
+
+/// Compute the relative path from `base` to `p`. Returns `None` if `p` is
+/// not reachable as a descendant of `base` via relative traversal.
+fn relative_to(p: &str, base: &str) -> Option<String> {
+    // `normalize` keeps a lone `.` for the current directory; it names no
+    // segment, so drop it before counting how far `base` sits below `p`.
+    let segments = |path: &str| {
+        let (absolute, drive, mut segs) = split_segments(&normalize(path));
+        segs.retain(|seg| seg != ".");
+        (absolute, drive, segs)
+    };
+    let (p_abs, p_drive, p_segs) = segments(p);
+    let (b_abs, b_drive, b_segs) = segments(base);
+    if p_abs != b_abs || p_drive != b_drive {
+        return None;
+    }
+    let common = p_segs
+        .iter()
+        .zip(b_segs.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+    // Climbing out of a base that itself starts above the working directory
+    // (`../x`) would need the names of directories the paths never mention.
+    if b_segs[common..].iter().any(|seg| seg == "..") {
+        return None;
+    }
+    let up = b_segs.len() - common;
+    let mut out: Vec<String> = std::iter::repeat_n("..".to_string(), up).collect();
+    out.extend(p_segs[common..].iter().cloned());
+    if out.is_empty() {
+        Some(".".into())
+    } else {
+        Some(out.join("/"))
+    }
+}
+
+fn workspace_path_info_to_vm(info: WorkspacePathInfo) -> VmValue {
+    let mut map: harn_vm_core::value::DictMap = harn_vm_core::value::DictMap::new();
+    map.put_str("input", info.input);
+    map.put_str(
+        "kind",
+        match info.kind {
+            harn_vm_core::workspace_path::WorkspacePathKind::WorkspaceRelative => {
+                "workspace_relative"
+            }
+            harn_vm_core::workspace_path::WorkspacePathKind::HostAbsolute => "host_absolute",
+            harn_vm_core::workspace_path::WorkspacePathKind::Invalid => "invalid",
+        },
+    );
+    map.put_str("normalized", info.normalized);
+    map.put_nullable_str("workspace_path", info.workspace_path);
+    map.put_nullable_str("host_path", info.host_path);
+    map.put_bool("recovered_root_drift", info.recovered_root_drift);
+    map.put_nullable_str("reason", info.reason);
+    VmValue::dict(map)
+}
+
+fn workspace_root_from_args(args: &[VmValue]) -> std::path::PathBuf {
+    args.get(1)
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(harn_vm::stdlib::process::execution_root_path)
+}
+
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_path_helper_builtins);
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_parts(path: string?) -> dict",
+    category = "path"
+)]
+fn path_parts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    let mut map: harn_vm_core::value::DictMap = harn_vm_core::value::DictMap::new();
+    map.put_str("dir", parent(&p));
+    map.put_str("file", basename(&p));
+    map.put_str("stem", stem(&p));
+    map.put_str("ext", extension(&p));
+    let (_, _, segments) = split_segments(&p);
+    map.put("segments", VmValue::strings(segments));
+    Ok(VmValue::dict(map))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_parent(path: string?) -> string",
+    category = "path"
+)]
+fn path_parent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::string(parent(&p)))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_basename(path: string?) -> string",
+    category = "path"
+)]
+fn path_basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::string(basename(&p)))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_stem(path: string?) -> string",
+    category = "path"
+)]
+fn path_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::string(stem(&p)))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_extension(path: string?) -> string",
+    category = "path"
+)]
+fn path_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::string(extension(&p)))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_with_extension(path: string?, extension: string) -> string",
+    category = "path"
+)]
+fn path_with_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    let ext = args.get(1).map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::string(with_extension(&p, &ext)))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_with_stem(path: string?, stem: string) -> string",
+    category = "path"
+)]
+fn path_with_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    let s = args.get(1).map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::string(with_stem(&p, &s)))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_is_absolute(path: string?) -> bool",
+    category = "path"
+)]
+fn path_is_absolute_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::Bool(is_absolute_path_syntax(&p)))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_is_relative(path: string?) -> bool",
+    category = "path"
+)]
+fn path_is_relative_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::Bool(!is_absolute_path_syntax(&p)))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_normalize(path: string?) -> string",
+    category = "path"
+)]
+fn path_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::string(normalize(&p)))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_relative_to(path: string?, base: string) -> string?",
+    category = "path"
+)]
+fn path_relative_to_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    let base = args.get(1).map(|a| a.display()).unwrap_or_default();
+    match relative_to(&p, &base) {
+        Some(rel) => Ok(VmValue::string(rel)),
+        None => Ok(VmValue::Nil),
+    }
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_to_posix(path: string?) -> string",
+    category = "path"
+)]
+fn path_to_posix_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::string(to_posix(&p)))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_to_native(path: string?) -> string",
+    category = "path"
+)]
+fn path_to_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::string(to_native(&p)))
+}
+
+#[harn_builtin(
+    exposure = "harness.fs.workspace_info",
+    effects = ["fs.read@dynamic"],
+    sig = "path_workspace_info(path: string?, workspace_root?: string) -> dict",
+    category = "path"
+)]
+fn path_workspace_info_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = args.first().map(|a| a.display()).unwrap_or_default();
+    let workspace_root = workspace_root_from_args(args);
+    Ok(workspace_path_info_to_vm(classify_workspace_path(
+        &path,
+        Some(&workspace_root),
+    )))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_workspace_normalize(path: string?, workspace_root?: string) -> string?",
+    category = "path"
+)]
+fn path_workspace_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = args.first().map(|a| a.display()).unwrap_or_default();
+    let workspace_root = workspace_root_from_args(args);
+    Ok(normalize_workspace_path(&path, Some(&workspace_root))
+        .map(VmValue::string)
+        .unwrap_or(VmValue::Nil))
+}
+
+#[harn_builtin(
+    exposure = "harness.fs.workspace_canonicalize_existing",
+    effects = ["fs.read@arg0"],
+    sig = "path_workspace_canonicalize_existing(path: string?, workspace_root?: string) -> string?",
+    category = "path",
+    doc = "Canonicalize an existing path and return its workspace-relative spelling only when it remains under the existing workspace root."
+)]
+fn path_workspace_canonicalize_existing_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let path = args.first().map(|a| a.display()).unwrap_or_default();
+    let workspace_root = workspace_root_from_args(args);
+    let target = std::path::PathBuf::from(&path);
+    let scoped_target = if target.is_absolute() {
+        target
+    } else {
+        workspace_root.join(target)
+    };
+    harn_vm::stdlib::sandbox::enforce_fs_path(
+        "path_workspace_canonicalize_existing",
+        &workspace_root,
+        harn_vm::stdlib::sandbox::FsAccess::Read,
+    )?;
+    harn_vm::stdlib::sandbox::enforce_fs_path(
+        "path_workspace_canonicalize_existing",
+        &scoped_target,
+        harn_vm::stdlib::sandbox::FsAccess::Read,
+    )?;
+    Ok(
+        canonicalize_existing_workspace_path(&scoped_target, &workspace_root)
+            .map(VmValue::string)
+            .unwrap_or(VmValue::Nil),
+    )
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "path_segments(path: string?) -> list",
+    category = "path"
+)]
+fn path_segments_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let p = args.first().map(|a| a.display()).unwrap_or_default();
+    let (_, _, segments) = split_segments(&p);
+    Ok(VmValue::strings(segments))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_collapses_dot_dot() {
+        assert_eq!(normalize("a/b/../c"), "a/c");
+        assert_eq!(normalize("../a"), "../a");
+        assert_eq!(normalize("a/../../b"), "../b");
+        assert_eq!(normalize("a/b/"), "a/b");
+        assert_eq!(normalize("/"), "/");
+        assert_eq!(normalize("/a/b/../c"), "/a/c");
+        assert_eq!(normalize("a\\b\\c"), "a/b/c");
+        assert_eq!(
+            normalize("C:\\repo\\pkg\\..\\main.harn"),
+            "C:/repo/main.harn"
+        );
+    }
+
+    /// A Windows verbatim path survives normalization.
+    ///
+    /// The test runner canonicalizes every case file, and Windows
+    /// canonicalization returns `\\?\D:\...`, so `harness.fs.cwd()` hands
+    /// scripts a verbatim path and `path_normalize(path_join(cwd, "../.."))`
+    /// is the ordinary way to reach a repository root. Collapsing the prefix
+    /// to `/?/` produced a directory Windows refuses to launch a process in.
+    #[test]
+    fn normalize_keeps_a_windows_verbatim_prefix() {
+        assert_eq!(
+            normalize("\\\\?\\D:\\a\\harn\\harn\\scripts\\tests/../.."),
+            "//?/D:/a/harn/harn"
+        );
+        assert_eq!(
+            normalize("//?/C:/repo/pkg/../main.harn"),
+            "//?/C:/repo/main.harn"
+        );
+        assert_eq!(normalize("//?/C:/"), "//?/C:/");
+        // A verbatim UNC share keeps its prefix too; there is no drive-letter
+        // form of it to fall back to.
+        assert_eq!(
+            normalize("\\\\?\\UNC\\server\\share\\pkg\\..\\main.harn"),
+            "//?/UNC/server/share/main.harn"
+        );
+        // A single leading slash is an ordinary absolute path, not a prefix.
+        assert_eq!(normalize("/a/b/../c"), "/a/c");
+    }
+
+    /// The whole chain the Windows installer case walks: a canonicalized cwd,
+    /// normalized by a script, handed back as a child process working
+    /// directory. `child_process_cwd` is written to strip the `//?/` spelling
+    /// this module produces, and only sees one if normalization kept it.
+    #[test]
+    fn a_normalized_verbatim_cwd_still_reaches_a_launchable_directory() {
+        let normalized = normalize("\\\\?\\D:\\a\\harn\\harn\\scripts\\tests/../..");
+        let launched =
+            harn_vm::stdlib::process::child_process_cwd(std::path::PathBuf::from(&normalized));
+        assert_eq!(launched, std::path::PathBuf::from("D:/a/harn/harn"));
+    }
+
+    #[test]
+    fn parent_keeps_a_windows_verbatim_prefix() {
+        assert_eq!(parent("//?/D:/a/harn/harn"), "//?/D:/a/harn");
+        assert_eq!(parent("//?/D:/a"), "//?/D:/");
+    }
+
+    #[test]
+    fn basename_and_parent() {
+        assert_eq!(basename("a/b/c.rs"), "c.rs");
+        assert_eq!(parent("a/b/c.rs"), "a/b");
+        assert_eq!(parent("a"), "");
+        assert_eq!(parent("/"), "/");
+        assert_eq!(parent("/a"), "/");
+    }
+
+    #[test]
+    fn stem_and_extension() {
+        assert_eq!(stem("a/b/c.rs"), "c");
+        assert_eq!(extension("a/b/c.rs"), ".rs");
+        assert_eq!(extension("a/b/c"), "");
+        assert_eq!(extension(".gitignore"), "");
+        assert_eq!(stem(".gitignore"), ".gitignore");
+        assert_eq!(extension("a/b/c.tar.gz"), ".gz");
+        assert_eq!(stem("a/b/c.tar.gz"), "c.tar");
+    }
+
+    #[test]
+    fn with_extension_and_stem() {
+        assert_eq!(with_extension("a/b/c.rs", "txt"), "a/b/c.txt");
+        assert_eq!(with_extension("a/b/c.rs", ".txt"), "a/b/c.txt");
+        assert_eq!(with_extension("c.rs", "py"), "c.py");
+        assert_eq!(with_extension("/c.rs", "py"), "/c.py");
+        assert_eq!(with_extension("C:/c.rs", "py"), "C:/c.py");
+        assert_eq!(with_stem("a/b/c.rs", "main"), "a/b/main.rs");
+        assert_eq!(with_stem("c.rs", "main"), "main.rs");
+        assert_eq!(with_stem("/c.rs", "main"), "/main.rs");
+        assert_eq!(with_stem("C:/c.rs", "main"), "C:/main.rs");
+        for root in ["//server/share/", "//?/UNC/server/share/", "//?/C:/"] {
+            let file = format!("{root}c.rs");
+            assert_eq!(with_extension(&file, "py"), format!("{root}c.py"));
+            assert_eq!(with_stem(&file, "main"), format!("{root}main.rs"));
+        }
+    }
+
+    #[test]
+    fn is_absolute_detection() {
+        assert!(is_absolute_path_syntax("/a/b"));
+        assert!(is_absolute_path_syntax("C:/a/b"));
+        assert!(is_absolute_path_syntax(r"C:\a\b"));
+        assert!(is_absolute_path_syntax(r"\\server\share\a"));
+        assert!(!is_absolute_path_syntax("C:a/b"));
+        assert!(!is_absolute_path_syntax("a/b"));
+        assert!(!is_absolute_path_syntax("./a"));
+        assert!(!is_absolute_path_syntax(""));
+    }
+
+    #[test]
+    fn native_path_conversion_matches_host_separator() {
+        let native = to_native("a\\b/c");
+        if cfg!(windows) {
+            assert_eq!(native, "a\\b\\c");
+        } else {
+            assert_eq!(native, "a/b/c");
+        }
+    }
+
+    #[test]
+    fn relative_to_walks_up() {
+        assert_eq!(relative_to("/a/b/c", "/a/b").as_deref(), Some("c"));
+        assert_eq!(relative_to("/a/c", "/a/b").as_deref(), Some("../c"));
+        assert_eq!(relative_to("a/b/c", "a/b").as_deref(), Some("c"));
+        assert_eq!(
+            relative_to("src/main.rs", ".").as_deref(),
+            Some("src/main.rs")
+        );
+        assert_eq!(
+            relative_to("src/main.rs", "./").as_deref(),
+            Some("src/main.rs")
+        );
+        assert_eq!(relative_to(".", "a").as_deref(), Some(".."));
+        assert_eq!(relative_to("..", ".").as_deref(), Some(".."));
+        assert_eq!(relative_to("a", "../b"), None);
+        assert_eq!(relative_to("/a", "b"), None);
+        assert_eq!(relative_to("C:/a/b", "D:/a/b"), None);
+    }
+}

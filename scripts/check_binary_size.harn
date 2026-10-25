@@ -309,9 +309,9 @@ fn observed_rustc(process: HarnessProcess) -> string {
  * One `[profile.dist]` key from the workspace manifest, falling back to the
  * `[profile.release]` it inherits.
  *
- * The release job exports `CARGO_PROFILE_DIST_*` for what a profile cannot
- * express, which wins. The manifest is the fallback so a local run observes
- * its real settings rather than reporting a comparability it did not check.
+ * A `CARGO_PROFILE_DIST_*` override in the environment wins, as it does for
+ * Cargo. The manifest is the fallback so a local run observes its real
+ * settings rather than reporting a comparability it did not check.
  */
 fn cargo_dist_profile_value(fs: HarnessFs, root: string, key: string) -> string {
   const text = try {

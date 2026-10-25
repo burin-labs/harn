@@ -48,6 +48,8 @@ pub import {
   GitStatusReceipt,
   GitTagListData,
   GitTagListReceipt,
+  GitToolCatalogOptions,
+  GitToolRunArgs,
   GitWorktreeCreateData,
   GitWorktreeCreateReceipt,
   GitWorktreeRemoveData,
@@ -59,6 +61,7 @@ pub import {
  * Import: import "std/git"
  */
 import { process_result_success, process_result_text, process_run } from "std/runtime"
+import { ToolDefinitionConfig, ToolRegistry } from "std/tools"
 
 type GitRunOptions = {
   repo?: string | GitRepo | GitReceipt,
@@ -157,15 +160,6 @@ type GitToolOperation = "status" \
   | "pull_ff_only" \
   | "rebase"
 
-type GitToolCatalogOptions = {
-  include_mutations?: bool,
-  enabled_operations?: list<string> | string,
-  operations?: list<string> | string,
-  disabled_operations?: list<string> | string,
-  limit?: int,
-  max_results?: int,
-}
-
 type GitToolCatalogEntry = {
   operation: GitToolOperation,
   group: GitToolGroup,
@@ -193,43 +187,15 @@ type GitToolSearchResult = {
   total: int,
 }
 
-type GitToolRunArgs = {
-  repo?: string | GitRepo | GitReceipt,
-  path?: string,
-  rev?: string,
-  rev_range?: string,
-  range?: string,
-  paths?: list<string>,
-  left?: string,
-  right?: string,
-  format?: string,
-  max_count?: int,
-  limit?: int,
-  oneline?: bool,
-  decorate?: bool,
-  stat?: bool,
-  patch?: bool,
-  branch?: string,
-  remote?: string,
-  refspecs?: list<string>,
-  quiet?: bool,
-  prune?: bool,
-  create?: bool,
-  force_create?: bool,
-  detach?: bool,
-  discard_changes?: bool,
-  base_ref?: string,
-}
-
 type GitToolRegistryOptions = {
   repo?: string | GitRepo | GitReceipt,
   cwd?: string,
   enabled_tools?: list<string> | string,
   disabled_tools?: list<string> | string,
-  names?: dict,
-  descriptions?: dict,
-  annotations?: dict,
-  tool_config?: dict,
+  names?: dict<string, string>,
+  descriptions?: dict<string, string>,
+  annotations?: dict<string, dict>,
+  tool_config?: dict<string, ToolDefinitionConfig>,
   defer_loading?: bool,
   namespace?: string,
   include_mutations?: bool,
@@ -1253,9 +1219,8 @@ pub fn git_run_tool(
   throw "std/git: git operation not implemented: " + op
 }
 
-fn __git_tool_enabled(options: any, key: any, group: any) -> bool {
-  const opts = options ?? {}
-  const enabled = opts?.enabled_tools
+fn __git_tool_enabled(options: GitToolRegistryOptions, key: string, group: GitToolGroup) -> bool {
+  const enabled = options.enabled_tools
     ?? [
       "git_status",
       "git_current_branch",
@@ -1264,7 +1229,7 @@ fn __git_tool_enabled(options: any, key: any, group: any) -> bool {
       "git_branch_list",
       "git_remote_list",
     ]
-  const disabled = opts?.disabled_tools ?? []
+  const disabled = options.disabled_tools ?? []
   if __git_list_contains(disabled, key) || __git_list_contains(disabled, group) {
     return false
   }
@@ -1272,32 +1237,38 @@ fn __git_tool_enabled(options: any, key: any, group: any) -> bool {
     || __git_list_contains(enabled, group)
 }
 
-fn __git_tool_name(options: any, key: any) -> string {
-  return (options ?? {})?.names?.[key] ?? key
+fn __git_tool_name(options: GitToolRegistryOptions, key: string) -> string {
+  return options.names?.[key] ?? key
 }
 
-fn __git_tool_description(options: any, key: any, fallback: any) -> string {
-  return (options ?? {})?.descriptions?.[key] ?? fallback
+fn __git_tool_description(
+  options: GitToolRegistryOptions,
+  key: string,
+  fallback: string,
+) -> string {
+  return options.descriptions?.[key] ?? fallback
 }
 
-fn __git_tool_annotations(options: any, key: any, defaults: dict) -> dict {
-  const opts = options ?? {}
-  const shared = opts?.annotations?.["*"] ?? {}
-  const local = opts?.annotations?.[key] ?? {}
+fn __git_tool_annotations(options: GitToolRegistryOptions, key: string, defaults: dict) -> dict {
+  const shared = options.annotations?.["*"] ?? {}
+  const local = options.annotations?.[key] ?? {}
   return defaults + shared + local
 }
 
-fn __git_tool_config(options: any, key: any, config: dict) {
-  const opts = options ?? {}
+fn __git_tool_config(
+  options: GitToolRegistryOptions,
+  key: string,
+  config: ToolDefinitionConfig,
+) -> ToolDefinitionConfig {
   let out = config
-  if opts?.defer_loading != nil {
-    out = out + {defer_loading: opts.defer_loading}
+  if options.defer_loading != nil {
+    out = out + {defer_loading: options.defer_loading}
   }
-  if opts?.namespace != nil {
-    out = out + {namespace: opts.namespace}
+  if options.namespace != nil {
+    out = out + {namespace: options.namespace}
   }
-  const shared = opts?.tool_config?.["*"] ?? {}
-  const local = opts?.tool_config?.[key] ?? {}
+  const shared = options.tool_config?.["*"] ?? {}
+  const local = options.tool_config?.[key] ?? {}
   return out + shared + local
 }
 
@@ -1305,11 +1276,15 @@ fn __git_tool_repo(args: GitToolRunArgs, options: any) {
   return args?.repo ?? (options ?? {})?.repo ?? (options ?? {})?.cwd ?? "."
 }
 
-fn __git_catalog_tool_key(entry: dict) -> string {
+fn __git_catalog_tool_key(entry: GitToolCatalogEntry) -> string {
   return "git_" + entry.operation
 }
 
-fn __git_catalog_tool_annotations(entry: dict, opts: GitToolRegistryOptions, key: any) {
+fn __git_catalog_tool_annotations(
+  entry: GitToolCatalogEntry,
+  opts: GitToolRegistryOptions,
+  key: string,
+) -> dict {
   if entry.group == "mutation" {
     return __git_tool_annotations(
       opts,
@@ -1320,14 +1295,22 @@ fn __git_catalog_tool_annotations(entry: dict, opts: GitToolRegistryOptions, key
   return __git_tool_annotations(opts, key, {kind: "read", side_effect_level: "read_only"})
 }
 
-fn __git_catalog_tool_run_options(entry: dict, opts: any) {
+fn __git_catalog_tool_run_options(
+  entry: GitToolCatalogEntry,
+  opts: GitToolRegistryOptions,
+) -> GitToolRegistryOptions {
   if entry.group == "mutation" {
     return opts + {include_mutations: true}
   }
   return opts
 }
 
-fn __git_define_catalog_tool(process: HarnessProcess, tools: any, entry: dict, opts: any) {
+fn __git_define_catalog_tool(
+  process: HarnessProcess,
+  tools: ToolRegistry,
+  entry: GitToolCatalogEntry,
+  opts: GitToolRegistryOptions,
+) -> ToolRegistry {
   const key = __git_catalog_tool_key(entry)
   if !__git_tool_enabled(opts, key, entry.group) {
     return tools
@@ -1345,7 +1328,8 @@ fn __git_define_catalog_tool(process: HarnessProcess, tools: any, entry: dict, o
         returns: {type: "object"},
         annotations: __git_catalog_tool_annotations(entry, opts, key),
         handler: { args ->
-          const result = git_run_tool(process, entry.operation, args, run_opts)
+          const request = schema_expect(args, schema_of(GitToolRunArgs))
+          const result = git_run_tool(process, entry.operation, request, run_opts)
           agent_tool_handler_result(to_string(result), result, result.success ? "ok" : "error")
         },
       },
@@ -1361,9 +1345,9 @@ fn __git_define_catalog_tool(process: HarnessProcess, tools: any, entry: dict, o
  */
 pub fn git_tools(
   process: HarnessProcess,
-  registry: {_type: "tool_registry", tools: list}? = nil,
+  registry: ToolRegistry? = nil,
   options: GitToolRegistryOptions = {},
-) -> {_type: "tool_registry", tools: list} {
+) -> ToolRegistry {
   const opts = options
   let tools = registry ?? tool_registry()
   for entry in __git_catalog_all() {
@@ -1372,10 +1356,9 @@ pub fn git_tools(
   return tools
 }
 
-fn __git_toolbox_enabled(options: any, key: string) -> bool {
-  const opts = options ?? {}
-  const enabled = opts?.enabled_tools ?? ["find_git_tool", "run_git_tool"]
-  const disabled = opts?.disabled_tools ?? []
+fn __git_toolbox_enabled(options: GitToolRegistryOptions, key: string) -> bool {
+  const enabled = options.enabled_tools ?? ["find_git_tool", "run_git_tool"]
+  const disabled = options.disabled_tools ?? []
   if __git_list_contains(disabled, key) || __git_list_contains(disabled, "toolbox") {
     return false
   }
@@ -1383,7 +1366,7 @@ fn __git_toolbox_enabled(options: any, key: string) -> bool {
     || __git_list_contains(enabled, key)
 }
 
-fn __git_toolbox_find_options(opts: GitToolRegistryOptions, args: dict) {
+fn __git_toolbox_find_options(opts: GitToolRegistryOptions, args: dict) -> GitToolCatalogOptions {
   let out = opts
   if args?.max_results != nil {
     out = out + {max_results: args.max_results}
@@ -1391,8 +1374,8 @@ fn __git_toolbox_find_options(opts: GitToolRegistryOptions, args: dict) {
   return out
 }
 
-fn __git_toolbox_run_annotations(opts: GitToolRegistryOptions, key: string) {
-  if opts?.include_mutations ?? false {
+fn __git_toolbox_run_annotations(opts: GitToolRegistryOptions, key: string) -> dict {
+  if opts.include_mutations ?? false {
     return __git_tool_annotations(
       opts,
       key,
@@ -1410,9 +1393,9 @@ fn __git_toolbox_run_annotations(opts: GitToolRegistryOptions, key: string) {
  */
 pub fn git_toolbox_tools(
   process: HarnessProcess,
-  registry: {_type: "tool_registry", tools: list}? = nil,
+  registry: ToolRegistry? = nil,
   options: GitToolRegistryOptions = {},
-) -> {_type: "tool_registry", tools: list} {
+) -> ToolRegistry {
   const opts = options
   let tools = registry ?? tool_registry()
   if __git_toolbox_enabled(opts, "find_git_tool") {
@@ -1489,7 +1472,8 @@ pub fn git_toolbox_tools(
           returns: {type: "object"},
           annotations: __git_toolbox_run_annotations(opts, key),
           handler: { args ->
-            const result = git_run_tool(process, args.operation, args, opts)
+            const request = schema_expect(args, schema_of(GitToolRunArgs))
+            const result = git_run_tool(process, args.operation, request, opts)
             agent_tool_handler_result(to_string(result), result, result.success ? "ok" : "error")
           },
         },

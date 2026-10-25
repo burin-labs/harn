@@ -16,6 +16,8 @@ import {
   linux_confinement_errors,
   macos_shared_cache_errors,
   macos_warm_errors,
+  make_target_path_gate_errors,
+  make_target_recipe_paths,
   minimal_pr_capacity_errors,
   nextest_version_errors,
   public_repository_runner_errors,
@@ -42,8 +44,21 @@ import {
   CI_CACHE_REFRESH_CONCURRENCY_GROUP,
   LIVE_ARTIFACT_CONSUMERS,
 } from "../ci_cache_policy/policy_core.harn"
+import { filter_matches_paths } from "../gh_check_state.harn"
 import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
+
+type PathFilters = dict<string, list<string>>
+
+/** ci-status checks out its verdict script first, so address the aggregate by name. */
+fn aggregate_index(workflow: dict) -> int {
+  for {index, value: step} in workflow.jobs["ci-status"].steps.enumerate() {
+    if step?.name == "Verify required CI jobs" {
+      return index
+    }
+  }
+  throw "ci-status has no 'Verify required CI jobs' step"
+}
 
 @test
 pipeline test_direct_cli_consumers_require_a_successful_shared_producer(harness: Harness) {
@@ -63,6 +78,172 @@ pipeline test_direct_cli_consumers_require_a_successful_shared_producer(harness:
     unproved_producer.jobs[consumer].if = condition.replace(required, "")
     assert(ci_linux_lane_policy_errors(unproved_producer).contains(refusal))
   }
+}
+
+@test
+pipeline test_make_target_path_gates_cover_every_recipe_path(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const makefile = harness.fs.read_text("../../Makefile")
+  assert_eq(make_target_path_gate_errors(ci, makefile), [])
+  const recipe = make_target_recipe_paths(makefile, "check-swift-protocol-binding")
+  for path in [
+    "scripts/tests/protocol_binding_session_recap.swift",
+    "crates/harn-serve/tests/fixtures/acp/session_update_extensions.json",
+    "spec/protocol-artifacts/HarnProtocol.swift",
+    "spec/run-view-fixtures/cases/x/expected/session_view.json",
+  ] {
+    assert(recipe.contains(path))
+  }
+  const moved = makefile.replace(
+    "scripts/tests/protocol_binding_session_recap.swift",
+    "scripts/probes/recap.swift",
+  )
+  assert(
+    make_target_path_gate_errors(ci, moved).contains(
+      "ci.yml:changes filter swift_protocol_binding must cover scripts/probes/recap.swift, which swift-protocol-binding reads through `make check-swift-protocol-binding`",
+    ),
+  )
+  let unrun = ci
+  unrun.jobs["swift-protocol-binding"].steps = [ci.jobs["swift-protocol-binding"].steps[0]]
+  assert(
+    make_target_path_gate_errors(unrun, makefile).contains(
+      "ci.yml:swift-protocol-binding must run `make check-swift-protocol-binding`",
+    ),
+  )
+}
+
+@test
+pipeline test_provider_probe_reuses_same_run_cli_without_live_authority(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const standalone = read_yaml(harness.fs, "../../.github/workflows/provider-contract-probe.yml")
+  const action = read_yaml(harness.fs, "../../.github/actions/provider-contract-probe/action.yml")
+  const probe = ci.jobs["provider-contract-probe"]
+  assert_eq(probe.needs, ["changes", "rust-cli"])
+  assert_eq(probe.permissions, {contents: "read"})
+  assert_eq(probe?.environment, nil)
+  assert_eq(probe.env.HARN_BIN_NO_BUILD, "1")
+  assert_eq(
+    probe.if,
+    "$"
+      + "{{ !cancelled() && needs.changes.outputs.provider_contract_probe == 'true' && needs.rust-cli.result == 'success' }}",
+  )
+  const checkout = probe.steps[0]
+  assert_eq(checkout.with.ref, "$" + "{{ github.sha }}")
+  const download = probe.steps[1]
+  assert_eq(download.uses, "./.github/actions/download-artifact-with-retry")
+  assert_eq(download.with.name, "harn-cli.tar.zst")
+  assert_eq(download.with?.["run-id"], nil)
+  const verify = probe.steps[2].run
+  assert(verify.contains("./scripts/ci/rust_artifact.sh restore-cli"))
+  assert(verify.contains("\"$GITHUB_SHA\" \"$GITHUB_ENV\""))
+  const campaign = probe.steps[3]
+  assert_eq(campaign.uses, "./.github/actions/provider-contract-probe")
+  assert_eq(campaign.with["harn-bin"], "$" + "{{ env.HARN_BIN }}")
+  assert_eq(campaign.with.live, "false")
+  assert_eq(campaign?.env, nil)
+  assert_eq(len(probe.steps), 4)
+  // The same measured path selection schedules the job and requires its result.
+  assert_eq(
+    ci.jobs.changes.outputs.provider_contract_probe,
+    "$" + "{{ steps.surface_filter.outputs.provider_contract_probe }}",
+  )
+  const filter = ci.jobs.changes.steps.filter({ step -> step?.id == "surface_filter" }).to_list()[0]
+  const filters = schema_expect(yaml_parse(filter.with.filters), schema_of(PathFilters))
+  const paths = filters["provider_contract_probe"] ?? []
+  assert(paths.contains("crates/harn-vm/src/llm/providers/**"))
+  assert(paths.contains("scripts/tests/provider_option_probe_test.harn"))
+  assert(paths.contains(".github/actions/provider-contract-probe/**"))
+  assert(!paths.contains("crates/**"))
+  const rust_filter = ci.jobs.changes.steps.filter({ step -> step?.id == "filter" }).to_list()[0]
+  const rust_filters = schema_expect(yaml_parse(rust_filter.with.filters), schema_of(PathFilters))
+  const rust_paths = rust_filters["rust"] ?? []
+  const without_catalog = paths.filter(
+    { path -> !path.starts_with("crates/harn-provider-catalog/") },
+  )
+    .to_list()
+  for path in [
+    "crates/harn-provider-catalog/Cargo.toml",
+    "crates/harn-provider-catalog/src/capabilities/option.rs",
+    "crates/harn-provider-catalog/src/capabilities/projection.rs",
+    "crates/harn-provider-catalog/src/capabilities/rule.rs",
+    "crates/harn-provider-catalog/src/config/query.rs",
+    "crates/harn-provider-catalog/src/capabilities.toml",
+  ] {
+    assert(harness.fs.exists("../../${path}"))
+    assert(filter_matches_paths(paths, [path]))
+    assert(filter_matches_paths(rust_paths, [path]))
+    assert(!filter_matches_paths(without_catalog, [path]))
+  }
+  assert(!filter_matches_paths(paths, ["crates/harn-fmt/src/lib.rs"]))
+  const status = ci.jobs["ci-status"]
+  assert(status.needs.contains("provider-contract-probe"))
+  const latency = unwrap(read_json_result(harness.fs, "../../.github/ci-latency.json"))
+  assert_eq(latency.required.jobs["provider-contract-probe"].budget_ms, 120000)
+  assert_eq(
+    status.steps[aggregate_index(ci)].env.PROVIDER_CONTRACT_PROBE_EXPECTED,
+    "$" + "{{ needs.changes.outputs.provider_contract_probe }}",
+  )
+  assert(
+    status.steps[aggregate_index(ci)].run.contains(
+      "Provider contract probe scope was not measured.",
+    ),
+  )
+  assert(
+    status.steps[aggregate_index(ci)].run.contains(
+      "test \"$PROVIDER_CONTRACT_PROBE_EXPECTED\" = \"false\"",
+    ),
+  )
+  // Standalone live runs keep their original build, branch policy and notifier.
+  assert_eq(standalone.on?.pull_request, nil)
+  assert_eq(standalone.on?.push, nil)
+  assert_eq(standalone.on.schedule, [{cron: "17 11 * * 1"}])
+  assert_eq(standalone.on.workflow_dispatch.inputs.live.default, false)
+  assert_eq(standalone.jobs["notify-live-failure"].permissions.issues, "write")
+  assert(standalone.jobs.probe.steps.any({ step -> step?.run == "make build-harn" }))
+  assert(standalone.jobs.probe.environment.contains("'provider-probe'"))
+  assert_eq(action.inputs.live.default, "false")
+  assert_eq(action.runs.steps[0].env.HARN_EXT_PROVIDER_PROBE_BINARY, "$" + "{{ inputs.harn-bin }}")
+  assert(action.runs.steps[0].run.contains("--require-runtime-revision \"$(git rev-parse HEAD)\""))
+  assert_eq(action.runs.steps[1].if, "always()")
+  assert_eq(action.runs.steps[1].with["if-no-files-found"], "error")
+}
+
+@test
+pipeline test_sdk_mirror_check_cannot_be_removed_or_skipped_before_merge(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  assert_eq(ci_linux_lane_policy_errors(ci), [])
+  let missing_mirror = ci
+  missing_mirror.jobs["shell-gates"].steps = missing_mirror.jobs["shell-gates"].steps.filter(
+    fn(step: dict) -> bool { return step?.name != "Check recorded AWS SDK mirror" },
+  )
+    .to_list()
+  const refusal = "ci.yml:shell-gates must run and enforce the recorded AWS SDK mirror before merge"
+  assert(ci_linux_lane_policy_errors(missing_mirror).contains(refusal))
+  let skipped_mirror = ci
+  skipped_mirror.jobs["shell-gates"].steps = skipped_mirror.jobs["shell-gates"].steps.map(
+    fn(step: dict) -> dict {
+      if step?.name == "Check recorded AWS SDK mirror" {
+        return {...step, if: "github.event_name == 'push'"}
+      }
+      return step
+    },
+  )
+    .to_list()
+  assert(ci_linux_lane_policy_errors(skipped_mirror).contains(refusal))
+  let ignored_mirror = ci
+  ignored_mirror.jobs["shell-gates"].steps = ignored_mirror.jobs["shell-gates"].steps.map(
+    fn(step: dict) -> dict {
+      if step?.name == "Check recorded AWS SDK mirror" {
+        return {...step, "continue-on-error": true}
+      }
+      return step
+    },
+  )
+    .to_list()
+  assert(ci_linux_lane_policy_errors(ignored_mirror).contains(refusal))
+  let ignored_job = ci
+  ignored_job.jobs["shell-gates"]["continue-on-error"] = true
+  assert(ci_linux_lane_policy_errors(ignored_job).contains(refusal))
 }
 
 @test
@@ -90,7 +271,8 @@ pipeline test_release_order_is_checked_before_expensive_ci_admission(harness: Ha
   assert_eq(steps[1].name, "Keep a release commit last in its merge group")
   assert_eq(steps[1].if, "github.event_name == 'merge_group'")
   assert(steps[1].run.contains("release_range_release_commits"))
-  assert_eq(steps[2].id, "filter")
+  assert_eq(steps[2].id, "merged_base")
+  assert_eq(steps[3].id, "filter")
   // Every compile, artifact consumer, and product proof depends directly on
   // admission. Capacity measurement and inexpensive hygiene can stay parallel.
   for name in [
@@ -121,7 +303,7 @@ pipeline test_release_order_is_checked_before_expensive_ci_admission(harness: Ha
   }
   assert_eq(ci.jobs["ci-status"].if, "always()")
   assert(ci.jobs["ci-status"].needs.contains("changes"))
-  const aggregate = ci.jobs["ci-status"].steps[0].run
+  const aggregate = ci.jobs["ci-status"].steps[aggregate_index(ci)].run
   assert(aggregate.contains("CI tier was not measured."))
   assert(aggregate.contains("[\"Detect changes\"]=\"$" + "{{ needs.changes.result }}\""))
   assert_eq(
@@ -375,6 +557,18 @@ pipeline test_e2e_concurrency_keeps_an_executed_result_per_main_head(
 }
 
 @test
+pipeline test_e2e_concurrency_rejects_unrelated_labels_in_the_proof_group() {
+  let shared = e2e_concurrency()
+  shared.group = gha_expression("github.workflow")
+    + "-"
+    + gha_expression(
+      "github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref",
+    )
+  const errors = e2e_workflow_concurrency_errors({concurrency: shared})
+  assert_eq(len(errors), 1)
+}
+
+@test
 pipeline test_e2e_concurrency_rejects_one_shared_main_key(harness: Harness, task: unknown) {
   // The observed defect: with one key for every main push, a push waiting
   // behind an executing run is cancelled by the push after it with zero jobs,
@@ -411,29 +605,55 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
       "ci.yml:security-tests-ready must use GitHub-hosted ubuntu-24.04",
     ),
   )
-  let pr_policy = ci
-  pr_policy.jobs["audit-scripts"].if = "needs.changes.outputs.rust == 'true'"
+  // The repository policy sweep refuses before the merge: a pull request that
+  // changes any of its inputs must select it. Push-only was the defect, so the
+  // old spellings, with and without the status function, are refused.
+  for push_only in [
+    "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success'",
+    "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true' && needs.rust-cli.result == 'success'",
+    "$"
+      + "{{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true' && needs.rust-cli.result == 'success' }}",
+  ] {
+    let pr_policy = ci
+    pr_policy.jobs["audit-scripts"].if = push_only
+    const refused = minimal_pr_capacity_errors(pr_policy, publish)
+    assert(
+      refused.contains(
+        "ci.yml:audit-scripts must run on every change that selects Rust proof, gated on rust and the shared CLI only",
+      ),
+    )
+    assert(
+      len(
+        refused.filter(
+          { e ->
+            contains(e, "ci.yml:audit-scripts is a cheap refusal and must carry no event condition")
+          },
+        ),
+      )
+        > 0,
+    )
+  }
+  // Negative control: dropping the `rust` gate would run it on a docs-only
+  // change, which has no CLI to run it with.
+  let ungated_policy = ci
+  ungated_policy.jobs["audit-scripts"].if = "$"
+    + "{{ !cancelled() && needs.rust-cli.result == 'success' }}"
   assert(
-    minimal_pr_capacity_errors(pr_policy, publish).contains(
-      "ci.yml:audit-scripts must run on Rust-changing main pushes only",
+    minimal_pr_capacity_errors(ungated_policy, publish).contains(
+      "ci.yml:audit-scripts must run on every change that selects Rust proof, gated on rust and the shared CLI only",
     ),
   )
-  // A main push the merge group already proved sets `rust` false. Main-only
-  // lanes gated on it would never run again, so each one reads `rust_paths`.
-  let heavy_gated_policy = ci
-  heavy_gated_policy.jobs["audit-scripts"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success'"
-  assert(
-    minimal_pr_capacity_errors(heavy_gated_policy, publish).contains(
-      "ci.yml:audit-scripts must run on Rust-changing main pushes only",
-    ),
+  // ci-status must not excuse a skip on a pull request that selected Rust proof.
+  let push_only_status = ci
+  push_only_status.jobs["ci-status"].steps[aggregate_index(ci)].run = replace(
+    push_only_status.jobs["ci-status"].steps[aggregate_index(ci)].run,
+    "  [ \"$" + "{{ needs.changes.outputs.rust }}\" != \"true\" ]\n\n# The one Windows",
+    "  test \"$" + "{EVENT_NAME}:$"
+      + "{GIT_REF}\" != \"push:refs/heads/main\"\n\n# The one Windows",
   )
-  // Without a status function the producer's skipped capacity ancestors
-  // skip the main-only lane on every push.
-  let skipped_policy = ci
-  skipped_policy.jobs["audit-scripts"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true' && needs.rust-cli.result == 'success'"
   assert(
-    minimal_pr_capacity_errors(skipped_policy, publish).contains(
-      "ci.yml:audit-scripts must run on Rust-changing main pushes only",
+    minimal_pr_capacity_errors(push_only_status, publish).contains(
+      "ci.yml:ci-status must require repository policies on every run that selects Rust proof",
     ),
   )
   let heavy_gated_size = ci
@@ -441,14 +661,6 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   assert(
     minimal_pr_capacity_errors(heavy_gated_size, publish).contains(
       "ci.yml:binary-size-signal must record main's baseline on every Rust-changing main push",
-    ),
-  )
-  let heavy_gated_status = ci
-  heavy_gated_status.jobs["ci-status"].steps[0].env.RUST_PATHS_SELECTED = "$"
-    + "{{ needs.changes.outputs.rust }}"
-  assert(
-    minimal_pr_capacity_errors(heavy_gated_status, publish).contains(
-      "ci.yml:ci-status must require repository policies on every Rust-changing main push, proven or not",
     ),
   )
   // Every run builds its own CLI: a download naming another run measures a
@@ -504,7 +716,7 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
     ),
   )
   let skip_tolerant = ci
-  skip_tolerant.jobs["ci-status"].steps[0].env.WINDOWS_CROSS_REQUIRED = "$"
+  skip_tolerant.jobs["ci-status"].steps[aggregate_index(ci)].env.WINDOWS_CROSS_REQUIRED = "$"
     + "{{ github.event_name == 'push' }}"
   assert(
     minimal_pr_capacity_errors(skip_tolerant, publish).contains(

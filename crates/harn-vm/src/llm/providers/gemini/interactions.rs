@@ -576,7 +576,7 @@ pub(crate) fn parse_response(
     // `generateContent` splits `candidatesTokenCount` from `thoughtsTokenCount`.
     let output_tokens = usage["total_output_tokens"].as_i64().unwrap_or(0)
         + usage["total_thought_tokens"].as_i64().unwrap_or(0);
-    let cache_read_tokens = usage["total_cached_tokens"].as_i64().unwrap_or(0);
+    let cache = crate::llm::usage::extract_cache_counts(usage)?;
     let request_id = json["id"].as_str().filter(|value| !value.is_empty());
     let telemetry = ProviderTelemetry::from_gemini_interactions_usage(usage, request_id);
 
@@ -586,7 +586,9 @@ pub(crate) fn parse_response(
         tool_calls,
         input_tokens,
         output_tokens,
-        cache_read_tokens,
+        cache_read_tokens: cache.read_tokens,
+        cache_write_tokens: cache.write_tokens,
+        cache_counts_reported: cache.reported,
         model: request.model.clone(),
         provider: request.provider.clone(),
         thinking: (!thinking.is_empty()).then_some(thinking),

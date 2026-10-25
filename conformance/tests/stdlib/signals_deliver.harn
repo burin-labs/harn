@@ -1,0 +1,66 @@
+import { ci_branch_decision, signal_apply, signal_deliver } from "std/signals"
+
+/** In-process delivery: an advisory system reminder, never a user message. */
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(1800000000000)
+  const options = {dir: harness.fs.mkdtemp_in_workspace("signals-")}
+  const agent_session = harness.agent.open()
+  harness.agent.reset(agent_session)
+  const me = {id: "vm-1", harness: "harn", cwd: "/work/api", repo: "acme/api", activity: "busy"}
+  // Nothing pending: nothing is injected.
+  const quiet = signal_deliver(harness, agent_session, me, options)
+  harness.stdio.println("quiet: " + to_string(len(quiet.reminder_ids)))
+  harness.stdio.println(
+    len(transcript_events_by_kind(harness.agent.snapshot(agent_session), "system_reminder")),
+  )
+  const red = [
+    {
+      workflow_id: 7,
+      name: "CI",
+      status: "completed",
+      conclusion: "failure",
+      html_url: "https://github.com/acme/api/actions/runs/2",
+    },
+  ]
+  signal_apply(harness.runtime, ci_branch_decision("acme/api", "main", red), options)
+  const first = signal_deliver(harness, agent_session, me, options)
+  harness.stdio.println(
+    "delivered: " + to_string(len(first.reminder_ids)) + ", acked " + to_string(len(first.acked)),
+  )
+  const pending = transcript_events_by_kind(
+    harness.agent.snapshot(agent_session),
+    "system_reminder",
+  )
+  harness.stdio.println(
+    "system reminders " + to_string(len(pending)) + ", transcript messages "
+      + to_string(harness.agent.length(agent_session)),
+  )
+  harness.stdio.println(pending[0]?.reminder?.authority)
+  harness.stdio.println(contains(pending[0]?.reminder?.body ?? "", "github.ci:acme/api@main#1"))
+  // The signal recovered before the next turn. The recovery replaces the
+  // pending reminder for the same signal instead of stacking a second one.
+  signal_apply(harness.runtime, ci_branch_decision("acme/api", "main", []), options)
+  harness.testing.clock_advance(1000)
+  const again = signal_deliver(harness, agent_session, me, options)
+  const replaced = transcript_events_by_kind(
+    harness.agent.snapshot(agent_session),
+    "system_reminder",
+  )
+  harness.stdio.println(
+    "acked " + to_string(len(again.acked)) + ", delivered "
+      + to_string(len(again.reminder_ids))
+      + ", pending "
+      + to_string(len(replaced)),
+  )
+  harness.stdio.println(contains(replaced[0]?.reminder?.body ?? "", "github.ci:acme/api@main#2"))
+  // Every lease was acked as it was injected, so a turn slower than the
+  // lease repeats nothing.
+  harness.testing.clock_advance(12 * 60 * 1000)
+  const next = signal_deliver(harness, agent_session, me, options)
+  harness.stdio.println(
+    "acked " + to_string(len(next.acked)) + ", delivered "
+      + to_string(len(next.reminder_ids)),
+  )
+  harness.agent.close(agent_session)
+  harness.testing.clock_reset()
+}

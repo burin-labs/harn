@@ -1,7 +1,7 @@
 //! Rename through real language servers.
 //!
 //! A machine without the server skips the positive cases unless
-//! `HARN_LSP_FIXTURES_REQUIRED=1`, which CI's test lanes and the fixture
+//! `HARN_EXT_LSP_FIXTURES_REQUIRED=1`, which CI's test lanes and the fixture
 //! evidence runs set so a missing server fails instead of passing.
 //!
 //! These tests wait on real server processes, so their bounds are real time
@@ -41,6 +41,17 @@ fn rename(
     new_name: &str,
     backend: &str,
 ) -> VmValue {
+    rename_with_proof(capability, path, name, new_name, backend, false)
+}
+
+fn rename_with_proof(
+    capability: &CodeIndexCapability,
+    path: &str,
+    name: &str,
+    new_name: &str,
+    backend: &str,
+    proof: bool,
+) -> VmValue {
     let symbol = dict(&[
         ("name", vm_string(name)),
         ("path", vm_string(path)),
@@ -51,12 +62,13 @@ fn rename(
         ("new_name", vm_string(new_name)),
         ("scope", vm_string("workspace")),
         ("backend", vm_string(backend)),
+        ("proof", VmValue::Bool(proof)),
     ]);
     crate::code_index::rename::run(&capability.shared(), &[request]).expect("rename runs")
 }
 
 fn required() -> bool {
-    std::env::var("HARN_LSP_FIXTURES_REQUIRED").is_ok_and(|value| value == "1")
+    std::env::var("HARN_EXT_LSP_FIXTURES_REQUIRED").is_ok_and(|value| value == "1")
 }
 
 /// Rename through the server only, retrying while a cold server warms.
@@ -67,9 +79,23 @@ fn server_rename(
     name: &str,
     new_name: &str,
 ) -> Option<VmValue> {
+    server_rename_with_proof(capability, path, name, new_name, false)
+}
+
+fn server_rename_with_proof(
+    capability: &CodeIndexCapability,
+    path: &str,
+    name: &str,
+    new_name: &str,
+    proof: bool,
+) -> Option<VmValue> {
+    server_answer(|| rename_with_proof(capability, path, name, new_name, "language_server", proof))
+}
+
+fn server_answer(mut rename: impl FnMut() -> VmValue) -> Option<VmValue> {
     let mut last = None;
     for _ in 0..8 {
-        let result = rename(capability, path, name, new_name, "language_server");
+        let result = rename();
         if s(field(&result, "result")) != "backend_unavailable" {
             return Some(result);
         }
@@ -483,44 +509,90 @@ fn a_narrow_scope_with_outside_references_refuses() {
 #[test]
 fn a_method_rename_leaves_a_free_function_path_in_a_macro_alone() {
     let _env = crate::process::test_support::declare_inherited();
-    let dir = tempdir().unwrap();
-    let lib = "pub mod parser;\n\n#[macro_export]\nmacro_rules! run {\n    () => {\n        $crate::parser::parse()\n    };\n}\n";
-    let parser = "pub fn parse() -> u8 {\n    1\n}\n\npub struct Parser;\n\nimpl Parser {\n    pub fn parse(&self) -> u8 {\n        2\n    }\n}\n";
-    write_tree(
-        dir.path(),
-        &[
-            (
-                "Cargo.toml",
-                "[package]\nname = \"small\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-            ),
-            ("src/lib.rs", lib),
-            ("src/parser.rs", parser),
-        ],
-    );
-    let capability = index(dir.path());
     if !rust_analyzer_runs() {
         return;
     }
-    let request = dict(&[
+    let parser = "pub fn parse() -> u8 {\n    1\n}\n\npub struct Parser;\n\nimpl Parser {\n    pub fn parse(&self) -> u8 {\n        2\n    }\n}\n";
+    let macro_lib = |declaration: &str, path: &str| {
+        format!("{declaration}\n\n#[macro_export]\nmacro_rules! run {{\n    () => {{\n        $crate::{path}()\n    }};\n}}\n")
+    };
+    // `$crate::parser::parse` names the module's free function, never the
+    // method. A conditional `mod` or module file, a path through the type,
+    // or a manifest target path that makes a `src/` file a crate root may
+    // reach it.
+    let bin = "[[bin]]\nname = \"tool\"\npath = \"src/bin.rs\"\n";
+    let cases = [
+        ("pub mod parser;", "", "parser::parse", "", true),
         (
-            "symbol_ref",
-            dict(&[
-                ("name", vm_string("parse")),
-                ("path", vm_string("src/parser.rs")),
-                ("line", VmValue::Int(8)),
-                ("kind", vm_string("Function")),
-            ]),
+            "#[cfg(not(any()))]\npub mod parser;",
+            "",
+            "parser::parse",
+            "",
+            false,
         ),
-        ("new_name", vm_string("parse_all")),
-        ("scope", vm_string("workspace")),
-        ("backend", vm_string("language_server")),
-    ]);
-    let result = crate::code_index::rename::run(&capability.shared(), &[request]).unwrap();
-    assert_ne!(s(field(&result, "result")), "applied", "{result:?}");
-    assert_eq!(
-        fs::read_to_string(dir.path().join("src/lib.rs")).unwrap(),
-        lib
-    );
+        (
+            "pub mod parser;",
+            "#![cfg(not(any()))] ",
+            "parser::parse",
+            "",
+            false,
+        ),
+        ("pub mod parser;", "", "parser::Parser::parse", "", false),
+        ("pub mod parser;", "", "parser::parse", bin, false),
+    ];
+    for (declaration, inner, path, targets, applies) in cases {
+        let dir = tempdir().unwrap();
+        let lib = macro_lib(declaration, path);
+        let parser = format!("{inner}{parser}");
+        let manifest = format!(
+            "[package]\nname = \"small\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n{targets}"
+        );
+        write_tree(
+            dir.path(),
+            &[
+                ("Cargo.toml", manifest.as_str()),
+                ("src/lib.rs", &lib),
+                ("src/parser.rs", &parser),
+                ("src/bin.rs", "fn main() {}\n"),
+            ],
+        );
+        let capability = index(dir.path());
+        let request = dict(&[
+            (
+                "symbol_ref",
+                dict(&[
+                    ("name", vm_string("parse")),
+                    ("path", vm_string("src/parser.rs")),
+                    ("line", VmValue::Int(8)),
+                    ("kind", vm_string("Function")),
+                ]),
+            ),
+            ("new_name", vm_string("parse_all")),
+            ("scope", vm_string("workspace")),
+            ("backend", vm_string("language_server")),
+        ]);
+        let result = crate::code_index::rename::run(&capability.shared(), &[request]).unwrap();
+        let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
+        assert_eq!(read("src/lib.rs"), lib, "{path}");
+        if applies {
+            assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+            assert_eq!(
+                read("src/parser.rs"),
+                parser.replace("parse(&self)", "parse_all(&self)")
+            );
+        } else {
+            assert_eq!(
+                s(field(&result, "result")),
+                "backend_unavailable",
+                "{declaration} {inner}{path} {targets}: {result:?}"
+            );
+            assert!(
+                s(field(&result, "details")).contains("src/lib.rs:"),
+                "{result:?}"
+            );
+            assert_eq!(read("src/parser.rs"), parser);
+        }
+    }
 }
 
 #[test]
@@ -751,9 +823,87 @@ const TS_PROJECT: &[(&str, &str)] = &[
     ),
     (
         "src/consumer.ts",
-        "import { Reading, average } from \"./reading\";\nimport * as current from \"./reading\";\nexport { Reading as LegacyReading } from \"./reading\";\nexport { Reading } from \"./reading\";\n\nexport const labels = { Reading: \"sensor\", kind: \"Reading\" };\n\nexport function latest(all: Array<Reading>): current.Reading | undefined {\n  const first: Reading[] = all.slice(0, 1);\n  return first.length ? average(first) : undefined;\n}\n",
+        "import { Reading, average } from \"./reading\";\nimport * as current from \"./reading\";\nexport { Reading as LegacyReading } from \"./reading\";\nexport { Reading } from \"./reading\";\n\nexport const labels = { Reading: \"sensor\", kind: \"Reading\", typed: null as Reading | null };\n\nexport function latest(all: Array<Reading>): current.Reading | undefined {\n  const first: Reading[] = all.slice(0, 1);\n  return first.length ? average(first) : undefined;\n}\n",
     ),
 ];
+
+#[test]
+fn typescript_server_renames_only_the_positioned_same_line_method() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    let source = "/* 🦀 */ export class First { load() { return 1; } } export class Second { load() { return 2; } }\nexport const first = new First().load();\nexport const second = new Second().load();\n";
+    write_tree(
+        dir.path(),
+        &[
+            (
+                "tsconfig.json",
+                "{\"compilerOptions\":{\"strict\":true},\"include\":[\"src/**/*.ts\"]}\n",
+            ),
+            ("src/handlers.ts", source),
+        ],
+    );
+    let capability = index(dir.path());
+    let second = source.lines().next().unwrap().rfind("load").unwrap();
+    let col = source.get(..second).unwrap().encode_utf16().count() as u32 + 1;
+    assert_ne!(
+        col,
+        second as u32 + 1,
+        "the fixture must distinguish UTF-16 from bytes"
+    );
+    let request = |name: &str, col: u32| {
+        let symbol = dict(&[
+            ("name", vm_string(name)),
+            ("path", vm_string("src/handlers.ts")),
+            ("line", VmValue::Int(1)),
+            ("col", VmValue::Int(i64::from(col))),
+            ("kind", vm_string("Function")),
+        ]);
+        let request = dict(&[
+            ("symbol_ref", symbol),
+            ("new_name", vm_string("fetch")),
+            ("scope", vm_string("workspace")),
+            ("backend", vm_string("language_server")),
+        ]);
+        crate::code_index::rename::run(&capability.shared(), &[request]).expect("rename runs")
+    };
+    for (name, wrong_col) in [
+        ("First.load", col),
+        ("Other.load", col),
+        ("Second.load", col - 1),
+        ("Second.load", second as u32 + 1),
+    ] {
+        let result = request(name, wrong_col);
+        assert_eq!(s(field(&result, "result")), "no_match", "{result:?}");
+        assert_eq!(
+            s(field(field(&result, "backend"), "name")),
+            "none",
+            "{result:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("src/handlers.ts")).unwrap(),
+            source
+        );
+    }
+    let Some(result) = server_answer(|| request("Second.load", col)) else {
+        return;
+    };
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    assert_eq!(
+        s(field(field(&result, "backend"), "name")),
+        "language_server",
+        "{result:?}"
+    );
+    let server = s(field(field(&result, "backend"), "server"));
+    assert!(
+        server == "typescript-language-server" || server == "tsc-lsp",
+        "{result:?}"
+    );
+    eprintln!("positioned same-line method rename served by {server}");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("src/handlers.ts")).unwrap(),
+        "/* 🦀 */ export class First { load() { return 1; } } export class Second { fetch() { return 2; } }\nexport const first = new First().load();\nexport const second = new Second().fetch();\n",
+    );
+}
 
 #[test]
 fn typescript_server_renames_array_types_namespaces_and_reexports() {
@@ -761,11 +911,29 @@ fn typescript_server_renames_array_types_namespaces_and_reexports() {
     let dir = tempdir().unwrap();
     write_tree(dir.path(), TS_PROJECT);
     let capability = index(dir.path());
-    let Some(result) = server_rename(&capability, "src/reading.ts", "Reading", "Measurement")
-    else {
+    let Some(result) = server_rename_with_proof(
+        &capability,
+        "src/reading.ts",
+        "Reading",
+        "Measurement",
+        true,
+    ) else {
         return;
     };
     assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    crate::schemas::validate_response(
+        "hostlib_code_index_rename_symbol",
+        "code_index",
+        "rename_symbol",
+        result.clone(),
+    )
+    .unwrap();
+    let preserved = field(field(&result, "proof"), "preserved");
+    assert_eq!(s(field(preserved, "status")), "checked");
+    assert!(
+        matches!(field(preserved, "site_count"), VmValue::Int(count) if *count >= 4),
+        "{preserved:?}"
+    );
     let server = s(field(field(&result, "backend"), "server"));
     // TypeScript 6 and older run behind typescript-language-server; 7 is native.
     assert!(
@@ -774,6 +942,25 @@ fn typescript_server_renames_array_types_namespaces_and_reexports() {
     );
     eprintln!("typescript rename served by {server}");
     let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
+    let VmValue::List(sites) = field(preserved, "sites") else {
+        panic!("preserved sites missing")
+    };
+    assert!(
+        !sites.is_empty(),
+        "preserved names require anchored evidence"
+    );
+    for site in sites.iter() {
+        let VmValue::Int(line) = field(site, "line") else {
+            panic!("preserved line missing")
+        };
+        assert_eq!(
+            read(&s(field(site, "path")))
+                .lines()
+                .nth(*line as usize - 1)
+                .unwrap_or(""),
+            s(field(site, "text"))
+        );
+    }
     assert_eq!(
         read("src/reading.ts"),
         "export class Measurement {\n  constructor(public value: number) {}\n}\n\nexport function average(items: Measurement[]): Measurement {\n  const total = items.reduce((sum, item) => sum + item.value, 0);\n  return new Measurement(total / items.length);\n}\n"
@@ -790,8 +977,147 @@ fn typescript_server_renames_array_types_namespaces_and_reexports() {
     );
     assert_eq!(
         read("src/consumer.ts"),
-        "import { Measurement, average } from \"./reading\";\nimport * as current from \"./reading\";\nexport { Measurement as LegacyReading } from \"./reading\";\nexport { Measurement } from \"./reading\";\n\nexport const labels = { Reading: \"sensor\", kind: \"Reading\" };\n\nexport function latest(all: Array<Measurement>): current.Measurement | undefined {\n  const first: Measurement[] = all.slice(0, 1);\n  return first.length ? average(first) : undefined;\n}\n"
+        "import { Measurement, average } from \"./reading\";\nimport * as current from \"./reading\";\nexport { Measurement as LegacyReading } from \"./reading\";\nexport { Measurement } from \"./reading\";\n\nexport const labels = { Reading: \"sensor\", kind: \"Reading\", typed: null as Measurement | null };\n\nexport function latest(all: Array<Measurement>): current.Measurement | undefined {\n  const first: Measurement[] = all.slice(0, 1);\n  return first.length ? average(first) : undefined;\n}\n"
     );
+}
+
+const TS_LOCALS: &[(&str, &str)] = &[
+    (
+        "tsconfig.json",
+        "{\"compilerOptions\":{\"strict\":true},\"include\":[\"src/**/*.ts\"]}\n",
+    ),
+    (
+        "src/patterns.ts",
+        "import { other } from \"./other\";\n\nconst length = (len: number) => (value: string) => value.length === len;\n\nexport const size = () => 1;\n\nexport const string = { length: (len: number) => length(len) };\n\nexport function count(args: any): number {\n  return args.length + other + size();\n}\n\nexport function bump(items: number[]): number[] {\n  const map = (value: number) => value + 1;\n  return items.map(map);\n}\n",
+    ),
+    ("src/other.ts", "export const other = 1;\n"),
+    // Untyped JavaScript outside the project: the server resolves none of
+    // these member names.
+    (
+        "scripts/run.mjs",
+        "export function width(text) {\n  return text.length + text.size;\n}\n\nexport function labels(list) {\n  return list.map((item) => item.name);\n}\n",
+    ),
+];
+
+#[test]
+fn file_local_typescript_bindings_ignore_mentions_they_cannot_reach() {
+    let _env = crate::process::test_support::declare_inherited();
+    let rename_at = |dir: &Path, name: &str, line: i64, new_name: &str| {
+        let capability = index(dir);
+        let request = dict(&[
+            (
+                "symbol_ref",
+                dict(&[
+                    ("name", vm_string(name)),
+                    ("path", vm_string("src/patterns.ts")),
+                    ("line", VmValue::Int(line)),
+                    ("kind", vm_string("Function")),
+                ]),
+            ),
+            ("new_name", vm_string(new_name)),
+            ("scope", vm_string("workspace")),
+            ("backend", vm_string("language_server")),
+        ]);
+        crate::code_index::rename::run(&capability.shared(), &[request]).expect("rename runs")
+    };
+    let read = |dir: &Path, path: &str| fs::read_to_string(dir.join(path)).unwrap();
+    let source = TS_LOCALS[1].1;
+
+    // A module-level binding the module never exports, and one local to a
+    // function: `args.length`, `text.length` and `list.map` cannot be them.
+    for (name, line, new_name) in [("length", 3, "lengthQp"), ("map", 14, "mapQp")] {
+        let dir = tempdir().unwrap();
+        write_tree(dir.path(), TS_LOCALS);
+        let Some(result) = server_answer(|| rename_at(dir.path(), name, line, new_name)) else {
+            return;
+        };
+        assert_eq!(s(field(&result, "result")), "applied", "{name}: {result:?}");
+        let expected = match name {
+            "length" => source
+                .replace("const length = ", "const lengthQp = ")
+                .replace("=> length(len)", "=> lengthQp(len)"),
+            _ => source
+                .replace("const map = ", "const mapQp = ")
+                .replace("items.map(map)", "items.map(mapQp)"),
+        };
+        assert_eq!(read(dir.path(), "src/patterns.ts"), expected, "{name}");
+        assert_eq!(
+            read(dir.path(), "scripts/run.mjs"),
+            TS_LOCALS[3].1,
+            "{name}"
+        );
+    }
+
+    // Negative control: an exported binding can be reached from the file the
+    // server could not resolve, so the rename still refuses.
+    let dir = tempdir().unwrap();
+    write_tree(dir.path(), TS_LOCALS);
+    let result = rename_at(dir.path(), "size", 5, "sizeQp");
+    if s(field(&result, "details")).contains("still loading") && !required() {
+        return;
+    }
+    assert_eq!(
+        s(field(&result, "result")),
+        "backend_unavailable",
+        "{result:?}"
+    );
+    assert!(
+        s(field(&result, "details")).contains("scripts/run.mjs"),
+        "{result:?}"
+    );
+    assert_eq!(read(dir.path(), "src/patterns.ts"), source);
+}
+
+const RUST_MANY_LEFTOVERS_CALLS: usize = 260;
+
+#[test]
+fn more_than_two_hundred_resolvable_leftovers_still_apply() {
+    let _env = crate::process::test_support::declare_inherited();
+    if !rust_analyzer_runs() {
+        return;
+    }
+    let dir = tempdir().unwrap();
+    let calls: String = (0..RUST_MANY_LEFTOVERS_CALLS)
+        .map(|at| format!("    total += vec![{at}u8].len();\n"))
+        .collect();
+    let lib = "pub mod counter;\npub mod sums;\n";
+    let counter = "pub struct Counter(Vec<u8>);\n\nimpl Counter {\n    pub fn len(&self) -> usize {\n        self.0.len()\n    }\n}\n";
+    let sums = format!("pub fn sum() -> usize {{\n    let mut total = 0;\n{calls}    total\n}}\n");
+    write_tree(
+        dir.path(),
+        &[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"small\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            ),
+            ("src/lib.rs", lib),
+            ("src/counter.rs", counter),
+            ("src/sums.rs", &sums),
+        ],
+    );
+    let capability = index(dir.path());
+    let request = dict(&[
+        (
+            "symbol_ref",
+            dict(&[
+                ("name", vm_string("len")),
+                ("path", vm_string("src/counter.rs")),
+                ("line", VmValue::Int(4)),
+                ("kind", vm_string("Function")),
+            ]),
+        ),
+        ("new_name", vm_string("count")),
+        ("scope", vm_string("workspace")),
+        ("backend", vm_string("language_server")),
+    ]);
+    let result = crate::code_index::rename::run(&capability.shared(), &[request]).unwrap();
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
+    assert_eq!(
+        read("src/counter.rs"),
+        counter.replace("fn len(", "fn count(")
+    );
+    assert_eq!(read("src/sums.rs"), sums);
 }
 
 const PY_PROJECT: &[(&str, &str)] = &[

@@ -400,16 +400,15 @@ async fn session_reminder_pending_list_and_revoke_controls() {
         .handle_incoming_message(serde_json::json!({
             "jsonrpc": "2.0",
             "id": 3,
-            "method": "session/pending_injections",
+            "method": "session/pending_prompts",
             "params": {"sessionId": session_id},
         }))
         .await;
     let pending = recv_json(&mut rx).await;
-    assert_eq!(pending["result"]["pendingCount"], 1);
-    assert_eq!(pending["result"]["injections"][0]["kind"], "reminder");
-    assert_eq!(pending["result"]["injections"][0]["reminderId"], "rem-acp");
-    assert_eq!(pending["result"]["injections"][0]["mode"], "finish_step");
-    assert_eq!(pending["result"]["injections"][0]["body"], "Host reminder");
+    assert_eq!(pending["result"]["prompts"], serde_json::json!([]));
+    assert_eq!(pending["result"]["reminders"][0]["reminderId"], "rem-acp");
+    assert_eq!(pending["result"]["reminders"][0]["mode"], "finish_step");
+    assert_eq!(pending["result"]["reminders"][0]["body"], "Host reminder");
 
     for id in [4, 5] {
         server
@@ -439,12 +438,12 @@ async fn session_reminder_pending_list_and_revoke_controls() {
         .handle_incoming_message(serde_json::json!({
             "jsonrpc": "2.0",
             "id": 6,
-            "method": "session/pending_injections",
+            "method": "session/pending_prompts",
             "params": {"sessionId": session_id},
         }))
         .await;
     let empty = recv_json(&mut rx).await;
-    assert_eq!(empty["result"]["pendingCount"], 0);
+    assert_eq!(empty["result"]["reminders"], serde_json::json!([]));
 
     server
         .handle_incoming_message(serde_json::json!({
@@ -602,96 +601,6 @@ async fn session_cancel_tool_call_rejects_missing_tool_call_id() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn session_inject_accepts_with_message_id_and_delivers_same_id() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "session/new",
-            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
-        }))
-        .await;
-    let created = recv_json(&mut rx).await;
-    let session_id = created["result"]["sessionId"]
-        .as_str()
-        .expect("session id")
-        .to_string();
-    let bridge = attach_test_host_bridge(&mut server, &session_id);
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "session/inject",
-            "params": {
-                "sessionId": session_id,
-                "mode": "queue",
-                "content": [{"type": "text", "text": "queued follow-up"}],
-            },
-        }))
-        .await;
-    let response = recv_json(&mut rx).await;
-    let message_id = response["result"]["messageId"]
-        .as_str()
-        .expect("messageId")
-        .to_string();
-    assert!(message_id.starts_with("msg_inj_"));
-
-    let delivered = bridge
-        .take_queued_user_messages_for(harn_vm::bridge::DeliveryCheckpoint::EndOfInteraction)
-        .await;
-    assert_eq!(delivered.len(), 1);
-    assert_eq!(delivered[0].message_id, message_id);
-    assert_eq!(delivered[0].content, "queued follow-up");
-    assert_eq!(
-        delivered[0].transcript_content,
-        serde_json::json!([{"type": "text", "text": "queued follow-up"}])
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn session_inject_requires_active_prompt_bridge() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "session/new",
-            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
-        }))
-        .await;
-    let created = recv_json(&mut rx).await;
-    let session_id = created["result"]["sessionId"]
-        .as_str()
-        .expect("session id")
-        .to_string();
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "session/inject",
-            "params": {
-                "sessionId": session_id,
-                "mode": "queue",
-                "content": "not running",
-            },
-        }))
-        .await;
-    let rejected = recv_json(&mut rx).await;
-    assert_eq!(rejected["error"]["code"], -32004);
-    assert!(rejected["error"]["message"]
-        .as_str()
-        .unwrap_or_default()
-        .contains("no active prompt"));
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn session_cancel_is_idempotent_and_actor_attributed() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
@@ -736,332 +645,6 @@ async fn session_cancel_is_idempotent_and_actor_attributed() {
             "controller-a"
         );
     }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn session_inject_revoke_and_replace_pending_messages() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "session/new",
-            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
-        }))
-        .await;
-    let created = recv_json(&mut rx).await;
-    let session_id = created["result"]["sessionId"]
-        .as_str()
-        .expect("session id")
-        .to_string();
-    let bridge = attach_test_host_bridge(&mut server, &session_id);
-
-    for (id, text) in [(2, "first"), (3, "second")] {
-        server
-            .handle_incoming_message(serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": "session/inject",
-                "params": {
-                    "sessionId": session_id,
-                    "mode": "steer",
-                    "content": [{"type": "text", "text": text}],
-                },
-            }))
-            .await;
-    }
-    let first = recv_json(&mut rx).await;
-    let first_id = first["result"]["messageId"].as_str().unwrap().to_string();
-    let second = recv_json(&mut rx).await;
-    let second_id = second["result"]["messageId"].as_str().unwrap().to_string();
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 4,
-            "method": "session/replace_inject",
-            "params": {
-                "sessionId": session_id,
-                "messageId": first_id,
-                "content": [{"type": "text", "text": "first edited"}],
-            },
-        }))
-        .await;
-    let replace = recv_json(&mut rx).await;
-    assert_eq!(replace["result"]["messageId"], first_id);
-    assert_eq!(replace["result"]["status"], "replaced");
-
-    for id in [5, 6] {
-        server
-            .handle_incoming_message(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "method": "session/revoke_inject",
-                    "params": {
-                        "sessionId": session_id,
-                        "messageId": second_id,
-                    },
-            }))
-            .await;
-        let revoke = recv_json(&mut rx).await;
-        assert_eq!(revoke["result"]["messageId"], second_id);
-        assert_eq!(
-            revoke["result"]["status"],
-            if id == 5 {
-                "revoked"
-            } else {
-                "already_revoked"
-            }
-        );
-    }
-
-    let delivered = bridge
-        .take_queued_user_messages_for(harn_vm::bridge::DeliveryCheckpoint::AfterCurrentOperation)
-        .await;
-    assert_eq!(delivered.len(), 1);
-    assert_eq!(delivered[0].message_id, first_id);
-    assert_eq!(delivered[0].content, "first edited");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn session_inject_state_survives_prompt_bridge_replacement() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "session/new",
-            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
-        }))
-        .await;
-    let created = recv_json(&mut rx).await;
-    let session_id = created["result"]["sessionId"]
-        .as_str()
-        .expect("session id")
-        .to_string();
-    let first_bridge = attach_test_host_bridge(&mut server, &session_id);
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "session/inject",
-            "params": {
-                "sessionId": session_id,
-                "mode": "queue",
-                "content": [{"type": "text", "text": "before replacement"}],
-            },
-        }))
-        .await;
-    let accepted = recv_json(&mut rx).await;
-    let message_id = accepted["result"]["messageId"]
-        .as_str()
-        .expect("message id")
-        .to_string();
-
-    server
-        .sessions
-        .get_mut(&session_id)
-        .expect("session")
-        .host_bridge = None;
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "session/replace_inject",
-            "params": {
-                "sessionId": session_id,
-                "messageId": message_id,
-                "content": [{"type": "text", "text": "after replacement"}],
-            },
-        }))
-        .await;
-    let replace = recv_json(&mut rx).await;
-    assert_eq!(replace["result"]["messageId"], message_id);
-    assert_eq!(replace["result"]["status"], "replaced");
-
-    let tool_call_cancellations = server
-        .sessions
-        .get(&session_id)
-        .expect("session")
-        .concurrent_control
-        .tool_call_cancellations
-        .clone();
-    let replacement_bridge = Arc::new(
-        harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
-            std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-            std::sync::Arc::new(|_| Ok(())),
-            10_000,
-            harn_vm::bridge::HostBridgeControlState::new(
-                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                std::sync::Arc::new(tokio::sync::Notify::new()),
-                first_bridge.injection_state(),
-                tool_call_cancellations,
-            ),
-        ),
-    );
-    server
-        .sessions
-        .get_mut(&session_id)
-        .expect("session")
-        .host_bridge = Some(replacement_bridge.clone());
-
-    let delivered = replacement_bridge
-        .take_queued_user_messages_for(harn_vm::bridge::DeliveryCheckpoint::EndOfInteraction)
-        .await;
-    assert_eq!(delivered.len(), 1);
-    assert_eq!(delivered[0].message_id, message_id);
-    assert_eq!(delivered[0].content, "after replacement");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn session_inject_reports_unknown_and_already_delivered_ids() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "session/new",
-            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
-        }))
-        .await;
-    let created = recv_json(&mut rx).await;
-    let session_id = created["result"]["sessionId"]
-        .as_str()
-        .expect("session id")
-        .to_string();
-    let bridge = attach_test_host_bridge(&mut server, &session_id);
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "session/revoke_inject",
-            "params": {"sessionId": session_id, "messageId": "missing"},
-        }))
-        .await;
-    let unknown = recv_json(&mut rx).await;
-    assert_eq!(unknown["error"]["data"]["reason"], "unknown_message_id");
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "session/inject",
-            "params": {
-                "sessionId": session_id,
-                "mode": "queue",
-                "content": [{"type": "text", "text": "deliver me"}],
-            },
-        }))
-        .await;
-    let accepted = recv_json(&mut rx).await;
-    let message_id = accepted["result"]["messageId"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let delivered = bridge
-        .take_queued_user_messages_for(harn_vm::bridge::DeliveryCheckpoint::EndOfInteraction)
-        .await;
-    assert_eq!(delivered.len(), 1);
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 4,
-            "method": "session/replace_inject",
-            "params": {
-                "sessionId": session_id,
-                "messageId": message_id,
-                "content": [{"type": "text", "text": "too late"}],
-            },
-        }))
-        .await;
-    let already_delivered = recv_json(&mut rx).await;
-    assert_eq!(
-        already_delivered["error"]["data"]["reason"],
-        "already_delivered"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn session_inject_rejects_cross_actor_mutation() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "session/new",
-            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
-        }))
-        .await;
-    let created = recv_json(&mut rx).await;
-    let session_id = created["result"]["sessionId"]
-        .as_str()
-        .expect("session id")
-        .to_string();
-    attach_test_host_bridge(&mut server, &session_id);
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "session/inject",
-            "params": {
-                "sessionId": session_id,
-                "mode": "queue",
-                "content": "owned pending message",
-                "_harn": {
-                    "actor": {
-                        "clientId": "controller-a",
-                        "role": "controller",
-                        "source": "ide"
-                    }
-                }
-            },
-        }))
-        .await;
-    let accepted = recv_json(&mut rx).await;
-    let message_id = accepted["result"]["messageId"].as_str().unwrap();
-    assert_eq!(accepted["result"]["status"], "accepted");
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "session/replace_inject",
-            "params": {
-                "sessionId": session_id,
-                "messageId": message_id,
-                "content": "stolen edit",
-                "_harn": {
-                    "actor": {
-                        "clientId": "controller-b",
-                        "role": "controller",
-                        "source": "ide"
-                    }
-                }
-            },
-        }))
-        .await;
-    let rejected = recv_json(&mut rx).await;
-    assert_eq!(
-        rejected["error"]["data"]["reason"],
-        "not_owner_or_not_authorized"
-    );
-    assert_eq!(
-        rejected["error"]["data"]["owner"]["clientId"],
-        "controller-a"
-    );
 }
 
 #[cfg(feature = "hostlib")]
@@ -1326,12 +909,10 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
         "openai fallback must point at a registered catalog model (got {model})"
     );
     assert_eq!(capabilities["loadSession"], true);
+    assert!(capabilities["session"].get("inject").is_none());
     assert_eq!(
-        capabilities["session"]["inject"],
-        serde_json::json!({
-            "modes": ["queue", "steer", "interrupt_immediate"],
-            "pending": {"replace": true},
-        })
+        capabilities["session"]["pendingPrompts"],
+        serde_json::json!({})
     );
     assert_eq!(
         capabilities["session"]["remind"],
@@ -1353,6 +934,7 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
             "image": true,
             "audio": false,
             "embeddedContext": false,
+            "delivery": {"steer": {}, "queue": {}},
         })
     );
     assert_eq!(
@@ -1422,6 +1004,7 @@ fn acp_prompt_capabilities_follow_configured_model_aliases() {
             "image": true,
             "audio": true,
             "embeddedContext": true,
+            "delivery": {"steer": {}, "queue": {}},
         })
     );
 }
@@ -1475,6 +1058,7 @@ mod injection_admission;
 mod model_routing;
 mod modes;
 mod oauth_redirect;
+mod prompt_delivery;
 mod prompt_errors;
 mod reasoning_receipts;
 mod runtime_overrides;

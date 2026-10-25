@@ -15,6 +15,9 @@ export RETIRE_CONSUMER_REPOSITORY=example/consumer
 export GITHUB_REPOSITORY=example/harn GH_TOKEN=fixture
 export FIXTURE_ROOT="$fixture" HARN_RELEASE_ROOT="$fixture/workspace" PUBLISHED_TAG=v1.2.3
 export PATH="$fixture/bin:$PATH"
+source "$root/scripts/lib/full_suite_jobs.sh"
+FULL_SUITE_JOBS="$(printf '%s\n' "${RELEASE_FULL_SUITE_JOBS[@]}")"
+export FULL_SUITE_JOBS
 
 cat > "$fixture/bin/git" <<'EOF'
 #!/usr/bin/env bash
@@ -25,7 +28,13 @@ case "$*" in
   'rev-parse HEAD') printf '%s\n' "$RETIRE_SOURCE_SHA"; exit 0 ;;
   'ls-remote --refs origin refs/heads/main '* )
     printf '%040d\trefs/heads/main\n' 1
+    printf '%s\trefs/heads/release-attempt/v1.2.4/%s\n' "$RETIRE_SOURCE_SHA" "$RETIRE_SOURCE_SHA"
     [[ "${MUTATION:-}" != conflicting_attempt ]] || printf '%040d\trefs/heads/release-attempt/v1.2.4/%040d\n' 2 2
+    [[ "${MUTATION:-}" != misnamed_attempt ]] || printf '%040d\trefs/heads/release-attempt/v1.2.4/%040d\n' 2 3
+    case "${MUTATION:-}" in
+      closed_attempt|merged_closed_attempt|foreign_closed_attempt)
+        printf '%s\trefs/heads/release-attempt/v1.2.4/%s\n' "$(printf 'c%.0s' {1..40})" "$(printf 'c%.0s' {1..40})" ;;
+    esac
     exit 0 ;;
 esac
 [[ "$*" == 'ls-remote --tags origin' ]] || exit 2
@@ -68,8 +77,18 @@ if [[ "$1 $2" == 'pr create' ]]; then
 fi
 if [[ "$1 $2" == 'pr edit' ]]; then exit 0; fi
 [[ "$1" == api ]] || exit 2
+# Main CI retries a first-attempt failure once, so the persistent failure is attempt 2.
+CI_ATTEMPT=2; [[ "${MUTATION:-}" != ci_first_attempt_failure ]] || CI_ATTEMPT=1
+export CI_ATTEMPT
 for arg in "$@"; do [[ "$arg" != repos/* ]] || endpoint="$arg"; done
 case "${endpoint:?}" in
+  */pulls\?state=closed\&head=example:release/v1.2.4\&*)
+    jq -n --arg mutation "${MUTATION:-}" '
+      [[{number:1,state:"closed",merged_at:null,base:{ref:"main",repo:{full_name:"example/harn"}},
+        head:{sha:("c"*40),ref:"release/v1.2.4",repo:{full_name:"example/harn"}}}] |
+       if $mutation == "merged_closed_attempt" then .[0].merged_at="2026-10-04"
+       elif $mutation == "foreign_closed_attempt" then .[0].head.repo.full_name="foreign/harn"
+       else . end]' ;;
   */pulls/2)
     source="$RETIRE_SOURCE_SHA"; [[ "${MUTATION:-}" != wrong_pr_merge ]] || source=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     jq -n --arg source "$source" --arg head "$RETIRE_SOURCE_SHA" '
@@ -90,15 +109,22 @@ case "${endpoint:?}" in
     sha="$RETIRE_SOURCE_SHA"; [[ "${MUTATION:-}" != producer_wrong_source ]] || sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     conclusion=success
     [[ -z "${RETIRE_SOURCE_CI_RUN:-}" ]] || conclusion=failure
-    [[ "${MUTATION:-}" != producer_success ]] || conclusion=success
+    case "${MUTATION:-}" in
+      producer_success|ci_success_missing_family) conclusion=success ;;
+      producer_cancelled) conclusion=cancelled ;;
+      producer_pending) conclusion=null ;;
+    esac
     jq -n --arg sha "$sha" --arg conclusion "$conclusion" '{id:3,repository:{full_name:"example/harn"},head_repository:{full_name:"example/harn"},
-      path:".github/workflows/build-release-binaries.yml",event:"merge_group",status:"completed",conclusion:$conclusion,head_sha:$sha,run_attempt:1}' ;;
+      path:".github/workflows/build-release-binaries.yml",event:"merge_group",status:"completed",conclusion:$conclusion,head_sha:$sha,run_attempt:1} |
+      if $conclusion == "null" then .status="in_progress" | .conclusion=null else . end' ;;
   */actions/runs/11)
     jq -n --arg sha "$RETIRE_SOURCE_SHA" --arg mutation "${MUTATION:-}" '
       {id:11,repository:{full_name:"example/harn"},head_repository:{full_name:"example/harn"},
        path:".github/workflows/ci.yml",event:"push",head_branch:"main",status:"completed",
-       conclusion:"failure",head_sha:$sha,run_attempt:1} |
-      if $mutation == "ci_success" then .conclusion="success"
+       conclusion:"failure",head_sha:$sha,run_attempt:($ENV.CI_ATTEMPT|tonumber)} |
+      if $mutation == "ci_success" or $mutation == "ci_success_producer_failed" or
+        $mutation == "ci_success_missing_family" then .conclusion="success"
+      elif $mutation == "ci_cancelled" then .conclusion="cancelled"
       elif $mutation == "ci_wrong_source" then .head_sha=("b"*40)
       elif $mutation == "ci_foreign_workflow" then .path=".github/workflows/foreign.yml"
       elif $mutation == "ci_foreign_repo" then .head_repository.full_name="foreign/harn"
@@ -108,17 +134,25 @@ case "${endpoint:?}" in
   */actions/runs/3/jobs\?*|*/actions/runs/11/jobs\?*)
     id="${endpoint#*/actions/runs/}"; id="${id%%/*}"
     jq -n --argjson id "$id" --arg mutation "${MUTATION:-}" '
-      [{total_count:2,jobs:[{id:($id*100),run_id:$id,run_attempt:1,name:"Owning check",
-        status:"completed",conclusion:"failure"},{id:($id*100+1),run_id:$id,run_attempt:1,
+      [{total_count:2,jobs:[{id:($id*100),run_id:$id,run_attempt:(if $id == 11 then ($ENV.CI_ATTEMPT|tonumber) else 1 end),name:"Owning check",
+        status:"completed",conclusion:"failure"},{id:($id*100+1),run_id:$id,run_attempt:(if $id == 11 then ($ENV.CI_ATTEMPT|tonumber) else 1 end),
         name:"Derived verdict",status:"completed",conclusion:"failure"}]}] |
       if $mutation == "empty_jobs" then .[0]={total_count:0,jobs:[]}
       elif $mutation == "partial_jobs" then .[0].total_count=3
       elif $mutation == "pending_jobs" then .[0].jobs[0].status="queued" | .[0].jobs[0].conclusion=null
       elif $mutation == "zero_failures" then .[0].jobs[].conclusion="success"
       elif $mutation == "foreign_job_run" then .[0].jobs[0].run_id=99
-      elif $mutation == "replaced_job_attempt" then .[0].jobs[0].run_attempt=2
+      elif $mutation == "replaced_job_attempt" then .[0].jobs[0].run_attempt=3
       elif $mutation == "duplicate_jobs" then .[0].jobs[1].id=.[0].jobs[0].id
       elif $mutation == "aggregate_only_failure" then .[0].jobs[0].name="CI status" | .[0].jobs[1].name="Release candidate verdict"
+      elif $id == 11 and ($mutation == "ci_success" or $mutation == "ci_success_producer_failed" or
+        $mutation == "ci_success_missing_family") then
+        ($ENV.FULL_SUITE_JOBS | split("\n") | map(select(length > 0))) as $names |
+        [{total_count:($names|length),jobs:[$names | to_entries[] | {id:(1100+.key),run_id:11,run_attempt:($ENV.CI_ATTEMPT|tonumber),
+          name:.value,status:"completed",conclusion:"success"}]}] |
+        if $mutation == "ci_success_missing_family" then
+          .[0].jobs |= map(if .name == "Windows cross-compile check" then .conclusion="skipped" else . end)
+        else . end
       else . end' ;;
   */actions/runs/5|*/actions/runs/9)
     id="${endpoint##*/}"; repo=example/harn; path=promote-release.yml; conclusion=failure
@@ -222,7 +256,7 @@ grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
 : > "$GITHUB_OUTPUT"
 PARENT_EVENT=workflow_run bash "$root/scripts/plan_development_bump.sh" > "$fixture/workflow-run.log"
 grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
-for mutation in tags_unreadable known_tag_absent tag_present conflicting_attempt release_unreadable empty_releases \
+for mutation in tags_unreadable known_tag_absent tag_present conflicting_attempt misnamed_attempt merged_closed_attempt foreign_closed_attempt release_unreadable empty_releases \
   release_present live_publisher partial_publishers empty_publishers manifest_mismatch duplicate_manifest \
   source_version_mismatch producer_wrong_source live_parent wrong_job_run successful_authorizer wrong_pr_merge foreign_parent_event leg_step_mismatch unknown_leg stray_terminal_record; do
   : > "$GITHUB_OUTPUT"
@@ -241,15 +275,26 @@ producer_plan() {
     RETIRE_CONSUMER_JOB='' RETIRE_AUTHORIZATION_JOB='' RETIRE_CONSUMER_RUN='' RETIRE_FAILED_JOB='' \
     bash "$root/scripts/plan_development_bump.sh"
 }
-: > "$GITHUB_OUTPUT"
-producer_plan > "$fixture/producer-valid.log"
-grep -Fxq required=true "$GITHUB_OUTPUT"
-grep -Fxq version=1.2.5-dev "$GITHUB_OUTPUT"
-grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
-for mutation in producer_success producer_wrong_source ci_success ci_wrong_source ci_foreign_workflow \
+# A source that can never promote retires whatever its producer concluded.
+for accepted in '' producer_success producer_cancelled ci_success_missing_family closed_attempt; do
+  : > "$GITHUB_OUTPUT"
+  MUTATION="$accepted" producer_plan > "$fixture/producer-valid-$accepted.log" 2>&1 || {
+    cat "$fixture/producer-valid-$accepted.log" >&2; echo "FAIL: unpromotable source refused: ${accepted:-default}" >&2; exit 1;
+  }
+  grep -Fxq required=true "$GITHUB_OUTPUT"
+  grep -Fxq version=1.2.5-dev "$GITHUB_OUTPUT"
+  grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
+done
+grep -Fq '"reason":"source_ci_failed"' "$fixture/producer-valid-producer_success.log"
+grep -Fq '"reason":"source_ci_not_full_suite"' "$fixture/producer-valid-ci_success_missing_family.log"
+grep -Fq '"missing_full_suite_jobs":["Windows cross-compile check"]' "$fixture/producer-valid-ci_success_missing_family.log"
+# A promotable source (green full suite, with any producer outcome) and every
+# unmeasured observation refuse.
+for mutation in ci_success ci_success_producer_failed ci_cancelled ci_first_attempt_failure producer_pending \
+  producer_wrong_source ci_wrong_source ci_foreign_workflow \
   ci_foreign_repo ci_pending ci_pr_event empty_jobs partial_jobs pending_jobs zero_failures \
   foreign_job_run replaced_job_attempt duplicate_jobs aggregate_only_failure \
-  tags_unreadable known_tag_absent tag_present conflicting_attempt release_unreadable empty_releases \
+  tags_unreadable known_tag_absent tag_present conflicting_attempt misnamed_attempt merged_closed_attempt foreign_closed_attempt release_unreadable empty_releases \
   release_present live_publisher partial_publishers empty_publishers wrong_pr_merge source_version_mismatch; do
   : > "$GITHUB_OUTPUT"
   if MUTATION="$mutation" producer_plan > "$fixture/producer-$mutation.log" 2>&1; then
@@ -258,7 +303,7 @@ for mutation in producer_success producer_wrong_source ci_success ci_wrong_sourc
   [[ ! -s "$GITHUB_OUTPUT" ]] || { echo "FAIL: producer emitted authority for $mutation" >&2; exit 1; }
 done
 if RETIRE_SOURCE_CI_RUN=11 bash "$root/scripts/plan_development_bump.sh" > "$fixture/mixed.log" 2>&1; then
-  echo 'FAIL: mixed producer and consumer retirement authority accepted' >&2; exit 1
+  echo 'FAIL: mixed source-CI and consumer retirement authority accepted' >&2; exit 1
 fi
 
 # Reach the actual opener, then change authoritative publication state during
@@ -297,6 +342,6 @@ ALLOW_OPEN=1 RETIRE_SOURCE_CI_RUN=11 RETIRE_PROMOTION_RUN='' RETIRE_RESOLVER_JOB
   HARN_BIN="$fixture/bin/harn" EXPECTED_DEVELOPMENT_VERSION=1.2.5-dev RELEASE_PUBLISHED_VERSION=v1.2.3 \
   bash "$root/scripts/open_development_bump.sh" > "$fixture/producer-open.log" 2>&1
 [[ -e "$fixture/branch_published" && -s "$fixture/opened-body" ]]
-grep -Fq 'Producer 3 and main CI 11 failed at exact source' "$fixture/opened-body"
+grep -Fq 'Source aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa can never promote: main CI 11' "$fixture/opened-body"
 grep -Fxq pr_url=https://github.com/example/harn/pull/12 "$GITHUB_OUTPUT"
-echo 'Unpublished retirement: consumer and producer failures advance through the actual planner; 51 false authorities refuse; the automatic promotion trigger is accepted; actual opener rechecks publication after preparation.'
+echo 'Unpublished retirement: consumer failures and unpromotable sources advance through the actual planner; promotable sources and false authorities refuse; the automatic promotion trigger is accepted; actual opener rechecks publication after preparation.'

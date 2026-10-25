@@ -1,0 +1,13 @@
+fn main(harness: Harness) -> nil {
+  for quorum in [-1, 0, 4294967296, 9223372036854775807] {
+    const result = try {
+      harness.interaction.request_approval("guard a local test action", {quorum: quorum})
+    }
+    require is_err(result), "an unrepresentable quorum must be rejected before dispatch"
+    require contains(to_string(unwrap_err(result)), "quorum must"), "reject at the options boundary"
+  }
+  harness.testing.respond("interaction", "approval_response", {approved: true, reviewer: "alice"})
+  const record = harness.interaction.request_approval("guard a local test action", {quorum: 1})
+  require record.approved, "a valid quorum still reaches the approval provider"
+  harness.stdio.println("approval quorums reject overflow and retain valid requests")
+}

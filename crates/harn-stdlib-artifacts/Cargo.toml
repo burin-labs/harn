@@ -15,37 +15,44 @@ build = "build.rs"
 # `harn` build took 337 s -> 390 s (dev) and 625 s -> 664 s (release), with
 # about 40% more compiler CPU. Hosts enable it for the binaries they ship.
 # Without it the table is empty and every import behaves as it always has.
-embed = ["dep:harn-vm", "dep:harn-stdlib"]
+embed = ["dep:harn-vm", "dep:harn-runtime", "dep:harn-stdlib", "dep:zstd"]
 
 # Embedded bytecode is keyed by the complete builtin contract, which these
-# harn-vm families change. Select exactly the families the host's harn-vm
-# resolves to; each one reaches both harn-vm dependencies below, since
-# resolver v2 never unifies the build script's features with the host's.
+# families change. Select exactly the families the host's runtime resolves to;
+# each one reaches the build script's harn-vm and harn-runtime, since resolver
+# v2 never unifies the build script's features with the host's. Without the
+# harn-runtime half, the build script's compiler lacks the family's builtins
+# and skips every stdlib module that calls one.
 # `register` refuses a table whose contract differs from the running binary.
-full = ["harn-vm?/full"]
-postgres = ["harn-vm?/postgres"]
-sqlite = ["harn-vm?/sqlite"]
-content = ["harn-vm?/content"]
-compression = ["harn-vm?/compression"]
+full = ["harn-vm?/full", "harn-runtime?/full"]
+postgres = ["harn-vm?/postgres", "harn-runtime?/postgres"]
+sqlite = ["harn-vm?/sqlite", "harn-runtime?/sqlite"]
+content = ["harn-vm?/content", "harn-runtime?/content"]
+compression = ["harn-vm?/compression", "harn-runtime?/compression"]
 cloud-aws = ["harn-vm?/cloud-aws"]
 native-keyring = ["harn-vm?/native-keyring"]
 
 [dependencies]
-harn-vm = { path = "../harn-vm", version = "=0.10.174", default-features = false }
+harn-vm = { path = "../harn-vm", version = "=0.10.180", default-features = false }
 
 # The compiler the build script runs: the same harn-vm source the host links.
 # A compiler with other families produces different artifact keys even for
 # modules that call no feature-gated builtin.
 [build-dependencies]
-harn-vm = { path = "../harn-vm", version = "=0.10.174", default-features = false, optional = true }
+harn-vm = { path = "../harn-vm", version = "=0.10.180", default-features = false, optional = true }
+# Builtin families owned outside harn-vm change the contract too.
+harn-runtime = { path = "../harn-runtime", version = "=0.10.180", optional = true }
 # The sources the build script compiles; a stdlib edit reruns the script.
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.174", optional = true }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.180", optional = true }
+# Each artifact is embedded zstd-compressed; harn-vm decodes it on import.
+zstd = { version = "0.14", default-features = false, optional = true }
 
 [dev-dependencies]
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.174" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.180" }
 # The families come from the selected features, as for a host; `otel` is a
 # runtime-only family the build-script compiler never sees.
-harn-vm = { path = "../harn-vm", version = "=0.10.174", default-features = false, features = ["otel"] }
+harn-vm = { path = "../harn-vm", version = "=0.10.180", default-features = false, features = ["otel"] }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.180" }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "time", "net"] }
 

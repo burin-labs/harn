@@ -1,0 +1,21 @@
+fn main(harness: Harness) -> nil {
+  const spec = {
+    method: "GET",
+    url: "https://example.amazonaws.com/",
+    service: "execute-api",
+    region: "us-east-1",
+    access_key_id: "fixture-access",
+    secret_access_key: "fixture-secret",
+  }
+  const signed = aws_sigv4_headers(spec + {timestamp: 0})
+  assert_eq(signed.amz_date, "19700101T000000Z")
+  for timestamp in [to_float("1e30"), to_float("-1e30"), to_float("inf")] {
+    const result = try {
+      aws_sigv4_headers(spec + {timestamp: timestamp})
+    }
+    assert(is_err(result))
+  }
+  const negative = aws_sigv4_headers(spec + {timestamp: -0.5})
+  assert_eq(negative.amz_date, "19691231T235959Z")
+  harness.stdio.println("signing timestamp bounds ok")
+}

@@ -19,8 +19,17 @@ pub(crate) fn discover_package_cache_entries() -> Result<Vec<PackageCacheEntry>,
 pub(crate) fn discover_package_cache_entries_in(
     workspace: &PackageWorkspace,
 ) -> Result<Vec<PackageCacheEntry>, PackageError> {
-    let mut entries = discover_cache_entries_for_kind(workspace, "git")?;
-    entries.extend(discover_cache_entries_for_kind(workspace, "archive")?);
+    let Some(cache) = PackageCache::inspect(workspace)? else {
+        return Ok(Vec::new());
+    };
+    discover_package_cache_entries_with_cache(&cache)
+}
+
+fn discover_package_cache_entries_with_cache(
+    cache: &PackageCache,
+) -> Result<Vec<PackageCacheEntry>, PackageError> {
+    let mut entries = discover_cache_entries_for_kind(cache, CacheKind::Git)?;
+    entries.extend(discover_cache_entries_for_kind(cache, CacheKind::Archive)?);
     entries.sort_by(|left, right| {
         left.kind
             .cmp(right.kind)
@@ -31,10 +40,10 @@ pub(crate) fn discover_package_cache_entries_in(
 }
 
 fn discover_cache_entries_for_kind(
-    workspace: &PackageWorkspace,
-    kind: &'static str,
+    cache: &PackageCache,
+    kind: CacheKind,
 ) -> Result<Vec<PackageCacheEntry>, PackageError> {
-    let root = workspace.cache_root()?.join(kind);
+    let root = cache.root().join(kind.directory());
     let mut entries = Vec::new();
     let source_dirs = match fs::read_dir(&root) {
         Ok(source_dirs) => source_dirs,
@@ -60,20 +69,27 @@ fn discover_cache_entries_for_kind(
                     source_dir.path().display()
                 )
             })?;
-            let commit_type = commit_dir.file_type().map_err(|error| {
-                format!("failed to stat {}: {error}", commit_dir.path().display())
-            })?;
-            if !commit_type.is_dir() {
+            if !commit_dir
+                .file_type()
+                .map_err(|error| {
+                    format!("failed to stat {}: {error}", commit_dir.path().display())
+                })?
+                .is_dir()
+            {
                 continue;
             }
             let commit = commit_dir.file_name().to_string_lossy().to_string();
             if commit.starts_with("tmp-") || commit.ends_with(".full-clone") {
                 continue;
             }
-            let metadata = read_cache_metadata(&commit_dir.path())?;
+            let source = cache.entry(kind, &source_hash, &commit)?;
+            if !source.directory().is_dir() {
+                continue;
+            }
+            let metadata = read_cache_metadata(source.directory())?;
             entries.push(PackageCacheEntry {
-                path: commit_dir.path(),
-                kind,
+                path: source.directory().to_path_buf(),
+                kind: kind.directory(),
                 source_hash: source_hash.clone(),
                 commit,
                 metadata,
@@ -137,20 +153,19 @@ pub(crate) fn verify_lock_entry_cache_in(
         .content_hash
         .as_deref()
         .ok_or_else(|| format!("missing content hash for {}", entry.name))?;
-    let (cache_dir, cache_key) = if entry.source.starts_with("git+") {
+    let cache = PackageCache::open(workspace)?;
+    let (source, cache_key) = if entry.source.starts_with("git+") {
         let commit = entry
             .commit
             .as_deref()
             .ok_or_else(|| format!("missing locked commit for {}", entry.name))?;
-        (git_cache_dir_in(workspace, &entry.source, commit)?, commit)
+        (cache.git(&entry.source, commit)?, commit)
     } else if entry.source.starts_with("archive+") {
-        (
-            archive_cache_dir_in(workspace, &entry.source, expected_hash)?,
-            expected_hash,
-        )
+        (cache.archive(&entry.source, expected_hash)?, expected_hash)
     } else {
         return Ok(false);
     };
+    let cache_dir = source.directory();
     if !cache_dir.is_dir() {
         return Err(format!(
             "package cache entry for {} is missing: {}",
@@ -159,8 +174,8 @@ pub(crate) fn verify_lock_entry_cache_in(
         )
         .into());
     }
-    verify_content_hash_or_compute(&cache_dir, expected_hash)?;
-    match read_cache_metadata(&cache_dir)? {
+    verify_and_record_content_hash(cache_dir, expected_hash)?;
+    match read_cache_metadata(cache_dir)? {
         Some(metadata)
             if metadata.source == entry.source
                 && metadata.commit == cache_key
@@ -178,7 +193,7 @@ pub(crate) fn verify_lock_entry_cache_in(
             )
             .into());
         }
-        None => write_cache_metadata(&cache_dir, &entry.source, cache_key, expected_hash)?,
+        None => write_cache_metadata(cache_dir, &entry.source, cache_key, expected_hash)?,
     }
     Ok(true)
 }
@@ -217,7 +232,7 @@ pub(crate) fn verify_materialized_lock_entry(
         )
         .into());
     }
-    verify_content_hash_or_compute(&dest_dir, expected_hash)?;
+    verify_content_hash(&dest_dir, expected_hash)?;
     Ok(true)
 }
 
@@ -258,12 +273,13 @@ pub(crate) fn clean_package_cache_in(
     workspace: &PackageWorkspace,
     all: bool,
 ) -> Result<usize, PackageError> {
-    let entries = discover_package_cache_entries_in(workspace)?;
+    let cache = PackageCache::clean(workspace)?;
+    let entries = discover_package_cache_entries_with_cache(&cache)?;
     if entries.is_empty() {
         return Ok(0);
     }
     if all {
-        let root = workspace.cache_root()?;
+        let root = cache.root();
         for child in ["git", "archive", "locks"] {
             let path = root.join(child);
             if path.exists() {

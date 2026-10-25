@@ -5,6 +5,7 @@
   "description": "Tagged result of an extraction in the shared refactoring envelope that `rename_symbol` defined: `applied` carries the edit (with `dry_run` nothing was written; a failed write keeps the tag with `applied: false` and `failed_paths_with_reasons`), and every other tag is a refusal that wrote nothing. `inputs` and `outputs` are reported whenever the analysis got far enough to compute them, so a `types_required` caller knows what to type.",
   "type": "object",
   "properties": {
+    "proof": { "$ref": "https://harnlang.com/schemas/hostlib/edit-proof.json" },
     "result": {
       "type": "string",
       "enum": [

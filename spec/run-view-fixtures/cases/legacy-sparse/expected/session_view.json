@@ -35,8 +35,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:771fe95f826d97b8bfd042da39f4dec6f8750557adc5cc4237a495fa2d7425df",
-    "projection_id": "session_view:unknown:771fe95f826d"
+    "projection_hash": "sha256:8f6bbeb43c88d2cfba2e09672e7096c29e258faaf8b7d164c623bcae75982a2a",
+    "projection_id": "session_view:unknown:8f6bbeb43c88"
   },
   "runs": [
     {
@@ -83,8 +83,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:4efb6769162b89b1b503da8f1b891f531a3131f9ceedd9dabc2fc86ba23f90dc",
-        "projection_id": "run_view:run_legacy_sparse:4efb6769162b"
+        "projection_hash": "sha256:d766979f03901036e2c3be6d868b03e4f19c2cf1a9ad69c1af4c06b177f7399d",
+        "projection_id": "run_view:run_legacy_sparse:d766979f0390"
       },
       "providers": [],
       "run": {
@@ -114,6 +114,8 @@
         "summary": null
       },
       "usage": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
         "call_count": 0,
         "cost_usd": null,
         "input_tokens": 0,
@@ -142,6 +144,8 @@
     "updated_at": null
   },
   "usage": {
+    "cache_read_tokens": null,
+    "cache_write_tokens": null,
     "call_count": 0,
     "cost_usd": 0.0,
     "input_tokens": 0,

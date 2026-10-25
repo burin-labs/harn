@@ -1,5 +1,8 @@
 # Provider catalog refresh workflow
 
+For model facts owned by Models.dev, [update the pinned source](models-dev-source.md).
+This workflow audits provider observations and proposes reviewed corrections.
+
 `scripts/update_provider_catalog.harn` is the Harn-native workflow that
 periodically collects model availability, pricing, and capability
 signals from provider sources, normalizes them, and emits:
@@ -534,7 +537,9 @@ reasoning_effort_levels = ["low", "high", "max"]  # measured, not asserted
 ## Catalog source and generated artifacts
 
 Harn authors edit small TOML fragments under
-`crates/harn-vm/src/llm/catalog_sources/`. Harn generates the embedded
+`crates/harn-vm/src/llm/catalog_sources/`. Selected model facts come from
+the pinned `models-dev.json` cache through explicit `models_dev` bindings.
+Harn generates the embedded
 runtime snapshot at `crates/harn-provider-catalog/src/providers.toml` from those
 fragments. Provider capability rules use the same pattern:
 `crates/harn-vm/src/llm/capability_sources/` generates
@@ -647,11 +652,14 @@ The full `make all` gate includes `check-provider-catalog`,
 `check-provider-matrix`,
 `check-provider-support`, and the refresh workflow drift gate.
 
+Export the catalog embedded in your installed runtime with
+`harn provider catalog export --output-dir <directory>`. This snapshot ignores
+source fragments and personal provider settings. Generate checked-in catalog
+files from source fragments with `harn provider catalog generate`.
+
 For local or private models, pass a providers-style TOML overlay to
 `harn provider catalog validate --overlay <path>` or
-`harn provider catalog export --overlay <path>`. `export` is for explicit
-overlay artifacts only; checked-in catalog files are generated with
-`harn provider catalog generate`. Overlays are merged with the
+`harn provider catalog export --overlay <path>`. Overlays are merged with the
 same precedence as runtime provider config, so private providers,
 aliases, deprecation notes, quality tags, pricing, and transport
 settings can be validated before they are published.

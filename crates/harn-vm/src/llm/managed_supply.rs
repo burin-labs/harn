@@ -22,8 +22,8 @@ pub use provider_wire::{
     hosted_openai_request, HostedAudioFormat, HostedChatMessage, HostedChatRequest, HostedContent,
     HostedContentPart, HostedFunctionDefinition, HostedFunctionTool, HostedImageDetail,
     HostedImageUrl, HostedInputAudio, HostedNamedFunction, HostedNamedToolChoice,
-    HostedOpenAiRequest, HostedRole, HostedStreamOptions, HostedToolCall, HostedToolCallFunction,
-    HostedToolChoice, HostedToolChoiceMode, HostedToolKind,
+    HostedOpenAiRequest, HostedRole, HostedToolCall, HostedToolCallFunction, HostedToolChoice,
+    HostedToolChoiceMode, HostedToolKind,
 };
 
 pub const MANAGED_SUPPLY_WIRE_KEY: &str = "harn_managed_supply";

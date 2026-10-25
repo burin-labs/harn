@@ -44,7 +44,8 @@ concurrency:
   # Pull requests keep their per-PR key. `schedule` and `workflow_dispatch`
   # keep the ref key; the push term is written on the event because main is
   # this workflow's only push trigger.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}
+  # An unrelated label must not evict a proof waiting in the per-PR slot.
+  group: ${{ github.workflow }}-${{ (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'e2e' && format('unrelated-label-{0}', github.run_id)) || github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}
   # A new commit invalidates the old E2E result for an opted-in PR. Cancel
   # only on synchronize so adding the label cannot turn its own run red.
   # Nothing supersedes a main push: with the per-commit key above, each one
@@ -96,6 +97,8 @@ jobs:
           TOUCHED: ${{ steps.filter.outputs.e2e_surface }}
           TOUCHED_FILES: ${{ steps.filter.outputs.e2e_surface_files }}
           LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'e2e') }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL: ${{ github.event.label.name }}
         run: bash scripts/ci/e2e_pull_request_reason.sh
 
   # Where the main-push runs are allowed to land. Read for its `capacity`
@@ -215,6 +218,21 @@ jobs:
         uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: nextest@0.9.132
+      - name: Require the Linux namespace confinement proof
+        run: |
+          set -euo pipefail
+          target_dir="$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.target_directory')"
+          launcher="$target_dir/debug/harn"
+          echo "HARN_EXT_OWNER_DEATH_NETNS_LAUNCHER=$launcher" >> "$GITHUB_ENV"
+          # Ubuntu restricts user namespaces by executable. Grant only this
+          # checkout's CLI, keeping the host's global restriction in place.
+          restriction=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -f "$restriction" && "$(cat "$restriction")" == 1 ]]; then
+            profile="$RUNNER_TEMP/harn-netns-apparmor.profile"
+            printf 'abi <abi/4.0>,\nprofile harn-ci-netns-%s-%s "%s" flags=(unconfined) {\n  userns,\n}\n' \
+              "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$launcher" > "$profile"
+            sudo apparmor_parser -r "$profile"
+          fi
       - run: make test-e2e
         env:
           # Some self-hosted runners export this allocator control to every
@@ -226,6 +244,15 @@ jobs:
           NEXTEST_PROFILE: e2e
           NEXTEST_TEST_THREADS: ${{ steps.resource-budget.outputs.test_threads }}
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
+      - name: Remove the checkout's namespace grant
+        if: always()
+        run: |
+          set -euo pipefail
+          profile="$RUNNER_TEMP/harn-netns-apparmor.profile"
+          if [[ -f "$profile" ]]; then
+            sudo apparmor_parser -R "$profile"
+            rm "$profile"
+          fi
       # Postgres hostlib loadgen. The Make target skips before invoking Cargo
       # when HARN_TEST_POSTGRES_URL is unset, which it is until a Postgres
       # instance + dedicated runner are provisioned (tracked separately).

@@ -110,7 +110,10 @@ fn glob_matches_prefix_suffix_middle_and_exact_routes() {
 #[test]
 fn test_openrouter_inference_requires_one_slash() {
     let _guard = crate::llm::env_guard();
-    let _env = crate::test_env::test_env_guard();
+    let env = crate::test_env::test_env_guard();
+    // Pin the default: auto-selection otherwise probes the machine's
+    // credentials and local servers.
+    env.set("HARN_DEFAULT_PROVIDER", "anthropic");
 
     assert_eq!(infer_provider("org/model"), "openrouter");
     assert_eq!(infer_provider("org/team/model"), "anthropic");
@@ -147,6 +150,7 @@ fn test_user_catalog_overlay_re_homes_model_provider() {
             deprecated: false,
             deprecation_note: None,
             sunset_date: None,
+            retires_on: None,
             superseded_by: None,
             serving_tiers: Vec::new(),
             quality_tags: Vec::new(),
@@ -665,6 +669,7 @@ fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
             deprecated: false,
             deprecation_note: None,
             sunset_date: None,
+            retires_on: None,
             superseded_by: None,
             serving_tiers: Vec::new(),
             quality_tags: Vec::new(),
@@ -844,6 +849,39 @@ fn fireworks_routes_that_need_a_dedicated_deployment_are_marked_dedicated() {
         .expect("Fireworks GLM 5.3 Flash row");
     assert_eq!(control.provider, "fireworks");
     assert_ne!(control.availability, ModelAvailability::Dedicated);
+}
+
+/// Fireworks removed these routes from public serverless on 2026-09-25
+/// (announced 2026-09-12, https://docs.fireworks.ai/updates/changelog). GLM 5.3
+/// Flash is the control: it is served, so it must stay un-deprecated, and the
+/// Flash 0731 row must point at the V4.1 Flash row that is.
+#[test]
+fn fireworks_routes_removed_from_serverless_on_2026_09_25_are_deprecated() {
+    for id in [
+        "accounts/fireworks/models/glm-5p2",
+        "accounts/fireworks/models/deepseek-v4-flash-0731",
+        "accounts/fireworks/models/deepseek-v4-pro-0813",
+        "accounts/fireworks/models/kimi-k2p6",
+        "accounts/fireworks/models/kimi-k2p7-code",
+    ] {
+        let model = model_catalog_entry(id).unwrap_or_else(|| panic!("{id} must be catalogued"));
+        assert!(model.deprecated, "{id}");
+        assert_eq!(model.sunset_date.as_deref(), Some("2026-09-25"), "{id}");
+        assert!(model.deprecation_note.is_some(), "{id}");
+    }
+    let flash = model_catalog_entry("accounts/fireworks/models/deepseek-v4-flash-0731")
+        .expect("Fireworks DeepSeek V4 Flash 0731 row");
+    assert_eq!(
+        flash.superseded_by.as_deref(),
+        Some("accounts/fireworks/models/deepseek-v4p1-flash")
+    );
+    for id in [
+        "accounts/fireworks/models/glm-5p3-flash",
+        "accounts/fireworks/models/deepseek-v4p1-flash",
+    ] {
+        let control = model_catalog_entry(id).unwrap_or_else(|| panic!("{id} must be catalogued"));
+        assert!(!control.deprecated, "{id}");
+    }
 }
 
 /// Fireworks lists Nemotron 3.5 Lightning as serverless, but on 2026-10-02 every

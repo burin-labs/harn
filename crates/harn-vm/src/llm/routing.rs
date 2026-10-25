@@ -218,7 +218,7 @@ fn provider_route_available(provider: &str) -> bool {
 
 /// What to do when a budget cap is exceeded while the chain is running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BudgetExceedAction {
+pub enum BudgetExceedAction {
     /// Throw the standard budget-exceeded error and stop the chain.
     Abort,
     /// Skip this link and continue to the next one in the chain.
@@ -249,7 +249,7 @@ impl BudgetExceedAction {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ChainLink {
+pub struct ChainLink {
     pub provider: String,
     pub model: String,
     /// Optional per-link override that wins over the policy-level timeout.
@@ -281,7 +281,7 @@ impl ChainLink {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct FailoverRules {
+pub struct FailoverRules {
     pub on_status: Vec<u16>,
     pub on_timeout_ms: Option<u64>,
     pub on_error_kinds: Vec<String>,
@@ -293,13 +293,13 @@ pub(crate) struct FailoverRules {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct LatencyRules {
+pub struct LatencyRules {
     pub target_p95_ms: Option<u64>,
     pub race_after_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct BudgetRules {
+pub struct BudgetRules {
     pub per_call_usd: Option<f64>,
     pub session_usd: Option<f64>,
     pub on_exceed: Option<BudgetExceedAction>,
@@ -327,12 +327,12 @@ impl BudgetRules {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct ObserveRules {
+pub struct ObserveRules {
     pub emit_event: Option<String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct RoutingPolicyConfig {
+pub struct RoutingPolicyConfig {
     pub chain: Vec<ChainLink>,
     pub failover: FailoverRules,
     pub latency: LatencyRules,

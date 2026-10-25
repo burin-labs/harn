@@ -63,3 +63,18 @@ fi
 
 retry_toolchain_command rustc -Vv
 retry_toolchain_command cargo -V
+
+# Every later step in the job compiles Harn's crates with rustc's parallel
+# front end through the workspace wrapper (scripts/lib/rustc_frontend.sh says
+# why). The library keeps Windows jobs serial.
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
+# shellcheck source=scripts/lib/rustc_frontend.sh
+source "${repo_root}/scripts/lib/rustc_frontend.sh"
+frontend_flags="$(harn_rustc_frontend_flags)"
+if [[ -n "$frontend_flags" ]]; then
+  wrapper="$(harn_rustc_frontend_install_wrapper "${repo_root}/scripts" \
+    "${RUNNER_TEMP:?the wrapper copy lives in the runner temp directory}/harn-rustc-frontend")"
+  printf 'RUSTC_WORKSPACE_WRAPPER=%s\n' "${wrapper}" \
+    >> "${GITHUB_ENV:?the workspace wrapper reaches later steps only through GITHUB_ENV}"
+  echo "rustc front end: ${frontend_flags} for workspace crates"
+fi

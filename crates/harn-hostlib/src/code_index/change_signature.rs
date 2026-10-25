@@ -17,15 +17,18 @@
 //! `ambiguous_symbol` (candidates in `warnings`) | `conflict` |
 //! `unsupported_language` | `syntax_error` | `error`, plus this operation's
 //! refusals `parameter_in_use` | `value_reference` | `unsupported_call_site` |
-//! `overrides_present` and its `call_sites_updated`, `sites`, and parameter
+//! `overrides_present` | `fixed_signature` and its `call_sites_updated`, `sites`, and parameter
 //! lists. A request that does not fit the declaration raises an invalid
 //! parameter error. Every refusal leaves every file byte-identical.
 //!
 //! # Algorithm
 //!
-//! 1. Resolve the seed through the symbol graph and refuse when another
-//!    declaration shares the name: a method's namesakes are overrides, and a
-//!    free function's make the name-based call sites ambiguous.
+//! 1. Resolve the seed through the symbol graph. A free function whose name
+//!    another declaration shares refuses: its name-based call sites are
+//!    ambiguous. A method that shares its name, or that a trait or interface
+//!    binds, changes with its whole override family
+//!    ([`super::override_family`]), which refuses when any member cannot be
+//!    enumerated soundly.
 //! 2. Read the declaration's parameters and plan the new list.
 //! 3. Refuse when the body still uses a removed parameter. A renamed
 //!    parameter's body uses are renamed with it.
@@ -38,13 +41,10 @@
 //! 6. Splice every file in memory, re-parse it, and write only after every
 //!    file passed.
 
+use harn_vm::VmValue;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::path::Path;
-#[cfg(test)]
-use std::sync::Arc;
-
-use harn_vm::VmValue;
 use tree_sitter::Node;
 
 use crate::ast::{api as ast_api, Language, TEXT_PATCH_FALLBACK};
@@ -54,11 +54,12 @@ use crate::tools::args::{
 };
 
 use super::builtins::SharedIndex;
+use super::override_family;
 use super::refactor_core::{
     candidates_value, competing_declarations, edit_envelope, failed_paths_value, file_plan_value,
     files_in_scope, first_syntax_error, is_identifier_token, parse_kind, plan_file, read_source,
-    reference_sites, resolve_seed, write_plans, EditEnvelope, EditSpan, EditSymbol, FilePlan,
-    IdentifierSpan, ReferenceKind, Scope, SeedCandidate, SeedLookup,
+    reference_sites, resolve_seed_selected, write_plans, EditEnvelope, EditSpan, EditSymbol,
+    FilePlan, IdentifierSpan, ReferenceKind, Scope, SeedCandidate, SeedLookup,
 };
 use super::signature_syntax::{
     body_uses, find_declaration, read_call_arguments, read_declaration, read_macro_call,
@@ -84,9 +85,11 @@ struct Request {
     name: String,
     path: String,
     line: Option<u32>,
+    col: Option<u32>,
     kind: Option<NodeKind>,
     params: Vec<ParamSpec>,
     dry_run: bool,
+    proof: bool,
     session_id: Option<String>,
 }
 
@@ -162,9 +165,11 @@ fn parse_request(args: &[VmValue]) -> Result<Request, HostlibError> {
         name: require_string(BUILTIN, symbol, "name")?,
         path: require_string(BUILTIN, symbol, "path")?,
         line,
+        col: super::builtin_args::optional_positive_u32(BUILTIN, symbol, "col")?,
         kind,
         params,
         dry_run: optional_bool(BUILTIN, dict, "dry_run", false)?,
+        proof: optional_bool(BUILTIN, dict, "proof", false)?,
         session_id: optional_string(BUILTIN, dict, "session_id")?,
     })
 }
@@ -323,11 +328,12 @@ fn plan(
     let session = request.session_id.as_deref();
     let normalized = super::builtins::normalize_relative_path_for(state, &request.path);
     let kind = request.kind.or(Some(NodeKind::Function));
-    let seed = match resolve_seed(
+    let seed = match resolve_seed_selected(
         &state.symbols,
         &normalized,
         &request.name,
         request.line,
+        request.col,
         kind,
     ) {
         SeedLookup::One(id) => id,
@@ -345,7 +351,8 @@ fn plan(
                 "ambiguous_symbol",
                 "several functions match; pass `symbol_ref.line` to pick one",
             );
-            refusal.candidates = candidates;
+            refusal.candidates =
+                super::refactor_core::candidate_locations(&state.symbols, &candidates);
             return Ok(Err(refusal));
         }
     };
@@ -360,6 +367,8 @@ fn plan(
             ),
         )));
     }
+    // The selector may be qualified (`Store.load`); syntax matches the bare name.
+    let name = seed_node.name.clone();
     let seed_path = seed_node.path.to_string();
     let seed_line = seed_node.line;
     let Some(language) = Language::detect(Path::new(&seed_path), None) else {
@@ -383,7 +392,7 @@ fn plan(
         seed_tree.root_node(),
         seed_source.as_bytes(),
         family,
-        &request.name,
+        &name,
         seed_line,
     ) else {
         return Ok(Err(Refusal::new(
@@ -418,9 +427,44 @@ fn plan(
         .map(|p| (p.name.clone(), p.text.clone()))
         .collect();
 
-    let in_scope = files_in_scope(state, Scope::Workspace, &request.name, &seed_path, session);
-    let competing = competing_declarations(&state.symbols, seed, &request.name, &in_scope);
-    if !competing.is_empty() {
+    let in_scope = files_in_scope(state, Scope::Workspace, &name, &seed_path, session);
+    let competing = competing_declarations(&state.symbols, seed, &name, &in_scope);
+    // A method changes together with its whole override family: the
+    // declarations that share its name, and the types inheriting it.
+    let override_family = if decl.is_method {
+        match override_family::enumerate(
+            BUILTIN,
+            state,
+            family,
+            &name,
+            (&seed_path, seed_line),
+            decl.contract.is_some(),
+            &in_scope,
+            &competing,
+            session,
+        )? {
+            Ok(found) => Some(found),
+            Err(refusal) => {
+                let sites = refusal
+                    .sites
+                    .into_iter()
+                    .map(|blocker| Site {
+                        path: blocker.path,
+                        line: blocker.line,
+                        kind: blocker.kind,
+                        reason: blocker.reason,
+                        text: String::new(),
+                    })
+                    .collect();
+                return Ok(Err(
+                    Refusal::new(refusal.tag, refusal.details).with_sites(sites)
+                ));
+            }
+        }
+    } else {
+        None
+    };
+    if override_family.is_none() && !competing.is_empty() {
         let sites = competing
             .iter()
             .map(|(path, line, kind)| Site {
@@ -431,26 +475,16 @@ fn plan(
                 text: String::new(),
             })
             .collect();
-        let refusal = if decl.is_method {
-            Refusal::new(
-                "overrides_present",
-                format!(
-                    "`{}` is a method and other declarations share its name; overrides and implementations would have to change together",
-                    request.name
-                ),
-            )
-        } else {
-            Refusal::new(
-                "ambiguous_symbol",
-                format!(
-                    "other declarations are named `{}`; call sites are matched by name, so they cannot be told apart",
-                    request.name
-                ),
-            )
-        };
-        return Ok(Err(refusal.with_sites(sites)));
+        return Ok(Err(Refusal::new(
+            "ambiguous_symbol",
+            format!(
+                "other declarations are named `{}`; call sites are matched by name, so they cannot be told apart",
+                request.name
+            ),
+        )
+        .with_sites(sites)));
     }
-    if let Some(reason) = &decl.contract {
+    if let (None, Some(reason)) = (&override_family, &decl.contract) {
         return Ok(Err(Refusal::new(
             "overrides_present",
             format!(
@@ -469,6 +503,23 @@ fn plan(
                 .unwrap_or("")
                 .trim()
                 .to_string(),
+        }])));
+    }
+
+    if let Some(reason) = &decl.fixed {
+        return Ok(Err(Refusal::new(
+            "fixed_signature",
+            format!(
+                "`{}` {reason}, which fixes its parameter list",
+                request.name
+            ),
+        )
+        .with_sites(vec![Site {
+            path: seed_path,
+            line: seed_line as usize,
+            kind: "declaration",
+            reason: reason.clone(),
+            text: String::new(),
         }])));
     }
 
@@ -491,18 +542,39 @@ fn plan(
         return Ok(Err(refusal));
     }
     let parameters_after = header_items(&decl, &new_params);
-    edits.entry(seed_path).or_default().push(PendingEdit {
-        range: decl.params_range.clone(),
-        start: decl.params_start,
-        end: decl.params_end,
-        content: EditContent::Literal(decl.layout.render(&parameters_after)),
-    });
+    edits
+        .entry(seed_path.clone())
+        .or_default()
+        .push(PendingEdit {
+            range: decl.params_range.clone(),
+            start: decl.params_start,
+            end: decl.params_end,
+            content: EditContent::Literal(decl.layout.render(&parameters_after)),
+        });
+
+    let mut owners: Vec<String> = decl.owner.iter().cloned().collect();
+    if let Some(found) = &override_family {
+        owners.extend(found.owners.iter().cloned());
+        for (path, line) in &found.members {
+            if let Err(refusal) = members::plan_member(
+                state,
+                session,
+                &name,
+                (&decl, &seed_path),
+                &new_params,
+                (path, *line),
+                &mut edits,
+            )? {
+                return Ok(Err(refusal));
+            }
+        }
+    }
 
     let call_sites = match plan_call_sites(
         state,
         request,
         seed,
-        &decl,
+        (&decl, owners.as_slice()),
         &new_params,
         &mut edits,
         session,
@@ -626,9 +698,15 @@ fn plan_params(decl: &Declaration, specs: &[ParamSpec]) -> Result<Vec<NewParam>,
             current_names(decl)
         ));
     }
+    check_default_order(decl, &out)?;
+    Ok(out)
+}
+
+/// Python and TypeScript reject a required parameter after a defaulted one.
+fn check_default_order(decl: &Declaration, out: &[NewParam]) -> Result<(), String> {
     let mut seen_default = false;
     let mut seen_variadic = false;
-    for param in &out {
+    for param in out {
         let base = param.source.map(|i| &decl.params[i]);
         if param.shape != ParamShape::Plain {
             seen_variadic = true;
@@ -649,7 +727,7 @@ fn plan_params(decl: &Declaration, specs: &[ParamSpec]) -> Result<Vec<NewParam>,
         }
         seen_default |= has_default;
     }
-    Ok(out)
+    Ok(())
 }
 
 fn current_names(decl: &Declaration) -> String {
@@ -675,6 +753,7 @@ fn header_items(decl: &Declaration, params: &[NewParam]) -> Vec<String> {
             &param.spec.name,
             param.spec.type_text.as_deref(),
             param.spec.default_text.as_deref(),
+            decl.body.is_none(),
         ));
     }
     items
@@ -776,7 +855,7 @@ fn plan_call_sites(
     state: &IndexState,
     request: &Request,
     seed: super::symbol_graph::NodeId,
-    decl: &Declaration,
+    (decl, owners): (&Declaration, &[String]),
     params: &[NewParam],
     edits: &mut BTreeMap<String, Vec<PendingEdit>>,
     session: Option<&str>,
@@ -883,7 +962,7 @@ fn plan_call_sites(
                     continue;
                 }
                 (ReferenceKind::QualifiedCall | ReferenceKind::MethodCall, true) => {
-                    receiver_is_explicit(decl, kind, site.qualifier.as_deref())
+                    receiver_is_explicit(decl, owners, kind, site.qualifier.as_deref())
                 }
                 _ => false,
             };
@@ -947,8 +1026,14 @@ fn plan_call_sites(
 }
 
 /// Whether a method call passes the instance as its first argument:
-/// Rust `Type::m(value, ..)`, Python `Class.m(value, ..)`.
-fn receiver_is_explicit(decl: &Declaration, kind: ReferenceKind, qualifier: Option<&str>) -> bool {
+/// Rust `Type::m(value, ..)`, Python `Class.m(value, ..)` where `Class` is
+/// one of `owners`, the classes declaring the method.
+fn receiver_is_explicit(
+    decl: &Declaration,
+    owners: &[String],
+    kind: ReferenceKind,
+    qualifier: Option<&str>,
+) -> bool {
     if decl.receiver != Receiver::Instance {
         return false;
     }
@@ -957,10 +1042,11 @@ fn receiver_is_explicit(decl: &Declaration, kind: ReferenceKind, qualifier: Opti
         // The core reads `m.f()` as qualified when an import binds the
         // leftmost name of `m`, which `Formatter().f()` also satisfies, so
         // only the class name itself marks an explicit receiver.
-        Family::Python => match (qualifier, decl.owner.as_deref()) {
-            (Some(qualifier), Some(owner)) => qualifier.rsplit('.').next() == Some(owner),
-            _ => false,
-        },
+        Family::Python => qualifier.is_some_and(|qualifier| {
+            owners
+                .iter()
+                .any(|owner| qualifier.rsplit('.').next() == Some(owner.as_str()))
+        }),
         Family::TypeScript => false,
     }
 }
@@ -1263,6 +1349,7 @@ fn finish(
             &state.root,
             &planned.plans,
             request.session_id.as_deref(),
+            &crate::host_call::workspace_writes(),
         )?
     };
     let details = if request.dry_run {
@@ -1279,6 +1366,8 @@ fn finish(
         "applied",
         EditEnvelope {
             applied: !request.dry_run && failed.is_empty(),
+            proof: (request.proof && failed.is_empty())
+                .then(|| super::refactor_core::edit_proof(&planned.plans, &failed).value()),
             dry_run: request.dry_run,
             touched_files: planned.plans.iter().map(file_plan_value).collect(),
             failed_paths: failed_paths_value(&failed),
@@ -1294,6 +1383,9 @@ fn finish(
         },
     ))
 }
+
+#[path = "change_signature_members.rs"]
+mod members;
 
 #[cfg(test)]
 #[path = "change_signature_tests.rs"]

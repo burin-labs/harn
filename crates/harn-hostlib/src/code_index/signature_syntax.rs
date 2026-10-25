@@ -31,7 +31,7 @@ impl Family {
         }
     }
 
-    fn declaration_kinds(self) -> &'static [&'static str] {
+    pub(super) fn declaration_kinds(self) -> &'static [&'static str] {
         match self {
             Self::Rust => &["function_item", "function_signature_item"],
             Self::TypeScript => &[
@@ -149,6 +149,9 @@ pub(super) struct Declaration {
     /// Why other signatures must change with this one: it declares or
     /// implements a trait or interface method, or is an overload.
     pub contract: Option<String>,
+    /// Why the parameter list cannot change at all: a test, bench or entry
+    /// attribute (or `fn main`) fixes it, or a declared function type does.
+    pub fixed: Option<String>,
 }
 
 /// `source[range]`, or empty when the range is not on character boundaries.
@@ -156,11 +159,11 @@ pub(super) fn slice(source: &str, range: Range<usize>) -> &str {
     source.get(range).unwrap_or("")
 }
 
-fn text<'a>(node: Node<'_>, bytes: &'a [u8]) -> &'a str {
+pub(super) fn text<'a>(node: Node<'_>, bytes: &'a [u8]) -> &'a str {
     std::str::from_utf8(&bytes[node.start_byte()..node.end_byte()]).unwrap_or("")
 }
 
-fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
+pub(super) fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
     let mut cursor = node.walk();
     node.named_children(&mut cursor).collect()
 }
@@ -328,7 +331,110 @@ pub(super) fn read_declaration(
         is_method,
         owner: is_method.then(|| owner_name(node, bytes)).flatten(),
         contract: contract(node, bytes, family),
+        fixed: fixed_signature(node, bytes, family),
     })
+}
+
+/// Attribute names whose function must keep its exact parameter list: a
+/// harness or runtime calls it, or its ABI symbol is exported.
+const SIGNATURE_FIXING_ATTRIBUTES: &[&str] = &[
+    "test",
+    "bench",
+    "main",
+    "no_mangle",
+    "export_name",
+    "test_case",
+    "rstest",
+    "wasm_bindgen",
+];
+
+fn fixed_signature(node: Node<'_>, bytes: &[u8], family: Family) -> Option<String> {
+    match family {
+        Family::Rust => {
+            let mut sibling = node.prev_sibling();
+            while let Some(current) = sibling {
+                match current.kind() {
+                    "attribute_item" => {
+                        if let Some(attribute) = signature_fixing_attribute(current, bytes) {
+                            return Some(format!("carries `{attribute}`"));
+                        }
+                    }
+                    "line_comment" | "block_comment" => {}
+                    _ => break,
+                }
+                sibling = current.prev_sibling();
+            }
+            let top_level = node.parent().is_some_and(|p| p.kind() == "source_file");
+            let name = node.child_by_field_name("name").map(|n| text(n, bytes));
+            (top_level && name == Some("main")).then(|| "is the program entry point".into())
+        }
+        Family::TypeScript => {
+            let annotation = match node.kind() {
+                "variable_declarator" => node.child_by_field_name("type"),
+                _ => None,
+            }?;
+            Some(format!(
+                "is bound to the declared type `{}`",
+                text(annotation, bytes).trim_start_matches(':').trim()
+            ))
+        }
+        Family::Python => None,
+    }
+}
+
+/// The attribute item's text when the attribute in it fixes the signature.
+fn signature_fixing_attribute(item: Node<'_>, bytes: &[u8]) -> Option<String> {
+    let attribute = named_children(item)
+        .into_iter()
+        .find(|c| c.kind() == "attribute")?;
+    let mut cursor = attribute.walk();
+    let tokens: Vec<Node<'_>> = attribute.children(&mut cursor).collect();
+    fixes_signature(&tokens, bytes).then(|| text(item, bytes).to_string())
+}
+
+/// Whether one attribute, as its head token and arguments, fixes the
+/// signature. `cfg` and `doc` only mention names. `cfg_attr` applies the
+/// attributes after its condition, so only those are read. Any other
+/// attribute fixes it when an identifier in it names a signature-fixing
+/// attribute, which covers wrapped forms such as `unsafe(no_mangle)`.
+fn fixes_signature(tokens: &[Node<'_>], bytes: &[u8]) -> bool {
+    let Some(head) = tokens.first() else {
+        return false;
+    };
+    match text(*head, bytes) {
+        "cfg" | "doc" => false,
+        "cfg_attr" => {
+            let Some(arguments) = tokens.iter().find(|t| t.kind() == "token_tree") else {
+                return false;
+            };
+            let mut cursor = arguments.walk();
+            let inner: Vec<Node<'_>> = arguments
+                .children(&mut cursor)
+                .filter(|t| !matches!(t.kind(), "(" | ")"))
+                .collect();
+            inner
+                .split(|t| t.kind() == ",")
+                .skip(1)
+                .any(|applied| fixes_signature(applied, bytes))
+        }
+        _ => tokens
+            .iter()
+            .any(|token| names_fixing_attribute(*token, bytes)),
+    }
+}
+
+fn names_fixing_attribute(root: Node<'_>, bytes: &[u8]) -> bool {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.kind().contains("string") {
+            continue;
+        }
+        if node.kind() == "identifier" && SIGNATURE_FIXING_ATTRIBUTES.contains(&text(node, bytes)) {
+            return true;
+        }
+        stack.extend(named_children(node));
+    }
+    false
 }
 
 fn enclosing<'t>(node: Node<'t>, kinds: &[&str]) -> Option<Node<'t>> {
@@ -513,19 +619,24 @@ fn bare_name(pattern: Node<'_>) -> Option<Node<'_>> {
 }
 
 /// Render one parameter. `rename` replaces the bare name; `type_text` and
-/// `default_text` replace (or add) those parts.
+/// `default_text` replace (or add) those parts. A TypeScript signature with
+/// no body cannot carry an initializer, so there a default renders as `?`.
 pub(super) fn render_param(
     family: Family,
     base: Option<&Param>,
     name: &str,
     type_text: Option<&str>,
     default_text: Option<&str>,
+    signature_only: bool,
 ) -> String {
-    let unchanged = base.is_some_and(|p| {
-        p.name == name
-            && type_text.is_none_or(|t| p.type_text.as_deref() == Some(t))
-            && default_text.is_none_or(|d| p.default_text.as_deref() == Some(d))
-    });
+    let optional_marker = signature_only && family == Family::TypeScript && default_text.is_some();
+    let default_text = default_text.filter(|_| !optional_marker);
+    let unchanged = !optional_marker
+        && base.is_some_and(|p| {
+            p.name == name
+                && type_text.is_none_or(|t| p.type_text.as_deref() == Some(t))
+                && default_text.is_none_or(|d| p.default_text.as_deref() == Some(d))
+        });
     if let (true, Some(param)) = (unchanged, base) {
         return param.text.clone();
     }
@@ -546,7 +657,7 @@ pub(super) fn render_param(
     let default = default_text
         .map(str::to_string)
         .or_else(|| base.and_then(|p| p.default_text.clone()));
-    let optional = base.is_some_and(|p| p.optional) && default.is_none();
+    let optional = (base.is_some_and(|p| p.optional) || optional_marker) && default.is_none();
     let mut out = pattern;
     if optional {
         out.push('?');
@@ -670,6 +781,10 @@ pub(super) fn read_macro_call(
     let list = node.next_sibling()?;
     if list.kind() != "token_tree" || !slice(source, list.byte_range()).starts_with('(') {
         return None;
+    }
+    // `fn name(..)` inside a macro body declares a function; it is no call.
+    if node.prev_sibling().map(|p| slice(source, p.byte_range())) == Some("fn") {
+        return Some(Err("a macro declares a function by this name".into()));
     }
     let shape = match node.prev_sibling().map(|p| p.kind()) {
         Some(".") => MacroCallShape::Method,

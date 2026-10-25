@@ -1,6 +1,7 @@
 use super::extract::extract_llm_options;
 use super::routing_test_support::{extract_with_options, ScopedEnvVar};
 use super::*;
+use crate::value::VmDictExt as _;
 
 fn install_effort_level_gate() {
     crate::llm::capabilities::set_user_overrides_toml(
@@ -55,7 +56,7 @@ fn zai_glm53_flash_rejects_explicit_disable_but_allows_an_unspecified_probe() {
         crate::llm::api::ThinkingConfig::Disabled
     );
 
-    options.insert(crate::value::intern_key("thinking"), VmValue::Bool(false));
+    options.put_bool("thinking", false);
     let error = extract_with_options(options).expect_err("explicit disable is unsupported");
     assert!(error
         .to_string()
@@ -223,7 +224,7 @@ thinking_modes = ["toggle"]
         }
     );
 
-    let budgeted = VmValue::dict([(crate::value::intern_key("budget_tokens"), VmValue::Int(128))]);
+    let budgeted = VmValue::dict([("budget_tokens", VmValue::Int(128))]);
     let err = extract(budgeted).expect_err("toggle does not accept a numeric thinking budget");
     assert!(
         err.to_string()

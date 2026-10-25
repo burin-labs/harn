@@ -57,8 +57,11 @@ A `GovernorPolicy` is a data row. It names a monotone consumption `signal`
 (`iterations`, `tokens`, or `cost`), a `budget` ceiling in that signal's units,
 and the consumption **fractions** at which the governor starts caring
 (`checkpoint`), warns while still making progress (`over_estimate`), and
-hard-stops regardless of progress (`hard`). Any successful tool call counts as
-progress unless `progress_tools` restricts it.
+hard-stops regardless of progress (`hard`). Progress is the loop's own
+definition, read from the post-turn payload's `progressing` field: the turn
+acted or spoke, it was not an exact repeat of an earlier read-only observation,
+and it was not a recurring failing verification. `progress_tools` narrows this
+further: a progressing turn counts only when one of those tools succeeded.
 
 ```harn
 import { governor_decision } from "std/agent/governors"

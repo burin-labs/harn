@@ -5,6 +5,7 @@
   "description": "Explicit before/after source images to summarize above a text diff. Null or omission means that side of the file did not exist.",
   "type": "object",
   "properties": {
+    "proof": { "type": "boolean", "default": false, "description": "Include bounded changed-line regions and syntax evidence over the supplied images. Does not claim files were written or run a project check." },
     "files": {
       "type": "array",
       "maxItems": 100,

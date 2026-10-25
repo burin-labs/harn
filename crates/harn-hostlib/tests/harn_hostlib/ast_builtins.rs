@@ -9,6 +9,7 @@
 use std::path::PathBuf;
 
 use harn_vm::VmValue;
+use rstest::rstest;
 
 use super::support::*;
 
@@ -75,7 +76,7 @@ fn parse_file_rejects_unknown_language() {
 fn symbols_filters_by_kind() {
     let registry = ast_registry();
     let path = fixture_path("rust/source.rs");
-    let kinds = VmValue::list(vec![VmValue::string("function")]);
+    let kinds = VmValue::strings(["function"]);
     let payload = dict(&[
         ("path", VmValue::string(path.to_string_lossy().as_ref())),
         ("kinds", kinds),
@@ -86,6 +87,56 @@ fn symbols_filters_by_kind() {
     for sym in symbols.iter() {
         assert_eq!(as_string(&dict_field(sym, "kind")), "function");
     }
+}
+
+/// Declarations in a function body, a callback, or an inline module carry a
+/// container, so a consumer never mistakes them for module-level items.
+#[rstest]
+#[case(
+    "ts",
+    "export function top() {}\ndescribe('x', () => {\n  function local() {}\n});\n",
+    "<anonymous>"
+)]
+#[case("ts", "export const top = () => {\n  function local() {}\n};\n", "top")]
+#[case(
+    "rs",
+    "pub fn top() {}\n#[cfg(test)]\nmod tests {\n    fn local() {}\n}\n",
+    "tests"
+)]
+#[case("rs", "pub fn top() {\n    fn local() {}\n}\n", "top")]
+fn nested_declarations_carry_their_container(
+    #[case] ext: &str,
+    #[case] source: &str,
+    #[case] container: &str,
+) {
+    use std::io::Write;
+    let mut file = tempfile::Builder::new()
+        .suffix(&format!(".{ext}"))
+        .tempfile()
+        .expect("temp file");
+    file.write_all(source.as_bytes()).expect("write source");
+    let registry = ast_registry();
+    let payload = dict(&[(
+        "path",
+        VmValue::string(file.path().to_string_lossy().as_ref()),
+    )]);
+    let result = call(&registry, "hostlib_ast_symbols", payload);
+    let symbols = extract_list(&dict_field(&result, "symbols"));
+    let find = |name: &str| {
+        symbols
+            .iter()
+            .find(|sym| as_string(&dict_field(sym, "name")) == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("no `{name}` in {symbols:?}"))
+    };
+    assert!(matches!(
+        dict_field(&find("top"), "container"),
+        VmValue::Nil
+    ));
+    assert_eq!(
+        as_string(&dict_field(&find("local"), "container")),
+        container
+    );
 }
 
 #[test]
@@ -245,6 +296,264 @@ fn symbol_replace_swaps_in_caller_text() {
     let result = call(&registry, "hostlib_ast_symbol_replace", payload);
     assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
     assert!(as_string(&dict_field(&result, "source")).contains("42"));
+}
+
+#[test]
+fn symbol_replace_preserves_neighbor_preamble_on_shared_line() {
+    let registry = ast_registry();
+    for (language, source, replacement, expected) in [
+        (
+            "ts",
+            "// keep with before\nconst before = 1; export function value() { return 1; } function after() {}",
+            "export function value() { return 42; }",
+            "// keep with before\nconst before = 1; export function value() { return 42; } function after() {}",
+        ),
+        (
+            "rust",
+            "// keep with before\r\nconst BEFORE: i32 = 1; pub fn value() -> i32 { 1 } fn after() {}\r\n",
+            "pub fn value() -> i32 { 42 }",
+            "// keep with before\r\nconst BEFORE: i32 = 1; pub fn value() -> i32 { 42 } fn after() {}\r\n",
+        ),
+    ] {
+        let result = call(
+            &registry,
+            "hostlib_ast_symbol_replace",
+            dict(&[
+                ("source", vm_string(source)),
+                ("language", vm_string(language)),
+                ("symbol_name", vm_string("value")),
+                ("new_text", vm_string(replacement)),
+            ]),
+        );
+        assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
+        assert_eq!(as_string(&dict_field(&result, "source")), expected);
+    }
+}
+
+#[test]
+fn symbol_replace_preserves_declaration_layout_and_surrounding_bytes() {
+    let registry = ast_registry();
+    let source = concat!(
+        "public record Value(String value) {\r\n",
+        "\tprivate static final int LIMIT = 1; // keep this comment\r\n",
+        "\r\n\r\n\r\n",
+        "\tint keep() { return 2; }\r\n",
+        "}\r\n",
+    );
+    let result = call(
+        &registry,
+        "hostlib_ast_symbol_replace",
+        dict(&[
+            ("source", vm_string(source)),
+            ("language", vm_string("java")),
+            ("symbol_name", vm_string("LIMIT")),
+            ("new_text", vm_string("private static final int LIMIT = 3;")),
+        ]),
+    );
+    assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
+    assert_eq!(
+        as_string(&dict_field(&result, "source")),
+        source.replace("LIMIT = 1", "LIMIT = 3"),
+    );
+}
+
+#[rstest]
+#[case::function(
+    "export function value() { return 1; }",
+    "export function value() { return 2; }"
+)]
+#[case::default_function(
+    "export default function value() { return 1; }",
+    "export default function value() { return 2; }"
+)]
+#[case::async_function(
+    "export async function value() { return 1; }",
+    "export async function value() { return 2; }"
+)]
+#[case::class("export class value { item = 1; }", "export class value { item = 2; }")]
+#[case::arrow("export const value = () => 1;", "export const value = () => 2;")]
+#[case::variable("export const value = 1;", "export const value = 2;")]
+#[case::local_function("function value() { return 1; }", "function value() { return 2; }")]
+fn symbol_replace_owns_the_export_wrapper_and_keeps_neighbors(
+    #[values("typescript", "tsx", "javascript", "jsx")] language: &str,
+    #[case] declaration: &str,
+    #[case] replacement: &str,
+) {
+    let registry = ast_registry();
+    let source = format!("const before = 0; {declaration} const after = 7;\r\n");
+    let result = call(
+        &registry,
+        "hostlib_ast_symbol_replace",
+        dict(&[
+            ("source", vm_string(&source)),
+            ("language", vm_string(language)),
+            ("symbol_name", vm_string("value")),
+            ("new_text", vm_string(replacement)),
+        ]),
+    );
+    assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
+    assert_eq!(
+        as_string(&dict_field(&result, "source")),
+        source.replacen(declaration, replacement, 1),
+    );
+}
+
+/// A caller replaces a whole declaration, so a replacement that restates the
+/// declaration's modifiers, decorators, attributes or doc comments must not
+/// leave a second copy of them in the file.
+#[test]
+fn symbol_replace_never_duplicates_restated_modifiers_or_wrappers() {
+    let registry = ast_registry();
+    // (language, symbol, source, new_text, expected source)
+    let cases: &[(&str, &str, &str, &str, &str)] = &[
+        (
+            "typescript",
+            "loadConfig",
+            "export function loadConfig(): number {\n  return 1\n}\n\nexport const keep = 2\n",
+            "export function loadConfig(): number {\n  return 42\n}",
+            "export function loadConfig(): number {\n  return 42\n}\n\nexport const keep = 2\n",
+        ),
+        (
+            "typescript",
+            "loadConfig",
+            "export default function loadConfig(): number {\n  return 1\n}\nconst keep = 2\n",
+            "export default function loadConfig(): number {\n  return 42\n}",
+            "export default function loadConfig(): number {\n  return 42\n}\nconst keep = 2\n",
+        ),
+        (
+            "typescript",
+            "Widget",
+            "@Component({})\nexport class Widget {\n  size = 1\n}\nconst keep = 2\n",
+            "@Component({})\nexport class Widget {\n  size = 2\n}",
+            "@Component({})\nexport class Widget {\n  size = 2\n}\nconst keep = 2\n",
+        ),
+        (
+            "javascript",
+            "loadConfig",
+            "export function loadConfig() {\n  return 1\n}\nconst keep = 2\n",
+            "export function loadConfig() {\n  return 42\n}",
+            "export function loadConfig() {\n  return 42\n}\nconst keep = 2\n",
+        ),
+        (
+            "rust",
+            "load_config",
+            "#[inline]\npub fn load_config() -> i32 {\n    1\n}\n\nfn keep() {}\n",
+            "#[inline]\npub fn load_config() -> i32 {\n    42\n}",
+            "#[inline]\npub fn load_config() -> i32 {\n    42\n}\n\nfn keep() {}\n",
+        ),
+        (
+            "python",
+            "load_config",
+            "@cache\ndef load_config():\n    return 1\n\n\ndef keep():\n    pass\n",
+            "@cache\ndef load_config():\n    return 42",
+            "@cache\ndef load_config():\n    return 42\n\n\ndef keep():\n    pass\n",
+        ),
+        (
+            "java",
+            "loadConfig",
+            "class Config {\n    @Override\n    public int loadConfig() { return 1; }\n    int keep() { return 2; }\n}\n",
+            "@Override\npublic int loadConfig() { return 42; }",
+            "class Config {\n    @Override\n    public int loadConfig() { return 42; }\n    int keep() { return 2; }\n}\n",
+        ),
+        (
+            "kotlin",
+            "loadConfig",
+            "@JvmStatic\nprivate fun loadConfig(): Int = 1\n\nfun keep() {}\n",
+            "@JvmStatic\nprivate fun loadConfig(): Int = 42",
+            "@JvmStatic\nprivate fun loadConfig(): Int = 42\n\nfun keep() {}\n",
+        ),
+        (
+            "go",
+            "LoadConfig",
+            "package main\n\n// LoadConfig reads it.\nfunc LoadConfig() int {\n\treturn 1\n}\n\nfunc keep() {}\n",
+            "// LoadConfig reads it.\nfunc LoadConfig() int {\n\treturn 42\n}",
+            "package main\n\n// LoadConfig reads it.\nfunc LoadConfig() int {\n\treturn 42\n}\n\nfunc keep() {}\n",
+        ),
+    ];
+    for (language, symbol, source, new_text, expected) in cases {
+        let result = call(
+            &registry,
+            "hostlib_ast_symbol_replace",
+            dict(&[
+                ("source", vm_string(source)),
+                ("language", vm_string(language)),
+                ("symbol_name", vm_string(symbol)),
+                ("new_text", vm_string(new_text)),
+            ]),
+        );
+        assert_eq!(
+            as_string(&dict_field(&result, "result")),
+            "replaced",
+            "{language} {symbol}"
+        );
+        assert_eq!(
+            as_string(&dict_field(&result, "source")),
+            *expected,
+            "{language} {symbol}"
+        );
+    }
+}
+
+#[test]
+fn symbol_replace_inherits_local_layout_without_rewriting_neighbors() {
+    let registry = ast_registry();
+    for (source, new_text, expected) in [
+        (
+            "class Value {\r\n\tint number() { return 1; }\r\n}\r\n",
+            "int number() {\n\treturn 3;\n}\n",
+            "class Value {\r\n\tint number() {\r\n\t\treturn 3;\r\n\t}\r\n}\r\n",
+        ),
+        (
+            "class Value {\n  int number() { return 1; }\n}",
+            "  int number() {\r\n    return 3;\r\n  }",
+            "class Value {\n  int number() {\n    return 3;\n  }\n}",
+        ),
+        (
+            "class Value { int number() { return 1; } int keep() { return 2; } }",
+            "int number() { return 3; }",
+            "class Value { int number() { return 3; } int keep() { return 2; } }",
+        ),
+        (
+            "class Value {\r\n\t/** Old docs. */\r\n\t@Deprecated\r\n\tint number() { return 1; } // keep\r\n}\r\n",
+            "/** New docs. */\n@Deprecated\nint number() { return 3; }",
+            "class Value {\r\n\t/** New docs. */\r\n\t@Deprecated\r\n\tint number() { return 3; } // keep\r\n}\r\n",
+        ),
+    ] {
+        let result = call(
+            &registry,
+            "hostlib_ast_symbol_replace",
+            dict(&[
+                ("source", vm_string(source)),
+                ("language", vm_string("java")),
+                ("symbol_name", vm_string("number")),
+                ("new_text", vm_string(new_text)),
+            ]),
+        );
+        assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
+        assert_eq!(as_string(&dict_field(&result, "source")), expected);
+    }
+}
+
+#[test]
+fn symbol_replace_keeps_multiline_literal_bytes_from_the_caller() {
+    let registry = ast_registry();
+    let source = "class Value {\r\n\tString value = \"old\";\r\n}\r\n";
+    let new_text = "String value = \"\"\"\n  keep these spaces\n  \"\"\";";
+    let result = call(
+        &registry,
+        "hostlib_ast_symbol_replace",
+        dict(&[
+            ("source", vm_string(source)),
+            ("language", vm_string("java")),
+            ("symbol_name", vm_string("value")),
+            ("new_text", vm_string(new_text)),
+        ]),
+    );
+    assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
+    assert_eq!(
+        as_string(&dict_field(&result, "source")),
+        format!("class Value {{\r\n\t{new_text}\r\n}}\r\n"),
+    );
 }
 
 #[test]

@@ -1,0 +1,23 @@
+---
+title: Frontmatter sentinel
+---
+
+import {
+  Card,
+  Image
+} from './ui.js'
+
+export const data = {
+  title: 'Export sentinel',
+  list: ['nested', '{']
+}
+
+# Plain
+
+<Card tone={data.title}>
+
+Read the [guide](./guide.md).
+
+</Card>
+
+Use {data.title} here.

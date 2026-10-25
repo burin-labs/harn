@@ -21,7 +21,6 @@ import {
 } from "./provider_tool_probe_campaign/env"
 pub import {
   provider_tool_probe_campaign_env_file,
-  provider_tool_probe_campaign_env_from_dotenv_text,
   provider_tool_probe_campaign_env_from_host,
   provider_tool_probe_campaign_parse_args,
 } from "./provider_tool_probe_campaign/env"

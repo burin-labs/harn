@@ -15,7 +15,6 @@ use crate::orchestration::DaemonEventKindRecord;
 use crate::stdlib::args::Args;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 const SNAPSHOT_FILE: &str = "daemon.json";
 const META_FILE: &str = "daemon.meta.json";
@@ -96,7 +95,7 @@ type DaemonStateRef = Arc<parking_lot::Mutex<DaemonState>>;
 
 /// The managed-daemon owner for one VM execution tree.
 #[derive(Default)]
-pub(crate) struct DaemonRegistry {
+pub struct DaemonRegistry {
     states: parking_lot::Mutex<BTreeMap<String, DaemonStateRef>>,
 }
 
@@ -136,9 +135,7 @@ pub(crate) fn swap_active_daemon_registry(next: Arc<DaemonRegistry>) -> Arc<Daem
     ACTIVE_DAEMON_REGISTRY.with(|registry| std::mem::replace(&mut *registry.borrow_mut(), next))
 }
 
-pub fn register_daemon_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub fn register_daemon_builtins);
 
 #[harn_builtin(
     exposure = "harness.agent.daemon_spawn",
@@ -545,19 +542,19 @@ async fn daemon_resume_builtin(
         &crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("name"),
-                VmValue::String(arcstr::ArcStr::from(meta.name.clone())),
+                VmValue::string(meta.name.clone()),
             ),
             (
                 crate::value::intern_key("task"),
-                VmValue::String(arcstr::ArcStr::from(meta.prompt.clone())),
+                VmValue::string(meta.prompt.clone()),
             ),
             (
                 crate::value::intern_key("persist_path"),
-                VmValue::String(arcstr::ArcStr::from(persist_root.clone())),
+                VmValue::string(persist_root.clone()),
             ),
             (
                 crate::value::intern_key("session_id"),
-                VmValue::String(arcstr::ArcStr::from(meta.session_id.clone())),
+                VmValue::string(meta.session_id.clone()),
             ),
             (
                 crate::value::intern_key("options"),
@@ -989,9 +986,9 @@ fn spawn_daemon_task(state: Arc<parking_lot::Mutex<DaemonState>>, mut vm: crate:
         })?;
         let args = vec![
             harness,
-            VmValue::String(arcstr::ArcStr::from(prompt)),
+            VmValue::string(prompt),
             match system {
-                Some(text) => VmValue::String(arcstr::ArcStr::from(text)),
+                Some(text) => VmValue::string(text),
                 None => VmValue::Nil,
             },
             VmValue::dict(options),
@@ -1196,27 +1193,19 @@ mod tests {
     use harn_parser::Parser;
 
     fn run_harn_result(source: &str) -> Result<(String, VmValue), VmError> {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(async {
-            let local = tokio::task::LocalSet::new();
-            local
-                .run_until(async {
-                    let mut lexer = Lexer::new(source);
-                    let tokens = lexer.tokenize().unwrap();
-                    let mut parser = Parser::new(tokens);
-                    let program = parser.parse().unwrap();
-                    let chunk = Compiler::new().compile(&program).unwrap();
+        let rt = harn_clock::test_support::current_thread_runtime();
+        rt.block_on(harn_clock::test_support::with_local_tasks(async {
+            let mut lexer = Lexer::new(source);
+            let tokens = lexer.tokenize().unwrap();
+            let mut parser = Parser::new(tokens);
+            let program = parser.parse().unwrap();
+            let chunk = Compiler::new().compile(&program).unwrap();
 
-                    let mut vm = crate::new_vm();
-                    register_vm_stdlib(&mut vm);
-                    let result = vm.execute(&chunk).await?;
-                    Ok((vm.output().to_string(), result))
-                })
-                .await
-        })
+            let mut vm = crate::new_vm();
+            register_vm_stdlib(&mut vm);
+            let result = vm.execute(&chunk).await?;
+            Ok((vm.output().to_string(), result))
+        }))
     }
 
     #[test]

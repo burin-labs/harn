@@ -445,14 +445,7 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     if !skill.manifest.allowed_tools.is_empty() {
         entry.put(
             "allowed_tools",
-            VmValue::list(
-                skill
-                    .manifest
-                    .allowed_tools
-                    .iter()
-                    .map(|t| VmValue::String(arcstr::ArcStr::from(t.as_str())))
-                    .collect(),
-            ),
+            VmValue::strings(skill.manifest.allowed_tools.iter().map(|t| t.as_str())),
         );
     }
     if skill.manifest.user_invocable {
@@ -461,14 +454,7 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     if !skill.manifest.paths.is_empty() {
         entry.put(
             "paths",
-            VmValue::list(
-                skill
-                    .manifest
-                    .paths
-                    .iter()
-                    .map(|p| VmValue::String(arcstr::ArcStr::from(p.as_str())))
-                    .collect(),
-            ),
+            VmValue::strings(skill.manifest.paths.iter().map(|p| p.as_str())),
         );
     }
     entry.put_opt_str("context", skill.manifest.context.as_deref());
@@ -488,13 +474,12 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     if !skill.manifest.trusted_signers.is_empty() {
         entry.put(
             "trusted_signers",
-            VmValue::list(
+            VmValue::strings(
                 skill
                     .manifest
                     .trusted_signers
                     .iter()
-                    .map(|fingerprint| VmValue::String(arcstr::ArcStr::from(fingerprint.as_str())))
-                    .collect(),
+                    .map(|fingerprint| fingerprint.as_str()),
             ),
         );
     }
@@ -544,13 +529,12 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     if !skill.manifest.allowed_tools.is_empty() {
         entry.put(
             "allowed_tools",
-            VmValue::list(
+            VmValue::strings(
                 skill
                     .manifest
                     .allowed_tools
                     .iter()
-                    .map(|tool| VmValue::String(arcstr::ArcStr::from(tool.as_str())))
-                    .collect(),
+                    .map(|tool| tool.as_str()),
             ),
         );
     }
@@ -560,14 +544,7 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     if !skill.manifest.paths.is_empty() {
         entry.put(
             "paths",
-            VmValue::list(
-                skill
-                    .manifest
-                    .paths
-                    .iter()
-                    .map(|path| VmValue::String(arcstr::ArcStr::from(path.as_str())))
-                    .collect(),
-            ),
+            VmValue::strings(skill.manifest.paths.iter().map(|path| path.as_str())),
         );
     }
     entry.put_opt_str("context", skill.manifest.context.as_deref());

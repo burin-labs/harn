@@ -10043,7 +10043,10 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Fireworks removed this route from public serverless 2026-09-25 (it also leaves the shared Serverless Training pool 2026-11-02) and names DeepSeek V4.1 Flash as the replacement. Source: https://docs.fireworks.ai/updates/changelog (2026-09-12 notice, checked 2026-10-24).",
+        "sunset_date": "2026-09-25",
+        "superseded_by": "accounts/fireworks/models/deepseek-v4p1-flash"
       },
       "availability": "dedicated",
       "quality_tags": [],
@@ -10243,7 +10246,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Fireworks removed this route from public serverless 2026-09-25. Source: https://docs.fireworks.ai/updates/changelog (2026-09-12 notice, checked 2026-10-24).",
+        "sunset_date": "2026-09-25"
       },
       "availability": "dedicated",
       "quality_tags": [],
@@ -10602,7 +10607,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Fireworks removed every GLM 5.2 variant from public serverless 2026-09-25. Source: https://docs.fireworks.ai/updates/changelog (2026-09-12 notice, checked 2026-10-24).",
+        "sunset_date": "2026-09-25"
       },
       "availability": "dedicated",
       "quality_tags": [],
@@ -10922,7 +10929,8 @@
       },
       "deprecation": {
         "status": "active",
-        "note": "Fireworks retires this serverless route 2026-11-07; dedicated deployments and Reserved Throughput are unaffected. The official migration is a dedicated GPT-OSS 120B deployment, not another token-billed model. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
+        "note": "Fireworks retires this serverless route 2026-11-07; dedicated deployments and Reserved Throughput are unaffected. The official migration is a dedicated GPT-OSS 120B deployment, not another token-billed model. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21).",
+        "retires_on": "2026-11-07"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -11011,7 +11019,8 @@
       },
       "deprecation": {
         "status": "active",
-        "note": "Fireworks retires this serverless route 2026-11-07 and recommends Muse Spark Open on its US endpoint (regional premium waived). Dedicated deployments and Reserved Throughput are unaffected. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
+        "note": "Fireworks retires this serverless route 2026-11-07 and recommends Muse Spark Open on its US endpoint (regional premium waived). Dedicated deployments and Reserved Throughput are unaffected. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21).",
+        "retires_on": "2026-11-07"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -11110,7 +11119,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Fireworks removed this route from public serverless 2026-09-25. Source: https://docs.fireworks.ai/updates/changelog (2026-09-12 notice, checked 2026-10-24).",
+        "sunset_date": "2026-09-25"
       },
       "availability": "dedicated",
       "quality_tags": [],
@@ -11213,7 +11224,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Fireworks removed this route from public serverless 2026-09-25. Source: https://docs.fireworks.ai/updates/changelog (2026-09-12 notice, checked 2026-10-24).",
+        "sunset_date": "2026-09-25"
       },
       "availability": "dedicated",
       "quality_tags": [],
@@ -17086,8 +17099,6 @@
         ],
         "effort_supported": true,
         "effort_levels": [
-          "low",
-          "medium",
           "high"
         ],
         "none_supported": false,
@@ -35476,7 +35487,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "SambaNova's authenticated customer notice received 2026-10-23 retires this SambaCloud route on 2026-11-03; cutoff time and timezone are unspecified. SambaStack and SambaManaged remain available. The public record https://docs.sambanova.ai/docs/en/models/deprecations does not yet include this notice (read 2026-10-23).",
+        "retires_on": "2026-11-03"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -35566,7 +35579,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "SambaNova's authenticated customer notice received 2026-10-23 retires this SambaCloud route on 2026-11-17; cutoff time and timezone are unspecified. SambaStack and SambaManaged remain available. The public record https://docs.sambanova.ai/docs/en/models/deprecations does not yet include this notice (read 2026-10-23).",
+        "retires_on": "2026-11-17"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -35753,7 +35768,8 @@
         "cache_write_per_mtok": 0.0
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "SambaNova's authenticated customer notice received 2026-10-23 announces an undated upgrade that will automatically route MiniMax-M3 requests to MiniMax-M3.1-Flash, but separately recommends MiniMax-M3.1 when live. Exact replacement wire identity and activation date remain unverified; preserve this row's M3 identity. The public roster https://docs.sambanova.ai/docs/en/models/sambacloud-models still lists MiniMax-M3 (read 2026-10-23)."
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -38225,7 +38241,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "Together retires this route on 2026-11-06 per its notice to account holders. The notice is not yet listed on https://docs.together.ai/docs/deprecations (read 2026-10-24), which does list the earlier 2026-09-14 retirement of Inkling Small. No replacement is named.",
+        "retires_on": "2026-11-06"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -38801,12 +38819,12 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": false,
-        "preferred_format": "json",
+        "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "declared",
-        "parity_notes": "Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization.",
+        "parity_notes": "One live native tool call succeeded on 2026-10-25; the text tool grammar was not probed, so text tools stay undeclared.",
         "tool_search": []
       },
       "structured_output": "none",
@@ -38907,7 +38925,8 @@
       "availability": "unknown",
       "quality_tags": [],
       "capability_tags": [
-        "streaming"
+        "streaming",
+        "tools"
       ],
       "family": "deepseek",
       "lineage": "deepseek",
@@ -44516,50 +44535,10 @@
     },
     {
       "provider": "fireworks",
-      "model": "accounts/fireworks/models/deepseek-v4-flash-0731",
-      "base_url": "https://api.fireworks.ai/inference/v1",
-      "secret_env": "FIREWORKS_API_KEY",
-      "label": "DeepSeek V4 Flash 0731 (Fireworks)",
-      "family": "deepseek",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "fireworks",
       "model": "accounts/fireworks/models/deepseek-v4-pro",
       "base_url": "https://api.fireworks.ai/inference/v1",
       "secret_env": "FIREWORKS_API_KEY",
       "label": "DeepSeek V4 Pro (Fireworks)",
-      "family": "deepseek",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "fireworks",
-      "model": "accounts/fireworks/models/deepseek-v4-pro-0813",
-      "base_url": "https://api.fireworks.ai/inference/v1",
-      "secret_env": "FIREWORKS_API_KEY",
-      "label": "DeepSeek V4 Pro 0813 (Fireworks)",
       "family": "deepseek",
       "capabilities": [
         "batch",
@@ -44623,26 +44602,6 @@
         "thinking",
         "tools",
         "vision"
-      ]
-    },
-    {
-      "provider": "fireworks",
-      "model": "accounts/fireworks/models/glm-5p2",
-      "base_url": "https://api.fireworks.ai/inference/v1",
-      "secret_env": "FIREWORKS_API_KEY",
-      "label": "GLM 5.2 (Fireworks)",
-      "family": "glm",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools"
       ]
     },
     {
@@ -44717,48 +44676,6 @@
         "native_tools",
         "streaming",
         "structured_output_mode:none",
-        "text_tools",
-        "thinking",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "fireworks",
-      "model": "accounts/fireworks/models/kimi-k2p6",
-      "base_url": "https://api.fireworks.ai/inference/v1",
-      "secret_env": "FIREWORKS_API_KEY",
-      "label": "Kimi K2.6 (Fireworks)",
-      "family": "kimi",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "fireworks",
-      "model": "accounts/fireworks/models/kimi-k2p7-code",
-      "base_url": "https://api.fireworks.ai/inference/v1",
-      "secret_env": "FIREWORKS_API_KEY",
-      "label": "Kimi K2.7 Code (Fireworks)",
-      "family": "kimi",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
         "text_tools",
         "thinking",
         "tools",
@@ -49913,8 +49830,10 @@
       "label": "DeepSeek V4.1 Flash 1017 (Vercel AI Gateway)",
       "family": "deepseek",
       "capabilities": [
+        "native_tools",
         "streaming",
-        "structured_output_mode:none"
+        "structured_output_mode:none",
+        "tools"
       ]
     },
     {

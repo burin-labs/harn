@@ -3,7 +3,7 @@ import test from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import {execFileSync,spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {observerDeadlineName,observerDeadlineStep,observerWindowSteps} from '../lib/consumer-observer-window.mjs';
@@ -142,6 +142,12 @@ test('the terminal entrypoint records only an authenticated reached product deci
         if(options.method==='POST')throw new Error('unexpected-private-post');
         const endpoint=new URL(url),p=endpoint.pathname;
         fs.writeFileSync(${JSON.stringify(lastRead)},JSON.stringify(p));
+        if(fixture.producerData && p.includes('/runs/900')){
+          const data=fixture.producerData;
+          const record=p.endsWith('/jobs')?{total_count:data.jobs.length,jobs:data.jobs}:
+            p.endsWith('/artifacts')?{total_count:data.artifacts.length,artifacts:data.artifacts}:data.run;
+          return {ok:true,json:async()=>record};
+        }
         if(p.endsWith('/zip')){
           const index=Number(/artifacts\\/(50[1234])\\//.exec(p)?.[1])-501;
           return {ok:true,arrayBuffer:async()=>fs.readFileSync(fixture.archives[index].archive)};
@@ -339,11 +345,11 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const selectEntry=fileURLToPath(new URL('../ci/consumer-observer-select.mjs',import.meta.url));
     const terminalParent={...parent,status:'completed',conclusion:'success',created_at:'2026-10-11T20:00:00Z'};
     const reusableChild={...completed,head_branch:'main'};
-    const readParent=(changes={},extraEnv={},select=false,decision=false,contextDecision=false,recovery=false)=>{
+    const readParent=(changes={},extraEnv={},select=false,decision=false,contextDecision=false,recovery=false,repair=false)=>{
       const output=path.join(scratch,`reuse-${sequence++}`);
       fs.writeFileSync(fixture,JSON.stringify({parent:terminalParent,child:reusableChild,runs:[reusableChild],archives,...changes}));
       const run=spawnSync(process.execPath,[contextDecision?readDecisionEntry:select?selectEntry:readParentEntry,
-        ...(recovery?['--recover']:decision?['--decision']:[])],{encoding:'utf8',env:{PATH:process.env.PATH,
+        ...(repair?['--repair']:recovery?['--recover']:decision?['--decision']:[])],{encoding:'utf8',env:{PATH:process.env.PATH,
         NODE_OPTIONS:`--import=${observerPreload}`,GH_TOKEN:'fixture-read',PARENT_RUN_ID:'42',PARENT_ROLE:'canary',
         SOURCE_REVISION:context.source_revision,REQUIRE_CURRENT_DEFAULT:'true',CANARY_REPOSITORY:'acme/widget-host',
         CANARY_WORKFLOW:'rehearsal.yml',GITHUB_OUTPUT:output,REHEARSAL_PROMOTION_RUN_ID:'42',
@@ -359,6 +365,81 @@ test('the terminal entrypoint records only an authenticated reached product deci
     assert.match(reused.text,/owned=false/);
     assert.equal(JSON.parse(fs.readFileSync(lastRead,'utf8')),'/repos/acme/widget-host/actions/runs/73',
       'the fresh child status follows public-parent and current-default eligibility reads');
+    const targets=JSON.parse(execFileSync('bash',[fileURLToPath(new URL('../lib/candidate_archive_contract.sh',import.meta.url)),'--targets-json'],{encoding:'utf8'}));
+    const producerRun={id:900,run_attempt:1,head_sha:context.source_revision,head_branch:'main',event:'push',
+      status:'completed',conclusion:'failure',path:'.github/workflows/build-release-binaries.yml',
+      repository:{full_name:context.parent_repository},head_repository:{full_name:context.parent_repository}};
+    const producerJobs=['Resolve release context','Prepare CLI AOT payload','Assemble candidate manifest','Release residual audit',
+      'Consumer release rehearsal / Decide whether main moved',...targets.map(target=>`Build ${target}`),
+      ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)]
+      .map((name,index)=>({id:index+1,run_id:900,run_attempt:1,head_sha:context.source_revision,name,status:'completed',conclusion:'success'}));
+    const producerArtifacts=[...targets.map(target=>`harn-${target}`),`candidate-manifest-${context.source_revision}`,'harn-release-files']
+      .map((name,index)=>({id:index+800,name,expired:false,size_in_bytes:100,digest:`sha256:${'d'.repeat(64)}`,
+        workflow_run:{id:900,head_sha:context.source_revision}}));
+    const producerData={run:producerRun,jobs:producerJobs,artifacts:producerArtifacts};
+    const repairRequest={schema:'harn.release.consumer_repair.v1',context,producer_run:'900',producer_attempt:1,consumer_pull:'7'};
+    const repairInputs={parent:{...parent,path:'.github/workflows/promote-release.yml',event:'workflow_dispatch',
+      head_branch:'main',conclusion:null,created_at:terminalParent.created_at},producerData,
+      pull:pairedPull,child:pairedChild,runs:[pairedChild]};
+    // Reach actual admission and terminal recording with the producing
+    // manifest bound into custody, rather than borrowing a source-only pass.
+    const admissionEntry=fileURLToPath(new URL('../ci/consumer-observer-admit.mjs',import.meta.url));
+    const admissionEvent=path.join(scratch,'repair-event.json');
+    const admitBound=(inputs={})=>{
+      const directory=path.join(scratch,`repair-admission-${sequence++}`);fs.mkdirSync(directory);
+      const output=path.join(directory,'outputs');
+      fs.writeFileSync(admissionEvent,JSON.stringify({inputs:{source_revision:context.source_revision,
+        observer:JSON.stringify(context),release_producer_run_id:'900',release_producer_run_attempt:'1',...inputs}}));
+      fs.writeFileSync(fixture,JSON.stringify({...repairInputs,archives,child:{...pairedChild,status:'in_progress',conclusion:null}}));
+      const run=spawnSync(process.execPath,[admissionEntry],{encoding:'utf8',env:{PATH:process.env.PATH,
+        NODE_OPTIONS:`--import=${observerPreload}`,GH_TOKEN:'fixture-read',OBSERVER_CONTEXT:JSON.stringify(context),
+        GITHUB_REPOSITORY:'acme/widget-host',GITHUB_RUN_ID:'73',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:child.head_sha,
+        GITHUB_WORKFLOW_REF:'acme/widget-host/.github/workflows/rehearsal.yml@refs/heads/paired-work',
+        GITHUB_EVENT_PATH:admissionEvent,SOURCE_REVISION:context.source_revision,
+        RELEASE_PRODUCER_RUN_ID:'900',RELEASE_PRODUCER_RUN_ATTEMPT:'1',RUNNER_TEMP:directory,GITHUB_OUTPUT:output}});
+      return {run,text:fs.existsSync(output)?fs.readFileSync(output,'utf8'):''};
+    };
+    const boundAdmission=admitBound();assert.equal(boundAdmission.run.status,0,boundAdmission.run.stderr);
+    const boundFile=/^receipt=(.+)$/m.exec(boundAdmission.text)?.[1];assert.ok(boundFile);
+    const boundReceipt=JSON.parse(fs.readFileSync(boundFile,'utf8'));
+    assert.equal(boundReceipt.schema,'harn.consumer_observer_receipt.v3');
+    assert.equal(boundReceipt.producer.manifest_id,producerArtifacts.find(item=>item.name.startsWith('candidate-manifest-')).id);
+    const wrongInput=admitBound({release_producer_run_id:'901'});
+    assert.equal(wrongInput.run.status,1);assert.equal(wrongInput.text,'');
+    const bindArchive=(file,slot)=>{
+      const archive=path.join(scratch,`bound-${slot}.zip`);
+      const zipped=spawnSync('zip',['-j',archive,file],{encoding:'utf8'});assert.equal(zipped.status,0,zipped.stderr);
+      const bytes=fs.readFileSync(archive);
+      return {archive,metadata:{...archives[slot].metadata,size_in_bytes:bytes.length,
+        digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`}};
+    };
+    const boundArchives=[archives[0],bindArchive(boundFile,1),archives[2]];
+    const boundTerminal=execute({parent:repairInputs.parent,archives:boundArchives});
+    assert.equal(boundTerminal.run.status,0,boundTerminal.run.stderr);
+    const boundTerminalFile=/^receipt=(.+)$/m.exec(boundTerminal.output)?.[1];assert.ok(boundTerminalFile);
+    assert.equal(JSON.parse(fs.readFileSync(boundTerminalFile,'utf8')).schema,'harn.consumer_observer_terminal.v3');
+    boundArchives[2]=bindArchive(boundTerminalFile,2);
+    repairInputs.archives=boundArchives;
+    const repair=(changes={},env={})=>readParent({...repairInputs,...changes},{
+      REQUIRE_CURRENT_DEFAULT:'false',OBSERVER_CONTEXT:JSON.stringify(repairRequest),...env},false,false,true,false,true);
+    const repaired=repair();assert.equal(repaired.run.status,0,repaired.run.stderr);
+    const repairedValue=JSON.parse(repaired.run.stdout);
+    assert.equal(repairedValue.schema,'harn.release.consumer_repair_decision.v1');
+    assert.equal(repairedValue.reading.product.verdict,'pass');
+    assert.equal(repairedValue.producer.producer_run,'900');
+    assert.equal(repairedValue.owned,false);
+    for(const changes of [{runs:[]},{runs:[pairedChild,{...pairedChild,id:74}]},{missing:0},{missing:1},{missing:2},{archives},
+      {child:{...pairedChild,id:74},runs:[{...pairedChild,id:74}]},
+      {finalPull:{...pairedPull,state:'closed'}},{finalPull:{...pairedPull,head:{...pairedPull.head,sha:'d'.repeat(40)}}},
+      {producerData:{...producerData,jobs:producerJobs.slice(1)}},
+      {producerData:{...producerData,artifacts:[]}},
+      {producerData:{...producerData,artifacts:producerArtifacts.map(item=>item.name.startsWith('candidate-manifest-')?
+        {...item,digest:`sha256:${'e'.repeat(64)}`}:item)}},
+      {parent:{...repairInputs.parent,status:'completed',conclusion:'cancelled'}},
+      {finalParent:{...repairInputs.parent,run_attempt:3}}]) {
+      const refused=repair(changes);assert.equal(refused.run.status,1,refused.run.stdout);
+      assert.equal(refused.text,'','unobserved, stale or unproved repair cannot emit publication selection');
+    }
     // Recover only through the deadline receipt emitted by the actual waiter
     // above and the actual terminal product receipt emitted by this producer.
     const deadlineArchive=path.join(scratch,'archive-3.zip');

@@ -1,7 +1,11 @@
 # Provider Catalog Sources
 
-These TOML fragments are the editable source for Harn's bundled provider/model
-catalog. The runtime embeds `crates/harn-provider-catalog/src/providers.toml`, generated from this
+These TOML fragments declare Harn's provider mechanics, model routes, and policy.
+Selected model facts come from the pinned `models-dev.json` cache through
+source-only `models_dev` bindings. Follow the
+[Models.dev update guide](../../../../../docs/src/llm/models-dev-source.md)
+to refresh the cache or add a binding. The runtime embeds
+`crates/harn-provider-catalog/src/providers.toml`, generated from these sources
 directory by:
 
 ```sh
@@ -9,9 +13,8 @@ harn provider catalog generate
 ```
 
 Use `harn provider catalog generate --check` to verify that snapshot
-and every checked-in provider catalog projection match the fragments. Direct
-edits to `../providers.toml` are invalid because the next generation pass will
-overwrite them.
+and every checked-in provider catalog projection match the sources. Don't edit
+the generated snapshot; regeneration replaces it.
 
 ## Generate projections from source
 
@@ -27,8 +30,9 @@ and `support` use embedded defaults only when source directories are absent;
 invalid source fragments fail explicitly. Runtime calls still embed the generated
 snapshots, so rebuild before testing their changed behavior.
 
-Fragments use the same `ProvidersConfig` schema as user overrides and package
-manifest `[llm]` sections. File names are sorted lexicographically, so keep
+After resolving `models_dev`, fragments use the same `ProvidersConfig` schema
+as user overrides and package manifest `[llm]` sections. Source bindings aren't
+accepted in runtime overlays. File names are sorted lexicographically, so keep
 numeric prefixes when adding a fragment that depends on earlier table context
 or routing order.
 

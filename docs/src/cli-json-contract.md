@@ -282,7 +282,7 @@ absent in check mode and same-version no-op responses.
     "needs_upgrade": false,
     "mode": "check",
     "installed": false,
-    "archive_url": "https://github.com/burin-labs/harn/releases/download/v0.8.27/harn-aarch64-apple-darwin.tar.gz",
+    "archive_url": "https://github.com/burin-labs/harn/releases/download/v0.8.27/harn-aarch64-apple-darwin.tar.xz",
     "checksums_url": "https://github.com/burin-labs/harn/releases/download/v0.8.27/SHA256SUMS",
     "target_triple": "aarch64-apple-darwin"
   }

@@ -224,8 +224,9 @@ mod tests {
     use crate::tools::inspect_test_results::{store_run, RawArtifacts, TestSummaryData};
     use harn_lexer::Lexer;
     use harn_parser::Parser;
+    use harn_runtime::register_vm_stdlib;
     use harn_vm::orchestration::RunExecutionRecord;
-    use harn_vm::{enter_execution_scope, mint_execution_scope, register_vm_stdlib, Compiler, Vm};
+    use harn_vm::{enter_execution_scope, mint_execution_scope, Compiler, Vm};
     use std::path::Path;
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -309,10 +310,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n";
         let mut req = DictMap::new();
         req.put_str("cwd", cwd.to_string_lossy());
         if let Some(argv) = argv {
-            req.put(
-                "argv",
-                VmValue::List(Arc::new(argv.into_iter().map(VmValue::string).collect())),
-            );
+            req.put("argv", VmValue::strings(argv));
         }
         req.put_opt_str("filter", filter);
         crate::tools::run_test::handle(&[VmValue::dict_map(req)]).expect("run_test ok")

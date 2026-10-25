@@ -935,6 +935,7 @@
     },
     "AvailableCommands": {
       "type": "object", "required": ["sessionUpdate", "availableCommands"], "additionalProperties": true,
+      "examples": [{ "sessionUpdate": "available_commands_update", "availableCommands": [] }],
       "properties": {
         "sessionUpdate": { "const": "available_commands_update" },
         "availableCommands": { "type": "array", "items": {} }
@@ -972,8 +973,36 @@
         }
       }
     },
+    "InferenceSpeed": {
+      "description": "Speed of one model call: live estimates while it streams, then one final snapshot. Absent fields were not measured. timeToFirstTokenMs follows gen_ai.client.inference.time_to_first_chunk; outputTokensPerSecond is the inverse of gen_ai.client.inference.time_per_output_chunk in tokens.",
+      "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "inference_speed" },
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object",
+            "required": ["callId", "provider", "model", "phase", "isFinal", "elapsedMs", "outputTokens", "tokenSource"],
+            "additionalProperties": true,
+            "properties": {
+              "callId": { "type": "string", "minLength": 1 },
+              "provider": { "type": "string" },
+              "model": { "type": "string" },
+              "phase": { "enum": ["awaiting_first_token", "reasoning", "responding", "calling_tool", "complete"] },
+              "isFinal": { "type": "boolean" },
+              "elapsedMs": { "type": "integer", "minimum": 0 },
+              "timeToFirstTokenMs": { "type": "integer", "minimum": 0 },
+              "outputTokens": { "type": "integer", "minimum": 0 },
+              "outputTokensPerSecond": { "type": "number", "minimum": 0 },
+              "tokenSource": { "enum": ["estimated", "provider", "server"] }
+            }
+          } }
+        }
+      }
+    },
     "LiveSessionClient": {
       "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
+      "examples": [{ "sessionUpdate": "live_session_client", "_meta": { "harn": { "action": "attached", "state": null } } }],
       "properties": {
         "sessionUpdate": { "const": "live_session_client" },
         "_meta": {
@@ -989,6 +1018,7 @@
     },
     "Log": {
       "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
+      "examples": [{ "sessionUpdate": "log", "_meta": { "harn": { "level": "info", "message": "fixture log" } } }],
       "properties": {
         "sessionUpdate": { "const": "log" },
         "_meta": {
@@ -1000,6 +1030,17 @@
             }
           } }
         }
+      }
+    },
+    "State": {
+      "type": "object", "required": ["sessionUpdate", "state"], "additionalProperties": false,
+      "examples": [{ "sessionUpdate": "state_update", "state": "idle", "stopReason": "end_turn" }],
+      "properties": {
+        "sessionUpdate": { "const": "state_update" },
+        "state": { "type": "string", "enum": ["running", "idle"] },
+        "stopReason": { "type": "string" },
+        "error": {},
+        "_meta": { "type": "object", "additionalProperties": true, "properties": {} }
       }
     },
     "Progress": {
@@ -1087,6 +1128,7 @@
         { "$ref": "#/$defs/Handoff" },
         { "$ref": "#/$defs/HitlRequest" },
         { "$ref": "#/$defs/HitlResolved" },
+        { "$ref": "#/$defs/InferenceSpeed" },
         { "$ref": "#/$defs/LiveSessionClient" },
         { "$ref": "#/$defs/Log" },
         { "$ref": "#/$defs/Progress" },
@@ -1096,6 +1138,7 @@
         { "$ref": "#/$defs/SkillNarrow" },
         { "$ref": "#/$defs/SkillScopeTools" },
         { "$ref": "#/$defs/StanceTransition" },
+        { "$ref": "#/$defs/State" },
         { "$ref": "#/$defs/ToolSearchQuery" },
         { "$ref": "#/$defs/ToolSearchResult" },
         { "$ref": "#/$defs/TranscriptCompacted" },

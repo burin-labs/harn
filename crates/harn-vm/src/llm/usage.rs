@@ -14,14 +14,25 @@ use super::api::{LlmResult, ProviderAttempts};
 
 mod billing;
 pub use billing::BillingUsage;
+mod cost;
+pub(crate) use cost::register_settlement_builtin;
+pub use cost::{
+    settle_call_cost, CallCostBreakdown, CallCostInput, CallCostInputError, CallCostRates,
+    CallCostSettlement, CallCostUnpriced,
+};
 mod receipt;
 #[doc(inline)]
 pub use harn_llm::usage::ReportedCacheUsage;
-pub(crate) use harn_llm::usage::{
-    cache_field_roots, extract_cache_read_tokens, extract_cache_write_tokens,
-};
+pub(crate) use harn_llm::usage::{cache_field_roots, extract_cache_counts, CacheCounts};
 pub(crate) use harn_llm::usage::{InputTokenBasis, PromptTokenCounts, ReportedTokenUsage};
 pub(crate) use receipt::ProviderUsageReceipt;
+
+struct ProviderReceiptSettlement {
+    usage: LlmUsage,
+    pricing: Option<super::cost::PricingDetail>,
+    billing: billing::BillingSettlement,
+    free_inference: bool,
+}
 
 /// The normalized accounting facts for one completed provider call.
 ///
@@ -140,6 +151,10 @@ pub struct LlmUsage {
     /// than borrowing `cache_supported`'s false precision.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_accounting_declared: Option<bool>,
+    /// Whether a provider response carried any cache counter. On a declared,
+    /// supported route `false` means the counters were omitted, not zero.
+    #[serde(default)]
+    pub cache_counts_present: bool,
     pub cache_hit_ratio: Option<f64>,
     pub cache_savings_usd: f64,
     pub cache_hit: bool,
@@ -354,6 +369,59 @@ impl UsageCostCertainty {
     }
 }
 
+/// Cache token totals over the calls whose provider reported cache accounting.
+///
+/// A call counts only when its route declared cache accounting and the
+/// response reported it (`cache_visibility` null). The totals read `None`
+/// until such a call is folded, so an unreported count never reads as a
+/// measured zero.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReportedCacheTotals {
+    pub reported_calls: i64,
+    pub read_tokens: i64,
+    pub write_tokens: i64,
+}
+
+impl ReportedCacheTotals {
+    pub(crate) fn record(&mut self, reported: bool, read_tokens: i64, write_tokens: i64) {
+        if !reported {
+            return;
+        }
+        self.reported_calls = self.reported_calls.saturating_add(1);
+        self.read_tokens = self.read_tokens.saturating_add(read_tokens);
+        self.write_tokens = self.write_tokens.saturating_add(write_tokens);
+    }
+
+    pub(crate) fn record_usage(&mut self, usage: &LlmUsage) {
+        self.record(
+            usage.cache_counts_reported(),
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
+        );
+    }
+
+    /// Calls folded after `before` was taken from the same running total.
+    #[must_use]
+    pub(crate) fn since(&self, before: &Self) -> Self {
+        Self {
+            reported_calls: self.reported_calls.saturating_sub(before.reported_calls),
+            read_tokens: self.read_tokens.saturating_sub(before.read_tokens),
+            write_tokens: self.write_tokens.saturating_sub(before.write_tokens),
+        }
+    }
+
+    #[must_use]
+    pub fn reported_read_tokens(&self) -> Option<i64> {
+        (self.reported_calls > 0).then_some(self.read_tokens)
+    }
+
+    #[must_use]
+    pub fn reported_write_tokens(&self) -> Option<i64> {
+        (self.reported_calls > 0).then_some(self.write_tokens)
+    }
+}
+
 /// Fold cost and accounting certainty once for every reporting projection.
 pub fn summarize_usage_cost_certainty<'a>(
     usages: impl IntoIterator<Item = &'a LlmUsage>,
@@ -417,6 +485,8 @@ fn pricing_facts(
     detail: &super::cost::PricingDetail,
     settled_at_ms: i64,
     cache_ttl: Option<super::api::PromptCacheTtl>,
+    settlement: &billing::BillingSettlement,
+    free_inference: bool,
 ) -> PricingFacts {
     PricingFacts {
         rate_card: detail.rate_card.label(),
@@ -427,10 +497,13 @@ fn pricing_facts(
             super::cost::PricingSource::CatalogServingTier
         )
         .then(|| super::serving_tiers::FAST_TIER_ID.to_string()),
-        cache_ttl_unpriced: !detail.cache_write_priced(cache_ttl),
+        cache_ttl_unpriced: !free_inference && !detail.cache_write_priced(cache_ttl),
+        platform_fee_estimate_usd: settlement.platform_fee_estimate_usd,
+        hosted_tool_unpriced: settlement.hosted_tool_unpriced.clone(),
+        modality_unpriced: settlement.modality_unpriced.clone(),
+        monthly_allowance_unapplied: settlement.monthly_allowance_unapplied.clone(),
         platform_fee_basis: (detail.platform_fee_percent > 0.0)
             .then(|| "catalog_estimate_funding_route_unknown".into()),
-        ..PricingFacts::default()
     }
 }
 
@@ -472,6 +545,9 @@ impl LlmUsage {
             .try_fold(true, |all_true, declared| {
                 declared.map(|declared| all_true && declared)
             });
+        // A retry or sibling with no response must not erase a response that did
+        // report, so presence is any() rather than all().
+        let cache_counts_present = usages.iter().any(|usage| usage.cache_counts_present);
         Self {
             input_tokens,
             output_tokens,
@@ -486,7 +562,10 @@ impl LlmUsage {
             cache_write_tokens,
             cache_supported,
             cache_accounting_declared,
-            cache_hit_ratio: (cache_accounting_declared == Some(true) && cache_supported)
+            cache_counts_present,
+            cache_hit_ratio: (cache_counts_present
+                && cache_accounting_declared == Some(true)
+                && cache_supported)
                 .then(|| super::cost::cache_hit_ratio(input_tokens, cache_read_tokens)),
             cache_savings_usd: usages.iter().map(|usage| usage.cache_savings_usd).sum(),
             cache_hit: usages.iter().any(|usage| usage.cache_hit),
@@ -591,6 +670,7 @@ impl LlmUsage {
             // undeclared) for the completed logical call.
             cache_supported: true,
             cache_accounting_declared: Some(true),
+            cache_counts_present: false,
             cache_hit_ratio: Some(0.0),
             cache_savings_usd: 0.0,
             cache_hit: false,
@@ -646,12 +726,8 @@ impl LlmUsage {
             .mock_replay_cost_usd()
             .or(result.telemetry.provider_cost_usd)
             .or_else(|| super::managed_supply::authoritative_cost_usd(result));
-        // A self-hosted route bills nothing whether or not it reported token
-        // counts, so its cost is known before its usage is. Leaving it to the
-        // gate below would price it `None` on any server that omits usage
-        // (streaming llama.cpp among them), and an unpriced call spends a USD
-        // ceiling whole. `usage_unknown_calls` still records that the token
-        // counts were missing: that stays unknown, only the cost does not.
+        // Missing counts cannot make self-hosted inference unpriced.
+        // Hosted-tool units still need their own rates; usage stays separate.
         let free_route = crate::llm_config::provider_is_self_hosted(&result.provider);
         // Settle at the instant the request left the client. A promotion that
         // expired, or a time-of-day window the call started inside, priced the
@@ -686,26 +762,30 @@ impl LlmUsage {
                 cache_ttl,
             )
         });
-        let billing = result.telemetry.billing.clone();
-        let settlement = detail.as_ref().zip(token_cost).map(|(detail, cost)| {
+        let billing = result.telemetry.billing.clone().map(|mut billing| {
+            billing.validate_normalized_counts(
+                result.input_tokens,
+                result.output_tokens,
+                result.cache_read_tokens,
+                result.cache_write_tokens,
+            );
             billing
-                .as_deref()
-                .unwrap_or(&BillingUsage::default())
-                .settle(detail, cost)
         });
-        let table_cost = settlement.as_ref().map(|settlement| settlement.total_usd);
+        let settlement = billing
+            .as_deref()
+            .unwrap_or(&BillingUsage::default())
+            .settle(detail.as_ref(), token_cost, free_route);
+        let table_cost = (free_route || token_cost.is_some()).then_some(settlement.known_cost_usd);
         let units_unpriced = authoritative_cost.is_none()
-            && !free_route
-            && (settlement
-                .as_ref()
-                .is_some_and(billing::BillingSettlement::has_unpriced_units)
-                || (!component_usage_known && billing.is_some())
-                || (result.cache_write_tokens > 0
-                    && detail
-                        .as_ref()
-                        .is_some_and(|detail| !detail.cache_write_priced(cache_ttl))));
+            && (settlement.has_unpriced_units()
+                || (!free_route
+                    && ((!component_usage_known && billing.is_some())
+                        || (result.cache_write_tokens > 0
+                            && detail
+                                .as_ref()
+                                .is_some_and(|detail| !detail.cache_write_priced(cache_ttl))))));
         let cost_usd = authoritative_cost
-            .or_else(|| free_route.then_some(0.0))
+            .or_else(|| free_route.then_some(settlement.known_cost_usd))
             .or_else(|| {
                 (component_usage_known || billing.is_some())
                     .then_some(table_cost)
@@ -716,7 +796,8 @@ impl LlmUsage {
         } else {
             unpriced_projection(cost_usd, table_cost)
         };
-        let cache_hit_ratio = (result.telemetry.cache_accounting_declared == Some(true)
+        let cache_hit_ratio = (result.cache_counts_reported
+            && result.telemetry.cache_accounting_declared == Some(true)
             && result.cache_supported)
             .then(|| super::cost::cache_hit_ratio(result.input_tokens, result.cache_read_tokens));
         Self {
@@ -728,14 +809,13 @@ impl LlmUsage {
             cache_write_tokens: result.cache_write_tokens,
             cache_supported: result.cache_supported,
             cache_accounting_declared: result.telemetry.cache_accounting_declared,
+            cache_counts_present: result.cache_counts_reported,
             cache_hit_ratio,
-            cache_savings_usd: super::cost::cache_savings_usd_for_provider(
-                &result.provider,
-                &result.model,
-                result.input_tokens,
+            cache_savings_usd: super::cost::cache_savings_usd_for_pricing(
+                detail.as_ref(),
+                free_route,
                 result.cache_read_tokens,
                 result.cache_write_tokens,
-                at,
                 cache_ttl,
             ),
             cache_hit: result.cache_read_tokens > 0,
@@ -756,22 +836,19 @@ impl LlmUsage {
                 unpriced_reason,
                 projected_cost_usd,
             ),
-            // Only a catalog-settled cost has a card to name. A provider's own
-            // cost figure and a self-hosted zero did not come from one, and
-            // claiming a card for them would put the catalog's name on a
-            // number it did not produce.
-            pricing: (cost_usd.is_some() && authoritative_cost.is_none() && !free_route)
+            // Free inference has no card unless a card priced hosted units.
+            pricing: (cost_usd.is_some()
+                && authoritative_cost.is_none()
+                && (!free_route || settlement.has_priced_hosted_tools))
                 .then(|| {
                     detail.as_ref().map(|detail| {
-                        let mut facts = pricing_facts(detail, settled_at_ms, cache_ttl);
-                        if let Some(settlement) = &settlement {
-                            facts.platform_fee_estimate_usd = settlement.platform_fee_estimate_usd;
-                            facts.hosted_tool_unpriced = settlement.hosted_tool_unpriced.clone();
-                            facts.modality_unpriced = settlement.modality_unpriced.clone();
-                            facts.monthly_allowance_unapplied =
-                                settlement.monthly_allowance_unapplied.clone();
-                        }
-                        Box::new(facts)
+                        Box::new(pricing_facts(
+                            detail,
+                            settled_at_ms,
+                            cache_ttl,
+                            &settlement,
+                            free_route,
+                        ))
                     })
                 })
                 .flatten(),
@@ -788,6 +865,14 @@ impl LlmUsage {
         model: &str,
         receipt: &ProviderUsageReceipt,
     ) -> Self {
+        Self::settle_provider_receipt(provider, model, receipt).usage
+    }
+
+    fn settle_provider_receipt(
+        provider: &str,
+        model: &str,
+        receipt: &ProviderUsageReceipt,
+    ) -> ProviderReceiptSettlement {
         let input_tokens = receipt.input_tokens.unwrap_or(0);
         let output_tokens = receipt.output_tokens.unwrap_or(0);
         let complete_counts = receipt.has_complete_token_counts();
@@ -814,27 +899,31 @@ impl LlmUsage {
                 cache_ttl,
             )
         });
-        let billing = receipt.billing.clone();
-        let settlement = detail.as_ref().zip(token_cost).map(|(detail, cost)| {
+        let billing = receipt.billing.clone().map(|mut billing| {
+            billing.validate_normalized_counts(
+                input_tokens,
+                output_tokens,
+                receipt.cache_read_tokens,
+                receipt.cache_write_tokens,
+            );
             billing
-                .as_deref()
-                .unwrap_or(&BillingUsage::default())
-                .settle(detail, cost)
         });
-        let table_cost = settlement.as_ref().map(|settlement| settlement.total_usd);
+        let settlement = billing
+            .as_deref()
+            .unwrap_or(&BillingUsage::default())
+            .settle(detail.as_ref(), token_cost, free_route);
+        let table_cost = (free_route || token_cost.is_some()).then_some(settlement.known_cost_usd);
         let units_unpriced = receipt.provider_cost_usd.is_none()
-            && !free_route
-            && (settlement
-                .as_ref()
-                .is_some_and(billing::BillingSettlement::has_unpriced_units)
-                || (!complete_counts && billing.is_some())
-                || (receipt.cache_write_tokens > 0
-                    && detail
-                        .as_ref()
-                        .is_some_and(|detail| !detail.cache_write_priced(cache_ttl))));
+            && (settlement.has_unpriced_units()
+                || (!free_route
+                    && ((!complete_counts && billing.is_some())
+                        || (receipt.cache_write_tokens > 0
+                            && detail
+                                .as_ref()
+                                .is_some_and(|detail| !detail.cache_write_priced(cache_ttl))))));
         let cost_usd = receipt
             .provider_cost_usd
-            .or_else(|| free_route.then_some(0.0))
+            .or_else(|| free_route.then_some(settlement.known_cost_usd))
             .or_else(|| {
                 (complete_counts || billing.is_some())
                     .then_some(table_cost)
@@ -846,7 +935,7 @@ impl LlmUsage {
             unpriced_projection(cost_usd, table_cost)
         };
         let usage_unknown = i64::from(!complete_counts);
-        Self {
+        let usage = Self {
             input_tokens,
             output_tokens,
             reported_total_tokens: receipt.reported_total_tokens,
@@ -855,16 +944,16 @@ impl LlmUsage {
             cache_write_tokens: receipt.cache_write_tokens,
             cache_supported: receipt.cache_supported,
             cache_accounting_declared: receipt.cache_accounting_declared,
-            cache_hit_ratio: (receipt.cache_accounting_declared == Some(true)
+            cache_counts_present: receipt.cache_counts_reported,
+            cache_hit_ratio: (receipt.cache_counts_reported
+                && receipt.cache_accounting_declared == Some(true)
                 && receipt.cache_supported)
                 .then(|| super::cost::cache_hit_ratio(input_tokens, receipt.cache_read_tokens)),
-            cache_savings_usd: super::cost::cache_savings_usd_for_provider(
-                provider,
-                model,
-                input_tokens,
+            cache_savings_usd: super::cost::cache_savings_usd_for_pricing(
+                detail.as_ref(),
+                free_route,
                 receipt.cache_read_tokens,
                 receipt.cache_write_tokens,
-                at,
                 cache_ttl,
             ),
             cache_hit: receipt.cache_read_tokens > 0,
@@ -885,22 +974,28 @@ impl LlmUsage {
                 unpriced_reason,
                 projected_cost_usd,
             ),
-            pricing: (cost_usd.is_some() && receipt.provider_cost_usd.is_none() && !free_route)
+            pricing: (cost_usd.is_some()
+                && receipt.provider_cost_usd.is_none()
+                && (!free_route || settlement.has_priced_hosted_tools))
                 .then(|| {
                     detail.as_ref().map(|detail| {
-                        let mut facts = pricing_facts(detail, settled_at_ms, cache_ttl);
-                        if let Some(settlement) = &settlement {
-                            facts.platform_fee_estimate_usd = settlement.platform_fee_estimate_usd;
-                            facts.hosted_tool_unpriced = settlement.hosted_tool_unpriced.clone();
-                            facts.modality_unpriced = settlement.modality_unpriced.clone();
-                            facts.monthly_allowance_unapplied =
-                                settlement.monthly_allowance_unapplied.clone();
-                        }
-                        Box::new(facts)
+                        Box::new(pricing_facts(
+                            detail,
+                            settled_at_ms,
+                            cache_ttl,
+                            &settlement,
+                            free_route,
+                        ))
                     })
                 })
                 .flatten(),
             billing,
+        };
+        ProviderReceiptSettlement {
+            usage,
+            pricing: detail,
+            billing: settlement,
+            free_inference: free_route,
         }
     }
 
@@ -1046,6 +1141,13 @@ impl LlmUsage {
             (Some(false), _) | (Some(true), false) => Some("unsupported"),
             (Some(true), true) => None,
         }
+    }
+
+    /// Whether the cache counts are a provider measurement: the route declared
+    /// cache accounting and the response carried the counters. An unsupported,
+    /// undeclared, or omitted count is not a measured zero.
+    pub(crate) fn cache_counts_reported(&self) -> bool {
+        self.cache_counts_present && self.cache_visibility().is_none()
     }
 
     /// Mechanically add the canonical accounting fields to the flat provider
@@ -1272,8 +1374,12 @@ impl ToolProbeUsage {
         if input_tokens.is_some() && output_tokens.is_some() {
             let receipt = ProviderUsageReceipt::new(input_tokens, output_tokens, None, false)
                 .with_cache(
-                    reported.cache_read_tokens.unwrap_or(0),
-                    reported.cache_write_tokens.unwrap_or(0),
+                    CacheCounts {
+                        read_tokens: reported.cache_read_tokens.unwrap_or(0),
+                        write_tokens: reported.cache_write_tokens.unwrap_or(0),
+                        reported: reported.cache_read_tokens.is_some()
+                            || reported.cache_write_tokens.is_some(),
+                    },
                     None,
                     reported.cache_read_tokens.is_some() || reported.cache_write_tokens.is_some(),
                 );

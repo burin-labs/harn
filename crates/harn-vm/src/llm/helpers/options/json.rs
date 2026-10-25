@@ -1,4 +1,4 @@
-pub(crate) fn extract_json(text: &str) -> String {
+pub fn extract_json(text: &str) -> String {
     crate::stdlib::json::extract_json_from_text(text)
 }
 
@@ -18,6 +18,6 @@ pub(crate) fn resolve_timeout_secs(timeout_ms: Option<i64>) -> Option<u64> {
     })
 }
 
-pub(crate) fn expects_structured_output(opts: &crate::llm::api::LlmCallOptions) -> bool {
+pub fn expects_structured_output(opts: &crate::llm::api::LlmCallOptions) -> bool {
     opts.output_format.is_structured() || opts.output_schema.is_some()
 }

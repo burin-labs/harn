@@ -25,7 +25,7 @@ mod tool_result_provenance;
 mod transport;
 pub(crate) use transport::reqwest_send_error;
 
-use crate::value::{ErrorCategory, VmError, VmValue};
+use crate::value::{ErrorCategory, VmDictExt, VmError, VmValue};
 
 use super::mock::{
     fixture_hash_for_request, get_replay_mode, load_fixture, mock_llm_response,
@@ -68,7 +68,7 @@ pub use ollama::{
     OLLAMA_DEFAULT_NUM_CTX, OLLAMA_HOST_ENV,
 };
 pub(crate) use openai_normalize::normalize_openai_style_messages;
-pub(crate) use options::{
+pub use options::{
     push_unique_anthropic_beta_feature, DeltaSender, LlmApiMode, LlmCallOptions, LlmRequestPayload,
     LlmRequestPayloadExt, LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy,
     LlmRoutingDecision, LogprobsConfig, MirostatConfig, OutputFormat, PromptCacheTtl,
@@ -80,8 +80,7 @@ pub(crate) use response::empty_generation_error;
 #[cfg(test)]
 pub(crate) use response::parse_llm_response as parse_llm_response_for_provider;
 pub(crate) use response::{
-    extract_cache_read_tokens, extract_cache_write_tokens, parse_openai_responses_response,
-    ProviderResponseEnvelope,
+    extract_cache_counts, parse_openai_responses_response, ProviderResponseEnvelope,
 };
 #[cfg(test)]
 pub(crate) use result::test_text_projection;
@@ -217,7 +216,7 @@ impl OffthreadLlmError {
                 category,
             },
             None => self.thrown.map_or_else(
-                || VmError::Thrown(VmValue::String(arcstr::ArcStr::from(self.message))),
+                || VmError::Thrown(VmValue::string(self.message)),
                 VmError::Thrown,
             ),
         }
@@ -265,6 +264,60 @@ pub(crate) async fn vm_call_llm_full(opts: &LlmCallOptions) -> Result<LlmResult,
     .await
 }
 
+/// A provider call that completed, with the budget stop its settlement raised.
+///
+/// The response was already paid for when the ceiling refused it, so the stop
+/// travels with the result instead of replacing it. Dropping the result there
+/// lost the call from every ledger that a stop is reported from.
+pub(crate) struct SettledCall {
+    pub(crate) result: LlmResult,
+    pub(crate) stop: Option<VmError>,
+}
+
+fn settle_completed_call(
+    reservation: Option<super::admission::AttemptReservation>,
+    result: LlmResult,
+) -> SettledCall {
+    let admission_result = reservation
+        .map(|reservation| reservation.settle(&result))
+        .transpose();
+    let usage_result = super::cost::record_llm_usage(&result);
+    SettledCall {
+        stop: admission_result.and(usage_result).err(),
+        result,
+    }
+}
+
+/// The error a settlement stop throws: its usual taxonomy plus the completed
+/// call, so the agent loop can record the spend that triggered it.
+pub(crate) fn settlement_stop_error(stop: &VmError, result: &LlmResult) -> VmError {
+    let VmValue::Dict(dict) =
+        super::call::build_llm_error_dict(stop, &result.provider, &result.model)
+    else {
+        return stop.clone();
+    };
+    let mut dict = dict.as_ref().clone();
+    let mut call = std::collections::BTreeMap::new();
+    call.put_str("provider", &result.provider);
+    call.put_str("model", &result.model);
+    call.put(
+        "stop_reason",
+        result
+            .stop_reason
+            .as_deref()
+            .map_or(VmValue::Nil, VmValue::string),
+    );
+    call.put(
+        "usage",
+        VmValue::dict(result.usage().to_vm_dict(&result.attempts)),
+    );
+    dict.insert(
+        crate::value::intern_key("settled_call"),
+        VmValue::dict(call),
+    );
+    VmError::Thrown(VmValue::dict(dict))
+}
+
 /// Execute exactly one prepared provider/model route. Observability calls this
 /// primitive after it emits the request receipt. The unforgeable token keeps
 /// every other caller on the logical, observed entry points above.
@@ -272,7 +325,7 @@ pub(crate) async fn vm_call_llm_full_single_route_prepared(
     observed: &super::agent_observe::ObservedAttemptToken,
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
-) -> Result<LlmResult, VmError> {
+) -> Result<SettledCall, VmError> {
     let reservation = super::admission::reserve(opts, request, observed.token_projection())?;
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let mut first_token = super::first_token::FirstTokenTimer::for_current_span();
@@ -297,13 +350,7 @@ pub(crate) async fn vm_call_llm_full_single_route_prepared(
     while delta_rx.try_recv().is_ok() {
         first_token.observe_delta();
     }
-    let admission_result = reservation
-        .map(|reservation| reservation.settle(&result))
-        .transpose();
-    let usage_result = super::cost::record_llm_usage(&result);
-    admission_result?;
-    usage_result?;
-    Ok(result)
+    Ok(settle_completed_call(reservation, result))
 }
 
 /// Execute an LLM call, streaming text deltas to `delta_tx`.
@@ -332,7 +379,7 @@ pub(crate) async fn vm_call_llm_full_streaming_single_route_prepared(
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
     delta_tx: DeltaSender,
-) -> Result<LlmResult, VmError> {
+) -> Result<SettledCall, VmError> {
     let reservation = super::admission::reserve(opts, request, observed.token_projection())?;
     let result = vm_call_llm_full_inner_request(
         observed,
@@ -341,13 +388,7 @@ pub(crate) async fn vm_call_llm_full_streaming_single_route_prepared(
         ProviderExecution::Inline,
     )
     .await?;
-    let admission_result = reservation
-        .map(|reservation| reservation.settle(&result))
-        .transpose();
-    let usage_result = super::cost::record_llm_usage(&result);
-    admission_result?;
-    usage_result?;
-    Ok(result)
+    Ok(settle_completed_call(reservation, result))
 }
 
 /// Execute provider I/O on Tokio's multithreaded scheduler while keeping
@@ -378,7 +419,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
     opts: &LlmCallOptions,
     request: LlmRequestPayload,
     delta_tx: DeltaSender,
-) -> Result<LlmResult, VmError> {
+) -> Result<SettledCall, VmError> {
     let reservation = super::admission::reserve(opts, &request, observed.token_projection())?;
     let result = vm_call_llm_full_inner_request(
         observed,
@@ -387,13 +428,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
         ProviderExecution::Offthread,
     )
     .await?;
-    let admission_result = reservation
-        .map(|reservation| reservation.settle(&result))
-        .transpose();
-    let usage_result = super::cost::record_llm_usage(&result);
-    admission_result?;
-    usage_result?;
-    Ok(result)
+    Ok(settle_completed_call(reservation, result))
 }
 
 #[derive(Clone, Copy)]
@@ -467,8 +502,8 @@ async fn vm_call_llm_full_inner_request(
             super::trigger_predicate::note_result(request, &result);
             return Ok(complete_bypass_result(request, result, delta_tx, None));
         }
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("No fixture found for LLM call (hash: {hash}). Run with --record first."),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "No fixture found for LLM call (hash: {hash}). Run with --record first."
         ))));
     }
 
@@ -535,9 +570,9 @@ async fn execute_provider_request(
     }))
     .await
     .map_err(|join_err| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "llm_call background task failed: {join_err}"
-        ))))
+        )))
     })?
     .map_err(OffthreadLlmError::into_vm_error)
 }
@@ -553,12 +588,36 @@ async fn dispatch_provider_request(
 ) -> Result<LlmResult, VmError> {
     let _permit = observed.admit_provider_request().await?;
     observed.record_provider_dispatch();
-    let mut result = vm_call_llm_api(request, delta_tx).await?;
+    let meter = observed.inference_speed().clone();
+    meter.start();
+    let (delta_tx, text_tee) = match delta_tx {
+        Some(tx) => {
+            let (tx, tee) = meter.tee_text(tx);
+            (Some(tx), Some(tee))
+        }
+        None => (None, None),
+    };
+    let outcome =
+        super::inference_speed::scope(meter.clone(), Box::pin(vm_call_llm_api(request, delta_tx)))
+            .await;
+    if let Some(tee) = text_tee {
+        // The tee drains once the adapter drops its sender; a sender an
+        // adapter leaked must not hold the call open.
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(200), tee).await;
+    }
+    let mut result = match outcome {
+        Ok(result) => result,
+        Err(error) => {
+            meter.abandon();
+            return Err(error);
+        }
+    };
     result.telemetry.inference_boundary_rule = boundary_rule;
     super::mock::mark_live_after_mock_prefix(request, &mut result);
     if let Some(recording) = recording {
         recording.record(&result);
     }
+    meter.finish(&mut result);
     record_cli_llm_result(request, &result);
     Ok(result)
 }

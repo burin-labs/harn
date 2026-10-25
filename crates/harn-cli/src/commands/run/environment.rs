@@ -289,20 +289,17 @@ pub(crate) fn launch_scope(
     ))
 }
 
-/// Project a validated process ceiling without replacing a narrower session.
+/// Declare a subprocess environment and apply the optional host inference ceiling.
+/// Existing session policy stays in force.
 pub(crate) fn host_environment_scope(
     boundary: Option<harn_vm::llm::api::InferenceBoundary>,
-) -> Option<harn_vm::stdlib::process::SessionEnvironmentGuard> {
-    boundary.map(|boundary| {
-        harn_vm::stdlib::process::declare_session_environment_if_absent(
-            SessionEnvironment::inherited(),
-        )
-        .with_host_inference_boundary(Some(boundary))
-    })
+) -> harn_vm::stdlib::process::SessionEnvironmentGuard {
+    harn_vm::stdlib::process::declare_session_environment_if_absent(SessionEnvironment::inherited())
+        .with_host_inference_boundary(boundary)
 }
 
 pub(crate) fn process_host_environment_scope(
-) -> Result<Option<harn_vm::stdlib::process::SessionEnvironmentGuard>, String> {
+) -> Result<harn_vm::stdlib::process::SessionEnvironmentGuard, String> {
     Ok(host_environment_scope(
         harn_vm::llm::api::InferenceBoundary::capture_process()?,
     ))

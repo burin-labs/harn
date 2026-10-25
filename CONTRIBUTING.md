@@ -17,6 +17,10 @@ This script:
 - enables the sccache rustc wrapper via a local `.cargo/config.toml`
 - writes a private Cargo `target-dir` under the developer cache for each
   worktree so parallel builds stay isolated
+- compiles Harn's own crates with rustc's parallel front end (`-Zthreads=8`)
+  through a workspace rustc wrapper, which roughly halves `harn-vm`'s compile;
+  dependencies compile as on stable, CI applies the same wrapper through its
+  Rust toolchain action, and `HARN_RUSTC_FRONTEND_THREADS=1` turns it off
 - installs repo-local markdown tooling plus Node dependencies for the portal,
   `tree-sitter-harn/`, and `editors/vscode/` when `npm` is available
 - builds `crates/harn-cli/portal-dist` when `npm` is available
@@ -246,7 +250,8 @@ The detection logic lives in
 [`.github/scripts/demo-gate.sh`](.github/scripts/demo-gate.sh) and
 flags additions to:
 
-- **Stdlib builtins** — `crates/harn-vm/src/stdlib/**/*.rs`: a new
+- **Stdlib builtins** — `crates/harn-vm/src/stdlib/**/*.rs`,
+  `crates/harn-builtins/src/**/*.rs`, or `crates/harn-flow/src/**/*.rs`: a new
   `#[harn_builtin]` annotation. See
   [Adding a stdlib builtin](#adding-a-stdlib-builtin) for the canonical
   proc-macro pattern.
@@ -353,29 +358,46 @@ New stdlib builtins are registered with the `#[harn_builtin]` proc-macro
 both the runtime entry and the parser `BuiltinSignature`, so there is no
 separate Rust-side signature table to keep in sync.
 
+A new builtin family goes in its own module at the root of
+`crates/harn-builtins/src/`, which compiles beside `harn-vm` instead of inside
+it. Keep a family in `crates/harn-vm/src/stdlib/` only when `harn-vm` itself
+calls into it, its runtime drives it (the trigger dispatcher, connectors, the
+embedded agent stdlib), or it belongs to the language prelude. Binaries reach
+every family through `harn-runtime`, so a new family needs no registration
+outside its own module.
+
+Declare how scripts can reach the builtin with `exposure`. Pure and internal
+builtins imply empty effects. Harness methods and privileged wire calls require
+an explicit `effects` list. The macro rejects effects on pure builtins.
+
 ```rust
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use harn_vm::stdlib::macros::harn_builtin;
+use harn_vm_core::value::{VmError, VmValue};
 
 /// Sync builtin: short signature in Harn syntax, return type after `->`.
-#[harn_builtin(sig = "bytes_to_hex(input: bytes) -> string", category = "bytes")]
+#[harn_builtin(exposure = "pure", sig = "bytes_to_hex(input: bytes) -> string", category = "bytes")]
 fn bytes_to_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     // ... implementation returning Ok(VmValue::String(...)) ...
 }
 
 /// Async builtin: declare `kind = "async"` and write an `async fn`.
 #[harn_builtin(
+    exposure = "harness.runtime.with_autonomy_policy",
+    effects = ["state.mutate@const=runtime-policy"],
     sig = "with_autonomy_policy(policy: dict, fn: closure) -> any",
     kind = "async",
     category = "runtime_scope"
 )]
-async fn with_autonomy_policy_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn with_autonomy_policy_impl(
+    ctx: harn_vm_core::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     // ... await your async work, return Ok(...) ...
 }
 
 /// Aliases share the impl + signature; each emits its own parser entry.
 #[harn_builtin(
+    exposure = "pure",
     sig = "render(template: string, vars: dict?) -> string",
     aliases = ["render_prompt"],
     category = "strings"
@@ -388,22 +410,22 @@ fn render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 /// signature set. Use for double-underscore internals (`__harn_*`) that
 /// scripts must not call directly.
 #[harn_builtin(
+    exposure = "runtime_internal",
     sig = "__harn_with_execution_policy_override(policy: dict, fn: closure) -> any",
     kind = "async",
     category = "runtime_scope",
     runtime_only = true
 )]
 async fn harn_with_execution_policy_override_impl(
+    ctx: harn_vm_core::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     // ... internal-only handler body ...
 }
 
-/// The macro captures the declaring module. The registry owns membership;
-/// the module installer keeps its place in ordered runtime initialization.
-pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+// Installs every `#[harn_builtin]` declared in this module, in the `Pure`
+// tier of ordered runtime initialization.
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_bytes_builtins);
 ```
 
 ### Reading arguments
@@ -454,9 +476,15 @@ Wire-up checklist:
    their initialization alongside registration.
 3. The macro contributes definitions to `all_builtin_defs()` automatically.
    Do not add a parallel membership list.
-4. Make sure your module's `register_*_builtins(vm)` is called from one of
-   `register_core_stdlib`, `register_io_stdlib`, or
-   `register_agent_stdlib_{before,after}_llm` in the same file.
+4. Declare the module's installer. When it registers exactly the module's
+   `#[harn_builtin]`s, write
+   `harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_x_builtins);`;
+   otherwise declare a hand-written installer beside it with
+   `harn_vm_core::stdlib_installer!(Pure, register_x_builtins);`. Use `Pure`
+   for deterministic builtins with no I/O and `Host` for everything else.
+   Installers must not register a name another installer registers. A
+   module that keeps thread-local state declares its reset with
+   `harn_vm_core::stdlib_state_reset!(reset_x_state);`.
 5. Read the arguments through `Args` / `Options` (see
    [Reading arguments](#reading-arguments)).
 6. Add or update a `harn explain <name>` snapshot / conformance fixture

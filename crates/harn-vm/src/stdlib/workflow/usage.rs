@@ -1,5 +1,6 @@
 //! LLM usage/tracing snapshots and delta accounting.
 
+use crate::llm::usage::ReportedCacheTotals;
 use crate::orchestration::LlmUsageRecord;
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -12,6 +13,9 @@ pub(super) struct UsageSnapshot {
     pub(super) unpriced_calls: i64,
     pub(super) usage_unknown_calls: i64,
     pub(super) trace_len: usize,
+    #[serde(default)]
+    // Boxed: snapshots sit by value in workflow frames across awaits, so inline size is paid per frame.
+    pub(super) cache: Box<ReportedCacheTotals>,
 }
 
 pub(super) fn llm_usage_snapshot() -> UsageSnapshot {
@@ -25,6 +29,7 @@ pub(super) fn llm_usage_snapshot() -> UsageSnapshot {
         unpriced_calls: trace.cost.unpriced_calls,
         usage_unknown_calls: trace.cost.usage_unknown_calls,
         trace_len: usize::try_from(trace.call_count).unwrap_or(usize::MAX),
+        cache: Box::new(trace.cache),
     }
 }
 
@@ -44,6 +49,7 @@ pub(super) fn llm_usage_delta(before: &UsageSnapshot, after: &UsageSnapshot) -> 
 
     let known_cost_usd = (after.total_cost - before.total_cost).max(0.0);
     let unpriced_calls = after.unpriced_calls.saturating_sub(before.unpriced_calls);
+    let cache = after.cache.since(&before.cache);
     LlmUsageRecord {
         input_tokens: after.input_tokens.saturating_sub(before.input_tokens),
         output_tokens: after.output_tokens.saturating_sub(before.output_tokens),
@@ -58,6 +64,8 @@ pub(super) fn llm_usage_delta(before: &UsageSnapshot, after: &UsageSnapshot) -> 
         cost_usd: (unpriced_calls == 0).then_some(known_cost_usd),
         known_cost_usd,
         total_cost: known_cost_usd,
+        cache_read_tokens: cache.reported_read_tokens(),
+        cache_write_tokens: cache.reported_write_tokens(),
         models,
     }
 }

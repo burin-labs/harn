@@ -1,6 +1,8 @@
 use super::*;
 use crate::value::VmDictExt;
 
+mod doas;
+mod find_delete;
 mod git_discard;
 mod git_push;
 mod preflight;
@@ -201,12 +203,9 @@ fn deterministic_scan_marks_dynamic_dispatch_dialects_and_malformed_argv_unresol
 fn canonical_context_binds_mode_argv_shape_and_resolved_shell_once() {
     let mut malformed = crate::value::DictMap::new();
     malformed.put_str("mode", "argv");
-    malformed.insert(
-        crate::value::intern_key("argv"),
-        VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(arcstr::ArcStr::from("printf")),
-            VmValue::Int(7),
-        ])),
+    malformed.put(
+        "argv",
+        VmValue::list(vec![VmValue::string("printf"), VmValue::Int(7)]),
     );
     let malformed_context =
         command_context_json(&malformed, &CommandPolicy::default(), JsonValue::Null);
@@ -358,16 +357,19 @@ fn deterministic_scan_projects_quote_aware_shell_command_groups() {
                 {
                     "text": "ps -axo command",
                     "argv": ["ps", "-axo", "command"],
+                    "xargs_child_argv": [],
                     "writes_to_file": false,
                 },
                 {
                     "text": "rg 'rustc .*harn_vm|cargo build --locked'",
                     "argv": ["rg", "rustc .*harn_vm|cargo build --locked"],
+                    "xargs_child_argv": [],
                     "writes_to_file": false,
                 },
                 {
                     "text": "head -n 20",
                     "argv": ["head", "-n", "20"],
+                    "xargs_child_argv": [],
                     "writes_to_file": false,
                 },
             ],
@@ -375,10 +377,28 @@ fn deterministic_scan_projects_quote_aware_shell_command_groups() {
                 {
                     "text": "git status --short",
                     "argv": ["git", "status", "--short"],
+                    "xargs_child_argv": [],
                     "writes_to_file": false,
                 },
             ],
         ])
+    );
+}
+
+#[test]
+fn deterministic_scan_projects_the_command_an_xargs_stage_launches() {
+    let scan = command_risk_scan_json(&shell_ctx("printf x | xargs -n 1 git stash drop"), None);
+    assert_eq!(
+        scan["shell_command_groups"][0][1]["xargs_child_argv"],
+        serde_json::json!(["git", "stash", "drop"])
+    );
+    let unresolved = command_risk_scan_json(
+        &shell_ctx("printf x | xargs --unknown git stash drop"),
+        None,
+    );
+    assert_eq!(
+        unresolved["shell_command_groups"][0][1]["xargs_child_argv"],
+        serde_json::json!([])
     );
 }
 
@@ -1047,6 +1067,8 @@ fn floor_blocks_quoting_and_chaining_adversarial_forms() {
         "git reset --hard && echo done",
         "echo start; git clean -fdx; echo end",
         "sudo rm -rf /etc",
+        "doas rm -rf /etc",
+        "doas -u root git reset --hard",
     ] {
         assert!(
             is_cat_root(cmd),
@@ -1103,6 +1125,7 @@ fn floor_blocks_in_root_project_wipes() {
         "echo ok & rm -rf ./*",
         "env FOO=bar rm -rf ${PWD}/*",
         "sudo -u root rm --recursive --force .",
+        "doas -n -u root rm --recursive --force .",
         "command -- rm -rf .",
         "command -p rm -rf .",
         "bash -lc 'rm -rf ./*'",
@@ -1290,14 +1313,7 @@ fn dd_input_read_is_no_longer_flagged_destructive() {
 fn argv_params(argv: &[&str]) -> crate::value::DictMap {
     let mut params = crate::value::DictMap::new();
     params.put_str("mode", "argv");
-    params.insert(
-        crate::value::intern_key("argv"),
-        VmValue::List(std::sync::Arc::new(
-            argv.iter()
-                .map(|arg| VmValue::String(arcstr::ArcStr::from(*arg)))
-                .collect(),
-        )),
-    );
+    params.put("argv", VmValue::strings(argv.iter().copied()));
     params
 }
 

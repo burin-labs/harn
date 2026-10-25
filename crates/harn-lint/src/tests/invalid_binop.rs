@@ -2,26 +2,19 @@
 
 use super::*;
 
-#[test]
-fn test_invalid_binary_op_literal_nil() {
-    let diags = lint_source(
-        r"
+#[rstest::rstest]
+#[case::test_invalid_binary_op_literal_nil(
+    r"
 pipeline default(task) {
 const x = nil - 5
 log(x)
 }
 ",
-    );
-    assert!(
-        has_rule(&diags, "invalid-binary-op-literal"),
-        "expected invalid-binary-op-literal for nil in arithmetic: {diags:?}"
-    );
-}
-
-#[test]
-fn test_no_invalid_binary_op_for_valid_types() {
-    let diags = lint_source(
-        r#"
+    "invalid-binary-op-literal",
+    true
+)]
+#[case::test_no_invalid_binary_op_for_valid_types(
+    r#"
 pipeline default(task) {
 const x = 1 + 2
 const y = "a" + "b"
@@ -29,10 +22,15 @@ log(x)
 log(y)
 }
 "#,
-    );
-    assert!(
-        !has_rule(&diags, "invalid-binary-op-literal"),
-        "should not fire for valid operand types: {diags:?}"
+    "invalid-binary-op-literal",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }
 

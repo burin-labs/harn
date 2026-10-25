@@ -227,8 +227,7 @@ fn parse_append_options(args: &[VmValue]) -> Result<AppendPageOptions, VmValue> 
 
 #[cfg(unix)]
 fn file_identity(_file: &std::fs::File, metadata: &std::fs::Metadata) -> std::io::Result<String> {
-    use std::os::unix::fs::MetadataExt;
-    Ok(format!("unix:{}:{}", metadata.dev(), metadata.ino()))
+    Ok(super::metadata::unix_file_identity(metadata))
 }
 
 #[cfg(windows)]
@@ -588,7 +587,6 @@ fn append_page_value(page: AppendLinePage) -> VmValue {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "read_lines_page_result(path: string, options?: dict) -> Result<{lines: list<{line: int, offset: int, text: string}>, next_offset: int, next_line: int, done: bool}, dict>",
     category = "fs",
     doc = "Read one byte- and record-bounded page of UTF-8 lines with a resumable cursor."
@@ -622,7 +620,6 @@ fn read_lines_page_result_builtin(args: &[VmValue], _out: &mut String) -> Result
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "read_lines_append_page_result(path: string, options?: dict) -> Result<{lines: list<{line: int, offset: int, text: string}>, next_cursor: {offset: int, line: int, file_identity: string, observed_size: int, generation?: string}, reset_reason?: string, partial_tail_bytes: int, caught_up: bool}, dict>",
     category = "fs",
     doc = "Read one bounded page of newline-committed UTF-8 lines from a growing file."
@@ -1001,7 +998,7 @@ mod tests {
         let page = result_payload(
             read_lines_page_result_builtin(
                 &[
-                    VmValue::String(arcstr::ArcStr::from(path.to_string_lossy().as_ref())),
+                    VmValue::string(path.to_string_lossy().as_ref()),
                     VmValue::dict(options),
                 ],
                 &mut out,
@@ -1038,9 +1035,7 @@ mod tests {
         let mut out = String::new();
         let failure = result_payload(
             read_lines_page_result_builtin(
-                &[VmValue::String(arcstr::ArcStr::from(
-                    path.to_string_lossy().as_ref(),
-                ))],
+                &[VmValue::string(path.to_string_lossy().as_ref())],
                 &mut out,
             )
             .unwrap(),
@@ -1059,9 +1054,7 @@ mod tests {
         });
         let append_failure = result_payload(
             read_lines_append_page_result_builtin(
-                &[VmValue::String(arcstr::ArcStr::from(
-                    path.to_string_lossy().as_ref(),
-                ))],
+                &[VmValue::string(path.to_string_lossy().as_ref())],
                 &mut out,
             )
             .unwrap(),

@@ -79,8 +79,7 @@ use crate::tools::args::{dict_arg, optional_bool, optional_string};
 use super::builtins::SharedIndex;
 use super::refactor_core::{
     contained_path, first_syntax_error, parse_kind, plan_file, read_source, reference_sites,
-    resolve_seed, resolves_inside, write_plans, ReferenceKind, ReferenceSite, SeedCandidate,
-    SeedLookup,
+    resolve_seed, resolves_inside, write_plans, ReferenceKind, ReferenceSite, SeedLookup,
 };
 use super::state::IndexState;
 use super::symbol_graph::NodeKind;
@@ -102,6 +101,7 @@ pub(crate) struct Request {
     pub(crate) line: Option<u32>,
     pub(crate) kind: Option<NodeKind>,
     pub(crate) dry_run: bool,
+    pub(crate) proof: bool,
     pub(crate) session_id: Option<String>,
 }
 
@@ -158,6 +158,7 @@ impl Request {
             line,
             kind,
             dry_run: optional_bool(BUILTIN, dict, "dry_run", false)?,
+            proof: optional_bool(BUILTIN, dict, "proof", false)?,
             session_id: optional_string(BUILTIN, dict, "session_id")?,
         })
     }
@@ -222,6 +223,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
                 &state.root,
                 &outcome.response.plans,
                 request.session_id.as_deref(),
+                &crate::host_call::workspace_writes(),
             )?;
             if request.session_id.is_none() {
                 for plan in &outcome.response.plans {
@@ -327,21 +329,16 @@ fn plan(
     if let SeedLookup::Many(candidates) = &lookup {
         // Fields and enum cases never move, so a struct field that shares
         // the item's name does not make the item ambiguous.
-        let movable: Vec<&SeedCandidate> = candidates
+        let movable: Vec<_> = candidates
             .iter()
-            .filter(|(path, _, kind)| path == source_path && !matches!(*kind, "Field" | "EnumCase"))
+            .filter_map(|id| state.symbols.node(*id))
+            .filter(|node| {
+                node.path.as_ref() == source_path
+                    && !matches!(node.kind, NodeKind::Field | NodeKind::EnumCase)
+            })
             .collect();
-        if let [(_, line, kind)] = movable.as_slice() {
-            let narrowed = resolve_seed(
-                &state.symbols,
-                source_path,
-                name,
-                Some(*line),
-                parse_kind(BUILTIN, kind).ok(),
-            );
-            if matches!(narrowed, SeedLookup::One(_)) {
-                lookup = narrowed;
-            }
+        if let [node] = movable.as_slice() {
+            lookup = SeedLookup::One(node.id);
         }
     }
     let seed = match lookup {
@@ -357,7 +354,7 @@ fn plan(
                 "ambiguous_symbol",
                 format!("several declarations are named `{name}`; pass `line` or `kind`"),
             );
-            outcome.response.candidates = candidates;
+            outcome.response.candidates = super::refactor_core::candidate_locations(&state.symbols, &candidates);
             return Ok(outcome);
         }
     };
@@ -475,7 +472,7 @@ fn plan(
         .cloned()
     else {
         return Ok(refuse(
-            "error",
+            "not_top_level",
             format!("`{name}` is not a top-level declaration in `{source_path}`; only top-level items move"),
         ));
     };
@@ -654,6 +651,93 @@ fn plan(
             blocked,
         ));
     }
+    // Code that reads a restricted field of the moved struct and would not
+    // see it from the destination. Only modules that saw the field before are
+    // scanned; elsewhere a same-named field belongs to another type.
+    if let (
+        Lang::Rust(ws),
+        ModuleRef::Rust {
+            crate_dir: source_crate,
+            path: from,
+        },
+        ModuleRef::Rust { path: to, .. },
+    ) = (&mut lang, &source_module, &dest_module)
+    {
+        let mut regions = Vec::new();
+        for (field, path) in rust::hidden_fields(item_node, &src.source) {
+            let before = rust::visible_from(from, &path).unwrap_or_default();
+            match rust::visible_from(to, &path) {
+                Some(after) if to.starts_with(&after) => regions.push((field, before, after)),
+                _ => {
+                    return Ok(refuse(
+                        "visibility_required",
+                        format!("field `{field}` of `{name}` is visible in `{path}`, which does not contain the destination; widen it first"),
+                    ));
+                }
+            }
+        }
+        let fields: Vec<String> = regions.iter().map(|(field, ..)| field.clone()).collect();
+        let mut paths: Vec<&str> = state
+            .files
+            .values()
+            .map(|file| file.relative_path.as_str())
+            .filter(|path| Language::detect(Path::new(path), None) == Some(Language::Rust))
+            .collect();
+        paths.sort_unstable();
+        let mut readers = Vec::new();
+        for path in paths {
+            let Some(ModuleRef::Rust {
+                crate_dir,
+                path: module,
+            }) = ws.module_of(path)
+            else {
+                continue;
+            };
+            let breaks = |field: &str| {
+                regions.iter().any(|(f, before, after)| {
+                    f == field && module.starts_with(before) && !module.starts_with(after)
+                })
+            };
+            if crate_dir != *source_crate || !fields.iter().any(|field| breaks(field)) {
+                continue;
+            }
+            if path == source_path {
+                readers.extend(rust::field_reads(
+                    path,
+                    &src.source,
+                    &src.tree,
+                    name,
+                    &fields,
+                    &breaks,
+                    Some(&moved),
+                ));
+                continue;
+            }
+            let text = read_source(BUILTIN, &state.root, path, session)?;
+            let mentions = text.contains(name)
+                || fields.iter().any(|field| {
+                    breaks(field)
+                        && if field.parse::<usize>().is_ok() {
+                            text.contains(&format!(".{field}"))
+                        } else {
+                            text.contains(field.as_str())
+                        }
+                });
+            if mentions {
+                let tree = parse(&text, Language::Rust)?;
+                readers.extend(rust::field_reads(
+                    path, &text, &tree, name, &fields, &breaks, None,
+                ));
+            }
+        }
+        if !readers.is_empty() {
+            return Ok(refuse_with_sites(
+                "visibility_required",
+                format!("code outside the destination reads fields of `{name}` it would no longer see; make them `pub(crate)` first"),
+                readers,
+            ));
+        }
+    }
 
     // 5. Every referencing file.
     let references = reference_sites(BUILTIN, state, seed, session)?;
@@ -692,6 +776,42 @@ fn plan(
                 imports: Vec::new(),
             },
         );
+    }
+
+    // Import requests render at the top of a file, so a list import inside a
+    // nested module or function would lose the name.
+    let nested: Vec<Site> = works
+        .values()
+        .flat_map(|work| {
+            work.model
+                .bindings
+                .iter()
+                .filter(|b| {
+                    !b.top_level
+                        && !b.sole
+                        && b.shape == Shape::Named
+                        && b.imported == name
+                        && b.target == source_module
+                })
+                .map(|b| {
+                    Site::at(
+                        &work.path,
+                        &work.source,
+                        b.statement.start,
+                        "import",
+                        "a nested import list naming the moved item",
+                    )
+                })
+        })
+        .collect();
+    if !nested.is_empty() {
+        return Ok(refuse_with_sites(
+            "nested_import",
+            format!(
+                "`{name}` is imported in a list inside a nested scope; split that import first"
+            ),
+            nested,
+        ));
     }
 
     let mut outside_users: Vec<Site> = Vec::new();
@@ -1040,7 +1160,12 @@ fn remaining_names(
     let kinds = language.rename_identifier_kinds().unwrap_or(&[]);
     let mut names = HashSet::new();
     text::walk(tree.root_node(), |node| {
-        if excluded.contains(&node.start_byte()) || model.in_import(node.start_byte()) {
+        // Prune only nodes wholly inside; the root starts where a leading
+        // `use` does.
+        let span = node.byte_range();
+        if text::covers(excluded, &span)
+            || model.import_ranges.iter().any(|r| text::covers(r, &span))
+        {
             return false;
         }
         if kinds.contains(&node.kind()) {

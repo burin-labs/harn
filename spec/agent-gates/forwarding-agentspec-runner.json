@@ -1,6 +1,20 @@
 [
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+    "expression": "render_agent_prompt_id(harness.fs, \"agent.operating_guidance\", {}, opts)",
+    "owner": "render_agent_prompt_id",
+    "evidence": "The prompt renderer validates logical IDs and reads typed overrides at its audited options boundary.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "render_agent_prompt_id",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
     "expression": "agent_required_tools_missing_from_session(opts, state.successful_tools_seen)",
     "owner": "agent_required_tools_missing_from_session",
@@ -17,6 +31,20 @@
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_denial_cutoff.harn",
     "expression": "agent_session_record_usage(\n    harness.agent,\n    session_id,\n    llm_result,\n    turn_llm_opts,\n    iteration,\n  )",
+    "owner": "agent_session_record_usage",
+    "evidence": "Consumer agent_session_record_usage.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_session_record_usage",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_provider_failure.harn",
+    "expression": "agent_session_record_usage(agent, session_id, settled_call, turn_llm_opts, state.iteration + 1)",
     "owner": "agent_session_record_usage",
     "evidence": "Consumer agent_session_record_usage.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [

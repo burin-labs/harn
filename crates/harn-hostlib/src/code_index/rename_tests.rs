@@ -31,6 +31,92 @@ fn build_index(root: &Path) -> CodeIndexCapability {
 }
 
 #[test]
+fn registered_positioned_rename_selects_exact_declarations_and_refuses_wrong_constraints() {
+    use crate::{BuiltinRegistry, HostlibCapability};
+    let dir = tempdir().unwrap();
+    for (file, source) in [
+        (
+            "a.ts",
+            "/* 😀 */ export function load() { return 1; }\nconst result = load();\n",
+        ),
+        (
+            "a.rs",
+            "/* 😀 */ pub fn load() -> i32 { 1 }\npub fn result() -> i32 { load() }\n",
+        ),
+    ] {
+        let source_path = dir.path().join(file);
+        fs::write(&source_path, source).unwrap();
+        let capability = build_index(dir.path());
+        {
+            let shared = capability.shared();
+            let guard = shared.lock().unwrap();
+            assert_eq!(
+                guard
+                    .as_ref()
+                    .unwrap()
+                    .symbols
+                    .iter_nodes()
+                    .filter(|node| node.kind == NodeKind::Function && node.name == "load")
+                    .count(),
+                1
+            );
+        }
+        let mut registry = BuiltinRegistry::new();
+        capability.register_builtins(&mut registry);
+        let offset = source.find("load").unwrap();
+        let col = source.get(..offset).unwrap().encode_utf16().count() as i64 + 1;
+        let request = |name: &str, path: &str, column: i64| {
+            dict(&[
+                (
+                    "symbol_ref",
+                    dict(&[
+                        ("name", vm_string(name)),
+                        ("path", vm_string(path)),
+                        ("line", VmValue::Int(1)),
+                        ("col", VmValue::Int(column)),
+                        ("kind", vm_string("Function")),
+                    ]),
+                ),
+                ("new_name", vm_string("loadById")),
+                ("scope", vm_string("workspace")),
+                ("backend", vm_string("syntax_tree")),
+            ])
+        };
+        for (name, path, column) in [
+            ("load", file, offset as i64 + 1),
+            ("Unknown.load", file, col),
+            ("load", "missing.ts", col),
+        ] {
+            let result =
+                (registry.find(BUILTIN).unwrap().handler)(&[request(name, path, column)]).unwrap();
+            assert_eq!(
+                s(field(&result, "result")),
+                "no_match",
+                "{file}: {result:?}"
+            );
+            assert_eq!(fs::read_to_string(&source_path).unwrap(), source);
+        }
+        for column in [0, -1, i64::from(u32::MAX) + 1] {
+            let result =
+                (registry.find(BUILTIN).unwrap().handler)(&[request("load", file, column)]);
+            assert!(
+                matches!(result, Err(HostlibError::InvalidParameter { .. })),
+                "{result:?}"
+            );
+            assert_eq!(fs::read_to_string(&source_path).unwrap(), source);
+        }
+        let result =
+            (registry.find(BUILTIN).unwrap().handler)(&[request("load", file, col)]).unwrap();
+        assert_eq!(s(field(&result, "result")), "applied", "{file}: {result:?}");
+        assert_eq!(
+            fs::read_to_string(&source_path).unwrap(),
+            source.replace("load", "loadById")
+        );
+        fs::remove_file(&source_path).unwrap();
+    }
+}
+
+#[test]
 fn workspace_rename_refuses_unindexed_bindings_before_any_write() {
     let cases = [
         ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\n\ndef parse(Reading):\n    return Reading()\n"),
@@ -419,6 +505,51 @@ fn typescript_workspace_rename() {
 }
 
 #[test]
+fn workspace_rename_leaves_prose_files_and_renames_the_code() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("src/widget.ts"),
+        "export class Widget {}\nexport const w = new Widget();\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("README.md"),
+        "# Usage\n\nCreate a `Widget` first.\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("index.html"),
+        "<script type=\"module\">new Widget();</script>\n",
+    )
+    .unwrap();
+    let capability = build_index(root);
+    let symbol_ref = dict(&[
+        ("name", vm_string("Widget")),
+        ("path", vm_string("src/widget.ts")),
+        ("kind", vm_string("Type")),
+    ]);
+    let result = rename(&capability, symbol_ref, "Gadget", "workspace");
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    assert!(fs::read_to_string(root.join("src/widget.ts"))
+        .unwrap()
+        .contains("new Gadget()"));
+    assert!(fs::read_to_string(root.join("README.md"))
+        .unwrap()
+        .contains("`Widget`"));
+    let warnings = format!("{:?}", field(&result, "warnings"));
+    assert!(warnings.contains("README.md"), "{warnings}");
+    // Markup can still use the old name, so the warning asks for a review.
+    assert!(
+        warnings.contains(
+            "index.html (html file left unchanged; it may still reference `Widget`, so review it)"
+        ),
+        "{warnings}"
+    );
+}
+
+#[test]
 fn python_workspace_rename() {
     let dir = tempdir().unwrap();
     let root = dir.path();
@@ -544,11 +675,21 @@ fn ambiguous_symbol_without_disambiguator() {
     let capability = build_index(root);
     let symbol_ref = dict(&[
         ("name", vm_string("helper")),
-        ("path", vm_string("src/missing.rs")),
+        ("path", vm_string(".")),
         ("kind", vm_string("Function")),
     ]);
     let result = rename(&capability, symbol_ref, "renamed", "workspace");
     assert_eq!(s(field(&result, "result")), "ambiguous_symbol");
+    let VmValue::List(warnings) = field(&result, "warnings") else {
+        panic!("warnings must be a list");
+    };
+    assert_eq!(warnings.len(), 2);
+    for warning in warnings.iter() {
+        assert_eq!(
+            s(field(warning, "symbol")),
+            s(field(warning, "qualified_name"))
+        );
+    }
 }
 
 #[test]

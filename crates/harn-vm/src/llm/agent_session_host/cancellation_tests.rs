@@ -1,3 +1,4 @@
+use crate::agent_events;
 use crate::NativeBuiltinCtxExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -84,9 +85,9 @@ async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session(
             .expect("known session")
             .events;
     assert!(replay.iter().any(
-        |event| matches!(&event.event, crate::agent_events::AgentEvent::TurnPhaseChanged {
-        phase: crate::agent_events::AgentTurnPhase::Terminal { reply, outcome }, ..
-    } if reply.is_empty() && outcome.kind == crate::agent_events::AgentTerminalKind::RuntimeError)
+        |event| matches!(&event.event, agent_events::AgentEvent::TurnPhaseChanged {
+        phase: agent_events::AgentTurnPhase::Terminal { reply, outcome }, ..
+    } if reply.is_empty() && outcome.kind == agent_events::AgentTerminalKind::RuntimeError)
     ));
     crate::agent_sessions::reset_session_store();
 }
@@ -595,8 +596,8 @@ async fn persisted_terminal_seals_the_live_session_against_late_mutation() {
     )
     .expect("seed malformed reminder before terminal");
 
-    let terminal = crate::agent_events::AgentTerminalOutcome::new(
-        crate::agent_events::classify_agent_terminal("completed", "end_turn", false, None),
+    let terminal = agent_events::AgentTerminalOutcome::new(
+        agent_events::classify_agent_terminal("completed", "end_turn", false, None),
         "end_turn",
     );
     let persisted_phase = super::super::live_transcript_journal::flush_terminal(
@@ -613,8 +614,8 @@ async fn persisted_terminal_seals_the_live_session_against_late_mutation() {
     )
     .await
     .expect("persist terminal");
-    let cancelled = crate::agent_events::AgentTerminalOutcome::new(
-        crate::agent_events::AgentTerminalKind::UserCancelled,
+    let cancelled = agent_events::AgentTerminalOutcome::new(
+        agent_events::AgentTerminalKind::UserCancelled,
         "cancelled",
     );
     let retried_phase = super::super::live_transcript_journal::flush_terminal(
@@ -830,12 +831,12 @@ fn stale_finalization_retry_receipt_cannot_claim_a_successor_run() {
 #[tokio::test(flavor = "current_thread")]
 async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() {
     struct TerminalPhaseCounter(Arc<AtomicUsize>);
-    impl crate::agent_events::AgentEventSink for TerminalPhaseCounter {
-        fn handle_event(&self, event: &crate::agent_events::AgentEvent) {
+    impl agent_events::AgentEventSink for TerminalPhaseCounter {
+        fn handle_event(&self, event: &agent_events::AgentEvent) {
             if matches!(
                 event,
-                crate::agent_events::AgentEvent::TurnPhaseChanged {
-                    phase: crate::agent_events::AgentTurnPhase::Terminal { .. },
+                agent_events::AgentEvent::TurnPhaseChanged {
+                    phase: agent_events::AgentTurnPhase::Terminal { .. },
                     ..
                 }
             ) {
@@ -876,17 +877,17 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
         .expect("close canonical session to inject terminal flush failure");
 
     let delivered = Arc::new(AtomicUsize::new(0));
-    crate::agent_events::register_sink(
+    agent_events::register_sink(
         session_id,
         Arc::new(TerminalPhaseCounter(delivered.clone())),
     );
     let assert_observer_live = || {
-        crate::agent_events::emit_event(&crate::agent_events::AgentEvent::TurnPhaseChanged {
+        agent_events::emit_event(&agent_events::AgentEvent::TurnPhaseChanged {
             session_id: session_id.to_string(),
-            phase: crate::agent_events::AgentTurnPhase::Terminal {
+            phase: agent_events::AgentTurnPhase::Terminal {
                 reply: "observer control".to_string(),
-                outcome: Box::new(crate::agent_events::AgentTerminalOutcome::new(
-                    crate::agent_events::AgentTerminalKind::Natural,
+                outcome: Box::new(agent_events::AgentTerminalOutcome::new(
+                    agent_events::AgentTerminalKind::Natural,
                     "done",
                 )),
             },
@@ -982,7 +983,7 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
     );
     assert_observer_live();
 
-    crate::agent_events::clear_session_sinks(session_id);
+    agent_events::clear_session_sinks(session_id);
     crate::agent_sessions::reset_session_store();
     super::super::reset_agent_session_host_state();
 }

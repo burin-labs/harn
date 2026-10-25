@@ -52,12 +52,8 @@ fn managed_supply_json_uses_logical_capabilities_and_authoritative_receipt() {
     let observed_requests = requests.clone();
     let server = spawn_llm_stub("managed supply JSON stub", move |stream| {
         observed_requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        use std::io::{Read, Write};
-        let mut buf = vec![0u8; 32_768];
-        let n = stream.read(&mut buf).expect("read request");
-        let request = String::from_utf8_lossy(&buf[..n]);
-        let body = request.split("\r\n\r\n").nth(1).expect("request body");
-        let body: serde_json::Value = serde_json::from_str(body).expect("request JSON");
+        use std::io::Write;
+        let (_, body) = read_http_request(stream);
         assert_eq!(
             body["harn_managed_supply"]["logical_route"]["provider"],
             "groq"
@@ -307,14 +303,9 @@ fn managed_supply_terminal_receipt_preserves_open_weight_caller_limit() {
             let requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let observed_requests = requests.clone();
             let server = spawn_llm_stub("managed physical weight receipt", move |stream| {
-                use std::io::{Read, Write};
+                use std::io::Write;
                 observed_requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let mut buf = vec![0u8; 32_768];
-                let n = stream.read(&mut buf).expect("request");
-                let request = String::from_utf8_lossy(&buf[..n]);
-                let body: serde_json::Value =
-                    serde_json::from_str(request.split("\r\n\r\n").nth(1).expect("body"))
-                        .expect("JSON");
+                let (_, body) = read_http_request(stream);
                 assert_eq!(
                     body["harn_managed_supply"]["inference_boundary"]["reach"],
                     "hosted_open_weight"
@@ -390,12 +381,8 @@ fn managed_supply_streams_multiple_deltas_and_applies_terminal_receipt() {
     let served_fingerprint =
         crate::llm::managed_supply::capability_fingerprint("groq", "qwen/qwen3.8-27b");
     let server = spawn_llm_stub("managed supply SSE stub", move |stream| {
-        use std::io::{Read, Write};
-        let mut buf = vec![0u8; 32_768];
-        let n = stream.read(&mut buf).expect("read request");
-        let request = String::from_utf8_lossy(&buf[..n]);
-        let body = request.split("\r\n\r\n").nth(1).expect("request body");
-        let body: serde_json::Value = serde_json::from_str(body).expect("request JSON");
+        use std::io::Write;
+        let (_, body) = read_http_request(stream);
         assert_eq!(body["stream"], true);
         assert_eq!(
             body["harn_managed_supply"]["logical_route"]["provider"],
@@ -520,13 +507,16 @@ fn managed_supply_rejects_a_valid_but_capability_incompatible_served_route() {
     let served_model = "claude-haiku-4-5-20251001";
     let served_fingerprint =
         crate::llm::managed_supply::capability_fingerprint("anthropic", served_model);
+    let prompt = "fragmented request ".repeat(8192);
+    let expected_prompt = prompt.clone();
     let server = spawn_llm_stub("managed supply incompatible route stub", move |stream| {
-        use std::io::{Read, Write};
-        let mut buf = vec![0u8; 32_768];
-        let n = stream.read(&mut buf).expect("read request");
-        let request = String::from_utf8_lossy(&buf[..n]);
-        let body = request.split("\r\n\r\n").nth(1).expect("request body");
-        let body: serde_json::Value = serde_json::from_str(body).expect("request JSON");
+        use std::io::Write;
+        let (_, body) = read_http_request(stream);
+        assert!(body["messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .any(|message| message["content"].as_str() == Some(expected_prompt.as_str())));
         assert_eq!(
             body["harn_managed_supply"]["logical_route"]["model"],
             "gpt-4o-mini"
@@ -568,6 +558,7 @@ fn managed_supply_rejects_a_valid_but_capability_incompatible_served_route() {
 
     let mut opts = managed_opts("managed-gateway-incompatible");
     opts.model = "gpt-4o-mini".to_string();
+    opts.messages = vec![serde_json::json!({"role": "user", "content": prompt})];
     opts.stream = false;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

@@ -11,11 +11,9 @@ pub fn artifacts_manifest(output: Option<&std::path::Path>) {
 }
 
 pub fn artifacts_check(manifest: &std::path::Path, json: bool) {
-    artifacts_check_with(
-        manifest,
-        json,
-        crate::commands::dump_protocol_artifacts::manifest_json_from,
-    );
+    artifacts_check_with(manifest, json, |_| {
+        crate::commands::dump_protocol_artifacts::manifest_json()
+    });
 }
 
 /// Command-line failure presentation stays outside the linked package owner.

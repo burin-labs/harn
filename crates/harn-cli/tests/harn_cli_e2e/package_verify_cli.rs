@@ -11,6 +11,78 @@ fn run(command: &mut Command) -> std::process::Output {
         .expect("run harn")
 }
 
+#[test]
+fn protocol_manifest_uses_the_running_binary_outside_a_source_checkout() {
+    let temp = tempfile::tempdir().expect("external directory");
+    let binary = harn_e2e_binary();
+    let output = run(Command::new(binary).current_dir(temp.path()).args([
+        "package",
+        "artifacts",
+        "manifest",
+    ]));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../spec/protocol-artifacts/manifest.json"
+    ))
+    .expect("compiled manifest");
+    let actual: serde_json::Value = serde_json::from_slice(&output.stdout).expect("manifest JSON");
+    assert_eq!(actual, expected);
+    let classes = actual["acp"]["promptErrorTerminalClasses"]
+        .as_array()
+        .expect("terminal classes");
+    assert!(classes.iter().any(|class| class == "context_overflow"));
+    assert!(!classes.is_empty());
+
+    // A source-shaped host directory must not replace the running binary's contract.
+    fs::write(temp.path().join("Cargo.toml"), "[workspace]\n").unwrap();
+    fs::create_dir_all(temp.path().join("conformance/protocols/schemas")).unwrap();
+    let manifest = temp.path().join("manifest.json");
+    let written = run(Command::new(binary)
+        .current_dir(temp.path())
+        .args(["package", "artifacts", "manifest", "--output"])
+        .arg(&manifest));
+    assert!(
+        written.status.success(),
+        "{}",
+        String::from_utf8_lossy(&written.stderr)
+    );
+    assert_eq!(fs::read(&manifest).unwrap(), output.stdout);
+
+    let check = |path: &std::path::Path| {
+        run(Command::new(binary)
+            .current_dir(temp.path())
+            .args(["package", "artifacts", "check"])
+            .arg(path)
+            .arg("--json"))
+    };
+    let good = check(&manifest);
+    assert!(
+        good.status.success(),
+        "{}",
+        String::from_utf8_lossy(&good.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&good.stdout).unwrap();
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["differences"], serde_json::json!([]));
+
+    let mut changed = actual;
+    changed["acp"]["promptErrorTerminalClasses"] = serde_json::json!([]);
+    fs::write(&manifest, serde_json::to_vec(&changed).unwrap()).unwrap();
+    let drift = check(&manifest);
+    assert!(!drift.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&drift.stdout).unwrap();
+    assert_eq!(report["ok"], false);
+    assert!(report["differences"]
+        .as_array()
+        .is_some_and(|rows| !rows.is_empty()));
+    fs::remove_file(&manifest).unwrap();
+    assert!(!check(&manifest).status.success());
+}
+
 fn scaffold_and_install(kind: &str) -> (tempfile::TempDir, std::path::PathBuf) {
     let temp = tempfile::tempdir().expect("tempdir");
     let package = temp.path().join(format!("example-{kind}"));
@@ -352,7 +424,7 @@ fn configured_package_test_roots_inventory_and_execute_the_same_nested_tests() {
     let report: serde_json::Value =
         serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
     assert!(String::from_utf8_lossy(&output.stdout)
-        .contains("ran 2 case(s) from 2 discoverable .harn file(s) under package"));
+        .contains("ran 2 case(s) from 2 discoverable source file(s) under package"));
     assert_eq!(report["summary"]["total"], 2);
     assert_eq!(report["summary"]["passed"], 2);
     let mut names = report["cases"]

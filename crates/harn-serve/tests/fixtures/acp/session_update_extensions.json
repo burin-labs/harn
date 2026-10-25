@@ -7,6 +7,30 @@
       "update": {
         "_meta": {
           "harn": {
+            "callId": "llm-call-1",
+            "elapsedMs": 4210,
+            "isFinal": true,
+            "model": "claude-sonnet-5-5",
+            "outputTokens": 431,
+            "outputTokensPerSecond": 126.8,
+            "phase": "complete",
+            "provider": "anthropic",
+            "timeToFirstTokenMs": 812,
+            "tokenSource": "provider"
+          }
+        },
+        "sessionUpdate": "inference_speed"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
             "artifactId": "artifact-chart-1",
             "fallback": "Build throughput (bar chart)",
             "kind": "vega-lite",

@@ -11,7 +11,8 @@ use crate::package_snapshot::{package_lock_digest, PackageSnapshot};
 mod content_hash;
 pub use content_hash::{
     compute_archive_content_hash, compute_package_content_hash, is_canonical_package_content_hash,
-    normalized_package_relative_path, verify_package_content_hash, CANONICAL_CONTENT_HASH_PREFIX,
+    is_package_cache_metadata_name, normalized_package_relative_path, verify_package_content_hash,
+    CANONICAL_CONTENT_HASH_PREFIX,
 };
 use content_hash::{
     compute_package_content_hash_capturing, excluded_package_name, validate_content_hash,
@@ -688,6 +689,28 @@ mod tests {
     }
 
     #[test]
+    fn guard_refuses_cache_metadata_temporary_files() {
+        let (_temp, snapshot, entry, content_hash) = fixture();
+        let guard = PackageExecutionGuard::new(snapshot, "agents", content_hash).unwrap();
+        assert_eq!(
+            guard.verify_entry_source(&entry).unwrap(),
+            b"pub pipeline run() { return 1 }\n"
+        );
+        for stem in ["..harn-package-ca", "..harn-content-ha"] {
+            let temporary = entry
+                .parent()
+                .unwrap()
+                .join(format!("{stem}.01a1748e85a67777a1ded4a7965795e4.tmp"));
+            fs::write(&temporary, "pub pipeline run() { return 2 }\n").unwrap();
+            let error = guard.verify_entry_source(&temporary).unwrap_err();
+            assert!(
+                error.to_string().contains("excluded from package"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
     fn guard_rejects_package_mutation_before_execution() {
         let (_temp, snapshot, entry, content_hash) = fixture();
         let guard = PackageExecutionGuard::new(snapshot, "agents", content_hash).unwrap();
@@ -710,7 +733,7 @@ mod tests {
         assert!(lease.try_lock().is_err());
         guard.verify_entry(&entry).unwrap();
         drop(guard);
-        lease.try_lock().unwrap();
+        harn_flock::assert_released(&lease);
     }
 
     #[test]

@@ -13,10 +13,12 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
     vm.set_global("e", VmValue::Float(std::f64::consts::E));
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_math_builtins);
+
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "abs(value: number) -> number", category = "math"
+    sig = "abs(value: number) -> number",
+    category = "math"
 )]
 fn abs_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
@@ -27,20 +29,12 @@ fn abs_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-#[harn_builtin(
-    exposure = "pure",
-    effects = [],
-    sig = "min(...args: any) -> any", category = "math"
-)]
+#[harn_builtin(exposure = "pure", sig = "min(...args: any) -> any", category = "math")]
 fn min_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(fold_extreme(args, std::cmp::Ordering::Less))
 }
 
-#[harn_builtin(
-    exposure = "pure",
-    effects = [],
-    sig = "max(...args: any) -> any", category = "math"
-)]
+#[harn_builtin(exposure = "pure", sig = "max(...args: any) -> any", category = "math")]
 fn max_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(fold_extreme(args, std::cmp::Ordering::Greater))
 }
@@ -76,8 +70,8 @@ fn fold_extreme(args: &[VmValue], keep: std::cmp::Ordering) -> VmValue {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "floor(value: number | decimal) -> int", category = "math"
+    sig = "floor(value: number | decimal) -> int",
+    category = "math"
 )]
 fn floor_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
@@ -90,8 +84,8 @@ fn floor_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "ceil(value: number | decimal) -> int", category = "math"
+    sig = "ceil(value: number | decimal) -> int",
+    category = "math"
 )]
 fn ceil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
@@ -104,7 +98,6 @@ fn ceil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "round(value: number | decimal, digits?: int) -> number | decimal",
     category = "math"
 )]
@@ -123,7 +116,7 @@ fn round_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
         // half-away-from-zero midpoint rule; ints stay ints when possible.
         (VmValue::Float(n), Some(d)) => Ok(VmValue::Float(round_float_to_digits(*n, d))),
         (VmValue::Int(n), Some(d)) => Ok(round_int_to_digits(*n, d)),
-        (VmValue::Decimal(x), Some(d)) => Ok(VmValue::decimal(round_decimal_to_digits(**x, d))),
+        (VmValue::Decimal(x), Some(d)) => round_decimal_to_digits(**x, d).map(VmValue::decimal),
         _ => Ok(VmValue::Nil),
     }
 }
@@ -148,6 +141,12 @@ fn round_float_to_digits(x: f64, digits: i64) -> f64 {
     if digits < -308 {
         return 0.0 * x.signum();
     }
+    if digits < 0 {
+        // Divide by the exact power of ten rather than multiplying by its
+        // inexact reciprocal: `1e-5` unscales `1.0` to `99999.99999999999`.
+        let bucket = 10f64.powi((-digits) as i32);
+        return (x / bucket).round() * bucket;
+    }
     let factor = 10f64.powi(digits as i32);
     let scaled = x * factor;
     if !scaled.is_finite() {
@@ -166,8 +165,9 @@ fn round_int_to_digits(n: i64, digits: i64) -> VmValue {
     if digits >= 0 || n == 0 {
         return VmValue::Int(n);
     }
-    if digits <= -19 {
-        // 10^19 exceeds i64::MAX, so every i64 rounds to the zero bucket.
+    if digits <= -20 {
+        // 2 * |i64::MIN| < 10^20, so every i64 rounds to the zero bucket;
+        // at -19 values of 5e18 and beyond still round out to ±1e19.
         return VmValue::Int(0);
     }
     let factor = 10i128.pow((-digits) as u32);
@@ -189,30 +189,41 @@ fn round_int_to_digits(n: i64, digits: i64) -> VmValue {
 /// banker's (midpoint-nearest-even) rounding, consistent with the 1-arg
 /// `round(decimal)` form. Negative digits round to power-of-ten buckets via
 /// exact scale/unscale.
-fn round_decimal_to_digits(x: rust_decimal::Decimal, digits: i64) -> rust_decimal::Decimal {
+fn round_decimal_to_digits(
+    x: rust_decimal::Decimal,
+    digits: i64,
+) -> Result<rust_decimal::Decimal, VmError> {
     use rust_decimal::Decimal;
     if digits >= 0 {
         // Decimal carries at most 28 fractional digits, so any larger request
         // is the identity; `round_dp` already treats it that way.
         let dp = u32::try_from(digits).unwrap_or(u32::MAX).min(28);
-        return x.round_dp(dp);
+        return Ok(x.round_dp(dp));
+    }
+    if digits < -29 {
+        return Ok(Decimal::ZERO);
     }
     let neg = (-digits) as u32;
-    // 96-bit decimals top out just under 8e28, so any coarser bucket is zero.
-    if neg > 28 {
-        return Decimal::ZERO;
+    let exponent = neg + x.scale();
+    // Twice the largest 96-bit mantissa is below 10^30.
+    if exponent >= 30 {
+        return Ok(Decimal::ZERO);
     }
-    let factor = Decimal::from_i128_with_scale(10i128.pow(neg), 0);
-    match x.checked_div(factor).map(|scaled| scaled.round()) {
-        Some(rounded) => rounded.checked_mul(factor).unwrap_or(x),
-        None => x,
+    let mantissa = x.mantissa();
+    let factor = 10i128.pow(exponent);
+    let mut bucket = mantissa / factor;
+    let twice_remainder = (mantissa % factor).abs() * 2;
+    if twice_remainder > factor || (twice_remainder == factor && bucket % 2 != 0) {
+        bucket += mantissa.signum();
     }
+    Decimal::try_from_i128_with_scale(bucket * 10i128.pow(neg), 0)
+        .map_err(|_| VmError::Runtime("round: decimal result is out of range".to_string()))
 }
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "sqrt(...args: any) -> any", category = "math"
+    sig = "sqrt(...args: any) -> any",
+    category = "math"
 )]
 fn sqrt_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
@@ -224,11 +235,7 @@ fn sqrt_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-#[harn_builtin(
-    exposure = "pure",
-    effects = [],
-    sig = "pow(...args: any) -> any", category = "math"
-)]
+#[harn_builtin(exposure = "pure", sig = "pow(...args: any) -> any", category = "math")]
 fn pow_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         match (&args[0], &args[1]) {
@@ -279,8 +286,8 @@ fn rng_seed_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "random(...args: any) -> float", category = "math"
+    sig = "random(...args: any) -> float",
+    category = "math"
 )]
 fn random_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     random_call(crate::value::RandomOperation::Float, args)
@@ -288,8 +295,8 @@ fn random_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "random_int(...args: any) -> any", category = "math"
+    sig = "random_int(...args: any) -> any",
+    category = "math"
 )]
 fn random_int_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     random_call(crate::value::RandomOperation::Range, args)
@@ -297,8 +304,8 @@ fn random_int_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "random_choice(...args: any) -> any", category = "math"
+    sig = "random_choice(...args: any) -> any",
+    category = "math"
 )]
 fn random_choice_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     random_call(crate::value::RandomOperation::Choice, args)
@@ -306,8 +313,8 @@ fn random_choice_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "random_shuffle(...args: any) -> list", category = "math"
+    sig = "random_shuffle(...args: any) -> list",
+    category = "math"
 )]
 fn random_shuffle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     random_call(crate::value::RandomOperation::Shuffle, args)
@@ -325,23 +332,21 @@ fn random_call(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "mean(...args: any) -> float", category = "math"
+    sig = "mean(...args: any) -> float",
+    category = "math"
 )]
 fn mean_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let values = numeric_list_arg(args, "mean")?;
     if values.is_empty() {
         return Ok(VmValue::Float(0.0));
     }
-    Ok(VmValue::Float(
-        values.iter().sum::<f64>() / values.len() as f64,
-    ))
+    Ok(VmValue::Float(arithmetic_mean(&values)))
 }
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "median(...args: any) -> float", category = "math"
+    sig = "median(...args: any) -> float",
+    category = "math"
 )]
 fn median_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut values = non_empty_numeric_list_arg(args, "median")?;
@@ -356,8 +361,8 @@ fn median_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "percentile(...args: any) -> float", category = "math"
+    sig = "percentile(...args: any) -> float",
+    category = "math"
 )]
 fn percentile_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut values = non_empty_numeric_list_arg(args, "percentile")?;
@@ -380,13 +385,18 @@ fn percentile_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let weight = h - lower;
     let lo = values[lower as usize - 1];
     let hi = values[upper as usize - 1];
-    Ok(VmValue::Float(lo + weight * (hi - lo)))
+    let interpolated = if lo.is_sign_negative() == hi.is_sign_negative() {
+        lo + weight * (hi - lo)
+    } else {
+        lo * (1.0 - weight) + hi * weight
+    };
+    Ok(VmValue::Float(interpolated))
 }
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "variance(...args: any) -> float", category = "math"
+    sig = "variance(...args: any) -> float",
+    category = "math"
 )]
 fn variance_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let values = non_empty_numeric_list_arg(args, "variance")?;
@@ -396,8 +406,8 @@ fn variance_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "stddev(...args: any) -> float", category = "math"
+    sig = "stddev(...args: any) -> float",
+    category = "math"
 )]
 fn stddev_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let values = non_empty_numeric_list_arg(args, "stddev")?;
@@ -409,8 +419,8 @@ fn stddev_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "sin(...args: any) -> float", category = "math"
+    sig = "sin(...args: any) -> float",
+    category = "math"
 )]
 fn sin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, "sin", f64::sin)
@@ -418,8 +428,8 @@ fn sin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "cos(value: number) -> float", category = "math"
+    sig = "cos(value: number) -> float",
+    category = "math"
 )]
 fn cos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, "cos", f64::cos)
@@ -427,8 +437,8 @@ fn cos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "tan(...args: any) -> float", category = "math"
+    sig = "tan(...args: any) -> float",
+    category = "math"
 )]
 fn tan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, "tan", f64::tan)
@@ -436,8 +446,8 @@ fn tan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "asin(value: number) -> float", category = "math"
+    sig = "asin(value: number) -> float",
+    category = "math"
 )]
 fn asin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, "asin", f64::asin)
@@ -445,8 +455,8 @@ fn asin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "acos(value: number) -> float", category = "math"
+    sig = "acos(value: number) -> float",
+    category = "math"
 )]
 fn acos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, "acos", f64::acos)
@@ -454,8 +464,8 @@ fn acos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "atan(value: number) -> float", category = "math"
+    sig = "atan(value: number) -> float",
+    category = "math"
 )]
 fn atan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, "atan", f64::atan)
@@ -463,8 +473,8 @@ fn atan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "log2(value: number) -> float", category = "math"
+    sig = "log2(value: number) -> float",
+    category = "math"
 )]
 fn log2_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, "log2", f64::log2)
@@ -472,8 +482,8 @@ fn log2_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "log10(value: number) -> float", category = "math"
+    sig = "log10(value: number) -> float",
+    category = "math"
 )]
 fn log10_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, "log10", f64::log10)
@@ -481,8 +491,8 @@ fn log10_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "ln(value: number) -> float", category = "math"
+    sig = "ln(value: number) -> float",
+    category = "math"
 )]
 fn ln_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, "ln", f64::ln)
@@ -490,8 +500,8 @@ fn ln_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "exp(value: number) -> float", category = "math"
+    sig = "exp(value: number) -> float",
+    category = "math"
 )]
 fn exp_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, "exp", f64::exp)
@@ -499,8 +509,8 @@ fn exp_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "atan2(y: number, x: number) -> float", category = "math"
+    sig = "atan2(y: number, x: number) -> float",
+    category = "math"
 )]
 fn atan2_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
@@ -522,8 +532,8 @@ fn atan2_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "sign(...args: any) -> int", category = "math"
+    sig = "sign(...args: any) -> int",
+    category = "math"
 )]
 fn sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
@@ -552,8 +562,8 @@ fn sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "is_nan(value: number) -> bool", category = "math"
+    sig = "is_nan(value: number) -> bool",
+    category = "math"
 )]
 fn is_nan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
@@ -564,8 +574,8 @@ fn is_nan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "is_infinite(value: number) -> bool", category = "math"
+    sig = "is_infinite(value: number) -> bool",
+    category = "math"
 )]
 fn is_infinite_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
@@ -576,7 +586,6 @@ fn is_infinite_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__range__(start: int, end: int, inclusive?: bool) -> any",
     runtime_only = true,
     category = "math"
@@ -596,8 +605,8 @@ fn range_internal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 // for human-readable inclusive math.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "range(...args: any) -> range", category = "math"
+    sig = "range(...args: any) -> range",
+    category = "math"
 )]
 fn range_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bounds = Args::new("range", args);
@@ -644,13 +653,26 @@ fn non_empty_numeric_list_arg(args: &[VmValue], label: &str) -> Result<Vec<f64>,
     Ok(values)
 }
 
+fn arithmetic_mean(values: &[f64]) -> f64 {
+    let sum = values.iter().sum::<f64>();
+    if sum.is_finite() {
+        return sum / values.len() as f64;
+    }
+    let scale = values.iter().map(|value| value.abs()).fold(0.0, f64::max);
+    if scale == 0.0 || !scale.is_finite() {
+        return sum / values.len() as f64;
+    }
+    // Normalize before summing so a finite mean does not overflow its sum.
+    (values.iter().map(|value| value / scale).sum::<f64>() / values.len() as f64) * scale
+}
+
 fn variance_for(values: &[f64], sample: bool, label: &str) -> Result<f64, VmError> {
     if sample && values.len() < 2 {
         return Err(VmError::Runtime(format!(
             "sample {label} requires at least 2 values"
         )));
     }
-    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    let mean = arithmetic_mean(values);
     let total = values
         .iter()
         .map(|value| {
@@ -761,6 +783,9 @@ mod tests {
         // Negative digits round to power-of-ten buckets.
         assert_eq!(round_float_to_digits(1234.5678, -2), 1200.0);
         assert_eq!(round_float_to_digits(1250.0, -2), 1300.0);
+        // Larger buckets stay exact instead of landing a hair below.
+        assert_eq!(round_float_to_digits(123456.0, -5), 100000.0);
+        assert_eq!(round_float_to_digits(150000.0, -5), 200000.0);
         // Extreme digit counts degrade gracefully.
         assert_eq!(round_float_to_digits(1.5, 400), 1.5);
         assert_eq!(round_float_to_digits(1.5, -400), 0.0);
@@ -778,6 +803,13 @@ mod tests {
         assert!(matches!(round_int_to_digits(1249, -2), VmValue::Int(1200)));
         assert!(matches!(round_int_to_digits(7, 3), VmValue::Int(7)));
         assert!(matches!(round_int_to_digits(123, -19), VmValue::Int(0)));
+        assert!(
+            matches!(round_int_to_digits(9_000_000_000_000_000_000, -19), VmValue::Float(f) if f == 1e19)
+        );
+        assert!(matches!(
+            round_int_to_digits(i64::MIN, -20),
+            VmValue::Int(0)
+        ));
         // A bucket boundary past i64::MAX promotes to float instead of wrapping
         // (i64::MAX rounds up to 9_223_400_000_000_000_000 at -14 digits).
         assert!(matches!(round_int_to_digits(i64::MAX, -14), VmValue::Float(f) if f == 9.2234e18));
@@ -786,7 +818,7 @@ mod tests {
     #[test]
     fn stddev_sample_error_names_stddev() {
         let mut vm = vm();
-        let values = VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1)]));
+        let values = VmValue::list(vec![VmValue::Int(1)]);
         let error = call(&mut vm, "stddev", vec![values, VmValue::Bool(true)])
             .expect_err("sample stddev needs at least two values");
         assert!(error.to_string().contains("sample stddev"));

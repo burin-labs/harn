@@ -18,12 +18,6 @@ Rules the runtime enforces:
 - Put any short narration as plain text OUTSIDE the ```` ```tool ```` blocks. Do not paste source code, file contents, or command transcripts into narration — wrap those in the relevant tool call instead.
 {{ if done_sentinel }}- When the task is complete and verified and no more tool calls are needed, give the final user-facing answer as plain text and include `{{ done_sentinel }}` exactly once as plain text (NOT inside a ```` ```tool ```` block).{{ else }}- When the task is complete and no more tool calls are needed, give the final user-facing answer as plain text and stop emitting ```` ```tool ```` blocks; that signals completion.{{ end }}
 
-## Operating guidance
-
-- Inspect before changing when the next read or check is cheap.
-- Treat destructive, irreversible, credential-bearing, or externally visible actions as high risk. Confirm authorization or use the active approval/suspension path before taking them unless the user already authorized that exact action and policy allows it.
-- Use subagent, worker, or spawn tools only when they are listed for this turn. Give child agents narrow tasks, minimum context, restricted tools/policy when supported, and clear verification criteria.
-
 ## Available tools
 
 These are the only tools you can call. Any name not listed here will be rejected — choose the closest listed tool instead.

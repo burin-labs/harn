@@ -191,10 +191,7 @@ fn collect_powershell(command: &str, depth: usize, analysis: &mut ShellAnalysis)
     }
 
     let mut parser = tree_sitter::Parser::new();
-    if parser
-        .set_language(&tree_sitter_powershell::LANGUAGE.into())
-        .is_err()
-    {
+    if parser.set_language(&harn_grammars::powershell()).is_err() {
         analysis.unresolved = true;
         return;
     }
@@ -584,10 +581,7 @@ fn collect_shell(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
         return;
     }
     let mut parser = tree_sitter::Parser::new();
-    if parser
-        .set_language(&tree_sitter_bash::LANGUAGE.into())
-        .is_err()
-    {
+    if parser.set_language(&harn_grammars::bash()).is_err() {
         analysis.unresolved = true;
         return;
     }
@@ -1002,6 +996,17 @@ fn collect_argument_execution(
 enum CarrierOption {
     Flag,
     Value,
+}
+
+/// The command an `xargs` stage launches, read with the same option boundary
+/// the scanner uses. Empty for any other stage or an unresolved option form.
+pub(crate) fn xargs_child_argv(argv: &[String]) -> Vec<String> {
+    if argv.first().map(|program| command_basename(program)) != Some("xargs") {
+        return Vec::new();
+    }
+    input_command_start(ArgumentExecution::InputArgv, argv)
+        .map(|index| argv[index..].to_vec())
+        .unwrap_or_default()
 }
 
 fn input_command_start(carrier: ArgumentExecution, argv: &[String]) -> Option<usize> {

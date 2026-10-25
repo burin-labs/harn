@@ -76,6 +76,8 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
     register_dict_builder_builtins(vm);
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_collection_builtins);
+
 #[harn_builtin(exposure = "pure", effects = [], sig = "chunk(items: list, size: int) -> list", kind = "async", category = "collections")]
 async fn chunk_impl(_ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let items = list_arg(&args, "chunk")?;
@@ -133,12 +135,9 @@ async fn group_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
         let bucket = string_discriminator(&key, "group_by")?;
         groups.entry(bucket).or_default().push(item.clone());
     }
-    Ok(VmValue::dict(
-        groups
-            .into_iter()
-            .map(|(key, values)| (crate::value::intern_key(&key), VmValue::list(values)))
-            .collect::<crate::value::DictMap>(),
-    ))
+    Ok(VmValue::dict(groups.into_iter().map(|(key, values)| {
+        (crate::value::intern_key(&key), VmValue::list(values))
+    })))
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "partition(items: list, predicate: closure) -> dict", kind = "async", category = "collections")]
@@ -245,12 +244,9 @@ async fn count_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
         let bucket = string_discriminator(&key, "count_by")?;
         *counts.entry(bucket).or_insert(0) += 1;
     }
-    Ok(VmValue::dict(
-        counts
-            .into_iter()
-            .map(|(key, count)| (crate::value::intern_key(&key), VmValue::Int(count)))
-            .collect::<crate::value::DictMap>(),
-    ))
+    Ok(VmValue::dict(counts.into_iter().map(|(key, count)| {
+        (crate::value::intern_key(&key), VmValue::Int(count))
+    })))
 }
 
 const COLLECTION_ASYNC_BUILTINS: &[&VmBuiltinDef] = &[
@@ -282,8 +278,8 @@ fn register_dict_builder_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "__dict_filter_nil(d: dict, drop_empty?: bool) -> dict", category = "collections"
+    sig = "__dict_filter_nil(d: dict, drop_empty?: bool) -> dict",
+    category = "collections"
 )]
 fn dict_filter_nil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     dict_filter_nil(
@@ -296,7 +292,6 @@ fn dict_filter_nil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__dict_merge(a: dict, b: dict) -> dict",
     category = "collections"
 )]
@@ -312,7 +307,6 @@ fn dict_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 /// optional fields. Unknown keys on a closed record fail static checking.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig_expr = harn_builtin_meta::signatures::PORTABLE_PICK,
     category = "collections"
 )]
@@ -347,7 +341,6 @@ fn pick_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__dict_omit(d: dict, keys: list) -> dict",
     category = "collections"
 )]
@@ -360,8 +353,8 @@ fn dict_omit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "clone(value: any) -> any", category = "collections"
+    sig = "clone(value: any) -> any",
+    category = "collections"
 )]
 fn clone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(shallow_clone(args.first().unwrap_or(&VmValue::Nil)))
@@ -369,8 +362,8 @@ fn clone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "deep_clone(value: any) -> any", category = "collections"
+    sig = "deep_clone(value: any) -> any",
+    category = "collections"
 )]
 fn deep_clone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(deep_clone_value(args.first().unwrap_or(&VmValue::Nil)))
@@ -378,7 +371,6 @@ fn deep_clone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     aliases = ["__deep_merge"],
     sig = "deep_merge(a: dict, b: dict) -> dict",
     category = "collections"
@@ -392,7 +384,6 @@ fn deep_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     aliases = ["__list_unique"],
     sig = "unique(items: list) -> list",
     category = "collections"
@@ -403,7 +394,6 @@ fn unique_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     aliases = ["__dict_from_pairs"],
     sig = "dict_from_pairs(pairs: list) -> dict",
     category = "collections"
@@ -472,7 +462,7 @@ fn deep_clone_value(value: &VmValue) -> VmValue {
 /// Otherwise the right-hand value wins, matching the shallow `merge`
 /// semantics for terminal nodes. Nil arguments are treated as empty
 /// dicts so that variadic accumulators don't require a base case.
-pub(super) fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
+pub fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
     let left = dict_arg(a, "deep_merge")?;
     let right = dict_arg(b, "deep_merge")?;
     if right.is_empty() {
@@ -620,7 +610,7 @@ mod tests {
     }
 
     fn keys(items: &[&str]) -> VmValue {
-        VmValue::list(items.iter().map(|k| VmValue::string(*k)).collect())
+        VmValue::strings(items.iter().copied())
     }
 
     #[test]
@@ -779,7 +769,6 @@ mod tests {
 /// site falls back to an ordinary method call.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__method_mutate(receiver: any, method: string, ...args: any) -> any",
     kind = "async",
     category = "collections",
@@ -797,6 +786,6 @@ async fn method_mutate_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<
         .apply_mutating_method(&receiver, method, args.get(2..).unwrap_or_default())
         .await?;
     Ok(mutation.map_or(VmValue::Nil, |mutation| {
-        VmValue::List(Arc::new(vec![mutation.receiver, mutation.result]))
+        VmValue::list(vec![mutation.receiver, mutation.result])
     }))
 }

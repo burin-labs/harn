@@ -14,8 +14,13 @@
 //! file. An entry whose key no longer matches (another Harn version, compiler
 //! fingerprint, or compiler options) is a miss, and the import takes the path
 //! it took before: the shared cache, then a compile.
+//!
+//! Each artifact is stored zstd-compressed, about a quarter of its size, and
+//! decoded when its module is first imported. The caller keeps the decoded
+//! module for the rest of the process.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 use super::header::{read_artifact_build, ArtifactBuild};
@@ -27,7 +32,36 @@ use crate::module_artifact::ModuleArtifact;
 #[derive(Debug, Clone, Copy)]
 pub struct EmbeddedStdlibArtifact {
     pub file_name: &'static str,
-    pub bytes: &'static [u8],
+    /// The artifact's size once decoded.
+    pub len: usize,
+    /// The artifact, compressed as one zstd frame.
+    pub zstd: &'static [u8],
+}
+
+impl EmbeddedStdlibArtifact {
+    /// The artifact's bytes, or `None` after warning when they do not decode
+    /// to exactly `len` bytes. The import then compiles, much more slowly, so
+    /// a broken table says so instead of only costing time.
+    fn decode(&self) -> Option<Vec<u8>> {
+        match zstd::bulk::decompress(self.zstd, self.len) {
+            Ok(bytes) if bytes.len() == self.len => Some(bytes),
+            outcome => {
+                static WARNED: AtomicBool = AtomicBool::new(false);
+                if !WARNED.swap(true, Ordering::Relaxed) {
+                    let problem = outcome.map_or_else(
+                        |error| error.to_string(),
+                        |bytes| format!("{} bytes, expected {}", bytes.len(), self.len),
+                    );
+                    eprintln!(
+                        "warning: embedded stdlib artifact {} does not decode ({problem}); \
+                         stdlib imports compile instead",
+                        self.file_name
+                    );
+                }
+                None
+            }
+        }
+    }
 }
 
 static EMBEDDED_STDLIB_ARTIFACTS: OnceLock<&'static [EmbeddedStdlibArtifact]> = OnceLock::new();
@@ -89,7 +123,7 @@ pub fn register_embedded_stdlib_artifacts(
     // One build script writes every row, so the first row speaks for the table.
     if let Some(first) = table.first() {
         let running = ArtifactBuild::running();
-        match read_artifact_build(first.bytes) {
+        match first.decode().as_deref().and_then(read_artifact_build) {
             Some(embedded) if embedded == running => {}
             embedded => {
                 return Err(EmbeddedStdlibRegistrationError::ForeignBuild {
@@ -131,7 +165,7 @@ pub(crate) fn lookup(
     let index = table
         .binary_search_by(|entry| entry.file_name.cmp(name.as_str()))
         .ok()?;
-    read_module_from_bytes(table[index].bytes, key, synthetic)
+    read_module_from_bytes(&table[index].decode()?, key, synthetic)
 }
 
 /// The module artifact in `bytes`, when they were written for exactly `key`.
@@ -155,7 +189,12 @@ mod tests {
             .into_iter()
             .map(|(name, bytes)| EmbeddedStdlibArtifact {
                 file_name: Box::leak(name.into_boxed_str()),
-                bytes: Box::leak(bytes.into_boxed_slice()),
+                len: bytes.len(),
+                zstd: Box::leak(
+                    zstd::bulk::compress(&bytes, 3)
+                        .expect("compress fixture")
+                        .into_boxed_slice(),
+                ),
             })
             .collect::<Vec<_>>();
         Box::leak(rows.into_boxed_slice())
@@ -191,6 +230,13 @@ mod tests {
             super::super::serialize_module_artifact(&other_build, &artifact).expect("encodes"),
         )]);
         assert!(lookup(foreign, &key, synthetic).is_none());
+
+        // Bytes that do not decode are a miss too, never a panic.
+        let corrupt = [EmbeddedStdlibArtifact {
+            zstd: b"not a zstd frame",
+            ..table[0]
+        }];
+        assert!(lookup(&corrupt, &key, synthetic).is_none());
 
         // Registration reads the same build identity, so a foreign table is
         // refused up front instead of registering and missing on every import.

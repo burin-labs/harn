@@ -7,6 +7,8 @@ cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/lib/file_time.sh"
 # shellcheck source=lib/cargo_env.sh
 source "$ROOT_DIR/scripts/lib/cargo_env.sh"
+# shellcheck source=lib/rustc_frontend.sh
+source "$ROOT_DIR/scripts/lib/rustc_frontend.sh"
 
 SETUP_STATE_DIR="${HARN_DEV_SETUP_STATE_DIR:-$ROOT_DIR/.codex/dev-setup}"
 SETUP_PROFILE="${HARN_DEV_SETUP_PROFILE:-full}"
@@ -276,6 +278,44 @@ write_sccache_env_config() {
   fi
 }
 
+# Compile Harn's own crates with rustc's parallel front end through a managed
+# `[build] rustc-workspace-wrapper` line (scripts/lib/rustc_frontend.sh says
+# why). A user-owned workspace wrapper stays authoritative and gets no second
+# key, which would be invalid TOML.
+write_rustc_frontend_config() {
+  local flags="$1"
+  local config_path=".cargo/config.toml"
+  local tmp_path
+
+  [[ -f "${config_path}" ]] || return 0
+  tmp_path="$(mktemp)"
+  # The managed `rustflags` and `RUSTC_BOOTSTRAP` lines are an earlier
+  # build-wide form of this setting; dropping them migrates such checkouts.
+  awk -v managed_marker="${MANAGED_CARGO_CONFIG_MARKER}" '
+    $0 ~ /^[[:space:]]*(rustc-workspace-wrapper|rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=/ &&
+      $0 ~ "#[[:space:]]*" managed_marker "[[:space:]]*$" { next }
+    { print }
+  ' "${config_path}" > "${tmp_path}"
+  mv "${tmp_path}" "${config_path}"
+
+  if [[ -z "${flags}" ]] \
+    || grep -Eq '^[[:space:]]*rustc-workspace-wrapper[[:space:]]*=' "${config_path}"; then
+    return 0
+  fi
+
+  local wrapper
+  wrapper="$(harn_rustc_frontend_install_wrapper "${ROOT_DIR}/scripts" \
+    "$(derive_storage_root)/rustc-frontend")" || return 1
+  local wrapper_line="rustc-workspace-wrapper = \"${wrapper}\" # ${MANAGED_CARGO_CONFIG_MARKER}"
+  tmp_path="$(mktemp)"
+  awk -v wrapper_line="${wrapper_line}" '
+    { print }
+    /^\[build\][[:space:]]*$/ { print wrapper_line; saw_build = 1 }
+    END { if (!saw_build) { print "\n[build]"; print wrapper_line } }
+  ' "${config_path}" > "${tmp_path}"
+  mv "${tmp_path}" "${config_path}"
+}
+
 hash_setup_inputs() {
   local name="$1"
   shift
@@ -405,6 +445,11 @@ else
 fi
 if [[ -n "${rustc_wrapper}" ]]; then
   echo "Configured sccache as rustc wrapper in .cargo/config.toml"
+fi
+rustc_frontend_flags="$(harn_rustc_frontend_flags)"
+write_rustc_frontend_config "${rustc_frontend_flags}"
+if [[ -n "${rustc_frontend_flags}" ]]; then
+  echo "Configured rustc front end (${rustc_frontend_flags}) in .cargo/config.toml"
 fi
 if [[ -n "${target_dir}" ]] && grep -Fxq \
   "target-dir = \"${target_dir}\" # ${MANAGED_CARGO_CONFIG_MARKER}" \

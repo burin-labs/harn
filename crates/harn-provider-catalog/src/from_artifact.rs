@@ -194,6 +194,7 @@ fn model_def_from_catalog(model: &CatalogModel) -> llm_config::ModelDef {
         deprecated: model.deprecation.status == DeprecationStatus::Deprecated,
         deprecation_note: model.deprecation.note.clone(),
         sunset_date: model.deprecation.sunset_date.clone(),
+        retires_on: model.deprecation.retires_on.clone(),
         superseded_by: model.deprecation.superseded_by.clone(),
         serving_tiers: model.serving_tiers.clone(),
         reasoning_modes: model.reasoning_modes.clone(),

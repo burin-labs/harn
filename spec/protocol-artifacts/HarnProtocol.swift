@@ -66,6 +66,7 @@ public enum HarnProtocolConstants {
         "handoff",
         "hitl_request",
         "hitl_resolved",
+        "inference_speed",
         "live_session_client",
         "log",
         "progress",
@@ -75,6 +76,7 @@ public enum HarnProtocolConstants {
         "skill_narrow",
         "skill_scope_tools",
         "stance_transition",
+        "state_update",
         "tool_search_query",
         "tool_search_result",
         "transcript_compacted",
@@ -1045,20 +1047,18 @@ public struct HarnConnectorSetupEvent: Codable, Sendable, Equatable {
 
 public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     case initialize = "initialize"
-    case sessionInject = "session/inject"
+    case cancelRequest = "$/cancel_request"
     case sessionInjectHostEvent = "session/inject_host_event"
     case sessionNew = "session/new"
     case sessionInputs = "session/inputs"
     case sessionLoad = "session/load"
-    case sessionReplaceInject = "session/replace_inject"
     case sessionResume = "session/resume"
     case sessionPrompt = "session/prompt"
-    case sessionRevokeInject = "session/revoke_inject"
+    case sessionPendingPrompts = "session/pending_prompts"
     case sessionTruncate = "session/truncate"
     case sessionRollback = "session/rollback"
     case sessionRedo = "session/redo"
     case sessionRemind = "session/remind"
-    case sessionPendingInjections = "session/pending_injections"
     case sessionRevokeReminder = "session/revoke_reminder"
     case sessionCancelToolCall = "session/cancel_tool_call"
     case sessionClose = "session/close"
@@ -1067,20 +1067,18 @@ public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
 
     public static let allCases: [Self] = [
         "initialize",
-        "session/inject",
+        "$/cancel_request",
         "session/inject_host_event",
         "session/new",
         "session/inputs",
         "session/load",
-        "session/replace_inject",
         "session/resume",
         "session/prompt",
-        "session/revoke_inject",
+        "session/pending_prompts",
         "session/truncate",
         "session/rollback",
         "session/redo",
         "session/remind",
-        "session/pending_injections",
         "session/revoke_reminder",
         "session/cancel_tool_call",
         "session/close",
@@ -1124,12 +1122,9 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
     case sessionCancelToolCall = "session/cancel_tool_call"
     case sessionClose = "session/close"
     case sessionStop = "session/stop"
-    case sessionInject = "session/inject"
     case sessionInjectHostEvent = "session/inject_host_event"
-    case sessionRevokeInject = "session/revoke_inject"
-    case sessionReplaceInject = "session/replace_inject"
     case sessionRemind = "session/remind"
-    case sessionPendingInjections = "session/pending_injections"
+    case sessionPendingPrompts = "session/pending_prompts"
     case sessionRevokeReminder = "session/revoke_reminder"
     case sessionList = "session/list"
     case harnSessionWorkspaceRoots = "harn.session_workspace_roots"
@@ -1198,12 +1193,9 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
         "session/cancel_tool_call",
         "session/close",
         "session/stop",
-        "session/inject",
         "session/inject_host_event",
-        "session/revoke_inject",
-        "session/replace_inject",
         "session/remind",
-        "session/pending_injections",
+        "session/pending_prompts",
         "session/revoke_reminder",
         "session/list",
         "harn.session_workspace_roots",
@@ -1283,12 +1275,9 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
     case sessionCancelToolCall = "session/cancel_tool_call"
     case sessionClose = "session/close"
     case sessionStop = "session/stop"
-    case sessionInject = "session/inject"
     case sessionInjectHostEvent = "session/inject_host_event"
-    case sessionRevokeInject = "session/revoke_inject"
-    case sessionReplaceInject = "session/replace_inject"
     case sessionRemind = "session/remind"
-    case sessionPendingInjections = "session/pending_injections"
+    case sessionPendingPrompts = "session/pending_prompts"
     case sessionRevokeReminder = "session/revoke_reminder"
     case sessionList = "session/list"
     case harnSessionWorkspaceRoots = "harn.session_workspace_roots"
@@ -1358,12 +1347,9 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
         "session/cancel_tool_call",
         "session/close",
         "session/stop",
-        "session/inject",
         "session/inject_host_event",
-        "session/revoke_inject",
-        "session/replace_inject",
         "session/remind",
-        "session/pending_injections",
+        "session/pending_prompts",
         "session/revoke_reminder",
         "session/list",
         "harn.session_workspace_roots",
@@ -1446,6 +1432,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case handoff = "handoff"
     case hitlRequest = "hitl_request"
     case hitlResolved = "hitl_resolved"
+    case inferenceSpeed = "inference_speed"
     case liveSessionClient = "live_session_client"
     case log = "log"
     case progress = "progress"
@@ -1455,6 +1442,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case skillNarrow = "skill_narrow"
     case skillScopeTools = "skill_scope_tools"
     case stanceTransition = "stance_transition"
+    case stateUpdate = "state_update"
     case toolSearchQuery = "tool_search_query"
     case toolSearchResult = "tool_search_result"
     case transcriptCompacted = "transcript_compacted"
@@ -1481,6 +1469,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
         "handoff",
         "hitl_request",
         "hitl_resolved",
+        "inference_speed",
         "live_session_client",
         "log",
         "progress",
@@ -1490,6 +1479,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
         "skill_narrow",
         "skill_scope_tools",
         "stance_transition",
+        "state_update",
         "tool_search_query",
         "tool_search_result",
         "transcript_compacted",
@@ -2371,6 +2361,12 @@ public enum HarnACPValue: Codable, Sendable, Equatable, Hashable {
     public var intValue: Int? {
         if case .int(let value) = self { return value }
         if case .double(let value) = self, value.rounded() == value { return Int(value) }
+        return nil
+    }
+
+    public var doubleValue: Double? {
+        if case .int(let value) = self { return Double(value) }
+        if case .double(let value) = self { return value }
         return nil
     }
 
@@ -3417,6 +3413,34 @@ public struct HarnACPHitlResolvedUpdate: Codable, Sendable, Equatable {
     }
 }
 
+public struct HarnACPInferenceSpeedUpdateMetaHarn: Codable, Sendable, Equatable {
+    public var callId: String
+    public var provider: String
+    public var model: String
+    public var phase: String
+    public var isFinal: Bool
+    public var elapsedMs: Int
+    public var outputTokens: Int
+    public var tokenSource: String
+    public var outputTokensPerSecond: Double?
+    public var replayed: Bool?
+    public var timeToFirstTokenMs: Int?
+}
+
+public struct HarnACPInferenceSpeedUpdateMeta: Codable, Sendable, Equatable {
+    public var harn: HarnACPInferenceSpeedUpdateMetaHarn
+}
+
+public struct HarnACPInferenceSpeedUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: String
+    public var meta: HarnACPInferenceSpeedUpdateMeta
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case meta = "_meta"
+    }
+}
+
 public struct HarnACPLiveSessionClientUpdateMetaHarn: Codable, Sendable, Equatable {
     public var action: String
     public var state: HarnACPValue
@@ -3722,6 +3746,39 @@ public struct HarnACPStanceTransitionUpdate: Codable, Sendable, Equatable {
     }
 }
 
+public struct HarnACPStateUpdateMetaHarn: Codable, Sendable, Equatable {
+    public var replayed: Bool?
+}
+
+public struct HarnACPStateUpdateMeta: Codable, Sendable, Equatable {
+    public var harn: HarnACPStateUpdateMetaHarn?
+}
+
+public struct HarnACPStateUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: String
+    public var state: String
+    public var meta: HarnACPStateUpdateMeta?
+    public var error: HarnACPValue?
+    public var stopReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case state
+        case meta = "_meta"
+        case error
+        case stopReason
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sessionUpdate = try values.decode(String.self, forKey: .sessionUpdate)
+        state = try values.decode(String.self, forKey: .state)
+        meta = try values.decodeIfPresent(HarnACPStateUpdateMeta.self, forKey: .meta)
+        error = values.contains(.error) ? try values.decode(HarnACPValue.self, forKey: .error) : nil
+        stopReason = try values.decodeIfPresent(String.self, forKey: .stopReason)
+    }
+}
+
 public struct HarnACPToolSearchQueryUpdateMetaHarn: Codable, Sendable, Equatable {
     public var toolUseId: String
     public var name: String
@@ -3968,6 +4025,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
     case handoff(HarnACPHandoffUpdate)
     case hitl_request(HarnACPHitlRequestUpdate)
     case hitl_resolved(HarnACPHitlResolvedUpdate)
+    case inference_speed(HarnACPInferenceSpeedUpdate)
     case live_session_client(HarnACPLiveSessionClientUpdate)
     case log(HarnACPLogUpdate)
     case progress(HarnACPProgressUpdate)
@@ -3977,6 +4035,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
     case skill_narrow(HarnACPSkillNarrowUpdate)
     case skill_scope_tools(HarnACPSkillScopeToolsUpdate)
     case stance_transition(HarnACPStanceTransitionUpdate)
+    case state_update(HarnACPStateUpdate)
     case tool_search_query(HarnACPToolSearchQueryUpdate)
     case tool_search_result(HarnACPToolSearchResultUpdate)
     case transcript_compacted(HarnACPTranscriptCompactedUpdate)
@@ -3996,7 +4055,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             if (value["_meta"]?["harn"]?["artifactId"]?.stringValue?.unicodeScalars.count ?? 1) < 1 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.artifactId is too short") }
             if value["_meta"]?["harn"]?["metadata"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.metadata is required") }
             if value["_meta"]?["harn"]?["provenance"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.provenance is required") }
-            if (value["_meta"]?["harn"]?["sizeBytes"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.sizeBytes is below its minimum") }
+            if (value["_meta"]?["harn"]?["sizeBytes"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.sizeBytes is below its minimum") }
             if value["_meta"]?["harn"]?["spec"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.spec is required") }
             if value["_meta"]?["harn"]?["title"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.title is required") }
             }
@@ -4059,6 +4118,30 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             }
             if value["sessionUpdate"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update sessionUpdate is required") }
             self = .hitl_resolved(try container.decode(HarnACPHitlResolvedUpdate.self))
+        case "inference_speed":
+            if value["_meta"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta is required") }
+            if value["_meta"] != nil {
+            if value["_meta"]?["harn"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn is required") }
+            if value["_meta"]?["harn"] != nil {
+            if value["_meta"]?["harn"]?["callId"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.callId is required") }
+            if (value["_meta"]?["harn"]?["callId"]?.stringValue?.unicodeScalars.count ?? 1) < 1 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.callId is too short") }
+            if value["_meta"]?["harn"]?["elapsedMs"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.elapsedMs is required") }
+            if (value["_meta"]?["harn"]?["elapsedMs"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.elapsedMs is below its minimum") }
+            if value["_meta"]?["harn"]?["isFinal"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.isFinal is required") }
+            if value["_meta"]?["harn"]?["model"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.model is required") }
+            if value["_meta"]?["harn"]?["outputTokens"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.outputTokens is required") }
+            if (value["_meta"]?["harn"]?["outputTokens"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.outputTokens is below its minimum") }
+            if (value["_meta"]?["harn"]?["outputTokensPerSecond"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.outputTokensPerSecond is below its minimum") }
+            if value["_meta"]?["harn"]?["phase"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.phase is required") }
+            if value["_meta"]?["harn"]?["phase"]?.stringValue.map({ !["awaiting_first_token", "reasoning", "responding", "calling_tool", "complete"].contains($0) }) == true { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.phase has an unknown value") }
+            if value["_meta"]?["harn"]?["provider"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.provider is required") }
+            if (value["_meta"]?["harn"]?["timeToFirstTokenMs"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.timeToFirstTokenMs is below its minimum") }
+            if value["_meta"]?["harn"]?["tokenSource"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.tokenSource is required") }
+            if value["_meta"]?["harn"]?["tokenSource"]?.stringValue.map({ !["estimated", "provider", "server"].contains($0) }) == true { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.tokenSource has an unknown value") }
+            }
+            }
+            if value["sessionUpdate"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update sessionUpdate is required") }
+            self = .inference_speed(try container.decode(HarnACPInferenceSpeedUpdate.self))
         case "live_session_client":
             if value["_meta"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta is required") }
             if value["_meta"] != nil {
@@ -4088,9 +4171,9 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             if value["_meta"]?["harn"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn is required") }
             if value["_meta"]?["harn"] != nil {
             if value["_meta"]?["harn"]?["message"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.message is required") }
-            if (value["_meta"]?["harn"]?["pendingCount"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.pendingCount is below its minimum") }
+            if (value["_meta"]?["harn"]?["pendingCount"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.pendingCount is below its minimum") }
             if value["_meta"]?["harn"]?["phase"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.phase is required") }
-            if (value["_meta"]?["harn"]?["totalBytes"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.totalBytes is below its minimum") }
+            if (value["_meta"]?["harn"]?["totalBytes"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.totalBytes is below its minimum") }
             }
             }
             if value["sessionUpdate"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update sessionUpdate is required") }
@@ -4124,7 +4207,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             if value["_meta"]?["harn"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn is required") }
             if value["_meta"]?["harn"] != nil {
             if value["_meta"]?["harn"]?["iteration"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.iteration is required") }
-            if (value["_meta"]?["harn"]?["iteration"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.iteration is below its minimum") }
+            if (value["_meta"]?["harn"]?["iteration"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.iteration is below its minimum") }
             if value["_meta"]?["harn"]?["skillName"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.skillName is required") }
             if (value["_meta"]?["harn"]?["skillName"]?.stringValue?.unicodeScalars.count ?? 1) < 1 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.skillName is too short") }
             if value["_meta"]?["harn"]?["skillName"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.skillName must not be blank") }
@@ -4137,7 +4220,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             if value["_meta"] != nil {
             if value["_meta"]?["harn"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn is required") }
             if value["_meta"]?["harn"] != nil {
-            if (value["_meta"]?["harn"]?["iteration"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.iteration is below its minimum") }
+            if (value["_meta"]?["harn"]?["iteration"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.iteration is below its minimum") }
             if value["_meta"]?["harn"]?["skillName"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.skillName is required") }
             if (value["_meta"]?["harn"]?["skillName"]?.stringValue?.unicodeScalars.count ?? 1) < 1 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.skillName is too short") }
             if value["_meta"]?["harn"]?["skillName"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.skillName must not be blank") }
@@ -4187,6 +4270,11 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             }
             if value["sessionUpdate"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update sessionUpdate is required") }
             self = .stance_transition(try container.decode(HarnACPStanceTransitionUpdate.self))
+        case "state_update":
+            if value["sessionUpdate"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update sessionUpdate is required") }
+            if value["state"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update state is required") }
+            if value["state"]?.stringValue.map({ !["running", "idle"].contains($0) }) == true { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update state has an unknown value") }
+            self = .state_update(try container.decode(HarnACPStateUpdate.self))
         case "tool_search_query":
             if value["_meta"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta is required") }
             if value["_meta"] != nil {
@@ -4219,16 +4307,16 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             if value["_meta"]?["harn"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn is required") }
             if value["_meta"]?["harn"] != nil {
             if value["_meta"]?["harn"]?["archivedMessages"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.archivedMessages is required") }
-            if (value["_meta"]?["harn"]?["archivedMessages"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.archivedMessages is below its minimum") }
+            if (value["_meta"]?["harn"]?["archivedMessages"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.archivedMessages is below its minimum") }
             if value["_meta"]?["harn"]?["classification"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.classification is required") }
             if value["_meta"]?["harn"]?["compactionPolicy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.compactionPolicy is required") }
             if value["_meta"]?["harn"]?["engineStrategy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.engineStrategy is required") }
             if value["_meta"]?["harn"]?["estimatedTokensAfter"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.estimatedTokensAfter is required") }
-            if (value["_meta"]?["harn"]?["estimatedTokensAfter"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.estimatedTokensAfter is below its minimum") }
+            if (value["_meta"]?["harn"]?["estimatedTokensAfter"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.estimatedTokensAfter is below its minimum") }
             if value["_meta"]?["harn"]?["estimatedTokensBefore"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.estimatedTokensBefore is required") }
-            if (value["_meta"]?["harn"]?["estimatedTokensBefore"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.estimatedTokensBefore is below its minimum") }
+            if (value["_meta"]?["harn"]?["estimatedTokensBefore"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.estimatedTokensBefore is below its minimum") }
             if value["_meta"]?["harn"]?["hardLimitTokens"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.hardLimitTokens is required") }
-            if (value["_meta"]?["harn"]?["hardLimitTokens"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.hardLimitTokens is below its minimum") }
+            if (value["_meta"]?["harn"]?["hardLimitTokens"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.hardLimitTokens is below its minimum") }
             if value["_meta"]?["harn"]?["instructionMode"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.instructionMode is required") }
             if value["_meta"]?["harn"]?["instructionSource"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.instructionSource is required") }
             if value["_meta"]?["harn"]?["mode"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.mode is required") }
@@ -4237,9 +4325,9 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             if value["_meta"]?["harn"]?["receiptId"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.receiptId is required") }
             if value["_meta"]?["harn"]?["requestedStrategy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.requestedStrategy is required") }
             if value["_meta"]?["harn"]?["resolvedThresholdTokens"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.resolvedThresholdTokens is required") }
-            if (value["_meta"]?["harn"]?["resolvedThresholdTokens"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.resolvedThresholdTokens is below its minimum") }
+            if (value["_meta"]?["harn"]?["resolvedThresholdTokens"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.resolvedThresholdTokens is below its minimum") }
             if value["_meta"]?["harn"]?["schemaVersion"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.schemaVersion is required") }
-            if (value["_meta"]?["harn"]?["schemaVersion"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.schemaVersion is below its minimum") }
+            if (value["_meta"]?["harn"]?["schemaVersion"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.schemaVersion is below its minimum") }
             if value["_meta"]?["harn"]?["snapshotAssetId"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.snapshotAssetId is required") }
             if value["_meta"]?["harn"]?["sourceMeasurement"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.sourceMeasurement is required") }
             if value["_meta"]?["harn"]?["strategy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.strategy is required") }
@@ -4253,12 +4341,12 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             if value["_meta"] != nil {
             if value["_meta"]?["harn"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn is required") }
             if value["_meta"]?["harn"] != nil {
-            if (value["_meta"]?["harn"]?["droppedCount"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.droppedCount is below its minimum") }
-            if (value["_meta"]?["harn"]?["keptCount"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.keptCount is below its minimum") }
+            if (value["_meta"]?["harn"]?["droppedCount"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.droppedCount is below its minimum") }
+            if (value["_meta"]?["harn"]?["keptCount"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.keptCount is below its minimum") }
             if value["_meta"]?["harn"]?["policy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.policy is required") }
             if value["_meta"]?["harn"]?["reason"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.reason is required") }
-            if (value["_meta"]?["harn"]?["reclaimedTokens"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.reclaimedTokens is below its minimum") }
-            if (value["_meta"]?["harn"]?["redactedCount"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.redactedCount is below its minimum") }
+            if (value["_meta"]?["harn"]?["reclaimedTokens"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.reclaimedTokens is below its minimum") }
+            if (value["_meta"]?["harn"]?["redactedCount"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.redactedCount is below its minimum") }
             }
             }
             if value["sessionUpdate"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update sessionUpdate is required") }
@@ -4295,6 +4383,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
         case .handoff(let update): try update.encode(to: encoder)
         case .hitl_request(let update): try update.encode(to: encoder)
         case .hitl_resolved(let update): try update.encode(to: encoder)
+        case .inference_speed(let update): try update.encode(to: encoder)
         case .live_session_client(let update): try update.encode(to: encoder)
         case .log(let update): try update.encode(to: encoder)
         case .progress(let update): try update.encode(to: encoder)
@@ -4304,6 +4393,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
         case .skill_narrow(let update): try update.encode(to: encoder)
         case .skill_scope_tools(let update): try update.encode(to: encoder)
         case .stance_transition(let update): try update.encode(to: encoder)
+        case .state_update(let update): try update.encode(to: encoder)
         case .tool_search_query(let update): try update.encode(to: encoder)
         case .tool_search_result(let update): try update.encode(to: encoder)
         case .transcript_compacted(let update): try update.encode(to: encoder)

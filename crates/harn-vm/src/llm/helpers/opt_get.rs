@@ -1,17 +1,17 @@
 use crate::value::VmValue;
 
-pub(crate) fn opt_str(options: &Option<crate::value::DictMap>, key: &str) -> Option<String> {
+pub fn opt_str(options: &Option<crate::value::DictMap>, key: &str) -> Option<String> {
     match options.as_ref()?.get(key)? {
         VmValue::Nil => None,
         value => Some(value.display()),
     }
 }
 
-pub(crate) fn opt_int(options: &Option<crate::value::DictMap>, key: &str) -> Option<i64> {
+pub fn opt_int(options: &Option<crate::value::DictMap>, key: &str) -> Option<i64> {
     options.as_ref()?.get(key)?.as_int()
 }
 
-pub(crate) fn opt_float(options: &Option<crate::value::DictMap>, key: &str) -> Option<f64> {
+pub fn opt_float(options: &Option<crate::value::DictMap>, key: &str) -> Option<f64> {
     options.as_ref()?.get(key).and_then(|v| match v {
         VmValue::Float(f) => Some(*f),
         VmValue::Int(i) => Some(*i as f64),
@@ -19,7 +19,7 @@ pub(crate) fn opt_float(options: &Option<crate::value::DictMap>, key: &str) -> O
     })
 }
 
-pub(crate) fn opt_bool(options: &Option<crate::value::DictMap>, key: &str) -> bool {
+pub fn opt_bool(options: &Option<crate::value::DictMap>, key: &str) -> bool {
     options
         .as_ref()
         .and_then(|o| o.get(key))
@@ -38,7 +38,7 @@ mod tests {
     #[test]
     fn opt_str_treats_nil_as_unset() {
         let mut options = crate::value::DictMap::new();
-        options.insert(crate::value::intern_key("path"), VmValue::Nil);
+        options.put("path", VmValue::Nil);
 
         assert_eq!(opt_str(&Some(options), "path"), None);
     }

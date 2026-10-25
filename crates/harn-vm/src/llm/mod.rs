@@ -22,7 +22,7 @@ pub fn capability_snapshot_id(snapshot: &serde_json::Value) -> String {
     format!("blake3:{}", blake3::hash(&retained).to_hex())
 }
 
-pub(crate) mod acp_permission;
+pub mod acp_permission;
 mod agent_config;
 pub(crate) mod agent_host_primitives;
 mod agent_host_tool_dispatch;
@@ -44,8 +44,8 @@ pub use agent_tools::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
 pub(crate) mod admission;
 pub use admission::{
     AdmissionMode, AdmissionReceipt, BudgetCeilingUpdate, ConservativeLlmBudget,
-    MachineSpendExhaustion, MachineSpendPeriod, MachineSpendPolicy, MachineSpendQuota,
-    MachineSpendReceipt,
+    MachineSpendExhaustion, MachineSpendPeriod, MachineSpendPolicy, MachineSpendPolicyFile,
+    MachineSpendQuota, MachineSpendReceipt,
 };
 pub mod api;
 #[cfg(test)]
@@ -83,21 +83,22 @@ pub mod eval;
 pub(crate) mod fake;
 pub(crate) mod first_token;
 mod hash_replay;
+pub mod inference_speed;
 pub use hash_replay::{scope_replay_mode, ReplayModeScope};
-pub(crate) mod helpers;
+pub mod helpers;
 pub use helpers::admit_reasoning_literals;
 pub mod introspection;
 pub mod jsonl;
 pub mod local_profiles;
 pub mod managed_supply;
 pub(crate) use harn_llm::message_lineage;
-pub(crate) mod mock;
+pub mod mock;
 mod mock_builtins;
 mod mock_error;
 pub(crate) mod mock_store;
 mod model_test;
 mod permission_preview;
-pub(crate) mod permissions;
+pub mod permissions;
 pub mod plan;
 mod predicate;
 pub mod prompt;
@@ -158,7 +159,7 @@ pub use reasoning_receipt::{
     dropped_reasoning_receipts, peek_reasoning_receipts, reset_reasoning_receipts, ReasoningReceipt,
 };
 pub(crate) mod reminder_iteration;
-pub(crate) mod reminder_providers;
+pub mod reminder_providers;
 mod rerank;
 pub mod resolved_dispatch;
 pub mod response_tool_calls;
@@ -221,27 +222,31 @@ pub(crate) fn shared_utility_client() -> &'static reqwest::Client {
 
 pub(crate) fn streaming_client_for_base_url(base_url: &str) -> reqwest::Client {
     static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
+    let metered = admission::bounds_dispatch();
     cached_client_for_base_url(
         "streaming",
         base_url,
+        metered,
         &CLIENTS,
         reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(30))
-            .redirect(crate::egress::redirect_policy("llm_streaming_redirect", 10))
+            .redirect(inference_redirect_policy("llm_streaming_redirect", metered))
             .pool_max_idle_per_host(4),
     )
 }
 
 pub(crate) fn blocking_client_for_base_url(base_url: &str) -> reqwest::Client {
     static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
+    let metered = admission::bounds_dispatch();
     cached_client_for_base_url(
         "blocking",
         base_url,
+        metered,
         &CLIENTS,
         reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(30))
             .timeout(std::time::Duration::from_mins(2))
-            .redirect(crate::egress::redirect_policy("llm_blocking_redirect", 10))
+            .redirect(inference_redirect_policy("llm_blocking_redirect", metered))
             .pool_max_idle_per_host(4),
     )
 }
@@ -251,6 +256,7 @@ pub(crate) fn utility_client_for_base_url(base_url: &str) -> reqwest::Client {
     cached_client_for_base_url(
         "utility",
         base_url,
+        false,
         &CLIENTS,
         reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(10))
@@ -260,9 +266,21 @@ pub(crate) fn utility_client_for_base_url(base_url: &str) -> reqwest::Client {
     )
 }
 
+fn inference_redirect_policy(surface: &'static str, metered: bool) -> reqwest::redirect::Policy {
+    if metered {
+        // A redirect is another HTTP dispatch outside the admitted request.
+        // Return the original response so ordinary error/accounting handling
+        // retains the reservation when the provider supplies no usage.
+        reqwest::redirect::Policy::none()
+    } else {
+        crate::egress::redirect_policy(surface, 10)
+    }
+}
+
 fn cached_client_for_base_url(
     kind: &str,
     base_url: &str,
+    metered: bool,
     cache: &OnceLock<Mutex<BTreeMap<String, reqwest::Client>>>,
     builder: reqwest::ClientBuilder,
 ) -> reqwest::Client {
@@ -270,7 +288,7 @@ fn cached_client_for_base_url(
         .into_iter()
         .collect::<Vec<_>>();
     let key = format!(
-        "{kind};{}",
+        "{kind};metered={metered};{}",
         crate::egress::ssrf_client_cache_key(&allow_hosts)
     );
     let clients = cache.get_or_init(|| Mutex::new(BTreeMap::new()));
@@ -347,11 +365,11 @@ pub(crate) mod trigger_predicate;
 /// See [`test_env`]: there used to be three locks and eight copies of the
 /// scoped setter, so cases in different modules serialized against different
 /// mutexes and clobbered each other's variables (harn#7960).
-#[cfg(test)]
-pub(crate) mod test_env;
+#[cfg(any(test, feature = "vm-test-support"))]
+pub mod test_env;
 
-#[cfg(test)]
-pub(crate) use test_env::{env_guard, env_lock};
+#[cfg(any(test, feature = "vm-test-support"))]
+pub use test_env::{env_guard, env_lock};
 
 pub const LLM_CALLS_DISABLED_ENV: &str = "HARN_LLM_CALLS_DISABLED";
 
@@ -442,7 +460,7 @@ pub(crate) use self::agent_observe::{pop_llm_transcript_dir, push_llm_transcript
 pub use self::agent_runtime::{
     current_agent_session_id, register_session_end_hook, SessionEndHookRegistration,
 };
-pub(crate) use self::agent_runtime::{
+pub use self::agent_runtime::{
     current_host_bridge, emit_agent_event_sync as emit_live_agent_event_sync,
     emit_agent_event_with_ctx as emit_live_agent_event_with_ctx, register_session_close_hook,
     swap_current_host_bridge, swap_current_loop_sinks, SessionCloseHookRegistration,
@@ -452,7 +470,7 @@ pub(crate) use self::agent_runtime::{fire_session_close_hooks, fire_session_end_
 pub(crate) use self::agent_session_host::active_run_id as active_agent_run_id;
 pub use self::api::fetch_provider_max_context;
 pub(crate) use self::api::vm_call_llm_full;
-pub(crate) use self::call::{
+pub use self::call::{
     execute_llm_call, execute_schema_retry_loop, extract_structured_data, llm_error_message,
     rewrite_structured_args, structured_output_errors, structured_safe_envelope_err,
     structured_safe_envelope_ok, SchemaLoopOutcome,
@@ -468,7 +486,7 @@ pub use self::healthcheck::{
     build_healthcheck_url, run_provider_healthcheck, run_provider_healthcheck_with_options,
     ProviderHealthcheckOptions, ProviderHealthcheckResult,
 };
-pub(crate) use self::helpers::extract_llm_options;
+pub use self::helpers::extract_llm_options;
 pub use self::helpers::{vm_value_to_export_json, vm_value_to_json, vm_value_to_json_strict};
 pub use self::jsonl::{
     load_llm_mocks_jsonl, parse_llm_mock_value, parse_llm_mock_value_versioned,
@@ -824,7 +842,7 @@ async fn llm_completion_builtin(
         }
     });
     let opts = extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from(prefix.clone())),
+        VmValue::string(prefix.clone()),
         args.get(2).cloned().unwrap_or(VmValue::Nil),
         args.get(3).cloned().unwrap_or(VmValue::Nil),
     ])?;
@@ -892,10 +910,13 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     cache::register_cache_builtins(vm);
     config_builtins::register_config_builtins(vm);
     cost::register_cost_builtins(vm);
+    usage::register_settlement_builtin(vm);
     rerank::register_rerank_builtins(vm);
     mock_builtins::register_llm_mock_builtins(vm);
     transcript_stats::register_transcript_builtins(vm);
 }
+
+harn_vm_core::stdlib_installer!(Host, register_llm_builtins);
 
 const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
     // trace
@@ -1009,7 +1030,7 @@ mod tests {
     fn output_validation_rejects_mismatched_schema_in_error_mode() {
         let opts = base_opts();
         let mut map = std::collections::BTreeMap::new();
-        map.insert("name".to_string(), VmValue::Int(42));
+        map.put_int("name", 42);
         let data = VmValue::dict(map);
         let errors = compute_validation_errors(&data, &opts);
         assert!(!errors.is_empty(), "schema should fail");
@@ -1018,22 +1039,14 @@ mod tests {
 
     #[test]
     fn structured_output_errors_report_missing_json() {
-        let result = VmValue::dict(std::collections::BTreeMap::from([
+        let result = VmValue::dict([
+            ("text", VmValue::string("Analyzing the task")),
             (
-                "text".to_string(),
-                VmValue::String(arcstr::ArcStr::from("Analyzing the task")),
+                "protocol_violations",
+                VmValue::strings(["stray text outside response tags"]),
             ),
-            (
-                "protocol_violations".to_string(),
-                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                    arcstr::ArcStr::from("stray text outside response tags"),
-                )])),
-            ),
-            (
-                "stop_reason".to_string(),
-                VmValue::String(arcstr::ArcStr::from("length")),
-            ),
-        ]));
+            ("stop_reason", VmValue::string("length")),
+        ]);
 
         let errors = structured_output_errors(&result, &base_opts());
         assert!(errors.iter().any(|err| err.contains("parseable JSON")));

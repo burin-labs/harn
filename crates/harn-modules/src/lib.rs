@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::{package_imports::acquire_package_snapshots, package_snapshot::PackageSnapshot};
 use harn_lexer::Span;
-use harn_parser::{Parser, SNode};
+use harn_parser::SNode;
 
 /// Crate-local source contribution to compiler and check cache identities.
 pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
@@ -15,6 +16,7 @@ pub mod fingerprint;
 pub mod host_capabilities;
 pub mod host_capability_config;
 mod import_recording;
+mod load_memo;
 pub mod manifest_walk;
 mod namespace_imports;
 mod namespace_signatures;
@@ -30,21 +32,21 @@ pub use source_reads::{
 mod references;
 mod standalone;
 mod stdlib;
-pub use stdlib::{stdlib_catalog, try_stdlib_catalog};
+pub use stdlib::{ensure_stdlib_installed, stdlib_catalog, try_stdlib_catalog};
 mod symbol_reachability;
 mod type_dependencies;
 mod typecheck;
 mod visibility;
+mod wave_load;
+use wave_load::load_wave;
+pub use wave_load::MODULE_GRAPH_JOBS_ENV;
 
 pub use construction::{
     build, build_closed_program, build_for_reference_index, build_with_module_projection,
     build_with_parsed_sources,
 };
 
-use declarations::{
-    callable_decl_name, collect_callable_declarations, collect_module_info,
-    collect_type_declarations, decl_site, type_decl_name,
-};
+use declarations::{callable_decl_name, decl_site, type_decl_name};
 pub use declarations::{public_declarations, sibling_declarations, DefKind, PublicDeclaration};
 pub use namespace_imports::NamespaceImportInfo;
 pub use namespace_signatures::NamespaceMemberSignature;
@@ -81,7 +83,7 @@ pub enum WildcardResolution {
 /// Parsed information for a set of module files.
 #[derive(Debug, Default)]
 pub struct ModuleGraph {
-    modules: HashMap<PathBuf, ModuleInfo>,
+    modules: HashMap<PathBuf, Arc<ModuleInfo>>,
     // Resolved definition/import paths remain valid for the graph lifetime.
     _package_snapshots: Vec<PackageSnapshot>,
 }
@@ -98,7 +100,7 @@ pub struct ModuleGraphBuild {
     pub parsed_sources: HashMap<PathBuf, ParsedModuleSource>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct ModuleInfo {
     /// All declarations visible in this module (for local symbol lookup and
     /// go-to-definition resolution).
@@ -242,7 +244,7 @@ fn build_inner(
         PackageContext::Project => acquire_package_snapshots(files),
         PackageContext::Standalone => Vec::new(),
     };
-    let mut modules: HashMap<PathBuf, ModuleInfo> = HashMap::new();
+    let mut modules: HashMap<PathBuf, Arc<ModuleInfo>> = HashMap::new();
     let mut parsed_sources: HashMap<PathBuf, ParsedModuleSource> = HashMap::new();
     let mut seen: HashSet<PathBuf> = HashSet::new();
     let mut wave: Vec<PathBuf> = Vec::new();
@@ -312,91 +314,11 @@ fn build_inner(
     }
 }
 
-/// Environment override for the graph-build worker-pool size. `1` forces the
-/// serial walk; unset defaults to the machine's available parallelism.
-pub const MODULE_GRAPH_JOBS_ENV: &str = "HARN_MODULE_GRAPH_JOBS";
-
-/// Load one BFS wave of module paths, in parallel when the wave is large
-/// enough to pay for the threads. Results are index-aligned with `paths`.
-fn load_wave(
-    paths: &[PathBuf],
-    package_snapshots: &[PackageSnapshot],
-    parsed_source_retention: ParsedSourceRetention<'_>,
-    source_overrides: Option<&HashMap<PathBuf, String>>,
-    observer: Option<&ModuleObserver<'_>>,
-) -> Vec<(ModuleInfo, Option<ParsedModuleSource>)> {
-    const MIN_PARALLEL_WAVE: usize = 8;
-    let configured = std::env::var(MODULE_GRAPH_JOBS_ENV)
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|&jobs| jobs > 0);
-    let workers = configured
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism()
-                .map(std::num::NonZeroUsize::get)
-                .unwrap_or(1)
-        })
-        .min(paths.len());
-    if workers <= 1 || paths.len() < MIN_PARALLEL_WAVE {
-        return paths
-            .iter()
-            .map(|path| {
-                load_module(
-                    path,
-                    package_snapshots,
-                    source_overrides,
-                    parsed_source_retention.retains(path),
-                    observer,
-                )
-            })
-            .collect();
-    }
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let mut produced: Vec<(usize, (ModuleInfo, Option<ParsedModuleSource>))> =
-        harn_parser::runtime_stack::scope(|scope| {
-            let handles: Vec<_> = (0..workers)
-                .map(|_| {
-                    scope
-                        .spawn_named("harn-module-parse", || {
-                            let mut local = Vec::new();
-                            loop {
-                                let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                let Some(path) = paths.get(index) else {
-                                    break;
-                                };
-                                local.push((
-                                    index,
-                                    load_module(
-                                        path,
-                                        package_snapshots,
-                                        source_overrides,
-                                        parsed_source_retention.retains(path),
-                                        observer,
-                                    ),
-                                ));
-                            }
-                            local
-                        })
-                        .expect("spawn module-parse worker")
-                })
-                .collect();
-            handles
-                .into_iter()
-                .flat_map(|handle| match handle.join() {
-                    Ok(local) => local,
-                    Err(panic) => std::panic::resume_unwind(panic),
-                })
-                .collect()
-        });
-    produced.sort_unstable_by_key(|(index, _)| *index);
-    produced.into_iter().map(|(_, loaded)| loaded).collect()
-}
-
 /// Iteratively expand each module's `exports` set to include the transitive
 /// public surface of its `pub import "..."` re-export targets. Cycles are
 /// safe because the loop only adds names — once no module's set grows in a
 /// pass, the fixpoint is reached.
-fn resolve_re_exports(modules: &mut HashMap<PathBuf, ModuleInfo>) {
+fn resolve_re_exports(modules: &mut HashMap<PathBuf, Arc<ModuleInfo>>) {
     let keys: Vec<PathBuf> = modules.keys().cloned().collect();
     loop {
         let mut changed = false;
@@ -417,12 +339,15 @@ fn resolve_re_exports(modules: &mut HashMap<PathBuf, ModuleInfo>) {
                     additions.extend(src_module.exports.iter().cloned());
                 }
             }
-            if let Some(module) = modules.get_mut(path) {
-                for name in additions {
-                    if module.exports.insert(name) {
-                        changed = true;
-                    }
-                }
+            // Graphs share each module's memoized projection; copy one only
+            // when this graph's re-exports actually grow its export set.
+            let Some(module) = modules.get_mut(path) else {
+                continue;
+            };
+            additions.retain(|name| !module.exports.contains(name));
+            if !additions.is_empty() {
+                Arc::make_mut(module).exports.extend(additions);
+                changed = true;
             }
         }
         if !changed {
@@ -691,6 +616,17 @@ impl ModuleGraph {
         file: &Path,
         kind: DefKind,
     ) -> Option<HashSet<String>> {
+        let mut grouped = self.imported_names_grouped_by_kind(file)?;
+        Some(grouped.remove(&kind).unwrap_or_default())
+    }
+
+    /// Every name `file` imports, grouped by the kind its import gives it, in
+    /// one pass over the imports. A name that two imports bind with different
+    /// kinds is listed under each. `None` when any import is unresolved.
+    pub fn imported_names_grouped_by_kind(
+        &self,
+        file: &Path,
+    ) -> Option<HashMap<DefKind, HashSet<String>>> {
         let file = normalize_path(file);
         let module = self.modules.get(&file)?;
         if module.has_unresolved_wildcard_import
@@ -700,24 +636,27 @@ impl ModuleGraph {
             return None;
         }
 
-        let mut names = HashSet::new();
+        let mut grouped: HashMap<DefKind, HashSet<String>> = HashMap::new();
         for import in &module.imports {
             // Namespace aliases are variables, not flattened member kinds.
             if import.namespace_alias.is_some() {
                 continue;
             }
             let import_path = import.path.as_ref()?;
+            let target = normalize_path(import_path);
+            let sibling = sibling_module_access(&file, &target);
             let imported_names: Vec<String> = match &import.selective_names {
                 Some(selective) => selective.iter().cloned().collect(),
                 None => self.exports_for_import(&file, import_path),
             };
             for name in imported_names {
-                if self.exported_kind_for_import(&file, import_path, &name) == Some(kind) {
-                    names.insert(name);
+                if let Some(kind) = self.exported_kind_for_resolved_import(sibling, &target, &name)
+                {
+                    grouped.entry(kind).or_default().insert(name);
                 }
             }
         }
-        Some(names)
+        Some(grouped)
     }
 
     /// Collect imported declarations that can be invoked with ordinary call
@@ -725,16 +664,8 @@ impl ModuleGraph {
     /// compilers; it includes function-like declarations and struct
     /// constructors while preserving import visibility and resolution.
     pub fn imported_callable_names_for_file(&self, file: &Path) -> Option<HashSet<String>> {
-        let mut names = HashSet::new();
-        for kind in [
-            DefKind::Function,
-            DefKind::Pipeline,
-            DefKind::Tool,
-            DefKind::Struct,
-        ] {
-            names.extend(self.imported_names_by_kind_for_file(file, kind)?);
-        }
-        Some(names)
+        let grouped = self.imported_names_grouped_by_kind(file)?;
+        Some(callable_names(&grouped))
     }
 
     /// Collect type / struct / enum / interface declarations made visible to
@@ -1195,7 +1126,15 @@ impl ModuleGraph {
     /// Explicit and wildcard re-exports are followed so callers can consume
     /// the same source-owned contract regardless of the import path used.
     pub fn exported_kind(&self, file: &Path, name: &str) -> Option<DefKind> {
-        self.exported_kind_inner(file, name, &mut HashSet::new())
+        let file = normalize_path(file);
+        // Most names are the module's own: answer those without the re-export
+        // walk's cycle guard, which allocates.
+        if let Some(module) = self.modules.get(&file) {
+            if module.own_exports.contains(name) {
+                return own_export_kind(module, &file, name);
+            }
+        }
+        self.exported_kind_inner(&file, name, &mut HashSet::new())
     }
 
     fn exported_kind_inner(
@@ -1210,17 +1149,7 @@ impl ModuleGraph {
         }
         let result = self.modules.get(&file).and_then(|module| {
             if module.own_exports.contains(name) {
-                return module
-                    .declarations
-                    .get(name)
-                    .map(|definition| definition.kind)
-                    .or_else(|| {
-                        stdlib_module_name(&file).and_then(|stdlib_module| {
-                            stdlib::builtin_reexports(stdlib_module)
-                                .contains(&name)
-                                .then_some(DefKind::Function)
-                        })
-                    });
+                return own_export_kind(module, &file, name);
             }
             if let Some(sources) = module.selective_re_exports.get(name) {
                 for source in sources {
@@ -1239,6 +1168,39 @@ impl ModuleGraph {
         visited.remove(&file);
         result
     }
+}
+
+/// The kind of a name `module` exports itself.
+fn own_export_kind(module: &ModuleInfo, file: &Path, name: &str) -> Option<DefKind> {
+    module
+        .declarations
+        .get(name)
+        .map(|definition| definition.kind)
+        .or_else(|| {
+            stdlib_module_name(file).and_then(|stdlib_module| {
+                stdlib::builtin_reexports(stdlib_module)
+                    .contains(&name)
+                    .then_some(DefKind::Function)
+            })
+        })
+}
+
+/// Declaration kinds that ordinary call syntax can invoke.
+const CALLABLE_KINDS: [DefKind; 4] = [
+    DefKind::Function,
+    DefKind::Pipeline,
+    DefKind::Tool,
+    DefKind::Struct,
+];
+
+/// The callable names in a [`ModuleGraph::imported_names_grouped_by_kind`] result.
+pub fn callable_names(grouped: &HashMap<DefKind, HashSet<String>>) -> HashSet<String> {
+    CALLABLE_KINDS
+        .iter()
+        .filter_map(|kind| grouped.get(kind))
+        .flatten()
+        .cloned()
+        .collect()
 }
 
 /// A duplicate or ambiguous re-export inside a single module. Reported by
@@ -1303,96 +1265,6 @@ impl SelectiveImportIssue {
             }
         }
     }
-}
-
-fn load_module(
-    path: &Path,
-    package_snapshots: &[PackageSnapshot],
-    source_overrides: Option<&HashMap<PathBuf, String>>,
-    retain_parsed_source: bool,
-    observer: Option<&ModuleObserver<'_>>,
-) -> (ModuleInfo, Option<ParsedModuleSource>) {
-    let source = match source_overrides
-        .and_then(|overrides| overrides.get(&normalize_path(path)).cloned())
-    {
-        Some(source) => Some(source),
-        None => match source_reads::read_module_source_checked(path) {
-            Ok(source) => source,
-            Err(message) => {
-                let module = ModuleInfo {
-                    load_error: Some(ModuleLoadError {
-                        message,
-                        span: Span::dummy(),
-                    }),
-                    ..ModuleInfo::default()
-                };
-                return (module, None);
-            }
-        },
-    };
-    let Some(source) = source else {
-        return (ModuleInfo::default(), None);
-    };
-    let mut lexer = harn_lexer::Lexer::new(&source);
-    let tokens = match lexer.tokenize() {
-        Ok(tokens) => tokens,
-        Err(error) => {
-            if let Some(observer) = observer {
-                observer(path, &source, None);
-            }
-            let module = ModuleInfo {
-                load_error: Some(ModuleLoadError {
-                    message: error.to_string(),
-                    span: error.span(),
-                }),
-                ..ModuleInfo::default()
-            };
-            return (module, None);
-        }
-    };
-    let mut parser = Parser::new(tokens);
-    let program = match parser.parse() {
-        Ok(program) => program,
-        Err(error) => {
-            if let Some(observer) = observer {
-                observer(path, &source, None);
-            }
-            let module = ModuleInfo {
-                load_error: Some(ModuleLoadError {
-                    message: error.to_string(),
-                    span: error.span(),
-                }),
-                ..ModuleInfo::default()
-            };
-            return (module, None);
-        }
-    };
-
-    if let Some(observer) = observer {
-        observer(path, &source, Some(&program));
-    }
-    let mut module = ModuleInfo::default();
-    for node in &program {
-        collect_module_info(path, node, &mut module, package_snapshots);
-        collect_type_declarations(node, &mut module.type_declarations);
-        collect_callable_declarations(node, &mut module.callable_declarations);
-    }
-    if let Some(stdlib_module) = stdlib_module_name(path) {
-        module.own_exports.extend(
-            stdlib::builtin_reexports(stdlib_module)
-                .iter()
-                .map(|name| (*name).to_string()),
-        );
-    }
-    // Seed the transitive `exports` set from local exports plus selective
-    // re-export names. Wildcard re-exports are folded in by
-    // [`resolve_re_exports`] after every module has been loaded.
-    module.exports.extend(module.own_exports.iter().cloned());
-    module
-        .exports
-        .extend(module.selective_re_exports.keys().cloned());
-    let parsed = retain_parsed_source.then_some(ParsedModuleSource { source, program });
-    (module, parsed)
 }
 
 /// Extract the stdlib module name when `path` is a `<std>/<name>`

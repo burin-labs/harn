@@ -36,7 +36,7 @@ path = ".github/workflows/bump-release.yml"
 name = "Open release PR"
 claim = "Unreleased changelog fragments on main have an open Release vX.Y.Z pull request"
 crons = ["29 15 * * *"]
-cadence_reason = "Daily bounds how long merged changes wait for a release; a run with nothing to release ends before any build."
+cadence_reason = "A green-checkpoint pass opens a due release at once; the daily run recovers a dropped event, and a run with nothing to release ends before any build."
 job_ids = ["open-release-pr"]
 health_failures = 3
 
@@ -218,6 +218,8 @@ crons = ["0 9 * * *"]
 cadence_reason = "Daily exercises the expensive three-way scheduler matrix outside required pull-request checks."
 job_ids = ["thread-parity"]
 health_failures = 3
+# Manual recovery runs execute the same full three-way matrix.
+health_events = ["schedule", "workflow_dispatch"]
 
 [[workflow]]
 path = ".github/workflows/windows-nightly.yml"

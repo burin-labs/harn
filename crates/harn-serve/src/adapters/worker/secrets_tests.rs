@@ -25,13 +25,11 @@ async fn a_job_resolves_a_configured_credential() {
     let _chain = ScopedEnvVar::set(harn_vm::secrets::SECRET_PROVIDER_CHAIN_ENV, "env");
     let _value = ScopedEnvVar::set("HARN_SECRET_WORKERTEST_API_TOKEN", "configured");
 
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let script = write_script(
-                dir.path(),
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = write_script(
+            dir.path(),
+            r#"
 import "std/triggers"
 
 @job("read_credential")
@@ -40,47 +38,47 @@ pub fn read_credential(harness: Harness, event: TriggerEvent) -> dict {
   return {resolved: len(token) > 0}
 }
 "#,
-            )
-            .await;
-            // Fail fast first. A regression here means the read fails, and
-            // the default retry policy would spend a minute backing off
-            // before the file-oriented call below reported anything.
-            let probe = run_job_once_with_options(
-                &script,
-                "read_credential",
-                serde_json::json!({}),
-                JobRunOptions::fail_fast(),
-                |_vm| {},
-            )
-            .await
-            .expect("run credentialed job");
-            assert!(
-                probe.succeeded(),
-                "the worker did not resolve a configured credential: {:?}",
-                probe.error
-            );
-
-            // Then the same job through the file-oriented entrypoint the
-            // hosted worker actually uses.
-            let request_path = dir.path().join("req.json");
-            tokio::fs::write(&request_path, "{}")
-                .await
-                .expect("write request");
-
-            let (outcome, rendered) =
-                run_job_from_files(&script, "read_credential", &request_path, None, false)
-                    .await
-                    .expect("run credentialed job");
-
-            assert!(outcome.succeeded(), "job failed: {rendered}");
-            let parsed: serde_json::Value = serde_json::from_str(&rendered).expect("parse report");
-            assert_eq!(parsed["resolved"], serde_json::json!(true));
-            assert!(
-                !rendered.contains("configured"),
-                "the report must not carry the secret's value"
-            );
-        })
+        )
         .await;
+        // Fail fast first. A regression here means the read fails, and
+        // the default retry policy would spend a minute backing off
+        // before the file-oriented call below reported anything.
+        let probe = run_job_once_with_options(
+            &script,
+            "read_credential",
+            serde_json::json!({}),
+            JobRunOptions::fail_fast(),
+            |_vm| {},
+        )
+        .await
+        .expect("run credentialed job");
+        assert!(
+            probe.succeeded(),
+            "the worker did not resolve a configured credential: {:?}",
+            probe.error
+        );
+
+        // Then the same job through the file-oriented entrypoint the
+        // hosted worker actually uses.
+        let request_path = dir.path().join("req.json");
+        tokio::fs::write(&request_path, "{}")
+            .await
+            .expect("write request");
+
+        let (outcome, rendered) =
+            run_job_from_files(&script, "read_credential", &request_path, None, false)
+                .await
+                .expect("run credentialed job");
+
+        assert!(outcome.succeeded(), "job failed: {rendered}");
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).expect("parse report");
+        assert_eq!(parsed["resolved"], serde_json::json!(true));
+        assert!(
+            !rendered.contains("configured"),
+            "the report must not carry the secret's value"
+        );
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -96,13 +94,11 @@ async fn tenanted_jobs_resolve_only_their_own_present_credential() {
         "tenant-b-value",
     );
 
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let script = write_script(
-                dir.path(),
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = write_script(
+            dir.path(),
+            r#"
 import "std/triggers"
 
 @job("read_own")
@@ -123,76 +119,76 @@ pub fn read_missing(harness: Harness, event: TriggerEvent) -> dict {
   return {resolved: len(token) > 0}
 }
 "#,
-            )
-            .await;
-            let scope = |tenant: &str| {
-                harn_vm::TenantScope::new(harn_vm::TenantId::new(tenant), dir.path())
-                    .expect("tenant scope")
-            };
-
-            let tenant_a = run_job_once_with_options(
-                &script,
-                "read_own",
-                serde_json::json!({}),
-                JobRunOptions::fail_fast().with_tenant_scope(scope("tenant-a")),
-                |_vm| {},
-            )
-            .await
-            .expect("run tenant-a job");
-            assert!(
-                tenant_a.succeeded(),
-                "tenant-a failed: {:?}",
-                tenant_a.error
-            );
-            assert_eq!(tenant_a.result.as_ref().unwrap()["tenant"], "tenant-a");
-
-            let tenant_b = run_job_once_with_options(
-                &script,
-                "read_own",
-                serde_json::json!({}),
-                JobRunOptions::fail_fast().with_tenant_scope(scope("tenant-b")),
-                |_vm| {},
-            )
-            .await
-            .expect("run tenant-b job");
-            assert!(
-                tenant_b.succeeded(),
-                "tenant-b failed: {:?}",
-                tenant_b.error
-            );
-            assert_eq!(tenant_b.result.as_ref().unwrap()["tenant"], "tenant-b");
-
-            let denied = run_job_once_with_options(
-                &script,
-                "read_other",
-                serde_json::json!({}),
-                JobRunOptions::fail_fast().with_tenant_scope(scope("tenant-a")),
-                |_vm| {},
-            )
-            .await
-            .expect("the worker starts; only cross-tenant access fails");
-            assert!(!denied.succeeded());
-            let report = serde_json::to_string(&denied.report_json()).expect("render report");
-            assert!(report.contains("denied"), "unexpected denial: {report}");
-            assert!(!report.contains("tenant-a-value"));
-            assert!(!report.contains("tenant-b-value"));
-
-            let missing = run_job_once_with_options(
-                &script,
-                "read_missing",
-                serde_json::json!({}),
-                JobRunOptions::fail_fast().with_tenant_scope(scope("tenant-a")),
-                |_vm| {},
-            )
-            .await
-            .expect("the worker starts; only the credential is absent");
-            let missing_report =
-                serde_json::to_string(&missing.report_json()).expect("render missing report");
-            assert!(!missing.succeeded());
-            assert!(missing_report.contains("not found"));
-            assert!(!missing_report.contains("denied"));
-        })
+        )
         .await;
+        let scope = |tenant: &str| {
+            harn_vm::TenantScope::new(harn_vm::TenantId::new(tenant), dir.path())
+                .expect("tenant scope")
+        };
+
+        let tenant_a = run_job_once_with_options(
+            &script,
+            "read_own",
+            serde_json::json!({}),
+            JobRunOptions::fail_fast().with_tenant_scope(scope("tenant-a")),
+            |_vm| {},
+        )
+        .await
+        .expect("run tenant-a job");
+        assert!(
+            tenant_a.succeeded(),
+            "tenant-a failed: {:?}",
+            tenant_a.error
+        );
+        assert_eq!(tenant_a.result.as_ref().unwrap()["tenant"], "tenant-a");
+
+        let tenant_b = run_job_once_with_options(
+            &script,
+            "read_own",
+            serde_json::json!({}),
+            JobRunOptions::fail_fast().with_tenant_scope(scope("tenant-b")),
+            |_vm| {},
+        )
+        .await
+        .expect("run tenant-b job");
+        assert!(
+            tenant_b.succeeded(),
+            "tenant-b failed: {:?}",
+            tenant_b.error
+        );
+        assert_eq!(tenant_b.result.as_ref().unwrap()["tenant"], "tenant-b");
+
+        let denied = run_job_once_with_options(
+            &script,
+            "read_other",
+            serde_json::json!({}),
+            JobRunOptions::fail_fast().with_tenant_scope(scope("tenant-a")),
+            |_vm| {},
+        )
+        .await
+        .expect("the worker starts; only cross-tenant access fails");
+        assert!(!denied.succeeded());
+        let report = serde_json::to_string(&denied.report_json()).expect("render report");
+        assert!(report.contains("denied"), "unexpected denial: {report}");
+        assert!(!report.contains("tenant-a-value"));
+        assert!(!report.contains("tenant-b-value"));
+
+        let missing = run_job_once_with_options(
+            &script,
+            "read_missing",
+            serde_json::json!({}),
+            JobRunOptions::fail_fast().with_tenant_scope(scope("tenant-a")),
+            |_vm| {},
+        )
+        .await
+        .expect("the worker starts; only the credential is absent");
+        let missing_report =
+            serde_json::to_string(&missing.report_json()).expect("render missing report");
+        assert!(!missing.succeeded());
+        assert!(missing_report.contains("not found"));
+        assert!(!missing_report.contains("denied"));
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -208,13 +204,11 @@ async fn tenanted_worker_server_claims_only_its_own_durable_jobs() {
         "tenant-b-durable-value",
     );
 
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let script = write_script(
-                dir.path(),
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = write_script(
+            dir.path(),
+            r#"
 import "std/triggers"
 
 @job("read_own")
@@ -224,100 +218,100 @@ pub fn read_own(harness: Harness, event: TriggerEvent) -> dict {
   return {resolved: len(token) > 0, tenant: harness.tenant.id()}
 }
 "#,
-            )
-            .await;
-            let scope = |tenant: &str| {
-                harn_vm::TenantScope::new(harn_vm::TenantId::new(tenant), dir.path())
-                    .expect("tenant scope")
-            };
-            let server = start_worker_server(
-                &script,
-                WorkerServeOptions {
-                    consumer_id: Some("tenant-a-worker".to_string()),
-                    drain_timeout: StdDuration::from_secs(5),
-                    tenant_scope: Some(scope("tenant-a")),
-                    ..WorkerServeOptions::default()
-                },
-            )
+        )
+        .await;
+        let scope = |tenant: &str| {
+            harn_vm::TenantScope::new(harn_vm::TenantId::new(tenant), dir.path())
+                .expect("tenant scope")
+        };
+        let server = start_worker_server(
+            &script,
+            WorkerServeOptions {
+                consumer_id: Some("tenant-a-worker".to_string()),
+                drain_timeout: StdDuration::from_secs(5),
+                tenant_scope: Some(scope("tenant-a")),
+                ..WorkerServeOptions::default()
+            },
+        )
+        .await
+        .expect("start tenant worker");
+        let registration = server.jobs().first().expect("job registration").clone();
+        let event_log = server.event_log();
+        let queue = WorkerQueue::new(event_log.clone());
+        let response_topic =
+            Topic::new(harn_vm::worker_response_topic_name("tenant-jobs")).expect("response topic");
+        let latest = event_log
+            .latest(&response_topic)
             .await
-            .expect("start tenant worker");
-            let registration = server.jobs().first().expect("job registration").clone();
-            let event_log = server.event_log();
-            let queue = WorkerQueue::new(event_log.clone());
-            let response_topic = Topic::new(harn_vm::worker_response_topic_name("tenant-jobs"))
-                .expect("response topic");
-            let latest = event_log
-                .latest(&response_topic)
-                .await
-                .expect("latest response");
-            let mut responses = event_log
-                .clone()
-                .subscribe(&response_topic, latest)
-                .await
-                .expect("subscribe responses");
+            .expect("latest response");
+        let mut responses = event_log
+            .clone()
+            .subscribe(&response_topic, latest)
+            .await
+            .expect("subscribe responses");
 
-            let enqueue = |tenant: &str| harn_vm::WorkerQueueJob {
-                queue: "tenant-jobs".to_string(),
-                trigger_id: registration.binding_id.clone(),
-                binding_key: registration.binding_key.clone(),
-                binding_version: registration.binding_version,
-                event: job_event("read_own", serde_json::json!({}), Some(scope(tenant).id)),
-                replay_of_event_id: None,
-                priority: WorkerQueuePriority::Normal,
-            };
-            let foreign = queue
-                .enqueue(&enqueue("tenant-b"))
-                .await
-                .expect("enqueue foreign job");
-            let own = queue
-                .enqueue(&enqueue("tenant-a"))
-                .await
-                .expect("enqueue own job");
+        let enqueue = |tenant: &str| harn_vm::WorkerQueueJob {
+            queue: "tenant-jobs".to_string(),
+            trigger_id: registration.binding_id.clone(),
+            binding_key: registration.binding_key.clone(),
+            binding_version: registration.binding_version,
+            event: job_event("read_own", serde_json::json!({}), Some(scope(tenant).id)),
+            replay_of_event_id: None,
+            priority: WorkerQueuePriority::Normal,
+        };
+        let foreign = queue
+            .enqueue(&enqueue("tenant-b"))
+            .await
+            .expect("enqueue foreign job");
+        let own = queue
+            .enqueue(&enqueue("tenant-a"))
+            .await
+            .expect("enqueue own job");
 
-            let response = harn_clock::test_support::within("tenant worker response", async {
-                loop {
-                    let (_, event) = responses
-                        .next()
-                        .await
-                        .expect("response stream ended")
-                        .expect("response event");
-                    if event.kind == "job_response" {
-                        break serde_json::from_value::<WorkerQueueResponseRecord>(event.payload)
-                            .expect("response record");
-                    }
-                }
-            })
-            .await;
-            assert_eq!(response.job_event_id, own.job_event_id);
-            let outcome = response.outcome.expect("dispatch outcome");
-            assert_eq!(outcome.status, DispatchStatus::Succeeded);
-            assert_eq!(outcome.result.expect("result")["tenant"], "tenant-a");
-
-            let state = queue.queue_state("tenant-jobs").await.expect("queue state");
-            let foreign = state
-                .jobs
-                .iter()
-                .find(|job| job.job_event_id == foreign.job_event_id)
-                .expect("foreign job state");
-            assert!(!foreign.acked);
-            assert!(foreign.active_claim.is_none());
-
-            for topic in event_log.topics().await.expect("event log topics") {
-                for (_, event) in event_log
-                    .read_range(&topic, None, usize::MAX)
+        let response = harn_clock::test_support::within("tenant worker response", async {
+            loop {
+                let (_, event) = responses
+                    .next()
                     .await
-                    .expect("durable events")
-                {
-                    let record = serde_json::to_string(&event).expect("serialize durable event");
-                    assert!(!record.contains("tenant-a-durable-value"));
-                    assert!(!record.contains("tenant-b-durable-value"));
+                    .expect("response stream ended")
+                    .expect("response event");
+                if event.kind == "job_response" {
+                    break serde_json::from_value::<WorkerQueueResponseRecord>(event.payload)
+                        .expect("response record");
                 }
             }
-
-            let report = server.shutdown().await.expect("shutdown worker");
-            assert!(report.drained);
         })
         .await;
+        assert_eq!(response.job_event_id, own.job_event_id);
+        let outcome = response.outcome.expect("dispatch outcome");
+        assert_eq!(outcome.status, DispatchStatus::Succeeded);
+        assert_eq!(outcome.result.expect("result")["tenant"], "tenant-a");
+
+        let state = queue.queue_state("tenant-jobs").await.expect("queue state");
+        let foreign = state
+            .jobs
+            .iter()
+            .find(|job| job.job_event_id == foreign.job_event_id)
+            .expect("foreign job state");
+        assert!(!foreign.acked);
+        assert!(foreign.active_claim.is_none());
+
+        for topic in event_log.topics().await.expect("event log topics") {
+            for (_, event) in event_log
+                .read_range(&topic, None, usize::MAX)
+                .await
+                .expect("durable events")
+            {
+                let record = serde_json::to_string(&event).expect("serialize durable event");
+                assert!(!record.contains("tenant-a-durable-value"));
+                assert!(!record.contains("tenant-b-durable-value"));
+            }
+        }
+
+        let report = server.shutdown().await.expect("shutdown worker");
+        assert!(report.drained);
+    })
+    .await;
 }
 
 /// A credential that was never stored is a different fault from a host with
@@ -329,13 +323,11 @@ pub fn read_own(harness: Harness, event: TriggerEvent) -> dict {
 #[tokio::test(flavor = "current_thread")]
 async fn a_missing_credential_and_a_missing_backend_are_different_failures() {
     let _guard = ENV_LOCK.lock().await;
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let script = write_script(
-                dir.path(),
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = write_script(
+            dir.path(),
+            r#"
 import "std/triggers"
 
 @job("read_credential")
@@ -344,33 +336,14 @@ pub fn read_credential(harness: Harness, event: TriggerEvent) -> dict {
   return {resolved: len(token) > 0}
 }
 "#,
-            )
-            .await;
-            // A configured backend that does not hold this credential: the
-            // job runs and fails on the read. `fail_fast` because this is a
-            // failure path and the dispatcher would otherwise retry it.
-            let missing_credential = {
-                let _chain = ScopedEnvVar::set(harn_vm::secrets::SECRET_PROVIDER_CHAIN_ENV, "env");
-                run_job_once_with_options(
-                    &script,
-                    "read_credential",
-                    serde_json::json!({}),
-                    JobRunOptions::fail_fast(),
-                    |_vm| {},
-                )
-                .await
-                .expect("the worker starts; only the read fails")
-            };
-            assert!(
-                !missing_credential.succeeded(),
-                "an absent credential must not read as success"
-            );
-
-            // No backend at all: the worker refuses to start, and says so
-            // as a backend fault rather than letting every read report a
-            // credential that was never there.
-            let _empty_chain = ScopedEnvVar::set(harn_vm::secrets::SECRET_PROVIDER_CHAIN_ENV, "");
-            let missing_backend = run_job_once_with_options(
+        )
+        .await;
+        // A configured backend that does not hold this credential: the
+        // job runs and fails on the read. `fail_fast` because this is a
+        // failure path and the dispatcher would otherwise retry it.
+        let missing_credential = {
+            let _chain = ScopedEnvVar::set(harn_vm::secrets::SECRET_PROVIDER_CHAIN_ENV, "env");
+            run_job_once_with_options(
                 &script,
                 "read_credential",
                 serde_json::json!({}),
@@ -378,18 +351,37 @@ pub fn read_credential(harness: Harness, event: TriggerEvent) -> dict {
                 |_vm| {},
             )
             .await
-            .expect_err("a host with no secret backend must fail loudly");
-            assert!(
-                matches!(missing_backend, DispatchError::SecretBackend(_)),
-                "expected a typed backend fault, got: {missing_backend:?}"
-            );
-            assert!(
-                missing_backend.message().contains("zero providers"),
-                "the diagnostic must name the misconfiguration: {}",
-                missing_backend.message()
-            );
-        })
-        .await;
+            .expect("the worker starts; only the read fails")
+        };
+        assert!(
+            !missing_credential.succeeded(),
+            "an absent credential must not read as success"
+        );
+
+        // No backend at all: the worker refuses to start, and says so
+        // as a backend fault rather than letting every read report a
+        // credential that was never there.
+        let _empty_chain = ScopedEnvVar::set(harn_vm::secrets::SECRET_PROVIDER_CHAIN_ENV, "");
+        let missing_backend = run_job_once_with_options(
+            &script,
+            "read_credential",
+            serde_json::json!({}),
+            JobRunOptions::fail_fast(),
+            |_vm| {},
+        )
+        .await
+        .expect_err("a host with no secret backend must fail loudly");
+        assert!(
+            matches!(missing_backend, DispatchError::SecretBackend(_)),
+            "expected a typed backend fault, got: {missing_backend:?}"
+        );
+        assert!(
+            missing_backend.message().contains("zero providers"),
+            "the diagnostic must name the misconfiguration: {}",
+            missing_backend.message()
+        );
+    })
+    .await;
 }
 
 /// A secret provider chain the host cannot build is a backend fault too,
@@ -432,13 +424,11 @@ async fn one_tenants_credential_is_not_reachable_by_naming_another() {
     let _chain = ScopedEnvVar::set(harn_vm::secrets::SECRET_PROVIDER_CHAIN_ENV, "env");
     let _value = ScopedEnvVar::set("HARN_SECRET_TENANTA_API_TOKEN", "configured");
 
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let script = write_script(
-                dir.path(),
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = write_script(
+            dir.path(),
+            r#"
 import "std/triggers"
 
 @job("read_own")
@@ -453,41 +443,41 @@ pub fn read_other(harness: Harness, event: TriggerEvent) -> dict {
   return {resolved: len(token) > 0}
 }
 "#,
-            )
-            .await;
-
-            let own = run_job_once_with_options(
-                &script,
-                "read_own",
-                serde_json::json!({}),
-                JobRunOptions::fail_fast(),
-                |_vm| {},
-            )
-            .await
-            .expect("run own-tenant job");
-            assert!(
-                own.succeeded(),
-                "the provider must be live, or the other half proves nothing"
-            );
-
-            let other = run_job_once_with_options(
-                &script,
-                "read_other",
-                serde_json::json!({}),
-                JobRunOptions::fail_fast(),
-                |_vm| {},
-            )
-            .await
-            .expect("the worker starts; only the read fails");
-            assert!(
-                !other.succeeded(),
-                "tenantb must not resolve tenanta's credential"
-            );
-            let rendered = serde_json::to_string(&other.report_json()).expect("render report");
-            assert!(
-                !rendered.contains("configured"),
-                "the report must not carry the other namespace's value"
-            );
-        })
+        )
         .await;
+
+        let own = run_job_once_with_options(
+            &script,
+            "read_own",
+            serde_json::json!({}),
+            JobRunOptions::fail_fast(),
+            |_vm| {},
+        )
+        .await
+        .expect("run own-tenant job");
+        assert!(
+            own.succeeded(),
+            "the provider must be live, or the other half proves nothing"
+        );
+
+        let other = run_job_once_with_options(
+            &script,
+            "read_other",
+            serde_json::json!({}),
+            JobRunOptions::fail_fast(),
+            |_vm| {},
+        )
+        .await
+        .expect("the worker starts; only the read fails");
+        assert!(
+            !other.succeeded(),
+            "tenantb must not resolve tenanta's credential"
+        );
+        let rendered = serde_json::to_string(&other.report_json()).expect("render report");
+        assert!(
+            !rendered.contains("configured"),
+            "the report must not carry the other namespace's value"
+        );
+    })
+    .await;
 }

@@ -2,63 +2,49 @@
 
 use super::*;
 
-#[test]
-fn test_assert_outside_test_pipeline_warns() {
-    let diags = lint_source(
-        r"
+#[rstest::rstest]
+#[case::test_assert_outside_test_pipeline_warns(
+    r"
 pipeline default(task) {
 assert(true)
 }
 ",
-    );
-    assert!(
-        has_rule(&diags, "assert-outside-test"),
-        "expected assert-outside-test warning, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_assert_inside_test_pipeline_is_allowed() {
-    let diags = lint_source(
-        r"
+    "assert-outside-test",
+    true
+)]
+#[case::test_assert_inside_test_pipeline_is_allowed(
+    r"
 pipeline test(task) {
 assert_eq(1 + 1, 2)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "assert-outside-test"),
-        "asserts inside test pipelines should be allowed: {diags:?}"
-    );
-}
-
-#[test]
-fn test_require_inside_test_pipeline_warns() {
-    let diags = lint_source(
-        r#"
+    "assert-outside-test",
+    false
+)]
+#[case::test_require_inside_test_pipeline_warns(
+    r#"
 pipeline test_example(task) {
 require 1 + 1 == 2, "math still works"
 }
 "#,
-    );
-    assert!(
-        has_rule(&diags, "require-in-test"),
-        "expected require-in-test warning, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_require_outside_test_pipeline_is_allowed() {
-    let diags = lint_source(
-        r#"
+    "require-in-test",
+    true
+)]
+#[case::test_require_outside_test_pipeline_is_allowed(
+    r#"
 pipeline default(task) {
 require task != nil, "task is required"
 }
 "#,
-    );
-    assert!(
-        !has_rule(&diags, "require-in-test"),
-        "require outside tests should be allowed: {diags:?}"
+    "require-in-test",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }
 

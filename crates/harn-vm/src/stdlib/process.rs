@@ -103,6 +103,8 @@ pub(crate) fn reset_process_state() {
     set_thread_execution_context(None);
 }
 
+harn_vm_core::stdlib_state_reset!(reset_process_state);
+
 /// The form of `path` a child process can actually be started in.
 ///
 /// Canonicalizing a path on Windows yields the extended-length `\\?\C:\...`
@@ -118,7 +120,7 @@ pub(crate) fn reset_process_state() {
 /// seam is exercised wherever the tests run. A true UNC path
 /// (`\\?\UNC\server\share`) is left alone: there is no drive-letter form of
 /// it to fall back to, and rewriting it would name a different location.
-pub(crate) fn child_process_cwd(path: std::path::PathBuf) -> std::path::PathBuf {
+pub fn child_process_cwd(path: std::path::PathBuf) -> std::path::PathBuf {
     match path.to_str().and_then(strip_windows_verbatim_prefix) {
         Some(stripped) => std::path::PathBuf::from(stripped),
         None => path,
@@ -360,10 +362,12 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
     }
 }
 
+harn_vm_core::stdlib_installer!(Host, register_process_builtins);
+
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "env(name: string) -> string?", category = "process"
+    sig = "env(name: string) -> string?",
+    category = "process"
 )]
 fn env_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
@@ -375,7 +379,6 @@ fn env_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "env_or(name: string, default: any) -> any",
     category = "process"
 )]
@@ -390,8 +393,8 @@ fn env_or_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "exit(code?: int) -> never", category = "process"
+    sig = "exit(code?: int) -> never",
+    category = "process"
 )]
 fn exit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let code = args.first().and_then(|a| a.as_int()).unwrap_or(0);
@@ -400,8 +403,8 @@ fn exit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "exec(...command: string) -> dict", category = "process"
+    sig = "exec(...command: string) -> dict",
+    category = "process"
 )]
 fn exec_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.is_empty() {
@@ -417,8 +420,8 @@ fn exec_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "shell(command: string) -> dict", category = "process"
+    sig = "shell(command: string) -> dict",
+    category = "process"
 )]
 fn shell_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let cmd = args.first().map(|a| a.display()).unwrap_or_default();
@@ -435,7 +438,6 @@ fn shell_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "exec_at(dir: string, ...command: string) -> dict",
     category = "process"
 )]
@@ -454,7 +456,6 @@ fn exec_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "shell_at(dir: string, command: string) -> dict",
     category = "process"
 )]
@@ -479,8 +480,8 @@ fn shell_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "username(...args: any) -> string", category = "process"
+    sig = "username(...args: any) -> string",
+    category = "process"
 )]
 fn username_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let user = std::env::var("USER")
@@ -491,8 +492,8 @@ fn username_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "hostname() -> string", category = "process"
+    sig = "hostname() -> string",
+    category = "process"
 )]
 fn hostname_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = std::env::var("HOSTNAME")
@@ -510,8 +511,8 @@ fn hostname_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "platform(...args: any) -> string", category = "process"
+    sig = "platform(...args: any) -> string",
+    category = "process"
 )]
 fn platform_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let os = if cfg!(target_os = "macos") {
@@ -528,8 +529,8 @@ fn platform_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "arch() -> string", category = "process"
+    sig = "arch() -> string",
+    category = "process"
 )]
 fn arch_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::string(std::env::consts::ARCH))
@@ -537,8 +538,8 @@ fn arch_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "home_dir() -> string", category = "process"
+    sig = "home_dir() -> string",
+    category = "process"
 )]
 fn home_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let home = crate::user_dirs::home_dir()
@@ -549,8 +550,8 @@ fn home_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "pid(...args: any) -> int", category = "process"
+    sig = "pid(...args: any) -> int",
+    category = "process"
 )]
 fn pid_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Int(std::process::id() as i64))
@@ -558,8 +559,8 @@ fn pid_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "date_iso() -> string", category = "process"
+    sig = "date_iso() -> string",
+    category = "process"
 )]
 fn date_iso_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     // `date_iso` reads the OS wall clock directly (it predates the
@@ -577,8 +578,8 @@ fn date_iso_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "cwd() -> string", category = "process"
+    sig = "cwd() -> string",
+    category = "process"
 )]
 fn cwd_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let dir = current_execution_context()
@@ -594,8 +595,8 @@ fn cwd_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "execution_root() -> string", category = "process"
+    sig = "execution_root() -> string",
+    category = "process"
 )]
 fn execution_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::string(
@@ -605,8 +606,8 @@ fn execution_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "asset_root() -> string", category = "process"
+    sig = "asset_root() -> string",
+    category = "process"
 )]
 fn asset_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::string(
@@ -629,7 +630,6 @@ fn asset_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 /// for the current run and wrong for an arbitrary one.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "runtime_paths() -> {execution_root: string, asset_root: string, state_root: string, run_root: string, worktree_root: string}",
     category = "process"
 )]
@@ -664,8 +664,8 @@ fn runtime_paths_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 // ported subcommands working without importing the tui module.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "term_width() -> int", category = "process"
+    sig = "term_width() -> int",
+    category = "process"
 )]
 fn term_width_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Int(crate::term::width() as i64))
@@ -673,8 +673,8 @@ fn term_width_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "term_height() -> int", category = "process"
+    sig = "term_height() -> int",
+    category = "process"
 )]
 fn term_height_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Int(crate::term::height() as i64))
@@ -993,7 +993,6 @@ fn exec_options(label: &str, options: Option<&VmValue>) -> Result<ExecOptions, V
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "exec_opts(command: list, options: dict?) -> dict",
     category = "process"
 )]
@@ -1015,7 +1014,6 @@ fn exec_opts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "exec_at_opts(dir: string, command: list, options: dict?) -> dict",
     category = "process"
 )]
@@ -1080,10 +1078,12 @@ pub(crate) fn register_path_builtins(vm: &mut Vm) {
     }
 }
 
+harn_vm_core::stdlib_installer!(Host, register_path_builtins);
+
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "source_dir(...args: any) -> string", category = "process"
+    sig = "source_dir(...args: any) -> string",
+    category = "process"
 )]
 fn source_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let dir = VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
@@ -1100,8 +1100,8 @@ fn source_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "project_root() -> string?", category = "process"
+    sig = "project_root() -> string?",
+    category = "process"
 )]
 fn project_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if let Some(root) = project_root_path() {
@@ -1312,15 +1312,15 @@ fn session_env_read_with(
     let Some(environment) = current_session_environment() else {
         return Ok(EnvironmentRead::Permitted(std::env::var(name).ok()));
     };
-    let workspace_defaults = workspace_env_defaults();
     let is_grant_target = environment.is_host_inference_target(name)
         || environment
             .grants()
             .iter()
             .any(|grant| grant.exposed_env_var() == Some(name));
     if !is_grant_target {
-        if let Some(value) = workspace_defaults.get(name) {
-            return Ok(EnvironmentRead::Permitted(Some(value.clone())));
+        let read_defaults = crate::stdlib::sandbox::workspace_env::active_workspace_env_for_read();
+        if let Some((_, value)) = read_defaults.into_iter().find(|(key, _)| key == name) {
+            return Ok(EnvironmentRead::Permitted(Some(value)));
         }
     }
     let resolved =

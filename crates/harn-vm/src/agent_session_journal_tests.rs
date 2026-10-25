@@ -316,14 +316,15 @@ async fn flush_persists_every_queued_mutation_in_one_transaction() {
     assert_eq!(
         sources,
         [
-            "event-0",
-            "event-1",
-            "event-2",
-            "event-3",
-            "event-4",
-            "event-audit"
+            Some("event-0"),
+            Some("event-1"),
+            Some("event-2"),
+            Some("event-3"),
+            Some("event-4"),
+            // Bookkeeping rows are not history positions, so they keep no source identity.
+            None,
         ]
-        .map(|id| Some(id.to_string()))
+        .map(|id| id.map(str::to_string))
     );
     let report = store.verify(session_id).await.expect("verify chain");
     assert!(report.failures.is_empty(), "{:?}", report.failures);

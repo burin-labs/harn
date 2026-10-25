@@ -1,0 +1,45 @@
+[package]
+name = "ambient-signals"
+
+[exports]
+handlers = "lib.harn"
+
+# Poll GitHub every five minutes. Each monitor fires a signal when its
+# condition starts holding and resolves it when it stops; polls that see no
+# change produce no reminder.
+[[triggers]]
+id = "signals-github-monitors"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "handlers::poll_github"
+schedule = "*/5 * * * *"
+timezone = "Etc/UTC"
+concurrency = { max = 1 }
+
+# Alert webhooks need an address the alerting service can reach. Locally that
+# means a tunnel or an on-premises service; hosted ingress forwards the same
+# payloads to the same handler.
+[[triggers]]
+id = "signals-sentry"
+kind = "webhook"
+provider = "webhook"
+match = { path = "/hooks/signals/sentry" }
+handler = "handlers::on_sentry"
+secrets = { signing_secret = "signals/sentry-signing-secret" }
+
+[[triggers]]
+id = "signals-grafana"
+kind = "webhook"
+provider = "webhook"
+match = { path = "/hooks/signals/grafana" }
+handler = "handlers::on_grafana"
+secrets = { signing_secret = "signals/grafana-signing-secret" }
+
+[[triggers]]
+id = "signals-honeycomb"
+kind = "webhook"
+provider = "webhook"
+match = { path = "/hooks/signals/honeycomb" }
+handler = "handlers::on_honeycomb"
+secrets = { signing_secret = "signals/honeycomb-signing-secret" }

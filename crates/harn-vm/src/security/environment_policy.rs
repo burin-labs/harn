@@ -196,8 +196,9 @@ const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
     "GOMODCACHE",
     "GOPATH",
     "GOROOT",
-    // JVM: install root.
+    // JVM: install root and Gradle's mutable distribution/dependency cache.
     "JAVA_HOME",
+    "GRADLE_USER_HOME",
     // libpq: connection selectors and a separately permissioned password file.
     // Raw passwords and credential-bearing URLs still require explicit grants.
     "PGHOST",
@@ -282,6 +283,7 @@ pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
     "CCACHE_TEMPDIR",
     // JVM
     "JAVA_HOME",
+    "GRADLE_USER_HOME",
 ];
 
 /// The write-cache subset of [`TOOLCHAIN_PATH_ENV_VARS`]: dirs a toolchain
@@ -302,6 +304,7 @@ pub const TOOLCHAIN_CACHE_ENV_VARS: &[&str] = &[
     "GOCACHE",
     "GOMODCACHE",
     "GOPATH",
+    "GRADLE_USER_HOME",
     "NPM_CONFIG_CACHE",
     "NPM_CONFIG_STORE_DIR",
     "PIP_CACHE_DIR",
@@ -711,6 +714,44 @@ mod tests {
                 TOOLCHAIN_PATH_ENV_VARS.contains(name),
                 "{name} is in TOOLCHAIN_CACHE_ENV_VARS but not TOOLCHAIN_PATH_ENV_VARS"
             );
+        }
+    }
+
+    #[test]
+    fn gradle_cache_survives_closed_environment_without_gradle_credentials() {
+        let snapshot = BTreeMap::from([
+            (
+                "GRADLE_USER_HOME".to_string(),
+                "/workspace/warm-gradle".to_string(),
+            ),
+            (
+                "GRADLE_TOKEN".to_string(),
+                "synthetic-must-not-reach-child".to_string(),
+            ),
+        ]);
+        let parent = env_from(&[]);
+        let no_secret = |_: &str, _: &str| None;
+        for kind in [
+            EnvironmentPolicyKind::Isolated,
+            EnvironmentPolicyKind::Granted,
+        ] {
+            let environment = SessionEnvironment::launch_from_snapshot(
+                kind,
+                Vec::new(),
+                snapshot.clone(),
+                &parent,
+            )
+            .unwrap();
+            let resolved = resolve_env(&environment, &parent, &no_secret).unwrap();
+            let command =
+                resolve_env_for_command(&environment, "gradle", &parent, &no_secret).unwrap();
+            for child in [resolved, command] {
+                assert_eq!(
+                    child.get("GRADLE_USER_HOME").map(String::as_str),
+                    Some("/workspace/warm-gradle")
+                );
+                assert!(!child.contains_key("GRADLE_TOKEN"));
+            }
         }
     }
 

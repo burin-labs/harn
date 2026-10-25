@@ -201,7 +201,7 @@ pub(crate) fn reserve(
 }
 
 #[derive(Clone)]
-pub(crate) struct CleanupRuntimes {
+pub struct CleanupRuntimes {
     execution_id: String,
     session: Arc<crate::agent_sessions::AgentSessionRuntime>,
     host: Arc<crate::llm::agent_session_host::AgentHostSessionRuntime>,

@@ -65,6 +65,8 @@
 //! - **`move_symbol`**: move a top-level Rust, TS/JS, or Python
 //!   declaration to another module and rewrite imports and qualified
 //!   uses in every referencing file, all-or-nothing.
+//! - **`language_server`**: whether a rename of a file would reach a
+//!   language server, from the lookup the rename uses, without starting one.
 //!
 //! ## Concurrency model
 //!
@@ -88,12 +90,17 @@ mod graph_store;
 mod imports;
 mod imports_go;
 mod imports_swift;
+#[cfg(test)]
+mod java_binding_tests;
+mod java_bindings;
+mod language_server;
 mod lsp;
 mod module_graph;
 mod module_index;
 mod move_symbol;
 mod name_index;
 mod overlay;
+mod override_family;
 mod parallel;
 mod postings;
 mod readonly;
@@ -102,10 +109,13 @@ mod refactor_backend;
 mod refactor_core;
 mod rename;
 mod rename_binding;
+mod rename_java;
+mod rename_reach;
 mod rename_rust_residue;
 mod repo_map;
 mod signature_syntax;
 mod snapshot;
+mod source_positions;
 mod state;
 mod symbol_graph;
 mod timing;
@@ -671,11 +681,20 @@ impl HostlibCapability for CodeIndexCapability {
             "module_graph",
             module_graph::run,
         );
+        register(
+            registry,
+            self.index.clone(),
+            language_server::BUILTIN,
+            "language_server",
+            language_server::run,
+        );
 
         // Cross-file safe rename (issue #2508). Builds on the typed
         // symbol graph (#2434) and routes writes through staged-fs
-        // (#1722) so all touched files succeed or none do.
-        register(
+        // (#1722) so all touched files succeed or none do. A language-server
+        // rename can wait on a cold server, so its caller must be able to
+        // stop it and see its progress.
+        register_interruptible(
             registry,
             self.index.clone(),
             rename::BUILTIN,
@@ -723,12 +742,31 @@ fn register(
     method: &'static str,
     runner: fn(&SharedIndex, &[VmValue]) -> Result<VmValue, HostlibError>,
 ) {
-    let captured = index;
-    let handler: SyncHandler = Arc::new(move |args| runner(&captured, args));
-    registry.register(RegisteredBuiltin {
+    registry.register(index_builtin(index, name, method, runner));
+}
+
+/// [`register`] for a builtin that can wait on an external process.
+fn register_interruptible(
+    registry: &mut BuiltinRegistry,
+    index: SharedIndex,
+    name: &'static str,
+    method: &'static str,
+    runner: fn(&SharedIndex, &[VmValue]) -> Result<VmValue, HostlibError>,
+) {
+    registry.register_interruptible(index_builtin(index, name, method, runner));
+}
+
+fn index_builtin(
+    index: SharedIndex,
+    name: &'static str,
+    method: &'static str,
+    runner: fn(&SharedIndex, &[VmValue]) -> Result<VmValue, HostlibError>,
+) -> RegisteredBuiltin {
+    let handler: SyncHandler = Arc::new(move |args| runner(&index, args));
+    RegisteredBuiltin {
         name,
         module: "code_index",
         method,
         handler,
-    });
+    }
 }

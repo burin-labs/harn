@@ -6,6 +6,18 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { render, configuration, normalizeInventory, sourceFingerprint, verify } from '../release_third_party_notices.mjs';
 
+test('the packaged provider catalog retains the Models.dev MIT notice', () => {
+  const pkg = { name: 'harn-provider-catalog', version: 'workspace', source: null,
+    manifest_path: new URL('../../crates/harn-provider-catalog/Cargo.toml', import.meta.url).pathname };
+  const inventory = normalizeInventory({ crates: [{ package: pkg, license: 'MIT' }],
+    licenses: [{ id: 'MIT', text: 'MIT dependency license', used_by: [{ crate: pkg }] }] });
+  const notice = inventory.crates[0].package.notices.find(entry => entry.name === 'NOTICE.models-dev');
+  assert.ok(notice, 'the owning release inventory must discover the actual source notice');
+  assert.match(notice.text, /Copyright \(c\) 2025 models.dev/);
+  assert.match(notice.text, /THE SOFTWARE IS PROVIDED "AS IS"/);
+  assert.ok(render(inventory).includes(notice.text), 'the full upstream notice must reach packaged notices');
+});
+
 test('modified workspace components retain their actual attribution notice', () => {
   const pkg = { name: 'harn-aws-config', version: '0.10.159', source: null,
     notices: [{ name: 'NOTICE.harn', text: 'Modified AWS SDK source; retain upstream attribution.' }] };
@@ -150,7 +162,7 @@ test('actual Unix packaging includes exact notices and refuses missing or empty 
   const workflow = readFileSync(new URL('../../.github/workflows/build-release-binaries.yml', import.meta.url), 'utf8');
   const step = workflow.split('      - name: Package (unix)\n')[1]?.split('\n      - name: ')[0];
   const script = step?.split('        run: |\n')[1]?.split('\n').map(line => line.slice(10)).join('\n');
-  assert.ok(script?.includes('tar czf'), 'owning packaging step must be reached');
+  assert.ok(script?.includes('XZ_OPT'), 'owning packaging step must be reached');
   for (const target of ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu']) {
     const dir = mkdtempSync(join(tmpdir(), 'harn-archive-test-'));
     try {
@@ -164,9 +176,9 @@ test('actual Unix packaging includes exact notices and refuses missing or empty 
         env: { ...process.env, HARN_RELEASE_TARGET: target, GITHUB_STEP_SUMMARY: join(dir, 'summary') } });
       const result = run();
       assert.equal(result.status, 0, result.stderr);
-      const archive = join(dir, `dist/harn-${target}.tar.gz`);
+      const archive = join(dir, `dist/harn-${target}.tar.xz`);
       for (const file of files) {
-        const member = spawnSync('tar', ['-xOzf', archive, file], { encoding: 'utf8' });
+        const member = spawnSync('tar', ['-xOf', archive, file], { encoding: 'utf8' });
         assert.equal(member.status, 0, member.stderr);
         assert.equal(member.stdout, `${file} full fixture text\n`);
       }

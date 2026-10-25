@@ -158,10 +158,10 @@ where
             break;
         }
         let json: serde_json::Value = serde_json::from_str(data).map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "ollama stream parse error: partial or invalid NDJSON frame before done=true: {error}; line={}",
                 crate::text::truncate_end_bytes(data, 200)
-            ))))
+            )))
         })?;
         liveness.mark_partial_output();
         liveness.mark_first_frame();
@@ -187,6 +187,10 @@ where
                 }
             }
         } else if !thinking.is_empty() {
+            crate::llm::inference_speed::observe_output(
+                crate::llm::inference_speed::OutputKind::Reasoning,
+                thinking,
+            );
             thinking_text.push_str(thinking);
             append_coalesced_text_block(&mut blocks, "reasoning", thinking, "private");
         }
@@ -259,7 +263,11 @@ where
                     telemetry.provider_cost_usd,
                     false,
                 )
-                .with_cache(0, 0, telemetry.cache_accounting_declared, false),
+                .with_cache(
+                    crate::llm::usage::CacheCounts::default(),
+                    telemetry.cache_accounting_declared,
+                    false,
+                ),
             ),
             format!(
                 "ollama model {model} reported eval_count={output_tokens} but delivered no visible content or tool calls [ollama_empty_content_parser_bug]"

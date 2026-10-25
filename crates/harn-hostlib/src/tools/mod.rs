@@ -82,13 +82,13 @@ impl HostlibCapability for ToolsCapability {
             "read_file",
             file_io::read_file,
         );
-        registry.register_fn(
+        registry.register_writer_fn(
             "tools",
             "hostlib_tools_write_file",
             "write_file",
             file_io::write_file,
         );
-        registry.register_fn(
+        registry.register_writer_fn(
             "tools",
             "hostlib_tools_delete_file",
             "delete_file",

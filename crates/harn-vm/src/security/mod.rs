@@ -66,7 +66,6 @@ use crate::config::{SecurityConfig, SecurityMode};
 use crate::stdlib::macros::harn_builtin;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolKind};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 /// Trust level attached to a unit of content entering the transcript.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1068,66 +1067,34 @@ fn policy_from_dict(config: &crate::value::DictMap) -> SecurityPolicy {
 fn policy_summary(policy: &SecurityPolicy) -> VmValue {
     let mut map = BTreeMap::new();
     map.put_str("mode", policy.mode.as_str());
-    map.insert(
-        "spotlight_external".to_string(),
-        VmValue::Bool(policy.spotlight_external),
+    map.put_bool("spotlight_external", policy.spotlight_external);
+    map.put_bool(
+        "neutralize_special_tokens",
+        policy.neutralize_special_tokens,
     );
-    map.insert(
-        "neutralize_special_tokens".to_string(),
-        VmValue::Bool(policy.neutralize_special_tokens),
-    );
-    map.insert(
-        "destyle_untrusted".to_string(),
-        VmValue::Bool(policy.destyle_untrusted),
-    );
-    map.insert(
-        "trifecta_gate".to_string(),
-        VmValue::Bool(policy.trifecta_gate),
-    );
-    map.insert(
-        "pin_mcp_schemas".to_string(),
-        VmValue::Bool(policy.pin_mcp_schemas),
-    );
-    map.insert(
-        "authenticate_directives".to_string(),
-        VmValue::Bool(policy.authenticate_directives),
-    );
-    map.insert(
-        "taint_file_provenance".to_string(),
-        VmValue::Bool(policy.taint_file_provenance),
-    );
-    map.insert(
-        "taint_command_reads".to_string(),
-        VmValue::Bool(policy.taint_command_reads),
-    );
-    map.insert(
-        "precise_exfil_gate".to_string(),
-        VmValue::Bool(policy.precise_exfil_gate),
-    );
-    map.insert(
-        "gate_secret_reads".to_string(),
-        VmValue::Bool(policy.gate_secret_reads),
-    );
-    map.insert(
-        "detect_injection".to_string(),
-        VmValue::Bool(policy.detect_injection),
-    );
-    map.insert(
-        "guard_threshold_percent".to_string(),
-        VmValue::Int(i64::from(policy.guard_threshold_percent)),
+    map.put_bool("destyle_untrusted", policy.destyle_untrusted);
+    map.put_bool("trifecta_gate", policy.trifecta_gate);
+    map.put_bool("pin_mcp_schemas", policy.pin_mcp_schemas);
+    map.put_bool("authenticate_directives", policy.authenticate_directives);
+    map.put_bool("taint_file_provenance", policy.taint_file_provenance);
+    map.put_bool("taint_command_reads", policy.taint_command_reads);
+    map.put_bool("precise_exfil_gate", policy.precise_exfil_gate);
+    map.put_bool("gate_secret_reads", policy.gate_secret_reads);
+    map.put_bool("detect_injection", policy.detect_injection);
+    map.put_int(
+        "guard_threshold_percent",
+        i64::from(policy.guard_threshold_percent),
     );
     map.put_str("guard_model", policy.guard_model.as_str());
     VmValue::dict(map)
 }
 
-/// Register the `security_policy(config: dict) -> dict` builtin. Embedders
-/// (the host, or `std/security::configure`) call it to push a resolved
-/// policy from their `[security]` config / feature flag.
-pub fn register_security_builtins(vm: &mut Vm) {
-    vm.register_builtin_def(&SECURITY_POLICY_IMPL_DEF);
-    vm.register_builtin_def(&SECURITY_STAMP_DIRECTIVE_IMPL_DEF);
-    vm.register_builtin_def(&SECURITY_VERIFY_DIRECTIVE_IMPL_DEF);
-}
+harn_vm_core::stdlib_module_installer!(
+    /// Register the security policy and directive builtins. Embedders (the
+    /// host, or `std/security::configure`) push a resolved policy from their
+    /// `[security]` config or feature flag through `__security_policy`.
+    Host, pub fn register_security_builtins
+);
 
 #[harn_builtin(exposure = "privileged_wire", effects = ["state.mutate@const=security-policy"], sig = "__security_policy(config: dict) -> dict", category = "security")]
 fn security_policy_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -1153,8 +1120,8 @@ fn security_stamp_directive_impl(args: &[VmValue], _out: &mut String) -> Result<
         Some(VmValue::String(emitter)) if !emitter.is_empty() => emitter.as_ref(),
         _ => "orchestrator",
     };
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        provenance::stamp_directive(content, emitter),
+    Ok(VmValue::string(provenance::stamp_directive(
+        content, emitter,
     )))
 }
 
@@ -1176,7 +1143,7 @@ fn security_verify_directive_impl(args: &[VmValue], _out: &mut String) -> Result
         DirectiveProvenance::Forged => ("forged", true),
     };
     map.put_str("status", status);
-    map.insert("forged".to_string(), VmValue::Bool(forged));
+    map.put_bool("forged", forged);
     map.put_str("trust", if forged { "untrusted" } else { "trusted" });
     Ok(VmValue::dict(map))
 }
@@ -1186,7 +1153,7 @@ mod tests {
     use super::*;
 
     fn vm_str(s: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(s))
+        VmValue::string(s)
     }
 
     fn mcp_executor(server: &str) -> VmValue {

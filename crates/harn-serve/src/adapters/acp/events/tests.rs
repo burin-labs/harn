@@ -21,6 +21,7 @@ use harn_vm::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolKind};
 use tokio::sync::mpsc;
 mod budget_exhausted;
 mod compaction_events;
+mod extension_fixtures;
 mod mcp_events;
 mod mutation_audit;
 mod observation_fixtures;
@@ -35,6 +36,7 @@ mod tool_data;
 mod turn_phase;
 use budget_exhausted::{empty_budget_exhausted_event, fixture_budget_exhausted_event};
 use compaction_events::fixture_compaction_receipt;
+use extension_fixtures::extension_fixture_events;
 use plan_document::fixture_plan_document_event;
 
 pub(super) use schema_contract::collect_notifications;
@@ -134,163 +136,6 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
             event: Box::new(fixture_plan_document_event(serde_json::json!([
                 {"content": "edit", "status": "pending"}
             ]))),
-        },
-    ]
-}
-
-fn extension_fixture_events() -> Vec<AgentEvent> {
-    vec![
-        AgentEvent::Artifact {
-            session_id: "session-1".to_string(),
-            artifact_id: "artifact-chart-1".to_string(),
-            kind: "vega-lite".to_string(),
-            title: Some("Build throughput".to_string()),
-            mime_type: "application/vnd.vegalite.v5+json".to_string(),
-            spec: serde_json::json!({
-                "mark": "bar",
-                "data": {"values": [{"name": "a", "count": 2}]},
-                "encoding": {
-                    "x": {"field": "name", "type": "nominal"},
-                    "y": {"field": "count", "type": "quantitative"}
-                }
-            }),
-            fallback: "Build throughput (bar chart)".to_string(),
-            size_bytes: 153,
-            provenance: serde_json::json!({"source": "agent"}),
-            metadata: serde_json::json!({"unit": "builds"}),
-        },
-        AgentEvent::SkillActivated {
-            session_id: "session-1".to_string(),
-            skill_name: "rust".to_string(),
-            iteration: 1,
-            reason: "matched".to_string(),
-        },
-        AgentEvent::SkillDeactivated {
-            session_id: "session-1".to_string(),
-            skill_name: "rust".to_string(),
-            iteration: 2,
-        },
-        AgentEvent::SkillScopeTools {
-            session_id: "session-1".to_string(),
-            skill_name: "rust".to_string(),
-            allowed_tools: vec!["read".to_string()],
-        },
-        AgentEvent::SkillNarrow {
-            session_id: "session-1".to_string(),
-            reason: "unused across 5 turns".to_string(),
-            removed_tools: vec!["write".to_string()],
-            remaining_tools: vec!["read".to_string()],
-            policy: serde_json::Value::Null,
-            removed_tool_details: serde_json::Value::Null,
-            kept_tool_details: serde_json::Value::Null,
-        },
-        AgentEvent::StanceTransition {
-            session_id: "session-1".to_string(),
-            phase: "write_access_granted".to_string(),
-            escape_tool: "request_write_access".to_string(),
-            allowed_tools: vec![
-                "look".to_string(),
-                "search".to_string(),
-                "request_write_access".to_string(),
-            ],
-            justification: "User asked me to make the change.".to_string(),
-            consent: "express".to_string(),
-            reason: "The user explicitly asked for the edit.".to_string(),
-        },
-        AgentEvent::ToolSearchQuery {
-            session_id: "session-1".to_string(),
-            tool_use_id: "search-1".to_string(),
-            name: "tool_search".to_string(),
-            query: serde_json::json!({"q": "read"}),
-            strategy: "semantic".to_string(),
-            mode: "client".to_string(),
-        },
-        AgentEvent::ToolSearchResult {
-            session_id: "session-1".to_string(),
-            tool_use_id: "search-1".to_string(),
-            promoted: vec!["read".to_string()],
-            strategy: "semantic".to_string(),
-            mode: "client".to_string(),
-        },
-        AgentEvent::TranscriptCompacted {
-            session_id: "session-1".to_string(),
-            receipt: fixture_compaction_receipt(
-                "compaction-fixture-1",
-                Some("extend"),
-                Some("host"),
-                Some(serde_json::json!({
-                    "instructions": "Preserve failing tests.",
-                    "instruction_mode": "extend",
-                    "instruction_source": "host"
-                })),
-            ),
-        },
-        AgentEvent::TranscriptProjected {
-            session_id: "session-1".to_string(),
-            policy: "clean_tool_repair".to_string(),
-            reason: "tool_call_repair_squashed".to_string(),
-            prefix_hash: "sha256:abc".to_string(),
-            kept_count: 3,
-            dropped_count: 2,
-            provider_safety_blocked: false,
-            redacted_count: 0,
-            reclaimed_tokens: 0,
-            roots_consulted: Vec::new(),
-            redaction_pointers: Vec::new(),
-        },
-        AgentEvent::ReminderEmitted {
-            session_id: "session-1".to_string(),
-            reminder_id: "reminder-1".to_string(),
-            tags: vec!["token_pressure".to_string()],
-            body: "Refresh the compacted context before answering.".to_string(),
-            role_hint: "developer".to_string(),
-            authority: "contract".to_string(),
-            rendered_role: "developer".to_string(),
-            source: "stdlib_provider".to_string(),
-            ttl_turns: Some(2),
-        },
-        AgentEvent::Handoff {
-            session_id: "session-1".to_string(),
-            artifact_id: "artifact-1".to_string(),
-            handoff: Box::new(fixture_handoff()),
-        },
-        AgentEvent::FsWatch {
-            session_id: "session-1".to_string(),
-            subscription_id: "fsw-1".to_string(),
-            events: vec![FsWatchEvent {
-                kind: "modify".to_string(),
-                paths: vec!["/tmp/project/src/lib.rs".to_string()],
-                relative_paths: vec!["src/lib.rs".to_string()],
-                raw_kind: "Modify(Any)".to_string(),
-                error: None,
-            }],
-        },
-        test_support::staged_writes_fixture_event(),
-        AgentEvent::WorkerUpdate {
-            session_id: "session-1".into(),
-            worker_id: "worker-1".into(),
-            worker_name: "review".into(),
-            worker_task: "review pr".into(),
-            worker_mode: "delegated_stage".into(),
-            event: harn_vm::agent_events::WorkerEvent::WorkerWaitingForInput,
-            status: "awaiting_input".into(),
-            metadata: serde_json::json!({
-                "child_run_id": "run_x",
-                "child_run_path": ".harn-runs/run_x",
-            }),
-            audit: Some(serde_json::json!({"run_id": "run_x"})),
-        },
-        AgentEvent::HitlRequested {
-            session_id: "session-1".into(),
-            request_id: "hitl_question_session-1_1".into(),
-            kind: "question".into(),
-            payload: serde_json::json!({"prompt": "Approve deploy?"}),
-        },
-        AgentEvent::HitlResolved {
-            session_id: "session-1".into(),
-            request_id: "hitl_question_session-1_1".into(),
-            kind: "question".into(),
-            outcome: "answered".into(),
         },
     ]
 }
@@ -1126,357 +971,6 @@ async fn skill_narrow_serializes_policy_details_under_harn_meta() {
     assert_eq!(harn_meta["keptToolDetails"][0]["class"], "mutating");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn tool_call_update_serializes_error_category_in_camel_case() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
-    sink.handle_event(&AgentEvent::ToolCallUpdate {
-        session_id: "session-1".to_string(),
-        tool_call_id: "tool-7".to_string(),
-        tool_name: "read".to_string(),
-        status: ToolCallStatus::Failed,
-        raw_output: None,
-        error: Some("missing required arg `path`".to_string()),
-        duration_ms: None,
-        execution_duration_ms: None,
-        error_category: Some(ToolCallErrorCategory::SchemaValidation),
-        mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
-        changed_paths: None,
-        data: None,
-        health: None,
-        executor: None,
-        parsing: None,
-        raw_input: None,
-        raw_input_partial: None,
-        audit: None,
-    });
-    let line = rx.recv().await.expect("acp tool_call_update");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    assert_eq!(
-        payload["params"]["update"]["sessionUpdate"],
-        "tool_call_update"
-    );
-    assert_eq!(payload["params"]["update"]["status"], "failed");
-    let harn_meta = update_harn_meta(&payload);
-    assert_eq!(harn_meta["errorCategory"], "schema_validation");
-    assert_eq!(harn_meta["error"], "missing required arg `path`");
-    assert!(payload["params"]["update"].get("errorCategory").is_none());
-    assert!(payload["params"]["update"].get("error").is_none());
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn tool_call_update_omits_error_category_when_none() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
-    sink.handle_event(&AgentEvent::ToolCallUpdate {
-        session_id: "session-1".to_string(),
-        tool_call_id: "tool-7".to_string(),
-        tool_name: "read".to_string(),
-        status: ToolCallStatus::Completed,
-        raw_output: Some(serde_json::json!({"ok": true})),
-        error: None,
-        duration_ms: None,
-        execution_duration_ms: None,
-        error_category: None,
-        mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
-        changed_paths: None,
-        data: None,
-        health: None,
-        executor: None,
-        parsing: None,
-        raw_input: None,
-        raw_input_partial: None,
-        audit: None,
-    });
-    let line = rx.recv().await.expect("acp tool_call_update");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    let harn_meta = update_harn_meta(&payload);
-    assert_eq!(harn_meta["mutationStatus"], "unknown");
-    assert!(harn_meta.get("errorCategory").is_none());
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn tool_call_update_serializes_mutation_status_under_harn_meta() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
-    sink.handle_event(&AgentEvent::ToolCallUpdate {
-        session_id: "session-1".to_string(),
-        tool_call_id: "tool-7".to_string(),
-        tool_name: "edit".to_string(),
-        status: ToolCallStatus::Completed,
-        raw_output: Some(serde_json::json!({"ok": true})),
-        error: None,
-        duration_ms: None,
-        execution_duration_ms: None,
-        error_category: None,
-        mutation_status: ToolMutationStatus::NotApplied,
-        changed_paths: None,
-        data: None,
-        health: None,
-        executor: Some(ToolExecutor::HostBridge),
-        parsing: None,
-        raw_input: None,
-        raw_input_partial: None,
-        audit: None,
-    });
-
-    let line = rx.recv().await.expect("acp tool_call_update");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    assert_eq!(update_harn_meta(&payload)["mutationStatus"], "not_applied");
-    assert!(payload["params"]["update"].get("mutationStatus").is_none());
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn tool_call_carries_parsing_flag_through_to_acp_wire() {
-    // Harn#692/#904: candidate parser state is Harn metadata on
-    // the ACP wire so clients can render the in-flight chip without
-    // extending the root ACP tool-call shape.
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
-
-    sink.handle_event(&AgentEvent::ToolCall {
-        session_id: "session-1".to_string(),
-        tool_call_id: "text-cand-1".to_string(),
-        tool_name: "edit".to_string(),
-        kind: None,
-        status: ToolCallStatus::Pending,
-        raw_input: serde_json::json!({}),
-        parsing: Some(true),
-        audit: None,
-        intent: None,
-    });
-    let line = rx.recv().await.expect("acp tool_call notification");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    assert_eq!(payload["params"]["update"]["sessionUpdate"], "tool_call");
-    assert_eq!(update_harn_meta(&payload)["parsing"], true);
-    assert!(payload["params"]["update"].get("parsing").is_none());
-
-    sink.handle_event(&AgentEvent::ToolCallUpdate {
-        session_id: "session-1".to_string(),
-        tool_call_id: "text-cand-1".to_string(),
-        tool_name: "edit".to_string(),
-        status: ToolCallStatus::Failed,
-        raw_output: None,
-        error: Some("malformed args".to_string()),
-        duration_ms: None,
-        execution_duration_ms: None,
-        error_category: Some(ToolCallErrorCategory::ParseAborted),
-        mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
-        changed_paths: None,
-        data: None,
-        health: None,
-        executor: None,
-        parsing: Some(false),
-        raw_input: None,
-        raw_input_partial: None,
-        audit: None,
-    });
-    let line = rx.recv().await.expect("acp tool_call_update notification");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    assert_eq!(
-        payload["params"]["update"]["sessionUpdate"],
-        "tool_call_update"
-    );
-    let harn_meta = update_harn_meta(&payload);
-    assert_eq!(harn_meta["parsing"], false);
-    assert_eq!(harn_meta["errorCategory"], "parse_aborted");
-    assert!(payload["params"]["update"].get("parsing").is_none());
-    assert!(payload["params"]["update"].get("errorCategory").is_none());
-
-    // Default `parsing: None` must not surface Harn metadata at all.
-    sink.handle_event(&AgentEvent::ToolCall {
-        session_id: "session-1".to_string(),
-        tool_call_id: "tool-1".to_string(),
-        tool_name: "read".to_string(),
-        kind: None,
-        status: ToolCallStatus::Pending,
-        raw_input: serde_json::json!({}),
-        parsing: None,
-        audit: None,
-        intent: None,
-    });
-    let line = rx.recv().await.expect("acp tool_call notification");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    assert!(payload["params"]["update"].get("_meta").is_none());
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn tool_call_update_serializes_executor_per_acp_wire_format() {
-    // Harn#691/#904: clients render badges off Harn executor metadata.
-    // The wire shape must distinguish bare-string variants from the
-    // McpServer object-with-serverName form so a UI can branch on
-    // `typeof executor === "string"`.
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
-
-    let cases = [
-        (ToolExecutor::HarnBuiltin, serde_json::json!("harn_builtin")),
-        (ToolExecutor::HostBridge, serde_json::json!("host_bridge")),
-        (
-            ToolExecutor::McpServer {
-                server_name: "linear".into(),
-            },
-            serde_json::json!({"kind": "mcp_server", "serverName": "linear"}),
-        ),
-        (
-            ToolExecutor::ProviderNative,
-            serde_json::json!("provider_native"),
-        ),
-    ];
-
-    for (executor, expected) in cases {
-        sink.handle_event(&AgentEvent::ToolCallUpdate {
-            session_id: "session-1".to_string(),
-            tool_call_id: "tool-1".to_string(),
-            tool_name: "demo".to_string(),
-            status: ToolCallStatus::Completed,
-            raw_output: None,
-            error: None,
-            duration_ms: None,
-            execution_duration_ms: None,
-            error_category: None,
-            mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
-            changed_paths: None,
-            data: None,
-            health: None,
-            executor: Some(executor),
-            parsing: None,
-            raw_input: None,
-            raw_input_partial: None,
-            audit: None,
-        });
-        let line = rx.recv().await.expect("acp tool_call_update notification");
-        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-        assert_eq!(
-            payload["params"]["update"]["sessionUpdate"],
-            "tool_call_update"
-        );
-        assert_eq!(update_harn_meta(&payload)["executor"], expected);
-        assert!(payload["params"]["update"].get("executor").is_none());
-    }
-
-    // `executor: None` must not surface executor metadata. The typed
-    // mutation outcome is still mandatory for every tool_call_update.
-    sink.handle_event(&AgentEvent::ToolCallUpdate {
-        session_id: "session-1".to_string(),
-        tool_call_id: "tool-2".to_string(),
-        tool_name: "demo".to_string(),
-        status: ToolCallStatus::InProgress,
-        raw_output: None,
-        error: None,
-        duration_ms: None,
-        execution_duration_ms: None,
-        error_category: None,
-        mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
-        changed_paths: None,
-        data: None,
-        health: None,
-        executor: None,
-        parsing: None,
-        raw_input: None,
-        raw_input_partial: None,
-        audit: None,
-    });
-    let line = rx.recv().await.expect("acp tool_call_update notification");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    let harn_meta = update_harn_meta(&payload);
-    assert_eq!(harn_meta["mutationStatus"], "unknown");
-    assert!(harn_meta.get("executor").is_none());
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_format() {
-    // #693/#904: parsed raw input remains canonical `rawInput`;
-    // unparseable raw bytes are Harn metadata under `_meta.harn`.
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
-
-    // Parsed partial value → `rawInput` populated, `rawInputPartial` absent.
-    sink.handle_event(&AgentEvent::ToolCallUpdate {
-        session_id: "session-1".to_string(),
-        tool_call_id: "tool-streaming".to_string(),
-        tool_name: "search".to_string(),
-        status: ToolCallStatus::Pending,
-        raw_output: None,
-        error: None,
-        duration_ms: None,
-        execution_duration_ms: None,
-        error_category: None,
-        mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
-        changed_paths: None,
-        data: None,
-        health: None,
-        executor: None,
-        raw_input: Some(serde_json::json!({"q": "hello"})),
-        raw_input_partial: None,
-        audit: None,
-        parsing: None,
-    });
-    let line = rx.recv().await.expect("acp tool_call_update notification");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    assert_eq!(payload["params"]["update"]["rawInput"]["q"], "hello");
-    let harn_meta = update_harn_meta(&payload);
-    assert_eq!(harn_meta["mutationStatus"], "unknown");
-    assert!(harn_meta.get("rawInputPartial").is_none());
-
-    // Unparseable partial bytes → `rawInputPartial` populated, `rawInput` absent.
-    sink.handle_event(&AgentEvent::ToolCallUpdate {
-        session_id: "session-1".to_string(),
-        tool_call_id: "tool-streaming".to_string(),
-        tool_name: "search".to_string(),
-        status: ToolCallStatus::Pending,
-        raw_output: None,
-        error: None,
-        duration_ms: None,
-        execution_duration_ms: None,
-        error_category: None,
-        mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
-        changed_paths: None,
-        data: None,
-        health: None,
-        executor: None,
-        parsing: None,
-        raw_input: None,
-        raw_input_partial: Some(r#"{"q":"hel"#.to_string()),
-        audit: None,
-    });
-    let line = rx.recv().await.expect("acp tool_call_update notification");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    assert!(payload["params"]["update"].get("rawInput").is_none());
-    assert_eq!(
-        update_harn_meta(&payload)["rawInputPartial"],
-        r#"{"q":"hel"#
-    );
-    assert!(payload["params"]["update"].get("rawInputPartial").is_none());
-
-    // Terminal updates (None / None) must not introduce these keys.
-    sink.handle_event(&AgentEvent::ToolCallUpdate {
-        session_id: "session-1".to_string(),
-        tool_call_id: "tool-streaming".to_string(),
-        tool_name: "search".to_string(),
-        status: ToolCallStatus::Completed,
-        raw_output: Some(serde_json::json!({"ok": true})),
-        error: None,
-        duration_ms: Some(12),
-        execution_duration_ms: Some(8),
-        error_category: None,
-        mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
-        changed_paths: None,
-        data: None,
-        health: None,
-        executor: None,
-        parsing: None,
-        raw_input: None,
-        raw_input_partial: None,
-        audit: None,
-    });
-    let line = rx.recv().await.expect("acp tool_call_update notification");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    assert!(payload["params"]["update"].get("rawInput").is_none());
-    assert!(update_harn_meta(&payload).get("rawInputPartial").is_none());
-    assert_eq!(payload["params"]["update"]["status"], "completed");
-}
-
 /// harn#905 conformance: vendor-extension session-update fields
 /// must travel under `update._meta.harn` and **must not** appear at
 /// the update root. Canonical ACP fields (`sessionUpdate`, `content`,
@@ -1494,6 +988,21 @@ async fn vendor_extension_session_update_fields_live_under_meta_harn() {
         fixture_compaction_receipt("compaction-fixture-1", None, None, None).to_acp_meta();
     let compaction_fields: Vec<&str> = compaction_meta.keys().map(String::as_str).collect();
     let expectations: &[(&str, &[&str])] = &[
+        (
+            "inference_speed",
+            &[
+                "callId",
+                "provider",
+                "model",
+                "phase",
+                "isFinal",
+                "elapsedMs",
+                "timeToFirstTokenMs",
+                "outputTokens",
+                "outputTokensPerSecond",
+                "tokenSource",
+            ],
+        ),
         (
             "artifact",
             &[
@@ -1895,3 +1404,5 @@ fn progress_reported_message_only_uses_harn_progress_extension() {
         "message-only agent_progress must emit exactly one ACP notification"
     );
 }
+#[path = "tests/tool_calls.rs"]
+mod tool_calls;

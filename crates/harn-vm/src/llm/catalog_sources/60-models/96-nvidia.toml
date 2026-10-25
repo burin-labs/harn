@@ -13,9 +13,9 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking"]
 architecture = { parameter_count_b = 550.0, active_parameter_count_b = 55.0, moe = true, source_url = "https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b/modelcard", last_verified = "2026-06-20" }
 tier = "frontier"
-open_weight = true
 strengths = ["agentic", "reasoning", "coding", "tool_use", "long_context"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+models_dev = {provider = "nvidia", model = "nvidia/nemotron-3-ultra-550b-a55b", fields = ["open_weight"]}
 
 [models."nvidia/nemotron-3-super-120b-a12b"]
 name = "Nemotron 3 Super 120B A12B (NVIDIA NIM)"
@@ -62,8 +62,8 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "structured_output"]
 architecture = { parameter_count_b = 30.0, active_parameter_count_b = 3.0, moe = true, source_url = "https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b/modelcard", last_verified = "2026-08-26" }
 tier = "mid"
-open_weight = true
 strengths = ["speed", "coding", "agentic", "reasoning", "tool_use", "long_context"]
+models_dev = {provider = "nvidia", model = "nvidia/nemotron-3.5-lightning-30b-a3b", fields = ["open_weight"]}
 
 [models."nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
 name = "Nemotron 3 Nano Omni 30B A3B Reasoning (NVIDIA NIM)"
@@ -76,7 +76,6 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "vision", "video", "audio", "streaming", "thinking"]
 architecture = { parameter_count_b = 30.0, active_parameter_count_b = 3.0, moe = true, source_url = "https://build.nvidia.com/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning/modelcard", last_verified = "2026-06-20" }
 tier = "mid"
-open_weight = true
 strengths = ["vision", "reasoning", "tool_use", "summarization", "long_context"]
 
 # 2026-08-15 reachability sweep: NIM retired both undated DeepSeek V4 builds
@@ -85,6 +84,7 @@ strengths = ["vision", "reasoning", "tool_use", "summarization", "long_context"]
 # catalog entry that cannot be called is worse than an absent one, because it is
 # selectable. By 2026-09-26 NIM had dropped the dated V4 Flash snapshot too and
 # serves DeepSeek V4.1 Flash in its place.
+models_dev = {provider = "nvidia", model = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", fields = ["open_weight"]}
 
 [models."nvidia/deepseek-v4.1-flash"]
 name = "DeepSeek V4.1 Flash (NVIDIA NIM)"
@@ -99,8 +99,8 @@ api_dialect = "openai_chat"
 # and reported cached prompt tokens.
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 tier = "mid"
-open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
+models_dev = {provider = "nvidia", model = "deepseek-ai/deepseek-v4.1-flash", fields = ["open_weight"]}
 
 [models."nvidia/deepseek-v4-flash-0731"]
 name = "DeepSeek V4 Flash 0731 (NVIDIA NIM)"
@@ -129,7 +129,6 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen",
 name = "Kimi K2.6 (NVIDIA NIM)"
 provider = "nvidia"
 wire_model = "moonshotai/kimi-k2.6"
-context_window = 262144
 logical_model = "moonshot-kimi-k2.6"
 equivalence_group = "moonshot-kimi-k2.6"
 served_variant = "nvidia-nim"
@@ -137,7 +136,6 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.60, output_per_mtok = 2.50, cache_read_per_mtok = 0.15 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 
@@ -145,11 +143,11 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen",
 # the 20B sibling below (https://integrate.api.nvidia.com/v1/models, observed
 # 2026-09-20). GPT-OSS 120B remains catalogued on Cerebras, Groq, Fireworks,
 # DeepInfra, SambaNova and Baseten.
+models_dev = {provider = "nvidia", model = "moonshotai/kimi-k2.6", fields = ["context_window", "open_weight"]}
 [models."nvidia/openai/gpt-oss-20b"]
 name = "GPT-OSS 20B (NVIDIA NIM)"
 provider = "nvidia"
 wire_model = "openai/gpt-oss-20b"
-context_window = 131072
 logical_model = "openai-gpt-oss-20b"
 equivalence_group = "openai-gpt-oss-20b"
 served_variant = "nvidia-nim"
@@ -157,7 +155,6 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking"]
 architecture = { parameter_count_b = 21.0, active_parameter_count_b = 3.6, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-20b", last_verified = "2026-06-20" }
 tier = "mid"
-open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
 # Removed 2026-09-20: nvidia/step-3.7-flash. `stepfun-ai/step-3.7-flash` is
@@ -171,20 +168,20 @@ strengths = ["speed", "cheap", "tool_use", "reasoning"]
 # inherited from the first-party rows (Moonshot's /v1/models reports 1,048,576
 # for kimi-k3; the GLM rows follow the direct Z.AI rows): NIM publishes neither
 # per-route limits nor a tool matrix, so treat both as unverified for NIM.
+models_dev = {provider = "nvidia", model = "openai/gpt-oss-20b", fields = ["context_window", "open_weight"]}
 [models."nvidia/kimi-k3"]
 name = "Kimi K3 (NVIDIA NIM)"
 provider = "nvidia"
 wire_model = "moonshotai/kimi-k3"
-context_window = 1048576
 logical_model = "moonshot-kimi-k3"
 equivalence_group = "moonshot-kimi-k3"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "vision", "streaming", "thinking"]
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+models_dev = {provider = "nvidia", model = "moonshotai/kimi-k3", fields = ["context_window", "open_weight"]}
 
 [models."nvidia/glm-5.3"]
 name = "GLM 5.3 (NVIDIA NIM)"
@@ -197,8 +194,8 @@ served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking"]
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+models_dev = {provider = "nvidia", model = "z-ai/glm-5.3", fields = ["open_weight"]}
 
 [models."nvidia/glm-5.3-flash"]
 name = "GLM 5.3 Flash (NVIDIA NIM)"
@@ -213,5 +210,5 @@ capabilities = ["tools", "streaming", "thinking"]
 # `frontier` matches the direct Z.AI and OpenRouter rows: tier is a property of
 # the logical model, and every row in an equivalence group must agree.
 tier = "frontier"
-open_weight = true
 strengths = ["speed", "cheap", "coding", "tool_use", "reasoning"]
+models_dev = {provider = "nvidia", model = "z-ai/glm-5.3-flash", fields = ["open_weight"]}

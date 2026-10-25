@@ -11,7 +11,7 @@ use super::{child_text_by_kind, enum_case_symbol, field_symbol};
 
 pub(super) fn extract_typescript(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
     walk_named(root, None, &mut |node, container| {
-        let pos = point_pos(node);
+        let pos = declaration_position(node);
         match node.kind() {
             "class_declaration" => named_decl_with_keyword(NamedDeclArgs {
                 node,
@@ -62,7 +62,7 @@ pub(super) fn extract_typescript(root: Node<'_>, source: &str, out: &mut Vec<Sym
                     prefix: "function",
                     out,
                 });
-                None
+                field_text(node, "name", source)
             }
             "method_definition" => {
                 push_func(PushFuncArgs {
@@ -74,7 +74,10 @@ pub(super) fn extract_typescript(root: Node<'_>, source: &str, out: &mut Vec<Sym
                     prefix: "",
                     out,
                 });
-                None
+                field_text(node, "name", source)
+            }
+            "arrow_function" | "function_expression" | "function" | "generator_function" => {
+                Some(function_value_name(node, source))
             }
             "lexical_declaration" | "variable_declaration" => {
                 extract_bindings(node, source, container, out);
@@ -87,7 +90,7 @@ pub(super) fn extract_typescript(root: Node<'_>, source: &str, out: &mut Vec<Sym
 
 pub(super) fn extract_javascript(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
     walk_named(root, None, &mut |node, container| {
-        let pos = point_pos(node);
+        let pos = declaration_position(node);
         match node.kind() {
             "class_declaration" => named_decl_with_keyword(NamedDeclArgs {
                 node,
@@ -108,7 +111,7 @@ pub(super) fn extract_javascript(root: Node<'_>, source: &str, out: &mut Vec<Sym
                     prefix: "function",
                     out,
                 });
-                None
+                field_text(node, "name", source)
             }
             "method_definition" => {
                 push_func(PushFuncArgs {
@@ -120,7 +123,10 @@ pub(super) fn extract_javascript(root: Node<'_>, source: &str, out: &mut Vec<Sym
                     prefix: "",
                     out,
                 });
-                None
+                field_text(node, "name", source)
+            }
+            "arrow_function" | "function_expression" | "function" | "generator_function" => {
+                Some(function_value_name(node, source))
             }
             "public_field_definition" | "field_definition" => {
                 push_field(node, source, container, pos, out);
@@ -133,6 +139,28 @@ pub(super) fn extract_javascript(root: Node<'_>, source: &str, out: &mut Vec<Sym
             _ => None,
         }
     });
+}
+
+/// The container a function value gives the declarations in its body: the
+/// name it is bound to, or `<anonymous>` for a callback. Either way they
+/// are local, not module level.
+fn function_value_name(node: Node<'_>, source: &str) -> String {
+    node.child_by_field_name("name")
+        .or_else(|| {
+            node.parent()
+                .filter(|parent| parent.kind() == "variable_declarator")
+                .and_then(|parent| parent.child_by_field_name("name"))
+        })
+        .map(|name| helpers::node_text(name, source))
+        .unwrap_or_else(|| "<anonymous>".to_string())
+}
+
+fn declaration_position(node: Node<'_>) -> NodePos {
+    point_pos(
+        node.parent()
+            .filter(|parent| parent.kind() == "export_statement")
+            .unwrap_or(node),
+    )
 }
 
 fn push_field(
@@ -184,7 +212,7 @@ fn push_enum_body(node: Node<'_>, source: &str, container: Option<&str>, out: &m
 /// Arrow and function-expression bindings are functions. Other module-level
 /// bindings are variables.
 fn extract_bindings(node: Node<'_>, source: &str, container: Option<&str>, out: &mut Vec<Symbol>) {
-    let pos = point_pos(node);
+    let pos = declaration_position(node);
     for declarator in helpers::children(node) {
         if !declarator.is_named() || declarator.kind() != "variable_declarator" {
             continue;

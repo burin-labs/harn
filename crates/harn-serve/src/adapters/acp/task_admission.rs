@@ -87,6 +87,8 @@ pub enum TaskAdmissionError {
     TaskNotRunnable,
     TaskNotCurrent,
     StorageUnavailable,
+    /// The session is being closed and no longer admits delivery prompts.
+    SessionClosing,
 }
 
 impl TaskAdmissionError {
@@ -95,6 +97,7 @@ impl TaskAdmissionError {
             Self::InvalidTaskContext => -32602,
             Self::TaskNotSteerable | Self::TaskNotRunnable | Self::TaskNotCurrent => -32000,
             Self::StorageUnavailable => TASK_ADMISSION_STORAGE_UNAVAILABLE_RPC_CODE,
+            Self::SessionClosing => -32004,
         }
     }
 
@@ -105,51 +108,61 @@ impl TaskAdmissionError {
             Self::TaskNotRunnable => "task cannot dispatch this session prompt",
             Self::TaskNotCurrent => "task does not own the current session prompt",
             Self::StorageUnavailable => "durable task storage is unavailable",
+            Self::SessionClosing => "session is closing and no longer accepts prompts",
         }
     }
 }
 
 pub(super) struct InjectionCommand {
+    pub request_id: serde_json::Value,
+    pub message_id: Option<String>,
     pub content: String,
     pub transcript_content: serde_json::Value,
-    pub mode: String,
-    pub requested_mode: String,
+    pub delivery: AcpPromptDelivery,
     pub goal: Option<ControlGoal>,
     pub actor: serde_json::Value,
 }
 
 impl ConcurrentSessionControls {
+    /// Admit one delivery prompt into the session input queue. Its pending
+    /// request is registered under the queue lock, before any checkpoint can
+    /// insert the message and look the request up.
     pub(super) async fn enqueue_injection(
         &self,
         session_id: &str,
         inject_state: &harn_vm::bridge::HostBridgeInjectionState,
         params: &serde_json::Value,
         command: InjectionCommand,
-    ) -> Result<serde_json::Value, TaskAdmissionError> {
+    ) -> Result<String, TaskAdmissionError> {
         let target = params
             .pointer("/_meta/harn/taskMessage")
             .map(|value| serde_json::from_value::<TaskInjectionTarget>(value.clone()))
             .transpose()
             .map_err(|_| TaskAdmissionError::InvalidTaskContext)?;
-        let mut projection = None;
-        let message_id = inject_state
+        let mode = match command.delivery {
+            AcpPromptDelivery::Steer => harn_vm::bridge::QueuedUserMessageMode::FinishStep,
+            AcpPromptDelivery::Queue => harn_vm::bridge::QueuedUserMessageMode::NextTurn,
+        };
+        inject_state
             .push_pending_user_message_admitted(
+                command.message_id,
                 command.content.clone(),
                 command.transcript_content,
-                &command.mode,
+                mode,
                 |message_id| {
                     let control = ControlEvent::injection(
-                        "session/inject",
+                        ACP_METHOD_SESSION_PROMPT,
                         control_id(),
                         "accepted",
-                        command.requested_mode,
-                        command.mode.clone(),
+                        command.delivery.as_str(),
+                        mode.as_str(),
                         message_id.to_owned(),
                         command.content,
                     )
                     .with_goal(command.goal)
                     .with_actor(command.actor.clone());
                     let mut delivery_owner = harn_vm::bridge::UserMessageDeliveryOwner::Session;
+                    let mut projection = None;
                     if let Some(admission) = &self.task_admission {
                         projection = Some(match target.as_ref() {
                             Some(task) => self
@@ -166,23 +179,23 @@ impl ConcurrentSessionControls {
                             );
                         }
                     }
-                    self.record_inject_owner(
-                        session_id,
-                        message_id.to_owned(),
-                        command.actor.clone(),
-                    );
+                    let mut meta = serde_json::json!({"harn": {"actor": command.actor}});
+                    if let Some(projection) = projection {
+                        meta["harn"]["taskMessage"] = projection;
+                    }
+                    self.pending_prompts
+                        .register(
+                            session_id,
+                            command.request_id,
+                            message_id,
+                            command.delivery,
+                            meta,
+                        )
+                        .map_err(|()| TaskAdmissionError::SessionClosing)?;
                     super::core::record_and_emit_control(self, session_id, control);
                     Ok(delivery_owner)
                 },
             )
-            .await?;
-        let mut result = serde_json::json!({
-            "messageId": message_id, "status": "accepted",
-            "_meta": {"harn": {"actor": command.actor}},
-        });
-        if let Some(projection) = projection {
-            result["_meta"]["harn"]["taskMessage"] = projection;
-        }
-        Ok(result)
+            .await
     }
 }

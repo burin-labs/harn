@@ -32,8 +32,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
-use std::io;
-use std::io::Write as _;
+use std::io::{self, Write as _};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -83,6 +82,8 @@ mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
 mod path_scope;
+pub(crate) use path_scope::enforce_fs_entry_path;
+pub use path_scope::enforce_fs_path;
 pub(crate) mod paths;
 mod process_config;
 mod process_output;
@@ -140,9 +141,9 @@ pub(crate) use refusal::unavailable;
 pub use refusal::{
     infer_process_sandbox_mechanism, is_process_sandbox_signal, process_violation_error,
     ProcessSandboxAssessment, ProcessSandboxDenialReporting, ProcessSandboxGrants,
-    ProcessSandboxMechanism, ProcessSandboxOperation, ProcessSandboxRefusal,
-    ProcessSandboxReportingContext, SandboxMechanism, SandboxMechanismAvailability,
-    SandboxMechanismUnavailable, SandboxRequirement,
+    ProcessSandboxMechanism, ProcessSandboxNetwork, ProcessSandboxOperation, ProcessSandboxRefusal,
+    ProcessSandboxReport, ProcessSandboxReportingContext, SandboxMechanism,
+    SandboxMechanismAvailability, SandboxMechanismUnavailable, SandboxRequirement,
 };
 pub(crate) use refusal::{path_is_denied, process_sandbox_read_deny_roots};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -156,7 +157,7 @@ mod workspace_env_integration;
 pub(crate) use handler_env::effective_fallback;
 #[cfg(test)]
 pub(crate) use handler_env::handler_sandbox_test_guard;
-pub use introspection::{host_confinement, register_sandbox_builtins, SANDBOX_CONFINEMENT_SCHEMA};
+pub use introspection::{host_confinement, SANDBOX_CONFINEMENT_SCHEMA};
 pub(crate) use locked_append::AppendLockOptions;
 pub(crate) use policy::allows_network as policy_allows_network;
 pub(crate) use replace::{
@@ -216,6 +217,7 @@ pub(crate) enum SandboxFallback {
 pub(crate) fn reset_sandbox_state() {
     WARNED_KEYS.with(|keys| keys.borrow_mut().clear());
 }
+harn_vm_core::stdlib_state_reset!(reset_sandbox_state);
 
 /// A workspace-root scope violation: a path that resolved outside every
 /// configured workspace root under a restricted [`SandboxProfile`].
@@ -263,11 +265,6 @@ impl SandboxViolation {
                 .join(", ")
         )
     }
-}
-
-pub(crate) fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> Result<(), VmError> {
-    check_fs_path_scope(path, access)
-        .map_err(|violation| sandbox_rejection(violation.message(builtin)))
 }
 
 pub(crate) fn append_scoped_at_open(builtin: &str, path: &Path, contents: &[u8]) -> io::Result<()> {
@@ -1217,7 +1214,7 @@ pub(crate) fn active_sandbox_policy() -> Option<(CapabilityPolicy, SandboxProfil
     if !profile.confines_processes() || effective_fallback(profile) == SandboxFallback::Off {
         return None;
     }
-    Some((policy, profile))
+    Some((crate::process_sandbox::reconcile(policy), profile))
 }
 
 fn spawn_error(error: std::io::Error) -> VmError {
@@ -1463,11 +1460,7 @@ fn base_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
             &crate::stdlib::process::execution_root_path(),
         )];
     }
-    policy
-        .workspace_roots
-        .iter()
-        .map(|root| render_policy_root(root))
-        .collect()
+    read_roots::declared_workspace_roots(policy)
 }
 
 pub(crate) fn process_sandbox_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {

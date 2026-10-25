@@ -34,13 +34,12 @@ fn model_execution_contract_to_vm_value(contract: &llm_config::ModelExecutionCon
     );
     dict.put(
         "alias_chain",
-        VmValue::list(
+        VmValue::strings(
             contract
                 .resolution
                 .alias_chain
                 .iter()
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value.as_str())))
-                .collect(),
+                .map(|value| value.as_str()),
         ),
     );
     dict.put_str(
@@ -113,13 +112,9 @@ mod tests {
         llm_config::set_user_overrides(Some(overlay));
 
         let mut out = String::new();
-        let raw_defaults = llm_model_defaults_builtin(
-            &[VmValue::String(arcstr::ArcStr::from(
-                "receipt-contract-model",
-            ))],
-            &mut out,
-        )
-        .expect("raw route defaults");
+        let raw_defaults =
+            llm_model_defaults_builtin(&[VmValue::string("receipt-contract-model")], &mut out)
+                .expect("raw route defaults");
         assert!(
             raw_defaults
                 .as_dict()
@@ -127,13 +122,9 @@ mod tests {
             "receipt filtering must not alter inference defaults",
         );
 
-        let result = llm_execution_contract_builtin(
-            &[VmValue::String(arcstr::ArcStr::from(
-                "receipt-contract-model",
-            ))],
-            &mut out,
-        )
-        .expect("execution contract");
+        let result =
+            llm_execution_contract_builtin(&[VmValue::string("receipt-contract-model")], &mut out)
+                .expect("execution contract");
         let contract = result.as_dict().expect("contract dict");
 
         assert_eq!(

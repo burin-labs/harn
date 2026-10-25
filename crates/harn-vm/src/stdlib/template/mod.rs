@@ -43,7 +43,7 @@ pub use harn_prompt_syntax::{lint, outline, validate_template_syntax, vocabulary
 mod tests;
 
 use assets::parse_cached;
-pub(crate) use assets::TemplateAsset;
+pub use assets::TemplateAsset;
 use error::TemplateError;
 pub use error::TemplateParseError;
 pub use llm_context::{
@@ -86,7 +86,7 @@ pub struct RegisteredPrompt {
 /// assigned `prompt_id`. Newest entries push to the back; when the cap
 /// is reached the oldest entry is dropped so the registry never grows
 /// unboundedly over long sessions.
-pub(crate) fn register_prompt(
+pub fn register_prompt(
     template_uri: String,
     rendered: String,
     spans: Vec<PromptSourceSpan>,
@@ -233,6 +233,8 @@ pub(crate) fn reset_prompt_registry() {
     }
 }
 
+harn_vm_core::stdlib_state_reset!(reset_prompt_registry);
+
 /// One-shot dedup for the user-supplied-`llm`-binding shadow warning.
 /// Keyed by template URI so a recurring render in a loop only emits
 /// the warning once per template per process.
@@ -287,7 +289,7 @@ fn warn_user_llm_shadowed(asset: &TemplateAsset) {
 /// Full-featured entrypoint that preserves errors. `base` is the directory
 /// used to resolve `{{ include "..." }}` paths; `source_path` (if known) is
 /// included in error messages.
-pub(crate) fn render_template_result(
+pub fn render_template_result(
     template: &str,
     bindings: Option<&crate::value::DictMap>,
     base: Option<&Path>,
@@ -420,7 +422,7 @@ pub(crate) fn render_template_with_provenance(
     render_asset_with_provenance_result(&asset, bindings, collect_provenance)
 }
 
-pub(crate) fn render_asset_result(
+pub fn render_asset_result(
     asset: &TemplateAsset,
     bindings: Option<&crate::value::DictMap>,
 ) -> Result<String, TemplateError> {
@@ -456,7 +458,7 @@ pub(crate) fn render_template_collect_branch_trace(
         .map(|(rendered, _spans, trace)| (rendered, trace))
 }
 
-pub(crate) fn render_asset_with_provenance_result(
+pub fn render_asset_with_provenance_result(
     asset: &TemplateAsset,
     bindings: Option<&crate::value::DictMap>,
     collect_provenance: bool,

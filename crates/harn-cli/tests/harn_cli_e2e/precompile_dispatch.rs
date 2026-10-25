@@ -26,6 +26,132 @@ use std::path::{Path, PathBuf};
 
 use crate::test_util::process::harn_e2e_command;
 
+#[cfg(unix)]
+#[test]
+fn generated_precompile_driver_uses_user_run_store_in_shared_temp() {
+    use std::os::unix::fs::PermissionsExt;
+    let temporary = tempfile::tempdir().expect("isolated shared temp");
+    std::fs::set_permissions(temporary.path(), std::fs::Permissions::from_mode(0o775))
+        .expect("a launcher may select a group-writable workspace temp directory");
+    let project = tempfile::tempdir().expect("project");
+    let legacy = temporary.path().join(".harn-runs");
+    // A file makes the old shared store unusable even when CI runs as root.
+    std::fs::write(&legacy, "another account owns this path\n").expect("block shared store");
+    let source = project.path().join("probe.harn");
+    std::fs::write(&source, "pub fn probe() -> int { return 1 }\n").expect("write source");
+    let output = harn_e2e_command()
+        .current_dir(project.path())
+        .env("TMPDIR", temporary.path())
+        .env("HARN_STATE_DIR", project.path().join("state"))
+        .env("HARN_CACHE_DIR", project.path().join("cache"))
+        .env("HARN_SECRET_PROVIDERS", "env")
+        .env_remove("HARN_RUN_DIR")
+        .env_remove("HARN_PRECOMPILE_INNER")
+        .args(["precompile", "--quiet"])
+        .arg(&source)
+        .output()
+        .expect("run canonical precompile dispatch");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for extension in ["harnmod", "harnifc", "harnbc"] {
+        assert!(
+            std::fs::metadata(source.with_extension(extension))
+                .expect("compiled artifact")
+                .len()
+                > 0
+        );
+    }
+    // SAFETY: geteuid has no arguments or preconditions.
+    let uid = unsafe { libc::geteuid() };
+    let runs = temporary.path().join(format!("harn-user-{uid}/.harn-runs"));
+    assert_eq!(
+        std::fs::metadata(runs.parent().unwrap())
+            .expect("private user namespace")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700,
+    );
+    let records: Vec<_> = std::fs::read_dir(runs)
+        .expect("user run store")
+        .map(|entry| entry.expect("run entry").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .collect();
+    assert_eq!(
+        records.len(),
+        1,
+        "the generated driver must persist its execution"
+    );
+    let record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&records[0]).expect("run record"))
+            .expect("record JSON");
+    assert_eq!(record["workflow_id"], "harn.execution");
+    assert_eq!(record["status"], "completed");
+    assert_eq!(
+        std::fs::read_to_string(legacy).expect("legacy store untouched"),
+        "another account owns this path\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn generated_precompile_driver_refuses_unsafe_user_run_store() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    for unsafe_kind in ["public", "symlink"] {
+        let temporary = tempfile::tempdir().expect("isolated shared temp");
+        std::fs::set_permissions(temporary.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("safe parent before introducing one unsafe condition");
+        let project = tempfile::tempdir().expect("project");
+        let outside = tempfile::tempdir().expect("other account's directory");
+        std::fs::write(outside.path().join("marker"), "untouched").unwrap();
+        // SAFETY: geteuid has no arguments or preconditions.
+        let uid = unsafe { libc::geteuid() };
+        let private = temporary.path().join(format!("harn-user-{uid}"));
+        if unsafe_kind == "symlink" {
+            symlink(outside.path(), &private).expect("plant namespace symlink");
+        } else {
+            std::fs::create_dir(&private).unwrap();
+            std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let source = project.path().join("probe.harn");
+        std::fs::write(&source, "pub fn probe() -> int { return 1 }\n").unwrap();
+        let output = harn_e2e_command()
+            .current_dir(project.path())
+            .env("TMPDIR", temporary.path())
+            .env("HARN_STATE_DIR", project.path().join("state"))
+            .env("HARN_CACHE_DIR", project.path().join("cache"))
+            .env("HARN_SECRET_PROVIDERS", "env")
+            .env_remove("HARN_RUN_DIR")
+            .env_remove("HARN_PRECOMPILE_INNER")
+            .args(["precompile", "--quiet"])
+            .arg(source)
+            .output()
+            .expect("run canonical precompile dispatch");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success(),
+            "unsafe namespace accepted: {stderr}"
+        );
+        assert!(
+            stderr.contains("shared-temp run directory must be private, owned by the effective user, and not a symlink"),
+            "the persistence boundary did not refuse the unsafe namespace: {stderr}"
+        );
+        assert!(!private.join(".harn-runs").exists());
+        assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 1);
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("marker")).unwrap(),
+            "untouched"
+        );
+    }
+}
+
 #[test]
 fn single_file_dispatch_matches_inner_compile() {
     let workdir = tempfile::tempdir().expect("workdir");

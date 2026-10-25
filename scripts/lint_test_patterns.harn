@@ -28,6 +28,10 @@ import { scan_glob } from "./path_visibility.harn"
 import { is_mechanically_checked_source_projection } from "./source_projections.harn"
 
 const THREAD_SLEEP_ALLOWLIST: list<string> = [
+  // Proves a writer stays blocked on the workspace write lease while a rename
+  // commits. Blocked progress is only observable over time; a slow host can
+  // weaken the check but never fail it, because the blocked writer cannot run.
+  "crates/harn-hostlib/src/code_index/lsp/interrupt_tests.rs",
   // Process-group disappearance is observed through kill(2), after the child
   // and its descendant have reported readiness. A virtual clock cannot reap
   // OS processes; the bounded poll names the surviving process group.
@@ -80,7 +84,7 @@ const TOKIO_SLEEP_ALLOWLIST: list<string> = [
   // instead — the very regression the test exists to catch.
   "crates/harn-vm/src/llm/api/transport/sse_telemetry_tests.rs",
   "crates/harn-vm/src/agent_sessions_tests.rs",
-  "crates/harn-vm/src/flow/predicates/executor_tests.rs",
+  "crates/harn-flow/src/predicates/executor_tests.rs",
   "crates/harn-cli/tests/harn_cli_fast/orchestrator_http/support.rs",
   // Stop controls: two distinct real-time needs, neither expressible on a
   // paused clock. One bounded poll waits on a tick file the *running agent
@@ -154,14 +158,18 @@ const LITERAL_TIMEOUT_BASELINE = [
   {rule: "literal_timeout", path: "crates/harn-vm/tests/harn_vm/otel_sink_export.rs", count: 1},
 ]
 
-// Live quality measurements need provider credentials and, for rejudging,
-// saved transcripts. Their deterministic logic runs in the default suite;
-// these two opt-in measurements remain ignored. Exact counts reject another
-// ignored test and require removing a row when its measurement is removed.
-const LIVE_PROVIDER_TEST_BASELINE = [
+// External measurements require provider credentials, saved transcripts, or
+// an isolated database. Exact counts keep deterministic cases in the default suite.
+const LIVE_EXTERNAL_TEST_BASELINE = [
   {rule: "ignore_attr", path: "crates/harn-vm/src/security/behavioral.rs", count: 1},
   {rule: "ignore_attr", path: "crates/harn-vm/src/security/stance_judge.rs", count: 1},
+  {rule: "ignore_attr", path: "crates/harn-builtins/src/postgres/tests.rs", count: 15},
+  {rule: "ignore_attr", path: "crates/harn-builtins/src/postgres/describe_tests.rs", count: 5},
+  {rule: "ignore_attr", path: "crates/harn-builtins/src/postgres/tests/migrations.rs", count: 11},
+  {rule: "ignore_attr", path: "crates/harn-builtins/src/postgres/tests/transactions.rs", count: 5},
 ]
+
+const EXACT_PATTERN_BASELINE = LITERAL_TIMEOUT_BASELINE + LIVE_EXTERNAL_TEST_BASELINE
 
 // Conformance tests that exercise real subprocesses should share the bounded
 // polling helpers from `conformance/tests/_common.harn` instead of copying
@@ -209,6 +217,9 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
 // are the intended surface. `crates/harn-cli/tests/harn_cli_fast/orchestrator_http/`
 // is a prefix match; other files require an explicit entry.
 const E2E_SUBPROCESS_PATHS: list<string> = [
+  // Agent harnesses run `harn signals hook` as a process and read its stdout,
+  // stderr, and exit code; only the real binary proves that contract.
+  "crates/harn-cli/tests/harn_cli_e2e/signals_hook_cli.rs",
   // Connector read authority and destination policy must hold through the real CLI.
   "crates/harn-cli/tests/harn_cli_e2e/user_test_cli/process_egress.rs",
   // Release process smoke must cross the real CLI and its measured host confinement or typed refusal.
@@ -514,9 +525,9 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/corrections/mod.rs",
   "crates/harn-vm/src/event_log/mod.rs",
   "crates/harn-vm/src/event_log/util.rs",
-  "crates/harn-vm/src/flow/atom.rs",
-  "crates/harn-vm/src/flow/fixer.rs",
-  "crates/harn-vm/src/flow/predicates/executor.rs",
+  "crates/harn-flow/src/atom.rs",
+  "crates/harn-flow/src/fixer.rs",
+  "crates/harn-flow/src/predicates/executor.rs",
   "crates/harn-vm/src/http/client.rs",
   "crates/harn-vm/src/http/streaming/websocket.rs",
   "crates/harn-vm/src/llm/agent_observe.rs",
@@ -560,6 +571,9 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // to the first streamed delta as RunProfile telemetry; real provider
   // latency is the source of truth.
   "crates/harn-vm/src/llm/first_token.rs",
+  // The inference meter times a live provider stream for speed telemetry;
+  // its tokio clock is paused in its own tests.
+  "crates/harn-vm/src/llm/inference_speed.rs",
   "crates/harn-vm/src/llm/mod.rs",
   "crates/harn-vm/src/llm/model_test.rs",
   // Ollama raw `/api/generate` bypasses the shared transport wrapper, so it
@@ -595,7 +609,7 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/personas/mod.rs",
   "crates/harn-vm/src/provenance/mod.rs",
   "crates/harn-vm/src/sessions/mod.rs",
-  "crates/harn-vm/src/stdlib/agent_state.rs",
+  "crates/harn-builtins/src/agent_state.rs",
   // stdlib/clock.rs is itself the canonical wall-clock reader for Harn
   // scripts; the SystemTime::now reads are the fallback when no mock is
   // active. Routing through Clock would create a cycle.
@@ -604,17 +618,17 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // `latency_ms` field of the result dict — the #2505 spec lists
   // compaction latency as required telemetry, so the host wall clock is
   // the source of truth (same shape as the allowlisted routing.rs).
-  "crates/harn-vm/src/stdlib/compaction.rs",
+  "crates/harn-builtins/src/compaction.rs",
   // testbench/wasi_process.rs's #[cfg(test)] module compares real wall
   // time vs virtual time to prove that WASM-side `poll_oneoff` sleeps
   // don't actually block the host thread — the wall-clock read is the
   // signal under test, not a flake source.
   "crates/harn-vm/src/testbench/wasi_process.rs",
-  "crates/harn-vm/src/stdlib/agent_state/backend.rs",
+  "crates/harn-builtins/src/agent_state/backend.rs",
   "crates/harn-vm/src/stdlib/agents_daemon.rs",
   "crates/harn-vm/src/stdlib/agents_workers/execution.rs",
   "crates/harn-vm/src/stdlib/concurrency.rs",
-  "crates/harn-vm/src/stdlib/cookies.rs",
+  "crates/harn-builtins/src/cookies.rs",
   "crates/harn-vm/src/stdlib/fs.rs",
   "crates/harn-vm/src/stdlib/hitl.rs",
   "crates/harn-vm/src/stdlib/host.rs",
@@ -635,25 +649,25 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // truth here — the same shape as the `date_now` builtin. The cutoff/window
   // math lives in pure helpers that take an injected `now` and are unit-tested
   // deterministically; only the thin builtin boundary reads the real clock.
-  "crates/harn-vm/src/stdlib/postgres/introspect.rs",
+  "crates/harn-builtins/src/postgres/introspect.rs",
   // `pg_execute` and `pg_migrate` time the host wall-clock duration of the
   // Postgres round-trip and surface it as `duration_ms` in the result dict
   // (issue #2500). The measurement IS the observability source of truth
   // — same shape as the existing `process.rs` allowlist entry.
-  "crates/harn-vm/src/stdlib/postgres/migrate.rs",
-  "crates/harn-vm/src/stdlib/postgres/mod.rs",
+  "crates/harn-builtins/src/postgres/migrate.rs",
+  "crates/harn-builtins/src/postgres/mod.rs",
   // `pg_pool`'s circuit breaker (#2512) stamps the open-at instant + tests
   // cooldown elapsed against the host wall clock. The "is the cooldown
   // over yet" decision IS the observability source of truth — same shape
   // as supervisor/triggers entries above.
-  "crates/harn-vm/src/stdlib/postgres/circuit.rs",
+  "crates/harn-builtins/src/postgres/circuit.rs",
   "crates/harn-vm/src/stdlib/process.rs",
   "crates/harn-vm/src/stdlib/supervisor.rs",
   "crates/harn-vm/src/stdlib/tracing.rs",
   "crates/harn-vm/src/stdlib/triggers_stdlib.rs",
   "crates/harn-vm/src/stdlib/waitpoint.rs",
   "crates/harn-vm/src/stdlib/waitpoints.rs",
-  "crates/harn-vm/src/stdlib/workflow_messages.rs",
+  "crates/harn-builtins/src/workflow_messages.rs",
   "crates/harn-vm/src/synchronization.rs",
   "crates/harn-vm/src/tenant.rs",
   "crates/harn-vm/src/tracing.rs",
@@ -1055,7 +1069,7 @@ pub fn has_mock_time(text: string) -> bool {
 
 /** The pinned finding count for `rule` in `rel`, or nil when not pinned. */
 pub fn pattern_baseline_count(rule: string, rel: string) -> int? {
-  for row in LITERAL_TIMEOUT_BASELINE + LIVE_PROVIDER_TEST_BASELINE {
+  for row in EXACT_PATTERN_BASELINE {
     if row.rule == rule && row.path == rel {
       return row.count
     }
@@ -1067,7 +1081,7 @@ pub fn pattern_baseline_count(rule: string, rel: string) -> int? {
 pub fn pattern_baseline_duplicates() -> list<string> {
   let seen: list<string> = []
   let dupes: list<string> = []
-  for row in LITERAL_TIMEOUT_BASELINE + LIVE_PROVIDER_TEST_BASELINE {
+  for row in EXACT_PATTERN_BASELINE {
     const key = row.rule + ":" + row.path
     if seen.contains(key) && !dupes.contains(key) {
       dupes = dupes + [key]
@@ -1204,7 +1218,7 @@ pipeline main(harness: Harness, task: unknown) {
     harness.stdio.println("  duplicate pattern baseline: " + key)
     violations = violations + 1
   }
-  for row in LITERAL_TIMEOUT_BASELINE + LIVE_PROVIDER_TEST_BASELINE {
+  for row in EXACT_PATTERN_BASELINE {
     if !test_files.any({ f -> f.rel == row.path }) {
       harness.stdio.println("  unscanned pattern baseline: " + row.rule + ":" + row.path)
       violations = violations + 1
@@ -1373,13 +1387,7 @@ pipeline main(harness: Harness, task: unknown) {
       harness.stdio,
       "ignore_attr",
       test_files,
-      { rel ->
-        // External database availability is explicit: these cases fail without
-        // a URL and run through the required-input test-postgres-live/cloud targets.
-        rel.starts_with("crates/harn-cli/tests/")
-          || rel == "crates/harn-vm/src/stdlib/postgres/tests.rs"
-          || rel == "crates/harn-vm/src/stdlib/postgres/describe_tests.rs"
-      },
+      { rel -> rel.starts_with("crates/harn-cli/tests/") },
       ignore_attr_pattern(),
       [
         "    hint: Default-suite Rust tests must run by default. Move slow subprocess coverage to the harn-cli E2E profile instead of using #[ignore].",

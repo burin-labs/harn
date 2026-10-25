@@ -33,10 +33,9 @@ fn test_redundant_clone_dropped_autofix() {
     );
 }
 
-#[test]
-fn test_redundant_clone_ignores_named_clone_binding() {
-    let diags = lint_source(
-        r"
+#[rstest::rstest]
+#[case::test_redundant_clone_ignores_named_clone_binding(
+    r"
 pipeline default(task) {
   const data = [1, 2]
   const copied = data.clone()
@@ -44,10 +43,60 @@ pipeline default(task) {
   log(data)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "redundant-clone"),
-        "binding a clone for later use should not trigger redundant-clone: {diags:?}"
+    "redundant-clone",
+    false
+)]
+#[case::test_pointless_if_constant_condition(
+    r"
+pipeline default(task) {
+  if false {
+    log(task)
+  }
+}
+",
+    "pointless-comparison",
+    true
+)]
+#[case::test_pointless_comparison_ignores_different_expressions(
+    r#"
+pipeline default(task) {
+  const other = "x"
+  const same = task == other
+  log(same)
+}
+"#,
+    "pointless-comparison",
+    false
+)]
+#[case::test_unused_pattern_binding_underscore_ignored(
+    r"
+pipeline default(task) {
+  const { a, b: _b } = { a: 1, b: 2 }
+  log(a)
+}
+",
+    "unused-pattern-binding",
+    false
+)]
+#[case::test_let_then_return_ignores_typed_binding(
+    r"
+pipeline default(task) {
+  fn answer() {
+    const value: int = 1 + 2
+    return value
+  }
+  log(answer())
+}
+",
+    "let-then-return",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }
 
@@ -98,40 +147,6 @@ fn test_self_comparison_warns_but_does_not_autofix_possible_float() {
 }
 
 #[test]
-fn test_pointless_if_constant_condition() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-  if false {
-    log(task)
-  }
-}
-",
-    );
-    assert!(
-        has_rule(&diags, "pointless-comparison"),
-        "expected constant if condition warning, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_pointless_comparison_ignores_different_expressions() {
-    let diags = lint_source(
-        r#"
-pipeline default(task) {
-  const other = "x"
-  const same = task == other
-  log(same)
-}
-"#,
-    );
-    assert!(
-        !has_rule(&diags, "pointless-comparison"),
-        "different operands should not trigger pointless-comparison: {diags:?}"
-    );
-}
-
-#[test]
 fn test_unused_pattern_binding_for_destructuring() {
     let diags = lint_source(
         r"
@@ -152,22 +167,6 @@ pipeline default(task) {
 }
 
 #[test]
-fn test_unused_pattern_binding_underscore_ignored() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-  const { a, b: _b } = { a: 1, b: 2 }
-  log(a)
-}
-",
-    );
-    assert!(
-        !has_rule(&diags, "unused-pattern-binding"),
-        "underscore-prefixed pattern binding should be ignored: {diags:?}"
-    );
-}
-
-#[test]
 fn test_let_then_return_autofix() {
     let source = "pipeline default(task) {\n  fn answer() {\n    const value = 1 + 2\n    return value\n  }\n  log(answer())\n}";
     let diags = lint_source(source);
@@ -183,24 +182,5 @@ fn test_let_then_return_autofix() {
     assert!(
         !fixed.contains("const value = 1 + 2"),
         "expected temporary binding to be removed, got: {fixed}"
-    );
-}
-
-#[test]
-fn test_let_then_return_ignores_typed_binding() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-  fn answer() {
-    const value: int = 1 + 2
-    return value
-  }
-  log(answer())
-}
-",
-    );
-    assert!(
-        !has_rule(&diags, "let-then-return"),
-        "typed temporary should preserve its annotation: {diags:?}"
     );
 }

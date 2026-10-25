@@ -125,10 +125,7 @@ pub(crate) fn compute_validation_errors(data: &VmValue, opts: &api::LlmCallOptio
     schema_validation_errors(&validation)
 }
 
-pub(crate) fn structured_output_errors(
-    result: &VmValue,
-    opts: &api::LlmCallOptions,
-) -> Vec<String> {
+pub fn structured_output_errors(result: &VmValue, opts: &api::LlmCallOptions) -> Vec<String> {
     let Some(dict) = result.as_dict() else {
         return vec!["structured output result was not a dict".to_string()];
     };
@@ -495,7 +492,7 @@ pub(crate) fn invalid_request_error(
     VmError::Thrown(build_llm_error_dict(&structured, provider, model))
 }
 
-pub(crate) fn llm_error_message(err: &VmError) -> String {
+pub fn llm_error_message(err: &VmError) -> String {
     match err {
         VmError::ProviderStreamFailure(failure) => failure.to_string(),
         VmError::CategorizedError { message, .. } => message.clone(),
@@ -508,7 +505,7 @@ pub(crate) fn llm_error_message(err: &VmError) -> String {
     }
 }
 
-pub(crate) async fn execute_llm_call(
+pub async fn execute_llm_call(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     opts: api::LlmCallOptions,
     options: Option<crate::value::DictMap>,
@@ -692,52 +689,56 @@ async fn execute_routing_schema_retry_loop(
     let mut usages = Vec::new();
 
     for attempt in 0..=schema_retries {
-        let (vm_result, raw_text, errors) =
-            match routing::execute_with_routing(&policy, opts.clone(), bridge, delta_sink.clone())
-                .await
-            {
-                Ok((result, trace)) => {
-                    usages.push(result.usage());
-                    let raw_text = result.text.clone();
-                    // Snap option metadata to the winning link so transcript / portal
-                    // payloads describe the call that actually ran.
-                    opts.provider = result.provider.clone();
-                    opts.model = result.model.clone();
-                    opts.routing_decision = Some(routing::trace_to_decision(&trace, &policy));
-                    let envelope = attach_routing_block(
-                        agent_config::build_llm_call_result(ctx, &result, &opts).await?,
-                        &trace,
-                        &policy,
-                    );
-                    if !expects_structured {
-                        return Ok(SchemaLoopOutcome {
-                            vm_result: envelope,
-                            raw_text,
-                            errors: Vec::new(),
-                            attempts: attempt + 1,
-                            schema_retries_budget: schema_retries,
-                            output_validation_mode,
-                            usages,
-                        });
-                    }
-                    let errors = structured_output_errors(&envelope, &opts);
-                    (envelope, raw_text, errors)
+        let (vm_result, raw_text, errors) = match Box::pin(routing::execute_with_routing(
+            &policy,
+            opts.clone(),
+            bridge,
+            delta_sink.clone(),
+        ))
+        .await
+        {
+            Ok((result, trace)) => {
+                usages.push(result.usage());
+                let raw_text = result.text.clone();
+                // Snap option metadata to the winning link so transcript / portal
+                // payloads describe the call that actually ran.
+                opts.provider = result.provider.clone();
+                opts.model = result.model.clone();
+                opts.routing_decision = Some(routing::trace_to_decision(&trace, &policy));
+                let envelope = attach_routing_block(
+                    agent_config::build_llm_call_result(ctx, &result, &opts).await?,
+                    &trace,
+                    &policy,
+                );
+                if !expects_structured {
+                    return Ok(SchemaLoopOutcome {
+                        vm_result: envelope,
+                        raw_text,
+                        errors: Vec::new(),
+                        attempts: attempt + 1,
+                        schema_retries_budget: schema_retries,
+                        output_validation_mode,
+                        usages,
+                    });
                 }
-                Err(error) => match parse_schema_stream_abort(&error) {
-                    Some(abort) => {
-                        // The provider billed the partial output it generated
-                        // before the stream was severed and never sent its
-                        // usage frame. Recording the attempt keeps it in the
-                        // ledger's request count with its cost refusing;
-                        // dropping it would let the call read as free.
-                        usages.push(super::usage::LlmUsage::stream_aborted_attempt());
-                        let errors = vec![schema_stream_abort_message(&abort)];
-                        let vm_result = schema_stream_aborted_result_value(&abort);
-                        (vm_result, String::new(), errors)
-                    }
-                    None => return Err(error),
-                },
-            };
+                let errors = structured_output_errors(&envelope, &opts);
+                (envelope, raw_text, errors)
+            }
+            Err(error) => match parse_schema_stream_abort(&error) {
+                Some(abort) => {
+                    // The provider billed the partial output it generated
+                    // before the stream was severed and never sent its
+                    // usage frame. Recording the attempt keeps it in the
+                    // ledger's request count with its cost refusing;
+                    // dropping it would let the call read as free.
+                    usages.push(super::usage::LlmUsage::stream_aborted_attempt());
+                    let errors = vec![schema_stream_abort_message(&abort)];
+                    let vm_result = schema_stream_aborted_result_value(&abort);
+                    (vm_result, String::new(), errors)
+                }
+                None => return Err(error),
+            },
+        };
         if errors.is_empty() {
             return Ok(SchemaLoopOutcome {
                 vm_result,
@@ -815,7 +816,7 @@ fn attach_routing_block(
 /// after exhaustion return `Ok(...)` with `errors` populated so the
 /// caller can decide between throwing, warning, or building a result
 /// envelope.
-pub(crate) struct SchemaLoopOutcome {
+pub struct SchemaLoopOutcome {
     /// Final attempt's vm_result dict (regardless of validation success).
     pub vm_result: VmValue,
     /// Final attempt's raw model text — preserved for diagnostics and
@@ -834,7 +835,7 @@ pub(crate) struct SchemaLoopOutcome {
     pub usages: Vec<super::usage::LlmUsage>,
 }
 
-pub(crate) async fn execute_schema_retry_loop(
+pub async fn execute_schema_retry_loop(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     mut opts: api::LlmCallOptions,
     options: Option<crate::value::DictMap>,
@@ -1078,7 +1079,7 @@ pub(super) fn llm_safe_envelope_ok(response: VmValue) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
     dict.put_bool("ok", true);
     dict.insert("response".to_string(), response);
-    dict.insert("error".to_string(), VmValue::Nil);
+    dict.put("error", VmValue::Nil);
     VmValue::dict(dict)
 }
 
@@ -1091,7 +1092,7 @@ pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
     if let VmError::Thrown(VmValue::Dict(d)) = err {
         let mut dict = std::collections::BTreeMap::new();
         dict.put_bool("ok", false);
-        dict.insert("response".to_string(), VmValue::Nil);
+        dict.put("response", VmValue::Nil);
         dict.put("error", VmValue::Dict(d.clone()));
         return VmValue::dict(dict);
     }
@@ -1105,7 +1106,7 @@ pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
     err_dict.put_str("message", message);
     let mut dict = std::collections::BTreeMap::new();
     dict.put_bool("ok", false);
-    dict.insert("response".to_string(), VmValue::Nil);
+    dict.put("response", VmValue::Nil);
     dict.put("error", VmValue::dict(err_dict));
     VmValue::dict(dict)
 }
@@ -1114,7 +1115,7 @@ pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
 /// `(prompt, system, options)` arguments used by `llm_call`. The positional
 /// schema owns the `output` contract; callers may tune retries but cannot
 /// install a second, conflicting schema through the options dict.
-pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>, VmError> {
+pub fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
             "llm_call_structured: missing required `schema` argument (expected \
@@ -1175,7 +1176,7 @@ pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>
 
 /// Extract the `.data` field from a canonical `llm_call` result dict.
 /// Used by `llm_call_structured` to surface just the validated payload.
-pub(crate) fn extract_structured_data(response: VmValue) -> VmValue {
+pub fn extract_structured_data(response: VmValue) -> VmValue {
     match response {
         VmValue::Dict(d) => d.get("data").cloned().unwrap_or(VmValue::Nil),
         other => other,
@@ -1186,19 +1187,19 @@ pub(crate) fn extract_structured_data(response: VmValue) -> VmValue {
 /// `llm_call_structured_safe`. Mirrors `llm_safe_envelope_ok` but keys
 /// the payload on `data` (the validated schema-parsed value) instead
 /// of `response` (the full result dict), matching the issue shape.
-pub(crate) fn structured_safe_envelope_ok(data: VmValue) -> VmValue {
+pub fn structured_safe_envelope_ok(data: VmValue) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
     dict.put_bool("ok", true);
     dict.insert("data".to_string(), data);
-    dict.insert("error".to_string(), VmValue::Nil);
+    dict.put("error", VmValue::Nil);
     VmValue::dict(dict)
 }
 
-pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
+pub fn structured_safe_envelope_err(err: &VmError) -> VmValue {
     if let VmError::Thrown(VmValue::Dict(d)) = err {
         let mut dict = std::collections::BTreeMap::new();
         dict.put_bool("ok", false);
-        dict.insert("data".to_string(), VmValue::Nil);
+        dict.put("data", VmValue::Nil);
         dict.put("error", VmValue::Dict(d.clone()));
         return VmValue::dict(dict);
     }
@@ -1212,7 +1213,7 @@ pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
     err_dict.put_str("message", message);
     let mut dict = std::collections::BTreeMap::new();
     dict.put_bool("ok", false);
-    dict.insert("data".to_string(), VmValue::Nil);
+    dict.put("data", VmValue::Nil);
     dict.put("error", VmValue::dict(err_dict));
     VmValue::dict(dict)
 }

@@ -1,0 +1,151 @@
+import { invoke, runtime } from "./lib/driver"
+import { qmode_inspect_task_dir } from "./qmode_inspect"
+
+type Pending = {question: string, asked_at: string}
+
+type Task = {task: string}
+
+fn display(
+  harness: {fs: HarnessFs, stdio: HarnessStdio},
+  directory: string,
+  history: bool = false,
+) -> int {
+  const plan = path_join(directory, "plan.json")
+  const pending = path_join(directory, "pending.json")
+  require !(harness.fs.exists(plan) && harness.fs.exists(pending)),
+    "Task has both a plan and a pending question: ${directory}"
+  if harness.fs.exists(plan) {
+    harness.stdio.println("=== PLAN ===")
+    harness.stdio.println(json_stringify_pretty(json_parse(harness.fs.read_text(plan))))
+    return 0
+  }
+  require harness.fs.exists(pending), "No plan or pending question: ${directory}"
+  const question = unwrap(json_decode(harness.fs.read_text(pending), schema_of(Pending)))
+  require question.question.trim() != "", "Pending question is empty"
+  harness.stdio.println("=== PENDING QUESTION ===")
+  harness.stdio.println(question.question)
+  const qa = path_join(directory, "qa.jsonl")
+  if history && harness.fs.exists(qa) {
+    harness.stdio.println("=== Q&A SO FAR ===")
+    harness.stdio.print(harness.fs.read_text(qa))
+  }
+  return 10
+}
+
+fn run_turn(harness: Harness, directory: string, task_id: string, task: string) -> nil {
+  const fixture = harness.env.get("QMODE_MOCK_FIXTURE") ?? ""
+  const mock_args = if fixture == "" {
+    ["--llm-mock-record", path_join(directory, "llm-mock.jsonl")]
+  } else {
+    ["--llm-mock", path_normalize(path_join(harness.fs.cwd(), fixture))]
+  }
+  const result = invoke(
+    harness,
+    runtime(harness),
+    ["playground", "--host", "host.harn", "--script", "pipeline_qmode.harn", "--task", task]
+      + mock_args,
+    harness.fs.source_dir(),
+    {
+      QMODE_TASK_ID: task_id,
+      BURIN_MINI_PROVIDER: harness.env.get("QMODE_PROVIDER") ?? "ollama",
+      BURIN_MINI_GENERATOR_MODEL: harness.env.get("QMODE_MODEL") ?? "devstral-small-2:24b",
+    },
+    path_join(directory, "last-stdout.log"),
+  )
+  require result.success,
+    "Planner failed (exit ${result.exit_code}); see ${directory}/last-stdout.log"
+}
+
+fn answer(harness: Harness, directory: string, task_id: string, text: string) -> nil {
+  require text.trim() != "", "Answer cannot be empty"
+  const pending = path_join(directory, "pending.json")
+  require !harness.fs.exists(path_join(directory, "plan.json")), "Task is already complete"
+  const question = unwrap(json_decode(harness.fs.read_text(pending), schema_of(Pending)))
+  const task = unwrap(
+    json_decode(harness.fs.read_text(path_join(directory, "task.json")), schema_of(Task)),
+  )
+  harness.fs.append(
+    path_join(directory, "qa.jsonl"),
+    "${json_stringify({
+    question: question.question, answer: text, asked_at: question.asked_at,
+    answered_at: harness.clock.date_iso(),
+  })}\n",
+  )
+  harness.fs.delete(pending)
+  run_turn(harness, directory, task_id, task.task)
+}
+
+fn read_answer(stdio: HarnessStdio, prompt: string) -> string? {
+  const result = stdio.read_line({prompt: prompt, trim: false})
+  if result.status == "eof" || result.status == "interrupt" {
+    return nil
+  }
+  require result.ok, "Cannot read input: ${result.error ?? result.status}"
+  return result.value ?? ""
+}
+
+fn main(harness: Harness) -> nil {
+  if argv.count < 2 || argv.contains("--help") {
+    harness.stdio.println("Usage: run_qmode.sh init|answer|chat|show|reset|inspect TASK_ID [TEXT]")
+    harness.stdio.println("Exit 0 means a plan is ready; exit 10 means a question is pending.")
+    harness.runtime.exit(
+      if argv.contains("--help") {
+        0
+      } else {
+        64
+      },
+    )
+  }
+  const action = argv[0]
+  const task_id = argv[1]
+  require regex_match(r"^[A-Za-z0-9][A-Za-z0-9_-]*$", task_id) != nil,
+    "Task ID must contain only letters, digits, underscores, or hyphens"
+  require ["init", "answer", "chat", "show", "reset", "inspect"].contains(action),
+    "Unknown command: ${action}"
+  const directory = path_join(harness.fs.source_dir(), ".qmode", task_id)
+  const text = argv[2:].join(" ")
+  if action == "reset" {
+    if harness.fs.exists(directory) {
+      harness.fs.delete(directory)
+    }
+    harness.stdio.println("Reset ${task_id}")
+    return
+  }
+  if action == "inspect" {
+    harness.runtime.exit(
+      qmode_inspect_task_dir(harness.fs, harness.stdio, directory, true).exit_code,
+    )
+  }
+  if action == "show" {
+    harness.runtime.exit(display(pick(harness, ["fs", "stdio"]), directory, true))
+  }
+  if action == "answer" {
+    answer(harness, directory, task_id, text)
+  } else if action == "init" || !harness.fs.exists(directory) {
+    require !harness.fs.exists(directory), "Task exists; answer it or reset it first"
+    const initial = if action == "chat" && text == "" {
+      read_answer(harness.stdio, "Task description: ")
+    } else {
+      text
+    }
+    if initial == nil {
+      harness.runtime.exit(130)
+    }
+    require initial.trim() != "", "Task description cannot be empty"
+    harness.fs.mkdir(directory)
+    run_turn(harness, directory, task_id, initial ?? "")
+  }
+  let state = display(pick(harness, ["fs", "stdio"]), directory)
+  while action == "chat" && state == 10 {
+    const response = read_answer(harness.stdio, "> ")
+    if response == nil {
+      harness.runtime.exit(130)
+    }
+    if response.trim() == "" {
+      continue
+    }
+    answer(harness, directory, task_id, response ?? "")
+    state = display(pick(harness, ["fs", "stdio"]), directory)
+  }
+  harness.runtime.exit(state)
+}

@@ -35,6 +35,21 @@ pipeline test(harness: Harness, task: unknown) {
   assert_eq(type_of(stale.tier1), "list")
   assert_eq(type_of(stale.tier2), "list")
   harness.project.metadata_refresh_hashes({dir: "zig"})
+  const entries = harness.project.metadata_entries({namespace: "classification"})
+  const root_entries = entries.filter({ entry -> entry.dir == "." })
+  assert_eq(len(root_entries), 1)
+  const root_hash = root_entries[0].local.structureHash
+  assert_eq(type_of(root_hash), "string")
+  assert(len(root_hash) > 0)
+  const zig_entries = entries.filter({ entry -> entry.dir == "zig" })
+  assert_eq(len(zig_entries), 1)
+  assert_eq(zig_entries[0].local, nil)
+  const missing = try {
+    harness.project.content_hash("zig")
+  }
+  assert(is_err(missing))
+  const preserved = harness.project.metadata_get({dir: "zig", namespace: "build_gotchas"})
+  assert_eq(preserved.gotchas[0], "use .map.count() on ArrayHashMap")
   harness.project.metadata_save({})
   harness.stdio.log("host project metadata fallback ok")
 }

@@ -6,10 +6,11 @@ them. You need permission to dispatch workflows in `burin-labs/harn`.
 ## Open the release pull request
 
 Releases are cut from [`green`](./dev/green-branch.md), the newest `main`
-commit whose full CI suite passed. Confirm that `green` declares an
-`X.Y.Z-dev` workspace version and contains unreleased
-`changelog.d/<id>.<category>.md` fragments. Fragments that landed on `main`
-after green wait for the next release. Then run:
+commit whose full CI suite passed. Each green-checkpoint pass that finds
+unreleased `changelog.d/<id>.<category>.md` fragments on a `green` that declares
+an `X.Y.Z-dev` workspace version opens the release by itself, so you normally
+run nothing. Fragments that landed on `main` after green wait for the next
+release. To open one at once, run:
 
 ```bash
 gh workflow run bump-release.yml --repo burin-labs/harn --ref main
@@ -19,17 +20,39 @@ The opener takes no version or candidate-build inputs. It strips the declared
 `-dev` suffix, folds the fragments, regenerates derived files, and opens
 `Release vX.Y.Z`. It publishes one GitHub-signed commit and adds `ship` so
 Smart Ship owns delivery through the merge queue. Required checks and review
-still apply. Repeated openers leave an existing PR's delivery grant unchanged.
+still apply: `approve-release-pr.yml` supplies the review only when
+`scripts/ci/approve_release_pr.sh` proves from the pull request's data that the
+bot's `Release vX.Y.Z` or `Start X.Y.Z-dev development` diff changes nothing but
+version strings and the changelog fold, and posts it as `github-actions`, bound
+to the head SHA. Any other line in the diff leaves the pull request waiting for
+a person. Repeated openers leave an existing PR's delivery grant unchanged.
 
-The daily schedule runs the same decision. A stable workspace version or no
+The opener restores the Harn binary that green's own CI run built, verified
+against green's commit, instead of compiling a second one. It builds only when
+that run's artifact has expired. The green checkpoint, the daily schedule and a
+manual dispatch all run the same decision. A stable workspace version or no
 unreleased fragments produces `action=none`, with a notice explaining why.
 An unreadable pull-request list fails instead of opening a duplicate.
 
 The signed commit is recorded at `release-attempt/vX.Y.Z/<commit>` before the
-pull request opens. An existing release stays frozen at that attempt. Later
-fragments remain for the next release, including when their changes merge ahead
-of this release. A push changing `changelog.d` checks the existing attempt
-without rebuilding or opening a release.
+pull request opens from that ref. A mergeable release stays frozen at that
+attempt. New fragments remain for the next release, including when they merge
+ahead of this release. A push changing `changelog.d` checks existing attempts
+before restoring or building Harn.
+
+If a fragment already folded into the attempt is edited on main, Git reports a
+modify/delete conflict. The opener waits until green contains the exact edited
+fragment blobs, then refolds from green into a new signed, immutable attempt.
+It enrolls the replacement in Smart Ship and closes the conflicted PR with a
+link to the replacement. It preserves the earlier commit and attempt ref.
+Other conflicts, missing attempt records, and multiple mergeable attempts fail
+closed instead of choosing a source.
+
+If replacement cleanup fails after the new PR opens, dispatch the same opener
+again. It selects the prepared replacement and finishes closing the superseded
+PR without rebuilding, republishing, or changing the existing PR's `ship`
+grant. The `release-opener-<run>-<attempt>` artifact records the recovery plan,
+selected source, outcome, and next action, including when an invocation fails.
 
 An existing `release/vX.Y.Z` branch without a matching attempt fails closed.
 To replace an unrecorded stale attempt, close its pull request and dispatch the
@@ -71,11 +94,13 @@ attempt, including after a crash. Missing or incomplete reservation history
 refuses automatic repair. Do not change the fixed anchor or seed to clear a
 reservation, and do not infer completed integration from a reserved attempt.
 
-## Retire an unpublished candidate with failed source CI
+## Retire an unpublished candidate whose source can never promote
 
-Read the failed producer and the main-push CI run at its exact source. If both
-are terminal failures and the version was never published, request retirement
-through the existing development bump workflow:
+Promotion requires a green full-suite main-push CI run at the release's exact
+source. When the CI run at that source can never become one, the version can
+never publish, whatever its candidate build concluded. Read the main-push CI
+run at the exact source, then request retirement through the existing
+development bump workflow:
 
 ```bash
 gh workflow run open-development-bump.yml --repo burin-labs/harn --ref main \
@@ -86,14 +111,31 @@ gh workflow run open-development-bump.yml --repo burin-labs/harn --ref main \
 
 Replace the placeholders with the published predecessor and the owning release
 records. Omit every consumer-retirement input: mixing the two evidence paths
-is refused. The planner requires complete terminal job censuses with actual
-failed checks, exact source identity, main ancestry and the merged release PR.
-It also proves that the version has no tag or release and that neither
-publication workflow is active, with known positive reads on those paths.
-The opener repeats those checks after preparation before opening its normal
-development-version PR. Follow that PR through the merge queue, then use the
+is refused. The planner decides from the source CI run's complete job census:
+
+| Source CI run | Candidate build | Decision |
+| --- | --- | --- |
+| Failed with a failed owning job on attempt 2 or later | Any terminal conclusion | Retire |
+| Failed on attempt 1 | Any | Refuse: main CI recovery still retries it |
+| Succeeded without every full-suite job succeeding | Any terminal conclusion | Retire |
+| Succeeded with every full-suite job | Any terminal conclusion | Refuse: the source can still promote |
+| Failed only in derived aggregate jobs | Any | Refuse: unmeasured |
+| Not completed, cancelled, or incomplete census | Any | Refuse: unmeasured |
+| Any | Not completed | Refuse: unmeasured |
+
+A failed candidate build under a green full suite is refused because rerunning
+the build can still promote the source. Main CI recovery reruns a first-attempt
+failure once, so only a failure that survives that retry is persistent. The full-suite job list lives in
+`scripts/lib/full_suite_jobs.sh`, shared with the promotion gate.
+
+The planner also requires exact source identity, main ancestry and the merged
+release PR. Release-attempt refs other than the merged PR's must belong to a
+release PR that closed unmerged. It proves that the version has no tag or
+release and that neither publication workflow is active, with known positive
+reads on those paths. The opener repeats those checks after preparation before
+opening its normal development-version PR. Follow that PR to main, then use the
 release opener for the next version. This retires an unpublished identity; it
-does not publish files from a failed candidate.
+does not publish files from the candidate.
 
 ## Follow certification and publication
 
@@ -101,7 +143,15 @@ Record the release pull request and the exact commit that lands on main.
 Follow the runs for that commit in
 [Harn Actions](https://github.com/burin-labs/harn/actions).
 
-1. `build-release-binaries.yml` builds the candidate on the version commit's
+1. `build-release-binaries.yml` first requires successful full-suite main CI
+   at the exact candidate source, using promotion's job list in
+   `scripts/lib/full_suite_jobs.sh`. It waits up to 85 minutes for a running
+   suite and refuses missing or failed proof before building, signing, or
+   dispatching the consumer rehearsal. The gate emits
+   `harn.release.full_suite.v1` JSON with the stage, source SHA, verdict,
+   pending and failing job names, and next action. Native qualification starts
+   after this admission and runs beside the artifact builds; publication still
+   requires it. The workflow then builds the candidate on the version commit's
    push to main. The release's merge group builds nothing; its
    `Release candidate verdict` passes only after the exact-source consumer
    rehearsal passes at the commit that lands. A merge group can't build the
@@ -137,7 +187,13 @@ Follow the runs for that commit in
 Before promotion, the candidate's exact source needs a successful
 `macos-nightly.yml` run through `workflow_dispatch`. The candidate run starts
 it: `scripts/ci/dispatch_native_qualification.sh` dispatches the main revision of
-the workflow with the candidate's `source_sha`. Before executing candidate code,
+the workflow with the candidate's `source_sha`. The producer waits up to
+85 minutes for the native proof beside the archive builds. Failed, missing,
+or unreadable proof blocks the consumer rehearsal and candidate verdict,
+instead of waiting until promotion. The run preserves
+`harn.release.native_qualification.v1` JSON with the source SHA, verdict,
+pending and failing job names, and next action.
+Before executing candidate code,
 the trusted workflow verifies that this source is a main ancestor and measures
 both allowed execution and a refused write through process confinement on the
 owned Mac. Scheduled source candidates don't start it. Arbitrary branch sources
@@ -198,7 +254,10 @@ it after the release publishes.
 - Opener failed before publication: fix the cause and dispatch
   `bump-release.yml` again. Its admission checks run again.
 - Candidate failed because of infrastructure: rerun the failed jobs in that
-  exact candidate run. A source defect needs a corrected pull request and
+  exact candidate run. Successful matrix legs stay complete. Candidate AOT
+  payloads, license notices, and archives remain available for 30 days so a
+  later retry can restore successful handoffs. Compiler caches are an
+  acceleration aid and may be evicted independently. A source defect needs a corrected pull request and
   certification of the resulting commit. For an unpublished stable version,
   keep that version, build a signed source candidate on corrected main with
   `source_candidate=true`, then use manual promotion recovery. Recovery proves
@@ -209,12 +268,13 @@ it after the release publishes.
 - Candidate succeeded but no main-push event started promotion: dispatch the
   existing promoter on main with that certified candidate's run ID and source:
   `gh workflow run promote-release.yml --repo burin-labs/harn --ref main -f candidate_run_id=RUN_ID -f candidate_sha=FULL_SHA`.
-  It refuses an unsuccessful or foreign producer and a source not contained
-  in main, then applies the normal version, manifest, digest and attestation
+  Ordinary recovery refuses an unsuccessful or foreign producer and a source
+  not contained in main, then applies the normal version, manifest, digest and attestation
   checks. If the producer never ran a consumer rehearsal, recovery runs the
   existing rehearsal workflow at that exact source and requires its measured
   pass before publication. Missing, failed, cancelled or mismatched results
-  refuse publication. A producer's existing failed rehearsal is not replaced.
+  refuse publication. Without an explicit repair, a producer's existing failed
+  rehearsal is not replaced.
   Recovery publishes the existing files without rebuilding them.
   When the consumer needs a prepared repair before it can land against the
   published tag, add `-f consumer_pull_request=PR_NUMBER`. Recovery selects
@@ -222,6 +282,13 @@ it after the release publishes.
   existing pairing checks; a fork, closed pull, malformed number, or conflicting
   source pairing refuses. Consumer observation and publication checks still
   run. This selection cannot reuse an earlier default-branch rehearsal.
+  An explicit repair can recover a waiting or failed consumer stage when every
+  original build, smoke, audit and required archive handoff succeeded. Recovery
+  checks exact-source full-suite CI and native qualification before dispatching
+  the new rehearsal. Its custody and terminal receipts bind the original
+  manifest artifact ID and digest, and publication reauthenticates that same
+  evidence and current repair head. Missing, expired or failed archive proof
+  refuses. The original candidate run stays unchanged.
 - The consumer observer reached its deadline, but its exact dispatched child
   later succeeded: after the completed-child recovery policy is on main,
   dispatch the normal promoter with the same producer and source plus
@@ -230,8 +297,8 @@ it after the release publishes.
   the child's complete successful census and product receipts, then rechecks
   both latest attempts. Only the observer deadline and its derived final
   verdict may have failed. Cancelled, failed, partial, replaced or mismatched
-  children refuse. The shared publisher authenticates the attempt-bound
-  authorization artifact before applying all normal archive and publication
+  children refuse. The shared publisher authenticates the original observer
+  context, deadline and reached product before applying all normal archive and publication
   checks. The original deadline remains unmeasured; no result is rewritten
   and no equal-tree source substitution is accepted.
 - Crate publication failed after the tag exists: rerun the failed jobs in the

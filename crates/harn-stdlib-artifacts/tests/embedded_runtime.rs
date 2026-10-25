@@ -7,7 +7,7 @@ fn embedded_agent_modules_load_under_the_native_runtime_without_compiling() {
     let cache = tempfile::tempdir().expect("private cold cache");
     std::env::set_var("HARN_CACHE_DIR", cache.path());
     assert!(harn_vm::bytecode_cache::cache_enabled());
-    harn_vm::stdlib::force_link();
+    harn_runtime::force_link();
     harn_stdlib::install().expect("install the shipped source catalog");
     assert!(!harn_stdlib_artifacts::ARTIFACTS.is_empty());
     harn_stdlib_artifacts::register().expect("register the build-script artifacts");
@@ -19,7 +19,7 @@ fn embedded_agent_modules_load_under_the_native_runtime_without_compiling() {
             .expect("native runtime")
             .block_on(async {
                 let mut vm = harn_vm::new_vm();
-                harn_vm::stdlib::register_vm_stdlib(&mut vm);
+                harn_runtime::register_vm_stdlib(&mut vm);
                 let recorder = vm.enable_module_phase_timing();
                 vm.load_module_exports_from_source(
                     PathBuf::from("<test>/embedded-agent.harn"),

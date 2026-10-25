@@ -323,3 +323,32 @@ fn tool_facts_read_across_the_envelope_and_the_provider_message() {
     assert_eq!(call.declared_tool_name(), None);
     assert_eq!(call.provider_tool_call("c").unwrap()["name"], "add");
 }
+
+#[test]
+fn only_conversation_rows_are_history_positions() {
+    let message = serde_json::json!({"role": "user", "content": "hi"});
+    let position =
+        |event: Value, raw: Option<Value>| TranscriptRecord::new(event, raw).is_history_position();
+    assert!(position(
+        serde_json::json!({"kind": "message", "role": "user"}),
+        Some(message)
+    ));
+    assert!(position(serde_json::json!({"kind": "tool_call"}), None));
+    assert!(position(serde_json::json!({"kind": "tool_result"}), None));
+    assert!(position(
+        serde_json::json!({"kind": "assistant_publication"}),
+        None
+    ));
+    for kind in [
+        "agent_goal",
+        "agent_run_started",
+        "agent_run_terminal",
+        "llm_call",
+    ] {
+        assert!(
+            !position(serde_json::json!({"kind": kind}), None),
+            "{kind} is bookkeeping, not a fork target"
+        );
+    }
+    assert!(!position(serde_json::json!({"role": "system"}), None));
+}

@@ -219,7 +219,7 @@ fn build_expected(
 
     let mut scripts = Vec::new();
     let mut artifacts = BTreeMap::new();
-    for script in harn_stdlib::STDLIB_CLI_SCRIPTS {
+    for script in harn_stdlib::CATALOG.cli_scripts {
         let source_path = format!("../harn-stdlib/src/stdlib/cli/{}.harn", script.name);
         let source_disk_path = contract.manifest_dir.join(&source_path);
         let source = fs::read_to_string(&source_disk_path)
@@ -288,7 +288,7 @@ fn build_expected(
 }
 
 fn compile_cli_source(source_path: &Path, source: &str) -> Result<harn_vm::Chunk, String> {
-    harn_vm::stdlib::force_link();
+    harn_runtime::force_link();
     harn_parser::install_builtin_manifest(harn_vm::stdlib::all_builtin_manifest());
     let program = harn_parser::parse_source(source).map_err(|error| error.to_string())?;
     let graph = harn_modules::build_with_standalone_source(source_path, source);

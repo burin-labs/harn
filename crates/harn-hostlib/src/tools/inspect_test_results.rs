@@ -266,37 +266,22 @@ fn record_to_map(record: test_parsers::TestRecord) -> harn_vm::value::DictMap {
     let mut map = harn_vm::value::DictMap::new();
     map.put_str("name", record.name);
     map.put_str("status", record.status.as_str());
-    map.insert(
-        harn_vm::value::intern_key("duration_ms"),
-        VmValue::Int(record.duration_ms as i64),
-    );
+    map.put_int("duration_ms", record.duration_ms as i64);
     map.insert(
         harn_vm::value::intern_key("message"),
-        record
-            .message
-            .map(|m| VmValue::String(arcstr::ArcStr::from(m)))
-            .unwrap_or(VmValue::Nil),
+        record.message.map(VmValue::string).unwrap_or(VmValue::Nil),
     );
     map.insert(
         harn_vm::value::intern_key("stdout"),
-        record
-            .stdout
-            .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
-            .unwrap_or(VmValue::Nil),
+        record.stdout.map(VmValue::string).unwrap_or(VmValue::Nil),
     );
     map.insert(
         harn_vm::value::intern_key("stderr"),
-        record
-            .stderr
-            .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
-            .unwrap_or(VmValue::Nil),
+        record.stderr.map(VmValue::string).unwrap_or(VmValue::Nil),
     );
     map.insert(
         harn_vm::value::intern_key("path"),
-        record
-            .path
-            .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
-            .unwrap_or(VmValue::Nil),
+        record.path.map(VmValue::string).unwrap_or(VmValue::Nil),
     );
     map.insert(
         harn_vm::value::intern_key("line"),

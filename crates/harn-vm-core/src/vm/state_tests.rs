@@ -9,10 +9,7 @@ use super::*;
 fn baseline_with_stdlib(source: &str) -> VmBaseline {
     let mut vm = super::super::test_runtime::new_vm();
     vm.set_source_info("baseline_test.harn", source);
-    vm.set_global(
-        "stable_global",
-        VmValue::String(arcstr::ArcStr::from("baseline")),
-    );
+    vm.set_global("stable_global", VmValue::string("baseline"));
     vm.baseline()
 }
 

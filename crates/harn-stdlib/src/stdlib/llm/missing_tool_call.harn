@@ -1,4 +1,8 @@
-import { AgentLoopCancelledFailure } from "std/agent/failure_types"
+import {
+  AgentLoopCancelledFailure,
+  AgentLoopClassifierConfigDetails,
+  AgentLoopClassifierConfigFailure,
+} from "std/agent/failure_types"
 pub import { MissingToolCallClassifier, MissingToolCallVerdict } from "std/agent/options_types"
 import { MissingToolCallRecoveryOptions } from "std/agent/options_types"
 import { EvaluationOutcome, EvaluationPolicy, boolean, choice } from "std/predicate"
@@ -90,7 +94,11 @@ fn __missing_tool_call_float(value: float?, fallback: float) {
   return parsed
 }
 
-fn __missing_tool_call_config_error(code: string, message: string, fields: dict? = {}) {
+fn __missing_tool_call_config_error(
+  code: string,
+  message: string,
+  fields: AgentLoopClassifierConfigDetails? = {},
+) -> AgentLoopClassifierConfigFailure {
   return {
     error: code,
     category: "invalid_config",

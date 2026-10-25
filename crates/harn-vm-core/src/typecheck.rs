@@ -459,7 +459,7 @@ mod tests {
     }
 
     fn vm_string(s: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(s))
+        VmValue::string(s)
     }
 
     fn vm_dict(entries: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
@@ -540,8 +540,8 @@ mod tests {
     #[test]
     fn list_validates_elements() {
         let list_int = TypeExpr::List(Box::new(ty_int()));
-        let good = VmValue::List(std::sync::Arc::new(vec![vm_int(1), vm_int(2)]));
-        let bad = VmValue::List(std::sync::Arc::new(vec![vm_int(1), vm_string("x")]));
+        let good = VmValue::list(vec![vm_int(1), vm_int(2)]);
+        let bad = VmValue::list(vec![vm_int(1), vm_string("x")]);
         assert!(matches_type(&good, &list_int));
         assert!(!matches_type(&bad, &list_int));
     }
@@ -549,9 +549,9 @@ mod tests {
     #[test]
     fn tuple_validates_arity_and_each_position() {
         let tuple = TypeExpr::Tuple(vec![ty_int(), ty_string()]);
-        let good = VmValue::List(std::sync::Arc::new(vec![vm_int(1), vm_string("x")]));
-        let wrong_position = VmValue::List(std::sync::Arc::new(vec![vm_string("x"), vm_int(1)]));
-        let wrong_arity = VmValue::List(std::sync::Arc::new(vec![vm_int(1)]));
+        let good = VmValue::list(vec![vm_int(1), vm_string("x")]);
+        let wrong_position = VmValue::list(vec![vm_string("x"), vm_int(1)]);
+        let wrong_arity = VmValue::list(vec![vm_int(1)]);
         assert!(matches_type(&good, &tuple));
         assert!(!matches_type(&wrong_position, &tuple));
         assert!(!matches_type(&wrong_arity, &tuple));
@@ -634,10 +634,7 @@ mod tests {
 
     #[test]
     fn validate_user_call_uses_cached_runtime_guard_metadata() {
-        let string_schema = VmValue::dict(std::collections::BTreeMap::from([(
-            "type".to_string(),
-            VmValue::String(arcstr::ArcStr::from("string")),
-        )]));
+        let string_schema = VmValue::dict([("type", VmValue::string("string"))]);
         let guard = RuntimeParamGuard::CanonicalSchema(
             crate::schema::canonical_param_schema(&string_schema).unwrap(),
         );

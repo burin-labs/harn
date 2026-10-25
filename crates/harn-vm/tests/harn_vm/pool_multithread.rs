@@ -12,7 +12,7 @@ fn run_with_worker_placement(source: &str) -> Result<Vec<String>, String> {
         harn_vm::subtask::SubtaskPlacement::Worker,
         async {
             let mut vm = harn_vm::new_vm();
-            harn_vm::register_vm_stdlib(&mut vm);
+            harn_runtime::register_vm_stdlib(&mut vm);
             vm.execute(&chunk)
                 .await
                 .map_err(|error: VmError| format!("{error:?}"))?;

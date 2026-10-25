@@ -100,7 +100,7 @@ setup-wasm:
 	fi
 
 setup-wasm-tools:
-	@if [ ! -x "$(HARN_WASM_TOOLS)" ] || [ "$$($(HARN_WASM_TOOLS) --version)" != "wasm-tools $(HARN_WASM_TOOLS_VERSION)" ]; then \
+	@if [ ! -x "$(HARN_WASM_TOOLS)" ] || [ "$$($(HARN_WASM_TOOLS) --version | awk '{print $$1, $$2}')" != "wasm-tools $(HARN_WASM_TOOLS_VERSION)" ]; then \
 		cargo install --locked --root "$(HARN_WASM_COMPONENT_TOOLS_DIR)" --version "=$(HARN_WASM_TOOLS_VERSION)" wasm-tools; \
 	fi
 
@@ -144,7 +144,12 @@ wasm-audit-imports: wasm-build
 
 # Browser tests are intentionally a real dedicated-worker path, not Node.
 wasm-test-browser: setup-wasm
-	@driver="$${HARN_CHROMEDRIVER:-$$(./scripts/resolve_chromedriver.sh)}"; \
+	@set -eu; driver="$${HARN_CHROMEDRIVER:-$$(./scripts/resolve_chromedriver.sh)}"; \
+	if [ -z "$${WASM_BINDGEN_TEST_WEBDRIVER_JSON:-}" ] && [ -n "$${HARN_CHROME_BIN:-}" ]; then \
+		capabilities="$$(mktemp)"; trap 'rm -f "$$capabilities"' EXIT; \
+		node -e 'process.stdout.write(JSON.stringify({"goog:chromeOptions": {binary: process.env.HARN_CHROME_BIN}}))' > "$$capabilities"; \
+		export WASM_BINDGEN_TEST_WEBDRIVER_JSON="$$capabilities"; \
+	fi; \
 	cd crates/harn-wasm && "$(HARN_WASM_PACK)" test --headless --chrome --chromedriver "$$driver"
 
 wasm-check: check-wasm-wit wasm-build check-app-runtime wasm-audit-imports wasm-test-browser
@@ -325,17 +330,19 @@ test-focused:
 
 # Live database tests are ignored by the ordinary suite, never counted as a
 # passing test that returned before opening a connection.
+HARN_POSTGRES_TEST_ARGS = --package harn-builtins --features postgres --lib --ignore-default-filter
+
 test-postgres-live:
 	@ : "$${HARN_TEST_POSTGRES_URL:?set HARN_TEST_POSTGRES_URL to an isolated test database}"
 	$(HARN_REQUIRE_NEXTEST)
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --package harn-vm --lib --run-ignored all --ignore-default-filter -E 'test(stdlib::postgres::) and not test(when_env_set) and not test(when_bench_enabled)'
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run $(HARN_POSTGRES_TEST_ARGS) --run-ignored all -E 'test(postgres::) and not test(when_env_set) and not test(when_bench_enabled)'
 
 test-postgres-cloud:
 	@ : "$${HARN_TEST_POSTGRES_URL:?set HARN_TEST_POSTGRES_URL to an isolated test database}"
 	@ : "$${HARN_TEST_CLOUD_MIGRATIONS_DIR:?set HARN_TEST_CLOUD_MIGRATIONS_DIR to the cloud migrations directory}"
 	@test -d "$${HARN_TEST_CLOUD_MIGRATIONS_DIR}"
 	$(HARN_REQUIRE_NEXTEST)
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --package harn-vm --lib --test-threads 1 --run-ignored only --ignore-default-filter -E 'test(stdlib::postgres::tests::) and test(when_env_set)'
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run $(HARN_POSTGRES_TEST_ARGS) --test-threads 1 --run-ignored only -E 'test(postgres::tests::) and test(when_env_set)'
 
 # Run exactly one Rust test without making nextest enumerate every test binary
 # in the package first. The environment-variable boundary keeps the
@@ -666,7 +673,7 @@ test-harn-scripts:
 	@echo "=== Running Harn script test suite ==="
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify personas/smart_ship --strict --json
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify scripts/package-release --strict --json
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ --parallel
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ scripts/github-actions-contracts/contract_test.harn --parallel
 # The denial arm of path_visibility cannot live in the suite above: `harn test`
 # runs without the worktree filesystem sandbox, so nothing is refusable in-process
 # and the arm would pass by measuring nothing. It runs here rather than in
@@ -728,6 +735,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/main_health_test.sh
 	./scripts/tests/main_health_carry_test.sh
 	./scripts/tests/green_checkpoint_test.sh
+	./scripts/tests/approve_release_pr_test.sh
 	./scripts/tests/check_public_product_names_test.sh
 	./scripts/tests/check_pr_metadata_privacy_test.sh
 	./scripts/tests/check_issue_comment_privacy_test.sh
@@ -746,6 +754,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/breaking_surface_check_test.sh
 	bash ./scripts/tests/pr_gate_range_test.sh
 	./scripts/tests/public_api_baseline_test.sh
+	bash ./scripts/tests/public_api_rustdoc_test.sh
 	./scripts/tests/release_pr_drift_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_ship_root_harn_bin_test.sh
@@ -781,8 +790,8 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/pre_push_signature_census_test.sh
 	./scripts/tests/ci_rust_test_lane_test.sh
 	bash ./scripts/tests/rust_test_duration_budget_test.sh
-	./scripts/tests/thread_parity_receipt_test.sh
 	./scripts/tests/macos_nightly_test_env_test.sh
+	./scripts/tests/bound_persistent_target_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
 	./scripts/tests/sccache_action_cache_size_test.sh
 	./scripts/tests/check_release_warm_build_budget_test.sh
@@ -825,6 +834,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/prune_stale_targets_test.sh
 	./scripts/tests/prune_stale_targets_retention_test.sh
 	./scripts/tests/prune_stale_targets_host_policy_test.sh
+	bash ./scripts/tests/prune_stale_targets_pressure_test.sh
 	./scripts/tests/target_gc_maintenance_test.sh
 	./scripts/tests/report_ci_cache_budget_test.sh
 	./scripts/tests/cache_refresh_admission_test.sh
@@ -832,7 +842,6 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	node scripts/tests/cache_generation_retirement_test.cjs
 	node scripts/tests/workspace_warm_phase_test.cjs
 	node --test scripts/tests/workspace_artifact_retention_test.cjs
-	node --test scripts/tests/workspace_build_evidence_test.cjs
 	./scripts/tests/loadgen_postgres_gate_test.sh
 	./scripts/tests/test_focused_test.sh
 	./scripts/tests/test_one_test.sh
@@ -999,10 +1008,12 @@ check-builtin-methods:
 
 gen-protocol-artifacts:
 	$(HARN_CLI_CMD) dump-protocol-artifacts
+	cp spec/protocol-artifacts/manifest.json crates/harn-cli/data/protocol-manifest.json
 
 check-protocol-artifacts:
 	@echo "=== Checking Harn protocol artifacts are up to date ==="
 	@$(HARN_CLI_CMD) dump-protocol-artifacts --check
+	@cmp spec/protocol-artifacts/manifest.json crates/harn-cli/data/protocol-manifest.json
 	@echo "    Harn protocol artifacts OK."
 
 gen-connector-schemas:
@@ -1062,7 +1073,7 @@ check-swift-protocol-binding:
 		tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/harn-swift-binding.XXXXXX"); \
 		trap 'rm -rf "$$tmp"' EXIT; \
 		xcrun swiftc -parse-as-library spec/protocol-artifacts/HarnProtocol.swift scripts/tests/protocol_binding_session_recap.swift -o "$$tmp/probe"; \
-		"$$tmp/probe" spec/protocol-artifacts/fixtures/round_trip.json crates/harn-serve/tests/fixtures/acp/session_update_extensions.json; \
+		"$$tmp/probe" spec/protocol-artifacts/fixtures/round_trip.json crates/harn-serve/tests/fixtures/acp/session_update_extensions.json conformance/protocols/schemas/acp-session-update.schema.json; \
 		xcrun swiftc -emit-module -emit-library -module-name HarnViewProjection spec/protocol-artifacts/HarnProtocol.swift spec/protocol-artifacts/HarnRunSessionView.swift -emit-module-path "$$tmp/HarnViewProjection.swiftmodule" -o "$$tmp/libHarnViewProjection.dylib"; \
 		xcrun swiftc -parse-as-library -I "$$tmp" -L "$$tmp" -lHarnViewProjection -Xlinker -rpath -Xlinker "$$tmp" scripts/tests/run_session_view_binding.swift -o "$$tmp/view-probe"; \
 		"$$tmp/view-probe" spec/run-view-fixtures/cases/*/expected/runs/*.json spec/run-view-fixtures/cases/*/expected/session_view.json
@@ -1119,31 +1130,23 @@ check-trigger-quickref:
 	@echo "    Harn trigger quickref OK."
 
 # Regenerate the provider/model capability matrix from capabilities.toml.
-gen-provider-matrix:
-	@$(HARN_BIN_ASSIGN) && \
-	"$$harn_bin" provider catalog generate && \
-	"$$harn_bin" provider catalog matrix
+gen-provider-matrix: gen-provider-catalog
+	$(HARN_CMD) provider catalog matrix
 
 # CI guard: fail if the provider matrix docs drift from capabilities.toml.
-check-provider-matrix:
+check-provider-matrix: check-provider-catalog
 	@echo "=== Checking docs/src/provider-matrix.md is up to date ==="
-	@$(HARN_BIN_ASSIGN) && \
-	"$$harn_bin" provider catalog generate --check && \
-	"$$harn_bin" provider catalog matrix --check
+	@$(HARN_CMD) provider catalog matrix --check
 	@echo "    Harn provider matrix OK."
 
 # Regenerate provider support recommendations from catalog/capabilities/notes.
-gen-provider-support:
-	@$(HARN_BIN_ASSIGN) && \
-	"$$harn_bin" provider catalog generate && \
-	"$$harn_bin" provider catalog support
+gen-provider-support: gen-provider-catalog
+	$(HARN_CMD) provider catalog support
 
 # CI guard: fail if provider support markdown or JSON drift.
-check-provider-support:
+check-provider-support: check-provider-catalog
 	@echo "=== Checking provider support artifacts are up to date ==="
-	@$(HARN_BIN_ASSIGN) && \
-	"$$harn_bin" provider catalog generate --check && \
-	"$$harn_bin" provider catalog support --check
+	@$(HARN_CMD) provider catalog support --check
 	@echo "    Harn provider support OK."
 
 # Regenerate the checked-in provider/model catalog JSON, schema, and downstream bindings.
@@ -1724,6 +1727,7 @@ check-rust-test-lane-policy:
 	@bash scripts/tests/host_telemetry_test.sh
 	@bash scripts/tests/runner_capacity_test.sh
 	@bash scripts/tests/consumer_canary_test.sh
+	@bash scripts/tests/consumer_verdict_test.sh
 
 check-cargo-lock-contract:
 	@echo "=== Checking CI cargo lock contract ==="

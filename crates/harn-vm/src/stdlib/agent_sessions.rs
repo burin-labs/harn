@@ -22,12 +22,8 @@ pub(super) mod goal;
 
 /// Sessions raise catchable errors (callers may `try`/`recover`).
 const ERR_KIND: ErrorKind = ErrorKind::Thrown;
-use crate::vm::Vm;
 
-pub fn register_agent_session_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-    goal::register(vm);
-}
+harn_vm_core::stdlib_module_installer!(Host, pub fn register_agent_session_builtins);
 
 fn err(msg: impl Into<String>) -> VmError {
     ERR_KIND.err(msg.into())
@@ -153,7 +149,7 @@ fn reject_unknown_opts(
     Ok(())
 }
 
-fn opt_bool(
+pub fn opt_bool(
     opts: &crate::value::DictMap,
     fn_name: &str,
     arg_name: &str,
@@ -376,7 +372,7 @@ fn agent_session_add_root_builtin(args: &[VmValue], _out: &mut String) -> Result
         .map_err(|message| err(format!("agent_session_add_root: {message}")))?;
     let reason = opt_string(&opts, "agent_session_add_root", "reason")?;
     Ok(
-        match agent_sessions::add_workspace_root(&id, &root, mount_mode, reason) {
+        match crate::stdlib::add_workspace_root(&id, &root, mount_mode, reason, None) {
             Ok(mounted_at) => ok_result(&[("mounted_at", serde_json::Value::String(mounted_at))]),
             Err(message) => seed_result_error(message),
         },

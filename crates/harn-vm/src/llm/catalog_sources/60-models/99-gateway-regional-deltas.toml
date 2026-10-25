@@ -10,14 +10,12 @@
 
 # Inception Labs Mercury routes.
 [models."mercury-2"]
-name = "Mercury 2"
 provider = "inception"
-context_window = 128000
 capabilities = ["tools", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.25, output_per_mtok = 0.75 }
 tier = "mid"
-open_weight = false
 strengths = ["speed", "reasoning", "tool_use", "agentic"]
+models_dev = {provider = "inception", model = "mercury-2", fields = ["name", "context_window", "open_weight"]}
 
 [models."mercury-coder-small"]
 name = "Mercury Coder Small"
@@ -37,24 +35,20 @@ strengths = ["speed", "coding", "tool_use"]
 # below now record as `input_token_bands`; that band was missing from the 4.5
 # row and understated the cost of its long prompts by 2x.
 [models."grok-4.5"]
-name = "Grok 4.5"
 provider = "xai"
-context_window = 500000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.30, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 rate_limits = { source_url = "https://docs.x.ai/developers/models", last_verified = "2026-07-09" }
 tier = "frontier"
-open_weight = false
 strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "xai", model = "grok-4.5", fields = ["name", "context_window", "open_weight"]}
 
 [models."x-ai/grok-4.5"]
 name = "Grok 4.5 (via OpenRouter)"
 provider = "openrouter"
-context_window = 500000
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.30, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 tier = "frontier"
-open_weight = false
 strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
 
 # Grok 4.6, xAI's release of 2026-08-06 (`created` on the /v1/models record).
@@ -66,27 +60,23 @@ strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_conte
 # xAI's /v1/language-models prices it identically to Grok 4.6 ($2 / $6, cached
 # $0.50); OpenRouter lists it at $1.60 / $4.80, cached $0.40. Same 500K
 # context and image input as Grok 4.6. The `grok-*` capability rules cover it.
+models_dev = {provider = "openrouter", model = "x-ai/grok-4.5", fields = ["context_window", "open_weight"]}
 [models."grok-4.7"]
-name = "Grok 4.7"
 provider = "xai"
-context_window = 500000
 released = "2026-09-01"
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 rate_limits = { source_url = "https://docs.x.ai/developers/models", last_verified = "2026-09-22" }
 tier = "frontier"
-open_weight = false
 strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "xai", model = "grok-4.7", fields = ["name", "context_window", "open_weight"]}
 
 [models."x-ai/grok-4.7"]
 name = "Grok 4.7 (via OpenRouter)"
 provider = "openrouter"
-context_window = 500000
-released = "2026-09-21"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.0, output_per_mtok = 6.0, cache_read_per_mtok = 0.5, input_token_bands = [{ minimum_input_tokens = 200000, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 tier = "frontier"
-open_weight = false
 strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
 
 # Grok 4.20 (0309 snapshots), still current on xAI's model index with no
@@ -103,77 +93,66 @@ strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_conte
 #     and 9,247 reasoning tokens; xAI documents effort as the agent count), but
 #     OpenRouter found no endpoint that accepts tools, so the row claims none
 #     despite xAI's page listing function calling.
+models_dev = {provider = "openrouter", model = "x-ai/grok-4.7", fields = ["context_window", "open_weight", "released"]}
 [models."grok-4.20-0309-reasoning"]
 name = "Grok 4.20 Reasoning"
 provider = "xai"
-context_window = 1000000
-released = "2026-03-09"
 api_dialect = "openai_chat_compat"
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.25, output_per_mtok = 2.50, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 rate_limits = { source_url = "https://docs.x.ai/docs/models/grok-4.20-0309-reasoning", last_verified = "2026-10-09" }
 tier = "frontier"
-open_weight = false
 strengths = ["agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "xai", model = "grok-4.20-0309-reasoning", fields = ["context_window", "open_weight", "released"]}
 
 [models."grok-4.20-0309-non-reasoning"]
 name = "Grok 4.20 Non-Reasoning"
 provider = "xai"
-context_window = 1000000
-released = "2026-03-09"
 api_dialect = "openai_chat_compat"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 1.25, output_per_mtok = 2.50, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 rate_limits = { source_url = "https://docs.x.ai/docs/models/grok-4.20-0309-non-reasoning", last_verified = "2026-10-09" }
 tier = "mid"
-open_weight = false
 strengths = ["speed", "tool_use", "vision", "long_context"]
+models_dev = {provider = "xai", model = "grok-4.20-0309-non-reasoning", fields = ["context_window", "open_weight", "released"]}
 
 [models."grok-4.20-multi-agent-0309"]
-name = "Grok 4.20 Multi-Agent"
 provider = "xai"
-context_window = 1000000
-released = "2026-03-09"
 api_dialect = "openai_chat_compat"
 capabilities = ["vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.25, output_per_mtok = 2.50, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 rate_limits = { source_url = "https://docs.x.ai/docs/models/grok-4.20-multi-agent-0309", last_verified = "2026-10-09" }
 tier = "frontier"
-open_weight = false
 strengths = ["reasoning", "vision", "long_context"]
+models_dev = {provider = "xai", model = "grok-4.20-multi-agent-0309", fields = ["name", "context_window", "open_weight", "released"]}
 
 [models."grok-4.6"]
-name = "Grok 4.6"
 provider = "xai"
-context_window = 500000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 rate_limits = { source_url = "https://docs.x.ai/developers/models", last_verified = "2026-09-20" }
 superseded_by = "grok-4.7"
 tier = "frontier"
-open_weight = false
 strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "xai", model = "grok-4.6", fields = ["name", "context_window", "open_weight"]}
 
 [models."x-ai/grok-4.6"]
 name = "Grok 4.6 (via OpenRouter)"
 provider = "openrouter"
-context_window = 500000
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 superseded_by = "x-ai/grok-4.7"
 tier = "frontier"
-open_weight = false
 strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "x-ai/grok-4.6", fields = ["context_window", "open_weight"]}
 
 [models."openai/gpt-5.5"]
 name = "GPT-5.5 (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6.1-sol"
 tier = "frontier"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
 
 # GPT-5.6 gateway routes. OpenRouter exposes standard and provider-managed Pro
@@ -183,62 +162,54 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_conte
 # GPT-6 on OpenRouter (listed 2026-09-04 for Astra, 2026-09-22 for Sol and
 # Luna) at OpenAI's list prices. The `-pro` slugs are OpenRouter's packaging
 # of the pro reasoning mode on the same model, so they share the logical model.
+models_dev = {provider = "openrouter", model = "openai/gpt-5.5", fields = ["context_window", "open_weight"]}
 [models."openai/gpt-6-astra"]
 name = "GPT-6 Astra (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-6-astra"
 equivalence_group = "gpt-6-astra"
 served_variant = "openrouter"
-released = "2026-09-04"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-6-astra", fields = ["context_window", "open_weight", "released"]}
 
 [models."openai/gpt-6-astra-pro"]
 name = "GPT-6 Astra Pro (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-6-astra"
 equivalence_group = "gpt-6-astra"
 served_variant = "openrouter_pro"
-released = "2026-09-04"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-6-astra-pro", fields = ["context_window", "open_weight", "released"]}
 
 [models."openai/gpt-6-sol"]
 name = "GPT-6 Sol (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-6-sol"
 equivalence_group = "gpt-6-sol"
 served_variant = "openrouter"
-released = "2026-09-22"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6.1-sol"
 tier = "mid"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-6-sol", fields = ["context_window", "open_weight", "released"]}
 
 [models."openai/gpt-6-sol-pro"]
 name = "GPT-6 Sol Pro (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-6-sol"
 equivalence_group = "gpt-6-sol"
 served_variant = "openrouter_pro"
-released = "2026-09-22"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6.1-sol-pro"
 tier = "mid"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
 
 # GPT-6.1 Sol on OpenRouter, listed 2026-09-29 at OpenAI's list price (live
@@ -249,66 +220,58 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_conte
 # is a 400 ("Reasoning is mandatory"), as on the direct route. The index read
 # 2026-10-01 adds a 272K-token override at 2x input and cache and 1.5x
 # output, the same long-prompt band as the direct row, on both slugs.
+models_dev = {provider = "openrouter", model = "openai/gpt-6-sol-pro", fields = ["context_window", "open_weight", "released"]}
 [models."openai/gpt-6.1-sol"]
 name = "GPT-6.1 Sol (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-6.1-sol"
 equivalence_group = "gpt-6.1-sol"
 served_variant = "openrouter"
-released = "2026-09-29"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "mid"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-6.1-sol", fields = ["context_window", "open_weight", "released"]}
 
 [models."openai/gpt-6.1-sol-pro"]
 name = "GPT-6.1 Sol Pro (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-6.1-sol"
 equivalence_group = "gpt-6.1-sol"
 served_variant = "openrouter_pro"
-released = "2026-09-29"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "mid"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-6.1-sol-pro", fields = ["context_window", "open_weight", "released"]}
 
 [models."openai/gpt-6-luna"]
 name = "GPT-6 Luna (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-6-luna"
 equivalence_group = "gpt-6-luna"
 served_variant = "openrouter"
-released = "2026-09-22"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "small"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-6-luna", fields = ["context_window", "open_weight", "released"]}
 
 [models."openai/gpt-6-luna-pro"]
 name = "GPT-6 Luna Pro (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-6-luna"
 equivalence_group = "gpt-6-luna"
 served_variant = "openrouter_pro"
-released = "2026-09-22"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "small"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-6-luna-pro", fields = ["context_window", "open_weight", "released"]}
 
 [models."openai/gpt-5.6-sol"]
 name = "GPT-5.6 Sol (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-5.6-sol"
 equivalence_group = "gpt-5.6-sol"
 served_variant = "openrouter"
@@ -316,13 +279,12 @@ capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_cac
 pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, promotions = [{ id = "openrouter-sol-2026-08", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }], input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6-sol"
 tier = "frontier"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-5.6-sol", fields = ["context_window", "open_weight"]}
 
 [models."openai/gpt-5.6-sol-pro"]
 name = "GPT-5.6 Sol Pro (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-5.6-sol"
 equivalence_group = "gpt-5.6-sol"
 served_variant = "openrouter_pro"
@@ -334,13 +296,12 @@ capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_cac
 pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, promotions = [{ id = "openrouter-sol-pro-2026-08", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://openrouter.ai/api/v1/models/openai/gpt-5.6-sol-pro/endpoints", input_per_mtok = 2.0, output_per_mtok = 10.0, cache_read_per_mtok = 0.2, cache_write_per_mtok = 2.5 }], input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6-sol-pro"
 tier = "frontier"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-5.6-sol-pro", fields = ["context_window", "open_weight"]}
 
 [models."openai/gpt-5.6-terra"]
 name = "GPT-5.6 Terra (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-5.6-terra"
 equivalence_group = "gpt-5.6-terra"
 served_variant = "openrouter"
@@ -348,13 +309,12 @@ capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_cac
 pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6-sol"
 tier = "mid"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-5.6-terra", fields = ["context_window", "open_weight"]}
 
 [models."openai/gpt-5.6-terra-pro"]
 name = "GPT-5.6 Terra Pro (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-5.6-terra"
 equivalence_group = "gpt-5.6-terra"
 served_variant = "openrouter_pro"
@@ -362,13 +322,12 @@ capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_cac
 pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6-sol-pro"
 tier = "mid"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-5.6-terra-pro", fields = ["context_window", "open_weight"]}
 
 [models."openai/gpt-5.6-luna"]
 name = "GPT-5.6 Luna (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-5.6-luna"
 equivalence_group = "gpt-5.6-luna"
 served_variant = "openrouter"
@@ -376,13 +335,12 @@ capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_cac
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6-luna"
 tier = "small"
-open_weight = false
 strengths = ["speed", "cheap", "coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-5.6-luna", fields = ["context_window", "open_weight"]}
 
 [models."openai/gpt-5.6-luna-pro"]
 name = "GPT-5.6 Luna Pro (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 logical_model = "gpt-5.6-luna"
 equivalence_group = "gpt-5.6-luna"
 served_variant = "openrouter_pro"
@@ -390,47 +348,43 @@ capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_cac
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6-luna-pro"
 tier = "small"
-open_weight = false
 strengths = ["speed", "cheap", "coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-5.6-luna-pro", fields = ["context_window", "open_weight"]}
 
 [models."openai/gpt-5.5-pro"]
 name = "GPT-5.5 Pro (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-5.5-pro", fields = ["context_window", "open_weight"]}
 
 [models."openai/gpt-5.4-pro"]
 name = "GPT-5.4 Pro (via OpenRouter)"
 provider = "openrouter"
-context_window = 1050000
 capabilities = ["tools", "vision", "streaming", "thinking"]
 pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "openai/gpt-5.4-pro", fields = ["context_window", "open_weight"]}
 
 [models."openai/gpt-5.4-mini"]
 name = "GPT-5.4 Mini (via OpenRouter)"
 provider = "openrouter"
 operations = ["text_generation", "decision"]
-context_window = 400000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075 }
 tier = "mid"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "cheap"]
 
 # OpenRouter still listed this slug with a null `expiration_date` on
 # 2026-10-01; it follows OpenAI's shutdown of the underlying model.
+models_dev = {provider = "openrouter", model = "openai/gpt-5.4-mini", fields = ["context_window", "open_weight"]}
 [models."openai/gpt-5.4-nano"]
 name = "GPT-5.4 Nano (via OpenRouter)"
 provider = "openrouter"
 operations = ["text_generation", "decision"]
-context_window = 400000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
 deprecated = true
@@ -438,41 +392,36 @@ deprecation_note = "OpenAI shuts down gpt-5.4-nano 2027-04-01 (announced 2026-10
 sunset_date = "2027-04-01"
 superseded_by = "openai/gpt-6-luna"
 tier = "small"
-open_weight = false
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
 # Removed 2026-09-20: anthropic/claude-opus-4.8-fast. OpenRouter's index lists
 # anthropic/claude-opus-4.8 and its `:batch` variant but no `-fast` slug
 # (observed 2026-09-20). Fast mode stays catalogued as a `serving_tiers` entry
 # on the direct Anthropic Opus rows, which is where it is actually sold.
+models_dev = {provider = "openrouter", model = "openai/gpt-5.4-nano", fields = ["context_window", "open_weight"]}
 [models."openrouter/free"]
 name = "OpenRouter Free Router"
 provider = "openrouter"
-context_window = 200000
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.00, output_per_mtok = 0.00 }
 tier = "small"
-open_weight = false
 strengths = ["cheap", "router", "tool_use"]
 quality_tags = ["free_tier", "aggregate_router", "avoid_reviewer"]
+models_dev = {provider = "openrouter", model = "openrouter/free", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."cohere/north-mini-code:free"]
 name = "North Mini Code Free (via OpenRouter)"
 provider = "openrouter"
-context_window = 256000
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.00, output_per_mtok = 0.00 }
 tier = "mid"
 open_weight = false
 strengths = ["coding", "cheap", "tool_use", "long_context"]
 quality_tags = ["free_tier", "avoid_reviewer"]
+models_dev = {provider = "openrouter", model = "cohere/north-mini-code:free", fields = ["context_window", "pricing"]}
 
 [models."nvidia/nemotron-3-super-120b-a12b:free"]
 name = "Nemotron 3 Super 120B A12B Free (via OpenRouter)"
 provider = "openrouter"
-context_window = 262144
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.00, output_per_mtok = 0.00 }
 tier = "frontier"
 open_weight = false
 strengths = ["cheap", "tool_use", "reasoning", "long_context"]
@@ -483,6 +432,8 @@ quality_tags = ["free_tier", "avoid_reviewer"]
 # "0 endpoints out of 1 requested are available matching your guardrail
 # restrictions and data policy ... Free model training violation (account
 # settings)" (provider contract probe run 37030330916, re-checked 2026-10-02).
+models_dev = {provider = "openrouter", model = "nvidia/nemotron-3-super-120b-a12b:free", fields = ["context_window", "pricing"]}
+
 [models."nvidia/nemotron-3-super-120b-a12b:free".data_controls]
 training_default = "trains"
 checked_on = "2026-10-02"
@@ -492,22 +443,20 @@ note = "OpenRouter excludes this endpoint as a free-model training violation unl
 [models."bytedance-seed/seed-2.0-lite"]
 name = "Seed 2.0 Lite (via OpenRouter)"
 provider = "openrouter"
-context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.25, output_per_mtok = 2.00, input_token_bands = [{ minimum_input_tokens = 128000, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 tier = "mid"
-open_weight = false
 strengths = ["cheap", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "bytedance-seed/seed-2.0-lite", fields = ["context_window", "open_weight"]}
 
 [models."qwen/qwen3.5-plus-20260420"]
 name = "Qwen3.5 Plus 20260420 (via OpenRouter)"
 provider = "openrouter"
-context_window = 1000000
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.30, output_per_mtok = 1.80, cache_write_per_mtok = 0.375, input_token_bands = [{ minimum_input_tokens = 256000, input_multiplier = 1.25, output_multiplier = 1.25 }] }
 tier = "frontier"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "qwen/qwen3.5-plus-20260420", fields = ["context_window", "open_weight"]}
 
 [models."qwen/qwen3.6-max-preview"]
 name = "Qwen3.6 Max Preview (via OpenRouter)"
@@ -609,25 +558,21 @@ strengths = ["reasoning", "coding", "tool_use", "long_context"]
 [models."Qwen/Qwen3.6-Plus"]
 name = "Qwen3.6 Plus (Together)"
 provider = "together"
-context_window = 1000000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.50, output_per_mtok = 3.00 }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
 
 # Together lists this model but a 2026-09-29 chat call returned "Unable to
 # access non-serverless model"; it needs a dedicated endpoint.
+models_dev = {provider = "togetherai", model = "Qwen/Qwen3.6-Plus", fields = ["context_window", "pricing"]}
 [models."Qwen/Qwen3.5-397B-A17B"]
 name = "Qwen3.5 397B A17B (Together)"
 provider = "together"
 availability = "dedicated"
-context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.60, output_per_mtok = 3.60, cache_read_per_mtok = 0.35 }
 architecture = { parameter_count_b = 397.0, active_parameter_count_b = 17.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B", last_verified = "2026-07-09" }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 
 # 2026-08-15 reachability sweep: `zai-org/GLM-5` is non-serverless on Together
@@ -636,6 +581,7 @@ strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 
 # Together lists this model but a 2026-09-29 chat call returned "Unable to
 # access non-serverless model"; it needs a dedicated endpoint.
+models_dev = {provider = "togetherai", model = "Qwen/Qwen3.5-397B-A17B", fields = ["context_window", "open_weight", "pricing"]}
 [models."together/nvidia/nemotron-3-ultra-550b-a55b"]
 name = "Nemotron 3 Ultra 550B A55B (Together)"
 provider = "together"
@@ -643,12 +589,12 @@ availability = "dedicated"
 wire_model = "nvidia/nemotron-3-ultra-550b-a55b"
 context_window = 512288
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.60, output_per_mtok = 3.60, cache_read_per_mtok = 0.20 }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "tool_use", "long_context"]
 
 # DeepInfra live model detail rows.
+models_dev = {provider = "togetherai", model = "nvidia/nemotron-3-ultra-550b-a55b", fields = ["pricing"]}
 [models."deepinfra/Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo"]
 name = "Qwen3 Coder 480B A35B Turbo (DeepInfra)"
 provider = "deepinfra"
@@ -657,12 +603,11 @@ logical_model = "qwen3-coder-480b-a35b"
 equivalence_group = "qwen3-coder-480b-a35b"
 served_variant = "deepinfra"
 api_dialect = "openai_chat"
-context_window = 262144
 capabilities = ["tools", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 0.30, output_per_mtok = 1.00, cache_read_per_mtok = 0.10 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "long_context", "agentic", "tool_use"]
+models_dev = {provider = "deepinfra", model = "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo", fields = ["context_window", "open_weight"]}
 
 [models."deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507"]
 name = "Qwen3 235B A22B Instruct 2507 (DeepInfra)"
@@ -670,12 +615,11 @@ provider = "deepinfra"
 wire_model = "Qwen/Qwen3-235B-A22B-Instruct-2507"
 served_variant = "deepinfra"
 api_dialect = "openai_chat"
-context_window = 262144
 capabilities = ["tools", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 0.09, output_per_mtok = 0.55 }
 tier = "mid"
-open_weight = true
 strengths = ["cheap", "tool_use", "long_context"]
+models_dev = {provider = "deepinfra", model = "Qwen/Qwen3-235B-A22B-Instruct-2507", fields = ["context_window", "open_weight"]}
 
 [models."deepinfra/Qwen/Qwen3.6-27B"]
 name = "Qwen3.6 27B (DeepInfra)"
@@ -685,12 +629,11 @@ logical_model = "qwen3.6-27b"
 equivalence_group = "qwen3.6-27b"
 served_variant = "deepinfra"
 api_dialect = "openai_chat"
-context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.32, output_per_mtok = 3.20 }
 tier = "mid"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "vision", "long_context"]
+models_dev = {provider = "deepinfra", model = "Qwen/Qwen3.6-27B", fields = ["context_window", "open_weight"]}
 
 [models."deepinfra/MiniMaxAI/MiniMax-M2.7-Turbo"]
 name = "MiniMax M2.7 Turbo (DeepInfra)"
@@ -728,12 +671,11 @@ logical_model = "minimax-m3"
 equivalence_group = "minimax-m3"
 served_variant = "deepinfra"
 api_dialect = "openai_chat"
-context_window = 524288
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.28, output_per_mtok = 1.10, cache_read_per_mtok = 0.056 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "cheap"]
+models_dev = {provider = "deepinfra", model = "MiniMaxAI/MiniMax-M3", fields = ["context_window", "open_weight"]}
 
 [models."deepinfra/zai-org/GLM-4.6"]
 name = "GLM 4.6 (DeepInfra)"
@@ -743,12 +685,11 @@ logical_model = "glm-4.6"
 equivalence_group = "glm-4.6"
 served_variant = "deepinfra"
 api_dialect = "openai_chat"
-context_window = 202752
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.50, output_per_mtok = 2.00, cache_read_per_mtok = 0.10 }
 tier = "mid"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "cheap", "long_context"]
+models_dev = {provider = "deepinfra", model = "zai-org/GLM-4.6", fields = ["context_window", "open_weight"]}
 
 [models."deepinfra/Qwen/Qwen3.5-397B-A17B"]
 name = "Qwen3.5 397B A17B (DeepInfra)"
@@ -756,15 +697,14 @@ provider = "deepinfra"
 wire_model = "Qwen/Qwen3.5-397B-A17B"
 served_variant = "deepinfra"
 api_dialect = "openai_chat"
-context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.45, output_per_mtok = 3.00, cache_read_per_mtok = 0.22 }
 architecture = { parameter_count_b = 397.0, active_parameter_count_b = 17.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B", last_verified = "2026-07-09" }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 
 # Fireworks compatibility fill-ins returned by live model discovery.
 # 2026-08-15 reachability sweep: Fireworks no longer deploys `glm-5p1`
 # (HTTP 404 `Model not found, inaccessible, and/or not deployed`); its model
 # listing carries only `glm-5p2`, which stays catalogued above.
+models_dev = {provider = "deepinfra", model = "Qwen/Qwen3.5-397B-A17B", fields = ["context_window", "open_weight"]}

@@ -4,7 +4,7 @@
 //!
 //! Motivation lives in harn#2293 (epic) and harn#2294 (G1). Scripts are
 //! defined in `crates/harn-stdlib/src/stdlib/cli/<name>.harn` and
-//! registered in [`harn_stdlib::STDLIB_CLI_SCRIPTS`]. Each dispatched
+//! registered in the CLI scripts in [`harn_stdlib::CATALOG`]. Each dispatched
 //! script receives:
 //!
 //!   * `argv: list<string>` — the per-subcommand argv after top-level
@@ -78,7 +78,7 @@ pub const DISABLE_AOT_ENV: &str = "HARN_DISABLE_AOT_CLI";
 pub const CACHE_DEBUG_ENV: &str = "HARN_BYTECODE_CACHE_DEBUG";
 
 /// Exit code returned when the named script can't be found in
-/// [`harn_stdlib::STDLIB_CLI_SCRIPTS`]. Matches `EX_SOFTWARE` from
+/// the CLI scripts in [`harn_stdlib::CATALOG`]. Matches `EX_SOFTWARE` from
 /// `sysexits.h` — an "internal software error" the user can't fix
 /// without a new release.
 const EX_SOFTWARE: i32 = 70;

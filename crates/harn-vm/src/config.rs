@@ -13,6 +13,7 @@ use serde_json::{json, Map as JsonMap, Value as JsonValue};
 
 use crate::redact::current_policy;
 
+pub mod env_file;
 mod provider_layer;
 
 pub use provider_layer::layer_from_providers_config;

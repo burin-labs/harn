@@ -21,6 +21,10 @@ pub(crate) struct NetnsLaunchArgs {
     /// device finalization mode, whose wrapper already installed the filter.
     #[arg(long = harn_vm::process_sandbox::NETNS_SECCOMP_FLAG.trim_start_matches('-'), required_unless_present = "close_fd", conflicts_with = "close_fd")]
     pub seccomp_hex: Option<String>,
+    /// Workspace temp dir to mount over the payload's `/tmp`, so tools that
+    /// hard-code `/tmp` write the workspace's temp storage instead of the host's.
+    #[arg(long = harn_vm::process_sandbox::NETNS_PRIVATE_TMP_FLAG.trim_start_matches('-'), value_name = "PATH", conflicts_with = "close_fd")]
+    pub private_tmp: Option<std::path::PathBuf>,
     /// Verify and close one pinned device setup descriptor, as FD:absolute-path.
     /// Bubblewrap has already installed confinement in this mode.
     #[arg(long = harn_vm::process_sandbox::NETNS_CLOSE_FD_FLAG.trim_start_matches('-'))]

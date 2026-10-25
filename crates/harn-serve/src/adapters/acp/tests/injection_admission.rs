@@ -28,8 +28,10 @@ impl SessionTaskAdmission for InputAdmission {
     }
 }
 
+/// Task admission runs before the steer is queued and records the same message
+/// identity the receipt later reports.
 #[tokio::test(flavor = "current_thread")]
-async fn normal_session_inject_admits_before_queue_with_same_message_identity() {
+async fn steer_is_admitted_before_queue_with_same_message_identity() {
     let admission = Arc::new(InputAdmission {
         accepted: Mutex::new(Vec::new()),
         fail: std::sync::atomic::AtomicBool::new(true),
@@ -45,11 +47,14 @@ async fn normal_session_inject_admits_before_queue_with_same_message_identity() 
         }))
         .await;
     let created = recv_json(&mut rx).await;
-    let session_id = created["result"]["sessionId"].as_str().unwrap();
-    let bridge = attach_test_host_bridge(&mut server, session_id);
+    let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
+    let bridge = attach_test_host_bridge(&mut server, &session_id);
+    server.sessions[&session_id]
+        .concurrent_control
+        .set_prompt_active(true);
     let input = serde_json::json!({
-        "jsonrpc":"2.0","id":2,"method":"session/inject",
-        "params":{"sessionId":session_id,"mode":"queue","content":"owned input"},
+        "jsonrpc":"2.0","id":2,"method":"session/prompt",
+        "params":{"sessionId":session_id,"delivery":"steer","prompt":[{"type":"text","text":"owned input"}]},
     });
     server.handle_incoming_message(input.clone()).await;
     let rejected = recv_json(&mut rx).await;
@@ -58,28 +63,41 @@ async fn normal_session_inject_admits_before_queue_with_same_message_identity() 
         TASK_ADMISSION_STORAGE_UNAVAILABLE_RPC_CODE
     );
     assert!(bridge
-        .take_queued_user_messages_for(harn_vm::bridge::DeliveryCheckpoint::EndOfInteraction)
+        .take_queued_user_messages_for(harn_vm::bridge::DeliveryCheckpoint::AfterCurrentOperation)
         .await
         .is_empty());
     assert!(admission.accepted.lock().unwrap().is_empty());
 
     admission.fail.store(false, Ordering::SeqCst);
     server.handle_incoming_message(input).await;
-    let accepted = recv_json(&mut rx).await;
+    assert!(
+        rx.try_recv().is_err(),
+        "a queued steer is answered only once inserted"
+    );
     let queued = bridge
-        .take_queued_user_messages_for(harn_vm::bridge::DeliveryCheckpoint::EndOfInteraction)
+        .take_queued_user_messages_for(harn_vm::bridge::DeliveryCheckpoint::AfterCurrentOperation)
         .await;
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0].content, "owned input");
-    let controls = admission.accepted.lock().unwrap();
-    assert_eq!(controls.len(), 1);
+    {
+        let controls = admission.accepted.lock().unwrap();
+        assert_eq!(controls.len(), 1);
+        assert_eq!(
+            controls[0].message_id.as_deref(),
+            Some(queued[0].message_id.as_str())
+        );
+    }
+
+    super::super::delivery::PromptReceipts::new(
+        server.concurrent_controls.pending_prompts.clone(),
+        server.output.clone(),
+    )
+    .inserted(&session_id, &queued[0].message_id);
+    let receipt = recv_json(&mut rx).await;
+    assert_eq!(receipt["id"], 2);
+    assert_eq!(receipt["result"]["messageId"], queued[0].message_id);
     assert_eq!(
-        controls[0].message_id.as_deref(),
-        Some(queued[0].message_id.as_str())
-    );
-    assert_eq!(accepted["result"]["messageId"], queued[0].message_id);
-    assert_eq!(
-        accepted["result"]["_meta"]["harn"]["taskMessage"]["id"],
+        receipt["result"]["_meta"]["harn"]["taskMessage"]["id"],
         queued[0].message_id
     );
 }

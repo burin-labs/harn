@@ -300,18 +300,36 @@ pub(super) async fn append_task_message(
             "cannot steer a terminal task",
         );
     }
-    let result = match state.acp.call_structured("session/inject", json!({
-        "sessionId": task.session_id, "mode": "steer", "content": content,
+    // The steer's own reply waits until the running turn takes it in; the
+    // API answers once it is admitted, which publishes `message.created`.
+    let message_id = format!("msg_inj_{}", uuid::Uuid::now_v7().simple());
+    let mut admitted = state.events_tx.subscribe();
+    let call = state.acp.call_structured("session/prompt", json!({
+        "sessionId": task.session_id, "delivery": "steer", "messageId": message_id,
+        "prompt": [{"type": "text", "text": content}],
         "_meta": {"harn": {"taskMessage": {"taskId": task_id, "message": message_input}, "actor": {"kind": "agents_api", "taskId": task_id,
             "metadata": message_input.get("metadata").cloned().unwrap_or_else(|| json!({}))}}},
-    })).await {
-        Ok(result) => result,
-        Err(error) if error.code == Some(crate::adapters::acp::TASK_ADMISSION_STORAGE_UNAVAILABLE_RPC_CODE) => return task_store::unavailable_response(),
-        Err(error) => return api_error(StatusCode::CONFLICT, "task_not_steerable", &error.message),
-    };
-    match result.pointer("/_meta/harn/taskMessage") {
-        Some(message) => (StatusCode::CREATED, Json(message.clone())).into_response(),
-        None => task_store::unavailable_response(),
+    }));
+    tokio::pin!(call);
+    let mut watching = true;
+    loop {
+        tokio::select! {
+            result = &mut call => return match result {
+                Ok(receipt) => match receipt.pointer("/_meta/harn/taskMessage") {
+                    Some(message) => (StatusCode::CREATED, Json(message.clone())).into_response(),
+                    None => task_store::unavailable_response(),
+                },
+                Err(error) if error.code == Some(crate::adapters::acp::TASK_ADMISSION_STORAGE_UNAVAILABLE_RPC_CODE) => task_store::unavailable_response(),
+                Err(error) => api_error(StatusCode::CONFLICT, "task_not_steerable", &error.message),
+            },
+            event = admitted.recv(), if watching => match event {
+                Ok(event) if event.event == "message.created" && event.payload["id"] == message_id => {
+                    return (StatusCode::CREATED, Json(event.payload)).into_response();
+                }
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => watching = false,
+            },
+        }
     }
 }
 

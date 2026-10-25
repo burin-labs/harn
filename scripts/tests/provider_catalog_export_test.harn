@@ -1,0 +1,74 @@
+type Snapshot = {providers: list<{id: string}>, models: list<{id: string}>}
+
+type LoadedCatalog = {models: list<{id: string}>}
+
+pipeline test_catalog_export_uses_the_embedded_baseline_and_only_explicit_overlays(
+  harness: Harness,
+) {
+  const root = harness.fs.mkdtemp_in_workspace("catalog-export-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const overlay = path_join(root, "providers.toml")
+  harness.fs.write_text(
+    overlay,
+    """
+[providers.fixture]
+display_name = "Fixture"
+base_url = "http://127.0.0.1:9000"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+
+[models."fixture/extra"]
+name = "Fixture extra"
+provider = "fixture"
+context_window = 8192
+""",
+  )
+  const environment = {HARN_PROVIDERS_CONFIG: overlay}
+  const shown = harness.process.run(
+    {program: binary, args: ["provider", "catalog", "show"], env: environment},
+  )
+  assert(shown.success, shown.stderr)
+  const loaded = unwrap(json_decode(shown.stdout, schema_of(LoadedCatalog)))
+  assert(loaded.models.any({ model -> model.id == "fixture/extra" }))
+  const baseline = path_join(root, "baseline")
+  const command = ["provider", "catalog", "export", "--output-dir", baseline]
+  const exported = harness.process.run({program: binary, args: command, env: environment})
+  assert(exported.success, exported.stderr)
+  const path = path_join(baseline, "provider-catalog.json")
+  const raw = json_parse(harness.fs.read_text(path))
+  const snapshot = unwrap(schema_parse(raw, schema_of(Snapshot)))
+  assert(snapshot.providers.count > 0 && snapshot.models.count > 0)
+  assert(!snapshot.models.any({ model -> model.id == "fixture/extra" }))
+  const schema = json_parse(
+    harness.fs.read_text(path_join(baseline, "provider-catalog.schema.json")),
+  )
+  assert(schema_is(raw, schema))
+  assert(!schema_is({}, schema))
+  assert(
+    harness.process.run({program: binary, args: command + ["--check"], env: environment}).success,
+  )
+  harness.fs.write_text(path, "{}")
+  assert(
+    !harness.process.run({program: binary, args: command + ["--check"], env: environment}).success,
+  )
+  const extended = path_join(root, "extended")
+  const with_overlay = harness.process.run(
+    {
+      program: binary,
+      args: ["provider", "catalog", "export", "--output-dir", extended, "--overlay", overlay],
+      env: environment,
+    },
+  )
+  assert(with_overlay.success, with_overlay.stderr)
+  const merged = unwrap(
+    json_decode(
+      harness.fs.read_text(path_join(extended, "provider-catalog.json")),
+      schema_of(Snapshot),
+    ),
+  )
+  assert(merged.models.any({ model -> model.id == "fixture/extra" }))
+  assert_eq(merged.models.count, snapshot.models.count + 1)
+}

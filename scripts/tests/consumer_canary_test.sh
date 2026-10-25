@@ -4,7 +4,7 @@
 set -eEuo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 bash "$root/scripts/tests/consumer_observation_policy_test.sh"
-node --test "$root/scripts/tests/consumer_observer_test.mjs" "$root/scripts/tests/consumer_observer_cleanup_test.mjs" "$root/scripts/tests/consumer_observer_terminal_test.mjs" "$root/scripts/tests/consumer_observer_dispatch_test.mjs" "$root/scripts/tests/consumer_observer_window_test.mjs" "$root/scripts/tests/consumer_observer_retirement_test.mjs" "$root/scripts/tests/consumer_observation_budget_test.mjs" "$root/scripts/tests/consumer_observer_budget_entry_test.mjs"
+node --test "$root/scripts/tests/consumer_observer_test.mjs" "$root/scripts/tests/consumer_observer_cleanup_test.mjs" "$root/scripts/tests/consumer_observer_terminal_test.mjs" "$root/scripts/tests/consumer_observer_dispatch_test.mjs" "$root/scripts/tests/consumer_observer_window_test.mjs" "$root/scripts/tests/consumer_observer_retirement_test.mjs" "$root/scripts/tests/consumer_observation_budget_test.mjs" "$root/scripts/tests/consumer_observer_budget_entry_test.mjs" "$root/scripts/tests/release_producer_readiness_test.mjs"
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/harn-consumer-canary.XXXXXX")
 export RUNNER_TEMP="$scratch"
 trap 'rm -rf "$scratch"' EXIT
@@ -120,27 +120,59 @@ OBSERVER_CONTEXT=$(jq -nc --argjson started "$(date +%s)" '{
 export OBSERVER_CONTEXT
 
 # A stand-in `gh` that answers from files, so each case sets the consumer's
-# reply without a network.
+# reply without a network. `--include` answers with an HTTP status line and
+# headers the way gh does. Each line of $STUB/faults answers one consumer read
+# instead, as `<status> [header=value ...]`, with a body that carries a private
+# value no output may repeat.
 mkdir -p "$scratch/bin"
 cat > "$scratch/bin/gh" <<'EOF'
 #!/usr/bin/env bash
-case "$1 $2" in
-  "api repos/acme/widget-host") echo main ;;
-  "api repos/acme/widget-host/pulls/"*) cat "$STUB/pull" ;;
-  "api repos/acme/widget-host/actions/runs/"*)
-    if [[ "${GH_TOKEN:-}" == fixture-expired ]]; then
-      echo "HTTP 401: Bad credentials fixture-private-value" >&2
-      exit 1
-    fi
-    cat "$STUB/run" ;;
-  "workflow run") echo "$*" > "$STUB/dispatched"; echo dispatch >> "$STUB/dispatch-count"; cat "$STUB/dispatch" ;;
-  "api repos/acme/harn/actions/workflows/"*) [[ -f "$STUB/history" ]] || exit 1; cat "$STUB/history" ;;
-  "api repos/acme/harn/actions/runs/"*/jobs) id=${2#repos/acme/harn/actions/runs/}; jq -r "$4" "$STUB/jobs-${id%/jobs}" ;;
-  "api repos/acme/harn/git/matching-refs/heads/green") [[ -f "$STUB/green-ref" ]] || exit 1; cat "$STUB/green-ref" ;;
-  *) echo "unexpected gh $*" >&2; exit 2 ;;
-esac
+include=false
+if [[ "$1 $2" == "api --include" ]]; then include=true; shift 2; set -- api "$@"; fi
+if [[ "$include" == true && "$2" == repos/acme/widget-host* && -s "$STUB/faults" ]]; then
+  read -r status headers < "$STUB/faults"
+  sed -i.bak 1d "$STUB/faults"
+  printf 'HTTP/2.0 %s Fixture\r\n' "$status"
+  for header in $headers; do printf '%s: %s\r\n' "${header%%=*}" "${header#*=}"; done
+  printf '\r\n{"message":"fixture refusal fixture-private-value"}\n'
+  echo fault >> "$STUB/fault-count"
+  exit 1
+fi
+code=200
+respond() {
+  case "$1 $2" in
+    "api repos/acme/widget-host") echo main ;;
+    "api repos/acme/widget-host/pulls/"*) cat "$STUB/pull" ;;
+    "api repos/acme/widget-host/actions/runs/"*)
+      if [[ "${GH_TOKEN:-}" == fixture-expired ]]; then
+        code=401
+        echo '{"message":"Bad credentials fixture-private-value"}'
+        return 1
+      fi
+      cat "$STUB/run" ;;
+    "workflow run")
+      if [[ -s "$STUB/dispatch-faults" ]]; then
+        head -1 "$STUB/dispatch-faults"; sed -i.bak 1d "$STUB/dispatch-faults"; return 1
+      fi
+      echo "$*" > "$STUB/dispatched"; echo dispatch >> "$STUB/dispatch-count"; cat "$STUB/dispatch" ;;
+    "api repos/acme/harn/actions/workflows/"*) [[ -f "$STUB/history" ]] || { code=404; return 1; }; cat "$STUB/history" ;;
+    "api repos/acme/harn/actions/runs/"*/jobs) id=${2#repos/acme/harn/actions/runs/}; jq -r "$4" "$STUB/jobs-${id%/jobs}" ;;
+    "api repos/acme/harn/git/matching-refs/heads/green") [[ -f "$STUB/green-ref" ]] || exit 1; cat "$STUB/green-ref" ;;
+    *) echo "unexpected gh $*" >&2; exit 2 ;;
+  esac
+}
+respond "$@" > "$STUB/gh-body"
+rc=$?
+if [[ "$include" == true ]]; then
+  ((rc == 0)) || [[ "$code" != 200 ]] || code=500
+  printf 'HTTP/2.0 %s Fixture\r\nX-Ratelimit-Remaining: 4000\r\n\r\n' "$code"
+fi
+cat "$STUB/gh-body"
+exit "$rc"
 EOF
 chmod +x "$scratch/bin/gh"
+# Retries back off without waiting in tests.
+export CANARY_API_BACKOFF_SECONDS=0
 
 canary() {
   local workspace_version=${2:-1.2.4-dev}
@@ -194,6 +226,65 @@ grep -q -- '--ref main ' "$scratch/dispatched"
 grep -q -- '-f target=v1.2.3 ' "$scratch/dispatched"
 ! grep -q -- 'release_producer_run_' "$scratch/dispatched"
 
+# A GitHub API refusal is classified by its HTTP status and rate-limit headers.
+# A rate limit or a server error is retried within bounds and then measures; a
+# denial fails at once and names the token and repository by label; no output
+# repeats the response body.
+api_faults() {
+  printf '%s\n' "$@" > "$scratch/faults"
+  rm -f "$scratch/fault-count" "$scratch/dispatched"
+}
+assert_private_body_unprinted() {
+  if grep -q 'fixture-private-value' "$scratch/out"; then
+    echo 'an API refusal printed its response body' >&2; cat "$scratch/out" >&2; exit 1
+  fi
+}
+api_faults '403 X-Ratelimit-Remaining=0 X-Ratelimit-Reset=1' '502' '429 Retry-After=0'
+canary
+grep -q 'retry=api_rate_limited read=consumer_unreadable status=403 attempt=1 wait_seconds=1' "$scratch/out"
+grep -q 'retry=api_unavailable read=consumer_unreadable status=502 attempt=2' "$scratch/out"
+grep -q 'retry=api_rate_limited read=consumer_unreadable status=429 attempt=3 wait_seconds=0' "$scratch/out"
+grep -q 'verdict=pass' "$scratch/out"
+[[ $(wc -l < "$scratch/fault-count") -eq 3 && -e "$scratch/dispatched" ]]
+assert_private_body_unprinted
+for denial in 401 403 404; do
+  api_faults "$denial"
+  CANARY_TOKEN_LABEL=consumer-dispatch-app-token refuses api_access_denied
+  grep -q "read=consumer_unreadable status=$denial token=consumer-dispatch-app-token repository=secret:CONSUMER_CANARY_REPOSITORY attempts=1" "$scratch/out"
+  [[ $(wc -l < "$scratch/fault-count") -eq 1 && ! -e "$scratch/dispatched" ]]
+  assert_private_body_unprinted
+done
+# A rate-limited dispatch was not acted on and is retried; any other refusal
+# may have dispatched and is final.
+printf '%s\n' 'HTTP 403: API rate limit exceeded for installation fixture-private-value' \
+  'HTTP 429: too many requests fixture-private-value' > "$scratch/dispatch-faults"
+rm -f "$scratch/dispatched"
+canary
+grep -q 'retry=api_rate_limited read=dispatch status=403 attempt=1' "$scratch/out"
+grep -q 'retry=api_rate_limited read=dispatch status=429 attempt=2' "$scratch/out"
+grep -q 'verdict=pass' "$scratch/out"
+assert_private_body_unprinted
+for refusal in 'HTTP 422: Unexpected inputs fixture-private-value' 'HTTP 502: Bad gateway fixture-private-value' \
+    'HTTP 403: Resource not accessible by integration fixture-private-value'; do
+  printf '%s\n' "$refusal" "$refusal" > "$scratch/dispatch-faults"
+  rm -f "$scratch/dispatched"
+  refuses dispatch_refused
+  grep -q "status=${refusal:5:3} token=GH_TOKEN repository=secret:CONSUMER_CANARY_REPOSITORY attempts=1" "$scratch/out"
+  [[ $(wc -l < "$scratch/dispatch-faults") -eq 1 && ! -e "$scratch/dispatched" ]]
+  assert_private_body_unprinted
+done
+: > "$scratch/dispatch-faults"
+api_faults 503 503 503 503
+refuses api_unavailable
+grep -q 'read=consumer_unreadable status=503 token=GH_TOKEN repository=secret:CONSUMER_CANARY_REPOSITORY attempts=4' "$scratch/out"
+[[ ! -e "$scratch/dispatched" ]]
+# A limit that resets beyond the wait bound is not slept on.
+api_faults '403 X-Ratelimit-Remaining=0 X-Ratelimit-Reset=4102444800'
+refuses api_rate_limited
+grep -q 'status=403 token=GH_TOKEN repository=secret:CONSUMER_CANARY_REPOSITORY attempts=1 ratelimit_remaining=0' "$scratch/out"
+assert_private_body_unprinted
+: > "$scratch/faults"
+
 # Archive mode carries the current observer's exact producer identity. Invalid
 # or mixed modes fail before a downstream run can be dispatched.
 archive_source=0123456789abcdef0123456789abcdef01234567
@@ -232,9 +323,28 @@ if OBSERVER_CONTEXT="$OBSERVER_CONTEXT" GITHUB_REF=refs/heads/main \
 fi
 grep -q 'reason=release_producer_identity_invalid' "$scratch/out"
 [[ ! -e "$scratch/dispatched" ]]
-CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb canary
-grep -q -- '-f harn_cli_run=123 -f harn_base=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' "$scratch/dispatched"
+pin=cccccccccccccccccccccccccccccccccccccccc
+CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb CANARY_CONSUMER_REVISION=$pin canary
+grep -q -- "-f harn_cli_run=123 -f harn_base=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb -f consumer_revision=$pin" "$scratch/dispatched"
 ! grep -q -- 'release_producer_run_' "$scratch/dispatched"
+! grep -q -- 'harn_cli_artifact' "$scratch/dispatched"
+# A pull request check never rehearses whatever the consumer's branch holds.
+rm -f "$scratch/dispatched"
+CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+  refuses consumer_revision_invalid
+[[ ! -e "$scratch/dispatched" ]]
+# The base CLI is rehearsed only at the base itself, on the same pinned consumer.
+pr_base=0123456789abcdef0123456789abcdef01234567
+CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=$pr_base CANARY_CONSUMER_REVISION=$pin \
+  CANARY_PULL_REQUEST_CLI_ARTIFACT=harn-base-cli.tar.zst canary
+grep -q -- "-f harn_base=$pr_base -f consumer_revision=$pin -f harn_cli_artifact=harn-base-cli.tar.zst" "$scratch/dispatched"
+for mismatch in "harn-base-cli.tar.zst bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "harn-cli.tar.zst $pr_base"; do
+  read -r artifact base <<< "$mismatch"
+  rm -f "$scratch/dispatched"
+  CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=$base CANARY_CONSUMER_REVISION=$pin \
+    CANARY_PULL_REQUEST_CLI_ARTIFACT=$artifact refuses pull_request_identity_invalid
+  [[ ! -e "$scratch/dispatched" ]]
+done
 
 # The current development identity maps to the latest published tag, which is
 # the version the consumer accepts as its repin floor.
@@ -436,7 +546,7 @@ if decide schedule; then
   echo "unreadable history decided anyway" >&2
   exit 1
 fi
-grep -q "reason=settled_history_unreadable" "$scratch/out"
+grep -q "reason=api_access_denied read=settled_history_unreadable status=404 token=GH_TOKEN repository=acme/harn attempts=1" "$scratch/out"
 if [[ -s "$scratch/gho" ]]; then
   echo "unreadable history wrote a decision" >&2
   exit 1
@@ -493,7 +603,7 @@ echo 'completed cancelled' > "$scratch/run"
 if observe fixture-expired; then
   echo 'expired read authority reported success' >&2; exit 1
 fi
-grep -q 'reason=consumer_read_refused run=42 verdict=unmeasured' "$scratch/out"
+grep -q 'reason=api_access_denied read=consumer_read_refused status=401 token=GH_TOKEN repository=secret:CONSUMER_CANARY_REPOSITORY attempts=1 ratelimit_remaining=4000 run=42 verdict=unmeasured' "$scratch/out"
 if grep -qE 'fixture-private-value|widget-host|github\.com' "$scratch/out"; then
   echo 'authorization refusal exposed private input' >&2; exit 1
 fi
@@ -582,21 +692,26 @@ for (const suffix of ['run_id', 'run_attempt']) {
   assert.equal(dispatch[0].env[`CANARY_${name.toUpperCase()}`], '${{ inputs.' + name + ' }}');
 }
 const archiveCall = producer.jobs['consumer-rehearsal'];
-assert.deepEqual(archiveCall.needs, ['setup', 'build', 'collect_candidate_manifest']);
+assert.deepEqual(archiveCall.needs, ['setup', 'build', 'collect_candidate_manifest', 'native-qualification']);
 assert.equal(archiveCall.with.release_producer_run_id,
   "${{ needs.setup.outputs.build_mode == 'candidate' && github.run_id || '' }}");
 assert.equal(archiveCall.with.release_producer_run_attempt,
   "${{ needs.setup.outputs.build_mode == 'candidate' && github.run_attempt || '' }}");
-const admitted = (mode, build, manifest, setup='success', source='a'.repeat(40), cancelled=false) =>
-  require('node:vm').runInNewContext(archiveCall.if, {
+const admitted = (mode, build, manifest, setup='success', source='a'.repeat(40), cancelled=false,
+  native={result:'success'}, event='push') =>
+  require('node:vm').runInNewContext(archiveCall.if.replaceAll('needs.native-qualification', 'needs["native-qualification"]'), {
     cancelled: () => cancelled,
+    github: {event_name: event},
     needs: {setup: {result: setup, outputs: {build_mode: mode, rehearsal_source_sha: source}},
-      build: {result: build}, collect_candidate_manifest: {result: manifest}},
+      build: {result: build}, collect_candidate_manifest: {result: manifest},
+      'native-qualification': native},
   });
 assert.equal(admitted('candidate', 'success', 'success'), true);
 for (const incomplete of ['failure', 'cancelled', 'skipped', 'pending', undefined]) {
   assert.equal(admitted('candidate', incomplete, 'success'), false);
   assert.equal(admitted('candidate', 'success', incomplete), false);
+  assert.equal(admitted('candidate', 'success', 'success', 'success', 'a'.repeat(40), false, {result:incomplete}), false);
+  assert.equal(admitted('candidate', 'success', 'success', 'success', 'a'.repeat(40), false, {result:incomplete}, 'schedule'), true);
 }
 assert.equal(admitted('none', 'skipped', 'skipped'), true);
 assert.equal(admitted('none', 'skipped', 'skipped', 'failure'), false);
@@ -614,12 +729,16 @@ verifyNode(steps);
 assert.throws(() => verifyNode(steps.filter((step) => step.id !== 'pairing-node')));
 const windows = steps.filter((step) => step.uses === './.github/actions/observe-consumer');
 assert.equal(windows.length, Math.ceil(policy.wall_seconds / policy.window_seconds));
-assert.equal(jobs.consumers['timeout-minutes'], Math.ceil((policy.wall_seconds + policy.cleanup_seconds) / 60));
+// Pull requests observe the same child through the entire declared budget.
+const minutes = (seconds) => Math.ceil((seconds + policy.cleanup_seconds) / 60);
+assert.equal(jobs.consumers['timeout-minutes'],
+  minutes(policy.wall_seconds));
 for (const step of windows) {
   assert.equal(step.with['run-id'], '${{ steps.canary.outputs.run_id }}');
   assert.equal(step.with['started-at'], '${{ steps.canary.outputs.started_at }}');
   assert.equal(step.with['observer-context'], '${{ steps.observer.outputs.context }}');
   assert.equal(step.with['rehearsal-promotion-run-id'], '${{ inputs.rehearsal_promotion_run_id }}');
+  assert.equal(step.with['single-window'], undefined);
   assert(jobs.consumers.outputs.verdict.includes(`steps.${step.id}.outputs.verdict`));
 }
 const interrupted = steps.find(step => step.id === 'interrupted');
@@ -646,7 +765,8 @@ assert.equal(observe.env.GH_TOKEN, '${{ steps.token.outputs.token }}');
 assert.equal(observe.env.CANARY_STARTED_AT, '${{ inputs.started-at }}');
 assert.equal(observe.env.CANARY_RUN_ID, '${{ inputs.run-id }}');
 assert.equal(observe.env.CANARY_WINDOW_SECONDS, String(policy.window_seconds));
-assert.equal(observe.env.CANARY_DEADLINE_SECONDS, "${{ inputs.observer-context != '' && '9900' || '7200' }}");
+assert.equal(observe.env.CANARY_DEADLINE_SECONDS,
+  `\${{ inputs.observer-context != '' && '${policy.wall_seconds}' || '7200' }}`);
 assert.equal(observe.env.OBSERVER_CONTEXT, '${{ inputs.observer-context }}');
 assert(observe.run.includes('--observe') && !observe.run.includes('--dispatch'));
 JS

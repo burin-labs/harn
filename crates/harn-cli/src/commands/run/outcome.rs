@@ -261,23 +261,23 @@ pub(super) fn finalize_harnpack_dry_run(
     }
 }
 
-pub(super) fn render_return_value_error(value: &harn_vm::VmValue) -> String {
+pub(crate) fn return_value_error(value: &harn_vm::VmValue) -> Option<String> {
     let harn_vm::VmValue::EnumVariant(enum_variant) = value else {
-        return String::new();
+        return None;
     };
     if !enum_variant.is_variant("Result", "Err") {
-        return String::new();
+        return None;
     }
     let rendered = enum_variant
         .fields
         .first()
         .map(|p| p.display())
         .unwrap_or_default();
-    if rendered.is_empty() {
+    Some(if rendered.is_empty() {
         "error\n".to_string()
     } else if rendered.ends_with('\n') {
         rendered
     } else {
         format!("{rendered}\n")
-    }
+    })
 }

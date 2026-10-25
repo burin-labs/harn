@@ -1,0 +1,16 @@
+/** Required verification cannot exempt an unmeasured result with a rollout flag. */
+pub fn warn_only_needs_errors(workflows: dict) -> list<string> {
+  const aggregate = workflows["ci.yml"]?.jobs?.["ci-status"]
+  const step = (aggregate?.steps ?? []).filter({ item -> item?.name == "Verify required CI jobs" })
+    .to_list()
+  if aggregate == nil || len(step) != 1 {
+    return ["ci.yml:ci-status must keep its 'Verify required CI jobs' step"]
+  }
+  let errors: list<string> = []
+  for flag in (step[0]?.env ?? {}).keys() {
+    if flag.ends_with("_UNMEASURED_BLOCKS") {
+      errors = errors + ["ci.yml:ci-status must block unmeasured verification without ${flag}"]
+    }
+  }
+  return errors
+}

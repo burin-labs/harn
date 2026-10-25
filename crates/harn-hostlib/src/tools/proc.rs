@@ -681,9 +681,9 @@ pub(crate) fn build_response(
         Some(handle_id) => builder.str("handle_id", handle_id),
         None => builder.nil("handle_id"),
     };
-    builder = builder.dict(
+    builder = builder.value(
         "sandbox",
-        sandbox_response(outcome.sandbox_assessment.reporting),
+        sandbox_response(&outcome.sandbox_assessment.report),
     );
     builder = match outcome.sandbox_assessment.refusal.as_ref() {
         Some(refusal) => builder.value("denial", refusal.handler_denial_value()),
@@ -720,34 +720,24 @@ pub(crate) fn process_cleanup_to_dict(
     match report.root_pid {
         Some(pid) => dict.put_int("root_pid", pid as i64),
         None => {
-            dict.insert(harn_vm::value::intern_key("root_pid"), VmValue::Nil);
+            dict.put("root_pid", VmValue::Nil);
         }
     }
     dict.insert(
         harn_vm::value::intern_key("attempted_signals"),
-        VmValue::list(
+        VmValue::strings(
             report
                 .attempted_signals
                 .iter()
-                .map(|signal| VmValue::string(format_signal(*signal)))
-                .collect(),
+                .map(|signal| format_signal(*signal)),
         ),
     );
     dict.put_int("observed_child_count", report.children.len() as i64);
     dict.put_int("reaped_child_count", reaped_children.len() as i64);
     dict.put_int("survivor_count", surviving_children.len() as i64);
-    dict.insert(
-        harn_vm::value::intern_key("observed_children"),
-        VmValue::list(observed_children),
-    );
-    dict.insert(
-        harn_vm::value::intern_key("reaped_children"),
-        VmValue::list(reaped_children),
-    );
-    dict.insert(
-        harn_vm::value::intern_key("surviving_children"),
-        VmValue::list(surviving_children),
-    );
+    dict.put("observed_children", VmValue::list(observed_children));
+    dict.put("reaped_children", VmValue::list(reaped_children));
+    dict.put("surviving_children", VmValue::list(surviving_children));
     dict
 }
 
@@ -764,25 +754,19 @@ fn process_cleanup_child_to_value(child: &process_handle::ProcessCleanupChild) -
     match child.parent_pid {
         Some(parent_pid) => dict.put_int("parent_pid", parent_pid as i64),
         None => {
-            dict.insert(harn_vm::value::intern_key("parent_pid"), VmValue::Nil);
+            dict.put("parent_pid", VmValue::Nil);
         }
     }
     dict.put_int("depth", child.depth as i64);
     match child.command_name.as_ref() {
         Some(command_name) => dict.put_str("command_name", command_name),
         None => {
-            dict.insert(harn_vm::value::intern_key("command_name"), VmValue::Nil);
+            dict.put("command_name", VmValue::Nil);
         }
     }
     dict.insert(
         harn_vm::value::intern_key("signals"),
-        VmValue::list(
-            child
-                .signals
-                .iter()
-                .map(|signal| VmValue::string(format_signal(*signal)))
-                .collect(),
-        ),
+        VmValue::strings(child.signals.iter().map(|signal| format_signal(*signal))),
     );
     match child.alive_after_cleanup {
         Some(alive) => dict.insert(
@@ -795,57 +779,6 @@ fn process_cleanup_child_to_value(child: &process_handle::ProcessCleanupChild) -
         ),
     };
     VmValue::dict(dict)
-}
-
-pub(crate) fn running_response(
-    command_id: String,
-    handle_id: String,
-    pid: u32,
-    process_group_id: Option<u32>,
-    started_at: String,
-    cwd: &Path,
-    command_display: String,
-    snapshot_binding: Option<&harn_vm::value::DictMap>,
-) -> VmValue {
-    let artifacts = planned_artifact_paths(&command_id);
-    let sandbox = sandbox_response(
-        harn_vm::process_sandbox::ProcessSandboxReportingContext::current().reporting,
-    );
-    let mut builder = ResponseBuilder::new()
-        .str("command_id", command_id.clone())
-        .str("cwd", to_agent_path(cwd))
-        .str("status", CommandStatus::Running.as_str())
-        .int("pid", pid as i64)
-        .str("handle_id", handle_id)
-        .str("started_at", started_at)
-        .nil("ended_at")
-        .int("duration_ms", 0)
-        .nil("exit_code")
-        .nil("signal")
-        .bool("timed_out", false)
-        .str("stdout", "")
-        .bool("stdout_truncated", false)
-        .str("stderr", "")
-        .bool("stderr_truncated", false)
-        .str("output_path", to_agent_path(&artifacts.output_path))
-        .str("stdout_path", to_agent_path(&artifacts.stdout_path))
-        .str("stderr_path", to_agent_path(&artifacts.stderr_path))
-        .int("line_count", 0)
-        .int("byte_count", 0)
-        .str("output_sha256", "")
-        .nil("denial")
-        .dict("sandbox", sandbox)
-        .str("audit_id", format!("audit_{command_id}"))
-        .str("command", command_display.clone())
-        .str("command_or_op_descriptor", command_display);
-    builder = match process_group_id {
-        Some(pgid) => builder.int("process_group_id", pgid as i64),
-        None => builder.nil("process_group_id"),
-    };
-    if let Some(snapshot_binding) = snapshot_binding {
-        builder = builder.dict("snapshot_binding", snapshot_binding.clone());
-    }
-    builder.build()
 }
 
 pub(crate) fn next_command_id() -> String {
@@ -940,24 +873,10 @@ fn lossy_prefix(bytes: &[u8], max_inline_bytes: usize) -> (String, bool) {
     (text, consumed < bytes.len())
 }
 
-pub(crate) fn sandbox_kind() -> &'static str {
-    harn_vm::process_sandbox::active_backend_mechanism().process_kind()
-}
-
-pub(crate) fn sandbox_response(
-    reporting: harn_vm::process_sandbox::ProcessSandboxDenialReporting,
-) -> harn_vm::value::DictMap {
-    let mut sandbox = harn_vm::value::DictMap::new();
-    sandbox.put_str("kind", sandbox_kind());
-    sandbox.insert(
-        harn_vm::value::intern_key("enforced"),
-        VmValue::Bool(matches!(
-            reporting,
-            harn_vm::process_sandbox::ProcessSandboxDenialReporting::InferredOnly
-        )),
-    );
-    sandbox.put_str("denial_reporting", reporting.as_str());
-    sandbox
+pub(crate) fn sandbox_response(report: &harn_vm::process_sandbox::ProcessSandboxReport) -> VmValue {
+    harn_vm::value::json::json_to_vm_value(
+        &serde_json::to_value(report).expect("typed process sandbox report"),
+    )
 }
 
 fn decode_status(status: process_handle::ExitStatus) -> (i32, Option<String>) {

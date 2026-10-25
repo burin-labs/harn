@@ -68,6 +68,7 @@ mod scan;
 mod self_toolchain;
 mod serve;
 mod session;
+mod signals;
 mod skill;
 mod skills;
 mod supervisor;
@@ -225,7 +226,7 @@ pub(crate) use provider::{ProviderPortableOptionArg, ProviderToolProbeModeArg};
 pub(crate) use providers::{
     ProviderCatalogCommand, ProvidersExportArgs, ProvidersGenerateArgs, ProvidersMatrixArgs,
     ProvidersOverlayAuditArgs, ProvidersRecommendArgs, ProvidersRefreshArgs, ProvidersSupportArgs,
-    ProvidersValidateArgs,
+    ProvidersUpdateSourceArgs, ProvidersValidateArgs,
 };
 pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use routes::RoutesArgs;
@@ -247,6 +248,10 @@ pub(crate) use session::{
     SessionArgs, SessionCheckpointArgs, SessionCommand, SessionExportArgs, SessionImportArgs,
     SessionListArgs, SessionPublicationEvidenceArgs, SessionSchemaArgs, SessionValidateArgs,
     SessionViewFixturesArgs,
+};
+pub(crate) use signals::{
+    SignalSeverityArg, SignalSignatureArg, SignalsArgs, SignalsCommand, SignalsFireArgs,
+    SignalsHookArgs, SignalsHookEvent, SignalsHookFormat,
 };
 pub(crate) use skill::{
     SkillArgs, SkillCommand, SkillEndorseArgs, SkillKeyCommand, SkillKeyGenerateArgs,
@@ -382,6 +387,9 @@ SCRIPTING
     Tokens(TokensArgs),
     /// Inspect, validate, and emit schemas for layered Harn runtime config.
     Config(ConfigArgs),
+    /// Route ambient alerts (CI red, production alerts, ...) into running agent
+    /// sessions through a per-machine inbox, and act as their delivery hook.
+    Signals(SignalsArgs),
     /// Explain a diagnostic. Pass a stable `HARN-<CAT>-<NNN>` code
     /// (optionally with `--json` for the structured envelope), or the
     /// legacy `--invariant <NAME> <FUNCTION> <FILE>` form to walk the
@@ -393,11 +401,16 @@ SCRIPTING
     Contracts(ContractsArgs),
     /// Lint .harn files or directories for common issues.
     Lint(PathTargetsArgs),
-    /// Format .harn files or directories.
+    /// Format .harn and .harn.txt source files or directories.
     Fmt(FmtArgs),
     /// Manage downloadable on-device injection-detection models (Layer 2).
     Guard(GuardArgs),
     /// Run user tests or the conformance suite.
+    ///
+    /// Directory scans honor .gitignore and .agentignore and skip generated
+    /// files and runtime state such as .harn. Hidden source folders and
+    /// ordinary vendor folders remain eligible. Explicit file paths and
+    /// directory roots remain selectable.
     Test(TestArgs),
     /// Run a .harn script under a hermetic testbench (paused clock,
     /// optional LLM/process tapes, fs overlay, deny-by-default network).

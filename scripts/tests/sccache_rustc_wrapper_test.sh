@@ -8,8 +8,10 @@ trap 'rm -rf "$tmp_root"' EXIT
 wrapper_source="$repo_root/scripts/sccache_rustc_wrapper.rs"
 wrapper_binary="$tmp_root/harn-sccache-wrapper"
 wrapper_tests="$tmp_root/harn-sccache-wrapper-tests"
+native_windows=0
 case "${OS:-$(uname -s)}" in
   Windows_NT | MINGW* | MSYS* | CYGWIN*)
+    native_windows=1
     wrapper_binary="${wrapper_binary}.exe"
     wrapper_tests="${wrapper_tests}.exe"
     ;;
@@ -19,10 +21,7 @@ rustc --edition=2021 --test "$wrapper_source" -o "$wrapper_tests"
 "$wrapper_tests"
 rustc --edition=2021 "$wrapper_source" -o "$wrapper_binary"
 
-if [[ "${OS:-$(uname -s)}" != Windows_NT \
-  && "${OS:-$(uname -s)}" != MINGW* \
-  && "${OS:-$(uname -s)}" != MSYS* \
-  && "${OS:-$(uname -s)}" != CYGWIN* ]]; then
+if [[ "$native_windows" == 0 ]]; then
   lifecycle_bin="$tmp_root/lifecycle-bin"
   lifecycle_ready="$tmp_root/lifecycle-ready"
   lifecycle_release="$tmp_root/lifecycle-release"
@@ -95,21 +94,32 @@ RS
 # repository-policy lane installs no compiler cache), stand up a forwarding
 # stub rather than skipping: a probe that quietly does not run is the one
 # result this test must never produce.
-probe_path="$PATH"
+probe_bin="$tmp_root/probe-bin"
+mkdir -p "$probe_bin"
 if sccache_binary=$(command -v sccache 2>/dev/null); then
   probe_sccache="installed at $sccache_binary"
 else
-  stub_bin="$tmp_root/stub-bin"
-  mkdir -p "$stub_bin"
-  cat > "$stub_bin/sccache" <<'SH'
+  sccache_binary=""
+  probe_sccache="absent; forwarding compiler probe"
+fi
+export HARN_TEST_SCCACHE="$sccache_binary"
+cat > "$probe_bin/sccache" <<'SH'
 #!/usr/bin/env bash
-# Stands in for sccache: run the compiler it was handed, cache nothing.
+compiler="${1//\\//}"
+case "${compiler##*/}" in
+  rustc | rustc.exe | clippy-driver | clippy-driver.exe) ;;
+  *)
+    echo "sccache must receive the real compiler after workspace flags are applied" >&2
+    exit 1
+    ;;
+esac
+if [[ -n "$HARN_TEST_SCCACHE" ]]; then
+  exec "$HARN_TEST_SCCACHE" "$@"
+fi
 exec "$@"
 SH
-  chmod +x "$stub_bin/sccache"
-  probe_path="$stub_bin:$PATH"
-  probe_sccache="absent; forwarding stub at $stub_bin/sccache"
-fi
+chmod +x "$probe_bin/sccache"
+probe_path="$probe_bin:$PATH"
 echo "sccache_rustc_wrapper_test: real Cargo probe sccache $probe_sccache"
 
 output="$tmp_root/cargo-output.txt"
@@ -138,6 +148,44 @@ if ! grep -Fq 'harn-sccache-wrapper: route=sccache' "$output"; then
   echo "real Cargo probe did not preserve sccache for ordinary compilation" >&2
   cat "$output" >&2
   exit 1
+fi
+
+if [[ "$native_windows" == 0 ]]; then
+  cat > "$fixture/src/lib.rs" <<'RS'
+pub const WORKSPACE_BOOTSTRAP: &str = env!("RUSTC_BOOTSTRAP");
+
+#[test]
+fn workspace_wrapper_reached_compilation() {
+    assert_eq!(WORKSPACE_BOOTSTRAP, "1");
+}
+RS
+  workspace_output="$tmp_root/workspace-cargo-output.txt"
+  if ! PATH="$probe_path" \
+    CARGO_TARGET_DIR="$tmp_root/workspace-target" \
+    CARGO_INCREMENTAL=0 \
+    RUSTC_WRAPPER="$wrapper_binary" \
+    RUSTC_WORKSPACE_WRAPPER="$repo_root/scripts/rustc_frontend_wrapper.sh" \
+    HARN_RUSTC_FRONTEND_THREADS=2 \
+    HARN_SCCACHE_WRAPPER_TRACE=1 \
+    HARN_ALLOW_RAW_CARGO=1 \
+    cargo test --manifest-path "$fixture/Cargo.toml" --lib --test binary_env -vv \
+    > "$workspace_output" 2>&1; then
+    echo "real Cargo probe failed with the workspace and cache wrappers composed" >&2
+    cat "$workspace_output" >&2
+    exit 1
+  fi
+  if ! grep -Fq 'workspace_wrapper_reached_compilation ... ok' "$workspace_output"; then
+    echo "workspace wrapper did not reach the actual library test" >&2
+    cat "$workspace_output" >&2
+    exit 1
+  fi
+  if ! grep -Fq 'cargo_binary_environment_reached_rustc ... ok' "$workspace_output"; then
+    echo "workspace wrapper lost the direct Cargo binary environment" >&2
+    cat "$workspace_output" >&2
+    exit 1
+  fi
+else
+  echo "sccache_rustc_wrapper_test: workspace shell wrapper is disabled on native Windows"
 fi
 
 echo "sccache_rustc_wrapper_test: ok"

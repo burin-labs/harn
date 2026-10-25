@@ -1047,19 +1047,19 @@ fn canonical_request_message(method: &str, path: &str, timestamp: &str, body: &[
     )
 }
 
-pub(crate) fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {
+pub fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(data);
     mac.finalize().into_bytes().to_vec()
 }
 
-pub(crate) fn hmac_sha1(secret: &[u8], data: &[u8]) -> Vec<u8> {
+pub fn hmac_sha1(secret: &[u8], data: &[u8]) -> Vec<u8> {
     let mut mac = Hmac::<sha1::Sha1>::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(data);
     mac.finalize().into_bytes().to_vec()
 }
 
-pub(crate) fn secure_eq(expected: &[u8], provided: &[u8]) -> bool {
+pub fn secure_eq(expected: &[u8], provided: &[u8]) -> bool {
     expected.ct_eq(provided).into()
 }
 

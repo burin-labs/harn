@@ -103,7 +103,7 @@ mod imp {
     /// engine, but no default host I/O.
     fn sandbox_vm() -> harn_vm::Vm {
         let mut vm = harn_vm::new_vm();
-        harn_vm::register_vm_stdlib(&mut vm);
+        harn_runtime::register_vm_stdlib(&mut vm);
         harn_rules_hostlib::install(&mut vm);
         vm
     }
@@ -359,7 +359,7 @@ mod imp {
         }
 
         fn s(text: &str) -> VmValue {
-            VmValue::String(arcstr::ArcStr::from(text))
+            VmValue::string(text)
         }
 
         #[test]
@@ -386,14 +386,14 @@ mod imp {
 
         #[test]
         fn maps_a_rules_diagnostics_envelope() {
-            let diagnostics = VmValue::List(Arc::new(vec![finding(&[
+            let diagnostics = VmValue::list(vec![finding(&[
                 ("message", s("delegated")),
                 ("rule_id", s("structural-rule")),
                 ("severity", s("info")),
                 ("start_row", VmValue::Int(4)),
                 ("start_col", VmValue::Int(2)),
                 ("end_row", VmValue::Int(5)),
-            ])]));
+            ])]);
             let mut out = Vec::new();
             map_return(
                 "script-rule",

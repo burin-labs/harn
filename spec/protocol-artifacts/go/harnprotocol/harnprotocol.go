@@ -49,20 +49,18 @@ type ACPAgentMethod string
 // ACPAgentMethods enumerates every wire value Harn currently emits for ACPAgentMethod.
 var ACPAgentMethods = []ACPAgentMethod{
 	"initialize",
-	"session/inject",
+	"$/cancel_request",
 	"session/inject_host_event",
 	"session/new",
 	"session/inputs",
 	"session/load",
-	"session/replace_inject",
 	"session/resume",
 	"session/prompt",
-	"session/revoke_inject",
+	"session/pending_prompts",
 	"session/truncate",
 	"session/rollback",
 	"session/redo",
 	"session/remind",
-	"session/pending_injections",
 	"session/revoke_reminder",
 	"session/cancel_tool_call",
 	"session/close",
@@ -115,6 +113,7 @@ var ACPSessionUpdates = []ACPSessionUpdate{
 	"handoff",
 	"hitl_request",
 	"hitl_resolved",
+	"inference_speed",
 	"live_session_client",
 	"log",
 	"progress",
@@ -124,6 +123,7 @@ var ACPSessionUpdates = []ACPSessionUpdate{
 	"skill_narrow",
 	"skill_scope_tools",
 	"stance_transition",
+	"state_update",
 	"tool_search_query",
 	"tool_search_result",
 	"transcript_compacted",
@@ -142,6 +142,7 @@ var HarnACPSessionUpdateExtensions = []HarnACPSessionUpdateExtension{
 	"handoff",
 	"hitl_request",
 	"hitl_resolved",
+	"inference_speed",
 	"live_session_client",
 	"log",
 	"progress",
@@ -151,6 +152,7 @@ var HarnACPSessionUpdateExtensions = []HarnACPSessionUpdateExtension{
 	"skill_narrow",
 	"skill_scope_tools",
 	"stance_transition",
+	"state_update",
 	"tool_search_query",
 	"tool_search_result",
 	"transcript_compacted",
@@ -1308,6 +1310,29 @@ type ACPHitlResolvedUpdate struct {
 	Meta          ACPHitlResolvedUpdateMeta `json:"_meta"`
 }
 
+type ACPInferenceSpeedUpdateMetaHarn struct {
+	CallID                string   `json:"callId"`
+	Provider              string   `json:"provider"`
+	Model                 string   `json:"model"`
+	Phase                 string   `json:"phase"`
+	IsFinal               bool     `json:"isFinal"`
+	ElapsedMs             uint64   `json:"elapsedMs"`
+	OutputTokens          uint64   `json:"outputTokens"`
+	TokenSource           string   `json:"tokenSource"`
+	OutputTokensPerSecond *float64 `json:"outputTokensPerSecond,omitempty"`
+	Replayed              *bool    `json:"replayed,omitempty"`
+	TimeToFirstTokenMs    *uint64  `json:"timeToFirstTokenMs,omitempty"`
+}
+
+type ACPInferenceSpeedUpdateMeta struct {
+	Harn ACPInferenceSpeedUpdateMetaHarn `json:"harn"`
+}
+
+type ACPInferenceSpeedUpdate struct {
+	SessionUpdate string                      `json:"sessionUpdate"`
+	Meta          ACPInferenceSpeedUpdateMeta `json:"_meta"`
+}
+
 type ACPLiveSessionClientUpdateMetaHarn struct {
 	Action   string          `json:"action"`
 	State    json.RawMessage `json:"state"`
@@ -1468,6 +1493,22 @@ type ACPStanceTransitionUpdateMeta struct {
 type ACPStanceTransitionUpdate struct {
 	SessionUpdate string                        `json:"sessionUpdate"`
 	Meta          ACPStanceTransitionUpdateMeta `json:"_meta"`
+}
+
+type ACPStateUpdateMetaHarn struct {
+	Replayed *bool `json:"replayed,omitempty"`
+}
+
+type ACPStateUpdateMeta struct {
+	Harn *ACPStateUpdateMetaHarn `json:"harn,omitempty"`
+}
+
+type ACPStateUpdate struct {
+	SessionUpdate string              `json:"sessionUpdate"`
+	State         string              `json:"state"`
+	Meta          *ACPStateUpdateMeta `json:"_meta,omitempty"`
+	Error         json.RawMessage     `json:"error,omitempty"`
+	StopReason    *string             `json:"stopReason,omitempty"`
 }
 
 type ACPToolSearchQueryUpdateMetaHarn struct {

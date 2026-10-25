@@ -5,6 +5,7 @@
 //! opaque "execute code" blob, so policy, transcript, replay, and host approval
 //! surfaces can keep reasoning about each child call normally.
 
+use crate::value::VmDictExt as _;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
@@ -1056,7 +1057,7 @@ fn register_composition_map_bounded_builtin(vm: &mut Vm, runtime: CompositionRun
                         results[index] = Some(VmValue::enum_variant(
                             "Result",
                             "Err",
-                            vec![VmValue::String(arcstr::ArcStr::from(error.to_string()))],
+                            vec![VmValue::string(error.to_string())],
                         ));
                     }
                 }
@@ -1071,9 +1072,9 @@ fn register_composition_map_bounded_builtin(vm: &mut Vm, runtime: CompositionRun
             }
 
             let mut dict = BTreeMap::new();
-            dict.insert(
-                "results".to_string(),
-                VmValue::List(std::sync::Arc::new(
+            dict.put(
+                "results",
+                VmValue::list(
                     results
                         .into_iter()
                         .map(|value| {
@@ -1081,17 +1082,17 @@ fn register_composition_map_bounded_builtin(vm: &mut Vm, runtime: CompositionRun
                                 VmValue::enum_variant(
                                     "Result",
                                     "Err",
-                                    vec![VmValue::String(arcstr::ArcStr::from(
+                                    vec![VmValue::string(
                                         "map_bounded: task did not produce a result",
-                                    ))],
+                                    )],
                                 )
                             })
                         })
                         .collect(),
-                )),
+                ),
             );
-            dict.insert("succeeded".to_string(), VmValue::Int(succeeded));
-            dict.insert("failed".to_string(), VmValue::Int(failed));
+            dict.put_int("succeeded", succeeded);
+            dict.put_int("failed", failed);
             Ok(VmValue::dict(dict))
         }
     });

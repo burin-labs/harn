@@ -219,7 +219,7 @@ impl DialectContract {
     /// Reading the sent value back out of the body keeps it the bytes the
     /// provider receives instead of a second copy of the dialect table.
     pub(crate) fn build_request_body(self, request: &LlmRequestPayload) -> serde_json::Value {
-        let body = self.lower_request_body(request);
+        let body = self.encode_request_body(request);
         self.record_request_body(request, &body);
         body
     }
@@ -239,7 +239,7 @@ impl DialectContract {
                 request, caps,
             )
         } else {
-            self.lower_request_body(request)
+            self.encode_request_body(request)
         };
         self.record_request_body(request, &body);
         body
@@ -327,7 +327,8 @@ impl DialectContract {
         );
     }
 
-    fn lower_request_body(self, request: &LlmRequestPayload) -> serde_json::Value {
+    /// Encode a request without recording provider-call evidence.
+    pub(crate) fn encode_request_body(self, request: &LlmRequestPayload) -> serde_json::Value {
         match self.wire {
             WireDialect::Anthropic => {
                 crate::llm::providers::AnthropicProvider::build_request_body(request)

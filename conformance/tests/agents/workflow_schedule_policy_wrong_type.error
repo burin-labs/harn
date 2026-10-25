@@ -1,0 +1,1 @@
+expected WorkflowJoinConfig?, found {node: {join_policy: {min_completed: string}}}

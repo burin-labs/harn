@@ -101,7 +101,7 @@ type ApprovalRequestOptions = {
 
 Emit an approval request and wait for a quorum of approving reviewers.
 
-- `quorum` defaults to `1`.
+- `quorum` defaults to `1` and must be between `1` and `4294967295`.
 - `deadline` defaults to 24 hours.
 - If `reviewers` is omitted, any authorized reviewer may approve.
 - `args` is the canonical host-rendered argument payload. When omitted, Harn

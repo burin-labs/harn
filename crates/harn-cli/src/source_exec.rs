@@ -238,7 +238,7 @@ pub(crate) async fn execute_with_skill_dirs_and_options(
     local
         .run_until(scope_source_execution(execution_policy, async {
             let mut vm = harn_vm::new_vm();
-            harn_vm::register_vm_stdlib(&mut vm);
+            harn_runtime::register_vm_stdlib(&mut vm);
             install_default_hostlib(&mut vm);
             // Compiling for trusted host dispatch only lowers the call; the VM
             // still refuses it at runtime unless the same authority is enabled

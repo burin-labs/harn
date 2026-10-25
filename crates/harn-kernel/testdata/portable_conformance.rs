@@ -6,7 +6,78 @@ pub struct PureCase {
     pub expected_json: &'static str,
 }
 
+const REGEX_ERROR_SOURCE: &str = r#"
+    fn inspect(input: string) {
+      const matched = try { regex_match(input, "x"); false } catch (_) { true }
+      const replaced = try { regex_replace(input, "y", "x"); false } catch (_) { true }
+      const captured = try { regex_captures(input, "x"); false } catch (_) { true }
+      const split = try { regex_split("x", input); false } catch (_) { true }
+      return [
+        matched,
+        replaced,
+        captured,
+        split,
+      ]
+    }
+"#;
+
 pub const PURE_CASES: &[PureCase] = &[
+    PureCase {
+        id: "hex-input-errors-are-catchable",
+        source: "fn inspect(input: string) { return try { hex_decode(input); false } catch (_) { true } }",
+        entry: "inspect",
+        input_json: r#""not-hex""#,
+        expected_json: "true",
+    },
+    PureCase {
+        id: "regex-input-errors-are-catchable",
+        source: REGEX_ERROR_SOURCE,
+        entry: "inspect",
+        input_json: r#""[""#,
+        expected_json: "[true,true,true,true]",
+    },
+    PureCase {
+        id: "valid-regex-inputs-do-not-throw",
+        source: REGEX_ERROR_SOURCE,
+        entry: "inspect",
+        input_json: r#""x""#,
+        expected_json: "[false,false,false,false]",
+    },
+    PureCase {
+        id: "hashed-secret-scan-refuses-an-empty-policy",
+        source: r#"
+            fn scan(input: string) {
+              try { secret_scan(input, []) }
+              catch (error) { return to_string(error).contains("hashes must be a nonempty list") }
+              return false
+            }
+        "#,
+        entry: "scan",
+        input_json: r#""clean""#,
+        expected_json: "true",
+    },
+    PureCase {
+        id: "hashed-secret-scan-keeps-locations-without-disclosing-tokens",
+        source: r#"
+            fn scan(input: string) {
+              const findings = secret_scan(input, [sha256("synthetic.private")])
+              let output = []
+              for finding in findings {
+                output = output + [{
+                  line: finding.line,
+                  column: finding.column_start,
+                  end: finding.column_end,
+                  redacted: finding.redacted,
+                  correct_digest: finding.fingerprint == sha256("synthetic.private"),
+                }]
+              }
+              return output
+            }
+        "#,
+        entry: "scan",
+        input_json: r#""λ SYNTHETIC.PRIVATE\nsynthetic.private.invalid synthetic.private""#,
+        expected_json: r#"[{"line":1,"column":3,"end":20,"redacted":"[hash match]","correct_digest":true},{"line":2,"column":27,"end":44,"redacted":"[hash match]","correct_digest":true}]"#,
+    },
     PureCase {
         id: "truthiness-empty-bytes",
         source: r"
@@ -414,6 +485,37 @@ pub const PURE_CASES: &[PureCase] = &[
         expected_json: r#"{"host":"C:/workspace/.harn/state.json","reset":"/absolute/file"}"#,
     },
     PureCase {
+        id: "compiled-secret-pattern-catalog",
+        source: r#"
+            fn inspect(input: string) {
+              const catalog = secret_pattern_catalog()
+              let high_count = 0
+              let contextual = false
+              let detector = ""
+              let pattern = ""
+              for row in catalog {
+                if row.precision == "high" { high_count = high_count + 1 }
+                if row.precision == "heuristic" { contextual = true }
+                if row.detector == "aws-access-key-id" {
+                  detector = row.detector
+                  pattern = row.regex
+                }
+              }
+              if pattern == "" { throw "missing AWS detector" }
+              return {
+                measured: high_count >= 10,
+                contextual: contextual,
+                detector: detector,
+                accepted: regex_match(pattern, "AKIA" + input) != nil,
+                rejected: regex_match(pattern, "ordinary text") == nil,
+              }
+            }
+        "#,
+        entry: "inspect",
+        input_json: r#""ABCDEFGHIJKLMNOP""#,
+        expected_json: r#"{"accepted":true,"contextual":true,"detector":"aws-access-key-id","measured":true,"rejected":true}"#,
+    },
+    PureCase {
         id: "result-enum-match-and-propagation",
         source: r#"
             fn divide(value: int, divisor: int) -> Result<int, string> {
@@ -531,6 +633,13 @@ pub struct RuntimeFailureCase {
 }
 
 pub const RUNTIME_FAILURE_CASES: &[RuntimeFailureCase] = &[
+    RuntimeFailureCase {
+        id: "catch-cannot-bypass-a-value-limit",
+        source: r#"fn repeat(input: string) { try { return input * 1048577 } catch (_) { return "caught" } }"#,
+        entry: "repeat",
+        input_json: r#""x""#,
+        expected_code: "value_byte_limit",
+    },
     RuntimeFailureCase {
         id: "string-repetition-rejects-output-over-byte-limit",
         source: r"fn repeat(input: {text: string, count: int}) { return input.text * input.count }",

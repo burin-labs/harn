@@ -34,8 +34,8 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Security: The arguments for command must be redacted since they can be sensitive
         let command = self.0.as_ref();
-        match command.find(char::is_whitespace) {
-            Some(index) => write!(f, "{} ** arguments redacted **", &command[0..index]),
+        match command.split_once(char::is_whitespace) {
+            Some((program, _)) => write!(f, "{program} ** arguments redacted **"),
             None => write!(f, "{command}"),
         }
     }

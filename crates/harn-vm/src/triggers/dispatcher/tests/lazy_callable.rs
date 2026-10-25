@@ -65,15 +65,13 @@ async fn lazy_dispatcher(
 
 #[tokio::test(flavor = "current_thread")]
 async fn lazy_module_shares_state_and_handler_observes_dispatch_context() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            crate::reset_thread_local_state();
-            let dir = tempfile::tempdir().expect("tempdir");
-            let module_path = dir.path().join("lazy_handler.harn");
-            std::fs::write(
-                &module_path,
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        crate::reset_thread_local_state();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let module_path = dir.path().join("lazy_handler.harn");
+        std::fs::write(
+            &module_path,
+            r#"
 import "std/triggers"
 
 let counter = 0
@@ -87,111 +85,105 @@ pub fn local_fn(harness: Harness, _event: TriggerEvent) -> dict {
   return {count: counter, action: harness.runtime.handler_context().action}
 }
 "#,
-            )
-            .expect("write lazy handler module");
-            let dispatcher = lazy_dispatcher(
-                &module_path,
-                crate::AutonomyTier::ActAuto,
-                Some("should_handle"),
+        )
+        .expect("write lazy handler module");
+        let dispatcher = lazy_dispatcher(
+            &module_path,
+            crate::AutonomyTier::ActAuto,
+            Some("should_handle"),
+        )
+        .await;
+
+        for (delivery, expected_count) in [("delivery-lazy-1", 1), ("delivery-lazy-2", 2)] {
+            let outcomes = dispatcher
+                .dispatch_event(trigger_event("issues.opened", delivery))
+                .await
+                .expect("lazy trigger dispatch succeeds");
+            assert_eq!(outcomes.len(), 1);
+            let lifecycle = read_topic(
+                dispatcher.event_log.clone(),
+                crate::TRIGGERS_LIFECYCLE_TOPIC,
             )
             .await;
-
-            for (delivery, expected_count) in [("delivery-lazy-1", 1), ("delivery-lazy-2", 2)] {
-                let outcomes = dispatcher
-                    .dispatch_event(trigger_event("issues.opened", delivery))
-                    .await
-                    .expect("lazy trigger dispatch succeeds");
-                assert_eq!(outcomes.len(), 1);
-                let lifecycle = read_topic(
-                    dispatcher.event_log.clone(),
-                    crate::TRIGGERS_LIFECYCLE_TOPIC,
-                )
-                .await;
-                let predicate_evaluations = lifecycle
-                    .iter()
-                    .filter(|(_, event)| event.kind == "predicate.evaluated")
-                    .map(|(_, event)| event.payload.clone())
-                    .collect::<Vec<_>>();
-                assert_eq!(
-                    outcomes[0].status,
-                    DispatchStatus::Succeeded,
-                    "outcome={:?}, predicate_evaluations={predicate_evaluations:?}",
-                    outcomes[0]
-                );
-                let result = outcomes[0].result.as_ref().expect("handler result");
-                assert_eq!(result["count"], expected_count);
-                assert!(result["action"].as_str().is_some());
-            }
-        })
-        .await;
+            let predicate_evaluations = lifecycle
+                .iter()
+                .filter(|(_, event)| event.kind == "predicate.evaluated")
+                .map(|(_, event)| event.payload.clone())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                outcomes[0].status,
+                DispatchStatus::Succeeded,
+                "outcome={:?}, predicate_evaluations={predicate_evaluations:?}",
+                outcomes[0]
+            );
+            let result = outcomes[0].result.as_ref().expect("handler result");
+            assert_eq!(result["count"], expected_count);
+            assert!(result["action"].as_str().is_some());
+        }
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn lazy_initializer_observes_dispatch_capability_policy() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            crate::reset_thread_local_state();
-            let dir = tempfile::tempdir().expect("tempdir");
-            let module_path = dir.path().join("policy_handler.harn");
-            std::fs::write(
-                &module_path,
-                r"
+    harn_clock::test_support::with_local_tasks(async {
+        crate::reset_thread_local_state();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let module_path = dir.path().join("policy_handler.harn");
+        std::fs::write(
+            &module_path,
+            r"
 let initialized_policy = __test_current_policy()
 
 pub fn local_fn(_harness: Harness, _event: TriggerEvent) -> string {
   return initialized_policy
 }
 ",
-            )
-            .expect("write policy handler module");
-            let dispatcher =
-                lazy_dispatcher(&module_path, crate::AutonomyTier::Suggest, None).await;
+        )
+        .expect("write policy handler module");
+        let dispatcher = lazy_dispatcher(&module_path, crate::AutonomyTier::Suggest, None).await;
 
-            let outcomes = dispatcher
-                .dispatch_event(trigger_event("issues.opened", "delivery-policy"))
-                .await
-                .expect("policy observation dispatch succeeds");
-            assert_eq!(outcomes.len(), 1);
-            assert_eq!(outcomes[0].status, DispatchStatus::Succeeded);
-            assert_eq!(outcomes[0].result, Some(serde_json::json!("read_only")));
-        })
-        .await;
+        let outcomes = dispatcher
+            .dispatch_event(trigger_event("issues.opened", "delivery-policy"))
+            .await
+            .expect("policy observation dispatch succeeds");
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].status, DispatchStatus::Succeeded);
+        assert_eq!(outcomes[0].result, Some(serde_json::json!("read_only")));
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn lazy_handler_observes_preexisting_dispatch_cancellation() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            crate::reset_thread_local_state();
-            let dir = tempfile::tempdir().expect("tempdir");
-            let module_path = dir.path().join("cancel_handler.harn");
-            let marker = dir.path().join("cancel-marker.txt");
-            std::fs::write(
-                &module_path,
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        crate::reset_thread_local_state();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let module_path = dir.path().join("cancel_handler.harn");
+        let marker = dir.path().join("cancel-marker.txt");
+        std::fs::write(
+            &module_path,
+            r#"
 pub fn local_fn(harness: Harness, _event: TriggerEvent) -> string {
   harness.fs.write_text("cancel-marker.txt", "initialized")
   return "handled"
 }
 "#,
-            )
-            .expect("write cancel handler module");
-            let dispatcher =
-                lazy_dispatcher(&module_path, crate::AutonomyTier::ActAuto, None).await;
-            dispatcher.shutdown();
+        )
+        .expect("write cancel handler module");
+        let dispatcher = lazy_dispatcher(&module_path, crate::AutonomyTier::ActAuto, None).await;
+        dispatcher.shutdown();
 
-            let outcomes = dispatcher
-                .dispatch_event(trigger_event("issues.opened", "delivery-cancel"))
-                .await
-                .expect("cancelled dispatch is recorded");
-            assert_eq!(outcomes.len(), 1);
-            assert_eq!(outcomes[0].status, DispatchStatus::Cancelled);
-            assert!(
-                !marker.exists(),
-                "handler ran after cancellation was installed"
-            );
-        })
-        .await;
+        let outcomes = dispatcher
+            .dispatch_event(trigger_event("issues.opened", "delivery-cancel"))
+            .await
+            .expect("cancelled dispatch is recorded");
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].status, DispatchStatus::Cancelled);
+        assert!(
+            !marker.exists(),
+            "handler ran after cancellation was installed"
+        );
+    })
+    .await;
 }

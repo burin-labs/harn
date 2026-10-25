@@ -1,0 +1,27 @@
+import { parse_env } from "std/config"
+
+pipeline test_literal_environment_files_are_complete_and_never_execute(harness: Harness) {
+  const parsed = unwrap(
+    parse_env(
+      "# comment\r\nexport KEY='first'\nKEY=\"last=value\"\nEMPTY=\nSHELL=$(touch sentinel)\nREF=$KEY\n",
+    ),
+  )
+  assert_eq(parsed["KEY"], "last=value")
+  assert_eq(parsed["EMPTY"], "")
+  assert_eq(parsed["SHELL"], "$(touch sentinel)")
+  assert_eq(parsed["REF"], "$KEY")
+  assert_eq(len(parsed), 4)
+  assert_eq(len(unwrap(parse_env("# only comments\n"))), 0)
+  for text in [
+    "TOKEN=public-canary\nnot-an-assignment",
+    "TOKEN=public-canary\nBAD KEY=value",
+    "TOKEN=public-canary\nOPEN='unfinished",
+    json_parse(r#""TOKEN=public-canary\nNUL=\u0000""#),
+  ] {
+    const result = parse_env(text)
+    assert(is_err(result))
+    assert_eq(unwrap_err(result).line, 2)
+    assert(!json_stringify(unwrap_err(result)).contains("public-canary"))
+  }
+  harness.stdio.println("Literal environment parsing passed")
+}

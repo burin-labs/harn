@@ -834,7 +834,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\ntrue\n"
             .capability_response(
                 harn_builtin_meta::CapabilityId::Interaction,
                 "ask",
-                crate::VmValue::String(arcstr::ArcStr::from("yes")),
+                crate::VmValue::string("yes"),
             )
             .capability_response(
                 harn_builtin_meta::CapabilityId::Project,
@@ -1168,10 +1168,7 @@ fn main(harness: Harness) {
 
     #[test]
     fn runtime_effect_receipt_comes_from_the_capability_contract() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = harn_clock::test_support::current_thread_runtime();
         let effects = rt.block_on(async {
             let source = r#"fn main(harness: Harness) { harness.stdio.println("record me") }"#;
             harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
@@ -1194,14 +1191,8 @@ fn main(harness: Harness) {
     }
 
     fn run_harness_source(source: &str, harness: Harness) -> Result<String, String> {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(async move {
-            let local = tokio::task::LocalSet::new();
-            local
-                .run_until(async move {
+        let rt = harn_clock::test_support::current_thread_runtime();
+        rt.block_on(harn_clock::test_support::with_local_tasks(async move {
                     let chunk = crate::compile_source(source)?;
                     let mut vm = crate::new_vm();
                     crate::stdlib::register_vm_stdlib(&mut vm);
@@ -1210,8 +1201,6 @@ fn main(harness: Harness) {
                         .await
                         .map_err(|error| error.to_string())?;
                     Ok(vm.output().to_string())
-                })
-                .await
-        })
+                }))
     }
 }

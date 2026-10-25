@@ -790,15 +790,40 @@ Backed by the `harness.code_index.rename_symbol` builtin (issue
 
 | Field | Required | Notes |
 |---|---|---|
-| `symbol_ref` | yes | `{name, path, line?, kind?}`. `line` (1-based) and `kind` (`"Function" \| "Type" \| "Module"`) disambiguate when several symbols in the workspace share a name. |
+| `symbol_ref` | yes | `{name, path, line?, col?, kind?}`. `name` is a bare declaration name or an exact `qualified_name` or `receiver_qualified_name` from the index, such as `Store.load` or `app.Store.load`. `path` is the exact defining path unless `.` searches the workspace. `line` and `col` point at the declaration name; coordinates are 1-based, and `col` counts UTF-16 code units. Every supplied constraint must match the same declaration. `kind` (`"Function" \| "Type" \| "Module"`) narrows the declaration kind. |
 | `new_name` | yes | Replacement identifier. Must be a valid identifier token and differ from `symbol_ref.name`. |
 | `scope` | yes | `"file"` \| `"module"` \| `"workspace"`. `file` and `module` are aliases today (one Module node per file); `workspace` adds every indexed file that declares the name or contains it as a whole word; each file is then parsed so only identifier occurrences change. |
 | `session_id` | no | Routes reads + writes through staged-fs (#1722). |
 | `dry_run` | no | When `true`, the host validates end-to-end (parse, conflict, syntax) and returns the planned edits without writing. |
 | `validate` | no, default `true` | Re-parse every rewritten file; reject on ERROR / MISSING nodes. |
+| `proof` | no, default `false` | Return bounded edit excerpts and a syntax reading for each compared file. |
+
+### Optional edit evidence
+
+The code-index rename, move, extract and signature operations accept `proof: true`.
+Their successful result then carries `proof.schema: "harn.edit_proof.v1"`.
+Every file has a syntax status: `passed`, `failed` or `unavailable`. A parser
+failure cannot produce `passed`. This reading uses tree-sitter and its grammar
+fitness receipt; it does not certify compilation or tests.
+
+The evidence counts every edit site and includes up to twelve excerpts across
+the result, each limited to 180 characters. `omitted_sites` records the rest.
+Line anchors are one-based and count `\n` breaks. CRLF is one line ending;
+a bare `\r` remains source content. A changed-site `before` or `after` excerpt
+starts at its anchored line and preserves the bytes within that bounded prefix,
+including any line endings. Preserved-name `text` is a bounded prefix of its
+final source line and can omit the line terminator.
+`site_kind: "edits"` counts exact edit spans, which can replace whole blocks;
+it is not a reference count. Preserved namesakes have `status: "checked"` only
+when the binding engine resolved them to other declarations. `unavailable`
+and a null count mean no such claim was measured. `semantics.status` is
+`not_run`; the tool does not launch a project command.
+
+The enclosing `applied` and `dry_run` fields describe whether files were written
+or only planned. A staged filesystem session can defer persistence until commit.
 
 Supported languages (first batch): Harn, Rust, TypeScript/TSX, JavaScript/JSX,
-Python, Swift, Go. Other languages return `result ==
+Python, Swift, Go, and Java methods. Other languages return `result ==
 "unsupported_language"` instead of silently misrewriting.
 
 The host must prove that every occurrence belongs to the selected declaration
@@ -809,6 +834,24 @@ unresolved imports, receiver members, dynamic class namespaces, macros and
 escaped or normalized identifiers can also require a binding-aware LSP rename.
 These cases return `ambiguous_symbol` with an explanation in `details` and
 leave every file unchanged.
+
+Java methods use declared field, parameter, and local types, explicit imports,
+and `this.field` to separate calls on unrelated classes. Comments and strings
+stay unchanged. Unknown receivers, inferred types, patterns, inheritance,
+interface contracts, method references, and overloads can require a language
+server and return `ambiguous_symbol` before any write. A definition selector
+chooses the method; it does not prove these unresolved caller bindings.
+Java rename also requires a final declaring type or a private method, and
+refuses new names that may change an Object method contract.
+Ambiguous results include declaration metadata in `warnings`: `symbol`,
+`qualified_name`, `path`, `line`, `col`, and `kind`. In every language
+`symbol` equals `qualified_name`, such as `First.load`, so it can be passed
+back as `symbol_ref.name`.
+`ambiguity_reason: "multiple_definition_seeds"` means a selector can choose a
+definition. `unresolved_reference_binding` means a caller binding remains
+unknown after selection; its candidate metadata does not provide a safe retry.
+Other result tags have a null reason. A null candidate
+column means the declaration name position is unavailable.
 
 ### Result tags
 
@@ -1098,7 +1141,7 @@ The three parameter refactorings take `harness.code_index` instead of the
 site across the indexed workspace and returns its own tagged result
 in `rename_symbol`'s envelope (`applied` with `dry_run`, `no_match`,
 `ambiguous_symbol`, plus `parameter_in_use | value_reference |
-unsupported_call_site | overrides_present`) with the rewritten or blocking
+unsupported_call_site | overrides_present | fixed_signature`) with the rewritten or blocking
 `sites`. Rebuild the index (`harness.code_index.rebuild`)
 before calling them.
 

@@ -6,7 +6,7 @@ use crate::vm::AsyncBuiltinCtx;
 use super::bridge::HOST_CALL_BRIDGE;
 use super::process_exec::{dispatch_process_exec_after_policy, process_exec_argv};
 
-pub(crate) async fn dispatch_process_exec(
+pub async fn dispatch_process_exec(
     params: &crate::value::DictMap,
     caller: JsonValue,
 ) -> Result<VmValue, VmError> {
@@ -19,7 +19,7 @@ pub(crate) async fn dispatch_process_exec(
 ///
 /// The caller is crate-private and this boundary validates its argv again, so
 /// a Harn script cannot relabel arbitrary `process.exec` input as reviewed.
-pub(crate) async fn dispatch_reviewed_git_push_with_lease(
+pub async fn dispatch_reviewed_git_push_with_lease(
     params: &crate::value::DictMap,
     caller: JsonValue,
 ) -> Result<VmValue, VmError> {
@@ -143,7 +143,7 @@ fn restore_wrapped_spawn_error(value: VmValue) -> Result<VmValue, VmError> {
 /// together — deleting a ref under a lease is the canonical case — so accepting
 /// only the flagless form sends exactly that operation to the generic floor,
 /// where it is denied as a bare force push.
-pub(crate) fn is_reviewed_git_push_with_lease(program: &str, args: &[String]) -> bool {
+pub fn is_reviewed_git_push_with_lease(program: &str, args: &[String]) -> bool {
     if program != "git" || args.first().map(String::as_str) != Some("push") {
         return false;
     }
@@ -180,7 +180,6 @@ fn validate_reviewed_git_push_with_lease(params: &crate::value::DictMap) -> Resu
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use crate::value::VmValue;
 
@@ -261,19 +260,16 @@ mod tests {
             "--force-with-lease=refs/heads/main:abc123",
         ] {
             let params = crate::value::DictMap::from_iter([
-                (
-                    crate::value::intern_key("mode"),
-                    VmValue::String(arcstr::ArcStr::from("argv")),
-                ),
+                (crate::value::intern_key("mode"), VmValue::string("argv")),
                 (
                     crate::value::intern_key("argv"),
-                    VmValue::List(Arc::new(vec![
-                        VmValue::String(arcstr::ArcStr::from("git")),
-                        VmValue::String(arcstr::ArcStr::from("push")),
-                        VmValue::String(arcstr::ArcStr::from(lease)),
-                        VmValue::String(arcstr::ArcStr::from("origin")),
-                        VmValue::String(arcstr::ArcStr::from("HEAD:main")),
-                    ])),
+                    VmValue::list(vec![
+                        VmValue::string("git"),
+                        VmValue::string("push"),
+                        VmValue::string(lease),
+                        VmValue::string("origin"),
+                        VmValue::string("HEAD:main"),
+                    ]),
                 ),
             ]);
 

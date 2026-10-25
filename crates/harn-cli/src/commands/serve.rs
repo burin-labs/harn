@@ -327,6 +327,7 @@ pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> 
         .run_http(SiteHttpServeOptions {
             bind: args.bind,
             public_url: args.public_url.clone(),
+            ready_file: args.ready_file.clone(),
             tls,
         })
         .await
@@ -584,7 +585,7 @@ pub fn on_tick(_event) -> nil {
         };
         let config = api_server_config(&args, AuthPolicy::allow_all())?;
         let mut vm = harn_vm::new_vm();
-        harn_vm::register_vm_stdlib(&mut vm);
+        harn_runtime::register_vm_stdlib(&mut vm);
         let result = async {
             config
                 .acp

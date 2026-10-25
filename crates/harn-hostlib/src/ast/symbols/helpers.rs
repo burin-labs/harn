@@ -44,6 +44,18 @@ pub(super) fn point_pos(node: Node<'_>) -> NodePos {
     }
 }
 
+/// An export or decorator belongs to a declaration only when its grammar
+/// field points to that exact node.
+pub(crate) fn declaration_wrapper(node: Node<'_>) -> Option<Node<'_>> {
+    let parent = node.parent()?;
+    let field = match parent.kind() {
+        "export_statement" => "declaration",
+        "decorated_definition" => "definition",
+        _ => return None,
+    };
+    (parent.child_by_field_name(field) == Some(node)).then_some(parent)
+}
+
 pub(super) fn normalized_access_level(raw: &str) -> Option<&'static str> {
     match raw.trim().trim_end_matches(':') {
         "pub" | "public" => Some("public"),

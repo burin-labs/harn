@@ -7,9 +7,7 @@ use super::{
 use crate::llm::{resolve_api_key_for_selection, ProviderSelectionSource};
 
 /// Extract all LLM call options from the standard (prompt, system, options) args.
-pub(crate) fn extract_llm_options(
-    args: &[VmValue],
-) -> Result<crate::llm::api::LlmCallOptions, VmError> {
+pub fn extract_llm_options(args: &[VmValue]) -> Result<crate::llm::api::LlmCallOptions, VmError> {
     use super::resolution::{request_resolution, RequestResolutionInputs};
     use crate::llm::api::{LlmApiMode, LlmCallOptions, ToolSearchMode, ToolSearchVariant};
     use crate::llm::provider::{provider_supports_defer_loading, provider_tool_search_variants};

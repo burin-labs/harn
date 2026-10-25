@@ -355,7 +355,7 @@ impl LlmMockState {
 /// handle on every future poll, so builtin calls always resolve through the
 /// logical VM even when the executor moves that future to another thread.
 #[derive(Clone, Default)]
-pub(crate) struct LlmMockContext(Arc<Mutex<LlmMockState>>);
+pub struct LlmMockContext(Arc<Mutex<LlmMockState>>);
 
 impl LlmMockContext {
     pub(crate) fn for_new_vm() -> Self {
@@ -546,7 +546,7 @@ pub(crate) fn builtin_llm_mock_snapshot() -> serde_json::Value {
     })
 }
 
-pub(crate) fn builtin_llm_mock_active() -> bool {
+pub fn builtin_llm_mock_active() -> bool {
     with_mock_state(|state| state.builtin_queue.is_active())
 }
 
@@ -563,7 +563,7 @@ pub(crate) fn builtin_llm_mock_strict_scopes() -> bool {
     with_mock_state(|state| state.builtin_queue.strict_scopes())
 }
 
-pub(crate) fn reset_llm_mock_state() {
+pub fn reset_llm_mock_state() {
     with_mock_state_mut(LlmMockState::reset);
 }
 
@@ -829,6 +829,8 @@ fn build_mock_result(
         output_tokens: mock.output_tokens.unwrap_or(30),
         cache_read_tokens: mock.cache_read_tokens.unwrap_or(0),
         cache_write_tokens: mock.cache_write_tokens.unwrap_or(0),
+        cache_counts_reported: mock.cache_read_tokens.is_some()
+            || mock.cache_write_tokens.is_some(),
         model: mock.model.clone(),
         provider: mock.provider.clone().unwrap_or_else(|| "mock".to_string()),
         thinking: mock.thinking.clone(),
@@ -928,6 +930,7 @@ fn apply_mock_prompt_cache(result: &mut LlmResult, cache_key: &str) {
     } else {
         result.cache_write_tokens = cache_tokens;
     }
+    result.cache_counts_reported = true;
 }
 
 /// Convert a mock's `error` payload into the `VmError` that the
@@ -953,13 +956,10 @@ fn mock_error_to_vm_error(err: &MockError) -> VmError {
         );
         dict.put_str("message", message);
         if let Some(status) = err.status {
-            dict.insert("status".to_string(), VmValue::Int(i64::from(status)));
+            dict.put_int("status", i64::from(status));
         }
         if let Some(retry_after_ms) = err.retry_after_ms {
-            dict.insert(
-                "retry_after_ms".to_string(),
-                VmValue::Int(retry_after_ms as i64),
-            );
+            dict.put_int("retry_after_ms", retry_after_ms as i64);
         }
         return VmError::Thrown(VmValue::dict(dict));
     }
@@ -1073,8 +1073,12 @@ pub(crate) fn record_cli_llm_result(request: &super::api::LlmRequestPayload, res
         sticky: false,
         input_tokens: Some(result.input_tokens),
         output_tokens: Some(result.output_tokens),
-        cache_read_tokens: Some(result.cache_read_tokens),
-        cache_write_tokens: Some(result.cache_write_tokens),
+        cache_read_tokens: result
+            .cache_counts_reported
+            .then_some(result.cache_read_tokens),
+        cache_write_tokens: result
+            .cache_counts_reported
+            .then_some(result.cache_write_tokens),
         simulated_cost_usd: None,
         thinking: result.thinking.clone(),
         thinking_summary: result.thinking_summary.clone(),

@@ -68,17 +68,64 @@ fn throws_mismatches(source: &str) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn throwing_the_declared_type_checks_clean() {
-    let diags = throws_mismatches(
-        r#"fn parse(s: string) throws string {
+#[rstest::rstest]
+#[case::throwing_the_declared_type_checks_clean(
+    r#"fn parse(s: string) throws string {
   throw "bad input"
 }"#,
-    );
-    assert!(
-        diags.is_empty(),
-        "throwing the declared type must not raise TYP-026: {diags:?}"
-    );
+    true
+)]
+#[case::union_throws_set_covers_each_member(
+    r#"fn parse(s: string) throws string | int {
+  if s == "" {
+    throw 42
+  }
+  throw "bad"
+}"#,
+    true
+)]
+// No `throws` clause → the historical unconstrained behavior; the throw of
+// an int must not be flagged. This is what keeps the feature additive.
+#[case::missing_throws_clause_is_unconstrained(
+    r"fn parse(s: string) {
+  throw 42
+}",
+    true
+)]
+// --- catch-exhaustiveness: try/catch subtracts handled errors -------------
+// The body throws `Parse.Bad`, which the `catch (e: Parse)` handles, so it
+// does NOT count against the declared channel. The catch body then throws
+// `Net.Down`, which IS declared — so the callable checks clean. If the
+// caught `Parse` error leaked into the thrown set this would raise TYP-026
+// (Parse is not <: Net).
+#[case::caught_error_is_excluded_from_the_declared_channel(
+    r"enum Parse { Bad }
+enum Net { Down }
+fn f() throws Net {
+  try {
+    throw Parse.Bad
+  } catch (e: Parse) {
+    throw Net.Down
+  }
+}",
+    true
+)]
+// An untyped `catch` is a catch-all: every error the body throws is
+// handled, so nothing escapes and the (over-broad) declared channel is not
+// violated.
+#[case::catch_all_absorbs_every_body_error(
+    r"enum Net { Down }
+fn f() throws Net {
+  try {
+    throw Net.Down
+  } catch {
+  }
+}",
+    true
+)]
+fn diagnostics_throws_mismatches(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = throws_mismatches(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
 }
 
 #[test]
@@ -96,37 +143,6 @@ fn throwing_an_undeclared_type_errors() {
 }
 
 #[test]
-fn union_throws_set_covers_each_member() {
-    let diags = throws_mismatches(
-        r#"fn parse(s: string) throws string | int {
-  if s == "" {
-    throw 42
-  }
-  throw "bad"
-}"#,
-    );
-    assert!(
-        diags.is_empty(),
-        "each member of a union throws set must be allowed: {diags:?}"
-    );
-}
-
-#[test]
-fn missing_throws_clause_is_unconstrained() {
-    // No `throws` clause → the historical unconstrained behavior; the throw of
-    // an int must not be flagged. This is what keeps the feature additive.
-    let diags = throws_mismatches(
-        r"fn parse(s: string) {
-  throw 42
-}",
-    );
-    assert!(
-        diags.is_empty(),
-        "an unannotated callable must never be throws-checked: {diags:?}"
-    );
-}
-
-#[test]
 fn pipeline_throws_clause_is_enforced() {
     let diags = throws_mismatches(
         r"pipeline run(task) throws string {
@@ -137,32 +153,6 @@ fn pipeline_throws_clause_is_enforced() {
         diags.len(),
         1,
         "a pipeline that throws outside its declared set must raise TYP-026: {diags:?}"
-    );
-}
-
-// --- catch-exhaustiveness: try/catch subtracts handled errors -------------
-
-#[test]
-fn caught_error_is_excluded_from_the_declared_channel() {
-    // The body throws `Parse.Bad`, which the `catch (e: Parse)` handles, so it
-    // does NOT count against the declared channel. The catch body then throws
-    // `Net.Down`, which IS declared — so the callable checks clean. If the
-    // caught `Parse` error leaked into the thrown set this would raise TYP-026
-    // (Parse is not <: Net).
-    let diags = throws_mismatches(
-        r"enum Parse { Bad }
-enum Net { Down }
-fn f() throws Net {
-  try {
-    throw Parse.Bad
-  } catch (e: Parse) {
-    throw Net.Down
-  }
-}",
-    );
-    assert!(
-        diags.is_empty(),
-        "an error handled by its catch clause must not count against `throws`: {diags:?}"
     );
 }
 
@@ -185,26 +175,6 @@ fn f() throws Parse {
         diags.len(),
         1,
         "an error the catch does not cover must escape and raise TYP-026: {diags:?}"
-    );
-}
-
-#[test]
-fn catch_all_absorbs_every_body_error() {
-    // An untyped `catch` is a catch-all: every error the body throws is
-    // handled, so nothing escapes and the (over-broad) declared channel is not
-    // violated.
-    let diags = throws_mismatches(
-        r"enum Net { Down }
-fn f() throws Net {
-  try {
-    throw Net.Down
-  } catch {
-  }
-}",
-    );
-    assert!(
-        diags.is_empty(),
-        "a catch-all must absorb every body error: {diags:?}"
     );
 }
 

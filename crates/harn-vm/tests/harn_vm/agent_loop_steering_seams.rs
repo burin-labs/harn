@@ -21,7 +21,7 @@
 //! Steer coverage (rfd/session-inject) — `mode: "steer"` (an alias for
 //! `finish_step`) queues a USER-role message via the in-VM
 //! `agent_session_push_user_message` primitive (the loop-driver
-//! equivalent of the ACP `session/inject` method). Unlike `audit_only`,
+//! equivalent of an ACP `session/prompt` steer). Unlike `audit_only`,
 //! the steer message is delivered MID-TURN at the next loop checkpoint
 //! (a tool boundary / iteration boundary), NOT at `loop_exit`, so the
 //! model sees it before its next call. The `steer_*` tests below prove
@@ -87,29 +87,24 @@ fn run_with_bridge_after(source: &str, setup: impl FnOnce()) -> Result<String, S
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let bridge = Arc::new(HostBridge::from_parts(
-                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                    Arc::new(AtomicBool::new(false)),
-                    Arc::new(Mutex::new(())),
-                    1,
-                ));
-                harn_vm::llm::install_current_host_bridge(bridge.clone());
-                let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let result = vm
-                    .execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"));
-                harn_vm::llm::clear_current_host_bridge();
-                result?;
-                Ok(vm.output().to_string())
-            })
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let bridge = Arc::new(HostBridge::from_parts(
+            Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(())),
+            1,
+        ));
+        harn_vm::llm::install_current_host_bridge(bridge.clone());
+        let mut vm = harn_vm::new_vm();
+        harn_runtime::register_vm_stdlib(&mut vm);
+        let result = vm
+            .execute(&chunk)
             .await
-    })
+            .map_err(|e: VmError| format!("{e:?}"));
+        harn_vm::llm::clear_current_host_bridge();
+        result?;
+        Ok(vm.output().to_string())
+    }))
 }
 
 fn out_lines(raw: &str) -> Vec<String> {
@@ -502,7 +497,7 @@ fn audit_only_control_run_records_no_audit_reminder() {
 /// iteration 0 the stub LLM caller — BEFORE returning a `would_force_push`
 /// tool call — queues a USER-role steer via the in-VM
 /// `agent_session_push_user_message` primitive with `mode: "steer"` (the
-/// loop-driver equivalent of the ACP `session/inject` method). On
+/// loop-driver equivalent of an ACP `session/prompt` steer). On
 /// iteration 1 the model returns `##DONE##`. The `mode: "steer"` string is
 /// passed verbatim through the builtin, which maps `steer` ->
 /// `finish_step` (delivered at the next loop checkpoint, i.e. the tool
@@ -895,7 +890,7 @@ fn unsteered_run_renders_no_steering_block() {
 /// model is the failure mode, and absence is what reads as success.
 ///
 /// So this asserts the decision rather than the code: it runs a real
-/// bridge-backed loop, pushes a steer through the same queue `session/inject`
+/// bridge-backed loop, pushes a steer through the same queue an ACP steer
 /// writes to, lets the real `finish_step` drain deliver it at the tool
 /// boundary, and then reads the request the model is actually handed on the
 /// next iteration.
@@ -1299,7 +1294,7 @@ pipeline main(harness: Harness, task: unknown) {{
 /// steer could not carry a goal, so the judge kept measuring the frozen task
 /// and demanded an itemized report for both rows the steer abandoned.
 ///
-/// The steer goes through the real in-VM `session/inject` twin, which records
+/// The steer goes through the real in-VM twin of an ACP steer, which records
 /// the typed control row, and the real `finish_step` drain delivers it. What is
 /// read back is what the authorities decided: the judge's own prompt, the typed
 /// retirement record, the next model request, and the run's terminal status.

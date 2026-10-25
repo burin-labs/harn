@@ -148,6 +148,90 @@ impl<'de> Deserialize<'de> for ExternalRoot {
     }
 }
 
+/// The policy's declared roots plus the roots mounted on the active session.
+///
+/// A mount is the runtime form of the same grant: `read_only` is a `read` root
+/// and `extend` a `read_write` one, so the boundary, the file builtins and the
+/// child profile never disagree about a root the host added mid-session. A
+/// `sandboxed` mount is isolated from the primary anchor and grants nothing
+/// here. A declared root naming the same path wins over its mount.
+pub(crate) fn effective_roots(declared: &[ExternalRoot]) -> Vec<ExternalRoot> {
+    use crate::workspace_anchor::MountMode;
+    let mut roots = declared.to_vec();
+    for mounted in crate::agent_sessions::current_session_mounts() {
+        let access = match mounted.mount_mode {
+            MountMode::ReadOnly => ExternalRootAccess::Read,
+            MountMode::Extend => ExternalRootAccess::ReadWrite,
+            MountMode::Sandboxed => continue,
+        };
+        let mount = ExternalRoot {
+            path: mounted.path.to_string_lossy().into_owned(),
+            access,
+        };
+        // Compared as the boundary compares them, so a symlink spelling of a
+        // declared root cannot widen it.
+        let declared_alias = roots
+            .iter()
+            .any(|root| root.normalized() == mount.normalized());
+        if !declared_alias {
+            roots.push(mount);
+        }
+    }
+    roots
+}
+
+/// The deepest `read_only` mount of the active session that covers `path`, if
+/// a narrower read-only grant sits inside a wider writable one.
+///
+/// A mount below the workspace (or below an `extend` mount) must win over the
+/// wider writable grant, so callers that admit a path as "inside a writable
+/// root" ask this first for a write. `writable_depth` is the component count of
+/// the writable root that admitted the path; only a strictly deeper read-only
+/// mount overrides it.
+pub(crate) fn read_only_mount_overriding(
+    path: &Path,
+    writable_depth: usize,
+) -> Option<std::path::PathBuf> {
+    use crate::workspace_anchor::MountMode;
+    crate::agent_sessions::current_session_mounts()
+        .into_iter()
+        .filter(|mounted| matches!(mounted.mount_mode, MountMode::ReadOnly))
+        .map(|mounted| normalize_for_policy(&mounted.path))
+        .filter(|root| path.starts_with(root) && root.components().count() > writable_depth)
+        .max_by_key(|root| root.components().count())
+}
+
+/// [`read_only_mount_overriding`] measured against the session's own writable
+/// roots (its primary anchor and `extend` mounts) and the execution workspace
+/// root that classified the path, which need not be the anchor. `None` when no
+/// writable root covers `path`.
+pub(crate) fn read_only_mount_overriding_writable(
+    path: &Path,
+    workspace_root: Option<&Path>,
+) -> Option<std::path::PathBuf> {
+    use crate::workspace_anchor::MountMode;
+    let path = &normalize_for_policy(path);
+    let anchor =
+        crate::agent_sessions::workspace_anchor(&crate::agent_sessions::current_session_id()?);
+    let anchor_roots = anchor.into_iter().flat_map(|anchor| {
+        std::iter::once(anchor.primary.clone()).chain(
+            anchor
+                .additional_roots
+                .iter()
+                .filter(|m| matches!(m.mount_mode, MountMode::Extend))
+                .map(|m| m.path.clone())
+                .collect::<Vec<_>>(),
+        )
+    });
+    let depth = anchor_roots
+        .chain(workspace_root.map(Path::to_path_buf))
+        .map(|root| normalize_for_policy(&root))
+        .filter(|root| path.starts_with(root))
+        .map(|root| root.components().count())
+        .max()?;
+    read_only_mount_overriding(path, depth)
+}
+
 /// The root that governs `path`: the deepest entry containing it, so a host
 /// can carve a read-only subtree out of a writable root or the reverse.
 ///

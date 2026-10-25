@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { setTimeout as pause } from 'node:timers/promises';
 import { assessConsumerObservation, unmeasuredConsumerTiming } from './consumer-observation-budget.mjs';
 
@@ -51,8 +52,27 @@ const contextKeys = [
 /** @typedef {{source_revision: string, verdict: 'pass'|'fail', owed: number,
  * proven: number, pending: 0, failed: number, failed_suites: string[]}} ProductDecision */
 
-function refuse(reason) {
-  throw new Error(`CONSUMER_OBSERVER reason=${reason}`);
+function refuse(reason, diagnostic) {
+  const error = new Error(`CONSUMER_OBSERVER reason=${reason}`);
+  if (diagnostic) error.diagnostic = diagnostic;
+  throw error;
+}
+
+const diagnosticFields = {
+  status: /^[1-5][0-9]{2}$/, ratelimit_remaining: /^[0-9]{1,9}$/, ratelimit_limit: /^[0-9]{1,9}$/,
+  ratelimit_reset: /^[0-9]{1,12}$/, ratelimit_resource: /^[a-z_]{1,32}$/,
+};
+
+/** The one public failure line. The reason is a closed token; the diagnostic carries only
+ * HTTP status and rate-limit fields, never an endpoint, repository, run id or message prose.
+ * @param {unknown} error @param {string} fallback
+ * @returns {{reason:string, line:string}} */
+export function observerRefusal(error, fallback) {
+  const reason = /^CONSUMER_OBSERVER reason=([a-z_]+)$/.exec(error?.message)?.[1] ?? fallback;
+  const fields = Object.entries(diagnosticFields)
+    .filter(([name, shape]) => shape.test(String(error?.diagnostic?.[name] ?? '')))
+    .map(([name]) => `${name}=${error.diagnostic[name]}`);
+  return {reason, line: ['CONSUMER_OBSERVER', `reason=${reason}`, ...fields].join(' ')};
 }
 
 /** Normalize once. Unknown fields cannot silently alter the ownership contract.
@@ -160,6 +180,24 @@ function qualifyChildRun(observer, expected, child) {
   }
 }
 
+function producerBinding(input, source) {
+  if(!input || Object.keys(input).sort().join(',')!=='manifest_digest,manifest_id,producer_attempt,producer_run,schema,source_sha'
+    || input.schema!=='harn.release.artifact_binding.v1' || input.source_sha!==source || !sha.test(source)
+    || typeof input.producer_run!=='string' || !id.test(input.producer_run)
+    || !Number.isSafeInteger(input.producer_attempt) || input.producer_attempt<1
+    || !Number.isSafeInteger(input.manifest_id) || input.manifest_id<1
+    || !/^sha256:[0-9a-f]{64}$/.test(input.manifest_digest)) refuse('child_artifact_identity_unproven');
+  return {schema:input.schema,source_sha:source,producer_run:input.producer_run,
+    producer_attempt:input.producer_attempt,manifest_id:input.manifest_id,manifest_digest:input.manifest_digest};
+}
+
+export function archiveProducerBinding(proof) {
+  if(proof?.verdict!=='pass') refuse('child_artifact_identity_unproven');
+  return producerBinding({schema:'harn.release.artifact_binding.v1',source_sha:proof.source_sha,
+    producer_run:proof.producer_run,producer_attempt:proof.producer_attempt,
+    manifest_id:proof.manifest?.id,manifest_digest:proof.manifest?.digest},proof.source_sha);
+}
+
 /** Authenticate a child-owned receipt without granting authority from a name.
  * @param {unknown} input
  * @param {ObserverContext} context
@@ -169,9 +207,10 @@ function qualifyChildRun(observer, expected, child) {
  * @param {ObserverContext} declaration Authenticated exact parent artifact */
 export function qualifyOwnedChild(input, context, parent, child, expected, declaration) {
   const observer = declaredObserver(qualifyObserverParent(context, parent), declaration);
+  const bound = input?.schema === 'harn.consumer_observer_receipt.v3';
   if (!input || typeof input !== 'object' || Array.isArray(input)
-    || Object.keys(input).sort().join(',') !== 'child,observer,schema'
-    || input.schema !== 'harn.consumer_observer_receipt.v2'
+    || Object.keys(input).sort().join(',') !== (bound?'child,observer,producer,schema':'child,observer,schema')
+    || (!bound && input.schema !== 'harn.consumer_observer_receipt.v2')
     || JSON.stringify(observerContext(input.observer)) !== JSON.stringify(observer)) {
     refuse('child_receipt_shape_or_context_unproven');
   }
@@ -190,12 +229,15 @@ export function qualifyOwnedChild(input, context, parent, child, expected, decla
     repository: receipt.repository, runId: receipt.run_id, attempt: receipt.run_attempt,
     headSha: receipt.head_sha, workflow: receipt.workflow,
   }, child);
+  const producer=bound?producerBinding(input.producer,observer.source_revision):undefined;
+  if(expected.producerBinding!==undefined && (!bound || JSON.stringify(producer)!==
+    JSON.stringify(producerBinding(expected.producerBinding,observer.source_revision)))) refuse('child_artifact_identity_unproven');
   if ((expected.headSha !== undefined && (!sha.test(expected.headSha) || child.head_sha !== expected.headSha))
     || (expected.branch !== undefined && (typeof expected.branch !== 'string' || !expected.branch
       || child.head_branch !== expected.branch))) {
     refuse('child_source_no_longer_eligible');
   }
-  return { schema: input.schema, observer, child: {
+  return { schema: input.schema, observer, ...(bound?{producer}:{}), child: {
     repository:receipt.repository, workflow:receipt.workflow,
     run_id:receipt.run_id, run_attempt:receipt.run_attempt,
     head_sha:receipt.head_sha, dispatch_actor:receipt.dispatch_actor, receipt_nonce:receipt.receipt_nonce,
@@ -243,7 +285,8 @@ function terminalProduct(input, context) {
 export function createTerminalReceipt(ownership, context, parent, child, expected, declaration, product) {
   const receipt = qualifyOwnedChild(ownership, context, parent, child, expected, declaration);
   return {
-    schema: 'harn.consumer_observer_terminal.v2', observer: receipt.observer,
+    schema: receipt.schema==='harn.consumer_observer_receipt.v3'?'harn.consumer_observer_terminal.v3':'harn.consumer_observer_terminal.v2',
+    ...(receipt.producer?{producer:receipt.producer}:{}), observer: receipt.observer,
     child: receipt.child, product: terminalProduct(product, receipt.observer),
   };
 }
@@ -251,13 +294,15 @@ export function createTerminalReceipt(ownership, context, parent, child, expecte
 /** A fresh completed run must agree with the reached private decision.
  * Execution failure alone never manufactures a reached product failure. */
 export function qualifyTerminalReceipt(input, context, parent, child, expected, declaration) {
+  const bound=input?.schema==='harn.consumer_observer_terminal.v3';
   if (!input || typeof input !== 'object' || Array.isArray(input)
-    || Object.keys(input).sort().join(',') !== 'child,observer,product,schema'
-    || input.schema !== 'harn.consumer_observer_terminal.v2') {
+    || Object.keys(input).sort().join(',') !== (bound?'child,observer,producer,product,schema':'child,observer,product,schema')
+    || (!bound && input.schema !== 'harn.consumer_observer_terminal.v2')) {
     refuse('terminal_receipt_shape_unproven');
   }
   const ownership = {
-    schema: 'harn.consumer_observer_receipt.v2', observer: input.observer, child: input.child,
+    schema: bound?'harn.consumer_observer_receipt.v3':'harn.consumer_observer_receipt.v2',
+    ...(bound?{producer:input.producer}:{}), observer: input.observer, child: input.child,
   };
   const receipt = createTerminalReceipt(ownership, context, parent, child, expected, declaration, input.product);
   const conclusion = receipt.product.verdict === 'pass' ? 'success' : 'failure';
@@ -282,8 +327,12 @@ export function admitChild(context, parent, expected, child, event, declaration)
     || JSON.stringify(observerContext(JSON.parse(event?.inputs?.observer ?? 'null'))) !== JSON.stringify(observer)) {
     refuse('child_dispatch_identity_unproven');
   }
+  const producer=expected.producerBinding===undefined?undefined:producerBinding(expected.producerBinding,observer.source_revision);
+  if(producer && (event?.inputs?.release_producer_run_id!==producer.producer_run
+    || event?.inputs?.release_producer_run_attempt!==String(producer.producer_attempt))) refuse('child_artifact_identity_unproven');
   return {
-    schema: 'harn.consumer_observer_receipt.v2',
+    schema: producer?'harn.consumer_observer_receipt.v3':'harn.consumer_observer_receipt.v2',
+    ...(producer?{producer}:{}),
     observer,
     child: {
       repository: expected.repository,
@@ -338,6 +387,75 @@ export async function githubDeclaration(token, context, fetchRecord = fetch, ext
   return declaration;
 }
 
+/** Bounds for retrying one refused read. Tests may shorten the backoff. */
+export const readRetry = { attempts: 4, backoffMs: 5_000, limitMs: 300_000 };
+
+function rateLimitHeader(response, name) {
+  return response.headers?.get?.(`x-ratelimit-${name}`) ?? undefined;
+}
+
+/** True when a 403's body names a rate limit. A secondary limit can arrive with
+ * primary budget left and no Retry-After, so only its message identifies it. */
+async function namesRateLimit(response) {
+  try {
+    const body = await response.clone().json();
+    return typeof body?.message === 'string' && body.message.includes('rate limit');
+  } catch {
+    return false;
+  }
+}
+
+/** Milliseconds before retrying a refused read, or undefined when a retry cannot help.
+ * A rate limit waits for Retry-After or its reset, and a secondary limit named only
+ * by its message backs off; a server error or a dropped connection (no response)
+ * backs off. A denial or any other status is final. */
+async function readRetryMs(response, attempt) {
+  const backoff = readRetry.backoffMs * 2 ** (attempt - 1);
+  if (response === null || response.status >= 500) return backoff;
+  if (![403, 429].includes(response.status)) return undefined;
+  const retryAfter = response.headers?.get?.('retry-after');
+  if (retryAfter !== undefined && retryAfter !== null && /^[0-9]+$/.test(retryAfter)) return Number(retryAfter) * 1000;
+  const reset = Number(rateLimitHeader(response, 'reset'));
+  if (rateLimitHeader(response, 'remaining') === '0' && Number.isFinite(reset)) {
+    const wait = Math.max(0, reset * 1000 - Date.now());
+    return wait + (wait > 0 ? 1000 : 0);
+  }
+  return response.status === 429 || await namesRateLimit(response) ? backoff : undefined;
+}
+
+/** The one GET path to the GitHub API. A rate limit, a server error or a
+ * dropped connection is retried within readRetry's bounds; the last response
+ * is returned for the caller to qualify, and a last dropped connection throws. */
+async function githubRead(token, url, fetchRecord) {
+  for (let attempt = 1; ; attempt += 1) {
+    let response = null, failure;
+    try {
+      response = await fetchRecord(url, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (error) {
+      failure = error;
+    }
+    if (response?.ok) return response;
+    const wait = await readRetryMs(response, attempt);
+    if (wait === undefined || wait > readRetry.limitMs || attempt >= readRetry.attempts) {
+      if (response === null) throw failure;
+      return response;
+    }
+    await new Promise(resolve => setTimeout(resolve, wait));
+  }
+}
+
+function refusalDiagnostic(response) {
+  const fields = {status: response.status};
+  for (const name of ['remaining', 'limit', 'reset', 'resource']) {
+    const value = rateLimitHeader(response, name);
+    if (value !== undefined) fields[`ratelimit_${name}`] = value;
+  }
+  return fields;
+}
+
 async function githubCensus(token, url, field, fetchRecord) {
   if (!token) refuse('read_authority_or_identity_missing');
   const records = [];
@@ -346,11 +464,8 @@ async function githubCensus(token, url, field, fetchRecord) {
     const endpoint = new URL(url);
     endpoint.searchParams.set('per_page', '100');
     endpoint.searchParams.set('page', String(page));
-    const response = await fetchRecord(endpoint.toString(), {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) refuse('observer_census_read_refused');
+    const response = await githubRead(token, endpoint.toString(), fetchRecord);
+    if (!response.ok) refuse('observer_census_read_refused', refusalDiagnostic(response));
     const census = await response.json();
     if (!Number.isSafeInteger(census?.total_count) || census.total_count < 0
       || census.total_count > censusLimit || !Array.isArray(census[field])
@@ -472,6 +587,62 @@ export async function githubRunJobs(token,repository,runId,attempt,fetchRecord=f
     'jobs',fetchRecord);
 }
 
+/** Build evidence belongs to its producing attempt. A new live promotion can
+ * measure a repaired consumer without rerunning those immutable archives. */
+export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
+  const {sourceRevision, runId, attempt} = request;
+  if (!sha.test(sourceRevision) || !id.test(runId) || !Number.isSafeInteger(attempt) || attempt < 1
+    || String(run?.id) !== runId || run.run_attempt !== attempt || run.head_sha !== sourceRevision
+    || run.head_repository?.full_name !== parentRepository || run.repository?.full_name !== parentRepository
+    || run.path !== observerParentWorkflows.candidate || run.head_branch !== 'main'
+    || !['push','workflow_dispatch'].includes(run.event)
+    || !(liveStates.has(run.status) && run.conclusion === null
+      || run.status === 'completed' && ['success','failure'].includes(run.conclusion))
+    || !Array.isArray(targets) || targets.length === 0 || new Set(targets).size !== targets.length
+    || targets.some(target => typeof target !== 'string' || !/^[a-z0-9_-]+$/.test(target))
+    || !Array.isArray(jobs) || jobs.length === 0 || new Set(jobs.map(job=>job.id)).size !== jobs.length
+    || new Set(jobs.map(job=>job.name)).size !== jobs.length) refuse('archive_producer_identity_unproven');
+  const deferred = new Set(['Consumer release rehearsal / Consumer canary',
+    'Consumer release rehearsal / Settled verdict','Release candidate verdict']);
+  const required = ['Resolve release context','Prepare CLI AOT payload','Assemble candidate manifest',
+    'Release residual audit','Consumer release rehearsal / Decide whether main moved',
+    ...targets.map(target=>`Build ${target}`),
+    ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)];
+  if (required.some(name=>!jobs.some(job=>job.name===name && job.status==='completed' && job.conclusion==='success'))
+    || jobs.some(job=>!Number.isSafeInteger(job.id) || job.id < 1 || String(job.run_id)!==runId
+      || job.run_attempt!==attempt || job.head_sha!==sourceRevision || typeof job.name!=='string'
+      || !(job.status==='completed' && job.conclusion==='success'
+        || job.name==='Report cache budget' && job.status==='completed' && job.conclusion==='skipped'
+        || deferred.has(job.name) && (liveStates.has(job.status) && job.conclusion===null
+          || job.status==='completed' && ['success','failure','skipped'].includes(job.conclusion))))) {
+    refuse('archive_producer_builds_unproven');
+  }
+  const names = [...targets.map(target=>`harn-${target}`),`candidate-manifest-${sourceRevision}`,'harn-release-files'];
+  if (!Array.isArray(artifacts) || names.some(name=>{
+    const matches=artifacts.filter(artifact=>artifact.name===name);
+    const artifact=matches[0];
+    return matches.length!==1 || !Number.isSafeInteger(artifact.id) || artifact.id<1
+      || artifact.expired!==false || !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes<1
+      || !/^sha256:[0-9a-f]{64}$/.test(artifact.digest)
+      || String(artifact.workflow_run?.id)!==runId || artifact.workflow_run?.head_sha!==sourceRevision;
+  })) refuse('archive_producer_artifacts_unproven');
+  return {schema:'harn.release.producer_readiness.v1',stage:'candidate-archives',source_sha:sourceRevision,
+    producer_run:runId,producer_attempt:attempt,verdict:'pass',observed_jobs:jobs.length,
+    proven_artifacts:names.length,manifest:{id:artifacts.find(artifact=>artifact.name===`candidate-manifest-${sourceRevision}`).id,
+      digest:artifacts.find(artifact=>artifact.name===`candidate-manifest-${sourceRevision}`).digest},
+    pending:0,failed_jobs:[],next_action:'measure-consumer-repair'};
+}
+
+export async function githubArchiveProducer(token, request, fetchRecord=fetch) {
+  const run=await githubRecord(token,parentRepository,request.runId,fetchRecord,request.attempt);
+  const jobs=await githubRunJobs(token,parentRepository,request.runId,request.attempt,fetchRecord);
+  const artifacts=await githubArtifactCensus(token,parentRepository,request.runId,fetchRecord);
+  // The shell contract owns the target list for writers and readers alike.
+  const targets=JSON.parse(execFileSync('bash',[fileURLToPath(new URL('./candidate_archive_contract.sh',import.meta.url)),'--targets-json'],
+    {encoding:'utf8',timeout:10_000,maxBuffer:16_384}));
+  return qualifyArchiveProducer(run,jobs,artifacts,request,targets);
+}
+
 /** One authenticated, bounded archive reader for public declarations and
  * private child receipts. Transport never prints a repository or artifact. */
 export async function githubArtifactJson(token, repository, artifact, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
@@ -490,12 +661,9 @@ export async function githubArtifactJson(token, repository, artifact, expected, 
     || artifact.size_in_bytes > 65_536) {
     refuse('dispatch_declaration_identity_unproven');
   }
-  const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' };
-  const base = `https://api.github.com/repos/${repository}/actions`;
-  const archive = await fetchRecord(`${base}/artifacts/${artifact.id}/zip`, {
-    headers, signal: AbortSignal.timeout(30_000),
-  });
-  if (!archive.ok) refuse('dispatch_declaration_read_refused');
+  const archive = await githubRead(token,
+    `https://api.github.com/repos/${repository}/actions/artifacts/${artifact.id}/zip`, fetchRecord);
+  if (!archive.ok) refuse('dispatch_declaration_read_refused', refusalDiagnostic(archive));
   const bytes = Buffer.from(await archive.arrayBuffer());
   if (bytes.length > 65_536
     || `sha256:${createHash('sha256').update(bytes).digest('hex')}` !== artifact.digest) {
@@ -511,11 +679,9 @@ export async function githubRecord(token, repository, runId, fetchRecord = fetch
     refuse('read_authority_or_identity_missing');
   }
   const suffix = attempt === null ? '' : `/attempts/${attempt}`;
-  const response = await fetchRecord(`https://api.github.com/repos/${repository}/actions/runs/${runId}${suffix}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) refuse('run_read_refused');
+  const response = await githubRead(token,
+    `https://api.github.com/repos/${repository}/actions/runs/${runId}${suffix}`, fetchRecord);
+  if (!response.ok) refuse('run_read_refused', refusalDiagnostic(response));
   const record = await response.json();
   if (!record || String(record.id) !== runId || typeof record.status !== 'string'
     || !Number.isSafeInteger(record.run_attempt) || record.run_attempt < 1
@@ -580,10 +746,8 @@ export function consumerPairing(text, requestedPull = '') {
 export async function githubConsumerSource(token, repository, pairedPull = null, fetchRecord = fetch) {
   const read=async suffix=>{
     if (!token || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) refuse('read_authority_or_identity_missing');
-    const response=await fetchRecord(`https://api.github.com/repos/${repository}${suffix}`, {
-      headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json'},signal:AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) refuse('consumer_source_read_refused');
+    const response=await githubRead(token,`https://api.github.com/repos/${repository}${suffix}`,fetchRecord);
+    if (!response.ok) refuse('consumer_source_read_refused', refusalDiagnostic(response));
     return response.json();
   };
   if(pairedPull!==null){
@@ -659,15 +823,17 @@ export async function readConsumerContextDecision(token, context, expected, fetc
   if(completed?!completedConclusions.has(parent.conclusion):!liveStates.has(parent.status)){
     refuse('parent_state_unmeasured');
   }
-  const source=expected.requireCurrentDefault?await githubConsumerSource(token,expected.repository,null,fetchRecord):{};
+  if(expected.requireCurrentDefault && expected.pairedPull!=null) refuse('parent_selection_unproven');
+  const scoped=expected.requireCurrentDefault || expected.pairedPull!=null;
+  const source=scoped?await githubConsumerSource(token,expected.repository,expected.pairedPull??null,fetchRecord):{};
   const reading=await readConsumerProduct(token,observer,{...expected,...source},fetchRecord,extract,async()=>{
     const finalParent=await githubRecord(token,observer.parent_repository,observer.parent_run_id,fetchRecord);
     qualifyObserverParent(observer,finalParent);
     if(completed?(finalParent.status!=='completed'||finalParent.conclusion!==parent.conclusion):!liveStates.has(finalParent.status)){
       refuse('parent_state_changed');
     }
-    if(expected.requireCurrentDefault){
-      const finalSource=await githubConsumerSource(token,expected.repository,null,fetchRecord);
+    if(scoped){
+      const finalSource=await githubConsumerSource(token,expected.repository,expected.pairedPull??null,fetchRecord);
       if(finalSource.headSha!==source.headSha||finalSource.branch!==source.branch) refuse('child_source_no_longer_eligible');
     }
   });
@@ -675,6 +841,27 @@ export async function readConsumerContextDecision(token, context, expected, fetc
     refuse('product_decision_unmeasured');
   }
   return {context:observer,reading,owned:false};
+}
+
+/** Fresh repaired-consumer proof is a separate authorization from an original
+ * deadline recovery. Both reuse the same authenticated custody/product reader. */
+export async function readConsumerRepairDecision(token, request, expected, fetchRecord=fetch, extract=artifactJsonFromZip) {
+  if(!request || Object.keys(request).sort().join(',')!=='consumer_pull,context,producer_attempt,producer_run,schema'
+    || request.schema!=='harn.release.consumer_repair.v1' || typeof request.consumer_pull!=='string'
+    || !id.test(request.consumer_pull)) refuse('consumer_repair_request_unproven');
+  const context=observerContext(request.context);
+  if(context.source_revision!==expected.sourceRevision) refuse('parent_selection_source_unproven');
+  const parent=await githubRecord(token,parentRepository,context.parent_run_id,fetchRecord);
+  qualifyObserverParent(context,parent);
+  if(parent.path!==observerParentWorkflows.promotion || parent.event!=='workflow_dispatch'
+    || parent.head_branch!=='main' || !(liveStates.has(parent.status) && parent.conclusion===null
+      || parent.status==='completed' && ['success','failure'].includes(parent.conclusion))) refuse('consumer_repair_parent_unproven');
+  const producer=await githubArchiveProducer(token,{sourceRevision:context.source_revision,
+    runId:request.producer_run,attempt:request.producer_attempt},fetchRecord);
+  const result=await readConsumerContextDecision(token,context,{...expected,
+    producerBinding:archiveProducerBinding(producer),pairedPull:request.consumer_pull,requireCurrentDefault:false},fetchRecord,extract);
+  if(result.reading.product.verdict!=='pass') refuse('product_decision_unmeasured');
+  return {...result,schema:'harn.release.consumer_repair_decision.v1',producer,consumer_pull:request.consumer_pull};
 }
 
 /** Authenticated private custody is shared by observation and cleanup. */
@@ -807,6 +994,7 @@ async function readConsumerProduct(token, context, expected, fetchRecord, extrac
     const qualified = qualifyTerminalReceipt(terminal, observer, parent, finalChild, expected, declaration);
     // Both artifacts must describe the exact same independently proven custody.
     if (JSON.stringify(qualified.child) !== JSON.stringify(owned.receipt.child)) refuse('terminal_custody_unproven');
+    if(JSON.stringify(qualified.producer??null)!==JSON.stringify(owned.receipt.producer??null)) refuse('terminal_custody_unproven');
     if(chronology!==null){
       if(qualified.product.verdict!=='pass'||finalChild.conclusion!=='success'||chronology.length===0
         || chronology.some(job=>!Number.isSafeInteger(job.id)||job.id<1||String(job.run_id)!==String(finalChild.id)

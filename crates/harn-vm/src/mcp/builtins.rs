@@ -408,7 +408,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
                 if let Some(url) = entry.url {
                     dict.put_str("url", url.as_str());
                 } else {
-                    dict.insert("url".to_string(), VmValue::Nil);
+                    dict.put("url", VmValue::Nil);
                 }
                 dict.put_bool("lazy", entry.lazy);
                 dict.put_bool("active", entry.active);
@@ -740,6 +740,8 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Host, register_mcp_builtins);
+
 pub(crate) fn mcp_roots_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::list(
         current_mcp_roots()
@@ -893,7 +895,7 @@ pub(crate) fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
                     if let Some(url) = s.url {
                         dict.put_str("url", url);
                     } else {
-                        dict.insert("url".to_string(), VmValue::Nil);
+                        dict.put("url", VmValue::Nil);
                     }
                     dict.put_bool("active", s.active);
                     dict.put_bool("lazy", s.lazy);
@@ -906,7 +908,7 @@ pub(crate) fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
                     if let Some(display_identity) = s.display_identity {
                         dict.put_str("display_identity", display_identity);
                     } else {
-                        dict.insert("display_identity".to_string(), VmValue::Nil);
+                        dict.put("display_identity", VmValue::Nil);
                     }
                     VmValue::dict(dict)
                 })

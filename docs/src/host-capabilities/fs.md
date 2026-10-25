@@ -30,7 +30,7 @@ same call.
 | `harness.fs.workspace_temp_dir()` | `workspace.write_text` |
 | `harness.fs.mkdtemp_in_workspace(prefix?)` | `workspace.write_text` |
 | `harness.fs.mkdtemp(prefix?)` | `workspace.write_text` |
-| `harness.fs.stat(path)` | `workspace.exists` |
+| `harness.fs.stat(path, options?)` | `workspace.exists` |
 | `harness.fs.rename(src, dst)` | `workspace.write_text` |
 | `harness.fs.read_lines(path)` | `workspace.read_text` |
 | `harness.fs.read_lines_page_result(path, options?)` | `workspace.read_text` |
@@ -44,6 +44,20 @@ same call.
 with stable `kind` values such as `not_found`, `permission_denied`,
 `invalid_data`, and `sandbox_denied`. Branch on `kind`; keep `message` for
 diagnostics rather than parsing its prose.
+
+`harness.fs.stat(path, options?)` returns `size`, `is_file`, `is_dir`,
+`is_symlink`, and `readonly`. It includes `modified` when the filesystem reports
+a modification time. On Unix hosts, `mode` holds the operating system's
+permission bits, including executable bits. `identity` identifies the current
+file, so hard links compare equal and a copied file has a different identity.
+Both fields are absent on other hosts.
+
+By default, `stat` follows a symbolic link and describes its target. Pass
+`{follow_symlinks: false}` to describe the directory entry itself, including a
+dangling link. Filesystem scope checks apply to both the entry's location and
+its target path. This option does not grant access to a link outside the
+allowed roots. Unknown options and non-boolean
+`follow_symlinks` values fail.
 
 `harness.fs.read_lines_page_result(path, options?)` returns complete UTF-8
 lines plus an exact byte-and-line cursor. `max_lines` and `max_bytes` bound each
@@ -164,6 +178,11 @@ that should be the `base` instead.
 Hidden-file filtering is a separate axis. `glob` and `walk_dir` always list
 dotfiles, so `harness.fs.glob(".github/workflows/*.yml")` works; `find_text` and
 `find_evidence` keep their `include_hidden: false` default.
+
+`harness.fs.walk` fails if it cannot read part of the tree. A missing root or
+an unreadable child does not return an empty or partial list. Invalid ignore
+files also fail the walk. Filesystem errors
+carry the same `error`, `kind`, and `message` fields as other file operations.
 
 `harness.fs.find_text(root, pattern, options?)` walks with gitignore-aware
 defaults and searches matching files in the VM. It returns a list of

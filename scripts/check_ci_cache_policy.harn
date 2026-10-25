@@ -29,6 +29,11 @@ pub import {
   step_budget_margin_errors,
 } from "./ci_cache_policy/linux_checks.harn"
 pub import {
+  MAKE_TARGET_PATH_GATES,
+  make_target_path_gate_errors,
+  make_target_recipe_paths,
+} from "./ci_cache_policy/make_target_paths.harn"
+pub import {
   actions_cache_capacity_errors,
   macos_shared_cache_errors,
   macos_warm_errors,

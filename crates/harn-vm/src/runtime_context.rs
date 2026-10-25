@@ -75,7 +75,7 @@ pub(crate) fn current_agent_run_ref() -> Option<crate::agent_events::AgentRunRef
     Some(crate::agent_events::AgentRunRef { session_id, run_id })
 }
 
-pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
+pub fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     let overlay = current_overlay();
     let mutation = crate::orchestration::current_mutation_session();
     let dispatch = crate::triggers::dispatcher::current_dispatch_context();
@@ -225,14 +225,7 @@ fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
     let mut debug = crate::value::DictMap::new();
     debug.put_bool("cancelled", cancelled);
     debug.put("waiting_reason", VmValue::Nil);
-    debug.put(
-        "active_task_ids",
-        VmValue::list(
-            vm.active_task_ids()
-                .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
-                .collect(),
-        ),
-    );
+    debug.put("active_task_ids", VmValue::strings(vm.active_task_ids()));
     debug.put("held_synchronization", VmValue::list(Vec::new()));
     debug.put(
         "supervisors",

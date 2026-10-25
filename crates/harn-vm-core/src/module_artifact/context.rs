@@ -61,16 +61,13 @@ impl ModuleCompilationContext {
     }
 
     pub fn from_graph(graph: &harn_modules::ModuleGraph, source_path: &Path) -> Self {
-        let mut context = Self::new(
-            graph
-                .imported_names_by_kind_for_file(source_path, DefKind::Enum)
-                .unwrap_or_default(),
-            graph
-                .imported_callable_names_for_file(source_path)
-                .unwrap_or_default(),
-        );
-        context.type_alias_names = graph
-            .imported_names_by_kind_for_file(source_path, DefKind::Type)
+        let mut grouped = graph
+            .imported_names_grouped_by_kind(source_path)
+            .unwrap_or_default();
+        let callable = harn_modules::callable_names(&grouped);
+        let mut context = Self::new(grouped.remove(&DefKind::Enum).unwrap_or_default(), callable);
+        context.type_alias_names = grouped
+            .remove(&DefKind::Type)
             .unwrap_or_default()
             .into_iter()
             .collect();
@@ -90,6 +87,27 @@ impl ModuleCompilationContext {
     ) -> Result<Self, VmError> {
         let program = parse_module_source(source_path, source)?;
         Ok(Self::for_program_in_graph(graph, source_path, &program))
+    }
+
+    /// [`Self::for_source_in_graph`] over a remembered source, or `None` when it
+    /// does not parse.
+    pub(crate) fn for_module_source_in_graph(
+        graph: &harn_modules::ModuleGraph,
+        source_path: &Path,
+        source: &crate::module_source::ModuleSource,
+    ) -> Option<Self> {
+        let needs_imported_symbols = source.needs_imported_symbols(source_path)?;
+        Some(
+            ModuleCompilationContextProjection {
+                needs_imported_symbols,
+            }
+            .in_graph(graph, source_path),
+        )
+    }
+
+    pub(crate) fn source_needs_imported_symbols(source_path: &Path, source: &str) -> Option<bool> {
+        let program = parse_module_source(source_path, source).ok()?;
+        Some(needs_imported_symbol_projection(&program))
     }
 
     /// Project the graph's parsed program without reading or parsing it again.

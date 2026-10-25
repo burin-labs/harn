@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 fn regex_error(error: String) -> VmError {
     VmError::Thrown(VmValue::string(format!("Invalid regex: {error}")))
@@ -34,13 +33,10 @@ fn required_str(args: &[VmValue], idx: usize) -> Option<std::borrow::Cow<'_, str
     }
 }
 
-pub(crate) fn register_regex_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_regex_builtins);
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig_expr = harn_builtin_meta::signatures::PORTABLE_REGEX_MATCH,
     category = "regex"
 )]
@@ -64,7 +60,6 @@ fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 // backreferences).
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig_expr = harn_builtin_meta::signatures::PORTABLE_REGEX_REPLACE,
     category = "regex"
 )]
@@ -84,7 +79,6 @@ fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig_expr = harn_builtin_meta::signatures::PORTABLE_REGEX_CAPTURES,
     category = "regex"
 )]
@@ -121,7 +115,6 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig_expr = harn_builtin_meta::signatures::PORTABLE_REGEX_SPLIT,
     category = "regex"
 )]
@@ -131,9 +124,7 @@ fn regex_split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     };
     let flags = optional_flags(args, 2);
     let parts = harn_kernel::pure::regex_split(&pattern, &text, &flags).map_err(regex_error)?;
-    Ok(VmValue::list(
-        parts.into_iter().map(VmValue::string).collect(),
-    ))
+    Ok(VmValue::strings(parts))
 }
 
 #[cfg(test)]
@@ -154,7 +145,7 @@ mod tests {
     }
 
     fn s(v: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(v))
+        VmValue::string(v)
     }
 
     fn unwrap_list(v: &VmValue) -> &Vec<VmValue> {

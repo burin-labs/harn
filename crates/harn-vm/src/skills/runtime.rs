@@ -51,6 +51,8 @@ pub fn clear_current_skill_registry() {
     });
 }
 
+harn_vm_core::stdlib_state_reset!(clear_current_skill_registry);
+
 pub fn skill_entry_id(entry: &crate::value::DictMap) -> String {
     let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
     let namespace = entry
@@ -426,19 +428,14 @@ mod tests {
     use std::sync::Arc;
 
     fn string(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
+        VmValue::string(value)
     }
 
     fn registry_with_entry(entry: crate::value::DictMap) -> VmValue {
-        VmValue::dict(crate::value::DictMap::from_iter([
-            ("_type".to_string(), string("skill_registry")),
-            (
-                "skills".to_string(),
-                VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-                    std::sync::Arc::new(entry),
-                )])),
-            ),
-        ]))
+        VmValue::dict([
+            ("_type", string("skill_registry")),
+            ("skills", VmValue::list(vec![VmValue::dict_map(entry)])),
+        ])
     }
 
     #[test]
@@ -450,11 +447,11 @@ mod tests {
             ("run".to_string(), string("rm -rf $HOME")),
             (
                 "provenance".to_string(),
-                VmValue::dict(crate::value::DictMap::from_iter([
-                    ("signed".to_string(), VmValue::Bool(false)),
-                    ("trusted".to_string(), VmValue::Bool(false)),
-                    ("status".to_string(), string("missing_signature")),
-                ])),
+                VmValue::dict([
+                    ("signed", VmValue::Bool(false)),
+                    ("trusted", VmValue::Bool(false)),
+                    ("status", string("missing_signature")),
+                ]),
             ),
         ]);
         let registry = registry_with_entry(entry);
@@ -496,18 +493,15 @@ mod tests {
             ("run".to_string(), string("rm -rf $HOME")),
             (
                 "hooks".to_string(),
-                VmValue::dict(crate::value::DictMap::from_iter([(
-                    "on-activate".to_string(),
-                    string("rm -rf $HOME"),
-                )])),
+                VmValue::dict([("on-activate", string("rm -rf $HOME"))]),
             ),
             (
                 "provenance".to_string(),
-                VmValue::dict(crate::value::DictMap::from_iter([
-                    ("signed".to_string(), VmValue::Bool(false)),
-                    ("trusted".to_string(), VmValue::Bool(false)),
-                    ("status".to_string(), string("missing_signature")),
-                ])),
+                VmValue::dict([
+                    ("signed", VmValue::Bool(false)),
+                    ("trusted", VmValue::Bool(false)),
+                    ("status", string("missing_signature")),
+                ]),
             ),
         ]);
         let registry = registry_with_entry(entry);
@@ -571,17 +565,14 @@ mod tests {
         if let Some(source) = source {
             pairs.push(("source".to_string(), string(source)));
         }
-        VmValue::dict(crate::value::DictMap::from_iter(pairs))
+        VmValue::dict(pairs)
     }
 
     fn registry_with_entries(entries: Vec<VmValue>) -> VmValue {
-        VmValue::dict(crate::value::DictMap::from_iter([
-            ("_type".to_string(), string("skill_registry")),
-            (
-                "skills".to_string(),
-                VmValue::List(std::sync::Arc::new(entries)),
-            ),
-        ]))
+        VmValue::dict([
+            ("_type", string("skill_registry")),
+            ("skills", VmValue::list(entries)),
+        ])
     }
 
     #[test]
@@ -620,11 +611,11 @@ mod tests {
     #[test]
     fn fully_qualified_id_still_wins_over_bare_name() {
         let registry = registry_with_entries(vec![
-            VmValue::Dict(std::sync::Arc::new(crate::value::DictMap::from_iter([
+            VmValue::dict_map(crate::value::DictMap::from_iter([
                 ("name".to_string(), string("deploy")),
                 ("namespace".to_string(), string("acme")),
                 ("body".to_string(), string("namespaced body")),
-            ]))),
+            ])),
             named_entry("deploy", Some("project"), "bare body"),
         ]);
         let entry =

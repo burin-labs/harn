@@ -244,7 +244,6 @@ impl Default for ExternalAgentDelegationEnvelope {
 }
 
 #[derive(Debug)]
-#[non_exhaustive]
 pub enum ExternalAgentError {
     InvalidRequest(String),
     Discovery(String),
@@ -288,6 +287,8 @@ impl From<A2aClientError> for ExternalAgentError {
 pub fn reset_external_agent_state() {
     idempotency_cache().clear();
 }
+
+harn_vm_core::stdlib_state_reset!(reset_external_agent_state);
 
 pub async fn delegate_external_agent(
     request: ExternalAgentDelegationRequest,

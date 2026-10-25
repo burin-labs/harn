@@ -1,4 +1,4 @@
-// Question-aharness.fs, t-a-time planning agent (qmode).
+// Question-at-a-time planning agent (qmode).
 //
 // The model asks the user one question at a time, may use read-only
 // discovery tools between questions, then calls exit_plan_mode with a
@@ -8,6 +8,7 @@
 // records the answer, and reruns the pipeline.
 //
 // Reuses workspace tools from lib/workspace.harn.
+import { agent_loop } from "std/agent/loop"
 import "std/path"
 import "std/runtime"
 import {
@@ -582,7 +583,7 @@ fn save_session(agent: HarnessAgent, fs: HarnessFs, session_id: any, snap_path: 
 pipeline default(harness: Harness) {
   assert_local_only(harness.env)
   const task_id = harness.env.get_or("QMODE_TASK_ID", "default")
-  const task_text = runtime_task()
+  const task_text = runtime_task(harness.runtime)
   const dir = ensure_task_dir(harness.fs, task_id)
   // Reset step marker for this invocation; handlers overwrite it.
   const step_marker = path_join(dir, "step.txt")
@@ -594,7 +595,7 @@ pipeline default(harness: Harness) {
     return
   }
   if harness.fs.exists(pending_path(harness.fs, task_id)) {
-    throw "[qmode] pending.json exists at ${pending_path(harness, task_id)}. The driver should have cleared it after recording the answer."
+    throw "[qmode] pending.json exists at ${pending_path(harness.fs, task_id)}. The driver should have cleared it after recording the answer."
   }
   // Persist task metadata on first run.
   if !harness.fs.exists(task_meta_path(harness.fs, task_id)) {

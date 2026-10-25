@@ -3,10 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::orchestration::CapabilityPolicy;
 
-use super::{
-    base_workspace_roots, normalize_for_policy, normalized_workspace_roots, path_is_within,
-    warn_once,
-};
+use super::{base_workspace_roots, normalize_for_policy, path_is_within, warn_once};
 
 pub(crate) const WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
 pub(crate) const TMPDIR_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
@@ -17,18 +14,25 @@ pub fn is_workspace_runtime_directory(name: &OsStr) -> bool {
     name == OsStr::new(WORKSPACE_TMPDIR_NAME) || name == OsStr::new(WORKSPACE_TOOLCHAIN_CACHE_NAME)
 }
 
+/// Where a workspace-local runtime directory lives, without creating it. The
+/// first normalized root is always the first base root, so this skips the git
+/// topology walk.
+fn planned_workspace_dir(policy: &CapabilityPolicy, name: &str) -> Option<PathBuf> {
+    if !policy.sandbox_profile.enforces_path_scope() {
+        return None;
+    }
+    Some(base_workspace_roots(policy).into_iter().next()?.join(name))
+}
+
 fn create_self_ignored_dir(
     policy: &CapabilityPolicy,
     name: &str,
     warning_key: &str,
     label: &str,
 ) -> Option<PathBuf> {
-    if !policy.sandbox_profile.enforces_path_scope() {
-        return None;
-    }
-    let root = normalized_workspace_roots(policy).into_iter().next()?;
-    let path = root.join(name);
-    if let Err(error) = initialize_self_ignored_dir(&root, name) {
+    let path = planned_workspace_dir(policy, name)?;
+    let root = path.parent()?;
+    if let Err(error) = initialize_self_ignored_dir(root, name) {
         warn_once(
             warning_key,
             &format!(
@@ -192,6 +196,18 @@ pub(crate) fn toolchain_home_from(
     })
 }
 
+/// `CARGO_HOME` and `RUSTUP_HOME` as a child should see them, by the rule of
+/// [`toolchain_home_from`]. Hosts that start a Rust tool outside the
+/// workspace environment (a language server) read the same answer.
+pub fn rust_toolchain_homes() -> Vec<(&'static str, PathBuf)> {
+    [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")]
+        .into_iter()
+        .filter_map(|(name, suffix)| {
+            toolchain_home(name, suffix).map(|resolved| (name, PathBuf::from(resolved.path)))
+        })
+        .collect()
+}
+
 fn workspace_toolchain_env_with_package_cache(
     policy: &CapabilityPolicy,
     package_cache: Option<PathBuf>,
@@ -199,6 +215,18 @@ fn workspace_toolchain_env_with_package_cache(
     let Some(root) = workspace_local_toolchain_cache(policy) else {
         return Vec::new();
     };
+    toolchain_env_at(policy, &root, package_cache, true)
+}
+
+/// The toolchain environment rooted at `root`. `seed` writes the credential-free
+/// npm and Composer stand-ins the values point at; a read passes `false` and
+/// gets the same values.
+fn toolchain_env_at(
+    policy: &CapabilityPolicy,
+    root: &Path,
+    package_cache: Option<PathBuf>,
+    seed: bool,
+) -> Vec<(String, String)> {
     let path = |key: &str, suffix: &str| {
         inherited_workspace_cache_path(policy, key)
             .unwrap_or_else(|| root.join(suffix).display().to_string())
@@ -233,6 +261,10 @@ fn workspace_toolchain_env_with_package_cache(
         ("GOMODCACHE".to_string(), path("GOMODCACHE", "go-mod")),
         ("GOPATH".to_string(), path("GOPATH", "go")),
         (
+            "GRADLE_USER_HOME".to_string(),
+            path("GRADLE_USER_HOME", "gradle"),
+        ),
+        (
             "SWIFTPM_MODULECACHE_OVERRIDE".to_string(),
             path("SWIFTPM_MODULECACHE_OVERRIDE", "swiftpm/modules"),
         ),
@@ -266,7 +298,6 @@ fn workspace_toolchain_env_with_package_cache(
             "YARN_CACHE_FOLDER".to_string(),
             path("YARN_CACHE_FOLDER", "yarn"),
         ),
-        ("PNPM_HOME".to_string(), path("PNPM_HOME", "pnpm/home")),
         (
             "COMPOSER_CACHE_DIR".to_string(),
             path("COMPOSER_CACHE_DIR", "composer"),
@@ -307,10 +338,8 @@ fn workspace_toolchain_env_with_package_cache(
     // the child was pointed at a toolchain that does not exist. It is also
     // wrong for anyone whose toolchain simply lives somewhere else, which is
     // ordinary on a shared or containerized machine.
-    for (name, suffix) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
-        if let Some(resolved) = toolchain_home(name, suffix) {
-            env.push((name.to_string(), resolved.path));
-        }
+    for (name, path) in rust_toolchain_homes() {
+        env.push((name.to_string(), path.display().to_string()));
     }
     if let Some(home) = crate::user_dirs::home_dir().filter(|home| home.is_absolute()) {
         for (key, candidate) in [
@@ -336,9 +365,13 @@ fn workspace_toolchain_env_with_package_cache(
         // and never carries a token into the workspace.
         env.push((
             "NPM_CONFIG_USERCONFIG".to_string(),
-            seed_sanitized_npmrc(&home.join(".npmrc"), &root.join("npm/npmrc"))
-                .display()
-                .to_string(),
+            if seed {
+                seed_sanitized_npmrc(&home.join(".npmrc"), &root.join("npm/npmrc"))
+            } else {
+                root.join("npm/npmrc")
+            }
+            .display()
+            .to_string(),
         ));
         // Composer treats an unreadable `auth.json` as fatal, and that file
         // is on the credential denylist. Pointing COMPOSER_HOME at a
@@ -346,9 +379,13 @@ fn workspace_toolchain_env_with_package_cache(
         // keeps repositories and preferred-install settings and drops tokens.
         env.push((
             "COMPOSER_HOME".to_string(),
-            seed_composer_home(&home, &root.join("composer/home"))
-                .display()
-                .to_string(),
+            if seed {
+                seed_composer_home(&home, &root.join("composer/home"))
+            } else {
+                root.join("composer/home")
+            }
+            .display()
+            .to_string(),
         ));
     }
     env
@@ -421,9 +458,12 @@ fn workspace_toolchain_env(policy: &CapabilityPolicy) -> Vec<(String, String)> {
 }
 
 pub(crate) fn inject_workspace_tmpdir(env: &mut Vec<(String, String)>, policy: &CapabilityPolicy) {
-    let Some(tmpdir) = workspace_local_tmpdir(policy) else {
-        return;
-    };
+    if let Some(tmpdir) = workspace_local_tmpdir(policy) {
+        push_tmpdir(env, &tmpdir);
+    }
+}
+
+fn push_tmpdir(env: &mut Vec<(String, String)>, tmpdir: &Path) {
     let tmpdir = tmpdir.display().to_string();
     for key in TMPDIR_ENV_KEYS {
         if !env.iter().any(|(existing, _)| existing == key) {
@@ -432,6 +472,17 @@ pub(crate) fn inject_workspace_tmpdir(env: &mut Vec<(String, String)>, policy: &
     }
 }
 
+fn push_absent(env: &mut Vec<(String, String)>, entries: Vec<(String, String)>) {
+    for (key, value) in entries {
+        if !env.iter().any(|(existing, _)| existing == &key) {
+            env.push((key, value));
+        }
+    }
+}
+
+/// The environment a confined child starts with. Creates the workspace temp
+/// and cache directories and, on macOS, the launchers that keep the child's
+/// temporary storage inside the workspace.
 pub(crate) fn inject_workspace_process_env(
     env: &mut Vec<(String, String)>,
     policy: &CapabilityPolicy,
@@ -439,18 +490,35 @@ pub(crate) fn inject_workspace_process_env(
     inject_workspace_tmpdir(env, policy);
     #[cfg(target_os = "macos")]
     super::macos::private_temp::inject_env(env, policy);
-    for (key, value) in workspace_toolchain_env(policy) {
-        if !env.iter().any(|(existing, _)| existing == &key) {
-            env.push((key, value));
-        }
-    }
+    push_absent(env, workspace_toolchain_env(policy));
     inject_jvm_loopback_env(env, policy);
     #[cfg(target_os = "macos")]
     super::macos::swiftpm::inject_env(env, policy);
 }
 
+/// The workspace defaults an in-process environment read sees, computed
+/// without touching disk. A read must not materialize anything: a provider
+/// catalog reads the environment once per provider, and building the child
+/// environment for each read rewrote toolchain launchers every agent step.
+/// The macOS launchers and temp alias exist only for children, so they are
+/// absent here.
+fn workspace_process_env_for_read(policy: &CapabilityPolicy) -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    if let Some(tmpdir) = planned_workspace_dir(policy, WORKSPACE_TMPDIR_NAME) {
+        push_tmpdir(&mut env, &tmpdir);
+    }
+    if let Some(root) = planned_workspace_dir(policy, WORKSPACE_TOOLCHAIN_CACHE_NAME) {
+        push_absent(
+            &mut env,
+            toolchain_env_at(policy, &root, crate::user_dirs::package_cache_dir(), false),
+        );
+    }
+    inject_jvm_loopback_env(&mut env, policy);
+    env
+}
+
 /// The JVM option that makes a loopback-only grant hold for Java children.
-const JVM_PREFER_IPV4_STACK: &str = "-Djava.net.preferIPv4Stack=true";
+const JVM_PREFER_IPV6_ADDRESSES: &str = "-Djava.net.preferIPv6Addresses=true";
 
 /// Make `allow_tcp_loopback` mean what it says for JVM children on macOS.
 ///
@@ -461,8 +529,16 @@ const JVM_PREFER_IPV4_STACK: &str = "-Djava.net.preferIPv4Stack=true";
 /// loopback dies with a bare `SocketException: Operation not permitted`
 /// while a Python or Node server beside it works. The seatbelt grammar
 /// offers no spelling for the mapped form (measured: numeric hosts are
-/// rejected at profile parse), so the fix is on the JVM side: prefer the
-/// IPv4 stack, which makes the JVM emit the addresses the filter matches.
+/// rejected at profile parse), so the fix is on the JVM side: prefer IPv6
+/// addresses, so `localhost` resolves to `::1`, which the filter matches.
+///
+/// Not the IPv4 stack, which also works for one JVM: a server JVM then
+/// advertises only `127.0.0.1`, and a child JVM launched without this
+/// variable connects to it mapped. Gradle starts its Checkstyle, PMD and
+/// CodeNarc workers with a fresh environment, so every code-quality task
+/// failed. With IPv6 preferred the server advertises `::1` first, and the
+/// child reaches it whatever its own setting. A JVM that names the literal
+/// `127.0.0.1` is still refused.
 ///
 /// `JAVA_TOOL_OPTIONS` is the one JVM-wide knob every launcher honours
 /// (Gradle's wrapper, sbt, Maven, `java` itself). A caller's own value is
@@ -493,9 +569,9 @@ fn inject_jvm_loopback_env(env: &mut Vec<(String, String)>, policy: &CapabilityP
         return;
     }
     let value = if existing.trim().is_empty() {
-        JVM_PREFER_IPV4_STACK.to_string()
+        JVM_PREFER_IPV6_ADDRESSES.to_string()
     } else {
-        format!("{} {JVM_PREFER_IPV4_STACK}", existing.trim_end())
+        format!("{} {JVM_PREFER_IPV6_ADDRESSES}", existing.trim_end())
     };
     env.retain(|(key, _)| key != "JAVA_TOOL_OPTIONS");
     env.push(("JAVA_TOOL_OPTIONS".to_string(), value));
@@ -510,6 +586,14 @@ pub fn active_workspace_process_env() -> Vec<(String, String)> {
     let mut env = Vec::new();
     inject_workspace_process_env(&mut env, &policy);
     env
+}
+
+/// [`active_workspace_process_env`] for an in-process read: the same values a
+/// read can see, with nothing created on disk.
+pub(crate) fn active_workspace_env_for_read() -> Vec<(String, String)> {
+    crate::orchestration::current_execution_policy()
+        .map(|policy| workspace_process_env_for_read(&policy))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -699,12 +783,12 @@ mod tests {
             "GOCACHE",
             "GOMODCACHE",
             "GOPATH",
+            "GRADLE_USER_HOME",
             "CARGO_TARGET_DIR",
             "PIP_CACHE_DIR",
             "UV_CACHE_DIR",
             "NPM_CONFIG_CACHE",
             "YARN_CACHE_FOLDER",
-            "PNPM_HOME",
             "CCACHE_DIR",
             "CCACHE_TEMPDIR",
         ] {
@@ -718,7 +802,7 @@ mod tests {
         // for a pytest that worked in the user's own terminal. Nothing was
         // refused; the interpreter never looked. The agent should see what the
         // user's terminal sees.
-        for key in ["HOME", "PYTHONUSERBASE"] {
+        for key in ["HOME", "PYTHONUSERBASE", "PNPM_HOME"] {
             assert!(
                 !env.contains_key(key),
                 "{key} must NOT be relocated; the child inherits the real one"
@@ -882,7 +966,7 @@ mod tests {
     }
 
     #[test]
-    fn a_loopback_grant_pins_the_jvm_to_the_ipv4_stack_on_macos() {
+    fn a_loopback_grant_makes_the_jvm_prefer_ipv6_on_macos() {
         let workspace = tempfile::tempdir().unwrap();
         let mut policy = policy(workspace.path());
         let mut env = Vec::new();
@@ -901,7 +985,7 @@ mod tests {
             .map(|(_, value)| value.clone())
             .unwrap();
         if cfg!(target_os = "macos") {
-            assert_eq!(value, format!("-Xmx1g {JVM_PREFER_IPV4_STACK}"));
+            assert_eq!(value, format!("-Xmx1g {JVM_PREFER_IPV6_ADDRESSES}"));
         } else {
             assert_eq!(value, "-Xmx1g", "only the macOS seatbelt needs the pin");
         }
@@ -909,7 +993,7 @@ mod tests {
         // An operator who already chose a stack keeps their choice.
         let mut env = vec![(
             "JAVA_TOOL_OPTIONS".to_string(),
-            "-Djava.net.preferIPv6Addresses=true".to_string(),
+            "-Djava.net.preferIPv4Stack=true".to_string(),
         )];
         inject_workspace_process_env(&mut env, &policy);
         assert_eq!(
@@ -918,6 +1002,6 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(env[0].1, "-Djava.net.preferIPv6Addresses=true");
+        assert_eq!(env[0].1, "-Djava.net.preferIPv4Stack=true");
     }
 }

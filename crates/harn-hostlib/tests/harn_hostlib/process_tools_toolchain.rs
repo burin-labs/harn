@@ -2,7 +2,7 @@
 
 #![cfg(unix)]
 
-use std::sync::Arc;
+use harn_vm::value::VmDictExt as _;
 
 use harn_hostlib::process::{MockProcessConfig, ProcessError};
 use harn_vm::VmValue;
@@ -28,7 +28,7 @@ fn toolchain_facts_runs_config_declared_probes_and_cache_state() {
     let mut cargo_version = dict_map();
     cargo_version.insert("parser".into(), vm_string("regex"));
     cargo_version.insert("pattern".into(), vm_string(r"cargo\s+([0-9.]+)"));
-    cargo_version.insert("group".into(), VmValue::Int(1));
+    cargo_version.put_int("group", 1);
 
     let mut cargo_env = dict_map();
     cargo_env.insert(
@@ -39,8 +39,8 @@ fn toolchain_facts_runs_config_declared_probes_and_cache_state() {
     let mut cargo_probe = dict_map();
     cargo_probe.insert("name".into(), vm_string("cargo"));
     cargo_probe.insert("argv".into(), vlist_str(&["cargo", "--version"]));
-    cargo_probe.insert("version".into(), VmValue::dict(cargo_version));
-    cargo_probe.insert("env".into(), VmValue::dict(cargo_env));
+    cargo_probe.put("version", VmValue::dict(cargo_version));
+    cargo_probe.put("env", VmValue::dict(cargo_env));
     cargo_probe.insert("env_mode".into(), vm_string("replace"));
     cargo_probe.insert("cache_env".into(), vlist_str(&["CARGO_HOME"]));
 
@@ -51,8 +51,8 @@ fn toolchain_facts_runs_config_declared_probes_and_cache_state() {
         "cwd".into(),
         vm_string(workspace.path().to_string_lossy().as_ref()),
     );
-    zig_probe.insert(
-        "env".into(),
+    zig_probe.put(
+        "env",
         VmValue::dict({
             let mut env = dict_map();
             env.insert(
@@ -70,12 +70,9 @@ fn toolchain_facts_runs_config_declared_probes_and_cache_state() {
     zig_probe.insert("state_paths".into(), vlist_str(&[".zig-cache"]));
 
     let mut req = dict_map();
-    req.insert(
-        "probes".into(),
-        VmValue::List(Arc::new(vec![
-            VmValue::dict(cargo_probe),
-            VmValue::dict(zig_probe),
-        ])),
+    req.put(
+        "probes",
+        VmValue::list(vec![VmValue::dict(cargo_probe), VmValue::dict(zig_probe)]),
     );
     let resp = require_dict(call_tool("hostlib_tools_toolchain_facts", req).unwrap());
     let toolchains = require_list(&resp, "toolchains");
@@ -138,10 +135,7 @@ fn toolchain_facts_reports_spawn_failure_without_aborting_batch() {
     probe.insert("argv".into(), vlist_str(&["missing-tool", "--version"]));
 
     let mut req = dict_map();
-    req.insert(
-        "probes".into(),
-        VmValue::List(Arc::new(vec![VmValue::dict(probe)])),
-    );
+    req.put("probes", VmValue::list(vec![VmValue::dict(probe)]));
     let resp = require_dict(call_tool("hostlib_tools_toolchain_facts", req).unwrap());
     let toolchains = require_list(&resp, "toolchains");
     let missing = as_dict(&toolchains[0]);

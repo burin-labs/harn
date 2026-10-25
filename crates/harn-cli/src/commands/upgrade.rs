@@ -224,7 +224,7 @@ fn install_verified_archive(
             }
         }
     } else {
-        let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(input));
+        let mut archive = tar_archive(input)?;
         for entry in archive.entries().map_err(|error| error.to_string())? {
             let mut entry = entry.map_err(|error| error.to_string())?;
             if entry.header().entry_type().is_file() {
@@ -282,7 +282,7 @@ fn upgrade(
         }
         None => fetch_latest_tag().map_err(|error| phase("resolve_failed", error))?,
     };
-    let archive_name = format!("harn-{triple}.tar.gz");
+    let archive_name = release_archive_name(triple, &target);
     let archive_url = format!("{RELEASES_BASE}/download/{target}/{archive_name}");
     let checksums_url = format!("{RELEASES_BASE}/download/{target}/SHA256SUMS");
     let report = output.insert(UpgradeReport {
@@ -856,11 +856,46 @@ fn hex_lower(bytes: &[u8]) -> String {
     s
 }
 
+/// First release that publishes macOS and Linux archives as `.tar.xz`; earlier ones are `.tar.gz`.
+const XZ_FIRST_RELEASE: [u64; 3] = [0, 10, 179];
+
+/// The release archive name for a target triple at a release tag; Windows stays a zip.
+pub(super) fn release_archive_name(triple: &str, tag: &str) -> String {
+    if triple.ends_with("-pc-windows-msvc") {
+        return format!("harn-{triple}.zip");
+    }
+    let parts: Vec<u64> = tag
+        .trim_start_matches('v')
+        .split('.')
+        .map_while(|part| part.parse().ok())
+        .collect();
+    let extension = if parts.as_slice() >= XZ_FIRST_RELEASE.as_slice() {
+        "tar.xz"
+    } else {
+        "tar.gz"
+    };
+    format!("harn-{triple}.{extension}")
+}
+
+/// Open a release tarball in whichever compression its bytes declare.
+fn tar_archive(mut input: fs::File) -> Result<tar::Archive<Box<dyn Read>>, String> {
+    let mut magic = [0u8; 6];
+    input
+        .read_exact(&mut magic)
+        .map_err(|error| format!("archive is too short: {error}"))?;
+    input.rewind().map_err(|error| error.to_string())?;
+    let reader: Box<dyn Read> = match magic {
+        [0x1f, 0x8b, ..] => Box::new(flate2::read::GzDecoder::new(input)),
+        [0xfd, b'7', b'z', b'X', b'Z', 0] => Box::new(lzma_rust2::XzReader::new(input, false)),
+        _ => return Err("unsupported archive compression; expected gzip or xz".to_string()),
+    };
+    Ok(tar::Archive::new(reader))
+}
+
 fn extract_tarball(archive: &Path, dest: &Path) -> Result<(), String> {
     let file = fs::File::open(archive)
         .map_err(|error| format!("failed to open archive {}: {error}", archive.display()))?;
-    let gz = flate2::read::GzDecoder::new(file);
-    let mut tar = tar::Archive::new(gz);
+    let mut tar = tar_archive(file)?;
     tar.unpack(dest)
         .map_err(|error| format!("failed to extract archive: {error}"))?;
     Ok(())
@@ -1336,11 +1371,11 @@ mod tests {
     #[test]
     fn find_expected_sha_parses_coreutils_format() {
         let manifest = "\
-deadbeef00000000000000000000000000000000000000000000000000000000  harn-x86_64-apple-darwin.tar.gz
-cafef00d00000000000000000000000000000000000000000000000000000000  harn-aarch64-apple-darwin.tar.gz
+deadbeef00000000000000000000000000000000000000000000000000000000  harn-x86_64-apple-darwin.tar.xz
+cafef00d00000000000000000000000000000000000000000000000000000000  harn-aarch64-apple-darwin.tar.xz
 ";
         assert_eq!(
-            find_expected_sha(manifest, "harn-aarch64-apple-darwin.tar.gz").as_deref(),
+            find_expected_sha(manifest, "harn-aarch64-apple-darwin.tar.xz").as_deref(),
             Some("cafef00d00000000000000000000000000000000000000000000000000000000"),
         );
     }
@@ -1357,6 +1392,89 @@ cafef00d00000000000000000000000000000000000000000000000000000000  harn-aarch64-a
     #[test]
     fn find_expected_sha_misses_unknown_asset() {
         let manifest = "abc  some-other.tar.gz\n";
-        assert!(find_expected_sha(manifest, "harn-x86_64-apple-darwin.tar.gz").is_none());
+        assert!(find_expected_sha(manifest, "harn-x86_64-apple-darwin.tar.xz").is_none());
+    }
+
+    #[test]
+    fn extract_tarball_reads_an_xz_stream() {
+        let mut tar_bytes = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tar_bytes);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(5);
+            header.set_mode(0o755);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, "harn", &b"hello"[..])
+                .unwrap();
+            builder.finish().unwrap();
+        }
+        let root = tempfile::tempdir().unwrap();
+        let archive = root.path().join("harn.tar.xz");
+        let mut writer = lzma_rust2::XzWriter::new(
+            fs::File::create(&archive).unwrap(),
+            lzma_rust2::XzOptions::with_preset(6),
+        )
+        .unwrap();
+        std::io::Write::write_all(&mut writer, &tar_bytes).unwrap();
+        writer.finish().unwrap();
+
+        let dest = root.path().join("out");
+        fs::create_dir(&dest).unwrap();
+        extract_tarball(&archive, &dest).unwrap();
+        assert_eq!(fs::read(dest.join("harn")).unwrap(), b"hello");
+    }
+    #[test]
+    fn release_archive_name_follows_the_xz_cutover() {
+        let linux = "x86_64-unknown-linux-gnu";
+        assert_eq!(
+            release_archive_name(linux, "v0.10.178"),
+            "harn-x86_64-unknown-linux-gnu.tar.gz"
+        );
+        assert_eq!(
+            release_archive_name(linux, "v0.10.179"),
+            "harn-x86_64-unknown-linux-gnu.tar.xz"
+        );
+        assert_eq!(
+            release_archive_name("aarch64-apple-darwin", "v0.11.0"),
+            "harn-aarch64-apple-darwin.tar.xz"
+        );
+        assert_eq!(
+            release_archive_name("x86_64-pc-windows-msvc", "v0.10.179"),
+            "harn-x86_64-pc-windows-msvc.zip"
+        );
+    }
+
+    #[test]
+    fn extract_tarball_reads_gzip_and_refuses_unknown_compression() {
+        let root = tempfile::tempdir().unwrap();
+        let mut tar_bytes = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tar_bytes);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(5);
+            header.set_mode(0o755);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, "harn", &b"hello"[..])
+                .unwrap();
+            builder.finish().unwrap();
+        }
+        let gz = root.path().join("harn.tar.gz");
+        let mut encoder = flate2::write::GzEncoder::new(
+            fs::File::create(&gz).unwrap(),
+            flate2::Compression::default(),
+        );
+        std::io::Write::write_all(&mut encoder, &tar_bytes).unwrap();
+        encoder.finish().unwrap();
+        let dest = root.path().join("out");
+        fs::create_dir(&dest).unwrap();
+        extract_tarball(&gz, &dest).unwrap();
+        assert_eq!(fs::read(dest.join("harn")).unwrap(), b"hello");
+
+        let plain = root.path().join("harn.tar");
+        fs::write(&plain, &tar_bytes).unwrap();
+        let error = extract_tarball(&plain, &dest).unwrap_err();
+        assert!(error.contains("expected gzip or xz"), "{error}");
     }
 }

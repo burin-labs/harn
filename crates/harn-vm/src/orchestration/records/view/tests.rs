@@ -226,6 +226,38 @@ fn build_session_view_aggregates_runs() {
 }
 
 #[test]
+fn session_view_cache_counts_stay_unknown_until_a_run_reports_them() {
+    let run_with = |read: Option<i64>| {
+        let mut run = sample_run();
+        run.usage = Some(LlmUsageRecord {
+            call_count: 1,
+            cache_read_tokens: read,
+            cache_write_tokens: read.map(|tokens| tokens / 2),
+            ..LlmUsageRecord::default()
+        });
+        build_run_view(&run)
+    };
+    let aggregate = |reads: &[Option<i64>]| {
+        let runs = reads.iter().map(|read| run_with(*read)).collect();
+        build_session_view_from_run_views(runs, SessionViewOptions::default()).usage
+    };
+
+    let unknown = aggregate(&[None, None]);
+    assert_eq!(
+        (unknown.cache_read_tokens, unknown.cache_write_tokens),
+        (None, None)
+    );
+    let encoded = serde_json::to_value(&unknown).unwrap();
+    assert_eq!(encoded["cache_read_tokens"], serde_json::Value::Null);
+
+    let mixed = aggregate(&[None, Some(40), Some(0)]);
+    assert_eq!(
+        (mixed.cache_read_tokens, mixed.cache_write_tokens),
+        (Some(40), Some(20))
+    );
+}
+
+#[test]
 fn build_run_view_summarizes_stage_only_transcripts() {
     let mut run = sample_run();
     run.transcript = None;

@@ -235,11 +235,17 @@ impl AcpServer {
             }
         };
         let reason = string_param(params, "reason", "reason");
-        let mounted_at = match harn_vm::agent_sessions::add_workspace_root(
+        // An idle session runs no prompt, so no execution policy is current:
+        // measure against the one its next turn's children would run under.
+        let policy = self.sessions.get(&session_id).and_then(|session| {
+            super::modes::policy_for_mode(&session.current_mode_id, &self.sandbox)
+        });
+        let mounted_at = match harn_vm::stdlib::add_workspace_root(
             &session_id,
             &path,
             mount_mode,
             reason,
+            policy.as_ref(),
         ) {
             Ok(mounted_at) => mounted_at,
             Err(message) => {

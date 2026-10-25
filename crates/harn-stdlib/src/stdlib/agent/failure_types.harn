@@ -21,7 +21,26 @@ pub type AgentLoopProtocolFailure = {
 /** A typed cancellation outcome propagated from an auxiliary evaluation. */
 pub type AgentLoopCancelledFailure = {category: "cancelled", message: string}
 
+pub type AgentLoopClassifierConfigDetails = {
+  field?: string,
+  expected?: string,
+  actual_type?: string,
+  actual?: unknown,
+  min?: float,
+  max?: float,
+}
+
+/** Invalid settings are terminal configuration errors, not classifier refusals. */
+pub type AgentLoopClassifierConfigFailure = AgentLoopClassifierConfigDetails \
+  & {
+  error: string,
+  category: "invalid_config",
+  component: "missing_tool_call_classifier",
+  message: string,
+}
+
 pub type AgentLoopFailure = string \
   | AgentLoopTerminalCallbackFailure \
   | AgentLoopProtocolFailure \
-  | AgentLoopCancelledFailure
+  | AgentLoopCancelledFailure \
+  | AgentLoopClassifierConfigFailure

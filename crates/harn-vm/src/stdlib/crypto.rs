@@ -10,7 +10,6 @@ use crate::stdlib::args::Args;
 use crate::stdlib::macros::harn_builtin;
 use crate::url_encoding::percent_encode_component;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 fn jwt_error(message: impl Into<String>) -> VmError {
     VmError::Runtime(format!("jwt_sign: {}", message.into()))
@@ -560,11 +559,9 @@ fn aws_sigv4_timestamp(value: Option<&VmValue>) -> Result<DateTime<Utc>, VmError
     let value = value.ok_or_else(|| aws_sigv4_error("timestamp is required"))?;
     match value {
         VmValue::String(text) => aws_sigv4_timestamp_string(text),
-        VmValue::Int(seconds) => Utc
-            .timestamp_opt(*seconds, 0)
-            .single()
-            .ok_or_else(|| aws_sigv4_error("timestamp is out of range")),
-        VmValue::Float(seconds) => aws_sigv4_timestamp_float(*seconds),
+        VmValue::Int(_) | VmValue::Float(_) => {
+            super::datetime::datetime_from_arg(Some(value), "aws_sigv4_headers")
+        }
         VmValue::Dict(dict) => aws_sigv4_timestamp(
             dict.get("timestamp").or_else(|| dict.get("iso8601")),
         ),
@@ -582,24 +579,6 @@ fn aws_sigv4_timestamp_string(text: &str) -> Result<DateTime<Utc>, VmError> {
     NaiveDateTime::parse_from_str(text, "%Y%m%dT%H%M%SZ")
         .map(|dt| Utc.from_utc_datetime(&dt))
         .map_err(|_| aws_sigv4_error("timestamp must be RFC 3339 or YYYYMMDDTHHMMSSZ"))
-}
-
-fn aws_sigv4_timestamp_float(seconds: f64) -> Result<DateTime<Utc>, VmError> {
-    if !seconds.is_finite() {
-        return Err(aws_sigv4_error("timestamp must be finite"));
-    }
-    let mut secs = seconds.trunc() as i64;
-    let mut nanos = ((seconds - secs as f64) * 1_000_000_000.0).round() as i64;
-    if nanos < 0 {
-        secs -= 1;
-        nanos += 1_000_000_000;
-    } else if nanos >= 1_000_000_000 {
-        secs += 1;
-        nanos -= 1_000_000_000;
-    }
-    Utc.timestamp_opt(secs, nanos as u32)
-        .single()
-        .ok_or_else(|| aws_sigv4_error("timestamp is out of range"))
 }
 
 fn aws_sigv4_headers_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -656,13 +635,10 @@ fn bytes_or_string_input(arg: Option<&VmValue>) -> Result<Vec<u8>, VmError> {
     }
 }
 
-pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_crypto_builtins);
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "base64_encode(input: string | bytes) -> string",
     category = "crypto"
 )]
@@ -676,8 +652,8 @@ fn base64_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "base64_decode(text: string?) -> string", category = "crypto"
+    sig = "base64_decode(text: string?) -> string",
+    category = "crypto"
 )]
 fn base64_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
@@ -694,7 +670,6 @@ fn base64_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 // challenges, JWT segments, and any other URL-safe encoding of raw bytes.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     aliases = ["bytes_to_base64url"],
     sig = "base64url_encode(input: string | bytes) -> string",
     category = "crypto"
@@ -709,8 +684,8 @@ fn base64url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "base64url_decode(text: string?) -> string", category = "crypto"
+    sig = "base64url_decode(text: string?) -> string",
+    category = "crypto"
 )]
 fn base64url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
@@ -728,7 +703,6 @@ fn base64url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 // round-trip through hex.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "sha256_base64url(input: string | bytes) -> string",
     category = "crypto"
 )]
@@ -747,8 +721,8 @@ fn sha256_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 // tokens with strong entropy. n must be a positive integer.
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "crypto_random_bytes(n: int) -> bytes", category = "crypto"
+    sig = "crypto_random_bytes(n: int) -> bytes",
+    category = "crypto"
 )]
 fn crypto_random_bytes_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use rand::Rng as _;
@@ -778,7 +752,6 @@ fn crypto_random_bytes_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "base32_encode(input: string | bytes) -> string",
     category = "crypto"
 )]
@@ -789,8 +762,8 @@ fn base32_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "base32_decode(text: string?) -> string", category = "crypto"
+    sig = "base32_decode(text: string?) -> string",
+    category = "crypto"
 )]
 fn base32_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
@@ -804,7 +777,6 @@ fn base32_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig_expr = harn_builtin_meta::signatures::PORTABLE_HEX_ENCODE,
     category = "crypto"
 )]
@@ -815,7 +787,6 @@ fn hex_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig_expr = harn_builtin_meta::signatures::PORTABLE_HEX_DECODE,
     category = "crypto"
 )]
@@ -830,8 +801,8 @@ fn hex_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 // Persisted replay fingerprints retain their separate legacy projection.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "hash_value(value: any) -> int", category = "crypto"
+    sig = "hash_value(value: any) -> int",
+    category = "crypto"
 )]
 fn hash_value_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
@@ -846,7 +817,6 @@ fn hash_value_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig_expr = harn_builtin_meta::signatures::PORTABLE_SHA256,
     category = "crypto"
 )]
@@ -857,8 +827,8 @@ fn sha256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "sha224(input: string | bytes) -> string", category = "crypto"
+    sig = "sha224(input: string | bytes) -> string",
+    category = "crypto"
 )]
 fn sha224_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
@@ -868,8 +838,8 @@ fn sha224_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "sha384(input: string | bytes) -> string", category = "crypto"
+    sig = "sha384(input: string | bytes) -> string",
+    category = "crypto"
 )]
 fn sha384_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
@@ -879,8 +849,8 @@ fn sha384_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "sha512(input: string | bytes) -> string", category = "crypto"
+    sig = "sha512(input: string | bytes) -> string",
+    category = "crypto"
 )]
 fn sha512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
@@ -890,7 +860,6 @@ fn sha512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "sha512_256(input: string | bytes) -> string",
     category = "crypto"
 )]
@@ -904,8 +873,8 @@ fn sha512_256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "md5(input: string | bytes) -> string", category = "crypto"
+    sig = "md5(input: string | bytes) -> string",
+    category = "crypto"
 )]
 fn md5_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use md5::Digest;
@@ -918,7 +887,6 @@ fn md5_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 // stringifying them.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "sha256_hex(input: string | bytes) -> string",
     category = "crypto"
 )]
@@ -932,7 +900,6 @@ fn sha256_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 // signature header (e.g. GitHub's `x-hub-signature-256: sha256=<hex>`).
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "hmac_sha256(key: string, message: string) -> string",
     category = "crypto"
 )]
@@ -947,7 +914,6 @@ fn hmac_sha256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 // HMAC-SHA256 returning standard base64 (used by Slack-style signatures).
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "hmac_sha256_base64(key: string, message: string) -> string",
     category = "crypto"
 )]
@@ -966,7 +932,6 @@ fn hmac_sha256_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 // preferred for any new integration.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "hmac_sha1(key: string, message: string) -> string",
     category = "crypto"
 )]
@@ -980,7 +945,6 @@ fn hmac_sha1_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "jwt_sign(algorithm: string, claims: dict, private_key: string) -> string",
     category = "crypto"
 )]
@@ -990,7 +954,6 @@ fn jwt_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "signed_url(base: string?, claims: dict, secret: string?, expires_at: number, options?: dict) -> string",
     category = "crypto"
 )]
@@ -1000,7 +963,6 @@ fn signed_url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "verify_signed_url(url: string?, secret_or_keys: string | dict, now: number, options?: dict) -> dict",
     category = "crypto"
 )]
@@ -1010,8 +972,8 @@ fn verify_signed_url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "aws_sigv4_headers(spec: dict) -> dict", category = "crypto"
+    sig = "aws_sigv4_headers(spec: dict) -> dict",
+    category = "crypto"
 )]
 fn aws_sigv4_headers_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     aws_sigv4_headers_builtin(args)
@@ -1023,7 +985,6 @@ fn aws_sigv4_headers_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 // signature comparison.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "constant_time_eq(a: string, b: string) -> bool",
     category = "crypto"
 )]
@@ -1038,8 +999,8 @@ fn constant_time_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "url_encode(input: string) -> string", category = "crypto"
+    sig = "url_encode(input: string) -> string",
+    category = "crypto"
 )]
 fn url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
@@ -1057,8 +1018,8 @@ fn url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "url_decode(text: string?) -> string", category = "crypto"
+    sig = "url_decode(text: string?) -> string",
+    category = "crypto"
 )]
 fn url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
@@ -1069,8 +1030,8 @@ fn url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "sha3_256(input: string | bytes) -> string", category = "crypto"
+    sig = "sha3_256(input: string | bytes) -> string",
+    category = "crypto"
 )]
 fn sha3_256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha3::{Digest, Sha3_256};
@@ -1081,8 +1042,8 @@ fn sha3_256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "sha3_512(input: string | bytes) -> string", category = "crypto"
+    sig = "sha3_512(input: string | bytes) -> string",
+    category = "crypto"
 )]
 fn sha3_512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha3::{Digest, Sha3_512};
@@ -1093,8 +1054,8 @@ fn sha3_512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "blake3(input: string | bytes) -> string", category = "crypto"
+    sig = "blake3(input: string | bytes) -> string",
+    category = "crypto"
 )]
 fn blake3_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = bytes_or_string_input(args.first())?;
@@ -1124,7 +1085,6 @@ fn ed25519_keypair_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "ed25519_sign(private_hex: string, message: string | bytes) -> string",
     category = "crypto"
 )]
@@ -1154,7 +1114,6 @@ fn ed25519_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "ed25519_verify(public_hex: string, message: string | bytes, signature_hex: string) -> bool",
     category = "crypto"
 )]
@@ -1226,7 +1185,6 @@ fn x25519_keypair_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "x25519_agree(private_hex: string, peer_public_hex: string) -> string",
     category = "crypto"
 )]
@@ -1267,7 +1225,6 @@ fn x25519_agree_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "jwt_verify(algorithm: string, token: string, key: string) -> dict",
     category = "crypto"
 )]

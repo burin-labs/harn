@@ -1,0 +1,39 @@
+import { read_yaml } from "std/fs"
+import { warn_only_needs_errors } from "../ci_cache_policy/warn_only_needs"
+
+fn workflows(fs: HarnessFs) -> dict {
+  return {"ci.yml": read_yaml(fs, "../../.github/workflows/ci.yml")}
+}
+
+fn with_status_env(all: dict, env: dict) -> dict {
+  const ci = all["ci.yml"]
+  const status = ci.jobs["ci-status"]
+  const steps = status.steps.map(
+    { step ->
+      if step?.name == "Verify required CI jobs" {
+        return {...step, env: {...step.env, ...env}}
+      }
+      return step
+    },
+  )
+    .to_list()
+  return {...all, "ci.yml": {...ci, jobs: {...ci.jobs, "ci-status": {...status, steps: steps}}}}
+}
+
+pipeline test_required_verification_has_no_unmeasured_warning_switch(harness: Harness) {
+  assert_eq(warn_only_needs_errors(workflows(harness.fs)), [])
+}
+
+pipeline test_unmeasured_rollout_switches_cannot_return(harness: Harness) {
+  const all = workflows(harness.fs)
+  for value in ["true", "false"] {
+    assert(
+      len(warn_only_needs_errors(with_status_env(all, {CONSUMER_UNMEASURED_BLOCKS: value}))) > 0,
+    )
+    assert(len(warn_only_needs_errors(with_status_env(all, {E2E_UNMEASURED_BLOCKS: value}))) > 0)
+  }
+}
+
+pipeline test_a_missing_aggregate_cannot_pass_the_policy() {
+  assert(len(warn_only_needs_errors({})) > 0)
+}

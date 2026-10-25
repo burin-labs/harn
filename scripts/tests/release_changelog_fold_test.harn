@@ -30,6 +30,22 @@ pipeline test_retired_candidate_carries_notes_without_becoming_an_install_base()
 }
 
 @test
+pipeline test_retirement_skips_earlier_never_published_identities() {
+  const text =
+    "## v1.2.5\n\n- candidate\n\n## v1.2.4 (never published)\n\n- earlier\n\n## v1.2.3\n\n- published\n"
+  const retired = retire_unpublished_section(text, "1.2.5", "1.2.3")
+  assert_eq(extract_section(retired, "1.2.5"), "- candidate")
+  assert_eq(published_changelog_versions(retired), ["1.2.3"])
+  const refused = try {
+    retire_unpublished_section(text, "1.2.5", "1.2.4")
+    false
+  } catch (_) {
+    true
+  }
+  assert_eq(refused, true)
+}
+
+@test
 pipeline test_retirement_refuses_wrong_or_missing_published_predecessor() {
   const text = "## v1.2.4\n\n- candidate\n\n## v1.2.3\n\n- published\n"
   for base in ["1.2.2", "1.2.4", ""] {

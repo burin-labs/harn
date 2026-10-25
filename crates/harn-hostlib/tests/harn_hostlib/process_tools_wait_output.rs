@@ -2,6 +2,7 @@
 
 #![cfg(unix)]
 
+use harn_vm::value::VmDictExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -35,7 +36,7 @@ fn install_running() -> (MockHandleController, SpawnerGuard) {
 fn start_background() -> harn_vm::value::DictMap {
     let mut request = dict_map();
     request.insert("argv".into(), vlist_str(&["mock-service"]));
-    request.insert("background".into(), VmValue::Bool(true));
+    request.put_bool("background", true);
     require_dict(call_tool("hostlib_tools_run_command", request).unwrap())
 }
 
@@ -95,7 +96,7 @@ async fn selects_stderr_and_matches_split_regex() {
 
     let mut request = wait_request(&handle_id, r"ready\s+on\s+\d+");
     request.insert("source".into(), vm_string("stderr"));
-    request.insert("regex".into(), VmValue::Bool(true));
+    request.put_bool("regex", true);
     let event = require_dict(
         call_async("hostlib_tools_wait_command_output", request)
             .await
@@ -136,7 +137,7 @@ async fn timeout_uses_paused_time() {
     let started = start_background();
     let handle_id = require_str(&started, "handle_id");
     let mut request = wait_request(&handle_id, "ready");
-    request.insert("timeout_ms".into(), VmValue::Int(1_000));
+    request.put_int("timeout_ms", 1_000);
     let waiter =
         tokio::spawn(async move { call_async("hostlib_tools_wait_command_output", request).await });
     tokio::task::yield_now().await;

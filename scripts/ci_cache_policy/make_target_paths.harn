@@ -1,0 +1,80 @@
+import { filter_matches_paths } from "../gh_check_state.harn"
+
+/**
+ * Path-gated ci.yml jobs whose whole proof is one Make target. The job's
+ * filter must cover every repository file the target's recipe names, or an
+ * edit to that file skips the only job that executes it.
+ */
+pub const MAKE_TARGET_PATH_GATES = [
+  {
+    job: "swift-protocol-binding",
+    filter: "swift_protocol_binding",
+    target: "check-swift-protocol-binding",
+  },
+]
+
+/** Repository paths named in `target`'s recipe, with each `*` made literal. */
+pub fn make_target_recipe_paths(makefile: string, target: string) -> list<string> {
+  let paths: list<string> = []
+  let in_recipe = false
+  for line in makefile.lines() {
+    if line.starts_with(target + ":") {
+      in_recipe = true
+      continue
+    }
+    if !in_recipe {
+      continue
+    }
+    if !line.starts_with("\t") {
+      break
+    }
+    for raw in regex_replace("[;\"']", " ", line).split(" ") {
+      const token = raw.trim()
+      if !token.contains("$")
+        && regex_match("^[A-Za-z0-9_.-]+/[A-Za-z0-9_./*-]*\\.[A-Za-z0-9]+$", token) != nil {
+        paths.push(token.replace("*", "x"))
+      }
+    }
+  }
+  return paths
+}
+
+pub fn make_target_path_gate_errors(
+  ci_workflow: dict,
+  makefile: string,
+  gates: list = MAKE_TARGET_PATH_GATES,
+) -> list<string> {
+  const surface = (ci_workflow?.jobs?.changes?.steps ?? []).filter(
+    { step -> step?.id == "surface_filter" },
+  )
+    .to_list()
+  const filters = if len(surface) == 1 {
+    yaml_parse(to_string(surface[0]?.with?.filters ?? "")) ?? {}
+  } else {
+    {}
+  }
+  let errors: list<string> = []
+  for gate in gates {
+    const job = ci_workflow?.jobs?.[gate.job]
+    const runs = (job?.steps ?? []).map({ step -> trim(to_string(step?.run ?? "")) }).to_list()
+    if !runs.contains("make ${gate.target}") {
+      errors.push("ci.yml:${gate.job} must run `make ${gate.target}`")
+    }
+    const patterns: list<string> = (filters?.[gate.filter] ?? []).map({ p -> to_string(p) })
+      .to_list()
+    const recipe = make_target_recipe_paths(makefile, gate.target)
+    if recipe == [] {
+      errors.push(
+        "Makefile:${gate.target} names no repository paths; its path gate cannot be checked",
+      )
+    }
+    for path in [".github/workflows/ci.yml", "Makefile"] + recipe {
+      if !filter_matches_paths(patterns, [path]) {
+        errors.push(
+          "ci.yml:changes filter ${gate.filter} must cover ${path}, which ${gate.job} reads through `make ${gate.target}`",
+        )
+      }
+    }
+  }
+  return errors
+}

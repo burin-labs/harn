@@ -78,6 +78,12 @@ impl InterfaceSlot {
         })
     }
 
+    /// Where the record lives. It names the module's bytes, anchor, and
+    /// compiler build, so it identifies the record.
+    pub(crate) fn record_path(&self) -> &Path {
+        &self.path
+    }
+
     /// The stored interface, when its manifest proves the closure unchanged.
     ///
     /// Any header mismatch, undecodable payload, or stale manifest is a miss,

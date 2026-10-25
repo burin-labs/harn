@@ -596,6 +596,15 @@ accepts:
 - `"first"` to return after the first completed branch
 - `"quorum"` to return after `join_policy.min_completed` branches finish
 
+`StageSpec.join_policy` uses `WorkflowJoinPolicy` from `std/workflow/schedule`.
+Its optional fields are `strategy`, `require_all_inputs`, and `min_completed`.
+For join nodes, `min_completed` takes precedence; otherwise, `"all"` or
+`require_all_inputs: true` requires every incoming edge. Other strategies need
+one completed input. `workflow_join_readiness` returns the typed
+`{ready, required, completed_inputs}` result. `workflow_next_edges` returns
+`WorkflowScheduleEdge` records and uses default edges only when no exact branch
+matches. Each edge has `from`, `to`, and optional `branch` and `label` fields.
+
 `node.map_policy.max_concurrent` limits branch fan-out, and partial failures are
 retained alongside successful branch artifacts instead of aborting the whole map
 stage on the first error.

@@ -18,11 +18,10 @@ use aws_smithy_runtime_api::client::orchestrator::HttpRequest;
 use aws_smithy_runtime_api::client::runtime_components::{GetIdentityResolver, RuntimeComponents};
 use aws_smithy_types::config_bag::ConfigBag;
 use aws_smithy_types::Number;
-use p256::ecdsa::signature::RandomizedSigner;
+use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::sec1::ToSec1Point;
 use p256::SecretKey;
-use rand::SeedableRng;
 use std::sync::{Arc, LazyLock};
 use std::time::SystemTime;
 
@@ -69,7 +68,7 @@ impl Payload {
 
 fn header(private_key: &SecretKey) -> Result<Header, LoginTokenError> {
     let public_key = private_key.public_key();
-    let point = public_key.to_encoded_point(false);
+    let point = public_key.to_sec1_point(false);
 
     let x_bytes = point
         .x()
@@ -103,8 +102,9 @@ fn build_message(header: &Header, payload: &Payload) -> String {
 
 fn sign(message: &str, private_key: &SecretKey) -> Result<String, LoginTokenError> {
     let signing_key = SigningKey::from(private_key);
-    let mut rng = rand::rngs::StdRng::from_entropy();
-    let signature: Signature = signing_key.sign_with_rng(&mut rng, message.as_bytes());
+    // RFC 6979 deterministic nonce: no RNG to thread, and a repeated message cannot
+    // reuse a weak nonce.
+    let signature: Signature = signing_key.sign(message.as_bytes());
     let signature_b64 = base64_simd::URL_SAFE_NO_PAD.encode_to_string(signature.to_bytes());
     Ok(format!("{message}.{signature_b64}"))
 }
@@ -312,6 +312,27 @@ mod tests {
         let dpop = result.unwrap();
         let parts: Vec<&str> = dpop.split('.').collect();
         assert_eq!(parts.len(), 3);
+    }
+
+    #[test]
+    fn test_calculate_signature_verifies_and_is_deterministic() {
+        use p256::ecdsa::signature::Verifier;
+        use p256::ecdsa::VerifyingKey;
+
+        let private_key = SecretKey::from_sec1_pem(TEST_KEY).unwrap();
+        let message = "header.payload";
+        let signed = sign(message, &private_key).unwrap();
+        assert_eq!(signed, sign(message, &private_key).unwrap());
+
+        let signature_b64 = signed.strip_prefix("header.payload.").unwrap();
+        let signature_bytes = base64_simd::URL_SAFE_NO_PAD
+            .decode_to_vec(signature_b64)
+            .unwrap();
+        let signature = Signature::from_slice(&signature_bytes).unwrap();
+        let verifying_key = VerifyingKey::from(SigningKey::from(&private_key));
+        verifying_key
+            .verify(message.as_bytes(), &signature)
+            .unwrap();
     }
 
     #[test]

@@ -46,11 +46,10 @@ pub(crate) fn capabilities_to_vm_value(
     );
     dict.put(
         "decision_question_kinds",
-        VmValue::list(
+        VmValue::strings(
             caps.decision_question_kinds
                 .iter()
-                .map(|kind| VmValue::String(arcstr::ArcStr::from(kind.as_str())))
-                .collect(),
+                .map(|kind| kind.as_str()),
         ),
     );
     dict.put_nullable_str(
@@ -272,35 +271,28 @@ pub(crate) fn capabilities_to_vm_value(
     dict.put_bool("stop_supported", caps.stop_supported);
     dict.put(
         "advanced_generation_options",
-        VmValue::list(
+        VmValue::strings(
             caps.advanced_generation_options
                 .iter()
-                .map(|option| VmValue::String(arcstr::ArcStr::from(option.name())))
-                .collect(),
+                .map(|option| option.name()),
         ),
     );
     dict.put(
         "allowed_tool_choice_modes",
-        VmValue::list(
+        VmValue::strings(
             caps.allowed_tool_choice_modes
                 .iter()
-                .map(|mode| VmValue::String(arcstr::ArcStr::from(mode.as_str())))
-                .collect(),
+                .map(|mode| mode.as_str()),
         ),
     );
     dict.put(
         "auto_reasoning_overrides",
-        VmValue::dict(
-            caps.auto_reasoning_overrides
-                .iter()
-                .map(|(task, mode)| {
-                    (
-                        crate::value::intern_key(task),
-                        VmValue::string(mode.clone()),
-                    )
-                })
-                .collect::<crate::value::DictMap>(),
-        ),
+        VmValue::dict(caps.auto_reasoning_overrides.iter().map(|(task, mode)| {
+            (
+                crate::value::intern_key(task),
+                VmValue::string(mode.clone()),
+            )
+        })),
     );
     // Accelerated-serving (`fast`) tier, read from the generalized
     // `serving_tiers` catalog so callers can branch on `harness.llm.call(...,

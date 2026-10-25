@@ -44,6 +44,8 @@ type EvalFingerprintIntegrity = {
   inconsistent_cases: list<string>,
 }
 
+type EvalPairedCohort = {baseline: list<dict>, current: list<dict>, deltas: list<float>}
+
 fn __float(value: any) -> float {
   return to_float(value) ?? 0.0
 }
@@ -365,6 +367,22 @@ fn __fingerprints_match(lhs: dict, rhs: dict) -> bool {
   const right_harness = __row_harness_fingerprint(rhs)
   const harness_matches = left_harness == "" || right_harness == "" || left_harness == right_harness
   return case_matches && harness_matches
+}
+
+fn __paired_cohort(baseline_rows: list, current_rows: list) -> EvalPairedCohort {
+  const baseline = __rows_by_case(__decided_rows(baseline_rows))
+  let paired_baseline: list<dict> = []
+  let paired_current: list<dict> = []
+  let deltas: list<float> = []
+  for row in __unique_rows_by_case(__decided_rows(current_rows)) {
+    const base = baseline[__row_case_name(row)]
+    if base != nil && __fingerprints_match(base, row) {
+      paired_baseline = paired_baseline + [base]
+      paired_current = paired_current + [row]
+      deltas = deltas + [__row_pass_rate(row) - __row_pass_rate(base)]
+    }
+  }
+  return {baseline: paired_baseline, current: paired_current, deltas: deltas}
 }
 
 fn __lcg_next(state: int) -> int {
@@ -937,21 +955,7 @@ pub fn axis_breakdown(rows: list, axis: string) -> EvalAxisBreakdown {
  * @example: paired_case_deltas([{name: "a", passes: 0, trials: 1}], [{name: "a", passes: 1, trials: 1}])
  */
 pub fn paired_case_deltas(baseline_rows: list, current_rows: list) -> list<float> {
-  let baseline = {}
-  for row in __decided_rows(baseline_rows) {
-    const name = __row_case_name(row)
-    baseline = baseline + {[name]: row}
-  }
-  let deltas: list<float> = []
-  for row in __decided_rows(current_rows) {
-    const name = __row_case_name(row)
-    const base = baseline[name]
-    const comparable = base != nil && __fingerprints_match(base, row)
-    if comparable {
-      deltas = deltas + [__row_pass_rate(row) - __row_pass_rate(base)]
-    }
-  }
-  return deltas
+  return __paired_cohort(baseline_rows, current_rows).deltas
 }
 
 /**
@@ -967,7 +971,8 @@ pub fn paired_delta_report(
   resamples: int = 2000,
   seed: int = 1234567,
 ) -> dict {
-  const deltas = paired_case_deltas(baseline_rows, current_rows)
+  const cohort = __paired_cohort(baseline_rows, current_rows)
+  const deltas = cohort.deltas
   if len(deltas) == 0 {
     return {
       n_cases: 0,
@@ -981,14 +986,9 @@ pub fn paired_delta_report(
     }
   }
   const ci = bootstrap_mean_ci(deltas, resamples, 0.05, seed)
-  const baseline_macro = macro_pass_at_1(baseline_rows)
-  const current_macro = macro_pass_at_1(current_rows)
-  const baseline_ci = bootstrap_mean_ci(
-    __pass_rates(__decided_rows(baseline_rows)),
-    resamples,
-    0.05,
-    987654,
-  )
+  const baseline_macro = macro_pass_at_1(cohort.baseline)
+  const current_macro = macro_pass_at_1(cohort.current)
+  const baseline_ci = bootstrap_mean_ci(__pass_rates(cohort.baseline), resamples, 0.05, 987654)
   const threshold = baseline_macro - baseline_ci.std
   const improved = ci.lo > 0.0
   const regression = current_macro < threshold

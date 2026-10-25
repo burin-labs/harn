@@ -5,57 +5,8 @@ name: Provider contract probe
 run-name: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.live)) && 'Provider contract probe (live)' || 'Provider contract probe' }}
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/provider-contract-probe.yml"
-      - "crates/harn-cli/src/cli/provider.rs"
-      - "crates/harn-cli/src/cli/mod.rs"
-      - "crates/harn-cli/src/entrypoint.rs"
-      - "crates/harn-cli/src/commands/mod.rs"
-      - "crates/harn-cli/src/commands/provider.rs"
-      - "crates/harn-cli/src/commands/provider_option_probe.rs"
-      - "crates/harn-cli/src/commands/providers.rs"
-      - "crates/harn-cli/src/commands/providers/tool_probe_request.rs"
-      - "crates/harn-stdlib/src/lib.rs"
-      - "crates/harn-vm/src/llm/capability_sources/**"
-      - "crates/harn-vm/src/llm/catalog_sources/**"
-      - "crates/harn-vm/src/llm/capabilities/**"
-      - "crates/harn-vm/src/llm/agent_observe.rs"
-      - "crates/harn-vm/src/llm/api/**"
-      - "crates/harn-vm/src/llm/helpers/options/**"
-      - "crates/harn-vm/src/llm/provider_contract_probe.rs"
-      - "crates/harn-vm/src/llm/providers/**"
-      - "crates/harn-stdlib/src/stdlib/cli/providers/**"
-      - "scripts/provider_tool_probe_campaign.harn"
-      - "scripts/provider_tool_probe_campaign/**"
-      - "scripts/tests/provider_option_probe_test.harn"
-      - "scripts/tests/provider_tool_probe_campaign_test.harn"
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/provider-contract-probe.yml"
-      - "crates/harn-cli/src/cli/provider.rs"
-      - "crates/harn-cli/src/cli/mod.rs"
-      - "crates/harn-cli/src/entrypoint.rs"
-      - "crates/harn-cli/src/commands/mod.rs"
-      - "crates/harn-cli/src/commands/provider.rs"
-      - "crates/harn-cli/src/commands/provider_option_probe.rs"
-      - "crates/harn-cli/src/commands/providers.rs"
-      - "crates/harn-cli/src/commands/providers/tool_probe_request.rs"
-      - "crates/harn-stdlib/src/lib.rs"
-      - "crates/harn-vm/src/llm/capability_sources/**"
-      - "crates/harn-vm/src/llm/catalog_sources/**"
-      - "crates/harn-vm/src/llm/capabilities/**"
-      - "crates/harn-vm/src/llm/agent_observe.rs"
-      - "crates/harn-vm/src/llm/api/**"
-      - "crates/harn-vm/src/llm/helpers/options/**"
-      - "crates/harn-vm/src/llm/provider_contract_probe.rs"
-      - "crates/harn-vm/src/llm/providers/**"
-      - "crates/harn-stdlib/src/stdlib/cli/providers/**"
-      - "scripts/provider_tool_probe_campaign.harn"
-      - "scripts/provider_tool_probe_campaign/**"
-      - "scripts/tests/provider_option_probe_test.harn"
-      - "scripts/tests/provider_tool_probe_campaign_test.harn"
+  # Pull requests and main pushes use CI's verified shared CLI consumer.
+  # Standalone runs keep their own exact-source build and live environment.
   schedule:
     - cron: "17 11 * * 1"
   workflow_dispatch:
@@ -78,7 +29,7 @@ permissions:
 
 concurrency:
   group: provider-contract-probe-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 env:
   CARGO_INCREMENTAL: "0"
@@ -94,9 +45,8 @@ jobs:
       contents: read
     # Live runs read budget-capped provider keys from the `provider-probe`
     # environment, which only protected branches may deploy to. Dry runs
-    # (pull requests and pushes) name no environment, so the branch policy never
-    # gates them and they never receive keys. Job-level `environment` cannot read
-    # `env`, so this repeats the PROVIDER_CONTRACT_PROBE_LIVE condition.
+    # name no environment and receive no keys. Job-level `environment` cannot
+    # read `env`, so this repeats the PROVIDER_CONTRACT_PROBE_LIVE condition.
     environment: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.live)) && 'provider-probe' || '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -123,10 +73,14 @@ jobs:
 
       - name: Plan or execute endpoint option contracts
         id: campaign
-        shell: bash
+        uses: ./.github/actions/provider-contract-probe
+        with:
+          harn-bin: ./target/debug/harn
+          live: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE }}
+          max-cost-usd: ${{ inputs.max_cost_usd || '5' }}
+          max-probes: ${{ inputs.max_probes || '500' }}
+          providers: anthropic fireworks openrouter
         env:
-          MAX_COST_USD_INPUT: ${{ inputs.max_cost_usd || '5' }}
-          MAX_PROBES_INPUT: ${{ inputs.max_probes || '500' }}
           # The providers a live run is responsible for measuring, one per
           # credential it receives below. A live run counts every selected cell
           # it could not measure, including a missing credential, as a failure,
@@ -134,63 +88,67 @@ jobs:
           # together with its secret, and keep the secret visible to this
           # repository: a declared provider without a key fails the run. Dry
           # runs still plan every catalog route.
-          PROBE_PROVIDERS: anthropic fireworks openrouter
           ANTHROPIC_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.ANTHROPIC_API_KEY || '' }}
           FIREWORKS_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.FIREWORKS_API_KEY || '' }}
           OPENROUTER_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.OPENROUTER_API_KEY || '' }}
+
+  # An announced retirement (`retires_on`) or a sunset must not outlive its
+  # date. The check takes today as RETIREMENT_SWEEP_DATE, runs here weekly, files or
+  # updates an issue and stays green, so a lapse never reddens main health or
+  # gates a pull request, where it would fail unrelated changes the day it lapses.
+  retirement-sweep:
+    if: github.repository == 'burin-labs/harn' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.live))
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/rust-toolchain
+      - name: Check for lapsed provider retirements
+        id: sweep
+        shell: bash
+        env:
+          RUST_MIN_STACK: "16777216"
+        run: |
+          set -uo pipefail
+          status=0
+          RETIREMENT_SWEEP_DATE="$(date -u +%F)" cargo test --locked -p harn-provider-catalog --lib -- lapsed_retirements_are_not_left_routable >"$RUNNER_TEMP/sweep.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/sweep.log"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          # Only the named assertion is a lapse; a compile or harness failure is not.
+          if [ "$status" -ne 0 ] && grep -q "retirements past their date:" "$RUNNER_TEMP/sweep.log"; then
+            echo "lapsed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "lapsed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: File or update the lapsed-retirement issue
+        if: steps.sweep.outputs.lapsed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
         run: |
           set -euo pipefail
-          output_dir=".harn-runs/provider-contract-probe"
-          live="$PROVIDER_CONTRACT_PROBE_LIVE"
-          max_cost="$MAX_COST_USD_INPUT"
-          max_probes="$MAX_PROBES_INPUT"
-          args=(
-            --catalog-routes
-            --exclude-local
-            --behavior provider_option_probe
-            --max-probes "$max_probes"
-            --max-cost-usd "$max_cost"
-            --harn-bin ./target/debug/harn
-            --require-runtime-revision "$(git rev-parse HEAD)"
-            --output-dir "$output_dir"
-          )
-          if [[ "$live" == "true" ]]; then
-            read -r -a probe_providers <<< "$PROBE_PROVIDERS"
-            if (( ${#probe_providers[@]} == 0 )); then
-              echo "::error::PROBE_PROVIDERS names no provider"
-              exit 2
-            fi
-            for provider in "${probe_providers[@]}"; do
-              args+=(--provider "$provider")
-            done
-            args+=(--live)
+          title="[Models] Provider retirement lapsed"
+          run_url="https://github.com/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
+          problems="$(sed -n '/retirements past their date:/,/^$/p' "$RUNNER_TEMP/sweep.log" | head -40)"
+          body="The weekly retirement sweep found catalog rows whose provider retirement date has passed. Deprecate each with a sunset_date and superseded_by, remove its aliases, or remove the row. The sweep reads only structured \`retires_on\` and \`sunset_date\` fields. Run: $run_url"$'\n\n'"$problems"
+          existing="$(gh issue list --repo "$GH_REPO" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
+          if [[ -n "$existing" ]]; then
+            gh issue comment "$existing" --repo "$GH_REPO" --body "$body"
+          else
+            gh issue create --repo "$GH_REPO" --title "$title" --body "$body" --assignee ksinder
           fi
-          set +e
-          ./target/debug/harn run --no-sandbox scripts/provider_tool_probe_campaign.harn -- "${args[@]}"
-          status=$?
-          set -e
-          echo "live=$live" >> "$GITHUB_OUTPUT"
-          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
-          report="$output_dir/report.json"
-          if [[ ! -s "$report" ]]; then
-            echo "::error::provider contract campaign produced no report"
-            exit 2
-          fi
-          catalog_drift_count="$(jq -er '.summary.fail | select(type == "number" and . >= 0 and floor == .)' "$report")"
-          echo "catalog_drift_count=$catalog_drift_count" >> "$GITHUB_OUTPUT"
-          jq -r '
-            "cells=\(.cell_count) pass=\(.summary.pass) fail=\(.summary.fail) error=\(.summary.error) unavailable=\(.summary.unavailable) skip=\(.summary.skip) pending=\(.summary.planned) controls=\(.claim_controls.status) supported=\(.claim_controls.measured_supported_count) unsupported=\(.claim_controls.measured_unsupported_count) excluded_by_account_policy=\(.claim_controls.excluded_by_account_policy_count) unavailable_controls=\(.claim_controls.unavailable_count) unmeasured=\(.claim_controls.unmeasured_count) missing_credentials=\((.auth_readiness.missing_env_candidates_by_provider // {}) | [.[] | join("|")] | if length == 0 then "none" else join(",") end)"
-          ' "$report" | tee -a "$GITHUB_STEP_SUMMARY"
-          exit "$status"
 
-      - name: Upload exact receipts
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: provider-contract-probe-${{ github.run_id }}
-          path: .harn-runs/provider-contract-probe/
-          if-no-files-found: error
-          retention-days: 30
+      - name: Fail when the sweep could not run
+        if: steps.sweep.outputs.status != '0' && steps.sweep.outputs.lapsed != 'true'
+        run: |
+          echo "::error::The retirement sweep failed for a reason other than a lapsed retirement, so it checked nothing."
+          exit 1
 
   notify-live-failure:
     needs: probe

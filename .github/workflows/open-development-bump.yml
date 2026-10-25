@@ -32,7 +32,7 @@ on:
         description: Retained canonical producer run
         type: string
       retire_source_ci_run:
-        description: Terminal failed main CI at the unpublished source; excludes consumer retirement inputs
+        description: Terminal main CI at the unpublished source that can never prove a green full suite; excludes consumer retirement inputs
         type: string
       retire_promotion_run:
         description: Terminal failed owning promotion run

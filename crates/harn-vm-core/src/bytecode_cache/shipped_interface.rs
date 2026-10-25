@@ -41,11 +41,19 @@ pub struct PrecompiledInterface {
     key: CacheKey,
     needs_write: bool,
     destination: PathBuf,
+    module_graph: Option<harn_modules::ModuleGraph>,
 }
 
 impl PrecompiledInterface {
     pub fn context(&self) -> &ModuleCompilationContext {
         &self.payload.entry
+    }
+
+    /// The entry's module graph when preparing this interface built one, so
+    /// the caller need not build the same graph again. `None` when a stored
+    /// interface was reused without building a graph.
+    pub fn take_module_graph(&mut self) -> Option<harn_modules::ModuleGraph> {
+        self.module_graph.take()
     }
 
     pub fn package_import_aliases(&self) -> &[String] {
@@ -116,6 +124,7 @@ pub fn prepare_precompiled_interface(
         key: key(source, result.relocatable),
         needs_write,
         destination: destination.to_path_buf(),
+        module_graph: result.module_graph,
     })
 }
 
@@ -172,6 +181,21 @@ fn recall_at(destination: &Path, source_path: &Path, source: &str) -> Option<Gra
 mod tests {
     use super::*;
 
+    fn replace_dependency(path: &Path, source: &str) {
+        let before = std::fs::metadata(path).unwrap().modified().unwrap();
+        std::fs::write(path, source).unwrap();
+        // Same-length fixture edits need distinct stat identities even when
+        // the filesystem assigns both writes the same timestamp tick.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(
+                std::fs::FileTimes::new().set_modified(before + std::time::Duration::from_secs(10)),
+            )
+            .unwrap();
+    }
+
     #[test]
     fn shipped_interface_identity_rejects_foreign_stale_and_resolution_changes() {
         let dir = tempfile::tempdir().unwrap();
@@ -210,12 +234,12 @@ mod tests {
             "foreign compiler control"
         );
         std::fs::write(&destination, &original).unwrap();
-        std::fs::write(&dep, "pub enum Shade { Ready Empty }\n").unwrap();
+        replace_dependency(&dep, "pub enum Shade { Ready Empty }\n");
         assert!(
             recall_at(&destination, &root, source).is_none(),
             "dependency content control"
         );
-        std::fs::write(&dep, "pub enum Color { Ready Empty }\n").unwrap();
+        replace_dependency(&dep, "pub enum Color { Ready Empty }\n");
         assert!(
             recall_at(&destination, &root, source).is_some(),
             "restored content must hit"

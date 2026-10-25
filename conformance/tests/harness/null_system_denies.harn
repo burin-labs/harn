@@ -11,4 +11,8 @@ fn main(harness: Harness) {
     harness.system.processes()
   } catch (e) {
   }
+  try {
+    harness.system.parent_process()
+  } catch (e) {
+  }
 }

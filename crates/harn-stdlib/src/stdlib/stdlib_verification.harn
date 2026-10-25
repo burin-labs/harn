@@ -19,6 +19,12 @@ pub import {
   verification_teardown_warm_state,
   verification_toolchain_facts,
 } from "std/verification_public"
+pub import {
+  VerificationCheckBinding,
+  VerificationInputState,
+  VerificationRecordedCheck,
+  VerificationReuse,
+} from "std/verification_types"
 
 pub type VerificationFileHashSnapshotEntry = {
   path: string,
@@ -49,13 +55,6 @@ pub type VerificationCheckObservation = {
   exit?: int,
   failureSignature?: string,
   snapshot?: dict,
-}
-
-pub type VerificationRecordedCheck = {
-  result: dict,
-  observation: VerificationCheckObservation,
-  row: dict?,
-  snapshot: VerificationFileHashSnapshot?,
 }
 
 pub type VerificationStartedCheck = {

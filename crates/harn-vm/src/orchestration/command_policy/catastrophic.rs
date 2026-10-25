@@ -13,6 +13,7 @@
 /// not an executable command (fork-bomb grammar and tracked-file redirects).
 use std::path::Path;
 
+mod find_delete;
 mod project_delete;
 mod semantic_shell;
 mod shell;
@@ -20,7 +21,7 @@ mod tracked_writes;
 
 use project_delete::argv_deletes_project;
 pub(super) use semantic_shell::{
-    analyze_argv, analyze_shell, analyze_shell_dialect, ShellAnalysis,
+    analyze_argv, analyze_shell, analyze_shell_dialect, xargs_child_argv, ShellAnalysis,
 };
 use shell::*;
 
@@ -213,6 +214,7 @@ fn invocation_catastrophe(
     match command {
         "git" => git_catastrophe(args),
         "rm" => rm_escape_catastrophe(args, roots),
+        "find" => find_delete::find_delete_catastrophe(args, roots),
         "dd" => dd_catastrophe(args),
         "mkfs" | "mke2fs" => Some(format!(
             "`{command}` (filesystem format) is blocked: it would destroy a device"
@@ -402,6 +404,34 @@ fn analysis_runs_git(
             "bash" | "sh" | "zsh" => shell_c_script(args).is_some_and(|script| {
                 analysis_runs_git(&analyze_shell(script), depth + 1, matches)
             }),
+            _ => false,
+        }
+    })
+}
+
+/// Whether any stage, including one in a `bash -c` payload, runs through a
+/// `doas` wrapper. Reads parsed words, so shell escapes and quoting are resolved.
+pub(super) fn analysis_runs_doas(analysis: &ShellAnalysis, depth: usize) -> bool {
+    if depth > MAX_DEPTH {
+        return false;
+    }
+    analysis.stages.iter().any(|stage| {
+        let source = &stage.source_argv;
+        let wrapped = unwrapped_command_index(source, 0, source.len()).min(source.len());
+        if source[..wrapped]
+            .iter()
+            .any(|word| command_basename(word) == "doas")
+        {
+            return true;
+        }
+        let tokens = &stage.argv;
+        let Some(command) = tokens.first() else {
+            return false;
+        };
+        match command_basename(command) {
+            "doas" => true,
+            "bash" | "sh" | "zsh" => shell_c_script(&tokens[1..])
+                .is_some_and(|script| analysis_runs_doas(&analyze_shell(script), depth + 1)),
             _ => false,
         }
     })

@@ -876,10 +876,7 @@ fn adjacent_path_with_extension(source_path: &Path, ext: &str) -> Option<PathBuf
     if stem.is_empty() {
         return None;
     }
-    let parent = source_path.parent().unwrap_or_else(|| Path::new(""));
-    let mut out = parent.join(stem);
-    out.set_extension(ext);
-    Some(out)
+    Some(source_path.with_extension(ext))
 }
 
 fn ensure_parent_dir(path: &Path) -> io::Result<()> {
@@ -1267,7 +1264,8 @@ enum GraphOutputs {
     InterfaceProof,
     /// The hashes plus a manifest a later process can re-check with stats.
     Manifest,
-    /// As [`Self::Manifest`], plus the entry module's compilation context.
+    /// As [`Self::Manifest`], plus the entry module's compilation context and
+    /// the module graph it was projected from.
     ManifestAndEntryContext,
 }
 
@@ -1276,6 +1274,7 @@ struct GraphHashes {
     relocatable: [u8; 32],
     manifest: Option<ContextManifest>,
     entry_compilation_context: Option<ModuleCompilationContext>,
+    module_graph: Option<harn_modules::ModuleGraph>,
 }
 
 fn walk_import_graph_fingerprinted(
@@ -1357,7 +1356,7 @@ fn walk_import_graph_fingerprinted(
                 visited.insert(
                     canonical.clone(),
                     ImportNode::Resolved {
-                        content: Arc::clone(module.text()),
+                        source: Arc::clone(&module),
                     },
                 );
                 match ManifestFile::observe(&canonical, &module) {
@@ -1402,6 +1401,7 @@ fn walk_import_graph_fingerprinted(
     // it beside each source digest; content alone has not been a complete
     // module compilation identity since imported callable lowering shipped.
     let mut entry_compilation_context = None;
+    let mut module_graph = None;
     if manifest.is_some() && outputs != GraphOutputs::InterfaceProof {
         let graph = harn_modules::build_with_source(source_path, source);
         manifest
@@ -1418,13 +1418,8 @@ fn walk_import_graph_fingerprinted(
             .files
             .iter()
             .map(|file| match visited.get(&file.path) {
-                Some(ImportNode::Resolved { content }) => {
-                    ModuleCompilationContext::for_source_in_graph(
-                        &graph,
-                        &file.path,
-                        content.as_ref(),
-                    )
-                    .ok()
+                Some(ImportNode::Resolved { source }) => {
+                    ModuleCompilationContext::for_module_source_in_graph(&graph, &file.path, source)
                 }
                 _ => None,
             })
@@ -1445,6 +1440,9 @@ fn walk_import_graph_fingerprinted(
             // entry compilation's diagnostic path.
             manifest = None;
             entry_compilation_context = None;
+        }
+        if outputs == GraphOutputs::ManifestAndEntryContext {
+            module_graph = Some(graph);
         }
     }
 
@@ -1474,6 +1472,7 @@ fn walk_import_graph_fingerprinted(
         relocatable,
         manifest,
         entry_compilation_context,
+        module_graph,
     }
 }
 

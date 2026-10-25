@@ -278,7 +278,7 @@ async fn execute_compiled(
                 harn_vm::security::SessionEnvironment::inherited(),
             );
             vm.set_prepared_module_cache(prepared_module_cache.clone());
-            harn_vm::register_vm_stdlib(&mut vm);
+            harn_runtime::register_vm_stdlib(&mut vm);
             crate::install_default_hostlib(&mut vm);
             let source_parent = case.file.parent().unwrap_or(Path::new("."));
             let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
@@ -367,7 +367,10 @@ async fn execute_compiled(
                 )
                 .await
             {
-                Ok(value) => CaseOutcome::Passed(value),
+                Ok(value) => match crate::commands::run::return_value_error(&value) {
+                    Some(error) => CaseOutcome::RuntimeError(format!("returned Err: {error}")),
+                    None => CaseOutcome::Passed(value),
+                },
                 Err(harn_vm::VmError::TestSkipped(reason)) => CaseOutcome::Skipped(reason),
                 Err(harn_vm::VmError::ExecutionDeadlineExceeded) => CaseOutcome::ExecutionTimedOut,
                 Err(error) => CaseOutcome::RuntimeError(vm.format_runtime_error(&error)),

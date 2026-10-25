@@ -361,7 +361,7 @@ use metadata::{
 };
 #[cfg(test)]
 pub(crate) use runtime_store::fresh_session_runtime;
-pub(crate) use runtime_store::{
+pub use runtime_store::{
     active_session_runtime, mark_dropped_host_payload_key_warning, mark_unknown_host_event_warning,
     swap_active_session_runtime, AgentSessionRuntime,
 };
@@ -389,7 +389,7 @@ static NEXT_CURRENT_SESSION_FRAME_ID: std::sync::atomic::AtomicU64 =
 /// therefore consumes this unique frame receipt rather than searching by the
 /// duplicate-capable public id and accidentally removing a sibling owner.
 #[derive(Clone, Debug)]
-pub(crate) struct CurrentSessionFrame {
+pub struct CurrentSessionFrame {
     frame_id: u64,
     session_id: String,
     active: Arc<std::sync::atomic::AtomicBool>,
@@ -537,7 +537,7 @@ pub(crate) fn new_current_session_frame(id: String) -> Option<CurrentSessionFram
     })
 }
 
-pub(crate) fn push_current_session(id: String) -> Option<CurrentSessionFrame> {
+pub fn push_current_session(id: String) -> Option<CurrentSessionFrame> {
     let frame = new_current_session_frame(id)?;
     CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().push(frame.clone()));
     Some(frame)
@@ -549,8 +549,8 @@ pub(crate) fn swap_current_session_stack(
     CURRENT_SESSION_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), replacement))
 }
 
-#[cfg(test)]
-pub(crate) fn pop_current_session() {
+#[cfg(any(test, feature = "vm-test-support"))]
+pub fn pop_current_session() {
     CURRENT_SESSION_STACK.with(|stack| {
         if let Some(frame) = stack.borrow_mut().pop() {
             frame.revoke();

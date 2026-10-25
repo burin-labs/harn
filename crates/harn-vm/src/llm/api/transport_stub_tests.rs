@@ -17,11 +17,13 @@ mod admission;
 mod admission_bypass;
 mod anthropic_admission;
 mod anthropic_egress;
+mod completion_fixtures;
 mod completion_rate_limits;
 mod effective_effort;
 #[path = "transport_stub_tests/gemini_generate_content.rs"]
 mod gemini_generate_content;
 mod inference_boundary_tests;
+mod metered_redirects;
 mod ollama_openai_compat;
 pub(crate) use ollama_openai_compat::read_http_request;
 mod terminal_usage;

@@ -69,18 +69,16 @@ pub use adapters::acp::{
     run_acp_channel_server, run_acp_channel_server_with_handle, run_acp_server,
     run_acp_websocket_server, AcpChannelHandle, AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta,
     AcpJsonRpcError, AcpJsonRpcErrorResponse, AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse,
-    AcpMeta, AcpOutput, AcpProfileConfig, AcpPromptErrorData, AcpPromptErrorSchema,
-    AcpRuntimeConfigurator, AcpSandboxConfig, AcpServer, AcpServerConfig, AcpServerConfinement,
-    AcpSessionCancelToolCallParams, AcpSessionEnvironmentConfig, AcpSessionIdParams,
-    AcpSessionInjectContent, AcpSessionInjectMode, AcpSessionInjectParams, AcpSessionLoadParams,
-    AcpSessionMessageIdParams, AcpSessionNewParams, AcpSessionProjectRootError,
-    AcpSessionPromptParams, AcpSessionPromptResult, AcpSessionReplaceInjectParams,
+    AcpMeta, AcpOutput, AcpProfileConfig, AcpPromptDelivery, AcpPromptErrorData,
+    AcpPromptErrorSchema, AcpRuntimeConfigurator, AcpSandboxConfig, AcpServer, AcpServerConfig,
+    AcpServerConfinement, AcpSessionCancelToolCallParams, AcpSessionEnvironmentConfig,
+    AcpSessionIdParams, AcpSessionLoadParams, AcpSessionNewParams, AcpSessionProjectRootError,
+    AcpSessionPromptParams, AcpSessionPromptReceipt, AcpSessionPromptResult,
     AcpSessionRestoreResult, AcpWebSocketServeOptions, NoopAcpRuntimeConfigurator,
-    ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CANCEL_TOOL_CALL,
-    ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT, ACP_METHOD_SESSION_LOAD,
-    ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PROMPT,
-    ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME, ACP_METHOD_SESSION_REVOKE_INJECT,
-    ACP_PROMPT_ERROR_DATA_SCHEMA,
+    ACP_METHOD_CANCEL_REQUEST, ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL,
+    ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_LOAD,
+    ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_PROMPTS, ACP_METHOD_SESSION_PROMPT,
+    ACP_METHOD_SESSION_RESUME, ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_REQUEST_CANCELLED_CODE,
 };
 pub use adapters::api::{ApiHttpServeOptions, ApiServer, ApiServerConfig};
 pub use adapters::mcp::{
@@ -89,7 +87,7 @@ pub use adapters::mcp::{
 };
 pub use adapters::site::{
     SiteAuth, SiteAuthContext, SiteAuthOutcome, SiteHttpServeOptions, SiteServer, SiteServerConfig,
-    SiteStreamProvider,
+    SiteServerReady, SiteStreamProvider,
 };
 pub use adapters::worker::{
     run_job_from_files, run_job_from_files_with_options, run_job_once, run_job_once_with,
@@ -114,8 +112,6 @@ pub use exports::{
     ExportedFunction, ExportedParam, JobSpec, RetryBackoff, RetrySpec, RoutePolicy, RouteSpec,
     ScheduleSpec, ToolAnnotations,
 };
-#[cfg(feature = "hostlib-full")]
-pub use harn_reference_resolver::resolver as harn_reference_resolver;
 /// Install the process-lifetime shared Postgres pool registry.
 ///
 /// Call this **once** at server startup (e.g. from the `SiteServer`/embedder
@@ -127,7 +123,9 @@ pub use harn_reference_resolver::resolver as harn_reference_resolver;
 ///
 /// Only available when the `vm-postgres` feature is enabled.
 #[cfg(feature = "vm-postgres")]
-pub use harn_vm::install_shared_pool_registry;
+pub use harn_builtins::postgres::install_shared_pool_registry;
+#[cfg(feature = "hostlib-full")]
+pub use harn_reference_resolver::resolver as harn_reference_resolver;
 pub use http_codec::{
     axum_response_from_call, axum_response_from_dispatch_error, classify_ws_upgrade,
     decode_call_response, dispatch_error_payload, fresh_request_id, HttpCodecOutcome, SseEventSpec,

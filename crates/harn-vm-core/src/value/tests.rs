@@ -35,7 +35,7 @@ fn vm_value_layout_budget() {
 }
 
 fn s(val: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(val))
+    VmValue::string(val)
 }
 
 fn i(val: i64) -> VmValue {
@@ -43,16 +43,11 @@ fn i(val: i64) -> VmValue {
 }
 
 fn list(items: Vec<VmValue>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(items))
+    VmValue::list(items)
 }
 
 fn dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
-    VmValue::dict(
-        pairs
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect::<crate::value::DictMap>(),
-    )
+    VmValue::dict(pairs.into_iter().map(|(k, v)| (k.to_string(), v)))
 }
 
 #[test]
@@ -368,8 +363,37 @@ fn try_compare_reports_nan_as_unordered() {
     let pair_b = VmValue::Pair(std::sync::Arc::new((i(1), VmValue::Float(5.0))));
     assert_eq!(try_compare_values(&pair_a, &pair_b), None);
 
-    // The total-order wrapper keeps a sort-stable fallback of 0.
-    assert_eq!(compare_values(&nan, &VmValue::Float(5.0)), 0);
+    // The total-order wrapper sorts NaN after every number and equal to
+    // itself, so `1 < 0.5` can never follow from `1 == NaN == 0.5`.
+    assert_eq!(compare_values(&nan, &VmValue::Float(5.0)), 1);
+    assert_eq!(compare_values(&i(5), &nan), -1);
+    assert_eq!(compare_values(&nan, &nan), 0);
+}
+
+#[test]
+fn compare_values_is_a_total_order_for_sorting() {
+    // Rust's sort panics on a comparator that is not a total order once the
+    // slice is long enough; NaN and mixed types used to compare "equal" to
+    // everything and tripped it.
+    let mut items: Vec<VmValue> = (0..64)
+        .map(|n| match n % 5 {
+            0 => VmValue::Float(f64::NAN),
+            1 => VmValue::string(format!("s{}", n % 7)),
+            2 => VmValue::Float(n as f64 / 3.0),
+            _ => i(64 - n),
+        })
+        .collect();
+    items.sort_by(|a, b| compare_values(a, b).cmp(&0));
+    let ranks: Vec<u8> = items
+        .iter()
+        .map(|v| match v {
+            VmValue::Float(f) if f.is_nan() => 1,
+            VmValue::Int(_) | VmValue::Float(_) => 0,
+            _ => 2,
+        })
+        .collect();
+    assert!(ranks.windows(2).all(|w| w[0] <= w[1]), "{ranks:?}");
+    assert!(items.windows(2).all(|w| compare_values(&w[0], &w[1]) <= 0));
 }
 
 #[test]
@@ -420,8 +444,8 @@ fn try_compare_orders_lists_lexicographically() {
         try_compare_values(&list(vec![nan.clone()]), &list(vec![i(1)])),
         None
     );
-    // … and the total-order wrapper falls back to 0 for sort stability.
-    assert_eq!(compare_values(&list(vec![nan]), &list(vec![i(1)])), 0);
+    // … while the total-order wrapper recurses with NaN sorting last.
+    assert_eq!(compare_values(&list(vec![nan]), &list(vec![i(1)])), 1);
 }
 
 // --- Deeply nested value recursion guards -------------------------------
@@ -657,7 +681,7 @@ fn char_offset_conversions_round_trip() {
 
 #[test]
 fn isolate_clone_uses_cow_for_nested_data_and_rejects_runtime_handles() {
-    let original = VmValue::dict([("nested", VmValue::List(Arc::new(vec![VmValue::Int(1)])))]);
+    let original = VmValue::dict([("nested", VmValue::list(vec![VmValue::Int(1)]))]);
     let seed = original.try_into_isolate_value().unwrap();
     let original = seed.instantiate();
     let mut cloned = seed.instantiate();
@@ -680,9 +704,7 @@ fn isolate_clone_uses_cow_for_nested_data_and_rejects_runtime_handles() {
 
     let handle = VmValue::dict([(
         "nested_handle",
-        VmValue::List(Arc::new(vec![VmValue::TaskHandle(HarnStr::from(
-            "task_fixture",
-        ))])),
+        VmValue::list(vec![VmValue::TaskHandle(HarnStr::from("task_fixture"))]),
     )]);
     assert!(handle.try_into_isolate_value().is_err());
 }

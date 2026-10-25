@@ -57,6 +57,7 @@ pub(crate) fn run(args: NetnsLaunchArgs) -> Result<Infallible, String> {
         args.seccomp_hex
             .as_deref()
             .ok_or("namespace helper: no confinement")?,
+        args.private_tmp.as_deref(),
         program,
         payload_args,
     )
@@ -118,6 +119,7 @@ fn finalize_exec(
 fn run_impl(
     ruleset_fd: Option<i32>,
     seccomp_hex: &str,
+    private_tmp: Option<&std::path::Path>,
     program: &str,
     payload_args: &[String],
 ) -> Result<Infallible, String> {
@@ -131,7 +133,7 @@ fn run_impl(
     let confinement = TransferableConfinement::from_parts(ruleset_fd, &seccomp)
         .map_err(|error| format!("namespace helper: {error}"))?;
 
-    enter_private_network_namespace().map_err(|error| {
+    enter_private_network_namespace(private_tmp.is_some()).map_err(|error| {
         format!(
             "namespace helper: could not build a private network namespace: {error}. On a host \
              that restricts unprivileged namespaces this executable needs its own policy grant; \
@@ -140,6 +142,14 @@ fn run_impl(
     })?;
     raise_loopback()
         .map_err(|error| format!("namespace helper: could not raise loopback: {error}"))?;
+    if let Some(dir) = private_tmp {
+        mount_private_tmp(dir).map_err(|error| {
+            format!(
+                "namespace helper: could not mount {} over /tmp: {error}",
+                dir.display()
+            )
+        })?;
+    }
 
     let mut command = Command::new(program);
     command.args(payload_args);
@@ -160,24 +170,74 @@ fn run_impl(
     ))
 }
 
-/// Unshare into a new user and network namespace and map the current user to
-/// root inside it.
+/// Unshare into a new user and network namespace (and a mount namespace when
+/// the child gets a private `/tmp`), keeping the caller's own ids inside.
 ///
-/// The user namespace is what makes the network namespace available without
-/// privilege, and the mapping is what makes the interface configurable from
-/// inside. `setgroups` must be denied before the group map is written, which
+/// The user namespace is what makes the others available without privilege;
+/// creating it grants this process the capabilities to configure them until
+/// it execs. The identity mapping keeps the payload the person who ran it:
+/// mapped to root, the JVM and anything else resolving the account read
+/// `/root` as home, and the payload kept full namespace capabilities across
+/// exec. `setgroups` must be denied before the group map is written, which
 /// the kernel requires and which also keeps the child from gaining any group
 /// it did not already hold.
 #[cfg(target_os = "linux")]
-fn enter_private_network_namespace() -> io::Result<()> {
+fn enter_private_network_namespace(mount_namespace: bool) -> io::Result<()> {
     let uid = unsafe { libc::getuid() };
     let gid = unsafe { libc::getgid() };
-    if unsafe { libc::unshare(libc::CLONE_NEWUSER | libc::CLONE_NEWNET) } != 0 {
+    let mut flags = libc::CLONE_NEWUSER | libc::CLONE_NEWNET;
+    if mount_namespace {
+        flags |= libc::CLONE_NEWNS;
+    }
+    if unsafe { libc::unshare(flags) } != 0 {
         return Err(io::Error::last_os_error());
     }
     std::fs::write("/proc/self/setgroups", "deny")?;
-    std::fs::write("/proc/self/uid_map", format!("0 {uid} 1\n"))?;
-    std::fs::write("/proc/self/gid_map", format!("0 {gid} 1\n"))?;
+    std::fs::write("/proc/self/uid_map", format!("{uid} {uid} 1\n"))?;
+    std::fs::write("/proc/self/gid_map", format!("{gid} {gid} 1\n"))?;
+    Ok(())
+}
+
+/// Bind the session temp dir over `/tmp` inside the new mount namespace.
+///
+/// Some tools write `/tmp` by a path compiled in rather than through
+/// `TMPDIR`: the JVM's attach socket (`/tmp/.java_pid<pid>`), which Mockito's
+/// inline mock maker needs, is one. The host's `/tmp` stays unwritable; the
+/// child sees its workspace's temp dir there instead. Propagation is made
+/// private first so the bind never reaches the host's mount table.
+#[cfg(target_os = "linux")]
+fn mount_private_tmp(dir: &std::path::Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let root = CString::new("/").expect("static path");
+    let tmp = CString::new("/tmp").expect("static path");
+    let source = CString::new(dir.as_os_str().as_bytes())
+        .map_err(|_| io::Error::other("temp dir path contains a NUL byte"))?;
+    let private = unsafe {
+        libc::mount(
+            std::ptr::null(),
+            root.as_ptr(),
+            std::ptr::null(),
+            libc::MS_REC | libc::MS_PRIVATE,
+            std::ptr::null(),
+        )
+    };
+    if private != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let bound = unsafe {
+        libc::mount(
+            source.as_ptr(),
+            tmp.as_ptr(),
+            std::ptr::null(),
+            libc::MS_BIND | libc::MS_REC,
+            std::ptr::null(),
+        )
+    };
+    if bound != 0 {
+        return Err(io::Error::last_os_error());
+    }
     Ok(())
 }
 
@@ -224,6 +284,7 @@ fn raise_loopback() -> io::Result<()> {
 fn run_impl(
     _ruleset_fd: Option<i32>,
     _seccomp_hex: &str,
+    _private_tmp: Option<&std::path::Path>,
     _program: &str,
     _payload_args: &[String],
 ) -> Result<Infallible, String> {

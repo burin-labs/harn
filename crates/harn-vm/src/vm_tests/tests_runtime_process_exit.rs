@@ -23,23 +23,21 @@ async fn parallel_settle_propagates_explicit_process_exit() {
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn detached_spawn_propagates_explicit_process_exit_to_parent() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let handle = tokio::task::spawn_local(run_harn_result_async(
-                r"pipeline default(harness: Harness, task: unknown) {
+    harn_clock::test_support::with_local_tasks(async {
+        let handle = tokio::task::spawn_local(run_harn_result_async(
+            r"pipeline default(harness: Harness, task: unknown) {
   const child = spawn {
     harness.runtime.exit(11)
   }
   harness.clock.sleep_ms(1000)
   return 0
 }",
-            ));
-            tokio::task::yield_now().await;
-            tokio::time::advance(Duration::from_secs(2)).await;
+        ));
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(2)).await;
 
-            let result = handle.await.expect("join VM task");
-            assert!(matches!(result, Err(VmError::ProcessExit(11))));
-        })
-        .await;
+        let result = handle.await.expect("join VM task");
+        assert!(matches!(result, Err(VmError::ProcessExit(11))));
+    })
+    .await;
 }

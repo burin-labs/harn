@@ -1,0 +1,110 @@
+import {
+  VerificationInputState,
+  VerificationRecordedCheck,
+  VerificationReuse,
+} from "std/verification_types"
+
+/**
+ * Read a complete input identity without retaining raw environment values.
+ * An unavailable input reader disables reuse for this call.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn __verification_reuse_inputs(reuse: VerificationReuse?) -> VerificationInputState? {
+  if reuse == nil || trim(reuse.scope) == "" {
+    return nil
+  }
+  const value = try {
+    reuse.inputs()
+  } catch {
+    nil
+  }
+  const parsed = schema_parse(value, schema_of(VerificationInputState))
+  match parsed {
+    Ok(state) -> {
+      if state.revision < 0 || trim(state.workspace) == "" || trim(state.source) == ""
+        || trim(state.dependencies) == ""
+        || trim(state.environment) == "" {
+        return nil
+      }
+      return state
+    }
+    Err(_) -> { return nil }
+  }
+}
+
+fn verification_reuse_key(scope: string) -> string {
+  return "harn.verification.reuse.${sha256(scope)}"
+}
+
+/**
+ * Only a positive observation over the same complete inputs can suppress execution.
+ *
+ * @effects: [state, host]
+ * @errors: [backend, invalid_argument]
+ */
+pub fn __verification_reuse_lookup(
+  runtime: HarnessRuntime,
+  reuse: VerificationReuse?,
+  invocation: string,
+  inputs: VerificationInputState?,
+) -> VerificationRecordedCheck? {
+  if reuse == nil || trim(reuse.scope) == "" {
+    return nil
+  }
+  const stored = runtime.store_get(verification_reuse_key(reuse.scope))
+  match schema_parse(stored, schema_of(VerificationRecordedCheck)) {
+    Ok(cached) -> {
+      const binding = cached.binding
+      const result = cached.result
+      if inputs != nil && binding != nil && binding.invocation == invocation
+        && binding.inputs == inputs
+        && cached.execution != "observed"
+        && result.status == "completed"
+        && result.exit_code == 0
+        && result.ok
+        && result.success
+        && reuse.accept(result)
+        && __verification_reuse_inputs(reuse) == inputs {
+        return cached + {execution: "reused"}
+      }
+    }
+    Err(_) -> {
+    }
+  }
+  runtime.store_set(verification_reuse_key(reuse.scope), nil)
+  return nil
+}
+
+/**
+ * Bind a successful observation only when the check left its inputs unchanged.
+ *
+ * @effects: [state, host]
+ * @errors: [backend, invalid_argument]
+ */
+pub fn __verification_reuse_store(
+  runtime: HarnessRuntime,
+  reuse: VerificationReuse?,
+  invocation: string,
+  before: VerificationInputState?,
+  check: VerificationRecordedCheck,
+) -> VerificationRecordedCheck {
+  if reuse == nil || trim(reuse.scope) == "" {
+    return check
+  }
+  const result = check.result
+  const passed = check.execution == "executed" && result.status == "completed"
+    && result.exit_code == 0
+    && result.ok
+    && result.success
+  const accepted = passed && reuse.accept(result)
+  const after = __verification_reuse_inputs(reuse)
+  const bound = if accepted && before != nil && before == after {
+    check + {binding: {invocation: invocation, inputs: before}}
+  } else {
+    nil
+  }
+  runtime.store_set(verification_reuse_key(reuse.scope), bound)
+  return bound ?? check
+}

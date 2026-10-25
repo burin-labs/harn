@@ -159,37 +159,25 @@ fn model_select_options(pinned_model: Option<&str>) -> Vec<serde_json::Value> {
         "name": "Inherit ambient default",
         "description": "Clear any session-level pin and use HARN_LLM_MODEL / providers.toml.",
     }));
-    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for alias in harn_vm::llm_config::known_model_names() {
-        let resolved = harn_vm::llm_config::resolve_model_info(&alias);
-        let label = format!("{alias} ({}/{})", resolved.provider, resolved.id);
-        if seen.insert(alias.clone()) {
-            let description = if resolved.tier.is_empty() {
-                resolved.provider.clone()
-            } else {
-                format!("tier: {}", resolved.tier)
-            };
-            entries.push(serde_json::json!({
-                "value": alias,
-                "name": label,
-                "description": description,
-            }));
+    let mut seen = std::collections::BTreeSet::from([MODEL_INHERIT_VALUE.to_owned()]);
+    for model in harn_vm::llm_config::model_display_entries() {
+        if !seen.insert(model.selector.clone()) {
+            continue;
         }
-    }
-    for (model_id, model) in harn_vm::llm_config::model_catalog_entries() {
-        if seen.insert(model_id.clone()) {
-            let description = model
-                .tier
-                .as_deref()
-                .filter(|tier| !tier.is_empty())
-                .map(|tier| format!("tier: {tier}"))
-                .unwrap_or_else(|| model.provider.clone());
-            entries.push(serde_json::json!({
-                "value": model_id,
-                "name": format!("{} ({})", model.name, model.provider),
-                "description": description,
-            }));
-        }
+        let label = match model.alias_target {
+            Some(target) => format!("{} ({}/{target})", model.name, model.provider),
+            None => format!("{} ({})", model.name, model.provider),
+        };
+        let description = if model.tier.is_empty() {
+            model.provider
+        } else {
+            format!("tier: {}", model.tier)
+        };
+        entries.push(serde_json::json!({
+            "value": model.selector,
+            "name": label,
+            "description": description,
+        }));
     }
     // The currently pinned selector may be a free-form id outside the
     // alias catalog. Surface it so the dropdown reflects the real

@@ -1,0 +1,187 @@
+import { agent_loop } from "std/agent/loop"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { default_llm_caller } from "std/llm/caller"
+
+fn main(harness: Harness) -> nil {
+  const root = harness.env.get_or("EVAL_WORKSPACE", "")
+  const cell = harness.env.get_or("EVAL_CELL", "")
+  const output = harness.env.get_or("EVAL_OUTPUT", "")
+  const experiment = harness.env.get_or("EVAL_ROOT", harness.fs.source_dir())
+  require contains(["ledger", "stream", "queue"], cell), "unknown evaluation cell"
+  require root != "" && output != "" && experiment != "", "evaluation paths required"
+  const module_file = "${cell}.py"
+  const output_budget = if cell == "queue" {
+    9000
+  } else {
+    4500
+  }
+  harness.fs.write_text(
+    path_join(output, "configuration.json"),
+    json_stringify(
+      {
+        arm: harness.env.get_or("EVAL_ARM", "baseline"),
+        cell: cell,
+        max_tokens: output_budget,
+        timeout_ms: 240000,
+        reasoning_policy: if cell == "queue" {
+          "low"
+        } else {
+          "medium"
+        },
+        script_sha256: sha256(harness.fs.read_text(path_join(experiment, "run.harn"))),
+        oracle_sha256: sha256(harness.fs.read_text(path_join(experiment, "fixtures", "oracle.py"))),
+      },
+    ),
+  )
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_file",
+    "Read README.md or the Python implementation.",
+    {
+      parameters: {path: {type: "string", enum: ["README.md", module_file]}},
+      handler: { args: dict<string, any> ->
+        require contains(["README.md", module_file], args.path),
+          "path outside the evaluation workspace"
+        return harness.fs.read_text(path_join(root, args.path))
+      },
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "write_file",
+    "Replace the Python implementation with complete file contents.",
+    {
+      parameters: {content: {type: "string", description: "Complete Python source"}},
+      handler: { args: dict<string, any> ->
+        harness.fs.write_text(path_join(root, module_file), args.content)
+        return agent_tool_handler_result("Implementation written.", {path: module_file})
+      },
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "run_tests",
+    "Run behavioral verification against the current implementation.",
+    {
+      parameters: {},
+      handler: { args: dict<string, any> ->
+        const checked = harness.process.run(
+          {
+            program: harness.env.get_or("EVAL_PYTHON", "/usr/bin/python3"),
+            args: [path_join(experiment, "fixtures", "oracle.py"), cell, root],
+            cwd: root,
+            env_mode: "replace",
+            env: {PATH: "/usr/bin:/bin", PYTHONDONTWRITEBYTECODE: "1"},
+            timeout_ms: 15000,
+          },
+        )
+        return agent_tool_handler_result(
+          "${checked.stdout}\n${checked.stderr}",
+          pick(checked, ["success", "stdout", "stderr"]),
+          if checked.success {
+            "ok"
+          } else {
+            "error"
+          },
+        )
+      },
+      annotations: {
+        kind: "execute",
+        side_effect_level: "read_only",
+        completion_evidence_role: "verification",
+      },
+    },
+  )
+  const call_count = harness.runtime.atomic(0)
+  const base = default_llm_caller(harness.agent, harness.llm)
+  const caller = { call: dict<string, any> ->
+    const number = harness.runtime.atomic_add(call_count, 1)
+    const response = base(call)
+    harness.fs.write_text(
+      path_join(output, "call-${number}.json"),
+      json_stringify(
+        {
+          system: call.system,
+          system_chars: len(call.system),
+          usage: if response.ok {
+            response.value.usage
+          } else {
+            nil
+          },
+          status: if response.ok {
+            "ok"
+          } else {
+            response.status
+          },
+          error: if response.ok {
+            nil
+          } else {
+            response.error
+          },
+        },
+      ),
+    )
+    return response
+  }
+  let options = {
+    provider: "openai",
+    model: "gpt-5.4-mini",
+    tool_format: "native",
+    tools: tools,
+    llm_caller: caller,
+    max_iterations: 12,
+    max_nudges: 0,
+    loop_until_done: true,
+    done_sentinel: nil,
+    turn_end_condition: nil,
+    final_wrapup: false,
+    max_tokens: output_budget,
+    reasoning_policy: if cell == "queue" {
+      "low"
+    } else {
+      "medium"
+    },
+    timeout_ms: 240000,
+    session_id: "guidance-eval-${harness.random.uuid()}",
+    context_profile_root: root,
+  }
+  if harness.env.get_or("EVAL_ARM", "baseline") == "baseline" {
+    const assets = harness.env.get_or("EVAL_BASELINE_ASSETS", path_join(experiment, "baseline"))
+    options = options
+      + {
+        prompts: {
+          "agent.operating_guidance": {text: ""},
+          "agent.loop_contract": {
+            text: harness.fs.read_text(path_join(assets, "loop_until_done_system.harn.prompt")),
+          },
+          "agent.tool_contract_native": {
+            text: harness.fs.read_text(path_join(assets, "tool_contract_native.harn.prompt")),
+          },
+        },
+      }
+  }
+  const result = agent_loop(
+    harness,
+    "Repair ${module_file} according to README.md. Inspect the files, implement the complete behavior, and verify it with run_tests.",
+    "You repair a Python library. Python 3.14 and its standard library are available. Work only through the supplied tools. Preserve the API and complete the requested behavior.",
+    options,
+  )
+  harness.fs.write_text(
+    path_join(output, "result.json"),
+    json_stringify(
+      {
+        status: result.status,
+        calls: harness.runtime.atomic_get(call_count),
+        cost_usd: result.cost_usd,
+        known_cost_usd: result.known_cost_usd,
+        llm: result.llm,
+        tools: result.tools,
+        provider_calls: result.provider_call_count,
+        final_text: result.visible_text,
+      },
+    ),
+  )
+}

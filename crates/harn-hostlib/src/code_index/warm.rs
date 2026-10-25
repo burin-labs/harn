@@ -652,6 +652,7 @@ pub(super) fn run_rebuild_single_flight(
 
 #[cfg(test)]
 mod tests {
+    use harn_vm::value::VmDictExt;
     #[cfg(target_os = "linux")]
     #[test]
     fn the_warm_thread_runs_below_normal_priority() {
@@ -692,10 +693,7 @@ mod tests {
 
     fn root_arg(root: &Path) -> VmValue {
         let mut map: harn_vm::value::DictMap = Default::default();
-        map.insert(
-            harn_vm::value::intern_key("root"),
-            VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().as_ref())),
-        );
+        map.put_str("root", root.to_string_lossy().as_ref());
         VmValue::dict(map)
     }
 

@@ -237,6 +237,55 @@ fn enter_policy_with_environment(
     PolicyGuard
 }
 
+#[test]
+fn an_in_process_env_read_writes_nothing_and_a_spawn_materializes() {
+    let workspace = tempfile::tempdir().unwrap();
+    let _guard = enter_policy(workspace.path());
+    let read = |name: &str| crate::stdlib::process::session_env_var(name).unwrap();
+
+    // Each provider's credential lookup reads the environment; building the
+    // child environment for every read rewrote toolchain launchers per step.
+    let tmpdir = read("TMPDIR").expect("the workspace temp dir is a default");
+    let root = workspace.path().canonicalize().unwrap();
+    assert_eq!(Path::new(&tmpdir), root.join(WORKSPACE_TMPDIR_NAME));
+    assert!(read("GOCACHE").is_some());
+    let created: Vec<_> = std::fs::read_dir(workspace.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert!(
+        created.is_empty(),
+        "an environment read created {created:?}"
+    );
+
+    let spawn = super::active_workspace_process_env();
+    assert!(Path::new(&tmpdir).is_dir(), "a spawn creates the temp dir");
+    let spawn_tmpdir = spawn.iter().find(|(key, _)| key == "TMPDIR").unwrap();
+    assert_eq!(
+        spawn_tmpdir.1, tmpdir,
+        "a read and a spawn agree on the value"
+    );
+}
+
+#[test]
+fn an_in_process_env_read_follows_a_session_environment_change() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().canonicalize().unwrap();
+    let cache = |name: &str| root.join(name).display().to_string();
+    let _guard = enter_policy_with_environment(
+        workspace.path(),
+        isolated_environment([("GOCACHE".to_string(), cache("first-go-cache"))]),
+    );
+    let read = || crate::stdlib::process::session_env_var("GOCACHE").unwrap();
+    assert_eq!(read(), Some(cache("first-go-cache")));
+
+    crate::stdlib::process::set_session_environment(Some(isolated_environment([(
+        "GOCACHE".to_string(),
+        cache("second-go-cache"),
+    )])));
+    assert_eq!(read(), Some(cache("second-go-cache")));
+}
+
 fn isolated_environment(
     entries: impl IntoIterator<Item = (String, String)>,
 ) -> crate::security::SessionEnvironment {
@@ -247,6 +296,57 @@ fn isolated_environment(
         &|_| None,
     )
     .unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn a_confined_child_keeps_the_installed_pnpm_home_read_only() {
+    let workspace = tempfile::tempdir().unwrap();
+    let installed = tempfile::tempdir().unwrap();
+    let marker = installed.path().join("installed-manager");
+    std::fs::write(&marker, "INSTALLED-PNPM").unwrap();
+    let home = installed.path().display().to_string();
+    let _guard = enter_policy_with_environment(
+        workspace.path(),
+        isolated_environment([("PNPM_HOME".to_string(), home.clone())]),
+    );
+    let mut policy = crate::orchestration::current_execution_policy().unwrap();
+    pop_execution_policy();
+    policy.process_sandbox.read_roots.push(home.clone());
+    push_execution_policy(policy);
+    assert_eq!(
+        crate::stdlib::process::session_env_var("PNPM_HOME").unwrap(),
+        Some(home)
+    );
+    let run = |source: &str| {
+        command_output(
+            "/bin/sh",
+            &["-c".to_string(), source.to_string()],
+            &ProcessCommandConfig {
+                cwd: Some(workspace.path().to_path_buf()),
+                ..Default::default()
+            },
+        )
+    };
+    let read = run("cat \"$PNPM_HOME/installed-manager\"");
+    if crate::sandbox_host::assert_unavailable_result(&read) {
+        return;
+    }
+    let read = read.unwrap();
+    assert!(read.status.success(), "{read:?}");
+    assert_eq!(read.stdout, b"INSTALLED-PNPM");
+    let write = run("printf poisoned > \"$PNPM_HOME/installed-manager\"");
+    assert!(
+        matches!(
+            &write,
+            Err(crate::VmError::CategorizedError {
+                category: crate::value::ErrorCategory::ToolRejected,
+                ..
+            })
+        ),
+        "{write:?}"
+    );
+    assert_eq!(std::fs::read_to_string(marker).unwrap(), "INSTALLED-PNPM");
 }
 
 fn find_program(name: &str) -> Option<PathBuf> {
@@ -386,7 +486,6 @@ fn spawned_process_observes_workspace_toolchain_environment() {
         "UV_CACHE_DIR",
         "NPM_CONFIG_CACHE",
         "YARN_CACHE_FOLDER",
-        "PNPM_HOME",
         "CCACHE_DIR",
         "CCACHE_TEMPDIR",
     ] {
@@ -395,7 +494,7 @@ fn spawned_process_observes_workspace_toolchain_environment() {
     }
     // The child must inherit the user's real HOME and user-site. See the
     // matching unit test in `workspace_env.rs` for why.
-    for key in ["HOME", "PYTHONUSERBASE"] {
+    for key in ["HOME", "PYTHONUSERBASE", "PNPM_HOME"] {
         let value = PathBuf::from(values.get(key).map(String::as_str).unwrap_or_default());
         assert!(
             !value.starts_with(&cache),
@@ -461,6 +560,77 @@ fn external_inherited_cache_is_relocated_inside_workspace() {
         );
         assert!(!observed.starts_with(&outside));
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn gradle_cache_child_preserves_workspace_paths_or_reports_unavailable_confinement() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let workspace = workspace.path().canonicalize().unwrap();
+    let outside = outside.path().canonicalize().unwrap();
+    let warm = workspace.join("warm-gradle");
+    std::fs::create_dir(&warm).unwrap();
+    std::fs::write(warm.join("prewarmed"), "gradle-cache-hit\n").unwrap();
+    let link = workspace.join("external-cache-link");
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+    for inherited in [&warm, &outside, &link] {
+        let environment = isolated_environment([
+            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+            (
+                "GRADLE_USER_HOME".to_string(),
+                inherited.display().to_string(),
+            ),
+            (
+                "GRADLE_TOKEN".to_string(),
+                "synthetic-must-not-reach-child".to_string(),
+            ),
+        ]);
+        let _policy = enter_policy_with_environment(&workspace, environment);
+        let expected = if inherited == &warm {
+            warm.clone()
+        } else {
+            workspace.join(".harn-toolchain-cache/gradle")
+        };
+        let mode = if inherited == &warm {
+            "warm"
+        } else {
+            "relocated"
+        };
+        let args = ["-c", "test -z \"${GRADLE_TOKEN+x}\" || exit 61; test \"$GRADLE_USER_HOME\" = \"$1\" || exit 62; if test \"$2\" = warm; then cat \"$GRADLE_USER_HOME/prewarmed\"; else mkdir -p \"$GRADLE_USER_HOME\" && printf private-cache > \"$GRADLE_USER_HOME/child-write\" && printf 'cache-relocated\\n'; fi", "cache-probe", expected.to_str().unwrap(), mode].map(str::to_string);
+        let result = command_output(
+            "/bin/sh",
+            &args,
+            &ProcessCommandConfig {
+                cwd: Some(workspace.clone()),
+                ..Default::default()
+            },
+        );
+        if crate::sandbox_host::assert_unavailable_result(&result) {
+            crate::sandbox_host::boundary_not_measured(
+                "gradle_cache_child",
+                "typed host confinement refusal observed; cache path was not measured",
+            );
+            return;
+        }
+        let output = result.expect("confined Gradle cache child");
+        assert!(
+            output.status.success(),
+            "launcher cache assertion for {mode}: status={}, stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            if mode == "warm" {
+                "gradle-cache-hit\n"
+            } else {
+                "cache-relocated\n"
+            }
+        );
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+    }
+    println!("confined Gradle cache warm-read, external and symlink relocation, and secret-negative controls reached");
 }
 
 #[test]

@@ -62,3 +62,43 @@ fn a_loopback_grant_admits_sockets_only_where_a_namespace_bounds_them() {
     resolve_netns_launcher(&unnamespaced)
         .expect_err("a loopback grant with no namespace helper must be refused, never widened");
 }
+
+/// The private `/tmp` mount hides every host path under `/tmp`, so a child
+/// granted anything there keeps the host's: its workspace, or the program it
+/// was spawned to run.
+#[test]
+fn a_grant_under_tmp_keeps_the_host_tmp() {
+    if !super::tests::live_landlock_available("a_grant_under_tmp_keeps_the_host_tmp") {
+        return;
+    }
+    // Tests that point `HOME` under `/tmp` hold this lock; HOME-derived grants
+    // would otherwise land under `/tmp` mid-run.
+    let _env_lock = crate::runtime_paths::test_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let support = landlock_support::host_support().expect("Landlock support");
+    let home = PathBuf::from(std::env::var_os("HOME").expect("HOME"));
+    let under_tmp = tempfile::tempdir_in("/tmp").unwrap();
+    let tmp_program = under_tmp.path().join("tool");
+    std::fs::copy("/bin/true", &tmp_program).unwrap();
+    let cases = [
+        (home.clone(), PathBuf::from("/bin/true"), true),
+        (PathBuf::from("/tmp"), PathBuf::from("/bin/true"), false),
+        (home, tmp_program, false),
+    ];
+    for (parent, program, mounted) in cases {
+        let workspace = tempfile::tempdir_in(&parent).unwrap();
+        let mut policy = linux_policy_with_workspace_ops(&["read_text", "write_text"]);
+        policy.workspace_roots = vec![workspace.path().display().to_string()];
+        policy.process_sandbox.allow_tcp_loopback = true;
+        let profile = landlock_profile_for(&program.display().to_string(), &policy, support)
+            .expect("profile");
+        assert_eq!(
+            profile.private_tmp.is_some(),
+            mounted,
+            "workspace under {}, program {}",
+            parent.display(),
+            program.display()
+        );
+    }
+}

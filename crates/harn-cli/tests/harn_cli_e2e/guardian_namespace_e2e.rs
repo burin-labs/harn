@@ -41,6 +41,9 @@ else:
 libc = ctypes.CDLL(None, use_errno=True)
 assert libc.unshare(0) == -1
 assert ctypes.get_errno() == errno.EPERM, 'seccomp ceiling missing'
+assert os.getuid() == HOST_UID, 'namespace must keep the caller uid, not map it to root'
+with open('/tmp/harn-private-tmp-probe', 'w') as private:
+    private.write('session')
 if len(sys.argv) == 1:
     print('loopback-egress-landlock-seccomp-ok', flush=True)
 else:
@@ -126,7 +129,8 @@ fn owner_death_preserves_namespace_then_confinement() {
         String::from_utf8_lossy(&preflight.stderr)
     );
 
-    let root = tempfile::tempdir().unwrap();
+    // Outside `/tmp`, so the child gets the private `/tmp` mount the probe checks.
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let fifo = root.path().join("ready.fifo");
     let fifo_c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
     assert_eq!(unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) }, 0);
@@ -147,10 +151,14 @@ fn main(harness: Harness) {{
   throw json_stringify(result)
 }}
 "#,
-        probe = serde_json::to_string(&PROBE.replace(
-            "LOOPBACK_HOSTS",
-            &crate::test_util::process::python_loopback_hosts(),
-        ))
+        probe = serde_json::to_string(
+            &PROBE
+                .replace(
+                    "LOOPBACK_HOSTS",
+                    &crate::test_util::process::python_loopback_hosts(),
+                )
+                .replace("HOST_UID", &unsafe { libc::getuid() }.to_string()),
+        )
         .unwrap(),
         fifo = serde_json::to_string(&fifo.display().to_string()).unwrap()
     );
@@ -220,6 +228,12 @@ fn main(harness: Harness) {{
     owner.0.wait().unwrap();
     await_exit(&child);
     await_exit(&grandchild);
+    // The payload's `/tmp` is the session temp dir, never the host's.
+    assert!(root
+        .path()
+        .join(".harn-tmp/harn-private-tmp-probe")
+        .is_file());
+    assert!(!std::path::Path::new("/tmp/harn-private-tmp-probe").exists());
 
     use harn_vm::orchestration::{CapabilityPolicy, SandboxProfile};
     let mut policy = CapabilityPolicy {
@@ -228,6 +242,9 @@ fn main(harness: Harness) {{
         ..CapabilityPolicy::default()
     };
     policy.process_sandbox.allow_tcp_loopback = true;
+    // The wrong-order control must reach namespace creation, not fail while
+    // executing the helper outside the temporary workspace.
+    policy.process_sandbox.read_roots.push(launcher.clone());
     policy.process_sandbox.netns_launcher_path = Some(launcher);
     harn_vm::orchestration::push_execution_policy(policy);
     // The test process inherits Cargo's loader path, which trusted sandbox

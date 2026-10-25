@@ -5,6 +5,7 @@ pipeline default(harness: Harness) {
   harness.fs.mkdir(root)
   const script_path = path_join(root, "sigterm.harn")
   const log_path = path_join(root, "sigterm.log")
+  const error_path = path_join(root, "sigterm.err")
   harness.fs.write_text(
     script_path,
     "import \"std/signal\"\n\npipeline default(harness: Harness) {\n  on_interrupt({ -> harness.stdio.println(\"term\") }, {signals: [\"SIGTERM\"], once: false})\n  harness.stdio.println(\"ready\")\n  try {\n    harness.clock.sleep_ms(30000)\n  } catch (e) {\n    harness.stdio.println(\"caught\")\n  }\n  harness.stdio.println(interrupted())\n}\n",
@@ -15,12 +16,13 @@ pipeline default(harness: Harness) {
     resolve_harn_bin(harness, repo_root),
   )
   const start = harness.process.shell(
-    "\"" + harn_bin + "\" run \"" + script_path + "\" >\"" + log_path + "\" 2>&1 & echo $!",
+    "\"" + harn_bin + "\" run \"" + script_path + "\" >\"" + log_path + "\" 2>\"" + error_path
+      + "\" & echo $!",
   )
   const pid = start.stdout.trim()
   require start.success, "failed to start harn run child"
   require pid != "", "missing child pid"
-  const ready = wait_for_log_contains(harness, log_path, "ready")
+  const ready = wait_for_log_contains(harness, log_path, "ready\n")
   const startup_log = harness.fs.exists(log_path) ? harness.fs.read_text(log_path) : "<missing>"
   require ready, "child did not become ready; log: " + startup_log
   const _ = harness.process.shell("kill -TERM " + pid)
@@ -28,7 +30,15 @@ pipeline default(harness: Harness) {
   const _ = harness.process.shell("kill -TERM " + pid + " >/dev/null 2>&1 || true")
   require exited, "child did not exit after SIGTERM"
   const log = harness.fs.read_text(log_path)
-  harness.stdio.println(contains(log, "\nterm\n"))
-  harness.stdio.println(contains(log, "\ncaught\n"))
-  harness.stdio.println(contains(log, "\ntrue\n"))
+  const observed = [
+    contains(log, "\nterm\n"),
+    contains(log, "\ncaught\n"),
+    contains(log, "\ntrue\n"),
+  ]
+  if observed.any({ value -> !value }) {
+    harness.stdio.eprintln(json_stringify({stdout: log, stderr: harness.fs.read_text(error_path)}))
+  }
+  for value in observed {
+    harness.stdio.println(value)
+  }
 }

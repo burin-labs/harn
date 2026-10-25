@@ -3,6 +3,7 @@
 
 mod support;
 
+mod cache_counts;
 mod canonical_publication;
 mod cost;
 mod lifecycle;

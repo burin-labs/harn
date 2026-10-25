@@ -47,15 +47,17 @@ pub(crate) async fn run_command(
     args: PlaygroundArgs,
     llm_mock_mode: CliLlmMockMode,
 ) -> Result<(), String> {
-    let _environment = crate::commands::run::environment::process_host_environment_scope()?;
-    crate::provider_bootstrap::maybe_seed_ollama_for_playground(
-        Path::new(&args.host),
-        Path::new(&args.script),
-        args.yes,
-        args.llm.is_some(),
-        args.llm_mock.is_some(),
-    )
-    .await;
+    {
+        let _environment = crate::commands::run::environment::process_host_environment_scope()?;
+        crate::provider_bootstrap::maybe_seed_ollama_for_playground(
+            Path::new(&args.host),
+            Path::new(&args.script),
+            args.yes,
+            args.llm.is_some(),
+            args.llm_mock.is_some(),
+        )
+        .await;
+    }
     let config = PlaygroundConfig {
         host: canonicalize_or_err(&args.host)?,
         script: canonicalize_or_err(&args.script)?,
@@ -84,7 +86,6 @@ pub(crate) async fn run_command(
 /// spawning the `harn` binary. Watch mode is not supported here — it has no
 /// terminal output contract worth asserting on.
 pub async fn execute_playground_inputs(inputs: PlaygroundInputs) -> Result<String, String> {
-    let _environment = crate::commands::run::environment::process_host_environment_scope()?;
     let llm = inputs.llm.as_deref().map(parse_llm_override).transpose()?;
     let config = PlaygroundConfig {
         host: canonicalize_or_err(inputs.host.to_string_lossy().as_ref())?,
@@ -189,6 +190,7 @@ async fn execute_playground(config: &PlaygroundConfig) -> Result<String, String>
         .map_err(|error| format!("error: compile error: {error}\n"))?;
 
     let env_guard = ScopedEnv::apply(config);
+    let _environment = crate::commands::run::environment::process_host_environment_scope()?;
     let source_parent = config
         .script
         .parent()
@@ -275,7 +277,7 @@ async fn configured_vm(
     store_base: &Path,
 ) -> Result<harn_vm::Vm, String> {
     let mut vm = harn_vm::new_vm();
-    harn_vm::register_vm_stdlib(&mut vm);
+    harn_runtime::register_vm_stdlib(&mut vm);
     crate::install_default_hostlib(&mut vm);
     harn_vm::register_store_builtins(&mut vm, store_base);
     harn_vm::register_metadata_builtins(&mut vm, store_base);
@@ -293,10 +295,7 @@ async fn configured_vm(
             vm.set_source_dir(parent);
         }
     }
-    vm.set_global(
-        "argv",
-        harn_vm::VmValue::List(std::sync::Arc::new(Vec::new())),
-    );
+    vm.set_global("argv", harn_vm::VmValue::list(Vec::new()));
     vm.set_harness(harn_vm::Harness::real());
 
     let loaded = load_skills(&SkillLoaderInputs {
@@ -511,7 +510,14 @@ pub fn build_prompt(task: string) {
         write_file(
             &script,
             r#"
+import { command_run } from "std/command"
+
 pipeline default(harness: Harness, task: any) {
+  assert(harness.env.get("HARN_TASK") == "ship it")
+  assert(harness.env.get("HARN_LLM_PROVIDER") == "mock")
+  assert(harness.env.get("HARN_LLM_MODEL") == "mock")
+  const child = command_run(harness.tools, {mode: "argv", argv: ["git", "--version"]})
+  assert(child.success && child.stdout.starts_with("git version "))
   harness.llm.mock_enqueue({text: "done"})
   const result = harness.llm.call(
     build_prompt(harness.env.get_or("HARN_TASK", "")),
@@ -540,12 +546,17 @@ pipeline default(harness: Harness, task: any) {
 
         write_file(
             &script,
-            r"
+            r#"
+import { command_run } from "std/command"
+
 pipeline default(harness: Harness, task: any) {
+  assert(harness.env.get("HARN_TASK") == "ship it again")
+  const child = command_run(harness.tools, {mode: "argv", argv: ["git", "--version"]})
+  assert(child.success && child.stdout.starts_with("git version "))
   const snapshot = harness.llm.mock_snapshot()
   harness.stdio.println(len(keys(snapshot.queue_remaining)))
 }
-",
+"#,
         );
         let next_output = execute_playground(&PlaygroundConfig {
             host,
