@@ -75,6 +75,7 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
       actions: read
@@ -82,6 +83,8 @@ jobs:
       source_sha: ${{ steps.source.outputs.source_sha }}
       run_id: ${{ steps.source.outputs.run_id }}
       requires_attached_consumer: ${{ steps.source.outputs.requires_attached_consumer }}
+      requires_consumer_repair: ${{ steps.source.outputs.requires_consumer_repair }}
+      producer_attempt: ${{ steps.source.outputs.producer_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,12 +97,14 @@ jobs:
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id || github.event.workflow_run.id }}
           EXPECTED_SOURCE_SHA: ${{ inputs.candidate_sha || github.event.workflow_run.head_sha }}
           COMPLETED_CONSUMER_RUN_ID: ${{ inputs.completed_consumer_run_id }}
+          CONSUMER_PULL_REQUEST: ${{ inputs.consumer_pull_request }}
         run: bash scripts/resolve-release-promotion-source.sh
 
   plan:
     name: Plan promotion
     needs: resolve
     runs-on: ubuntu-24.04
+    timeout-minutes: 190
     permissions:
       contents: read
       actions: read
@@ -114,6 +119,8 @@ jobs:
       major_minor: ${{ steps.plan.outputs.major_minor }}
       requires_rehearsal: ${{ steps.plan.outputs.requires_rehearsal }}
       requires_attached_consumer: ${{ needs.resolve.outputs.requires_attached_consumer }}
+      requires_consumer_repair: ${{ needs.resolve.outputs.requires_consumer_repair }}
+      producer_attempt: ${{ needs.resolve.outputs.producer_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -132,6 +139,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ needs.resolve.outputs.source_sha }}
           REQUIRES_ATTACHED_CONSUMER: ${{ needs.resolve.outputs.requires_attached_consumer }}
+          REQUIRES_CONSUMER_REPAIR: ${{ needs.resolve.outputs.requires_consumer_repair }}
           BUILD_RUN_ID: ${{ needs.resolve.outputs.run_id }}
           SOURCE_DIRECTORY: release-source
           RECOVERY: ${{ github.event_name == 'workflow_dispatch' }}
@@ -210,7 +218,11 @@ jobs:
             exit 1
           fi
           requires_rehearsal=false
-          if [[ "${REQUIRES_ATTACHED_CONSUMER:-false}" == true ]]; then
+          if [[ "${REQUIRES_CONSUMER_REPAIR:-false}" == true ]]; then
+            [[ "${RECOVERY:-false}" == true && "${CONSUMER_PULL_REQUEST:-}" =~ ^[1-9][0-9]*$ ]] || exit 1
+            requires_rehearsal=true
+            echo "::notice::Verified candidate archives require a fresh observer-owned consumer repair measurement."
+          elif [[ "${REQUIRES_ATTACHED_CONSUMER:-false}" == true ]]; then
             [[ "${RECOVERY:-false}" == true ]] || exit 1
             echo "::notice::Original observer remains unmeasured; exact completed-child authorization is required."
           elif [[ "${RECOVERY:-false}" == true ]]; then
@@ -239,6 +251,16 @@ jobs:
             echo "requires_rehearsal=$requires_rehearsal"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Require source CI and native proof before consumer recovery
+        if: steps.plan.outputs.promote == 'true'
+        timeout-minutes: 90
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+          WAIT_FOR_FULL_SUITE: 'true'
+        run: bash scripts/ci/require_full_suite.sh
+
   consumer-rehearsal:
     name: Recover missing consumer rehearsal
     needs: plan
@@ -252,6 +274,8 @@ jobs:
       candidate_run_id: ${{ needs.plan.outputs.run_id }}
       rehearsal_promotion_run_id: ${{ inputs.rehearsal_promotion_run_id }}
       consumer_pull_request: ${{ inputs.consumer_pull_request }}
+      release_producer_run_id: ${{ needs.plan.outputs.requires_consumer_repair == 'true' && needs.plan.outputs.run_id || '' }}
+      release_producer_run_attempt: ${{ needs.plan.outputs.requires_consumer_repair == 'true' && needs.plan.outputs.producer_attempt || '' }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -262,11 +286,14 @@ jobs:
     needs: [plan, consumer-rehearsal]
     if: always() && needs.plan.result == 'success' && needs.plan.outputs.promote == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 115
     permissions:
       contents: read
       actions: read
     outputs:
       ready: ${{ steps.authorize.outputs.ready }}
+      original_context: ${{ steps.original-context.outputs.context }}
+      consumer_repair: ${{ steps.consumer-repair.outputs.repair_request }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -281,15 +308,44 @@ jobs:
           WAIT_FOR_FULL_SUITE: 'true'
         run: bash scripts/ci/require_full_suite.sh
       - name: Mint registered consumer read authority
-        if: needs.plan.outputs.requires_attached_consumer == 'true'
+        if: needs.plan.outputs.requires_attached_consumer == 'true' || needs.plan.outputs.requires_consumer_repair == 'true'
         id: completed-consumer-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          repositories: |
+            harn
+            ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           permission-actions: read
+          permission-contents: read
+          permission-pull-requests: read
+      - name: Set up the authenticated consumer reader runtime
+        if: needs.plan.outputs.requires_attached_consumer == 'true' || needs.plan.outputs.requires_consumer_repair == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Authenticate the fresh consumer repair
+        if: needs.plan.outputs.requires_consumer_repair == 'true'
+        id: consumer-repair
+        env:
+          GH_TOKEN: ${{ steps.completed-consumer-token.outputs.token }}
+          SOURCE_REVISION: ${{ needs.plan.outputs.source_sha }}
+          PRODUCER_RUN: ${{ needs.plan.outputs.run_id }}
+          PRODUCER_ATTEMPT: ${{ needs.plan.outputs.producer_attempt }}
+          CONSUMER_PULL: ${{ inputs.consumer_pull_request }}
+          ISSUED_CONTEXT: ${{ needs.consumer-rehearsal.outputs.observer_context }}
+          REQUIRE_CURRENT_DEFAULT: 'false'
+          CANARY_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+        run: |
+          set -euo pipefail
+          OBSERVER_CONTEXT="$(jq -cn --argjson context "$ISSUED_CONTEXT" --arg run "$PRODUCER_RUN" \
+            --argjson attempt "$PRODUCER_ATTEMPT" --arg pull "$CONSUMER_PULL" \
+            '{schema:"harn.release.consumer_repair.v1",context:$context,producer_run:$run,producer_attempt:$attempt,consumer_pull:$pull}')"
+          export OBSERVER_CONTEXT
+          node scripts/ci/consumer-observer-read-decision.mjs --repair
       - name: Attach completed exact-source consumer
         if: needs.plan.outputs.requires_attached_consumer == 'true'
         id: attached-consumer
@@ -312,6 +368,18 @@ jobs:
           path: ${{ runner.temp }}/completed-consumer-authorization/authorization.json
           if-no-files-found: error
           retention-days: 7
+      - name: Select authenticated original consumer context
+        if: needs.plan.outputs.requires_attached_consumer == 'true'
+        id: original-context
+        env:
+          GH_TOKEN: ${{ steps.completed-consumer-token.outputs.token }}
+          SOURCE_REVISION: ${{ needs.plan.outputs.source_sha }}
+          PARENT_RUN_ID: ${{ needs.plan.outputs.run_id }}
+          PARENT_ROLE: candidate
+          REQUIRE_CURRENT_DEFAULT: 'true'
+          CANARY_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+        run: node scripts/ci/consumer-observer-read-parent.mjs
       - name: Require the owning rehearsal result
         id: authorize
         env:
@@ -325,6 +393,11 @@ jobs:
           ATTACHED_SOURCE_SHA: ${{ steps.attached-consumer.outputs.source_sha }}
           ATTACHED_PRODUCER_RUN: ${{ steps.attached-consumer.outputs.producer_run }}
           CANDIDATE_RUN_ID: ${{ needs.plan.outputs.run_id }}
+          REQUIRES_CONSUMER_REPAIR: ${{ needs.plan.outputs.requires_consumer_repair }}
+          REPAIR_RESULT: ${{ steps.consumer-repair.outcome }}
+          REPAIR_REQUEST: ${{ steps.consumer-repair.outputs.repair_request }}
+          PRODUCER_ATTEMPT: ${{ needs.plan.outputs.producer_attempt }}
+          CONSUMER_PULL: ${{ inputs.consumer_pull_request }}
         run: bash scripts/authorize-release-rehearsal.sh
 
   promote:
@@ -337,16 +410,17 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@ec5c89707613dd618ec01c8806e01de9e03096e5
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@839fa59d13d4693055c47a35b3bc5c1aff05c105
     with:
       sha: ${{ needs.plan.outputs.source_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}
       tag: ${{ needs.plan.outputs.tag }}
-      authorization-run-id: ${{ needs.plan.outputs.requires_attached_consumer == 'true' && github.run_id || '' }}
-      authorization-attempt: ${{ needs.plan.outputs.requires_attached_consumer == 'true' && github.run_attempt || '' }}
+      original-consumer-context: ${{ needs.authorize.outputs.original_context }}
+      consumer-repair: ${{ needs.authorize.outputs.consumer_repair }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
 
   # Each registered consumer's own repin workflow opens its pull request, and
   # that repository's CI and review rules decide whether it merges.

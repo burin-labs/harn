@@ -106,3 +106,53 @@ test('the actual recovery dispatcher authenticates its live promotion and preser
     fs.rmSync(scratch,{recursive:true,force:true});
   }
 });
+
+test('the actual promotion resolver admits only an explicit repair with complete original archive proof',()=>{
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-repair-resolver-'));
+  try {
+    const fixture=path.join(scratch,'fixture.json');
+    const preload=path.join(scratch,'fetch.mjs');
+    const output=path.join(scratch,'output');
+    fs.writeFileSync(preload,`import fs from 'node:fs';
+      const data=JSON.parse(fs.readFileSync(process.env.REPAIR_FIXTURE,'utf8'));
+      globalThis.fetch=async(url)=>({ok:true,json:async()=>url.includes('/jobs')?
+        {total_count:data.jobs.length,jobs:data.jobs}:url.includes('/artifacts')?
+        {total_count:data.artifacts.length,artifacts:data.artifacts}:data.run});`);
+    fs.writeFileSync(path.join(scratch,'gh'),`#!${process.execPath}
+      const fs=require('node:fs');
+      const data=JSON.parse(fs.readFileSync(process.env.REPAIR_FIXTURE,'utf8'));
+      const route=process.argv[3];
+      if(route.includes('/compare/')) console.log(JSON.stringify({status:'ahead',merge_base_commit:{sha:data.run.head_sha}}));
+      else if(route.endsWith('/42')) console.log(JSON.stringify(data.run));
+      else process.exit(2);`,{mode:0o755});
+    const execute=(changes={},environment={})=>{
+      fs.writeFileSync(fixture,JSON.stringify({run,jobs,artifacts,...changes}));
+      fs.writeFileSync(output,'');
+      const result=spawnSync('bash',[fileURLToPath(new URL('../resolve-release-promotion-source.sh',import.meta.url))],{
+        encoding:'utf8',env:{PATH:`${scratch}:${process.env.PATH}`,NODE_OPTIONS:`--import=${preload}`,
+          REPAIR_FIXTURE:fixture,GH_TOKEN:'fixture-read',GITHUB_REPOSITORY:'burin-labs/harn',
+          CANDIDATE_RUN_ID:'42',EXPECTED_SOURCE_SHA:source,GITHUB_OUTPUT:output,CONSUMER_PULL_REQUEST:'7',...environment},
+      });
+      return {...result,outputs:fs.readFileSync(output,'utf8')};
+    };
+    const positive=execute();
+    assert.equal(positive.status,0,positive.stderr);
+    assert.match(positive.outputs,/requires_consumer_repair=true\n/);
+    assert.match(positive.outputs,/producer_attempt=1\n/);
+    const failed=execute({run:{...run,status:'completed',conclusion:'failure'}});
+    assert.equal(failed.status,0,failed.stderr);
+    for(const [changes,environment] of [
+      [{},{CONSUMER_PULL_REQUEST:''}], [{},{CONSUMER_PULL_REQUEST:'other'}],
+      [{},{COMPLETED_CONSUMER_RUN_ID:'123'}],
+      [{run:{...run,status:'completed',conclusion:'cancelled'}},{}],
+      [{jobs:jobs.filter(job=>job.name!=='Assemble candidate manifest')},{}],
+      [{artifacts:[]},{}], [{run:{...run,head_repository:{full_name:'fork/harn'}}},{}],
+    ]) {
+      const refused=execute(changes,environment);
+      assert.notEqual(refused.status,0);
+      assert.equal(refused.outputs,'','unmeasured source must emit no promotion outputs');
+    }
+  } finally {
+    fs.rmSync(scratch,{recursive:true,force:true});
+  }
+});

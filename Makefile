@@ -764,6 +764,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/release_promotion_plan_test.sh
 	bash ./scripts/tests/release_promotion_source_test.sh
 	bash ./scripts/tests/release_rehearsal_authorization_test.sh
+	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/release_repair_workflow_test.harn
 	bash ./scripts/tests/completed_consumer_recovery_test.sh
 	bash ./scripts/tests/release_consumer_candidate_verdict_test.sh
 	bash ./scripts/tests/failed_rehearsal_observation_test.sh

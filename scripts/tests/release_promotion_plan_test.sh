@@ -181,6 +181,18 @@ plan recovery_explicit_pair RECOVERY=true FAKE_CONSUMER=missing CONSUMER_PULL_RE
 plan recovery_existing_pair RECOVERY=true CONSUMER_PULL_REQUEST=7
 [[ "$(cat "$tmp/recovery_existing_pair.status")" != 0 ]] \
   || fail "explicit pair replaced an existing measured rehearsal"
+plan verified_repair RECOVERY=true REQUIRES_CONSUMER_REPAIR=true CONSUMER_PULL_REQUEST=7 FAKE_CONSUMER=failure
+[[ "$(cat "$tmp/verified_repair.status")" == 0 && "$(output verified_repair requires_rehearsal)" == true ]] \
+  || fail "verified archive repair did not require a fresh consumer measurement"
+for invalid in no_pull nonnumeric_pull not_manual; do
+  case "$invalid" in
+    no_pull) extras=(RECOVERY=true) ;;
+    nonnumeric_pull) extras=(RECOVERY=true CONSUMER_PULL_REQUEST=other) ;;
+    not_manual) extras=(RECOVERY=false CONSUMER_PULL_REQUEST=7) ;;
+  esac
+  plan "repair_$invalid" REQUIRES_CONSUMER_REPAIR=true "${extras[@]}"
+  [[ "$(cat "$tmp/repair_$invalid.status")" != 0 ]] || fail "repair $invalid was admitted"
+done
 for verdict in pending failure cancelled; do
   plan "recovery_consumer_$verdict" RECOVERY=true "FAKE_CONSUMER=$verdict"
   [[ "$(cat "$tmp/recovery_consumer_$verdict.status")" != 0 ]] \

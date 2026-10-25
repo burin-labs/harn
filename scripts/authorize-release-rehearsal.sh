@@ -44,4 +44,27 @@ case "${REQUIRES_REHEARSAL:-}" in
     exit 1
     ;;
 esac
+case "${REQUIRES_CONSUMER_REPAIR:-false}" in
+  true)
+    [[ "${REQUIRES_ATTACHED_CONSUMER:-false}" == false &&
+       "${REQUIRES_REHEARSAL:-}" == true && "${REPAIR_RESULT:-}" == success ]] &&
+      jq -e --arg source "$SOURCE_SHA" --arg producer "${CANDIDATE_RUN_ID:-}" \
+        --arg attempt "${PRODUCER_ATTEMPT:-}" --arg pull "${CONSUMER_PULL:-}" '
+        .schema == "harn.release.consumer_repair.v1" and .context.source_revision == $source and
+        .producer_run == $producer and (.producer_attempt | tostring) == $attempt and
+        .consumer_pull == $pull and ($producer | test("^[1-9][0-9]*$")) and
+        ($attempt | test("^[1-9][0-9]*$")) and ($pull | test("^[1-9][0-9]*$"))
+      ' <<< "${REPAIR_REQUEST:-}" >/dev/null || {
+        echo '::error::Authenticated consumer repair is absent or mismatched.' >&2
+        exit 1
+      }
+    ;;
+  false)
+    [[ "${REPAIR_RESULT:-skipped}" == skipped && -z "${REPAIR_REQUEST:-}" ]] || {
+      echo '::error::Unexpected consumer repair authorization.' >&2
+      exit 1
+    }
+    ;;
+  *) echo '::error::Unreported consumer repair decision.' >&2; exit 1 ;;
+esac
 echo 'ready=true' >> "${GITHUB_OUTPUT:?output required}"
