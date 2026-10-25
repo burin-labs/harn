@@ -939,8 +939,12 @@ fn python_override_family_changes_every_override_and_call() {
              \x20       return 3 * scale\n\
              \n\
              \n\
+             class Tiny(Square):\n\
+             \x20   pass\n\
+             \n\
+             \n\
              def total(c, s):\n\
-             \x20   return c.area(scale=1) + Shape.area(s, 2) + Square.area(s, 3)\n",
+             \x20   return c.area(scale=1) + Shape.area(s, 2) + Square.area(s, 3) + Tiny.area(s, 4)\n",
         ),
     ];
     for seed_line in [6, 11] {
@@ -954,7 +958,7 @@ fn python_override_family_changes_every_override_and_call() {
             ],
             &symbol_at("area", "pkg/shapes.py", seed_line),
         );
-        assert_applied(&result, 3);
+        assert_applied(&result, 4);
         assert_eq!(
             ws.read("pkg/shapes.py"),
             PY_SHAPES.replace("area(self, scale)", "area(self, scale, offset)")
@@ -962,8 +966,9 @@ fn python_override_family_changes_every_override_and_call() {
         let round = ws.read("pkg/round.py");
         assert!(round.contains("def area(self, scale, offset):"), "{round}");
         assert!(
-            round
-                .contains("c.area(scale=1, offset=0) + Shape.area(s, 2, 0) + Square.area(s, 3, 0)"),
+            round.contains(
+                "c.area(scale=1, offset=0) + Shape.area(s, 2, 0) + Square.area(s, 3, 0) + Tiny.area(s, 4, 0)"
+            ),
             "{round}"
         );
     }
@@ -980,6 +985,11 @@ fn python_override_family_refuses_unrelated_and_external_members() {
         // An override whose class also extends a package class.
         (
             "from widgets import Frame\nfrom .shapes import Shape\n\n\nclass Panel(Shape, Frame):\n    def area(self, scale):\n        return 2\n",
+            "pkg/extra.py:5 supertype",
+        ),
+        // A subclass that inherits the method beside a package class.
+        (
+            "from widgets import Frame\nfrom .shapes import Square\n\n\nclass Local(Frame, Square):\n    pass\n",
             "pkg/extra.py:5 supertype",
         ),
     ];
@@ -1268,6 +1278,13 @@ fn typescript_family_refuses_package_supertypes_and_property_members() {
              \x20 }\n\
              }\n",
             "src/extra.ts:4 supertype",
+        ),
+        // A class that inherits its implementation from a package base.
+        (
+            "import { Shape } from \"./shape\"\n\
+             import { Widget } from \"ui-kit\"\n\
+             export class Local extends Widget implements Shape {}\n",
+            "src/extra.ts:3 supertype",
         ),
     ];
     for (extra, blocking) in cases {

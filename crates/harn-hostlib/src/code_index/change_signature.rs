@@ -429,11 +429,19 @@ fn plan(
 
     let in_scope = files_in_scope(state, Scope::Workspace, &name, &seed_path, session);
     let competing = competing_declarations(&state.symbols, seed, &name, &in_scope);
-    // A method that shares its name, or that a trait or interface binds,
-    // changes together with its whole override family.
-    let override_family = if decl.is_method && (!competing.is_empty() || decl.contract.is_some()) {
+    // A method changes together with its whole override family: the
+    // declarations that share its name, and the types inheriting it.
+    let override_family = if decl.is_method {
         match override_family::enumerate(
-            BUILTIN, state, family, &name, &seed_path, seed_line, &in_scope, &competing, session,
+            BUILTIN,
+            state,
+            family,
+            &name,
+            (&seed_path, seed_line),
+            decl.contract.is_some(),
+            &in_scope,
+            &competing,
+            session,
         )? {
             Ok(found) => Some(found),
             Err(refusal) => {

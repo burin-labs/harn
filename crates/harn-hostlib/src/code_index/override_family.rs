@@ -23,7 +23,7 @@ use tree_sitter::Node;
 use crate::ast::{api as ast_api, Language};
 use crate::error::HostlibError;
 
-use super::refactor_core::{first_syntax_error, read_source, SeedCandidate};
+use super::refactor_core::{files_in_scope, first_syntax_error, read_source, Scope, SeedCandidate};
 use super::signature_syntax::{named_children, text, Family};
 use super::state::IndexState;
 
@@ -170,15 +170,20 @@ struct Enumerator<'a> {
 
 /// Enumerate the override family of the method `name` declared at
 /// `seed_path:seed_line`. `in_scope` is every file that may mention the
-/// name; `competing` the symbol graph's other declarations of it.
+/// name; `competing` the symbol graph's other declarations of it; `bound`
+/// whether a trait or interface binds the seed.
+///
+/// A lone method (no namesake, not bound) keeps the single-declaration
+/// contract: its own supertypes are not resolved. Types inheriting it are
+/// still enumerated.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn enumerate(
     builtin: &'static str,
     state: &IndexState,
     family: Family,
     name: &str,
-    seed_path: &str,
-    seed_line: u32,
+    (seed_path, seed_line): (&str, u32),
+    bound: bool,
     in_scope: &[String],
     competing: &[SeedCandidate],
     session: Option<&str>,
@@ -277,6 +282,8 @@ pub(super) fn enumerate(
         }
     }
 
+    let lone = !bound && competing.is_empty() && members.values().map(Vec::len).sum::<usize>() == 1;
+
     // Owner of each member; members without one are namesakes outside any family.
     let mut member_owners: Vec<(String, usize, OwnerRef)> = Vec::new();
     for (path, found) in &members {
@@ -284,6 +291,13 @@ pub(super) fn enumerate(
             match &member.owner {
                 Ok(index) => {
                     member_owners.push((path.clone(), member.line, (path.clone(), *index)));
+                }
+                // A lone free-standing or inherent method has no family.
+                Err(_) if lone && blockers.is_empty() => {
+                    return Ok(Ok(OverrideFamily {
+                        members: vec![(path.clone(), member.line as u32)],
+                        owners: Vec::new(),
+                    }));
                 }
                 Err(reason) => block(
                     &mut blockers,
@@ -326,6 +340,8 @@ pub(super) fn enumerate(
         for base in &decl.bases {
             match base {
                 BaseRef::Neutral => {}
+                // A lone method's supertypes stay unchecked, as before families.
+                BaseRef::Opaque(_) | BaseRef::Name(_) if lone => {}
                 BaseRef::Opaque(reason) => {
                     block(
                         &mut blockers,
@@ -383,9 +399,33 @@ pub(super) fn enumerate(
         return Ok(Err(refusal(name, blockers)));
     }
 
-    let mut owners: Vec<String> = member_owners
+    // Types that inherit the method without declaring it belong to the
+    // family too: their other supertypes must resolve, and their names
+    // qualify explicit-receiver calls.
+    let root = root.expect("checked above").2.clone();
+    let mut related: BTreeSet<OwnerRef> = BTreeSet::new();
+    for owner in direct.keys() {
+        let mut seen = BTreeSet::new();
+        let mut walk = vec![owner.clone()];
+        while let Some(current) = walk.pop() {
+            if seen.insert(current.clone()) {
+                walk.extend(direct.get(&current).cloned().unwrap_or_default());
+            }
+        }
+        if seen.contains(&root) {
+            related.insert(owner.clone());
+        }
+    }
+    if family != Family::Rust {
+        enumerator.descendants(&mut related, seed_path, &member_owners, &mut blockers)?;
+        if !blockers.is_empty() {
+            return Ok(Err(refusal(name, blockers)));
+        }
+    }
+
+    let mut owners: Vec<String> = related
         .iter()
-        .filter_map(|(_, _, owner)| enumerator.owner(owner).name.clone())
+        .filter_map(|owner| enumerator.owner(owner).name.clone())
         .collect();
     owners.sort();
     owners.dedup();
@@ -557,6 +597,99 @@ impl Enumerator<'_> {
                 "supertype `{base}` names several declarations in `{target}`"
             )),
         })
+    }
+
+    /// Grow `related` with every workspace type that names a related type
+    /// as a supertype, transitively, blocking any whose other supertypes
+    /// cannot be resolved: an unresolved one may supply the method.
+    fn descendants(
+        &mut self,
+        related: &mut BTreeSet<OwnerRef>,
+        seed_path: &str,
+        member_owners: &[(String, usize, OwnerRef)],
+        blockers: &mut Vec<Blocker>,
+    ) -> Result<(), HostlibError> {
+        let mut searched: BTreeSet<String> = BTreeSet::new();
+        let mut checked: BTreeSet<OwnerRef> = related.clone();
+        loop {
+            let pending: Vec<String> = related
+                .iter()
+                .filter_map(|owner| self.owner(owner).name.clone())
+                .filter(|owner_name| !searched.contains(owner_name))
+                .collect();
+            if pending.is_empty() {
+                return Ok(());
+            }
+            for owner_name in pending {
+                searched.insert(owner_name.clone());
+                let files = files_in_scope(
+                    self.state,
+                    Scope::Workspace,
+                    &owner_name,
+                    seed_path,
+                    self.session,
+                );
+                for path in files {
+                    if Language::detect(Path::new(&path), None).and_then(Family::of)
+                        != Some(self.family)
+                    {
+                        continue;
+                    }
+                    let Some(scan) = self.scan(&path)? else {
+                        continue;
+                    };
+                    let count = scan.owners.len();
+                    for index in 0..count {
+                        let candidate = (path.clone(), index);
+                        if checked.contains(&candidate) {
+                            continue;
+                        }
+                        let decl = self.owner(&candidate).clone();
+                        let names_related = decl
+                            .bases
+                            .iter()
+                            .any(|b| matches!(b, BaseRef::Name(n) if *n == owner_name));
+                        if !names_related {
+                            continue;
+                        }
+                        checked.insert(candidate.clone());
+                        let mut descends = false;
+                        let mut problems = Vec::new();
+                        for base in &decl.bases {
+                            match base {
+                                BaseRef::Neutral => {}
+                                BaseRef::Opaque(reason) => problems.push(reason.clone()),
+                                BaseRef::Name(base_name) => {
+                                    match self.resolve_base(&candidate, base_name, member_owners)? {
+                                        Ok(parent) if related.contains(&parent) => descends = true,
+                                        Ok(_) => {}
+                                        // It may name the related type; it cannot be ruled out.
+                                        Err(reason) if *base_name == owner_name => {
+                                            descends = true;
+                                            problems.push(reason);
+                                        }
+                                        Err(reason) => problems.push(reason),
+                                    }
+                                }
+                            }
+                        }
+                        if !descends {
+                            continue;
+                        }
+                        for reason in problems {
+                            block(
+                                blockers,
+                                &path,
+                                decl.line,
+                                "supertype",
+                                format!("inherits `{}` and {reason}", self.name),
+                            );
+                        }
+                        related.insert(candidate);
+                    }
+                }
+            }
+        }
     }
 
     /// The workspace file an import's module specifier names.
