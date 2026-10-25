@@ -318,7 +318,7 @@ fn a_session_mount_reaches_the_child_profile_by_its_mode() {
     assert!(!shell_succeeds(&policy, &read), "unmounted: not readable");
 
     let root_text = root.display().to_string();
-    crate::stdlib::add_workspace_root(&session, &root_text, Some(MountMode::ReadOnly), None)
+    crate::stdlib::add_workspace_root(&session, &root_text, Some(MountMode::ReadOnly), None, None)
         .unwrap();
     assert!(shell_succeeds(&policy, &read), "read_only mount reads");
     assert!(
@@ -334,7 +334,8 @@ fn a_session_mount_reaches_the_child_profile_by_its_mode() {
         "a different outside path stays unreadable"
     );
 
-    crate::stdlib::add_workspace_root(&session, &root_text, Some(MountMode::Extend), None).unwrap();
+    crate::stdlib::add_workspace_root(&session, &root_text, Some(MountMode::Extend), None, None)
+        .unwrap();
     assert!(shell_succeeds(&policy, &write), "extend mount writes");
     assert!(root.join("f").exists());
     assert!(
@@ -387,14 +388,15 @@ fn a_read_only_mount_nested_in_the_workspace_matches_its_backend() {
         "control: writable before the mount"
     );
     std::fs::remove_file(nested.join("f")).unwrap();
-    push_execution_policy(policy.clone());
+    // No current execution policy and no current session: an idle session's
+    // host supplies the policy its children will run under.
     let mounted = crate::stdlib::add_workspace_root(
         &session,
         &nested.to_string_lossy(),
         Some(MountMode::ReadOnly),
         None,
+        Some(&policy),
     );
-    pop_execution_policy();
     assert!(
         shell_succeeds(&policy, &beside),
         "the rest of the workspace stays writable"

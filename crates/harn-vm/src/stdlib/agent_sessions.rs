@@ -347,57 +347,6 @@ fn agent_session_set_workspace_policy_builtin(
     Ok(VmValue::Bool(changed))
 }
 
-/// Mount a root on a session, refusing a `read_only` mount the active sandbox
-/// could not hold. Every host entry point mounts through this, not through
-/// [`agent_sessions::add_workspace_root`].
-pub fn add_workspace_root(
-    id: &str,
-    root: &str,
-    mount_mode: Option<crate::workspace_anchor::MountMode>,
-    reason: Option<String>,
-) -> Result<String, String> {
-    agent_sessions::add_workspace_root_verified(id, root, mount_mode, reason, |mounted| {
-        refuse_unenforceable_read_only(id, mounted)
-    })
-}
-
-/// Refuse a `read_only` mount when the active
-/// policy's confined child would still be able to write it.
-///
-/// Landlock rules only add access, so a child keeps its parent root's write
-/// grant over the nested mount; the macOS profile re-denies it. A mount the
-/// kernel would not hold must not be reported as read-only. Only a measured
-/// `Writable` refuses: an unconfined or unmeasured child is left to the
-/// approval boundary, as for any other read-only root.
-fn refuse_unenforceable_read_only(id: &str, root: &std::path::Path) -> Result<(), String> {
-    use crate::workspace_anchor::MountMode;
-    let Some(anchor) = agent_sessions::workspace_anchor(id) else {
-        return Ok(());
-    };
-    // The probe reads the current session's mounts, so any other session's
-    // mount is unmeasured here and left to the approval boundary.
-    let mounted_read_only = anchor
-        .additional_roots
-        .iter()
-        .any(|entry| entry.path == root && matches!(entry.mount_mode, MountMode::ReadOnly));
-    if !mounted_read_only || agent_sessions::current_session_id().as_deref() != Some(id) {
-        return Ok(());
-    }
-    let Some(policy) = crate::orchestration::current_execution_policy() else {
-        return Ok(());
-    };
-    if super::sandbox::child_write::child_write_disposition(&policy, root)
-        == super::sandbox::child_write::ChildWriteDisposition::Writable
-    {
-        return Err(format!(
-            "cannot mount '{}' read_only: this platform's sandbox cannot subtract write \
-             access from a path inside a writable root, so a command could still write it",
-            root.display()
-        ));
-    }
-    Ok(())
-}
-
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
@@ -422,10 +371,12 @@ fn agent_session_add_root_builtin(args: &[VmValue], _out: &mut String) -> Result
         .transpose()
         .map_err(|message| err(format!("agent_session_add_root: {message}")))?;
     let reason = opt_string(&opts, "agent_session_add_root", "reason")?;
-    Ok(match add_workspace_root(&id, &root, mount_mode, reason) {
-        Ok(mounted_at) => ok_result(&[("mounted_at", serde_json::Value::String(mounted_at))]),
-        Err(message) => seed_result_error(message),
-    })
+    Ok(
+        match crate::stdlib::add_workspace_root(&id, &root, mount_mode, reason, None) {
+            Ok(mounted_at) => ok_result(&[("mounted_at", serde_json::Value::String(mounted_at))]),
+            Err(message) => seed_result_error(message),
+        },
+    )
 }
 
 #[harn_builtin(

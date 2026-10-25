@@ -415,7 +415,9 @@ pub fn add_workspace_root(
 
 /// [`add_workspace_root`] that asks `verify` about the mount once it exists
 /// and undoes it when `verify` refuses. The sandbox backend can only measure a
-/// mount that is part of the profile it renders, so the check runs after it.
+/// mount that is part of the profile it renders, so the check runs after the
+/// anchor holds the mount. The `RootMounted` event is recorded only once
+/// `verify` accepts, so a refused mount leaves no history and no grant reset.
 pub fn add_workspace_root_verified(
     id: &str,
     root: &str,
@@ -423,35 +425,29 @@ pub fn add_workspace_root_verified(
     reason: Option<String>,
     verify: impl FnOnce(&std::path::Path) -> Result<(), String>,
 ) -> Result<String, String> {
-    let normalized_root = validate_workspace_root_path(root)?;
-    let prior = workspace_anchor(id).and_then(|anchor| {
-        anchor
-            .additional_roots
-            .iter()
-            .find(|entry| entry.path == normalized_root)
-            .map(|entry| entry.mount_mode)
-    });
-    let mounted_at = mount_workspace_root(id, root, mount_mode, reason)?;
-    if let Err(error) = verify(&normalized_root) {
-        match prior {
-            Some(mode) => {
-                mount_workspace_root(id, root, Some(mode), None)?;
-            }
-            None => {
-                remove_workspace_root(id, root)?;
-            }
-        }
+    let applied = apply_workspace_mount(id, root, mount_mode)?;
+    if let Err(error) = verify(&applied.root) {
+        rollback_workspace_mount(id, applied);
         return Err(error);
     }
-    Ok(mounted_at)
+    record_workspace_mount(id, &applied, reason)?;
+    Ok(applied.mounted_at)
 }
 
-fn mount_workspace_root(
+/// A mount as the anchor now holds it, with what it replaced.
+struct AppliedMount {
+    root: PathBuf,
+    mode: MountMode,
+    mounted_at: String,
+    prior: Option<MountedRoot>,
+    prior_redo_stack: Vec<super::SessionRedoEntry>,
+}
+
+fn apply_workspace_mount(
     id: &str,
     root: &str,
     mount_mode: Option<MountMode>,
-    reason: Option<String>,
-) -> Result<String, String> {
+) -> Result<AppliedMount, String> {
     let normalized_root = validate_workspace_root_path(root)?;
     let mounted_at = crate::orchestration::now_unix_seconds_text();
     SESSIONS.with(|s| {
@@ -460,15 +456,18 @@ fn mount_workspace_root(
             return Err(format!("agent session '{id}' does not exist"));
         };
         let default_mount_mode = state.workspace_policy.default_mount_mode;
+        let prior_redo_stack = state.redo_stack.clone();
         let Some(anchor) = state.workspace_anchor.as_mut() else {
             return Err(format!("agent session '{id}' has no workspace anchor"));
         };
         let resolved_mount_mode = mount_mode.unwrap_or(default_mount_mode);
+        let mut prior = None;
         if let Some(existing) = anchor
             .additional_roots
             .iter_mut()
             .find(|entry| entry.path == normalized_root)
         {
+            prior = Some(existing.clone());
             let changed =
                 existing.mount_mode != resolved_mount_mode || existing.mounted_at != mounted_at;
             existing.mount_mode = resolved_mount_mode;
@@ -484,22 +483,70 @@ fn mount_workspace_root(
             });
             state.redo_stack.clear();
         }
+        Ok(AppliedMount {
+            root: normalized_root,
+            mode: resolved_mount_mode,
+            mounted_at,
+            prior,
+            prior_redo_stack,
+        })
+    })
+}
+
+/// Put the anchor and redo stack back as they were before the mount, without
+/// recording anything.
+fn rollback_workspace_mount(id: &str, applied: AppliedMount) {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return;
+        };
+        if let Some(anchor) = state.workspace_anchor.as_mut() {
+            match applied.prior {
+                Some(prior) => {
+                    if let Some(entry) = anchor
+                        .additional_roots
+                        .iter_mut()
+                        .find(|entry| entry.path == applied.root)
+                    {
+                        *entry = prior;
+                    }
+                }
+                None => anchor
+                    .additional_roots
+                    .retain(|entry| entry.path != applied.root),
+            }
+        }
+        state.redo_stack = applied.prior_redo_stack;
+    });
+}
+
+fn record_workspace_mount(
+    id: &str,
+    applied: &AppliedMount,
+    reason: Option<String>,
+) -> Result<(), String> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
         let event = crate::llm::helpers::transcript_event(
             "RootMounted",
             "system",
             "internal",
             "",
             Some(serde_json::json!({
-                "path": normalized_root.to_string_lossy(),
-                "mount_mode": resolved_mount_mode.as_str(),
-                "mounted_at": mounted_at.clone(),
+                "path": applied.root.to_string_lossy(),
+                "mount_mode": applied.mode.as_str(),
+                "mounted_at": applied.mounted_at.clone(),
                 "reason": reason,
             })),
         );
         append_event_to_state(state, event, "add_workspace_root")?;
         crate::llm::permissions::clear_session_grants(id);
         state.touch();
-        Ok(mounted_at.clone())
+        Ok(())
     })
 }
 
