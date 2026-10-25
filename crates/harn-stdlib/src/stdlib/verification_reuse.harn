@@ -23,7 +23,7 @@ pub fn __verification_reuse_inputs(reuse: VerificationReuse?) -> VerificationInp
   const parsed = schema_parse(value, schema_of(VerificationInputState))
   match parsed {
     Ok(state) -> {
-      if trim(state.workspace) == "" || trim(state.source) == ""
+      if state.revision < 0 || trim(state.workspace) == "" || trim(state.source) == ""
         || trim(state.dependencies) == ""
         || trim(state.environment) == "" {
         return nil

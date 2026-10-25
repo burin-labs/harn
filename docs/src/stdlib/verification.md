@@ -155,9 +155,14 @@ accepts a `VerificationReuse` record:
   concurrent checks.
 - `inputs`: a callback returning `VerificationInputState` or `nil` when any
   input cannot be identified. The record contains nonempty `workspace`,
-  `source`, `dependencies`, and `environment` identities. Fingerprint the
+  `source`, `dependencies`, and `environment` identities plus a nonnegative
+  monotonic `revision`. The revision must advance for every relevant input
+  change, including a change followed by an undo. Read the identities and
+  revision as one coherent snapshot. Return `nil` when the input owner cannot
+  guarantee that revision contract. Fingerprint the
   actual dependency installation, toolchain and effective environment, not
-  just a lockfile or agent edit counter. Supply digests instead of secrets.
+  just a lockfile or agent edit counter. Equal endpoint hashes alone cannot
+  detect a change and restore during execution. Supply digests instead of secrets.
 - `accept`: the check's verdict callback over `CommandResult`, for example
   rejecting an exit-zero test run that collected no tests.
 
