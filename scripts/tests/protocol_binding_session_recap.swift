@@ -35,8 +35,8 @@ private func optionalField<T: Codable>(_ type: T.Type, _ base: [String: Any], _ 
 @main
 private struct RecapBindingProbe {
     static func main() throws {
-        guard CommandLine.arguments.count == 3 else {
-            fatalError("usage: protocol-binding-session-recap FIXTURE SESSION_UPDATES")
+        guard CommandLine.arguments.count == 4 else {
+            fatalError("usage: protocol-binding-session-recap FIXTURE SESSION_UPDATES SESSION_UPDATE_SCHEMA")
         }
         let fixture = try JSONSerialization.jsonObject(
             with: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
@@ -79,13 +79,27 @@ private struct RecapBindingProbe {
                 throw RecapBindingProbeError.acceptedMissingSessionUpdateIdentity
             } catch {}
         }
-        // These kinds are emitted outside AgentEvent, so the adapter fixture omits them.
-        let nonEventKinds: Set<String> = [
-            "available_commands_update", "live_session_client", "log", "state_update",
-        ]
-        let stateUpdate: [String: Any] = ["sessionUpdate": "state_update", "state": "idle", "stopReason": "end_turn"]
-        try roundTrip(HarnACPTypedSessionUpdate.self, stateUpdate, stateUpdate)
-        guard updateKinds.union(nonEventKinds) == Set(HarnProtocolConstants.acpSessionUpdateExtensions),
+        // Kinds the adapter emits outside AgentEvent are absent from the event
+        // fixture, so the schema carries an example payload for each. A kind
+        // with neither source fails the coverage check below.
+        let schema = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[3]))
+        ) as! [String: Any]
+        let definitions = schema["$defs"] as! [String: Any]
+        let variants = (definitions["HarnExtensionUpdate"] as! [String: Any])["oneOf"] as! [[String: Any]]
+        var examples: [[String: Any]] = []
+        var schemaKinds = Set<String>()
+        for variant in variants {
+            let key = String((variant["$ref"] as! String).dropFirst("#/$defs/".count))
+            let definition = definitions[key] as! [String: Any]
+            let properties = definition["properties"] as! [String: Any]
+            schemaKinds.insert((properties["sessionUpdate"] as! [String: Any])["const"] as! String)
+            examples += (definition["examples"] as? [[String: Any]]) ?? []
+        }
+        for example in examples { try roundTrip(HarnACPTypedSessionUpdate.self, example, example) }
+        let nonEventKinds = Set(examples.map { $0["sessionUpdate"] as! String })
+        guard schemaKinds == Set(HarnProtocolConstants.acpSessionUpdateExtensions),
+              updateKinds.union(nonEventKinds) == schemaKinds,
               updateKinds.isDisjoint(with: nonEventKinds) else {
             throw RecapBindingProbeError.incompleteSessionUpdateFixture
         }

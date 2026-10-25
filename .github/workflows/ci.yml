@@ -278,6 +278,7 @@ jobs:
             swift_protocol_binding:
               - '.github/workflows/ci.yml'
               - 'Makefile'
+              - 'conformance/protocols/schemas/acp-session-update.schema.json'
               - 'crates/harn-serve/tests/fixtures/acp/**'
               - 'scripts/tests/protocol_binding_session_recap.swift'
               - 'scripts/tests/run_session_view_binding.swift'

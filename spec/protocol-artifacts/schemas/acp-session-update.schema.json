@@ -935,6 +935,7 @@
     },
     "AvailableCommands": {
       "type": "object", "required": ["sessionUpdate", "availableCommands"], "additionalProperties": true,
+      "examples": [{ "sessionUpdate": "available_commands_update", "availableCommands": [] }],
       "properties": {
         "sessionUpdate": { "const": "available_commands_update" },
         "availableCommands": { "type": "array", "items": {} }
@@ -1001,6 +1002,7 @@
     },
     "LiveSessionClient": {
       "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
+      "examples": [{ "sessionUpdate": "live_session_client", "_meta": { "harn": { "action": "attached", "state": null } } }],
       "properties": {
         "sessionUpdate": { "const": "live_session_client" },
         "_meta": {
@@ -1016,6 +1018,7 @@
     },
     "Log": {
       "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
+      "examples": [{ "sessionUpdate": "log", "_meta": { "harn": { "level": "info", "message": "fixture log" } } }],
       "properties": {
         "sessionUpdate": { "const": "log" },
         "_meta": {
@@ -1031,6 +1034,7 @@
     },
     "State": {
       "type": "object", "required": ["sessionUpdate", "state"], "additionalProperties": false,
+      "examples": [{ "sessionUpdate": "state_update", "state": "idle", "stopReason": "end_turn" }],
       "properties": {
         "sessionUpdate": { "const": "state_update" },
         "state": { "type": "string", "enum": ["running", "idle"] },

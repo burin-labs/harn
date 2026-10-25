@@ -11,20 +11,98 @@ fn adapter_notifications() -> Vec<serde_json::Value> {
         .expect("adapter notifications")
 }
 
+/// The payload each adapter-emitted kind carries in the owning schema. These
+/// kinds do not come from AgentEvent, so the event-emission fixture omits them.
+fn schema_examples() -> Vec<serde_json::Value> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(SOURCE);
+    let schema: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("schema")).expect("schema JSON");
+    schema["$defs"]["HarnExtensionUpdate"]["oneOf"]
+        .as_array()
+        .expect("typed payloads")
+        .iter()
+        .flat_map(|variant| {
+            let key = variant["$ref"]
+                .as_str()
+                .expect("ref")
+                .trim_start_matches("#/$defs/");
+            schema["$defs"][key]["examples"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+fn schema_kinds() -> BTreeSet<String> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(SOURCE);
+    let schema: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("schema")).expect("schema JSON");
+    schema["$defs"]["HarnExtensionUpdate"]["oneOf"]
+        .as_array()
+        .expect("typed payloads")
+        .iter()
+        .map(|variant| {
+            let key = variant["$ref"]
+                .as_str()
+                .expect("ref")
+                .trim_start_matches("#/$defs/");
+            schema["$defs"][key]["properties"]["sessionUpdate"]["const"]
+                .as_str()
+                .expect("kind")
+                .to_string()
+        })
+        .collect()
+}
+
 fn typed_notifications() -> Vec<serde_json::Value> {
     let mut notifications = adapter_notifications();
-    // These updates come from session::refresh_advertised_commands,
-    // bridge::send_log, live_clients::write_live_client_operation and
-    // delivery::send_state_update rather than AgentEvent, so they are absent from the event-emission fixture.
-    for update in [
-        serde_json::json!({"sessionUpdate": "available_commands_update", "availableCommands": []}),
-        serde_json::json!({"sessionUpdate": "log", "_meta": {"harn": {"level": "info", "message": "fixture log"}}}),
-        serde_json::json!({"sessionUpdate": "live_session_client", "_meta": {"harn": {"action": "attached", "state": null}}}),
-        serde_json::json!({"sessionUpdate": "state_update", "state": "idle", "stopReason": "end_turn"}),
-    ] {
+    for update in schema_examples() {
         notifications.push(serde_json::json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fixture-session", "update": update}}));
     }
     notifications
+}
+
+/// Every kind has exactly one source: an emitted event in the adapter fixture,
+/// or an example in the schema. A kind added to the schema alone has neither.
+#[test]
+fn every_kind_is_an_event_fixture_or_a_schema_example_never_both() {
+    let from_events: BTreeSet<String> = adapter_notifications()
+        .iter()
+        .map(|n| {
+            n["params"]["update"]["sessionUpdate"]
+                .as_str()
+                .expect("kind")
+                .to_string()
+        })
+        .collect();
+    let from_schema: BTreeSet<String> = schema_examples()
+        .iter()
+        .map(|update| update["sessionUpdate"].as_str().expect("kind").to_string())
+        .collect();
+    assert!(
+        from_events.is_disjoint(&from_schema),
+        "a kind with a schema example must not also be emitted by an event: {:?}",
+        from_events.intersection(&from_schema).collect::<Vec<_>>()
+    );
+    let advertised: BTreeSet<String> = harn_serve::adapters::acp::HARN_SESSION_UPDATE_EXTENSIONS
+        .iter()
+        .map(|kind| (*kind).to_string())
+        .collect();
+    let covered: BTreeSet<String> = from_events.union(&from_schema).cloned().collect();
+    assert_eq!(
+        schema_kinds(),
+        advertised,
+        "the schema and the advertised kinds must name the same set"
+    );
+    assert_eq!(
+        covered, advertised,
+        "a kind has neither an event fixture nor a schema example"
+    );
 }
 
 #[test]
