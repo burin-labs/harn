@@ -821,3 +821,31 @@ fn rust_import_list_in_a_nested_module_refuses() {
     let sites = list(field(&result, "sites"));
     assert_eq!(int(field(&sites[0], "line")), 13, "{sites:?}");
 }
+
+#[test]
+fn rust_descendant_module_reading_a_hidden_field_refuses() {
+    let fixture = Fixture::new(&[
+        ("Cargo.toml", "[package]\nname = \"kit\"\nversion = \"0.1.0\"\n"),
+        (
+            "src/lib.rs",
+            "pub mod other;\npub mod reader;\n\npub struct Meta {\n    pub(super) level: u8,\n    pub(crate) target: u8,\n}\n",
+        ),
+        (
+            "src/reader.rs",
+            "pub fn level(meta: &crate::Meta) -> u8 {\n    meta.target + meta.level\n}\n",
+        ),
+        ("src/other.rs", "pub fn other() {}\n"),
+    ]);
+    let result = fixture.refused(
+        "visibility_required",
+        &[
+            ("symbol", vm_string("Meta")),
+            ("path", vm_string("src/lib.rs")),
+            ("to_path", vm_string("src/other.rs")),
+        ],
+    );
+    // `pub(crate)` stays readable; `pub(super)` from the new module does not.
+    let sites = list(field(&result, "sites"));
+    assert_eq!(sites.len(), 1, "{sites:?}");
+    assert_eq!(s(field(&sites[0], "path")), "src/reader.rs");
+}

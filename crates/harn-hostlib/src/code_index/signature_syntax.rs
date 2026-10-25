@@ -346,15 +346,8 @@ fn fixed_signature(node: Node<'_>, bytes: &[u8], family: Family) -> Option<Strin
             while let Some(current) = sibling {
                 match current.kind() {
                     "attribute_item" => {
-                        let path = named_children(current)
-                            .into_iter()
-                            .find(|c| c.kind() == "attribute")
-                            .and_then(|a| named_children(a).into_iter().next())
-                            .map(|p| text(p, bytes).to_string())
-                            .unwrap_or_default();
-                        let last = path.rsplit("::").next().unwrap_or("");
-                        if SIGNATURE_FIXING_ATTRIBUTES.contains(&last) {
-                            return Some(format!("carries `#[{path}]`"));
+                        if let Some(attribute) = signature_fixing_attribute(current, bytes) {
+                            return Some(format!("carries `{attribute}`"));
                         }
                     }
                     "line_comment" | "block_comment" => {}
@@ -378,6 +371,31 @@ fn fixed_signature(node: Node<'_>, bytes: &[u8], family: Family) -> Option<Strin
         }
         Family::Python => None,
     }
+}
+
+/// The attribute's text when any identifier in it names a signature-fixing
+/// attribute. Reading every identifier covers wrapped forms such as
+/// `#[unsafe(no_mangle)]` and `#[cfg_attr(test, test)]`; `cfg` and `doc` only
+/// mention names, and string literals are never descended into.
+fn signature_fixing_attribute(item: Node<'_>, bytes: &[u8]) -> Option<String> {
+    let attribute = named_children(item)
+        .into_iter()
+        .find(|c| c.kind() == "attribute")?;
+    let head = named_children(attribute).into_iter().next()?;
+    if matches!(text(head, bytes), "cfg" | "doc") {
+        return None;
+    }
+    let mut stack = vec![attribute];
+    while let Some(node) = stack.pop() {
+        if node.kind().contains("string") {
+            continue;
+        }
+        if node.kind() == "identifier" && SIGNATURE_FIXING_ATTRIBUTES.contains(&text(node, bytes)) {
+            return Some(text(item, bytes).to_string());
+        }
+        stack.extend(named_children(node));
+    }
+    None
 }
 
 fn enclosing<'t>(node: Node<'t>, kinds: &[&str]) -> Option<Node<'t>> {

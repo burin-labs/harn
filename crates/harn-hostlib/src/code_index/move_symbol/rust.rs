@@ -587,62 +587,66 @@ pub(crate) fn module_declaration_edit(source: &str, tree: &Tree, line: &str) -> 
     }
 }
 
-/// Uses outside `moved` of the moved struct's private fields, which the
-/// destination module would hide from the source. Matching is by field name,
-/// so a same-named field of another type also refuses.
-pub(crate) fn private_fields_read_outside(
-    rel: &str,
-    source: &str,
-    tree: &Tree,
-    item: Node<'_>,
-    moved: &Range<usize>,
-) -> Vec<Site> {
+/// Fields of the moved struct that code outside the destination module could
+/// no longer read: every field not visible crate-wide (`pub` or `pub(crate)`).
+/// Tuple fields are named by index.
+pub(crate) fn hidden_field_names(item: Node<'_>, source: &str) -> HashSet<String> {
+    let mut hidden = HashSet::new();
     let Some(body) = (item.kind() == "struct_item")
         .then(|| item.child_by_field_name("body"))
         .flatten()
     else {
-        return Vec::new();
+        return hidden;
     };
-    let mut private: HashSet<String> = HashSet::new();
+    let crate_wide = |modifier: Option<&str>| {
+        modifier.is_some_and(|v| matches!(v.replace(' ', "").as_str(), "pub" | "pub(crate)"))
+    };
     match body.kind() {
         "field_declaration_list" => {
             for field in text::members(body) {
-                if field.kind() == "field_declaration" && !is_public(field, source) {
+                if field.kind() == "field_declaration" && !crate_wide(visibility(field, source)) {
                     if let Some(name) = field.child_by_field_name("name") {
-                        private.insert(text::text(name, source).to_string());
+                        hidden.insert(text::text(name, source).to_string());
                     }
                 }
             }
         }
         "ordered_field_declaration_list" => {
             let mut index = 0;
-            let mut public = false;
+            let mut modifier = None;
             let mut cursor = body.walk();
             for child in body.named_children(&mut cursor) {
                 match child.kind() {
-                    "visibility_modifier" => {
-                        public = text::text(child, source).replace(' ', "") != "pub(self)";
-                    }
+                    "visibility_modifier" => modifier = Some(text::text(child, source)),
                     "attribute_item" => {}
                     kind if kind.contains("comment") => {}
                     _ => {
-                        if !public {
-                            private.insert(index.to_string());
+                        if !crate_wide(modifier) {
+                            hidden.insert(index.to_string());
                         }
                         index += 1;
-                        public = false;
+                        modifier = None;
                     }
                 }
             }
         }
         _ => {}
     }
-    if private.is_empty() {
-        return Vec::new();
-    }
+    hidden
+}
+
+/// Reads of `fields` in `source` outside `skip`. Matching is by field name,
+/// so a same-named field of another type also counts.
+pub(crate) fn field_reads(
+    rel: &str,
+    source: &str,
+    tree: &Tree,
+    fields: &HashSet<String>,
+    skip: Option<&Range<usize>>,
+) -> Vec<Site> {
     let mut sites = Vec::new();
     text::walk(tree.root_node(), |node| {
-        if text::covers(moved, &node.byte_range()) {
+        if skip.is_some_and(|skip| text::covers(skip, &node.byte_range())) {
             return false;
         }
         let method_call = node.parent().is_some_and(|parent| {
@@ -658,13 +662,13 @@ pub(crate) fn private_fields_read_outside(
         };
         if let Some(field) = field {
             let name = text::text(field, source);
-            if private.contains(name) {
+            if fields.contains(name) {
                 sites.push(Site::at(
                     rel,
                     source,
                     field.start_byte(),
                     "reference",
-                    format!("reads the private field `{name}`, which the destination would hide"),
+                    format!("reads the field `{name}`, which the destination would hide"),
                 ));
             }
         }

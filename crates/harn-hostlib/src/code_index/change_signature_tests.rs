@@ -888,6 +888,12 @@ fn test_entry_and_typed_arrow_signatures_refuse_as_fixed() {
              // runs on the async runtime\n\
              #[tokio::test]\n\
              async fn kv_async() {}\n\
+             #[cfg_attr(test, test)]\n\
+             fn kv_gated() {}\n\
+             #[unsafe(no_mangle)]\n\
+             pub extern \"C\" fn exported() {}\n\
+             #[cfg(test)]\n\
+             #[doc = \"a test helper\"]\n\
              fn helper() {}\n",
         ),
         ("src/main.rs", "fn main() {\n    run();\n}\nfn run() {}\n"),
@@ -903,6 +909,8 @@ fn test_entry_and_typed_arrow_signatures_refuse_as_fixed() {
     for (name, path, reason) in [
         ("kv_error", "tests/macros.rs", "#[test]"),
         ("kv_async", "tests/macros.rs", "#[tokio::test]"),
+        ("kv_gated", "tests/macros.rs", "#[cfg_attr(test, test)]"),
+        ("exported", "tests/macros.rs", "#[unsafe(no_mangle)]"),
         ("main", "src/main.rs", "entry point"),
     ] {
         let result = ws.refuse("fixed_signature", name, path, extra);

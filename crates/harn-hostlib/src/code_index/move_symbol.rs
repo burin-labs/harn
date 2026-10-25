@@ -64,7 +64,7 @@ mod rust;
 mod script;
 mod text;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::Range;
 use std::path::Path;
 
@@ -78,8 +78,9 @@ use crate::tools::args::{dict_arg, optional_bool, optional_string};
 
 use super::builtins::SharedIndex;
 use super::refactor_core::{
-    contained_path, first_syntax_error, parse_kind, plan_file, read_source, reference_sites,
-    resolve_seed, resolves_inside, write_plans, ReferenceKind, ReferenceSite, SeedLookup,
+    contained_path, files_in_scope, first_syntax_error, parse_kind, plan_file, read_source,
+    reference_sites, resolve_seed, resolves_inside, write_plans, ReferenceKind, ReferenceSite,
+    Scope, SeedLookup,
 };
 use super::state::IndexState;
 use super::symbol_graph::NodeKind;
@@ -650,18 +651,53 @@ fn plan(
             blocked,
         ));
     }
-    if family == Family::Rust {
-        let readers = rust::private_fields_read_outside(
-            source_path,
-            &src.source,
-            &src.tree,
-            item_node,
-            &moved,
-        );
+    // Fields a module outside the destination can no longer read: the
+    // source and its descendant modules, which share the source's privacy.
+    if let Lang::Rust(ws) = &mut lang {
+        let hidden = rust::hidden_field_names(item_node, &src.source);
+        let mut readers =
+            rust::field_reads(source_path, &src.source, &src.tree, &hidden, Some(&moved));
+        let mut candidates: BTreeSet<String> = BTreeSet::new();
+        for field in &hidden {
+            candidates.extend(files_in_scope(
+                state,
+                Scope::Workspace,
+                field,
+                source_path,
+                session,
+            ));
+        }
+        for path in candidates
+            .iter()
+            .filter(|path| path.as_str() != source_path && path.as_str() != dest_path)
+        {
+            if Language::detect(Path::new(path), None) != Some(Language::Rust) {
+                continue;
+            }
+            let descendant = match (ws.module_of(path), &source_module) {
+                (
+                    Some(ModuleRef::Rust {
+                        crate_dir,
+                        path: module,
+                    }),
+                    ModuleRef::Rust {
+                        crate_dir: source_crate,
+                        path: source_path_segments,
+                    },
+                ) => &crate_dir == source_crate && module.starts_with(source_path_segments),
+                _ => false,
+            };
+            if !descendant {
+                continue;
+            }
+            let text = read_source(BUILTIN, &state.root, path, session)?;
+            let tree = parse(&text, Language::Rust)?;
+            readers.extend(rust::field_reads(path, &text, &tree, &hidden, None));
+        }
         if !readers.is_empty() {
             return Ok(refuse_with_sites(
                 "visibility_required",
-                format!("the source reads private fields of `{name}`; make them public first"),
+                format!("code outside the destination reads fields of `{name}` it would no longer see; make them `pub(crate)` first"),
                 readers,
             ));
         }
