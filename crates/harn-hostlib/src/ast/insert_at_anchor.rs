@@ -632,7 +632,7 @@ fn with_candidates(response: VmValue, candidates: Candidates) -> VmValue {
         return response;
     };
     let mut fields = (*map).clone();
-    if false && !candidates.summary.is_empty() {
+    if !candidates.summary.is_empty() {
         // Callers that forward only `details` still see where a retry can aim.
         let details = match fields.get("details") {
             Some(VmValue::String(details)) => details.to_string(),
