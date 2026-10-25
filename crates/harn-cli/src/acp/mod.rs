@@ -24,12 +24,16 @@ fn code_index_warm_disabled(value: Option<&str>) -> bool {
 ///
 /// A root's handles stay while a session over it is open or its index has
 /// work in flight, so a second workspace opening never strands the first
-/// one's warm. Once neither holds, the next session event releases them.
+/// one's warm. They are released at the last close, or when index work
+/// still running at that close ends.
 #[cfg(feature = "hostlib")]
 #[derive(Default)]
 struct WorkspaceHostlib {
-    by_root: std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, WorkspaceEntry>>,
+    by_root: Arc<std::sync::Mutex<WorkspaceMap>>,
 }
+
+#[cfg(feature = "hostlib")]
+type WorkspaceMap = std::collections::HashMap<std::path::PathBuf, WorkspaceEntry>;
 
 #[cfg(feature = "hostlib")]
 struct WorkspaceEntry {
@@ -39,19 +43,19 @@ struct WorkspaceEntry {
 
 #[cfg(feature = "hostlib")]
 impl WorkspaceHostlib {
-    fn lock(
-        &self,
-    ) -> std::sync::MutexGuard<'_, std::collections::HashMap<std::path::PathBuf, WorkspaceEntry>>
-    {
-        self.by_root
+    fn lock(&self) -> std::sync::MutexGuard<'_, WorkspaceMap> {
+        Self::lock_map(&self.by_root)
+    }
+
+    fn lock_map(
+        by_root: &std::sync::Mutex<WorkspaceMap>,
+    ) -> std::sync::MutexGuard<'_, WorkspaceMap> {
+        by_root
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn entry<'a>(
-        by_root: &'a mut std::collections::HashMap<std::path::PathBuf, WorkspaceEntry>,
-        project_root: &Path,
-    ) -> &'a mut WorkspaceEntry {
+    fn entry<'a>(by_root: &'a mut WorkspaceMap, project_root: &Path) -> &'a mut WorkspaceEntry {
         by_root
             .entry(project_root.to_path_buf())
             .or_insert_with(|| WorkspaceEntry {
@@ -61,7 +65,7 @@ impl WorkspaceHostlib {
     }
 
     /// Drop every root no open session needs and no index work holds.
-    fn release_unused(by_root: &mut std::collections::HashMap<std::path::PathBuf, WorkspaceEntry>) {
+    fn release_unused(by_root: &mut WorkspaceMap) {
         by_root.retain(|_, entry| entry.open_sessions > 0 || !entry.handles.code_index.is_idle());
     }
 
@@ -85,6 +89,29 @@ impl WorkspaceHostlib {
             entry.open_sessions = entry.open_sessions.saturating_sub(1);
         }
         Self::release_unused(&mut by_root);
+        // No later session event is guaranteed, so a root no session needs
+        // but whose index work is still running is released when it ends.
+        let Some(entry) = by_root
+            .get(project_root)
+            .filter(|entry| entry.open_sessions == 0)
+        else {
+            return;
+        };
+        let code_index = entry.handles.code_index.clone();
+        let map = Arc::clone(&self.by_root);
+        let spawned = std::thread::Builder::new()
+            .name("harn-acp-index-release".to_string())
+            .spawn(move || {
+                code_index.wait_until_idle();
+                Self::release_unused(&mut Self::lock_map(&map));
+            });
+        if let Err(error) = spawned {
+            tracing::warn!(
+                target: "harn_cli::acp",
+                %error,
+                "could not schedule the code-index release; it waits for the next session event",
+            );
+        }
     }
 }
 
@@ -395,6 +422,43 @@ pub fn on_tick(_event) -> nil {
             "the last close must release the warmed index"
         );
         assert!(after_close.lock().unwrap().is_none());
+    }
+
+    /// A warm still running when the last session closes is released when it
+    /// ends, even though no later session event arrives.
+    #[test]
+    fn a_warm_running_at_the_last_close_is_released_when_it_ends() {
+        let workspace = tempfile::tempdir().unwrap();
+        for file in 0..400 {
+            std::fs::write(
+                workspace.path().join(format!("m{file}.rs")),
+                "pub fn f() -> u32 { 1 }\n",
+            )
+            .unwrap();
+        }
+        let root = workspace.path().canonicalize().unwrap();
+        let configurator = CliAcpRuntimeConfigurator::new(true);
+        configurator.warm_session_workspace(&root);
+        // Holding the index lock keeps the warm from publishing, so the
+        // close below deterministically meets in-flight work.
+        let shared = configurator.hostlib.handles_for(&root).code_index.shared();
+        let publish_gate = shared.lock().unwrap();
+        assert!(publish_gate.is_none(), "the warm finished before the gate");
+        configurator.release_session_workspace(&root);
+        let retained = |configurator: &CliAcpRuntimeConfigurator| {
+            configurator.hostlib.lock().contains_key(&root)
+        };
+        assert!(retained(&configurator), "in-flight work keeps the root");
+
+        drop(publish_gate);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while retained(&configurator) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            !retained(&configurator),
+            "the root must be released once its warm ends"
+        );
     }
 
     /// A second workspace opening must not strand the first one's warm: the
