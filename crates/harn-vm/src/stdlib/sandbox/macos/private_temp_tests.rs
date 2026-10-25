@@ -56,3 +56,41 @@ fn workspace_temp_symlinks_cannot_select_host_storage() {
     );
     assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
 }
+
+#[test]
+fn reaping_removes_only_dangling_alias_symlinks() {
+    let base = tempfile::tempdir().unwrap();
+    let live_target = tempfile::tempdir().unwrap();
+    let gone_target = tempfile::tempdir().unwrap();
+    let live = prepare_in(base.path(), live_target.path()).unwrap();
+    let gone = prepare_in(base.path(), gone_target.path()).unwrap();
+    let gone_path = gone_target.path().to_path_buf();
+    drop(gone_target);
+    assert!(!gone_path.exists());
+
+    // Dangling symlinks that do not match the alias pattern, a matching
+    // directory, and a matching regular file must all survive.
+    let dangling_other = base.path().join("harn-parent");
+    std::os::unix::fs::symlink(&gone_path, &dangling_other).unwrap();
+    let wrong_case = base.path().join("harn-ABCDEF0123456789");
+    std::os::unix::fs::symlink(&gone_path, &wrong_case).unwrap();
+    let directory = base.path().join("harn-0123456789abcdef");
+    std::fs::create_dir(&directory).unwrap();
+    let file = base.path().join("harn-fedcba9876543210");
+    std::fs::write(&file, "host-owned").unwrap();
+
+    reap_dangling_aliases(base.path());
+
+    assert!(
+        !base.path().join(&gone).is_symlink(),
+        "dangling alias remains"
+    );
+    assert_eq!(
+        std::fs::read_link(base.path().join(&live)).unwrap(),
+        live_target.path()
+    );
+    assert!(dangling_other.is_symlink());
+    assert!(wrong_case.is_symlink());
+    assert!(directory.is_dir());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "host-owned");
+}

@@ -8,6 +8,7 @@ use std::ffi::{CStr, OsStr, OsString};
 use std::io;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 
 use crate::orchestration::CapabilityPolicy;
 
@@ -32,6 +33,8 @@ pub(super) fn prepare(policy: &CapabilityPolicy) -> io::Result<Option<Binding>> 
         ));
     }
     let base = native_temp_base()?;
+    static REAPED: Once = Once::new();
+    REAPED.call_once(|| reap_dangling_aliases(&base));
     let suffix = prepare_in(&base, &target)?;
     Ok(Some(Binding {
         directory: target,
@@ -66,6 +69,32 @@ pub(in crate::stdlib::sandbox) fn inject_env(
 /// 50: the full digest left no room for a socket such as the JVM's
 /// `.java_pid<pid>`. A collision is refused below, never shared.
 const ALIAS_DIGEST_HEX: usize = 16;
+
+/// Remove aliases whose workspace is gone. Only a symlink named like an alias
+/// whose target no longer exists is touched, never a directory, a file, or a
+/// live target. Best effort: the base can be large and shared, so a failure
+/// leaves the entry for the next process.
+fn reap_dangling_aliases(base: &Path) {
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let is_alias = entry.file_name().to_str().is_some_and(|name| {
+            name.strip_prefix("harn-").is_some_and(|digest| {
+                digest.len() == ALIAS_DIGEST_HEX
+                    && digest
+                        .bytes()
+                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+            })
+        });
+        let path = entry.path();
+        let dangling = entry.file_type().is_ok_and(|kind| kind.is_symlink())
+            && matches!(path.metadata(), Err(error) if error.kind() == io::ErrorKind::NotFound);
+        if is_alias && dangling {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
 
 fn prepare_in(base: &Path, target: &Path) -> io::Result<String> {
     let mut digest = harn_kernel::pure::sha256_hex(target.as_os_str().as_bytes());
