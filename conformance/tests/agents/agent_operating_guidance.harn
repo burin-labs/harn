@@ -41,7 +41,7 @@ fn main(harness: Harness) -> nil {
     tools,
     "inspect",
     "Inspect the current state.",
-    {handler: { args: dict<string, any> -> "observed" }, parameters: {}},
+    {handler: { _args: dict<string, any> -> "observed" }, parameters: {}},
   )
   probe(harness, {loop_until_done: true}, "## Operating guidance")
   probe(harness, {loop_until_done: false}, nil)
