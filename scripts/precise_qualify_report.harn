@@ -8,8 +8,8 @@ pub const RECEIPT_SCHEMA = "harn.precise_qualify.receipt"
 pub const RECEIPT_SCHEMA_VERSION = 1
 
 /**
- * `pending` is a planned attempt that produced no verdict (time budget or
- * failed baseline). It is reported, never folded into a pass.
+ * `pending` is a planned attempt that produced no verdict: the time budget
+ * ran out, or its repo was not measured. It is reported, never folded into a pass.
  */
 pub type QualifyOutcome = "applied_correct" | "applied_wrong" | "refused" | "crashed" | "pending"
 
@@ -236,6 +236,14 @@ pub type Totals = {
   refused: int,
   crashed: int,
   pending: int,
+}
+
+/**
+ * A run passes only when it judged every planned attempt, judged nothing
+ * wrong, and measured every repo.
+ */
+pub fn run_passed(t: Totals, unmeasured_repos: int) -> bool {
+  return t.planned > 0 && t.applied_wrong + t.crashed + t.pending == 0 && unmeasured_repos == 0
 }
 
 pub fn totals(rows: list<SummaryRow>) -> Totals {

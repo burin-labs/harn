@@ -132,8 +132,6 @@ harn-flock = { path = "../harn-flock", version = "=0.10.179-dev" }
 harn-parser = { path = "../harn-parser", version = "=0.10.179-dev" }
 harn-session-store = { path = "../harn-session-store", version = "=0.10.179-dev" }
 harn-vm = { path = "../harn-vm", version = "=0.10.179-dev", default-features = false }
-harn-runtime = { path = "../harn-runtime", version = "=0.10.179-dev" }
-harn-builtins = { path = "../harn-builtins", version = "=0.10.179-dev" }
 harn-terminal = { path = "../harn-terminal", version = "=0.10.179-dev", optional = true }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive", "rc"] }
@@ -246,6 +244,10 @@ windows-sys = { version = "0.61.2", features = [
 serde_json = "1"
 
 [dev-dependencies]
+# Tests run scripts against every builtin family. The library itself registers
+# through harn-vm's registry, so the binaries that link harn-runtime supply the
+# families and hostlib does not wait on harn-builtins to compile.
+harn-runtime = { path = "../harn-runtime", version = "=0.10.179-dev" }
 rstest.workspace = true
 harn-modules = { path = "../harn-modules", version = "=0.10.179-dev", features = ["bundled-stdlib"] }
 harn-clock = { path = "../harn-clock", version = "=0.10.179-dev", features = ["test-support"] }

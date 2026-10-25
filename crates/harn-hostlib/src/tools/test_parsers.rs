@@ -1,7 +1,7 @@
 //! Native test-output projections. JUnit decoding and case records are owned
 //! by the runtime; plain cargo/go diagnostics remain lenient display helpers.
 
-pub(crate) use harn_builtins::junit::{
+pub(crate) use harn_vm::stdlib::junit::{
     duration_seconds_to_ms, parse_junit_xml, Status, TestRecord,
 };
 

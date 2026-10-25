@@ -7473,7 +7473,9 @@ text_tool_wire_format_supported = true
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
-reasoning_effort_levels = ["low", "medium", "high"]
+# Mistral documents only `high` and `none` for this model (docs.mistral.ai/capabilities/reasoning)
+# and its API rejected `medium` on 2026-10-24, so `high` is the only declared rung.
+reasoning_effort_levels = ["high"]
 vision_supported = true
 vision = true
 prefers_xml_scaffolding = false

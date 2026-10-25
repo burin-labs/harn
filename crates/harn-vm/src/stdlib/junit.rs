@@ -5,8 +5,8 @@
 
 use std::time::Duration;
 
-use harn_vm::stdlib::macros::harn_builtin;
-use harn_vm_core::value::{VmDictExt, VmError, VmValue};
+use crate::stdlib::macros::harn_builtin;
+use crate::value::{VmDictExt, VmError, VmValue};
 
 const MAX_DURATION_MS: u64 = i64::MAX as u64;
 const MAX_REPORT_BYTES: usize = 32 * 1024 * 1024;
@@ -107,7 +107,7 @@ fn parse_junit_xml_result_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
     Ok(match parse_junit_xml(&bytes) {
         Ok(records) => VmValue::enum_variant("Result", "Ok", vec![records_to_value(records)]),
         Err(error) => {
-            let mut value = harn_vm_core::value::DictMap::new();
+            let mut value = crate::value::DictMap::new();
             value.put_str("kind", error.kind);
             value.put_str("message", error.message);
             VmValue::enum_variant("Result", "Err", vec![VmValue::dict(value)])
@@ -132,7 +132,7 @@ fn records_to_value(records: Vec<TestRecord>) -> VmValue {
 }
 
 fn record_to_value(record: TestRecord) -> VmValue {
-    let mut map = harn_vm_core::value::DictMap::new();
+    let mut map = crate::value::DictMap::new();
     map.put_str("name", record.name);
     map.put_str("status", record.status.as_str());
     map.put_int("duration_ms", record.duration_ms as i64);
@@ -143,7 +143,7 @@ fn record_to_value(record: TestRecord) -> VmValue {
         ("path", record.path),
     ] {
         map.insert(
-            harn_vm_core::value::intern_key(name),
+            crate::value::intern_key(name),
             value.map(VmValue::string).unwrap_or(VmValue::Nil),
         );
     }
