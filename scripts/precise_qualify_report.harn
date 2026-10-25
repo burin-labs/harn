@@ -1,0 +1,352 @@
+/**
+ * Classification, aggregation and rendering for the precise-edit
+ * qualification probe (`scripts/precise_qualify.harn`). Everything here is
+ * pure so the verdict rules are testable without a corpus checkout.
+ */
+pub const RECEIPT_SCHEMA = "harn.precise_qualify.receipt"
+
+pub const RECEIPT_SCHEMA_VERSION = 1
+
+/**
+ * `pending` is a planned attempt that produced no verdict (time budget or
+ * failed baseline). It is reported, never folded into a pass.
+ */
+pub type QualifyOutcome = "applied_correct" | "applied_wrong" | "refused" | "crashed" | "pending"
+
+/** What one tool call left behind, read from the call result and from git. */
+pub type CallObservation = {
+  tag: string,
+  error: string?,
+  reported_files: list<string>,
+  changed_files: list<string>,
+  wall_ms: int,
+}
+
+/**
+ * One edit attempt. `apply` is nil when the preview refused. `oracle_passed`
+ * is nil when the oracle never ran. `reference_files` is nil when the arm has
+ * no find_references cross-check.
+ */
+pub type EditObservation = {
+  preview: CallObservation,
+  apply: CallObservation?,
+  oracle_passed: bool?,
+  reference_files: list<string>?,
+}
+
+pub type Verdict = {outcome: QualifyOutcome, reason: string}
+
+/** Result tags that mean the tool accepted the request. */
+const ACCEPTED_TAGS = ["applied", "dry_run"]
+
+fn verdict(outcome: QualifyOutcome, reason: string) -> Verdict {
+  return {outcome: outcome, reason: reason}
+}
+
+fn missing_from(expected: list<string>, actual: list<string>) -> list<string> {
+  return expected.filter({ path -> !actual.contains(path) }).to_list()
+}
+
+fn same_files(a: list<string>, b: list<string>) -> bool {
+  return len(missing_from(a, b)) == 0 && len(missing_from(b, a)) == 0
+}
+
+/**
+ * Classify one edit attempt. Any write the tool did not announce, or any
+ * applied edit the oracle rejects, is `applied_wrong`; that check runs
+ * before a refusal is accepted so a refusal that still wrote is caught.
+ */
+pub fn classify_edit(obs: EditObservation) -> Verdict {
+  const preview = obs.preview
+  if len(preview.changed_files) > 0 {
+    return verdict("applied_wrong", "preview_wrote")
+  }
+  if preview.error != nil {
+    return verdict("crashed", "preview_error")
+  }
+  if !ACCEPTED_TAGS.contains(preview.tag) {
+    return verdict("refused", preview.tag)
+  }
+  const apply = obs.apply
+  if apply == nil {
+    return verdict("pending", "apply_not_run")
+  }
+  if apply.error != nil {
+    return if len(apply.changed_files) > 0 {
+      verdict("applied_wrong", "wrote_on_error")
+    } else {
+      verdict("crashed", "apply_error")
+    }
+  }
+  if !ACCEPTED_TAGS.contains(apply.tag) {
+    return if len(apply.changed_files) > 0 {
+      verdict("applied_wrong", "wrote_on_refusal")
+    } else {
+      verdict("refused", "after_preview:" + apply.tag)
+    }
+  }
+  if len(apply.changed_files) == 0 {
+    return verdict("applied_wrong", "applied_without_change")
+  }
+  if !same_files(apply.changed_files, apply.reported_files)
+    || !same_files(apply.changed_files, preview.reported_files) {
+    return verdict("applied_wrong", "preview_apply_mismatch")
+  }
+  if obs.oracle_passed == nil {
+    return verdict("pending", "oracle_not_run")
+  }
+  if !obs.oracle_passed {
+    return verdict("applied_wrong", "oracle_failed")
+  }
+  const references = obs.reference_files
+  if references != nil && len(missing_from(apply.changed_files, references)) > 0 {
+    return verdict("applied_wrong", "diverged_from_find_references")
+  }
+  return verdict("applied_correct", "")
+}
+
+/**
+ * find_references is read-only: any file it `wrote` is `applied_wrong`. Its
+ * oracle is the file set of a verified
+ * rename of the same symbol. Missing any file that rename had to change is
+ * `applied_wrong`; reporting extra files is over-approximation, counted
+ * separately by the caller. Without a verified rename there is no verdict.
+ */
+pub fn classify_references(
+  error: string?,
+  files: list<string>,
+  oracle_files: list<string>?,
+  wrote: list<string>,
+) -> Verdict {
+  if len(wrote) > 0 {
+    return verdict("applied_wrong", "query_wrote")
+  }
+  if error != nil {
+    return verdict("crashed", "query_error")
+  }
+  if oracle_files == nil {
+    return verdict("pending", "no_verified_rename")
+  }
+  if len(missing_from(oracle_files, files)) > 0 {
+    return verdict("applied_wrong", "missed_reference_file")
+  }
+  return verdict("applied_correct", "")
+}
+
+pub type AttemptRow = {
+  repo: string,
+  language: string,
+  arm: string,
+  outcome: QualifyOutcome,
+  reason: string,
+  server_start: string?,
+  preview_ms: int?,
+}
+
+pub type SummaryRow = {
+  repo: string,
+  language: string,
+  arm: string,
+  planned: int,
+  applied_correct: int,
+  applied_wrong: int,
+  refused: int,
+  crashed: int,
+  pending: int,
+  refusal_reasons: dict,
+  wrong_causes: dict,
+  pending_reasons: dict,
+  preview_ms_cold: list<int>,
+  preview_ms_warm: list<int>,
+}
+
+fn bump(counts: dict, key: string) -> dict {
+  return counts + {[key]: (counts[key] ?? 0) + 1}
+}
+
+fn empty_row(attempt: AttemptRow) -> SummaryRow {
+  return {
+    repo: attempt.repo,
+    language: attempt.language,
+    arm: attempt.arm,
+    planned: 0,
+    applied_correct: 0,
+    applied_wrong: 0,
+    refused: 0,
+    crashed: 0,
+    pending: 0,
+    refusal_reasons: {},
+    wrong_causes: {},
+    pending_reasons: {},
+    preview_ms_cold: [],
+    preview_ms_warm: [],
+  }
+}
+
+fn add_attempt(row: SummaryRow, attempt: AttemptRow) -> SummaryRow {
+  let next = row + {planned: row.planned + 1}
+  const outcome = attempt.outcome
+  if outcome == "applied_correct" {
+    next = next + {applied_correct: next.applied_correct + 1}
+  } else if outcome == "applied_wrong" {
+    next = next
+      + {
+        applied_wrong: next.applied_wrong + 1,
+        wrong_causes: bump(next.wrong_causes, attempt.reason),
+      }
+  } else if outcome == "refused" {
+    next = next
+      + {refused: next.refused + 1, refusal_reasons: bump(next.refusal_reasons, attempt.reason)}
+  } else if outcome == "crashed" {
+    next = next + {crashed: next.crashed + 1, wrong_causes: bump(next.wrong_causes, attempt.reason)}
+  } else {
+    next = next
+      + {pending: next.pending + 1, pending_reasons: bump(next.pending_reasons, attempt.reason)}
+  }
+  const ms = attempt.preview_ms
+  if ms != nil && outcome != "pending" {
+    if attempt.server_start == "cold" {
+      next = next + {preview_ms_cold: next.preview_ms_cold + [ms]}
+    } else {
+      next = next + {preview_ms_warm: next.preview_ms_warm + [ms]}
+    }
+  }
+  return next
+}
+
+/** One row per (repo, arm), in first-seen order. */
+pub fn summarize(attempts: list<AttemptRow>) -> list<SummaryRow> {
+  let keys: list<string> = []
+  let rows = {}
+  for attempt in attempts {
+    const key = attempt.repo + "\\u{0}" + attempt.arm
+    if !keys.contains(key) {
+      keys = keys + [key]
+      rows = rows + {[key]: empty_row(attempt)}
+    }
+    rows = rows + {[key]: add_attempt(rows[key], attempt)}
+  }
+  return keys.map({ key -> rows[key] }).to_list()
+}
+
+pub type Totals = {
+  planned: int,
+  applied_correct: int,
+  applied_wrong: int,
+  refused: int,
+  crashed: int,
+  pending: int,
+}
+
+pub fn totals(rows: list<SummaryRow>) -> Totals {
+  let t = {planned: 0, applied_correct: 0, applied_wrong: 0, refused: 0, crashed: 0, pending: 0}
+  for row in rows {
+    t = {
+      planned: t.planned + row.planned,
+      applied_correct: t.applied_correct + row.applied_correct,
+      applied_wrong: t.applied_wrong + row.applied_wrong,
+      refused: t.refused + row.refused,
+      crashed: t.crashed + row.crashed,
+      pending: t.pending + row.pending,
+    }
+  }
+  return t
+}
+
+fn median_ms(samples: list<int>) -> string {
+  if len(samples) == 0 {
+    return "-"
+  }
+  const ordered = samples.sorted()
+  return to_string(ordered[len(ordered) / 2])
+}
+
+/** A share of attempted calls; an arm with no verdicts says so instead of 0% or 100%. */
+fn share(count: int, row: SummaryRow) -> string {
+  const decided = row.planned - row.pending
+  if decided == 0 {
+    return "no sample"
+  }
+  return to_string(count) + " (" + to_string(count * 100 / decided) + "%)"
+}
+
+fn histogram(counts: dict) -> string {
+  const keys = counts.keys().sorted_by({ key -> 0 - counts[key] })
+  if len(keys) == 0 {
+    return "-"
+  }
+  return join(keys.map({ key -> key + " " + to_string(counts[key]) }).to_list(), ", ")
+}
+
+pub type WrongAttempt = {repo: string, arm: string, symbol: string, reason: string, detail: string}
+
+/**
+ * Render the one-page table. Wrong edits and crashes lead; pending counts are
+ * printed beside every rate so an empty or partial sample stays visible.
+ */
+pub fn render_markdown(
+  title: string,
+  rows: list<SummaryRow>,
+  wrong: list<WrongAttempt>,
+  notes: list<string>,
+) -> string {
+  const t = totals(rows)
+  let out = "# " + title + "\n\n"
+  out = out + "**applied_wrong: " + to_string(t.applied_wrong) + "**, crashed: "
+    + to_string(t.crashed)
+    + ", pending (no verdict): "
+    + to_string(t.pending)
+    + ", refused: "
+    + to_string(t.refused)
+    + ", applied_correct: "
+    + to_string(t.applied_correct)
+    + ", planned: "
+    + to_string(t.planned)
+    + ".\n\n"
+  if t.planned == 0 {
+    out = out + "No attempts were planned. This run measured nothing.\n\n"
+  }
+  if len(wrong) > 0 {
+    out = out
+      + "## Wrong edits and crashes\n\n| repo | arm | symbol | cause | detail |\n|---|---|---|---|---|\n"
+    for item in wrong {
+      out = out + "| " + item.repo + " | " + item.arm + " | `" + item.symbol + "` | " + item.reason
+        + " | "
+        + item.detail.replace("|", "\\|").replace("\n", " ")
+        + " |\n"
+    }
+    out = out + "\n"
+  }
+  out = out + "## Rates by tool, language and repo\n\n"
+  out = out
+    + "| arm | language | repo | planned | wrong | correct | refused | crashed | pending | refusal reasons | preview ms p50 cold / warm |\n"
+  out = out + "|---|---|---|---|---|---|---|---|---|---|---|\n"
+  for row in rows {
+    out = out + "| " + row.arm + " | " + row.language + " | " + row.repo + " | "
+      + to_string(row.planned)
+      + " | "
+      + share(row.applied_wrong, row)
+      + " | "
+      + share(row.applied_correct, row)
+      + " | "
+      + share(row.refused, row)
+      + " | "
+      + share(row.crashed, row)
+      + " | "
+      + to_string(row.pending)
+      + " | "
+      + histogram(row.refusal_reasons)
+      + " | "
+      + median_ms(row.preview_ms_cold)
+      + " / "
+      + median_ms(row.preview_ms_warm)
+      + " |\n"
+  }
+  if len(notes) > 0 {
+    out = out + "\n## Notes\n\n"
+    for note in notes {
+      out = out + "- " + note + "\n"
+    }
+  }
+  return out
+}

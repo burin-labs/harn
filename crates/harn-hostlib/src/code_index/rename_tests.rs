@@ -505,6 +505,39 @@ fn typescript_workspace_rename() {
 }
 
 #[test]
+fn workspace_rename_leaves_prose_files_and_renames_the_code() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("src/widget.ts"),
+        "export class Widget {}\nexport const w = new Widget();\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("README.md"),
+        "# Usage\n\nCreate a `Widget` first.\n",
+    )
+    .unwrap();
+    let capability = build_index(root);
+    let symbol_ref = dict(&[
+        ("name", vm_string("Widget")),
+        ("path", vm_string("src/widget.ts")),
+        ("kind", vm_string("Type")),
+    ]);
+    let result = rename(&capability, symbol_ref, "Gadget", "workspace");
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    assert!(fs::read_to_string(root.join("src/widget.ts"))
+        .unwrap()
+        .contains("new Gadget()"));
+    assert!(fs::read_to_string(root.join("README.md"))
+        .unwrap()
+        .contains("`Widget`"));
+    let warnings = format!("{:?}", field(&result, "warnings"));
+    assert!(warnings.contains("README.md"), "{warnings}");
+}
+
+#[test]
 fn python_workspace_rename() {
     let dir = tempdir().unwrap();
     let root = dir.path();

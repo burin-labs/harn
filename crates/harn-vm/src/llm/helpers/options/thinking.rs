@@ -6,7 +6,7 @@ pub(super) fn thinking_error(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::string(message.into()))
 }
 
-pub(crate) fn parse_reasoning_effort_field(
+pub fn parse_reasoning_effort_field(
     field: &str,
     raw: &str,
 ) -> Result<crate::llm::api::ReasoningEffort, VmError> {
@@ -82,7 +82,7 @@ fn default_reasoning_effort(
 /// Explicit call options and reasoning policy own the decision. Catalog
 /// defaults apply only when neither surface made a choice, then pass through
 /// the same capability and supported-level validation as explicit effort.
-pub(crate) fn resolve_thinking_config(
+pub fn resolve_thinking_config(
     options: Option<&crate::value::DictMap>,
     model_defaults: &std::collections::BTreeMap<String, toml::Value>,
     provider: &str,
@@ -122,7 +122,7 @@ pub(crate) fn resolve_thinking_config_with_source(
 }
 
 /// Resolve catalog defaults without inheriting ambient session policy.
-pub(crate) fn resolve_catalog_thinking_config(
+pub fn resolve_catalog_thinking_config(
     model_defaults: &std::collections::BTreeMap<String, toml::Value>,
     provider: &str,
     model: &str,

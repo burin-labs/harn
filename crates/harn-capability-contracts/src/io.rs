@@ -302,8 +302,8 @@ capability_method!(
     fs_stat,
     "harness.fs.stat",
     ["fs.read@arg0"],
-    "__cap_fs_stat(path: string) -> dict",
-    "Read file metadata."
+    "__cap_fs_stat(path: string, options?: {follow_symlinks?: bool}) -> {size: int, is_file: bool, is_dir: bool, is_symlink: bool, readonly: bool, modified?: float, mode?: int, identity?: string}",
+    "Read file metadata, optionally inspecting a symbolic link itself."
 );
 capability_method!(
     fs_rename,

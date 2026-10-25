@@ -1,0 +1,26 @@
+import { compose_tool_callers, with_redaction, with_required_reason } from "std/llm/tool_middleware"
+
+/**
+ * Redaction records the arguments the tool actually saw, so a synthetic field
+ * stripped by an inner layer stays out of the recorded copy.
+ */
+fn main(harness: Harness) {
+  const redactor = { record ->
+    if record.phase == "in" {
+      return {args: record.args + {api_key: "***"}, redacted_fields: ["api_key"]}
+    }
+    return {}
+  }
+  const caller = compose_tool_callers(
+    harness.clock,
+    [with_redaction(redactor), with_required_reason().caller],
+  )
+  const result = caller(
+    {tool_name: "fetch", tool_args: {api_key: "sk-live-123456789", reason: "why"}},
+    { c -> {ok: true, arguments: c.tool_args, result: "fetched"} },
+  )
+  require result.arguments?.reason == nil,
+    "the stripped reason must stay out of the recorded arguments"
+  require result.arguments?.api_key == "***", "the recorded arguments must be redacted"
+  harness.stdio.println("redaction keeps stripped arguments")
+}

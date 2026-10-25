@@ -1,0 +1,159 @@
+import {
+  AttemptRow,
+  CallObservation,
+  classify_edit,
+  classify_references,
+  render_markdown,
+  summarize,
+  totals,
+} from "../precise_qualify_report.harn"
+
+fn call(tag: string, reported: list<string>, changed: list<string>) -> CallObservation {
+  return {tag: tag, error: nil, reported_files: reported, changed_files: changed, wall_ms: 5}
+}
+
+fn row(arm: string, outcome: string, reason: string) -> AttemptRow {
+  return {
+    repo: "fixture",
+    language: "rust",
+    arm: arm,
+    outcome: outcome,
+    reason: reason,
+    server_start: nil,
+    preview_ms: 5,
+  }
+}
+
+pipeline test_a_refusal_or_preview_that_writes_is_wrong_not_refused() {
+  const wrote_preview = classify_edit(
+    {
+      preview: call("dry_run", [], ["src/lib.rs"]),
+      apply: nil,
+      oracle_passed: nil,
+      reference_files: nil,
+    },
+  )
+  assert_eq(wrote_preview.outcome, "applied_wrong")
+  assert_eq(wrote_preview.reason, "preview_wrote")
+  const thrown: CallObservation = {
+    tag: "",
+    error: "backend exploded",
+    reported_files: [],
+    changed_files: ["src/lib.rs"],
+    wall_ms: 5,
+  }
+  const wrote_then_threw = classify_edit(
+    {preview: thrown, apply: nil, oracle_passed: nil, reference_files: nil},
+  )
+  assert_eq(wrote_then_threw.outcome, "applied_wrong")
+  assert_eq(wrote_then_threw.reason, "preview_wrote")
+  const wrote_refusal = classify_edit(
+    {
+      preview: call("dry_run", ["src/lib.rs"], []),
+      apply: call("syntax_error", [], ["src/lib.rs"]),
+      oracle_passed: nil,
+      reference_files: nil,
+    },
+  )
+  assert_eq(wrote_refusal.outcome, "applied_wrong")
+  assert_eq(wrote_refusal.reason, "wrote_on_refusal")
+  const clean_refusal = classify_edit(
+    {
+      preview: call("ambiguous_symbol", [], []),
+      apply: nil,
+      oracle_passed: nil,
+      reference_files: nil,
+    },
+  )
+  assert_eq(clean_refusal.outcome, "refused")
+  assert_eq(clean_refusal.reason, "ambiguous_symbol")
+}
+
+pipeline test_an_applied_result_must_match_what_it_wrote_and_previewed() {
+  const silent = classify_edit(
+    {
+      preview: call("dry_run", ["a.ts"], []),
+      apply: call("applied", ["a.ts"], []),
+      oracle_passed: nil,
+      reference_files: nil,
+    },
+  )
+  assert_eq(silent.reason, "applied_without_change")
+  const extra_write = classify_edit(
+    {
+      preview: call("dry_run", ["a.ts"], []),
+      apply: call("applied", ["a.ts"], ["a.ts", "b.ts"]),
+      oracle_passed: true,
+      reference_files: nil,
+    },
+  )
+  assert_eq(extra_write.outcome, "applied_wrong")
+  assert_eq(extra_write.reason, "preview_apply_mismatch")
+}
+
+pipeline test_a_compiling_rename_outside_find_references_is_wrong() {
+  const files = ["src/a.rs", "src/b.rs"]
+  const verdict = classify_edit(
+    {
+      preview: call("dry_run", files, []),
+      apply: call("applied", files, files),
+      oracle_passed: true,
+      reference_files: ["src/a.rs"],
+    },
+  )
+  assert_eq(verdict.outcome, "applied_wrong")
+  assert_eq(verdict.reason, "diverged_from_find_references")
+}
+
+pipeline test_find_references_missing_a_verified_rename_file_is_wrong() {
+  const missed = classify_references(nil, ["a.rs"], ["a.rs", "b.rs"], [])
+  assert_eq(missed.outcome, "applied_wrong")
+  assert_eq(missed.reason, "missed_reference_file")
+  assert_eq(
+    classify_references(nil, ["a.rs", "b.rs", "c.rs"], ["a.rs", "b.rs"], []).outcome,
+    "applied_correct",
+  )
+}
+
+pipeline test_an_empty_or_unjudged_sample_never_reads_as_a_pass() {
+  const unjudged = classify_edit(
+    {
+      preview: call("dry_run", ["src/lib.rs"], []),
+      apply: call("applied", ["src/lib.rs"], ["src/lib.rs"]),
+      oracle_passed: nil,
+      reference_files: nil,
+    },
+  )
+  assert_eq(unjudged.outcome, "pending")
+  assert_eq(classify_references(nil, ["a.rs"], nil, []).outcome, "pending")
+  // A query that wrote is wrong even when it also threw.
+  const wrote = classify_references("boom", [], nil, ["src/lib.rs"])
+  assert_eq(wrote.outcome, "applied_wrong")
+  assert_eq(wrote.reason, "query_wrote")
+  const empty = summarize([])
+  assert_eq(totals(empty).planned, 0)
+  assert(render_markdown("t", empty, [], []).contains("This run measured nothing."))
+  const all_pending = summarize(
+    [row("rename_symbol:syntax_tree", "pending", "baseline_oracle_failed")],
+  )
+  const table = render_markdown("t", all_pending, [], [])
+  assert(table.contains("no sample"))
+  assert(table.contains("pending (no verdict): 1"))
+  assert(!table.contains("100%"))
+}
+
+pipeline test_wrong_counts_lead_the_table() {
+  const rows = summarize(
+    [
+      row("rename_symbol:syntax_tree", "applied_correct", ""),
+      row("rename_symbol:syntax_tree", "applied_wrong", "oracle_failed"),
+      row("change_signature", "refused", "overrides_present"),
+    ],
+  )
+  assert_eq(len(rows), 2)
+  assert_eq(rows[0]?.applied_wrong, 1)
+  assert_eq(rows[0]?.wrong_causes?.["oracle_failed"], 1)
+  assert_eq(rows[1]?.refusal_reasons?.["overrides_present"], 1)
+  const table = render_markdown("t", rows, [], [])
+  assert(table.starts_with("# t\n\n**applied_wrong: 1**"))
+}

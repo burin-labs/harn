@@ -15,7 +15,7 @@ use crate::orchestration::{CapabilityPolicy, CommandPolicy, ToolApprovalPolicy};
 
 /// The execution policy owned by a deferred callback's registering caller.
 #[derive(Clone, Debug)]
-pub(crate) struct RegisteredExecutionPolicy(Option<Arc<CapabilityPolicy>>);
+pub struct RegisteredExecutionPolicy(Option<Arc<CapabilityPolicy>>);
 
 impl RegisteredExecutionPolicy {
     pub(crate) fn capture() -> Self {
@@ -68,7 +68,7 @@ pub fn scope_ambient_context<F: Future>(inner: F) -> impl Future<Output = F::Out
     scope_modified(inner, |_| {})
 }
 
-pub(crate) fn scope_approval_policy<F: Future>(policy: ToolApprovalPolicy, inner: F) -> Scoped<F> {
+pub fn scope_approval_policy<F: Future>(policy: ToolApprovalPolicy, inner: F) -> Scoped<F> {
     scope_modified(inner, |scope| {
         scope
             .approval
@@ -76,18 +76,18 @@ pub(crate) fn scope_approval_policy<F: Future>(policy: ToolApprovalPolicy, inner
     })
 }
 
-pub(crate) fn scope_command_policy<F: Future>(policy: CommandPolicy, inner: F) -> Scoped<F> {
+pub fn scope_command_policy<F: Future>(policy: CommandPolicy, inner: F) -> Scoped<F> {
     scope_modified(inner, |scope| scope.command.push(policy))
 }
 
-pub(crate) fn scope_dynamic_permissions<F: Future>(
+pub fn scope_dynamic_permissions<F: Future>(
     policy: DynamicPermissionPolicy,
     inner: F,
 ) -> Scoped<F> {
     scope_modified(inner, |scope| scope.permissions.push(policy))
 }
 
-pub(crate) fn scope_autonomy_policy<F: Future>(policy: AutonomyPolicy, inner: F) -> Scoped<F> {
+pub fn scope_autonomy_policy<F: Future>(policy: AutonomyPolicy, inner: F) -> Scoped<F> {
     scope_modified(inner, |scope| scope.autonomy.push(policy))
 }
 

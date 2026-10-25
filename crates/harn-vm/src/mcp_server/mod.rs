@@ -13,7 +13,7 @@ mod defs;
 mod register;
 mod registry;
 mod tools_schema;
-mod uri;
+pub mod uri;
 
 #[cfg(test)]
 mod tests;

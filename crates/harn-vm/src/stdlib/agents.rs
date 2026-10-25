@@ -38,7 +38,7 @@ use crate::value::{VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
 mod replay;
-mod resume;
+pub mod resume;
 mod resume_conditions;
 mod stop_handoff;
 

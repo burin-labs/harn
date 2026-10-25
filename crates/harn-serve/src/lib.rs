@@ -114,8 +114,6 @@ pub use exports::{
     ExportedFunction, ExportedParam, JobSpec, RetryBackoff, RetrySpec, RoutePolicy, RouteSpec,
     ScheduleSpec, ToolAnnotations,
 };
-#[cfg(feature = "hostlib-full")]
-pub use harn_reference_resolver::resolver as harn_reference_resolver;
 /// Install the process-lifetime shared Postgres pool registry.
 ///
 /// Call this **once** at server startup (e.g. from the `SiteServer`/embedder
@@ -127,7 +125,9 @@ pub use harn_reference_resolver::resolver as harn_reference_resolver;
 ///
 /// Only available when the `vm-postgres` feature is enabled.
 #[cfg(feature = "vm-postgres")]
-pub use harn_vm::install_shared_pool_registry;
+pub use harn_builtins::postgres::install_shared_pool_registry;
+#[cfg(feature = "hostlib-full")]
+pub use harn_reference_resolver::resolver as harn_reference_resolver;
 pub use http_codec::{
     axum_response_from_call, axum_response_from_dispatch_error, classify_ws_upgrade,
     decode_call_response, dispatch_error_payload, fresh_request_id, HttpCodecOutcome, SseEventSpec,

@@ -31,19 +31,19 @@ candidate with a broken or missing asset manifest fails its build run.
       "binaries": ["harn.exe", "harn-dap.exe", "harn-lsp.exe"]
     },
     "aarch64-apple-darwin": {
-      "filename": "harn-aarch64-apple-darwin.tar.gz",
+      "filename": "harn-aarch64-apple-darwin.tar.xz",
       "url":      "...",
       "sha256":   "...",
       "size":     12345678,
-      "format":   "tar.gz",
+      "format":   "tar.xz",
       "binaries": ["harn", "harn-dap", "harn-lsp"]
     },
     "x86_64-unknown-linux-gnu": {
-      "filename": "harn-x86_64-unknown-linux-gnu.tar.gz",
+      "filename": "harn-x86_64-unknown-linux-gnu.tar.xz",
       "url":      "...",
       "sha256":   "...",
       "size":     12345678,
-      "format":   "tar.gz",
+      "format":   "tar.xz",
       "binaries": ["harn", "harn-dap", "harn-lsp", "harn-container-probe"]
     }
   }
@@ -60,13 +60,20 @@ candidate with a broken or missing asset manifest fails its build run.
 | `assets[triple].url`               | Deterministic GitHub-releases download URL. |
 | `assets[triple].sha256`            | Lowercase hex SHA-256 of the archive bytes. |
 | `assets[triple].size`              | Archive size in bytes. |
-| `assets[triple].format`            | `"tar.gz"` or `"zip"`. |
+| `assets[triple].format`            | `"tar.xz"` or `"zip"`. |
 | `assets[triple].binaries`          | List of files unpacked from the archive. |
 
 Linux archives also include `harn-container-probe`, which the release
 container image uses for its distroless health check. Installer scripts
 may ignore that extra binary unless they are assembling the container
 root filesystem.
+
+Each release also publishes `harn-<triple>.tar.gz` for the four macOS and Linux
+targets: the same contents as the `.tar.xz` archive, for the ACP Agent Registry,
+which cannot unpack `.tar.xz`. Only `spec/acp-registry/harn/agent.json` names
+them. They are not in `release-assets.json` or `SHA256SUMS`; installers must
+not use them. They are listed in the candidate manifest so promotion attests
+and publishes them with the other release files.
 
 Generated Agents API SDK clients are a separate release contract. They are
 not entries in `release-assets.json`. Downstream SDK repositories pin a

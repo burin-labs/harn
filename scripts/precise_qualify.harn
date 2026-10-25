@@ -1,0 +1,935 @@
+/**
+ * Precise-edit qualification probe.
+ *
+ *   harn run --no-sandbox scripts/precise_qualify.harn -- <plan.json> <out-dir>
+ *
+ * For each pinned repository in the plan, samples symbols from the code index
+ * in a seeded order, runs each precise tool's preview and then its apply in a
+ * scratch clone, runs the repository's compiler or typecheck oracle, and
+ * classifies the attempt. Writes `receipt.json` (schema
+ * `harn.precise_qualify.receipt`) after every attempt and `table.md` at the
+ * end. Makes no model calls.
+ *
+ * The plan names a seed, how many functions and types to sample per
+ * repository, a time budget, and per repository its URL, commit, a local
+ * checkout at that commit, setup commands and oracle commands. Arms:
+ * `rename_symbol` on each backend, `change_signature` (one appended
+ * parameter), `move_symbol` (top-level declarations into a sibling file),
+ * `insert_method` (`ast.insert_at_anchor` as the last member of a class or
+ * inherent impl) and `find_references` (the by-name graph query), which is
+ * judged against a verified rename of the same symbol. Wall times come from
+ * one long-lived process, so only the first language-server call in each
+ * repository is cold.
+ */
+import { edit_add_parameter } from "std/edit"
+import {
+  AttemptRow,
+  RECEIPT_SCHEMA,
+  RECEIPT_SCHEMA_VERSION,
+  SummaryRow,
+  Totals,
+  Verdict,
+  WrongAttempt,
+  classify_edit,
+  classify_references,
+  render_markdown,
+  summarize,
+  totals,
+} from "./precise_qualify_report.harn"
+
+pub type RepoPlan = {
+  id: string,
+  language: "rust" | "typescript" | "java",
+  url: string,
+  commit: string,
+  checkout: string,
+  setup: list<list<string>>,
+  oracle: list<list<string>>,
+  exclude_prefixes?: list<string>,
+}
+
+type Plan = {
+  seed: string,
+  functions: int,
+  types: int,
+  max_minutes: int,
+  arms?: list<string>,
+  repos: list<RepoPlan>,
+}
+
+pub type Symbol = {
+  name: string,
+  path: string,
+  line: int,
+  col: int?,
+  kind: string,
+  container: string,
+}
+
+type Receipt = {
+  schema: string,
+  schema_version: int,
+  started_at: string,
+  finished_at: string?,
+  harn_version: string,
+  host: {os: string, arch: string},
+  plan: Plan,
+  repos: list<dict>,
+  attempts: list<dict>,
+  summary: list<SummaryRow>,
+  totals: Totals?,
+}
+
+const ALL_ARMS = [
+  "find_references",
+  "rename_symbol:syntax_tree",
+  "rename_symbol:language_server",
+  "change_signature",
+  "move_symbol",
+  "insert_method",
+]
+
+const FUNCTION_ARMS = [
+  "find_references",
+  "rename_symbol:syntax_tree",
+  "rename_symbol:language_server",
+  "change_signature",
+  "move_symbol",
+]
+
+const TYPE_ARMS = [
+  "find_references",
+  "rename_symbol:syntax_tree",
+  "rename_symbol:language_server",
+  "move_symbol",
+  "insert_method",
+]
+
+/** Output tails kept in the receipt; enough to read the first compiler error. */
+const TAIL_CHARS = 1600
+
+fn run_cmd(harness: Harness, argv: list<string>, cwd: string, timeout_ms: int) -> dict {
+  const started = harness.clock.monotonic_ms()
+  const res = harness.process.run(
+    {program: argv[0], args: argv.slice(1, len(argv)), cwd: cwd, timeout_ms: timeout_ms},
+  )
+  return {
+    argv: argv,
+    success: res.success,
+    exit_code: res.exit_code,
+    timed_out: res.timed_out,
+    wall_ms: harness.clock.monotonic_ms() - started,
+    output: res.stdout + res.stderr,
+  }
+}
+
+/** Thrown values can be structured host errors; the receipt keeps them as text. */
+fn error_text(error: any) -> string {
+  return if type_of(error) == "string" {
+    error
+  } else {
+    json_stringify(error)
+  }
+}
+
+fn head_of(text: string) -> string {
+  return if len(text) > TAIL_CHARS {
+    text.slice(0, TAIL_CHARS)
+  } else {
+    text
+  }
+}
+
+/** Run every oracle command; the first failure decides and keeps its output head. */
+fn run_oracle(harness: Harness, repo: RepoPlan, root: string) -> dict {
+  const started = harness.clock.monotonic_ms()
+  for argv in repo.oracle {
+    const res = run_cmd(harness, argv, root, 900000)
+    if !res.success {
+      return {
+        passed: false,
+        wall_ms: harness.clock.monotonic_ms() - started,
+        failed_argv: argv,
+        exit_code: res.exit_code,
+        timed_out: res.timed_out,
+        output_head: head_of(res.output),
+      }
+    }
+  }
+  return {passed: true, wall_ms: harness.clock.monotonic_ms() - started}
+}
+
+/** Paths git sees as modified, added or deleted, relative to the clone root. */
+fn git_status(process: HarnessProcess, root: string) -> list<{path: string, untracked: bool}> {
+  const res = process.run(
+    {program: "git", args: ["status", "--porcelain=v1", "-uall"], cwd: root, timeout_ms: 60000},
+  )
+  if !res.success {
+    throw "git status failed in " + root + ": " + res.stderr
+  }
+  let entries = []
+  for line in res.stdout.split("\n") {
+    if len(line) > 3 {
+      const parts = line.slice(3, len(line)).split(" -> ")
+      entries = entries + [{path: parts[len(parts) - 1], untracked: line.starts_with("??")}]
+    }
+  }
+  return entries
+}
+
+/** Paths git sees as modified, added or deleted, relative to the clone root. */
+fn changed_files(process: HarnessProcess, root: string) -> list<string> {
+  return git_status(process, root).map({ entry -> entry.path }).to_list().sorted()
+}
+
+/**
+ * Return the clone to its commit. Harn's command policy refuses `git reset
+ * --hard` and `git clean -fd`, so tracked files are checked out and each
+ * untracked file the attempt created is deleted by name.
+ */
+fn reset_clone(harness: Harness, root: string) {
+  const res = run_cmd(harness, ["git", "checkout", "-q", "--", "."], root, 60000)
+  if !res.success {
+    throw "reset failed in " + root + ": " + res.output
+  }
+  for entry in git_status(harness.process, root) {
+    if entry.untracked {
+      harness.fs.delete(path_join(root, entry.path))
+    }
+  }
+  const left = changed_files(harness.process, root)
+  if len(left) > 0 {
+    throw "reset left changes in " + root + ": " + join(left, ", ")
+  }
+}
+
+fn relative_to(root: string, path: string) -> string {
+  const prefix = root + "/"
+  return if path.starts_with(prefix) {
+    path.slice(len(prefix), len(path))
+  } else {
+    path
+  }
+}
+
+fn reported_files(root: string, result: dict?) -> list<string> {
+  if result == nil {
+    return []
+  }
+  let paths: list<string> = []
+  for entry in result?.touched_files ?? [] {
+    const path = relative_to(root, to_string(entry?.path ?? ""))
+    if path != "" && !paths.contains(path) {
+      paths = paths + [path]
+    }
+  }
+  const single = result?.path
+  if len(paths) == 0 && single != nil && (result?.applied ?? false) {
+    paths = [relative_to(root, to_string(single))]
+  }
+  return paths.sorted()
+}
+
+fn observe(harness: Harness, root: string, call: fn() -> dict) -> dict {
+  const started = harness.clock.monotonic_ms()
+  const outcome = try {
+    call()
+  }
+  const wall_ms = harness.clock.monotonic_ms() - started
+  const changed = changed_files(harness.process, root)
+  if !is_ok(outcome) {
+    return {
+      observation: {
+        tag: "error",
+        error: error_text(unwrap_err(outcome)),
+        reported_files: [],
+        changed_files: changed,
+        wall_ms: wall_ms,
+      },
+      raw: nil,
+    }
+  }
+  const raw = unwrap(outcome)
+  return {
+    observation: {
+      tag: to_string(raw?.result ?? "missing_result"),
+      error: nil,
+      reported_files: reported_files(root, raw),
+      changed_files: changed,
+      wall_ms: wall_ms,
+    },
+    raw: raw,
+  }
+}
+
+/** The refusal reason: the typed result tag, refined by its typed sub-reason. */
+fn refusal_reason(tag: string, raw: dict?) -> string {
+  const sub = raw?.ambiguity_reason
+  return if sub != nil {
+    tag + ":" + to_string(sub)
+  } else {
+    tag
+  }
+}
+
+fn new_name(language: string, symbol: Symbol) -> string {
+  return if language == "rust" && symbol.kind == "Function" {
+    symbol.name + "_qp"
+  } else {
+    symbol.name + "Qp"
+  }
+}
+
+fn symbol_ref(symbol: Symbol) -> dict {
+  let selector: dict = pick(symbol, ["name", "path", "line", "kind"])
+  if symbol.col != nil {
+    selector = selector + {col: symbol.col}
+  }
+  return selector
+}
+
+fn added_param(language: string) -> dict {
+  return if language == "rust" {
+    {name: "_qp_extra", type: "u8", call_value: "0"}
+  } else if language == "java" {
+    {name: "qpExtra", type: "int", call_value: "0"}
+  } else {
+    {name: "_qpExtra", type: "number", default: "0", call_value: "0"}
+  }
+}
+
+fn moved_path(language: string, path: string) -> string {
+  const dir = dirname(path)
+  const base = if language == "rust" {
+    "qp_moved.rs"
+  } else {
+    "qpMoved.ts"
+  }
+  return if dir == "" || dir == "." {
+    base
+  } else {
+    dir + "/" + base
+  }
+}
+
+fn insert_query(language: string, name: string) -> string {
+  if language == "rust" {
+    return "(impl_item !trait type: [(type_identifier) @name (generic_type type: (type_identifier) @name)] body: (declaration_list) @anchor (#eq? @name \""
+      + name
+      + "\"))"
+  }
+  if language == "java" {
+    return "[(class_declaration name: (identifier) @name body: (class_body) @anchor) (enum_declaration name: (identifier) @name body: (enum_body) @anchor) (record_declaration name: (identifier) @name body: (class_body) @anchor)] (#eq? @name \""
+      + name
+      + "\")"
+  }
+  return "[(class_declaration name: (type_identifier) @name body: (class_body) @anchor) (abstract_class_declaration name: (type_identifier) @name body: (class_body) @anchor)] (#eq? @name \""
+    + name
+    + "\")"
+}
+
+fn inserted_method(language: string) -> string {
+  if language == "rust" {
+    return "#[allow(dead_code)]\nfn qp_inserted(&self) -> u8 {\n    0\n}"
+  }
+  if language == "java" {
+    return "int qpInserted() {\n    return 0;\n}"
+  }
+  return "qpInserted(): number {\n  return 0;\n}"
+}
+
+/** One edit request per arm; `dry_run` is added by the caller. */
+fn edit_call(
+  harness: Harness,
+  arm: string,
+  language: string,
+  root: string,
+  symbol: Symbol,
+) -> fn(bool) -> dict {
+  if arm == "rename_symbol:syntax_tree" || arm == "rename_symbol:language_server" {
+    const backend = if arm == "rename_symbol:syntax_tree" {
+      "syntax_tree"
+    } else {
+      "language_server"
+    }
+    return { dry_run ->
+      harness.code_index.rename_symbol(
+        {
+          symbol_ref: symbol_ref(symbol),
+          new_name: new_name(language, symbol),
+          scope: "workspace",
+          backend: backend,
+          dry_run: dry_run,
+        },
+      )
+    }
+  }
+  if arm == "change_signature" {
+    return { dry_run ->
+      edit_add_parameter(
+        harness.code_index,
+        {symbol_ref: symbol_ref(symbol), param: added_param(language), dry_run: dry_run},
+      )
+    }
+  }
+  if arm == "move_symbol" {
+    return { dry_run ->
+      harness.code_index.move_symbol(
+        {
+          symbol: symbol.name,
+          path: symbol.path,
+          line: symbol.line,
+          kind: symbol.kind,
+          to_path: moved_path(language, symbol.path),
+          dry_run: dry_run,
+        },
+      )
+    }
+  }
+  return { dry_run ->
+    harness.ast.insert_at_anchor(
+      {
+        path: root + "/" + symbol.path,
+        query: insert_query(language, symbol.name),
+        position: "last_child",
+        content: inserted_method(language),
+        dry_run: dry_run,
+      },
+    )
+  }
+}
+
+/**
+ * The graph query behind find_references: call sites, referencing files and definitions by name.
+ */
+fn find_reference_files(code_index: HarnessCodeIndex, name: string) -> list<string> {
+  const safe = name.replace("\\", "\\\\").replace("'", "\\'")
+  const queries = [
+    "MATCH (f:Function {name: '" + safe + "'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
+    "MATCH (s {name: '" + safe + "'})<-[:REFS]-(m:Module) RETURN m.path AS path",
+    "MATCH (d {name: '" + safe
+      + "'}) WHERE d.kind = 'Function' OR d.kind = 'Type' OR d.kind = 'Module' RETURN d.path AS path",
+  ]
+  let files: list<string> = []
+  for query in queries {
+    for row in code_index.cypher({query: query}).rows {
+      const path = to_string(row["path"] ?? "")
+      if path != "" && !files.contains(path) {
+        files = files + [path]
+      }
+    }
+  }
+  return files.sorted()
+}
+
+fn backend_fields(raw: dict?) -> dict {
+  const backend = raw?.backend
+  if backend == nil {
+    return {}
+  }
+  return {
+    backend: backend?.name,
+    server: backend?.server,
+    server_start: backend?.server_start,
+    server_elapsed_ms: backend?.server_elapsed_ms,
+    fallback_reason: backend?.fallback_reason,
+  }
+}
+
+fn short_raw(raw: dict?) -> dict? {
+  if raw == nil {
+    return nil
+  }
+  return {
+    result: raw?.result,
+    applied: raw?.applied,
+    match_count: raw?.match_count,
+    details: head_of(to_string(raw?.details ?? "")),
+    warnings: (raw?.warnings ?? []).slice(0, min(5, len(raw?.warnings ?? []))),
+    conflicts: (raw?.conflicts ?? []).slice(0, min(5, len(raw?.conflicts ?? []))),
+  }
+}
+
+fn hash_order(harness: Harness, seed: string, symbol: Symbol) -> string {
+  return sha256(
+    seed + "\\u{0}" + symbol.path + "\\u{0}" + to_string(symbol.line) + "\\u{0}" + symbol.name,
+  )
+}
+
+fn excluded(repo: RepoPlan, path: string) -> bool {
+  for prefix in repo.exclude_prefixes ?? [] {
+    if path.starts_with(prefix) {
+      return true
+    }
+  }
+  return false
+}
+
+fn sample(harness: Harness, repo: RepoPlan, plan: Plan, kind: string, count: int) -> dict {
+  const rows = harness.code_index.cypher(
+    {
+      query: "MATCH (n:" + kind
+        + ") RETURN n.name AS name, n.path AS path, n.line AS line, n.col AS col, n.container AS container, n.language AS language",
+    },
+  ).rows
+  let candidates: list<Symbol> = []
+  let seen: list<string> = []
+  for row in rows {
+    const name = to_string(row["name"] ?? "")
+    const path = to_string(row["path"] ?? "")
+    const key = path + ":" + to_string(row["line"]) + ":" + name
+    if len(name) > 1 && to_string(row["language"] ?? "") == repo.language && !excluded(repo, path)
+      && !seen.contains(key) {
+      seen = seen + [key]
+      candidates = candidates
+        + [
+          {
+            name: name,
+            path: path,
+            line: to_int(row["line"]) ?? 0,
+            col: to_int(row["col"]),
+            kind: kind,
+            container: to_string(row["container"] ?? ""),
+          },
+        ]
+    }
+  }
+  const ordered = candidates.sorted_by({ symbol -> hash_order(harness, plan.seed, symbol) })
+  return {candidates: len(candidates), picked: ordered.slice(0, min(count, len(ordered)))}
+}
+
+fn arms_for(plan: Plan, symbol: Symbol) -> list<string> {
+  const enabled = plan.arms ?? ALL_ARMS
+  const base = if symbol.kind == "Function" {
+    FUNCTION_ARMS
+  } else {
+    TYPE_ARMS
+  }
+  // move_symbol only moves top-level declarations; a member is out of its domain.
+  return base.filter(
+    { arm -> enabled.contains(arm) && (arm != "move_symbol" || symbol.container == "") },
+  )
+    .to_list()
+}
+
+fn symbol_label(symbol: Symbol) -> string {
+  return symbol.path + ":" + to_string(symbol.line) + " " + symbol.name
+}
+
+fn record(state: Receipt, attempt: dict) -> Receipt {
+  return state + {attempts: state.attempts + [attempt]}
+}
+
+fn pending_attempt(repo: RepoPlan, arm: string, symbol: Symbol, reason: string) -> dict {
+  return {
+    repo: repo.id,
+    language: repo.language,
+    arm: arm,
+    symbol: symbol,
+    outcome: "pending",
+    reason: reason,
+  }
+}
+
+fn write_receipt(fs: HarnessFs, out_dir: string, state: dict) {
+  fs.write_text(path_join(out_dir, "receipt.json"), json_stringify_pretty(state) + "\n")
+}
+
+/** Run every arm for one symbol on a clean clone, leaving it clean again. */
+pub fn run_symbol(
+  harness: Harness,
+  repo: RepoPlan,
+  root: string,
+  symbol: Symbol,
+  arms: list<string>,
+) -> list<dict> {
+  let attempts: list<dict> = []
+  let reference_files: list<string>? = nil
+  let reference_error: string? = nil
+  let verified_renames = {}
+  for arm in arms {
+    if arm == "find_references" {
+      const started = harness.clock.monotonic_ms()
+      const res = try {
+        find_reference_files(harness.code_index, symbol.name)
+      }
+      if is_ok(res) {
+        reference_files = unwrap(res)
+      } else {
+        reference_error = error_text(unwrap_err(res))
+      }
+      // A read-only query must not write; a write would also be charged to
+      // the next arm's preview.
+      const wrote = changed_files(harness.process, root)
+      if len(wrote) > 0 {
+        reset_clone(harness, root)
+        harness.code_index.rebuild({root: root})
+      }
+      attempts = attempts
+        + [
+          {
+            arm: arm,
+            wall_ms: harness.clock.monotonic_ms() - started,
+            files: reference_files ?? [],
+            error: reference_error,
+            wrote: wrote,
+          },
+        ]
+      continue
+    }
+    const call = edit_call(harness, arm, repo.language, root, symbol)
+    const preview = observe(harness, root, { -> call(true) })
+    let apply = nil
+    let oracle = nil
+    if preview.observation.error == nil && len(preview.observation.changed_files) == 0
+      && ["applied", "dry_run"].contains(preview.observation.tag) {
+      apply = observe(harness, root, { -> call(false) })
+      if apply.observation.error == nil && ["applied", "dry_run"].contains(apply.observation.tag)
+        && len(apply.observation.changed_files) > 0 {
+        oracle = run_oracle(harness, repo, root)
+      }
+    }
+    const checked_against = if arm == "rename_symbol:syntax_tree" {
+      reference_files
+    } else {
+      nil
+    }
+    let verdict: Verdict = classify_edit(
+      {
+        preview: preview.observation,
+        apply: apply?.observation,
+        oracle_passed: oracle?.passed,
+        reference_files: checked_against,
+      },
+    )
+    if verdict.outcome == "refused" {
+      const raw = if apply != nil {
+        apply.raw
+      } else {
+        preview.raw
+      }
+      verdict = verdict + {reason: refusal_reason(verdict.reason, raw)}
+    }
+    if verdict.outcome == "applied_correct" && arm.starts_with("rename_symbol:") {
+      verified_renames = verified_renames + {[arm]: apply.observation.changed_files}
+    }
+    attempts = attempts
+      + [
+        {
+          arm: arm,
+          outcome: verdict.outcome,
+          reason: verdict.reason,
+          preview: preview.observation,
+          preview_raw: short_raw(preview.raw),
+          apply: apply?.observation,
+          apply_raw: short_raw(apply?.raw),
+          oracle: oracle,
+          // The preview is the arm's first call, so it carries any cold start.
+          preview_backend: backend_fields(preview.raw),
+          apply_backend: backend_fields(apply?.raw),
+          server_start: backend_fields(preview.raw)?.server_start,
+        },
+      ]
+    reset_clone(harness, root)
+    harness.code_index.rebuild({root: root})
+  }
+  // find_references is judged last, against the semantic rename when it verified.
+  const oracle_source = if verified_renames["rename_symbol:language_server"] != nil {
+    "rename_symbol:language_server"
+  } else if verified_renames["rename_symbol:syntax_tree"] != nil {
+    "rename_symbol:syntax_tree"
+  } else {
+    nil
+  }
+  return attempts.map(
+    { attempt ->
+      if attempt.arm != "find_references" {
+        return attempt
+      }
+      const oracle_files = if oracle_source != nil {
+        verified_renames[oracle_source]
+      } else {
+        nil
+      }
+      const verdict = classify_references(attempt.error, attempt.files, oracle_files, attempt.wrote)
+      const extra = if oracle_files != nil {
+        attempt.files.filter({ path -> !oracle_files.contains(path) }).to_list()
+      } else {
+        []
+      }
+      return attempt
+        + {
+          outcome: verdict.outcome,
+          reason: verdict.reason,
+          oracle_source: oracle_source,
+          oracle_files: oracle_files,
+          extra_files: extra,
+        }
+    },
+  )
+    .to_list()
+}
+
+fn prepare_repo(harness: Harness, repo: RepoPlan, work_dir: string) -> dict {
+  const head = run_cmd(harness, ["git", "rev-parse", "HEAD"], repo.checkout, 60000)
+  if !head.success || trim(head.output) != repo.commit {
+    return {ok: false, reason: "checkout_not_at_commit", detail: trim(head.output)}
+  }
+  const root = path_join(work_dir, repo.id)
+  const clone = run_cmd(
+    harness,
+    ["git", "clone", "-q", "--local", repo.checkout, root],
+    work_dir,
+    600000,
+  )
+  if !clone.success {
+    return {ok: false, reason: "clone_failed", detail: head_of(clone.output)}
+  }
+  run_cmd(harness, ["git", "checkout", "-q", repo.commit], root, 60000)
+  for argv in repo.setup {
+    const res = run_cmd(harness, argv, root, 1800000)
+    if !res.success {
+      return {ok: false, reason: "setup_failed", detail: head_of(res.output), root: root}
+    }
+  }
+  const baseline = run_oracle(harness, repo, root)
+  if !baseline.passed {
+    return {ok: false, reason: "baseline_oracle_failed", baseline: baseline, root: root}
+  }
+  return index_clone(harness, root) + {root: root, baseline: baseline}
+}
+
+/**
+ * Index a clean clone and make it the baseline every attempt is compared to.
+ * The rebuild persists the index inside the workspace, and setup or the
+ * oracle can leave untracked outputs; git is told to ignore those files so
+ * they never read as a tool's edit. A modified tracked file fails instead.
+ */
+pub fn index_clone(harness: Harness, root: string) -> dict {
+  const started = harness.clock.monotonic_ms()
+  const index = harness.code_index.rebuild({root: root, force: true})
+  const wall_ms = harness.clock.monotonic_ms() - started
+  let untracked = []
+  for entry in git_status(harness.process, root) {
+    if !entry.untracked {
+      return {ok: false, reason: "tracked_files_dirty_before_attempts", detail: entry.path}
+    }
+    untracked = untracked + [entry.path]
+  }
+  if len(untracked) > 0 {
+    const exclude = path_join(root, ".git/info/exclude")
+    harness.fs.write_text(
+      exclude,
+      harness.fs.read_text(exclude) + "\n" + join(untracked, "\n") + "\n",
+    )
+  }
+  return {
+    ok: true,
+    baseline_untracked: untracked,
+    index: {wall_ms: wall_ms, files_indexed: index.files_indexed},
+  }
+}
+
+fn attempt_row(attempt: dict) -> AttemptRow {
+  return {
+    repo: attempt.repo,
+    language: attempt.language,
+    arm: attempt.arm,
+    outcome: attempt.outcome,
+    reason: attempt.reason,
+    server_start: attempt?.server_start,
+    preview_ms: attempt?.preview?.wall_ms ?? attempt?.wall_ms,
+  }
+}
+
+fn wrong_detail(attempt: dict) -> string {
+  if attempt?.error != nil && attempt.arm != "find_references" {
+    return head_of(to_string(attempt.error)).slice(0, min(300, len(to_string(attempt.error))))
+  }
+  if attempt?.oracle?.output_head != nil {
+    const lines = attempt.oracle.output_head.split("\n").filter({ line -> line.contains("error") })
+      .to_list()
+    return if len(lines) > 0 {
+      lines[0]
+    } else {
+      attempt.oracle.output_head.slice(0, min(200, len(attempt.oracle.output_head)))
+    }
+  }
+  if attempt.arm == "find_references" {
+    return "missed "
+      + join(
+        (attempt?.oracle_files ?? []).filter({ path -> !attempt.files.contains(path) }).to_list(),
+        ", ",
+      )
+  }
+  return to_string(attempt?.apply?.error ?? attempt?.preview?.error ?? "")
+}
+
+fn main(harness: Harness) -> int {
+  if len(argv) != 2 {
+    harness.stdio.eprintln("usage: precise_qualify.harn -- <plan.json> <out-dir>")
+    return 2
+  }
+  const plan = json_decode(harness.fs.read_text(argv[0]), schema_of(Plan))?
+  const out_dir = argv[1]
+  // With no oracle command nothing compiles an edit, so every apply would read correct.
+  const unchecked = plan.repos.filter({ repo -> len(repo.oracle) == 0 }).map({ repo -> repo.id })
+    .to_list()
+  if len(unchecked) > 0 {
+    harness.stdio.eprintln("every repo needs an oracle command; none for " + unchecked.join(", "))
+    return 2
+  }
+  if harness.fs.exists(path_join(out_dir, "receipt.json")) {
+    harness.stdio.eprintln("refusing to overwrite an existing receipt in " + out_dir)
+    return 2
+  }
+  harness.fs.mkdir(out_dir)
+  const work_dir = path_join(out_dir, "work")
+  harness.fs.mkdir(work_dir)
+  const stop_at_ms = harness.clock.monotonic_ms() + plan.max_minutes * 60000
+  let state: Receipt = {
+    schema: RECEIPT_SCHEMA,
+    schema_version: RECEIPT_SCHEMA_VERSION,
+    started_at: harness.clock.date_iso(),
+    finished_at: nil,
+    harn_version: to_string(harness.runtime.introspection().harn_version),
+    host: {os: harness.system.platform().os, arch: harness.system.platform().arch},
+    plan: plan,
+    repos: [],
+    attempts: [],
+    summary: [],
+    totals: nil,
+  }
+  write_receipt(harness.fs, out_dir, state)
+  for repo in plan.repos {
+    harness.stdio.eprintln("[precise-qualify] preparing " + repo.id)
+    const prepared = prepare_repo(harness, repo, work_dir)
+    let symbols: list<Symbol> = []
+    let candidates = {}
+    if prepared.ok {
+      const functions = sample(harness, repo, plan, "Function", plan.functions)
+      const types = sample(harness, repo, plan, "Type", plan.types)
+      symbols = functions.picked + types.picked
+      candidates = {functions: functions.candidates, types: types.candidates}
+    }
+    state = state
+      + {
+        repos: state.repos
+          + [
+            {
+              id: repo.id,
+              language: repo.language,
+              url: repo.url,
+              commit: repo.commit,
+              prepared: prepared,
+              candidates: candidates,
+              sampled: symbols,
+            },
+          ],
+      }
+    if !prepared.ok {
+      harness.stdio.eprintln("[precise-qualify] " + repo.id + " not measured: " + prepared.reason)
+      for kind in ["Function", "Type"] {
+        const count = if kind == "Function" {
+          plan.functions
+        } else {
+          plan.types
+        }
+        for i in range(0, count) {
+          const placeholder: Symbol = {
+            name: "(unsampled)",
+            path: "",
+            line: i,
+            col: nil,
+            kind: kind,
+            container: "",
+          }
+          for arm in arms_for(plan, placeholder) {
+            state = record(state, pending_attempt(repo, arm, placeholder, prepared.reason))
+          }
+        }
+      }
+      write_receipt(harness.fs, out_dir, state)
+      continue
+    }
+    for symbol in symbols {
+      const arms = arms_for(plan, symbol)
+      if harness.clock.monotonic_ms() > stop_at_ms {
+        for arm in arms {
+          state = record(state, pending_attempt(repo, arm, symbol, "time_budget"))
+        }
+        continue
+      }
+      harness.stdio.eprintln("[precise-qualify] " + repo.id + " " + symbol_label(symbol))
+      const outcome = try {
+        run_symbol(harness, repo, prepared.root, symbol, arms)
+      }
+      if is_ok(outcome) {
+        for attempt in unwrap(outcome) {
+          state = record(state, attempt + {repo: repo.id, language: repo.language, symbol: symbol})
+        }
+      } else {
+        const message = error_text(unwrap_err(outcome))
+        for arm in arms {
+          state = record(
+            state,
+            {
+              repo: repo.id,
+              language: repo.language,
+              arm: arm,
+              symbol: symbol,
+              outcome: "crashed",
+              reason: "probe_error",
+              error: message,
+            },
+          )
+        }
+        reset_clone(harness, prepared.root)
+        harness.code_index.rebuild({root: prepared.root})
+      }
+      write_receipt(harness.fs, out_dir, state)
+    }
+  }
+  const rows = summarize(state.attempts.map({ attempt -> attempt_row(attempt) }).to_list())
+  const wrong: list<WrongAttempt> = state.attempts.filter(
+    { attempt -> attempt.outcome == "applied_wrong" || attempt.outcome == "crashed" },
+  )
+    .map(
+      { attempt ->
+        {
+          repo: attempt.repo,
+          arm: attempt.arm,
+          symbol: symbol_label(attempt.symbol),
+          reason: attempt.reason,
+          detail: wrong_detail(attempt),
+        }
+      },
+    )
+    .to_list()
+  state = state + {finished_at: harness.clock.date_iso(), summary: rows, totals: totals(rows)}
+  write_receipt(harness.fs, out_dir, state)
+  const notes = state.repos.map(
+    { repo ->
+      repo.id + ": " + repo.url + " @ " + repo.commit + ", "
+        + to_string(len(repo.sampled))
+        + " symbols sampled"
+        + if repo.prepared.ok {
+          ""
+        } else {
+          ", NOT MEASURED (" + repo.prepared.reason + ")"
+        }
+    },
+  )
+    .to_list()
+    + [
+      "seed " + plan.seed + ", " + state.harn_version + ", " + state.host.os + "/"
+        + state.host.arch,
+      "cold = the call that started the language server; every other call is warm",
+    ]
+  harness.fs.write_text(
+    path_join(out_dir, "table.md"),
+    render_markdown("Precise-edit qualification", rows, wrong, notes),
+  )
+  harness.stdio.println(json_stringify(totals(rows)))
+  return 0
+}

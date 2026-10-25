@@ -14,7 +14,7 @@ use super::{
 /// from the previous call are the same shared VM values, so each message's
 /// projection is memoized by identity and only messages new at their position
 /// are converted. Non-dict entries are skipped.
-pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json::Value>, VmError> {
+pub fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json::Value>, VmError> {
     Ok(
         crate::llm::content_hash::memoized_json_messages(msg_list, vm_message_to_json)
             .into_iter()
@@ -85,7 +85,7 @@ pub(crate) fn vm_message(role: &str, content: &str) -> VmValue {
     vm_message_value(role, VmValue::string(content))
 }
 
-pub(crate) fn vm_message_value(role: &str, content: VmValue) -> VmValue {
+pub fn vm_message_value(role: &str, content: VmValue) -> VmValue {
     let mut msg = BTreeMap::new();
     msg.put_str("role", role);
     msg.insert("content".to_string(), content);
@@ -97,7 +97,7 @@ pub(crate) fn vm_message_value(role: &str, content: VmValue) -> VmValue {
 /// Every call re-projects the whole request history, so each message's
 /// projection is memoized by content and only messages new to this thread are
 /// converted. The projection is a pure function of the message.
-pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue> {
+pub fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue> {
     crate::llm::content_hash::memoized_vm_messages(msg_list, json_message_to_vm)
         .into_iter()
         .flatten()
@@ -167,7 +167,7 @@ fn json_message_to_vm(msg: &serde_json::Value) -> Option<VmValue> {
         .map(|content| vm_message_value(role, crate::schema::json_to_vm_value(content)))
 }
 
-pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValue, VmError> {
+pub fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValue, VmError> {
     match args.first() {
         Some(VmValue::List(list)) => {
             let mut new_messages = (**list).clone();

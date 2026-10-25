@@ -822,7 +822,7 @@ builtins were deleted.
 | `harness.fs.find_text(root, pattern, options?)` | root: string, pattern: string, options: dict | list, bool, int, or handle dict | Search files under a root and return `{path, line, col, column, text}` hits. Options: `mode` (`hits`, `exists`, `count`), `preset` (`default`, `source`), `ignore_policy` (`none`, `builtin`, `project`; default `project`), `include`, `exclude`, `max_depth`, `max_filesize`/`max_file_size`, `threads`, `parallel`, `follow_symlinks`, `include_hidden`, `case_sensitive`/`case_insensitive`, `fixed_strings`, `max_matches`, `background` |
 | `harness.fs.find_evidence(roots, patterns, options?)` | roots: list, patterns: list, options: dict | receipt or handle dict | Walk labeled roots once for labeled literal patterns. Returns deterministic path-relative hits and settled per-root status. Options: `preset`, `ignore_policy` (`none`, `builtin`, `project`; default `project`), `include`, `exclude`, `max_depth`, `max_filesize`/`max_file_size`, `threads`, `follow_symlinks`, `include_hidden`, ASCII `case_insensitive`, `max_matches`, `max_matches_per_root`, `background` |
 | `harness.fs.mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
-| `harness.fs.stat(path)` | path: string | dict | File metadata: `{size, is_file, is_dir, readonly, modified}`. Throws on failure |
+| `harness.fs.stat(path, options?)` | path: string, options?: `{follow_symlinks?: bool}` | `{size, is_file, is_dir, is_symlink, readonly, modified?, mode?, identity?}` | File metadata. Follows symbolic links by default; set `follow_symlinks: false` to inspect the link itself. Unix hosts report permission bits in `mode` and an opaque file `identity`; other hosts omit both. Throws on failure |
 | `harness.fs.temp_dir()` | none | string | System temporary directory path |
 | `harness.fs.workspace_temp_dir()` | none | string | Return a workspace-local scratch directory, creating it lazily |
 | `harness.fs.mkdtemp_in_workspace(prefix?)` | prefix: string (default `"harn-"`) | string | Create a uniquely named directory under `harness.fs.workspace_temp_dir()` |
@@ -2600,9 +2600,22 @@ advisory only), or `unbound` (no binding; advisory only).
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `secret_scan(content)` | content: string | list | Scan text or diffs for high-signal leaked credentials and return redacted findings with detector metadata and source locations |
+| `secret_scan(content, hashes?)` | content: string, hashes: `list<string>` | list of typed findings | Scan for leaked credentials, or use a supplied SHA-256 token denylist |
 | `secret_pattern_catalog()` | none | list of records | Read the compiled catalog in detector order, with `redaction_name`, `detector`, `source`, `title`, `regex`, and `precision` string fields |
 | `self_review(diff, rubric?, max_rounds?)` | diff: string, rubric: string, max_rounds: int | dict | Run a structured pre-PR self-review over a diff, merge in `secret_scan` blockers, and append a `pr.self_review` trust-graph record with review metadata |
+
+With a `hashes` list, `secret_scan` checks only tokens matching
+`[A-Za-z0-9._-]+`. It lowercases each token before hashing, so a hostname and
+its longer domain form are distinct tokens. Each hash must be a lowercase,
+64-character SHA-256 digest. Empty or invalid lists fail rather than report a
+clean scan. Omit `hashes`, or pass `nil`, to use the credential-pattern scan.
+
+Hash findings contain `detector`, `source`, `title`, `precision`, `line`,
+`column_start`, `column_end`, `start_offset`, `end_offset`, `redacted`, and
+`fingerprint`. Lines and character columns start at 1; byte offsets start at 0
+and end just after the match. `redacted` is always `[hash match]`, and
+`fingerprint` is the complete lowercase digest. No part of a matched token is
+returned. The same implementation runs in native and portable programs.
 
 Use `precision == "high"` for self-identifying token patterns that a host can
 compile with its own regex engine. Heuristic patterns need context checks beyond

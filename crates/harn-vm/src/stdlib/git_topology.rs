@@ -152,7 +152,7 @@ fn collect_alternates(common_dir: &Path, read_only: &mut Vec<PathBuf>, depth: us
 /// Parse the `gitdir: <path>` pointer of a linked worktree's `.git` file.
 /// Relative targets resolve against the `.git` file's directory. Returns `None`
 /// for an unreadable file or one that does not begin with `gitdir:`.
-pub(crate) fn read_gitdir_file(git_path: &Path) -> Option<PathBuf> {
+pub fn read_gitdir_file(git_path: &Path) -> Option<PathBuf> {
     let text = read_text_if_exists(git_path)?;
     let raw = text.trim().strip_prefix("gitdir:")?.trim();
     let candidate = PathBuf::from(raw);
@@ -166,7 +166,7 @@ pub(crate) fn read_gitdir_file(git_path: &Path) -> Option<PathBuf> {
 /// Resolve the shared common git dir from a worktree git dir's `commondir`
 /// file. Relative targets resolve against the git dir. Returns `None` when the
 /// file is absent (the git dir is itself the common dir).
-pub(crate) fn read_commondir(git_dir: &Path) -> Option<PathBuf> {
+pub fn read_commondir(git_dir: &Path) -> Option<PathBuf> {
     let raw = read_text_if_exists(&git_dir.join("commondir"))?;
     let candidate = PathBuf::from(raw.trim());
     if candidate.is_absolute() {

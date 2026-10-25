@@ -15,21 +15,19 @@ use super::options::DIRECTIVE_IDS_KEY;
 use super::{vm_value_to_json, TRANSCRIPT_ASSET_TYPE, TRANSCRIPT_TYPE, TRANSCRIPT_VERSION};
 
 /// Canonical `kind` for a [`SystemReminder`] transcript event.
-pub(crate) const SYSTEM_REMINDER_EVENT_KIND: &str = "system_reminder";
-pub(crate) const REMINDER_LIFECYCLE_TOPIC: &str = "transcript.reminder.lifecycle";
-pub(crate) const REMINDER_INJECTED_EVENT_KIND: &str = "transcript.reminder.injected";
-pub(crate) const REMINDER_FIRED_EVENT_KIND: &str = "transcript.reminder.fired";
-pub(crate) const REMINDER_DEDUPED_EVENT_KIND: &str = "transcript.reminder.deduped";
-pub(crate) const REMINDER_EXPIRED_EVENT_KIND: &str = "transcript.reminder.expired";
-pub(crate) const REMINDER_DROPPED_EVENT_KIND: &str = "transcript.reminder.dropped";
-pub(crate) const REMINDER_INHERITED_EVENT_KIND: &str = "transcript.reminder.inherited";
-pub(crate) const REMINDER_ITERATION_SUMMARY_EVENT_KIND: &str =
-    "transcript.reminder.iteration_summary";
-pub(crate) const REMINDER_PROVIDER_EVALUATED_EVENT_KIND: &str =
-    "transcript.reminder.provider_evaluated";
-pub(crate) const SUSPENSION_EVENT_KIND: &str = "suspension";
-pub(crate) const RESUMPTION_EVENT_KIND: &str = "resumption";
-pub(crate) const DRAIN_DECISION_EVENT_KIND: &str = "drain_decision";
+pub const SYSTEM_REMINDER_EVENT_KIND: &str = "system_reminder";
+pub const REMINDER_LIFECYCLE_TOPIC: &str = "transcript.reminder.lifecycle";
+pub const REMINDER_INJECTED_EVENT_KIND: &str = "transcript.reminder.injected";
+pub const REMINDER_FIRED_EVENT_KIND: &str = "transcript.reminder.fired";
+pub const REMINDER_DEDUPED_EVENT_KIND: &str = "transcript.reminder.deduped";
+pub const REMINDER_EXPIRED_EVENT_KIND: &str = "transcript.reminder.expired";
+pub const REMINDER_DROPPED_EVENT_KIND: &str = "transcript.reminder.dropped";
+pub const REMINDER_INHERITED_EVENT_KIND: &str = "transcript.reminder.inherited";
+pub const REMINDER_ITERATION_SUMMARY_EVENT_KIND: &str = "transcript.reminder.iteration_summary";
+pub const REMINDER_PROVIDER_EVALUATED_EVENT_KIND: &str = "transcript.reminder.provider_evaluated";
+pub const SUSPENSION_EVENT_KIND: &str = "suspension";
+pub const RESUMPTION_EVENT_KIND: &str = "resumption";
+pub const DRAIN_DECISION_EVENT_KIND: &str = "drain_decision";
 
 #[allow(dead_code)] // schema surface reserved for lifecycle producers
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -313,7 +311,7 @@ impl SystemReminder {
     }
 }
 
-pub(crate) fn transcript_message_list(
+pub fn transcript_message_list(
     transcript: &crate::value::DictMap,
 ) -> Result<Vec<VmValue>, VmError> {
     match transcript.get("messages") {
@@ -325,9 +323,7 @@ pub(crate) fn transcript_message_list(
     }
 }
 
-pub(crate) fn transcript_asset_list(
-    transcript: &crate::value::DictMap,
-) -> Result<Vec<VmValue>, VmError> {
+pub fn transcript_asset_list(transcript: &crate::value::DictMap) -> Result<Vec<VmValue>, VmError> {
     match transcript.get("assets") {
         Some(VmValue::List(list)) => Ok((**list).clone()),
         Some(_) => Err(VmError::Thrown(VmValue::string(
@@ -344,15 +340,15 @@ fn transcript_string_field(transcript: &crate::value::DictMap, key: &str) -> Opt
     })
 }
 
-pub(crate) fn transcript_summary_text(transcript: &crate::value::DictMap) -> Option<String> {
+pub fn transcript_summary_text(transcript: &crate::value::DictMap) -> Option<String> {
     transcript_string_field(transcript, "summary")
 }
 
-pub(crate) fn transcript_id(transcript: &crate::value::DictMap) -> Option<String> {
+pub fn transcript_id(transcript: &crate::value::DictMap) -> Option<String> {
     transcript_string_field(transcript, "id")
 }
 
-pub(crate) fn new_transcript_with(
+pub fn new_transcript_with(
     id: Option<String>,
     messages: Vec<VmValue>,
     summary: Option<String>,
@@ -369,7 +365,7 @@ pub(crate) fn new_transcript_with(
     )
 }
 
-pub(crate) fn new_transcript_with_events(
+pub fn new_transcript_with_events(
     id: Option<String>,
     messages: Vec<VmValue>,
     summary: Option<String>,
@@ -422,7 +418,7 @@ pub(crate) fn new_transcript_with_event_prefix(
     VmValue::dict(transcript)
 }
 
-pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
+pub fn transcript_event_from_message(message: &VmValue) -> VmValue {
     let dict = message.as_dict().cloned().unwrap_or_default();
     // Reminder-shaped messages (kind: "system_reminder", reminder: {...})
     // surface as typed reminder events so downstream consumers see the
@@ -480,7 +476,7 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
     VmValue::dict(event)
 }
 
-pub(crate) fn transcript_events_from_messages(messages: &[VmValue]) -> Vec<VmValue> {
+pub fn transcript_events_from_messages(messages: &[VmValue]) -> Vec<VmValue> {
     messages.iter().map(transcript_event_from_message).collect()
 }
 
@@ -506,7 +502,7 @@ pub(crate) fn transcript_to_vm_with_events(
     )
 }
 
-pub(crate) fn transcript_to_vm_with_event_prefix(
+pub fn transcript_to_vm_with_event_prefix(
     id: Option<String>,
     summary: Option<String>,
     metadata: Option<serde_json::Value>,
@@ -529,7 +525,7 @@ pub(crate) fn transcript_to_vm_with_event_prefix(
     )
 }
 
-pub(crate) fn transcript_event(
+pub fn transcript_event(
     kind: &str,
     role: &str,
     visibility: &str,
@@ -551,7 +547,7 @@ pub(crate) fn transcript_event(
 /// `CompactionReceipt::receipt_id` — the one id that also rides the live event,
 /// ACP, and the run-observability record. [`transcript_event`] delegates here
 /// with a fresh UUID for every other event kind.
-pub(crate) fn transcript_event_with_id(
+pub fn transcript_event_with_id(
     id: &str,
     kind: &str,
     role: &str,
@@ -593,7 +589,7 @@ pub(crate) fn transcript_event_with_id(
     VmValue::dict(event)
 }
 
-pub(crate) fn normalize_transcript_asset(value: &VmValue) -> VmValue {
+pub fn normalize_transcript_asset(value: &VmValue) -> VmValue {
     let mut asset = value.as_dict().cloned().unwrap_or_default();
     asset.put_str("_type", TRANSCRIPT_ASSET_TYPE);
     if !asset.contains_key("id") {
@@ -617,7 +613,7 @@ pub(crate) fn normalize_transcript_asset(value: &VmValue) -> VmValue {
     VmValue::dict(asset)
 }
 
-pub(crate) fn is_transcript_value(value: &VmValue) -> bool {
+pub fn is_transcript_value(value: &VmValue) -> bool {
     value
         .as_dict()
         .and_then(|d| d.get("_type"))
@@ -632,7 +628,7 @@ pub(crate) fn is_transcript_value(value: &VmValue) -> bool {
 /// other transcript event so existing consumers ignore it cleanly, and
 /// additionally carries the lifecycle envelope under `reminder` plus a
 /// flattened `metadata` block for hosts that key off `event.metadata`.
-pub(crate) fn transcript_reminder_event(reminder: &SystemReminder) -> VmValue {
+pub fn transcript_reminder_event(reminder: &SystemReminder) -> VmValue {
     let reminder_json = serde_json::to_value(reminder).unwrap_or(serde_json::Value::Null);
     // `system_reminder` events are public by default — they're intended
     // to nudge the model on the next turn — but never duplicate into
@@ -657,14 +653,14 @@ pub(crate) fn transcript_reminder_event(reminder: &SystemReminder) -> VmValue {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct ReminderPostTurnReport {
+pub struct ReminderPostTurnReport {
     pub transcript: Option<VmValue>,
     pub decremented_count: usize,
     pub expired: Vec<SystemReminder>,
     pub remaining_count: usize,
 }
 
-pub(crate) fn apply_reminder_post_turn(transcript: &VmValue, turn: i64) -> ReminderPostTurnReport {
+pub fn apply_reminder_post_turn(transcript: &VmValue, turn: i64) -> ReminderPostTurnReport {
     let Some(dict) = transcript.as_dict() else {
         return ReminderPostTurnReport::default();
     };
@@ -792,7 +788,7 @@ fn ensure_reminder_correlation(payload: &mut JsonValue) {
     }
 }
 
-pub(crate) fn reminder_lifecycle_payload(
+pub fn reminder_lifecycle_payload(
     session_id: Option<&str>,
     reminder: &SystemReminder,
 ) -> JsonValue {
@@ -812,7 +808,7 @@ pub(crate) fn reminder_lifecycle_payload(
     payload
 }
 
-pub(crate) fn emit_reminder_lifecycle_event(kind: &str, mut payload: JsonValue) {
+pub fn emit_reminder_lifecycle_event(kind: &str, mut payload: JsonValue) {
     let Some(log) = active_event_log() else {
         return;
     };
@@ -843,13 +839,13 @@ pub(crate) fn emit_reminder_lifecycle_event(kind: &str, mut payload: JsonValue) 
 /// listing every knob. Unrecognized enum values silently fall back to
 /// the same defaults; strict-typed callers should construct a
 /// [`SystemReminder`] directly.
-pub(crate) fn transcript_reminder_event_from_value(value: &VmValue) -> VmValue {
+pub fn transcript_reminder_event_from_value(value: &VmValue) -> VmValue {
     let reminder = reminder_from_vm_value(value);
     transcript_reminder_event(&reminder)
 }
 
 #[allow(dead_code)] // typed constructor reserved for lifecycle producers
-pub(crate) fn transcript_suspension_event(suspension: &Suspension) -> VmValue {
+pub fn transcript_suspension_event(suspension: &Suspension) -> VmValue {
     let payload = serde_json::to_value(suspension).unwrap_or(JsonValue::Null);
     lifecycle_transcript_event(
         SUSPENSION_EVENT_KIND,
@@ -859,7 +855,7 @@ pub(crate) fn transcript_suspension_event(suspension: &Suspension) -> VmValue {
     )
 }
 
-pub(crate) fn transcript_suspension_event_from_value(value: &VmValue) -> VmValue {
+pub fn transcript_suspension_event_from_value(value: &VmValue) -> VmValue {
     let payload = vm_value_to_json(value);
     let text = payload
         .get("reason")
@@ -869,7 +865,7 @@ pub(crate) fn transcript_suspension_event_from_value(value: &VmValue) -> VmValue
 }
 
 #[allow(dead_code)] // typed constructor reserved for lifecycle producers
-pub(crate) fn transcript_resumption_event(resumption: &Resumption) -> VmValue {
+pub fn transcript_resumption_event(resumption: &Resumption) -> VmValue {
     let payload = serde_json::to_value(resumption).unwrap_or(JsonValue::Null);
     lifecycle_transcript_event(
         RESUMPTION_EVENT_KIND,
@@ -879,7 +875,7 @@ pub(crate) fn transcript_resumption_event(resumption: &Resumption) -> VmValue {
     )
 }
 
-pub(crate) fn transcript_resumption_event_from_value(value: &VmValue) -> VmValue {
+pub fn transcript_resumption_event_from_value(value: &VmValue) -> VmValue {
     let payload = vm_value_to_json(value);
     let text = payload
         .get("initiator_id")
@@ -889,7 +885,7 @@ pub(crate) fn transcript_resumption_event_from_value(value: &VmValue) -> VmValue
 }
 
 #[allow(dead_code)] // typed constructor reserved for lifecycle producers
-pub(crate) fn transcript_drain_decision_event(drain: &DrainDecision) -> VmValue {
+pub fn transcript_drain_decision_event(drain: &DrainDecision) -> VmValue {
     let payload = serde_json::to_value(drain).unwrap_or(JsonValue::Null);
     lifecycle_transcript_event(
         DRAIN_DECISION_EVENT_KIND,
@@ -899,7 +895,7 @@ pub(crate) fn transcript_drain_decision_event(drain: &DrainDecision) -> VmValue 
     )
 }
 
-pub(crate) fn transcript_drain_decision_event_from_value(value: &VmValue) -> VmValue {
+pub fn transcript_drain_decision_event_from_value(value: &VmValue) -> VmValue {
     let payload = vm_value_to_json(value);
     let text = payload
         .get("reason")
@@ -923,7 +919,7 @@ fn lifecycle_transcript_event(
     VmValue::dict(event)
 }
 
-pub(crate) fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
+pub fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
     let dict = value.as_dict().cloned().unwrap_or_default();
     let id = dict
         .get("id")
@@ -1022,7 +1018,7 @@ pub(crate) fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
     }
 }
 
-pub(crate) fn reminder_from_event(event: &VmValue) -> Option<SystemReminder> {
+pub fn reminder_from_event(event: &VmValue) -> Option<SystemReminder> {
     let dict = event.as_dict()?;
     if !dict
         .get("kind")
@@ -1053,7 +1049,7 @@ pub(crate) fn inherited_reminder_for_handoff(
     reminder
 }
 
-pub(crate) fn reminder_propagation_from_transcript(
+pub fn reminder_propagation_from_transcript(
     transcript: &VmValue,
     source_agent_id: &str,
 ) -> Vec<SystemReminder> {
@@ -1076,7 +1072,7 @@ pub(crate) fn reminder_propagation_from_transcript(
         .collect()
 }
 
-pub(crate) fn replace_reminder_payload(event: &VmValue, reminder: &SystemReminder) -> VmValue {
+pub fn replace_reminder_payload(event: &VmValue, reminder: &SystemReminder) -> VmValue {
     let reminder_json = serde_json::to_value(reminder).unwrap_or(JsonValue::Null);
     let reminder_value = crate::schema::json_to_vm_value(&reminder_json);
     let mut dict = event.as_dict().cloned().unwrap_or_default();

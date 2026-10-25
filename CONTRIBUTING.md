@@ -246,7 +246,8 @@ The detection logic lives in
 [`.github/scripts/demo-gate.sh`](.github/scripts/demo-gate.sh) and
 flags additions to:
 
-- **Stdlib builtins** — `crates/harn-vm/src/stdlib/**/*.rs`: a new
+- **Stdlib builtins** — `crates/harn-vm/src/stdlib/**/*.rs`,
+  `crates/harn-builtins/src/**/*.rs`, or `crates/harn-flow/src/**/*.rs`: a new
   `#[harn_builtin]` annotation. See
   [Adding a stdlib builtin](#adding-a-stdlib-builtin) for the canonical
   proc-macro pattern.
@@ -353,14 +354,21 @@ New stdlib builtins are registered with the `#[harn_builtin]` proc-macro
 both the runtime entry and the parser `BuiltinSignature`, so there is no
 separate Rust-side signature table to keep in sync.
 
+A new builtin family goes in its own module at the root of
+`crates/harn-builtins/src/`, which compiles beside `harn-vm` instead of inside
+it. Keep a family in `crates/harn-vm/src/stdlib/` only when `harn-vm` itself
+calls into it, its runtime drives it (the trigger dispatcher, connectors, the
+embedded agent stdlib), or it belongs to the language prelude. Binaries reach
+every family through `harn-runtime`, so a new family needs no registration
+outside its own module.
+
 Declare how scripts can reach the builtin with `exposure`. Pure and internal
 builtins imply empty effects. Harness methods and privileged wire calls require
 an explicit `effects` list. The macro rejects effects on pure builtins.
 
 ```rust
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use harn_vm::stdlib::macros::harn_builtin;
+use harn_vm_core::value::{VmError, VmValue};
 
 /// Sync builtin: short signature in Harn syntax, return type after `->`.
 #[harn_builtin(exposure = "pure", sig = "bytes_to_hex(input: bytes) -> string", category = "bytes")]
@@ -377,7 +385,7 @@ fn bytes_to_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     category = "runtime_scope"
 )]
 async fn with_autonomy_policy_impl(
-    ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: harn_vm_core::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     // ... await your async work, return Ok(...) ...
@@ -405,17 +413,15 @@ fn render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     runtime_only = true
 )]
 async fn harn_with_execution_policy_override_impl(
-    ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: harn_vm_core::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     // ... internal-only handler body ...
 }
 
-/// The macro captures the declaring module. The registry owns membership;
-/// the module installer keeps its place in ordered runtime initialization.
-pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+// Installs every `#[harn_builtin]` declared in this module, in the `Pure`
+// tier of ordered runtime initialization.
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_bytes_builtins);
 ```
 
 ### Reading arguments

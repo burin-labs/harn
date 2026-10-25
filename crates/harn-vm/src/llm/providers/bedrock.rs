@@ -47,7 +47,7 @@ pub(crate) fn current_env_region() -> Option<String> {
     resolve_region(None).ok()
 }
 
-pub(crate) use crate::aws_sigv4::AwsSigV4Credentials as AwsCredentials;
+pub use crate::aws_sigv4::AwsSigV4Credentials as AwsCredentials;
 
 impl BedrockProvider {
     pub(crate) fn build_request_body(request: &LlmRequestPayload) -> serde_json::Value {

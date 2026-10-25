@@ -110,7 +110,10 @@ fn glob_matches_prefix_suffix_middle_and_exact_routes() {
 #[test]
 fn test_openrouter_inference_requires_one_slash() {
     let _guard = crate::llm::env_guard();
-    let _env = crate::test_env::test_env_guard();
+    let env = crate::test_env::test_env_guard();
+    // Pin the default: auto-selection otherwise probes the machine's
+    // credentials and local servers.
+    env.set("HARN_DEFAULT_PROVIDER", "anthropic");
 
     assert_eq!(infer_provider("org/model"), "openrouter");
     assert_eq!(infer_provider("org/team/model"), "anthropic");
