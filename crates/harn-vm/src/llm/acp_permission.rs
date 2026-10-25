@@ -89,6 +89,18 @@ pub(crate) fn request_params(
     if let Some(session_id) = session_id {
         params.insert("sessionId".to_string(), json!(session_id));
     }
+    // The request is a display surface the host shows and may persist: mask
+    // credentials in the echoed arguments and previews with the redaction
+    // policy. The approval decision comes back as an option id, so the action
+    // that runs is built from the original arguments, not from this copy.
+    let policy = crate::redact::current_policy();
+    let raw_input = &policy.redact_json(raw_input);
+    let mut approval_request = approval_request;
+    for field in ["args", "evidence_refs", "undo_metadata"] {
+        if let Some(value) = approval_request.get_mut(field) {
+            policy.redact_json_in_place(value);
+        }
+    }
     // The full tool descriptor (description + inputSchema, plus the rug-pull
     // `schemaChanged` flag) rides along so the host renders the *complete*
     // model-visible tool text at approval time, closing the tool-poisoning
@@ -107,7 +119,10 @@ pub(crate) fn request_params(
             .expect("Harn metadata object")
             .insert("toolAnnotations".to_string(), json!(annotations));
     }
-    let content = permission_content(&approval_request);
+    let mut content = permission_content(&approval_request);
+    for block in &mut content {
+        policy.redact_json_in_place(block);
+    }
     let locations = permission_locations(&approval_request);
     let mut tool_call = json!({
         "sessionUpdate": "tool_call_update",
@@ -144,6 +159,8 @@ pub(crate) fn with_intent(mut params: JsonValue, intent: Option<&str>) -> JsonVa
             .pointer_mut("/toolCall/_meta/harn")
             .and_then(JsonValue::as_object_mut),
     ) {
+        // The label is model-authored and reaches the host outside `request_params`' masking.
+        let intent = crate::redact::current_policy().redact_string(intent);
         harn.insert("intent".to_string(), json!(intent));
     }
     params
@@ -369,6 +386,24 @@ pub(crate) fn parse_response(response: &JsonValue) -> WireOutcome {
 mod tests {
     use super::*;
     use crate::tool_annotations::ToolKind;
+
+    #[test]
+    fn with_intent_masks_a_credential_in_the_purpose_label() {
+        let params = request_params(
+            Some("session-1"),
+            "tool-1",
+            "edit",
+            &json!({"path": "src/lib.rs"}),
+            json!({"id": "tool-1", "action": "edit"}),
+            &json!({"decision": "ask"}),
+            None,
+            None,
+        );
+        let params = with_intent(params, Some("use key sk-abcdef0123456789abcdef to edit"));
+        let intent = params["toolCall"]["_meta"]["harn"]["intent"].to_string();
+        assert!(!intent.contains("sk-abcdef"), "{intent}");
+        assert!(intent.contains("to edit"), "{intent}");
+    }
 
     #[test]
     fn request_params_carry_canonical_options_and_tool_call() {
@@ -716,6 +751,31 @@ mod tests {
             parse_response(&json!({"granted": true})),
             WireOutcome::Rejected { .. }
         ));
+    }
+
+    #[test]
+    fn the_request_masks_credentials_in_the_echoed_arguments() {
+        let token = "Bearer sk-abcdef0123456789abcdef";
+        let args = json!({"url": "https://example.test/data", "headers": {"Authorization": token}});
+        let params = request_params(
+            Some("session-1"),
+            "tool-1",
+            "fetch",
+            &args,
+            json!({"id": "tool-1", "action": "fetch", "args": args}),
+            &json!({"decision": "ask"}),
+            None,
+            None,
+        );
+        let rendered = params.to_string();
+        assert!(
+            !rendered.contains("sk-abcdef"),
+            "credential in the request: {rendered}"
+        );
+        assert_eq!(
+            params["toolCall"]["rawInput"]["url"],
+            "https://example.test/data"
+        );
     }
 
     #[test]

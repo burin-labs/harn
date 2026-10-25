@@ -13,14 +13,14 @@ cat > "$fixture/archive/harn" <<'SEED'
 exit "${HARN_SEED_TEST_EXIT_CODE:-0}"
 SEED
 chmod +x "$fixture/archive/harn"
-tar -czf "$fixture/harn-x86_64-unknown-linux-gnu.tar.gz" -C "$fixture/archive" harn
+tar -cJf "$fixture/harn-x86_64-unknown-linux-gnu.tar.xz" -C "$fixture/archive" harn
 if command -v sha256sum >/dev/null 2>&1; then
-  checksum=$(sha256sum "$fixture/harn-x86_64-unknown-linux-gnu.tar.gz")
+  checksum=$(sha256sum "$fixture/harn-x86_64-unknown-linux-gnu.tar.xz")
 else
-  checksum=$(shasum -a 256 "$fixture/harn-x86_64-unknown-linux-gnu.tar.gz")
+  checksum=$(shasum -a 256 "$fixture/harn-x86_64-unknown-linux-gnu.tar.xz")
 fi
 checksum=${checksum%% *}
-printf '%s  %s\n' "$checksum" harn-x86_64-unknown-linux-gnu.tar.gz > "$fixture/SHA256SUMS"
+printf '%s  %s\n' "$checksum" harn-x86_64-unknown-linux-gnu.tar.xz > "$fixture/SHA256SUMS"
 
 cat > "$tools/uname" <<'EOF'
 #!/bin/sh
@@ -70,7 +70,7 @@ cp "$fixture/SHA256SUMS.valid" "$fixture/SHA256SUMS"
 run_seed >/dev/null
 cache=$scratch/cache-home/harn/bootstrap-seed/9.8.7/x86_64-unknown-linux-gnu
 cmp "$fixture/SHA256SUMS" "$cache/SHA256SUMS"
-cmp "$fixture/harn-x86_64-unknown-linux-gnu.tar.gz" "$cache/harn-x86_64-unknown-linux-gnu.tar.gz"
+cmp "$fixture/harn-x86_64-unknown-linux-gnu.tar.xz" "$cache/harn-x86_64-unknown-linux-gnu.tar.xz"
 
 # Drive the adapter's real EXIT trap with a simulated executable lock. Keep
 # the scratch root outside the tool shim so the test can remove leftovers.
@@ -117,9 +117,9 @@ grep -F "warning: bootstrap seed cleanup left $leftover" "$scratch/failed.stderr
 unset HARN_SEED_TEST_EXIT_CODE
 
 # Corrupt bytes must still fail verification even when cleanup also fails.
-cp "$fixture/harn-x86_64-unknown-linux-gnu.tar.gz" "$fixture/archive.valid"
-printf '%s\n' corrupt > "$fixture/harn-x86_64-unknown-linux-gnu.tar.gz"
-"$real_rm" -f "$cache/harn-x86_64-unknown-linux-gnu.tar.gz"
+cp "$fixture/harn-x86_64-unknown-linux-gnu.tar.xz" "$fixture/archive.valid"
+printf '%s\n' corrupt > "$fixture/harn-x86_64-unknown-linux-gnu.tar.xz"
+"$real_rm" -f "$cache/harn-x86_64-unknown-linux-gnu.tar.xz"
 if run_seed > "$scratch/corrupt.stdout" 2> "$scratch/corrupt.stderr"; then
   echo 'corrupt seed unexpectedly passed verification' >&2
   exit 1
@@ -127,9 +127,9 @@ fi
 grep -F 'seed checksum mismatch' "$scratch/corrupt.stderr" >/dev/null
 leftover=$(cat "$HARN_SEED_TEST_LEFTOVER")
 grep -F "warning: bootstrap seed cleanup left $leftover" "$scratch/corrupt.stderr" >/dev/null
-test ! -e "$cache/harn-x86_64-unknown-linux-gnu.tar.gz"
+test ! -e "$cache/harn-x86_64-unknown-linux-gnu.tar.xz"
 "$real_rm" -rf "$leftover"
-cp "$fixture/archive.valid" "$fixture/harn-x86_64-unknown-linux-gnu.tar.gz"
+cp "$fixture/archive.valid" "$fixture/harn-x86_64-unknown-linux-gnu.tar.xz"
 "$real_rm" -f "$tools/rm"
 run_seed >/dev/null
 
@@ -140,14 +140,14 @@ HARN_BOOTSTRAP_OFFLINE=1 \
 HARN_SEED_TEST_FIXTURE="$scratch/absent" \
   sh "$repo/scripts/bootstrap-harn.sh" --help >/dev/null
 
-rm -f "$cache/harn-x86_64-unknown-linux-gnu.tar.gz"
+rm -f "$cache/harn-x86_64-unknown-linux-gnu.tar.xz"
 if PATH="$tools:$PATH" XDG_CACHE_HOME="$scratch/cache-home" \
   HARN_EXT_BOOTSTRAP_SEED_VERSION=9.8.7 HARN_SEED_TEST_INTERRUPT=1 \
   HARN_SEED_TEST_FIXTURE="$fixture" sh "$repo/scripts/bootstrap-harn.sh" --help >/dev/null 2>&1; then
   echo 'interrupted seed download unexpectedly succeeded' >&2
   exit 1
 fi
-test ! -e "$cache/harn-x86_64-unknown-linux-gnu.tar.gz"
+test ! -e "$cache/harn-x86_64-unknown-linux-gnu.tar.xz"
 
 rm -rf "$scratch/cache-home"
 run_seed >/dev/null &
@@ -157,4 +157,4 @@ second=$!
 wait "$first"
 wait "$second"
 cmp "$fixture/SHA256SUMS" "$cache/SHA256SUMS"
-cmp "$fixture/harn-x86_64-unknown-linux-gnu.tar.gz" "$cache/harn-x86_64-unknown-linux-gnu.tar.gz"
+cmp "$fixture/harn-x86_64-unknown-linux-gnu.tar.xz" "$cache/harn-x86_64-unknown-linux-gnu.tar.xz"

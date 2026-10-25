@@ -1012,13 +1012,13 @@ fn sweep_command_artifact_dirs_except(
 /// Each owner's session liveness, asked once per sweep: a namespace holds many
 /// directories per owner, and the answer is one lock-file open.
 #[derive(Default)]
-struct OwnerLiveness(HashMap<u32, bool>);
+struct OwnerLiveness(HashMap<(PathBuf, u32), bool>);
 
 impl OwnerLiveness {
     fn is_live(&mut self, namespace: &Path, owner: u32) -> bool {
         *self
             .0
-            .entry(owner)
+            .entry((namespace.to_path_buf(), owner))
             .or_insert_with(|| owner_session_is_live(namespace, owner))
     }
 }

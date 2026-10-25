@@ -49,7 +49,7 @@ fn fixture(harness: Harness) {
     "aarch64-apple-darwin"
   }
   const request: RuntimeInstallRequest = {
-    version: "0.10.999",
+    version: "0.10.150",
     target: target,
     repository: "burin-labs/harn",
     cache_dir: path_join(root, "cache"),
@@ -71,6 +71,8 @@ fn fixture(harness: Harness) {
       mode: 493,
     },
   ]
+  // The installer under test may be an older release that reads only gzip, so the
+  // fixture is a release before the xz cutover; xz decoding is covered natively.
   const archive = if windows {
     zip_create(entries)
   } else {
@@ -175,18 +177,35 @@ pipeline manifest_accepts_coreutils_checksum_and_rejects_ambiguous_metadata(
   task: unknown,
 ) {
   const digest = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
-  const valid = digest + "  *harn.tar.gz\r\n"
-  assert_eq(checksum_for_asset(valid, "harn.tar.gz"), digest)
+  const valid = digest + "  *harn.tar.xz\r\n"
+  assert_eq(checksum_for_asset(valid, "harn.tar.xz"), digest)
   assert_eq(checksum_for_asset(valid, "absent.zip"), nil)
-  for invalid in ["", "malformed", valid + valid, digest + "  ../harn.tar.gz"] {
+  for invalid in ["", "malformed", valid + valid, digest + "  ../harn.tar.xz"] {
     assert(
       is_err(
         try {
-          checksum_for_asset(invalid, "harn.tar.gz")
+          checksum_for_asset(invalid, "harn.tar.xz")
         },
       ),
     )
   }
+}
+
+@test
+pipeline archive_format_follows_the_xz_cutover(harness: Harness, task: unknown) {
+  const f = fixture(harness)
+  const linux = f.request + {target: "x86_64-unknown-linux-gnu"}
+  assert_eq(
+    runtime_plan(linux + {version: "0.10.178"}).asset,
+    "harn-x86_64-unknown-linux-gnu.tar.gz",
+  )
+  assert_eq(
+    runtime_plan(linux + {version: "v0.10.179"}).asset,
+    "harn-x86_64-unknown-linux-gnu.tar.xz",
+  )
+  assert_eq(runtime_plan(linux + {version: "1.0.0"}).asset, "harn-x86_64-unknown-linux-gnu.tar.xz")
+  const windows = f.request + {target: "x86_64-pc-windows-msvc", version: "0.10.179"}
+  assert_eq(runtime_plan(windows).asset, "harn-x86_64-pc-windows-msvc.zip")
 }
 
 @test
@@ -197,7 +216,7 @@ pipeline release_repository_is_typed_and_controls_both_release_origins(
   const f = fixture(harness)
   const plan = runtime_plan(f.request + {repository: "example/runtime"})
   assert_eq(plan.repository, "example/runtime")
-  assert_eq(plan.base, "https://github.com/example/runtime/releases/download/v0.10.999/")
+  assert_eq(plan.base, "https://github.com/example/runtime/releases/download/v0.10.150/")
   assert(
     is_err(
       try {
@@ -240,7 +259,7 @@ pipeline online_manifest_and_digest_pins_preserve_exact_release_integrity(
   harness.testing.http_mock("GET", f.plan.base + "SHA256SUMS", {status: 404, body: "missing"})
   harness.testing.http_mock(
     "GET",
-    "https://api.github.com/repos/burin-labs/harn/releases/tags/v0.10.999",
+    "https://api.github.com/repos/burin-labs/harn/releases/tags/v0.10.150",
     {
       status: 200,
       body: json_stringify({assets: [{name: f.plan.asset, digest: "sha256:" + f.checksum}]}),
@@ -310,14 +329,14 @@ pipeline absent_release_exhausts_bounded_sources_without_inventing_success(
   harness.testing.http_mock("GET", f.plan.base + "SHA256SUMS", {status: 404, body: "absent"})
   harness.testing.http_mock(
     "GET",
-    "https://api.github.com/repos/burin-labs/harn/releases/tags/v0.10.999",
+    "https://api.github.com/repos/burin-labs/harn/releases/tags/v0.10.150",
     {status: 404, body: "absent"},
   )
   const failure = try {
     install_runtime(harness, f.request)
   }
   assert(is_err(failure))
-  assert(to_string(unwrap_err(failure)).contains("release v0.10.999 is absent"))
+  assert(to_string(unwrap_err(failure)).contains("release v0.10.150 is absent"))
   assert_eq(len(harness.testing.http_mock_calls()), 2)
   assert_missing(harness.fs, f.request.install_dir)
 }

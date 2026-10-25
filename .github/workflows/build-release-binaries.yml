@@ -1122,10 +1122,15 @@ jobs:
             package_entries+=(harn-container-probe)
           fi
           cd dist
-          tar czf "harn-${HARN_RELEASE_TARGET}.tar.gz" "${package_entries[@]}"
-          archive="harn-${HARN_RELEASE_TARGET}.tar.gz"
+          archive="harn-${HARN_RELEASE_TARGET}.tar.xz"
+          # bsdtar (macOS) carries its own liblzma; GNU tar shells out to xz.
+          if tar --version | grep -q bsdtar; then
+            tar --xz --options xz:compression-level=9,xz:threads=0 -cf "$archive" "${package_entries[@]}"
+          else
+            XZ_OPT='-9e -T0' tar -cJf "$archive" "${package_entries[@]}"
+          fi
           for notice in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
-            cmp "$notice" <(tar -xOzf "$archive" "$notice")
+            cmp "$notice" <(tar -xOf "$archive" "$notice")
           done
           archive_bytes="$(wc -c < "$archive" | tr -d '[:space:]')"
           duration=$((SECONDS - start))
@@ -1393,7 +1398,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          archives=(dist/harn-*.tar.gz dist/harn-*.zip)
+          archives=(dist/harn-*.tar.xz dist/harn-*.zip)
           if (( ${#archives[@]} != 1 )); then
             echo "::error::Expected exactly one packaged archive for $RELEASE_TARGET, found ${#archives[@]}."
             exit 1
@@ -1492,7 +1497,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          archives=(dist/harn-*.tar.gz dist/harn-*.zip)
+          archives=(dist/harn-*.tar.xz dist/harn-*.zip)
           if (( ${#archives[@]} != 1 )); then
             echo "::error::Expected exactly one packaged archive for $RELEASE_TARGET"
             exit 1
@@ -1533,7 +1538,7 @@ jobs:
         with:
           name: harn-${{ matrix.target }}
           path: |
-            dist/harn-${{ matrix.target }}.tar.gz
+            dist/harn-${{ matrix.target }}.tar.xz
             dist/candidate-receipts/${{ matrix.target }}.json
           if-no-files-found: error
           compression-level: 0
@@ -1618,8 +1623,11 @@ jobs:
           (cd "$archives" && sha256sum harn-* | LC_ALL=C sort -k 2) > "$release_files/SHA256SUMS"
           cat "$release_files/SHA256SUMS"
 
+          # The ACP registry cannot install .tar.xz; its manifest alone names these.
+          scripts/build_acp_registry_archives.sh --archives-dir "$archives" --output-dir "$release_files"
+
           # The candidate's own Linux CLI renders the target-independent files.
-          tar -xzf "$archives/harn-x86_64-unknown-linux-gnu.tar.gz" -C "$tools" harn
+          tar -xf "$archives/harn-x86_64-unknown-linux-gnu.tar.xz" -C "$tools" harn
           "$tools/harn" run scripts/build_release_assets_manifest.harn -- \
             --artifacts-dir "$archives" \
             --tag "v$VERSION" \
@@ -1679,6 +1687,7 @@ jobs:
             ${{ steps.manifest.outputs.release_files }}/SHA256SUMS
             ${{ steps.manifest.outputs.release_files }}/release-assets.json
             ${{ steps.manifest.outputs.release_files }}/release-notes.md
+            ${{ steps.manifest.outputs.release_files }}/harn-*.tar.gz
           predicate-type: https://harnlang.com/attestations/release-archive/v1
           predicate-path: ${{ steps.manifest.outputs.predicate }}
 
@@ -1697,6 +1706,7 @@ jobs:
             ${{ steps.manifest.outputs.release_files }}/SHA256SUMS
             ${{ steps.manifest.outputs.release_files }}/release-assets.json
             ${{ steps.manifest.outputs.release_files }}/release-notes.md
+            ${{ steps.manifest.outputs.release_files }}/harn-*.tar.gz
           predicate-type: https://harnlang.com/attestations/release-archive/v1
           predicate-path: ${{ steps.manifest.outputs.predicate }}
 
@@ -1719,6 +1729,7 @@ jobs:
             ${{ steps.manifest.outputs.release_files }}/SHA256SUMS
             ${{ steps.manifest.outputs.release_files }}/release-assets.json
             ${{ steps.manifest.outputs.release_files }}/release-notes.md
+            ${{ steps.manifest.outputs.release_files }}/harn-*.tar.gz
           if-no-files-found: error
           retention-days: 30
 
@@ -1780,7 +1791,7 @@ jobs:
       - name: Verify the candidate Harn binary
         run: >-
           ./scripts/ci/rust_artifact.sh restore-candidate
-          "$RUNNER_TEMP/candidate-archive/harn-x86_64-unknown-linux-gnu.tar.gz"
+          "$RUNNER_TEMP/candidate-archive/harn-x86_64-unknown-linux-gnu.tar.xz"
           "$RUNNER_TEMP/candidate-manifest/candidate-manifest.json"
           x86_64-unknown-linux-gnu
           "$RUNNER_TEMP/candidate-harn"

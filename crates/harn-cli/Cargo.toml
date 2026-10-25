@@ -125,6 +125,7 @@ hmac = "0.13"
 ipnet = "2"
 tar = { version = "0.4", default-features = false }
 flate2 = "1"
+lzma-rust2 = { version = "0.15", default-features = false, features = ["std", "xz", "optimization"] }
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 subtle = "2.6"
 base64 = "0.23"
@@ -226,6 +227,7 @@ syn = { version = "3", features = ["full", "visit"] }
 rcgen.workspace = true
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
 wat = "1"
+lzma-rust2 = { version = "0.15", default-features = false, features = ["encoder"] }
 
 [lints]
 workspace = true

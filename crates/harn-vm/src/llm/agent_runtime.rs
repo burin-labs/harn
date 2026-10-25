@@ -297,7 +297,7 @@ fn publish_observed_event(event: &AgentEvent) {
         agent_events::emit_event(event);
         let loop_sink = CURRENT_LOOP_SINKS.with(|stack| stack.borrow().last().cloned());
         if let Some(sink) = loop_sink {
-            sink.handle_event(event);
+            sink.handle_event(&agent_events::redact_for_emission(event));
         }
     }
 }
