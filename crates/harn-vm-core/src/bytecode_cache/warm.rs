@@ -12,9 +12,16 @@ use crate::VmError;
 
 /// Pure compilation into runtime cache identities. A session remembers exact
 /// module keys so overlapping entrypoints compile and persist a module once.
+///
+/// It also remembers each interface record it has proven or written. Entries
+/// share most of their import closures, and re-proving a shared module's
+/// record for every entry repeated the same stats and package resolutions once
+/// per entry. A record whose closure changes later in the session is no worse
+/// than one that changes after the session ends: every reader re-checks it.
 #[derive(Default)]
 pub struct CachePrecompiler {
     modules: BTreeSet<String>,
+    interfaces: BTreeSet<PathBuf>,
     stdlib_prepared: bool,
 }
 
@@ -144,7 +151,13 @@ impl CachePrecompiler {
                     file.path.display()
                 )));
             }
-            prepare_interface(&file.path, &source, &file.compilation_context, &projections)?;
+            prepare_interface(
+                &mut self.interfaces,
+                &file.path,
+                &source,
+                &file.compilation_context,
+                &projections,
+            )?;
             self.prepare_module(&file.path, &source, &file.compilation_context, provenance)?;
         }
         self.prepare_graph_stdlib(path, source)?;
@@ -237,6 +250,7 @@ fn require_cache() -> Result<(), VmError> {
 /// Each module keeps its own dependency proof. The hash-only walk collects
 /// that closure without parsing or deriving the typed projections again.
 fn prepare_interface(
+    prepared: &mut BTreeSet<PathBuf>,
     path: &Path,
     source: &ModuleSource,
     context: &ModuleCompilationContext,
@@ -244,7 +258,11 @@ fn prepare_interface(
 ) -> Result<(), VmError> {
     let slot = InterfaceSlot::open(path, source.as_str())
         .ok_or_else(|| VmError::Runtime("module interface cache is unavailable".into()))?;
+    if prepared.contains(slot.record_path()) {
+        return Ok(());
+    }
     if slot.recall().is_some() {
+        prepared.insert(slot.record_path().to_path_buf());
         return Ok(());
     }
     let proof = walk_import_graph_fingerprinted(
@@ -268,7 +286,9 @@ fn prepare_interface(
             })?;
         file.compilation_context = (*context).clone();
     }
-    slot.write(context, &manifest).map_err(persist_error)
+    slot.write(context, &manifest).map_err(persist_error)?;
+    prepared.insert(slot.record_path().to_path_buf());
+    Ok(())
 }
 
 fn persist_error(error: io::Error) -> VmError {

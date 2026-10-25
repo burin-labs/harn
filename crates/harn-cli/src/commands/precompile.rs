@@ -14,7 +14,7 @@ use crate::compiler_context::{ensure_builtin_signatures_installed, SourceCompile
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 use crate::parse_source_file;
-use crate::typecheck_imports::checker_with_resolved_imports;
+use crate::typecheck_imports::checker_with_resolved_graph;
 
 mod warm_cache;
 
