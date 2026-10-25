@@ -8,8 +8,8 @@ pub const RECEIPT_SCHEMA = "harn.precise_qualify.receipt"
 pub const RECEIPT_SCHEMA_VERSION = 1
 
 /**
- * `pending` is a planned attempt that produced no verdict (time budget or
- * failed baseline). It is reported, never folded into a pass.
+ * `pending` is a planned attempt that produced no verdict: the time budget
+ * ran out, or its repo was not measured. It is reported, never folded into a pass.
  */
 pub type QualifyOutcome = "applied_correct" | "applied_wrong" | "refused" | "crashed" | "pending"
 
