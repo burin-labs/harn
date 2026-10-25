@@ -208,3 +208,76 @@ async fn maintenance_store_owns_mutation_admission_once() {
         .await
         .expect("ordinary mutation enters after maintenance drops");
 }
+
+/// A child forked by another thread holds a copy of every descriptor until it
+/// execs, and a flock belongs to the open file, so a lease that only closes on
+/// drop can stay locked for that window. Runs `rounds` drop-and-reclaim cycles
+/// of `cycle` while 32 threads spawn processes, and returns how many reclaims
+/// were refused.
+#[cfg(unix)]
+fn refused_reclaims_while_threads_spawn(rounds: usize, mut cycle: impl FnMut() -> bool) -> usize {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let spawners: Vec<_> = (0..32)
+        .map(|_| {
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    let _ = std::process::Command::new("true").status();
+                }
+            })
+        })
+        .collect();
+    let refused = (0..rounds).filter(|_| !cycle()).count();
+    stop.store(true, Ordering::Relaxed);
+    for spawner in spawners {
+        spawner.join().expect("spawner thread");
+    }
+    refused
+}
+
+#[cfg(unix)]
+#[test]
+fn leases_release_on_drop_while_other_threads_spawn() {
+    const ROUNDS: usize = 2000;
+    let root = tempfile::tempdir().expect("lease root");
+
+    // Negative control: the old close-only drop must lose rounds under this
+    // load, or the load proves nothing about the leases below.
+    let control_path = root.path().join("control.lock");
+    let control_refused = refused_reclaims_while_threads_spawn(ROUNDS, || {
+        let file = std::fs::File::create(&control_path).expect("control file");
+        if file.try_lock().is_err() {
+            return false;
+        }
+        drop(file);
+        std::fs::File::open(&control_path)
+            .expect("control reopen")
+            .try_lock()
+            .is_ok()
+    });
+    assert!(
+        control_refused > 0,
+        "close-only drop never lost a round in {ROUNDS}: the spawner load is too weak to test anything"
+    );
+
+    let writer_refused = refused_reclaims_while_threads_spawn(ROUNDS, || {
+        let Ok(first) = SessionWriteLease::try_acquire(root.path(), "back-to-back") else {
+            return false;
+        };
+        drop(first);
+        SessionWriteLease::try_acquire(root.path(), "back-to-back").is_ok()
+    });
+    assert_eq!(writer_refused, 0, "writer lease reclaim refused");
+
+    let maintenance_refused = refused_reclaims_while_threads_spawn(ROUNDS, || {
+        let Ok(first) = SessionMaintenanceLease::try_acquire(root.path()) else {
+            return false;
+        };
+        drop(first);
+        SessionMaintenanceLease::try_acquire(root.path()).is_ok()
+    });
+    assert_eq!(maintenance_refused, 0, "maintenance lease reclaim refused");
+}

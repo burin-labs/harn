@@ -593,7 +593,8 @@ jobs:
     # Avoid GitHub's multi-hour default timeout for release artifacts. Native
     # macOS is the slowest surface; if it cannot finish inside this budget,
     # fail loudly so the release queue does not burn hours silently.
-    timeout-minutes: 150
+    # 135 (build) + 45 (sign and notarize) + setup, packaging and upload.
+    timeout-minutes: 195
     # Every Cargo consumer in this job builds `--profile dist` (Cargo.toml owns
     # its LTO, codegen-unit, and strip settings) and must resolve the same
     # artifact, so diagnostics such as cargo-bloat never pay for a second LTO
@@ -801,11 +802,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # Both GNU/Linux release legs intentionally build on the same pinned
-      # x86_64 Ubuntu baseline. ARM64 therefore needs the complete target
-      # C toolchain: gcc-aarch64-linux-gnu only recommends (and does not own)
-      # the target libc development headers that native build scripts load.
-      # The native ARM64 runner remains reserved for artifact smoke testing.
+      # The ARM64 leg builds natively on ubuntu-22.04-arm (free for public
+      # repositories, glibc 2.35 like the x86_64 leg). The cross toolchain
+      # below runs only when policy routes the target to an x86 host.
       - name: Install Linux ARM64 cross toolchain (x86 host only)
         if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.arch == 'X64'
         uses: ./.github/actions/apt-install
@@ -820,9 +819,50 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.arch == 'X64'
         run: echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
+      # The fat-LTO link of `harn` peaks near the 16 GB of a hosted Linux
+      # runner. Without swap the ARM64 runner was killed mid-link (0.10.178).
+      - name: Ensure swap for the final link (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          swap_mib="$(free -m | awk '/^Swap:/ {print $2}')"
+          if (( swap_mib < 12288 )); then
+            sudo swapoff -a || true
+            sudo fallocate -l 16G /mnt/harn-release.swap
+            sudo chmod 600 /mnt/harn-release.swap
+            sudo mkswap /mnt/harn-release.swap >/dev/null
+            sudo swapon /mnt/harn-release.swap
+          fi
+          free -m
+          df -h /mnt "$GITHUB_WORKSPACE"
+
+      # Job-scoped so the size gate records the identity that was built. On
+      # ARM64 Linux the fat-LTO link peaked at 15.5 GB RAM plus 15 GB swap,
+      # and the macOS and Windows builds ran past 100 minutes. These targets
+      # keep the pre-fat-LTO thin profile until a fat-LTO build fits.
+      - name: Scope the dist profile to what the runner can link
+        shell: bash
+        env:
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          case "$HARN_RELEASE_TARGET" in
+            aarch64-unknown-linux-gnu | aarch64-apple-darwin | x86_64-apple-darwin | x86_64-pc-windows-msvc)
+              {
+                echo "CARGO_PROFILE_DIST_LTO=thin"
+                echo "CARGO_PROFILE_DIST_CODEGEN_UNITS=16"
+              } >> "$GITHUB_ENV"
+              echo "dist profile for $HARN_RELEASE_TARGET: thin LTO, 16 codegen units"
+              ;;
+            *) echo "dist profile for $HARN_RELEASE_TARGET: Cargo.toml (fat LTO, 1 codegen unit)" ;;
+          esac
+
       - name: Build
         id: build
-        timeout-minutes: 90
+        # Fat LTO with one codegen unit (the dist profile) made a cold macOS
+        # build outrun 90 minutes; the job cap covers this plus signing.
+        timeout-minutes: 135
         shell: bash
         env:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
@@ -833,6 +873,13 @@ jobs:
         run: |
           set -euo pipefail
           start=$SECONDS
+          # A runner killed mid-link leaves no output; this line every minute
+          # shows whether memory ran out first.
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            (while true; do echo "memory: $(free -m | awk '/^Mem:/ {m="used=" $3 "MiB available=" $7 "MiB of " $2 "MiB"} /^Swap:/ {s=" swap_used=" $3 "MiB of " $2 "MiB"} END {print m s}')"; sleep 60; done) &
+            memory_logger=$!
+            trap 'kill "$memory_logger" 2>/dev/null || true' EXIT
+          fi
           # One binary. harn-lsp / harn-dap are linked into `harn` and reached
           # via argv[0] dispatch; we ship them as symlinks/copies at package
           # time. Building only `harn` runs the expensive final LTO link once
@@ -1122,10 +1169,15 @@ jobs:
             package_entries+=(harn-container-probe)
           fi
           cd dist
-          tar czf "harn-${HARN_RELEASE_TARGET}.tar.gz" "${package_entries[@]}"
-          archive="harn-${HARN_RELEASE_TARGET}.tar.gz"
+          archive="harn-${HARN_RELEASE_TARGET}.tar.xz"
+          # bsdtar (macOS) carries its own liblzma; GNU tar shells out to xz.
+          if tar --version | grep -q bsdtar; then
+            tar --xz --options xz:compression-level=9,xz:threads=0 -cf "$archive" "${package_entries[@]}"
+          else
+            XZ_OPT='-9e -T0' tar -cJf "$archive" "${package_entries[@]}"
+          fi
           for notice in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
-            cmp "$notice" <(tar -xOzf "$archive" "$notice")
+            cmp "$notice" <(tar -xOf "$archive" "$notice")
           done
           archive_bytes="$(wc -c < "$archive" | tr -d '[:space:]')"
           duration=$((SECONDS - start))
@@ -1393,7 +1445,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          archives=(dist/harn-*.tar.gz dist/harn-*.zip)
+          archives=(dist/harn-*.tar.xz dist/harn-*.zip)
           if (( ${#archives[@]} != 1 )); then
             echo "::error::Expected exactly one packaged archive for $RELEASE_TARGET, found ${#archives[@]}."
             exit 1
@@ -1492,7 +1544,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          archives=(dist/harn-*.tar.gz dist/harn-*.zip)
+          archives=(dist/harn-*.tar.xz dist/harn-*.zip)
           if (( ${#archives[@]} != 1 )); then
             echo "::error::Expected exactly one packaged archive for $RELEASE_TARGET"
             exit 1
@@ -1533,7 +1585,7 @@ jobs:
         with:
           name: harn-${{ matrix.target }}
           path: |
-            dist/harn-${{ matrix.target }}.tar.gz
+            dist/harn-${{ matrix.target }}.tar.xz
             dist/candidate-receipts/${{ matrix.target }}.json
           if-no-files-found: error
           compression-level: 0
@@ -1618,8 +1670,11 @@ jobs:
           (cd "$archives" && sha256sum harn-* | LC_ALL=C sort -k 2) > "$release_files/SHA256SUMS"
           cat "$release_files/SHA256SUMS"
 
+          # The ACP registry cannot install .tar.xz; its manifest alone names these.
+          scripts/build_acp_registry_archives.sh --archives-dir "$archives" --output-dir "$release_files"
+
           # The candidate's own Linux CLI renders the target-independent files.
-          tar -xzf "$archives/harn-x86_64-unknown-linux-gnu.tar.gz" -C "$tools" harn
+          tar -xf "$archives/harn-x86_64-unknown-linux-gnu.tar.xz" -C "$tools" harn
           "$tools/harn" run scripts/build_release_assets_manifest.harn -- \
             --artifacts-dir "$archives" \
             --tag "v$VERSION" \
@@ -1679,6 +1734,7 @@ jobs:
             ${{ steps.manifest.outputs.release_files }}/SHA256SUMS
             ${{ steps.manifest.outputs.release_files }}/release-assets.json
             ${{ steps.manifest.outputs.release_files }}/release-notes.md
+            ${{ steps.manifest.outputs.release_files }}/harn-*.tar.gz
           predicate-type: https://harnlang.com/attestations/release-archive/v1
           predicate-path: ${{ steps.manifest.outputs.predicate }}
 
@@ -1697,6 +1753,7 @@ jobs:
             ${{ steps.manifest.outputs.release_files }}/SHA256SUMS
             ${{ steps.manifest.outputs.release_files }}/release-assets.json
             ${{ steps.manifest.outputs.release_files }}/release-notes.md
+            ${{ steps.manifest.outputs.release_files }}/harn-*.tar.gz
           predicate-type: https://harnlang.com/attestations/release-archive/v1
           predicate-path: ${{ steps.manifest.outputs.predicate }}
 
@@ -1719,6 +1776,7 @@ jobs:
             ${{ steps.manifest.outputs.release_files }}/SHA256SUMS
             ${{ steps.manifest.outputs.release_files }}/release-assets.json
             ${{ steps.manifest.outputs.release_files }}/release-notes.md
+            ${{ steps.manifest.outputs.release_files }}/harn-*.tar.gz
           if-no-files-found: error
           retention-days: 30
 
@@ -1780,7 +1838,7 @@ jobs:
       - name: Verify the candidate Harn binary
         run: >-
           ./scripts/ci/rust_artifact.sh restore-candidate
-          "$RUNNER_TEMP/candidate-archive/harn-x86_64-unknown-linux-gnu.tar.gz"
+          "$RUNNER_TEMP/candidate-archive/harn-x86_64-unknown-linux-gnu.tar.xz"
           "$RUNNER_TEMP/candidate-manifest/candidate-manifest.json"
           x86_64-unknown-linux-gnu
           "$RUNNER_TEMP/candidate-harn"

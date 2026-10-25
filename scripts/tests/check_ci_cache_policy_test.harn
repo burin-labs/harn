@@ -16,6 +16,8 @@ import {
   linux_confinement_errors,
   macos_shared_cache_errors,
   macos_warm_errors,
+  make_target_path_gate_errors,
+  make_target_recipe_paths,
   minimal_pr_capacity_errors,
   nextest_version_errors,
   public_repository_runner_errors,
@@ -66,6 +68,38 @@ pipeline test_direct_cli_consumers_require_a_successful_shared_producer(harness:
     unproved_producer.jobs[consumer].if = condition.replace(required, "")
     assert(ci_linux_lane_policy_errors(unproved_producer).contains(refusal))
   }
+}
+
+@test
+pipeline test_make_target_path_gates_cover_every_recipe_path(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const makefile = harness.fs.read_text("../../Makefile")
+  assert_eq(make_target_path_gate_errors(ci, makefile), [])
+  const recipe = make_target_recipe_paths(makefile, "check-swift-protocol-binding")
+  for path in [
+    "scripts/tests/protocol_binding_session_recap.swift",
+    "crates/harn-serve/tests/fixtures/acp/session_update_extensions.json",
+    "spec/protocol-artifacts/HarnProtocol.swift",
+    "spec/run-view-fixtures/cases/x/expected/session_view.json",
+  ] {
+    assert(recipe.contains(path))
+  }
+  const moved = makefile.replace(
+    "scripts/tests/protocol_binding_session_recap.swift",
+    "scripts/probes/recap.swift",
+  )
+  assert(
+    make_target_path_gate_errors(ci, moved).contains(
+      "ci.yml:changes filter swift_protocol_binding must cover scripts/probes/recap.swift, which swift-protocol-binding reads through `make check-swift-protocol-binding`",
+    ),
+  )
+  let unrun = ci
+  unrun.jobs["swift-protocol-binding"].steps = [ci.jobs["swift-protocol-binding"].steps[0]]
+  assert(
+    make_target_path_gate_errors(unrun, makefile).contains(
+      "ci.yml:swift-protocol-binding must run `make check-swift-protocol-binding`",
+    ),
+  )
 }
 
 @test

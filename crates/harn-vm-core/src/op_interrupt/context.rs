@@ -160,6 +160,18 @@ pub fn installed() -> bool {
     CURRENT.with(|slot| slot.borrow().is_some())
 }
 
+/// Whether the installed cancel token is set. Unlike [`requested`], an
+/// expired deadline reads `false`, so a host operation can tell a stop from
+/// a missed deadline.
+pub fn cancel_requested() -> bool {
+    CURRENT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .and_then(|ctx| ctx.cancel.as_ref())
+            .is_some_and(|token| token.load(Ordering::SeqCst))
+    })
+}
+
 /// Returns `true` when the interrupt context installed on this thread has
 /// fired: the cancel token is set, or a deadline or operation budget has
 /// passed. Cheap enough

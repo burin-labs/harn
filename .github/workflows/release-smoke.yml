@@ -64,7 +64,7 @@ jobs:
             harn_binary: target/dist/harn
           - platform: linux-arm64
             # Activates the already-present `Linux-ARM64` case in the resolve
-            # step below (maps to harn-aarch64-unknown-linux-gnu.tar.gz, which
+            # step below (maps to harn-aarch64-unknown-linux-gnu.tar.xz, which
             # build-release-binaries.yml cross-builds on the pinned portable
             # Linux baseline and ships). Smoke still runs the artifact on a
             # native GitHub-hosted ARM64 runner.
@@ -101,10 +101,10 @@ jobs:
           fi
 
           case "${RUNNER_OS}-${RUNNER_ARCH}" in
-            Linux-X64) target="x86_64-unknown-linux-gnu"; asset="harn-${target}.tar.gz"; binary="harn" ;;
-            Linux-ARM64) target="aarch64-unknown-linux-gnu"; asset="harn-${target}.tar.gz"; binary="harn" ;;
-            macOS-X64) target="x86_64-apple-darwin"; asset="harn-${target}.tar.gz"; binary="harn" ;;
-            macOS-ARM64) target="aarch64-apple-darwin"; asset="harn-${target}.tar.gz"; binary="harn" ;;
+            Linux-X64) target="x86_64-unknown-linux-gnu"; asset="harn-${target}.tar.xz"; binary="harn" ;;
+            Linux-ARM64) target="aarch64-unknown-linux-gnu"; asset="harn-${target}.tar.xz"; binary="harn" ;;
+            macOS-X64) target="x86_64-apple-darwin"; asset="harn-${target}.tar.xz"; binary="harn" ;;
+            macOS-ARM64) target="aarch64-apple-darwin"; asset="harn-${target}.tar.xz"; binary="harn" ;;
             Windows-X64) target="x86_64-pc-windows-msvc"; asset="harn-${target}.zip"; binary="harn.exe" ;;
             *)
               echo "::error::Unsupported runner for candidate smoke: ${RUNNER_OS}-${RUNNER_ARCH}"

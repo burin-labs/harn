@@ -2,6 +2,21 @@ use std::path::{Component, Path, PathBuf};
 
 use super::FsAccess;
 
+pub(super) fn normalize_entry_for_policy(path: &Path) -> PathBuf {
+    let Some(name) = path.file_name() else {
+        return path
+            .canonicalize()
+            .map(|path| normalize_os_path_alias(&path))
+            .unwrap_or_else(|_| normalize_for_policy(path));
+    };
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = parent
+        .canonicalize()
+        .map(|path| normalize_os_path_alias(&path))
+        .unwrap_or_else(|_| normalize_for_policy(parent));
+    parent.join(name)
+}
+
 pub(crate) fn normalize_for_policy(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()

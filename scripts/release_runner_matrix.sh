@@ -155,7 +155,7 @@ jq -c \
       elif $target == "x86_64-unknown-linux-gnu" then
         "v1-rust-release-glibc235-x86_64-unknown-linux-gnu-Linux-x64-"
       elif $target == "aarch64-unknown-linux-gnu" then
-        "v1-rust-release-glibc235-aarch64-unknown-linux-gnu-Linux-x64-"
+        "v1-rust-release-glibc235-aarch64-unknown-linux-gnu-Linux-ARM64-"
       elif $target == "x86_64-pc-windows-msvc" then
         "v0-rust-release-x86_64-pc-windows-msvc-Windows_NT-x64-"
       else

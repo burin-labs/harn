@@ -104,7 +104,7 @@ fn run_with_bridge_in_parent_workspace(
         });
 
         let mut vm = harn_vm::new_vm();
-        harn_vm::register_vm_stdlib(&mut vm);
+        harn_runtime::register_vm_stdlib(&mut vm);
         let result = vm
             .execute(&chunk)
             .await

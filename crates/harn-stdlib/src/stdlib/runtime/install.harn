@@ -1,4 +1,11 @@
 /** Exact release selection and cache orchestration over verified native archive installation. */
+import { compare_release } from "std/semver"
+
+/**
+ * First release that publishes macOS and Linux archives as `.tar.xz`; earlier ones are `.tar.gz`.
+ */
+const XZ_FIRST_RELEASE = "0.10.179"
+
 pub type RuntimeInstallRequest = {
   version: string,
   target: string,
@@ -197,6 +204,8 @@ pub fn runtime_plan(request: RuntimeInstallRequest) -> RuntimePlan {
     "invalid runtime release repository"
   const extension = if request.target == "x86_64-pc-windows-msvc" {
     "zip"
+  } else if compare_release(version, XZ_FIRST_RELEASE) >= 0 {
+    "tar.xz"
   } else {
     "tar.gz"
   }

@@ -150,7 +150,7 @@ test('actual Unix packaging includes exact notices and refuses missing or empty 
   const workflow = readFileSync(new URL('../../.github/workflows/build-release-binaries.yml', import.meta.url), 'utf8');
   const step = workflow.split('      - name: Package (unix)\n')[1]?.split('\n      - name: ')[0];
   const script = step?.split('        run: |\n')[1]?.split('\n').map(line => line.slice(10)).join('\n');
-  assert.ok(script?.includes('tar czf'), 'owning packaging step must be reached');
+  assert.ok(script?.includes('XZ_OPT'), 'owning packaging step must be reached');
   for (const target of ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu']) {
     const dir = mkdtempSync(join(tmpdir(), 'harn-archive-test-'));
     try {
@@ -164,9 +164,9 @@ test('actual Unix packaging includes exact notices and refuses missing or empty 
         env: { ...process.env, HARN_RELEASE_TARGET: target, GITHUB_STEP_SUMMARY: join(dir, 'summary') } });
       const result = run();
       assert.equal(result.status, 0, result.stderr);
-      const archive = join(dir, `dist/harn-${target}.tar.gz`);
+      const archive = join(dir, `dist/harn-${target}.tar.xz`);
       for (const file of files) {
-        const member = spawnSync('tar', ['-xOzf', archive, file], { encoding: 'utf8' });
+        const member = spawnSync('tar', ['-xOf', archive, file], { encoding: 'utf8' });
         assert.equal(member.status, 0, member.stderr);
         assert.equal(member.stdout, `${file} full fixture text\n`);
       }

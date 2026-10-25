@@ -2,14 +2,14 @@
 
 use super::NativeVmState;
 use crate::vm::AsyncBuiltinCtx;
-#[cfg(test)]
+#[cfg(any(test, feature = "vm-test-support"))]
 use crate::vm::Vm;
 use std::sync::Arc;
 
 #[cfg(test)]
 mod tests;
 
-pub(crate) trait NativeBuiltinCtxExt: Sized {
+pub trait NativeBuiltinCtxExt: Sized {
     fn record_evaluation_receipt(&self, receipt: crate::llm::decision::receipt::EvaluationReceipt);
     fn evaluation_invocation_id(&self) -> String;
     fn evaluation_replay(&self) -> Option<crate::llm::decision::replay::EvaluationReplayScope>;
@@ -24,7 +24,7 @@ pub(crate) trait NativeBuiltinCtxExt: Sized {
             crate::connectors::ClientError,
         >,
     > + Send;
-    #[cfg(test)]
+    #[cfg(any(test, feature = "vm-test-support"))]
     fn for_test(vm: Vm) -> Self;
 }
 
@@ -49,7 +49,7 @@ impl NativeBuiltinCtxExt for AsyncBuiltinCtx {
 
     /// Construct a context with the fixture's active registries, as the
     /// production dispatch scope does for native host work.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "vm-test-support"))]
     fn for_test(mut vm: Vm) -> Self {
         let native = vm.native_mut();
         native.worker_registry = crate::stdlib::agents::agents_workers::active_worker_registry();

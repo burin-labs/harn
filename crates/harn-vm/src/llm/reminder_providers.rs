@@ -1749,7 +1749,7 @@ fn json_bool(value: &JsonValue, key: &str) -> Option<bool> {
     value.get(key).and_then(JsonValue::as_bool)
 }
 
-pub(crate) fn options_map_to_json(options: &crate::value::DictMap) -> JsonValue {
+pub fn options_map_to_json(options: &crate::value::DictMap) -> JsonValue {
     JsonValue::Object(
         options
             .iter()

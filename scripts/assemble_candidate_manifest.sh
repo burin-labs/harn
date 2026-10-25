@@ -162,6 +162,29 @@ for release_file in checksums:SHA256SUMS asset-index:release-assets.json notes:r
     }')")
 done
 
+# The ACP registry's gzip copies are release files too; only the manifest
+# generator for spec/acp-registry/harn/agent.json points at them.
+for file in "${ACP_REGISTRY_ARCHIVES[@]}"; do
+  if [[ ! -s "$release_files_dir/$file" ]]; then
+    echo "error: missing or empty ACP registry archive $file in $release_files_dir" >&2
+    exit 1
+  fi
+  entries+=("$(jq -nc \
+    --arg file "$file" \
+    --arg sha256 "$(sha256_file "$release_files_dir/$file")" \
+    --arg artifact "$RELEASE_FILES_ARTIFACT" \
+    --arg predicate "$RELEASE_ARCHIVE_PREDICATE_TYPE" \
+    '{
+      kind: "asset-index",
+      artifact: $artifact,
+      file: $file,
+      sha256: $sha256,
+      attestationPredicateType: $predicate,
+      signingStatus: "not_applicable",
+      notarizationStatus: "not_applicable"
+    }')")
+done
+
 mkdir -p "$(dirname "$output")"
 printf '%s\n' "${entries[@]}" | jq -s \
   --arg schemaVersion "$CANDIDATE_MANIFEST_SCHEMA" \

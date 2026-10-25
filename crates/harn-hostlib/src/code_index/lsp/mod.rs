@@ -19,11 +19,12 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::ast::Language;
+use crate::host_call::{HostCallContext, Phase};
 
 use self::edits::{lower_edits, path_to_uri, Encoding, LineIndex, Position, WorkspaceEdit};
 use self::servers::{Launch, Readiness, ServerSpec};
 use self::transport::{Connection, RpcError};
-use super::refactor_backend::{BackendOutcome, FileEdits, ServerRun, ServerStart};
+use super::refactor_backend::{BackendOutcome, FileEdits, ServerRun, ServerStart, Unanswered};
 
 #[cfg(test)]
 pub(super) use self::servers::test_override;
@@ -89,7 +90,8 @@ fn session(
     spec: &'static ServerSpec,
     root: &Path,
     deadline: Instant,
-) -> Result<(Arc<Session>, ServerStart), String> {
+    call: &HostCallContext,
+) -> Result<(Arc<Session>, ServerStart), Unanswered> {
     let key = (spec.id, root.to_path_buf());
     if let Some(found) = cached(&key) {
         return Ok((found, ServerStart::Warm));
@@ -99,16 +101,17 @@ fn session(
     let mut reasons = Vec::new();
     let mut started = None;
     for launch in spec.launches {
-        match start(spec, launch, root, deadline) {
+        match start(spec, launch, root, deadline, call) {
             Ok(session) => {
                 started = Some(Arc::new(session));
                 break;
             }
-            Err(reason) => reasons.push(reason),
+            Err(Unanswered::Unavailable(reason)) => reasons.push(reason),
+            Err(interrupted) => return Err(interrupted),
         }
     }
     let Some(started) = started else {
-        return Err(reasons.join("; "));
+        return Err(Unanswered::Unavailable(reasons.join("; ")));
     };
     let mut sessions = SESSIONS.lock().expect("lsp sessions poisoned");
     if let Some(existing) = sessions
@@ -149,15 +152,19 @@ fn start(
     launch: &'static Launch,
     root: &Path,
     deadline: Instant,
-) -> Result<Session, String> {
+    call: &HostCallContext,
+) -> Result<Session, Unanswered> {
     let id = launch.id;
-    let program = launch.resolve_program(root)?;
+    let program = launch
+        .resolve_program(root)
+        .map_err(Unanswered::Unavailable)?;
     let served_root = if launch.hidden_path_safe_root {
         hidden_path_safe(root)
     } else {
         root.to_path_buf()
     };
-    let connection = Connection::spawn(spec, launch, &program, &served_root)?;
+    let connection =
+        Connection::spawn(spec, launch, &program, &served_root).map_err(Unanswered::Unavailable)?;
     let root_uri = path_to_uri(&served_root);
     let init: InitializeResult = connection
         .request(
@@ -183,18 +190,24 @@ fn start(
                 },
             }),
             deadline.saturating_duration_since(Instant::now()),
+            call,
         )
-        .map_err(|err| format!("{id} failed to initialize: {err}"))?;
+        .map_err(|err| match err {
+            RpcError::Interrupted(interrupt) => Unanswered::Interrupted(interrupt),
+            err => Unanswered::Unavailable(format!("{id} failed to initialize: {err}")),
+        })?;
     let rename = init
         .capabilities
         .rename_provider
         .unwrap_or(Value::Bool(false));
     if rename == Value::Bool(false) || rename.is_null() {
-        return Err(format!("{id} does not provide rename"));
+        return Err(Unanswered::Unavailable(format!(
+            "{id} does not provide rename"
+        )));
     }
     connection
         .notify("initialized", json!({}))
-        .map_err(|err| format!("{id}: {err}"))?;
+        .map_err(|err| Unanswered::Unavailable(format!("{id}: {err}")))?;
     Ok(Session {
         root: root.to_path_buf(),
         served_root,
@@ -226,6 +239,7 @@ pub(super) struct RenameRequest<'a> {
     pub session_id: Option<&'a str>,
     /// Index-relative files that mention `old_name`.
     pub mentions: &'a [String],
+    pub call: &'a HostCallContext,
 }
 
 /// Whether one server answers for both languages (TypeScript and TSX do).
@@ -254,31 +268,41 @@ pub(super) fn warm(
     index_root: &Path,
     path: &str,
     language: Language,
-) -> Result<Warmed, (String, Option<ServerRun>)> {
+    call: &HostCallContext,
+) -> Result<Warmed, (Unanswered, Option<ServerRun>)> {
+    let unavailable = |reason: String| (Unanswered::Unavailable(reason), None);
     let Some(spec) = servers::for_language(language) else {
-        return Err((
-            format!("no language server is registered for {}", language.name()),
-            None,
-        ));
+        return Err(unavailable(format!(
+            "no language server is registered for {}",
+            language.name()
+        )));
     };
     let started = Instant::now();
     let file = index_root.join(path);
     let Some(root) = spec.workspace_root(&file, index_root) else {
-        return Err((format!("no {} project root contains {path}", spec.id), None));
+        return Err(unavailable(format!(
+            "no {} project root contains {path}",
+            spec.id
+        )));
     };
+    call.report(Phase::ServerStart, spec.id);
     let (session, start) = session(
         spec,
         &root,
         started + budget("HARN_LSP_STARTUP_TIMEOUT_MS", DEFAULT_STARTUP_MS),
+        call,
     )
-    .map_err(|reason| (reason, None))?;
+    .map_err(|unanswered| (unanswered, None))?;
     let ready_budget = match start {
         ServerStart::Cold => budget("HARN_LSP_STARTUP_TIMEOUT_MS", DEFAULT_STARTUP_MS),
         ServerStart::Warm => budget("HARN_LSP_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_MS),
     };
-    let ready = session
-        .connection
-        .wait_ready(session.launch.readiness, started + ready_budget);
+    let ready = session.connection.wait_ready(
+        session.launch.readiness,
+        started + ready_budget,
+        call,
+        session.launch.id,
+    );
     let run = ServerRun {
         server: session.launch.id,
         start,
@@ -287,15 +311,35 @@ pub(super) fn warm(
     match ready {
         Ok(true) => Ok(Warmed { session, run }),
         Ok(false) => Err((
-            format!(
+            Unanswered::Unavailable(format!(
                 "{} was still loading the workspace after {} ms; it keeps warming for the next call",
                 session.launch.id,
                 ready_budget.as_millis()
-            ),
+            )),
             Some(run),
         )),
-        Err(err) => Err((format!("{}: {err}", session.launch.id), Some(run))),
+        Err(RpcError::Interrupted(interrupt)) => {
+            Err((Unanswered::Interrupted(interrupt), Some(run)))
+        }
+        Err(err) => Err((
+            Unanswered::Unavailable(format!("{}: {err}", session.launch.id)),
+            Some(run),
+        )),
     }
+}
+
+/// How long a caller stopped by its deadline should wait before asking the
+/// same server again: what is left of a cold server's start budget, which it
+/// keeps spending in the background.
+pub(super) fn retry_after(run: Option<&ServerRun>) -> Duration {
+    let warming = run
+        .filter(|run| run.start == ServerStart::Cold)
+        .map(|run| {
+            budget("HARN_LSP_STARTUP_TIMEOUT_MS", DEFAULT_STARTUP_MS)
+                .saturating_sub(Duration::from_millis(run.elapsed_ms))
+        })
+        .unwrap_or_default();
+    warming.max(Duration::from_secs(1))
 }
 
 pub(super) fn rename(request: &RenameRequest<'_>, warmed: &Warmed) -> (BackendOutcome, ServerRun) {
@@ -345,7 +389,7 @@ pub(super) fn resolve(
     warmed: &Warmed,
     sites: &[(String, usize)],
     stop_at_miss: bool,
-) -> Result<Vec<Resolution>, String> {
+) -> Result<Vec<Resolution>, Unanswered> {
     let file = request.index_root.join(request.path);
     warmed.session.resolve(request, &file, sites, stop_at_miss)
 }
@@ -442,7 +486,7 @@ impl Session {
             Err(reason) => return BackendOutcome::Unavailable(reason),
         };
         let position = LineIndex::new(request.source).position(request.offset, self.encoding);
-        let mut outcome = match self.project_loading(ends_before, timeout) {
+        let mut outcome = match self.project_loading(ends_before, timeout, request.call) {
             Some(unavailable) => Ok(unavailable),
             None => self.rename_at(request, file, position, timeout),
         };
@@ -505,11 +549,14 @@ impl Session {
         file: &Path,
         sites: &[(String, usize)],
         stop_at_miss: bool,
-    ) -> Result<Vec<Resolution>, String> {
+    ) -> Result<Vec<Resolution>, Unanswered> {
+        request.call.report(Phase::Resolving, self.launch.id);
         let mut versions = self.op.lock().expect("lsp op poisoned");
         // One budget for the whole pass, not per site.
         let deadline = Instant::now() + budget("HARN_LSP_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_MS);
-        let opened = self.open_all(&mut versions, request, file)?;
+        let opened = self
+            .open_all(&mut versions, request, file)
+            .map_err(Unanswered::Unavailable)?;
         let seed = LineIndex::new(request.source).position(request.offset, self.encoding);
         let seed_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
         let mut resolutions = Vec::with_capacity(sites.len());
@@ -519,24 +566,25 @@ impl Session {
             let text = match read_document(request, &path) {
                 Ok(text) => text,
                 Err(reason) => {
-                    failure = Some(reason);
+                    failure = Some(Unanswered::Unavailable(reason));
                     break;
                 }
             };
             let position = LineIndex::new(&text).position(*offset, self.encoding);
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
-                failure = Some(format!(
+                failure = Some(Unanswered::Unavailable(format!(
                     "{} did not resolve {} remaining mentions in time",
                     self.spec.id,
                     sites.len() - resolutions.len()
-                ));
+                )));
                 break;
             }
             let answer = self.connection.request::<_, Value>(
                 "textDocument/definition",
                 json!({"textDocument": {"uri": self.uri(&path)}, "position": position}),
                 remaining,
+                request.call,
             );
             match answer {
                 Ok(answer) => {
@@ -555,8 +603,15 @@ impl Session {
                         break;
                     }
                 }
+                Err(RpcError::Interrupted(interrupt)) => {
+                    failure = Some(Unanswered::Interrupted(interrupt));
+                    break;
+                }
                 Err(err) => {
-                    failure = Some(format!("{} definition: {err}", self.spec.id));
+                    failure = Some(Unanswered::Unavailable(format!(
+                        "{} definition: {err}",
+                        self.spec.id
+                    )));
                     break;
                 }
             }
@@ -572,26 +627,36 @@ impl Session {
 
     /// `Some` when the server is still loading the project the opened files
     /// belong to. Only the first operation expects a load to begin.
-    fn project_loading(&self, ends_before: u64, timeout: Duration) -> Option<BackendOutcome> {
+    fn project_loading(
+        &self,
+        ends_before: u64,
+        timeout: Duration,
+        call: &HostCallContext,
+    ) -> Option<BackendOutcome> {
         if self.launch.readiness != Readiness::ProjectLoaded {
             return None;
         }
+        call.report(Phase::Indexing, self.launch.id);
         let first = !self.loaded.swap(true, Ordering::Relaxed);
         let (expected, grace) = if first {
             (Some(ends_before), PROJECT_LOAD_GRACE)
         } else {
             (None, Duration::ZERO)
         };
-        match self
-            .connection
-            .wait_progress(expected, grace, Instant::now() + timeout)
-        {
+        match self.connection.wait_progress(
+            expected,
+            grace,
+            Instant::now() + timeout,
+            call,
+            self.launch.id,
+        ) {
             Ok(true) => None,
             Ok(false) => Some(BackendOutcome::Unavailable(format!(
                 "{} was still loading the project after {} ms; it keeps loading for the next call",
                 self.launch.id,
                 timeout.as_millis()
             ))),
+            Err(RpcError::Interrupted(interrupt)) => Some(BackendOutcome::Interrupted(interrupt)),
             Err(err) => Some(BackendOutcome::Unavailable(format!(
                 "{}: {err}",
                 self.launch.id
@@ -634,10 +699,16 @@ impl Session {
         timeout: Duration,
     ) -> Result<BackendOutcome, Stale> {
         let id = self.launch.id;
+        request.call.report(Phase::Resolving, id);
         let document = json!({"textDocument": {"uri": self.uri(file)}, "position": position});
         if self.prepare_rename {
             // `null` and `{defaultBehavior: false}` both mean "not renameable".
-            match self.call::<Value>("textDocument/prepareRename", document.clone(), timeout) {
+            match self.call::<Value>(
+                "textDocument/prepareRename",
+                document.clone(),
+                timeout,
+                request.call,
+            ) {
                 Ok(answer)
                     if answer.is_null()
                         || answer.get("defaultBehavior") == Some(&Value::Bool(false)) =>
@@ -654,8 +725,12 @@ impl Session {
         }
         let mut params = document;
         params["newName"] = json!(request.new_name);
-        let edit = match self.call::<Option<WorkspaceEdit>>("textDocument/rename", params, timeout)
-        {
+        let edit = match self.call::<Option<WorkspaceEdit>>(
+            "textDocument/rename",
+            params,
+            timeout,
+            request.call,
+        ) {
             Ok(Some(edit)) => edit,
             Ok(None) => {
                 return Ok(BackendOutcome::Declined(format!(
@@ -716,13 +791,17 @@ impl Session {
         method: &str,
         params: Value,
         timeout: Duration,
+        call: &HostCallContext,
     ) -> Result<R, BackendOutcome> {
         let id = self.launch.id;
-        let mut attempt = self.connection.request(method, params.clone(), timeout);
+        let mut attempt = self
+            .connection
+            .request(method, params.clone(), timeout, call);
         if matches!(&attempt, Err(err) if err.retryable()) {
-            attempt = self.connection.request(method, params, timeout);
+            attempt = self.connection.request(method, params, timeout, call);
         }
         attempt.map_err(|err| match err {
+            RpcError::Interrupted(interrupt) => BackendOutcome::Interrupted(interrupt),
             RpcError::Server { ref message, .. } if !err.retryable() => {
                 BackendOutcome::Declined(format!("{id}: {message}"))
             }
@@ -834,3 +913,7 @@ fn extra_documents(
 #[cfg(test)]
 #[path = "rename_lsp_tests.rs"]
 mod rename_lsp_tests;
+
+#[cfg(all(test, unix))]
+#[path = "interrupt_tests.rs"]
+mod interrupt_tests;

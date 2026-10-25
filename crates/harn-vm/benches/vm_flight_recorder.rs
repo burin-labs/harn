@@ -1,7 +1,8 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use harn_vm::{compile_source, register_vm_stdlib, Chunk};
+use harn_runtime::register_vm_stdlib;
+use harn_vm::{compile_source, Chunk};
 
 const HOT_LOOP: &str = r"pipeline main(harness: Harness) {
   let total = 0

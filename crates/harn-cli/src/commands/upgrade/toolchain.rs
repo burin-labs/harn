@@ -194,11 +194,7 @@ fn ensure_installed(root: &Path, requested: &str) -> Result<(CachedBinary, bool)
         ));
     }
     let target = toolchain_target()?;
-    let asset = if cfg!(windows) {
-        format!("harn-{target}.zip")
-    } else {
-        format!("harn-{target}.tar.gz")
-    };
+    let asset = super::release_archive_name(target, &version);
     let staging = tempfile::tempdir().map_err(|error| error.to_string())?;
     let archive = staging.path().join(&asset);
     let sums = staging.path().join("SHA256SUMS");

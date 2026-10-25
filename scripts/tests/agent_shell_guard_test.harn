@@ -101,6 +101,8 @@ pipeline test_raw_git_worktree_add_is_denied_across_parser_shapes(harness: Harne
     "sh -c \"git -C /workspace worktree add ../lane\"",
     "/usr/bin/env -u GIT_DIR command git --no-pager worktree add ../lane origin/main",
     "nohup /usr/bin/git worktree add ../lane origin/main",
+    "sudo -u builder git worktree add ../lane origin/main",
+    "timeout -k 5 60 git worktree add ../lane origin/main",
     "HARN_ALLOW_RAW_CARGO=1 git worktree add ../lane",
   ] {
     const violation = raw_worktree_add_violation(command)
@@ -1081,4 +1083,71 @@ pipeline test_a_nested_scan_asks_about_every_reachable_directory(harness: Harnes
     single.allow,
     "one reachable directory that owns no command is still not this rule's: " + single.reason,
   )
+}
+
+@test
+pipeline test_git_stash_writes_are_denied_across_parser_shapes(harness: Harness, task: unknown) {
+  for command in [
+    "git stash",
+    "git stash push -m wip",
+    "git stash save wip",
+    "git stash -u",
+    "git stash -m wip",
+    "git stash -m list",
+    "git stash --message show",
+    "git stash -q list",
+    "git stash pop",
+    "git stash apply stash@{1}",
+    "git stash drop",
+    "git stash clear",
+    "git stash branch rescue",
+    "/usr/bin/git stash pop",
+    "git -C /workspace stash pop",
+    "git --no-pager -c core.editor=true stash",
+    "env GIT_DIR=/x git stash",
+    "sudo git stash",
+    "sudo -u x git stash push",
+    "sudo -E -- HOME=/root git stash pop",
+    "nice -n 10 git stash",
+    "timeout 30 git stash drop",
+    "timeout --signal KILL 30s git stash clear",
+    "time git stash",
+    "sudo nice timeout 30 git stash",
+    "git add -A && git stash && make test",
+    "bash -lc 'git stash pop'",
+    "sh -c \"git -C /workspace stash push\"",
+  ] {
+    const refused = verdict(claude_payload(command))
+    assert(!refused.allow, command + " writes the shared stash list")
+    assert(
+      refused.reason.contains("git commit"),
+      "the refusal must name the replacement: " + refused.reason,
+    )
+    assert(
+      !decision(codex_payload(command), UNADMITTED, NO_MAKE_TARGETS).allow,
+      command + " is refused for Codex in any repository",
+    )
+  }
+}
+
+@test
+pipeline test_git_stash_reads_and_lookalikes_are_allowed(harness: Harness, task: unknown) {
+  // THE CONTROL. Refusing every command that mentions `stash` would pass the
+  // denial cases above, so the read-only verbs and unrelated words must pass.
+  for command in [
+    "git stash list",
+    "git stash show -p stash@{0}",
+    "git -C /workspace stash list",
+    "sudo -u x git stash list",
+    "timeout 30 git stash show",
+    "nice -n 5 git log --oneline",
+    "git log --oneline",
+    "git commit -am 'stash the cache'",
+    "echo git stash",
+    "grep stash docs/notes.md",
+    "git reset --soft HEAD~1",
+  ] {
+    const allowed = verdict(claude_payload(command))
+    assert(allowed.allow, command + " does not write the stash list: " + allowed.reason)
+  }
 }

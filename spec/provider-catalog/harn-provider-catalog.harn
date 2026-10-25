@@ -84,6 +84,7 @@ pub type HarnProviderCatalogDataControls = {
 
 pub type HarnProviderCatalogDeprecation = {
   note?: string,
+  retires_on?: string,
   status: "active" | "deprecated",
   sunset_date?: string,
   superseded_by?: string,

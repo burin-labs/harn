@@ -14,7 +14,7 @@ use crate::value::{VmError, VmValue};
 /// of already-persisted records, so the name is corrected here instead — both
 /// to stop the next reader assuming RFC3339 and to keep this from being folded
 /// into `harn_clock::system_now_rfc3339` as if it were another copy.
-pub(crate) fn now_unix_seconds_text() -> String {
+pub fn now_unix_seconds_text() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -114,7 +114,7 @@ pub(crate) use policy::{is_policy_machinery_consent_call, swap_execution_policy_
 mod ambient_scope;
 pub use ambient_scope::blocking::run_blocking_with_ambient;
 pub(crate) use ambient_scope::scope_persistent_state_context;
-pub(crate) use ambient_scope::{
+pub use ambient_scope::{
     poll_source_dir, scope_agent_session, scope_ambient, scope_ambient_transaction,
     scope_approval_policy, scope_autonomy_policy, scope_command_policy, scope_dynamic_permissions,
     scope_inference_boundary, scope_inline_subtask, scope_run_event_sink, AmbientExecutionScope,

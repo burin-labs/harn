@@ -5,8 +5,10 @@ use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 use uuid::Uuid;
 
+use harn_builtins::secret_scan::append_secret_scan_audit;
+use harn_builtins::secret_scan::scan_content as secret_scan_content;
+use harn_builtins::secret_scan::SecretFinding;
 use harn_vm::mcp_protocol;
-use harn_vm::{append_secret_scan_audit, secret_scan_content, SecretFinding};
 
 use super::types::{
     ConnectionState, DlqRetryRequest, InspectPayload, McpOrchestratorService, QueueSnapshot,

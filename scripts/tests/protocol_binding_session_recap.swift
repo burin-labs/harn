@@ -79,7 +79,10 @@ private struct RecapBindingProbe {
                 throw RecapBindingProbeError.acceptedMissingSessionUpdateIdentity
             } catch {}
         }
-        guard updateKinds.count == 17 else {
+        // These kinds are emitted outside AgentEvent, so the adapter fixture omits them.
+        let nonEventKinds: Set<String> = ["available_commands_update", "live_session_client", "log"]
+        guard updateKinds.union(nonEventKinds) == Set(HarnProtocolConstants.acpSessionUpdateExtensions),
+              updateKinds.isDisjoint(with: nonEventKinds) else {
             throw RecapBindingProbeError.incompleteSessionUpdateFixture
         }
         let recap = fixture["sessionRecapAvailability"] as! [String: Any]

@@ -101,7 +101,7 @@ impl ToolAudience {
         Self::Agent,
     ];
 
-    pub(crate) fn parse(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         Some(match value {
             "cli" => Self::Cli,
             "mcp" => Self::Mcp,

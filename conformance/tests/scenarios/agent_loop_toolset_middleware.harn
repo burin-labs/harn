@@ -32,9 +32,7 @@ fn check_pair(harness: Harness, caller: any, expected: MiddlewareExpectation) {
     "A namespaced member.",
     {
       handler: { args ->
-        if expected.redacted ?? false {
-          require args.marker == "redacted", "the member's argument must be redacted"
-        }
+        require args.marker == "raw", "the handler must receive the original argument"
         harness.runtime.atomic_add(native, 1)
         return "native reached"
       },
@@ -77,6 +75,15 @@ fn check_pair(harness: Harness, caller: any, expected: MiddlewareExpectation) {
         done_sentinel: "##DONE##",
         tool_caller: { call, next ->
           const result = caller(call, next)
+          if expected.redacted ?? false {
+            require result?.arguments?.marker
+              == if call.call_id == "native" {
+                "redacted"
+              } else {
+                "raw"
+              },
+              "only the recorded copy of the redacted member's argument changes"
+          }
           if result?.error_category == "scope_violation" {
             harness.runtime.atomic_add(rejected, 1)
           }

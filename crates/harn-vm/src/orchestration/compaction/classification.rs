@@ -28,7 +28,7 @@ pub struct ClassificationConfig {
 }
 
 impl ClassificationConfig {
-    pub(crate) fn from_value(value: &VmValue) -> Result<Self, VmError> {
+    pub fn from_value(value: &VmValue) -> Result<Self, VmError> {
         let fields = value
             .as_dict()
             .ok_or_else(|| invalid("classify must be a record"))?;

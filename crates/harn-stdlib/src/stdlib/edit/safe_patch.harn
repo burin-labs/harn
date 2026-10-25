@@ -720,6 +720,7 @@ fn __edit_signature_current(code_index: HarnessCodeIndex, p: dict) -> list {
  *
  * All-or-nothing and never a silent no-op: refusals (`parameter_in_use`,
  * `value_reference`, `unsupported_call_site`, `overrides_present`,
+ * `fixed_signature`,
  * `ambiguous_symbol`, `no_match`, ...) write nothing and list the blocking
  * `sites`; a request that does not fit the function (an unknown `from`, a
  * new parameter without a value, an unchanged list) throws. The result keeps

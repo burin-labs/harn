@@ -13,6 +13,6 @@ pub(crate) fn sha256_hex(args: &[VmValue]) -> String {
     harn_kernel::pure::sha256_hex(bytes.as_ref())
 }
 
-pub(crate) fn sha256_hex_value(args: &[VmValue]) -> VmValue {
+pub fn sha256_hex_value(args: &[VmValue]) -> VmValue {
     VmValue::string(sha256_hex(args))
 }

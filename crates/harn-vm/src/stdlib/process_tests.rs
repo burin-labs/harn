@@ -34,28 +34,18 @@ fn refused_script_read_emits_names_only_to_embedded_event_sink() {
     );
 }
 
-struct CurrentDirGuard(std::path::PathBuf);
-
-impl Drop for CurrentDirGuard {
-    fn drop(&mut self) {
-        std::env::set_current_dir(&self.0).expect("restore current dir");
-    }
-}
-
 #[test]
 fn inherited_process_cwd_prefers_admitted_execution_context_over_ambient_root() {
     let _env_lock = crate::runtime_paths::test_env_lock()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     crate::reset_thread_local_state();
+    // The process cwd stays put: tests spawning children in parallel inherit it,
+    // and pointing it at a temp dir that is later deleted fails their spawns.
+    let ambient = std::env::current_dir().unwrap();
     let roots = tempfile::tempdir().unwrap();
-    let ambient = roots.path().join("ambient");
     let execution = roots.path().join("execution");
-    std::fs::create_dir_all(&ambient).unwrap();
     std::fs::create_dir_all(&execution).unwrap();
-    let original_cwd = std::env::current_dir().unwrap();
-    std::env::set_current_dir(&ambient).unwrap();
-    let cwd_guard = CurrentDirGuard(original_cwd);
     set_thread_execution_context(Some(crate::orchestration::RunExecutionRecord {
         cwd: Some(execution.to_string_lossy().into_owned()),
         ..Default::default()
@@ -72,7 +62,6 @@ fn inherited_process_cwd_prefers_admitted_execution_context_over_ambient_root() 
     let resolved = inherited_process_cwd().unwrap();
 
     crate::reset_thread_local_state();
-    drop(cwd_guard);
     assert_eq!(resolved, std::fs::canonicalize(&execution).unwrap());
 }
 

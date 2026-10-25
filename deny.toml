@@ -19,33 +19,18 @@ all-features = true
 # standing exception with a concrete reason and an upstream tracking link.
 # A real, fixable vulnerability is never ignored — it fails unconditionally.
 #
-# An ignore that no longer matches any crate also fails the gate: the CI job
-# runs `--deny advisory-not-detected`. Delete an entry once its crate leaves
-# the tree; do not keep it "just in case" the crate returns.
+# Each reason must say `Review by YYYY-MM-DD`. The shared advisories workflow
+# fails an undated or expired ignore, and one that matches nothing in
+# Cargo.lock. Delete an entry once its crate leaves the lockfile; do not keep
+# it "just in case" the crate returns.
 ignore = [
     # --- Unmaintained/unsound transitive deps, no vuln, no safe upgrade ---
-    { id = "RUSTSEC-2024-0436", reason = "paste 1.x unmaintained proc-macro; transitive, no vuln, no drop-in replacement. https://rustsec.org/advisories/RUSTSEC-2024-0436" },
+    { id = "RUSTSEC-2024-0436", reason = "paste 1.x unmaintained proc-macro; transitive, no vuln, no drop-in replacement. Review by 2027-01-24. https://rustsec.org/advisories/RUSTSEC-2024-0436" },
     # Linux keyring adapters still require zbus 5; zbus 6 absorbed these crates.
     # Remove these informational exceptions when both adapters support zbus 6.
-    { id = "RUSTSEC-2026-0370", reason = "zvariant merged into zbus 6; no vulnerability. Latest secret-service 5.2 and zbus-secret-service-keyring-store 1.0.1 require zbus ^5. https://github.com/z-galaxy/zbus/issues/2043" },
-    { id = "RUSTSEC-2026-0371", reason = "zbus_names merged into zbus 6; no vulnerability. Latest secret-service 5.2 and zbus-secret-service-keyring-store 1.0.1 require zbus ^5. https://github.com/z-galaxy/zbus/issues/2043" },
-    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive merged into zbus 6; no vulnerability. Latest secret-service 5.2 and zbus-secret-service-keyring-store 1.0.1 require zbus ^5. https://github.com/z-galaxy/zbus/issues/2043" },
-    # --- quick-xml DoS advisories: transitive under xcap (screen capture for
-    # computer-use), which is at its latest 0.9.6. The fix (>=0.41.0) is
-    # semver-incompatible with what xcb/wayland-scanner pin, so it cannot be
-    # resolved without an upstream xcap release. The parsed XML is local
-    # X11/Wayland protocol data (not attacker-controlled network input), so the
-    # memory-exhaustion / quadratic-parse vectors are not reachable in practice.
-    #
-    # Two further reachability facts, so this does not get re-derived: xcap is
-    # optional behind harn-hostlib's `computer-local` feature, and `default` =
-    # `full` = ["ast", "terminal-session"] — no workspace crate enables
-    # `computer-local`, so quick-xml is not compiled in a default build at all
-    # (`cargo tree -i quick-xml` matches nothing). xcb's copy is additionally a
-    # BUILD-dependency used to generate X11 bindings, so it never ships in the
-    # binary. Both parents are Linux-only.
-    { id = "RUSTSEC-2026-0194", reason = "quick-xml quadratic attribute-check; transitive via xcap@0.9.6 (latest) -> xcb/wayland. Fix >=0.41 semver-blocked upstream; local display-protocol data only. https://rustsec.org/advisories/RUSTSEC-2026-0194" },
-    { id = "RUSTSEC-2026-0195", reason = "quick-xml unbounded namespace alloc; transitive via xcap@0.9.6 (latest) -> xcb/wayland. Fix >=0.41 semver-blocked upstream; local display-protocol data only. https://rustsec.org/advisories/RUSTSEC-2026-0195" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant merged into zbus 6; no vulnerability. Latest secret-service 5.2 and zbus-secret-service-keyring-store 1.0.1 require zbus ^5. Review by 2027-01-17. https://github.com/z-galaxy/zbus/issues/2043" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names merged into zbus 6; no vulnerability. Latest secret-service 5.2 and zbus-secret-service-keyring-store 1.0.1 require zbus ^5. Review by 2027-01-17. https://github.com/z-galaxy/zbus/issues/2043" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive merged into zbus 6; no vulnerability. Latest secret-service 5.2 and zbus-secret-service-keyring-store 1.0.1 require zbus ^5. Review by 2027-01-17. https://github.com/z-galaxy/zbus/issues/2043" },
 ]
 
 [licenses]

@@ -7,7 +7,7 @@ mod options;
 mod provider;
 mod transcript;
 pub(crate) use crate::stdlib::template::render_stdlib_prompt_asset;
-pub(crate) use crate::value::json::vm_value_dict_to_json;
+pub use crate::value::json::vm_value_dict_to_json;
 pub use crate::value::json::vm_value_to_json;
 
 use crate::value::{VmError, VmValue};
@@ -20,15 +20,16 @@ impl From<crate::llm_config::ModelResolutionError> for VmError {
 
 pub(crate) use goal_pin::GoalPinProjection;
 pub use goal_pin::{GoalPinCriterion, GoalPinSpec};
-pub(crate) use message_view::{displays_as, MessageView};
-pub(crate) use messages::{
+pub use message_view::{displays_as, MessageView};
+pub use messages::{
     json_messages_to_vm, vm_add_role_message, vm_message_value, vm_messages_to_json,
 };
-pub(crate) use opt_get::{opt_bool, opt_float, opt_int, opt_str};
+pub use opt_get::{opt_bool, opt_float, opt_int, opt_str};
 pub use options::admit_reasoning_literals;
-pub(crate) use options::{
+pub use options::extract_llm_options;
+pub use options::{
     assemble_system_prompt, compose_system_prompt, directive_envelope_message,
-    directive_nonce_for_session, expects_structured_output, extract_json, extract_llm_options,
+    directive_nonce_for_session, expects_structured_output, extract_json,
     has_directive_commit_metadata, parse_reasoning_effort_field, pending_reminders_from_session,
     prepare_llm_options, prepare_llm_options_safe, project_agent_tools, project_llm_options,
     render_pending_reminders, resolve_catalog_thinking_config, resolve_thinking_config,
@@ -37,12 +38,12 @@ pub(crate) use options::{
 };
 #[cfg(test)]
 pub(crate) use options::{strip_internal_message_metadata, tracked_directive_envelope_message};
-pub(crate) use provider::{
+pub use provider::{
     vm_resolve_model, vm_resolve_model_selector, vm_resolve_provider, ResolvedProvider,
 };
 #[cfg(test)]
 pub(crate) use transcript::transcript_to_vm_with_events;
-pub(crate) use transcript::{
+pub use transcript::{
     apply_reminder_post_turn, emit_reminder_lifecycle_event, is_transcript_value,
     new_transcript_with, new_transcript_with_events, normalize_transcript_asset,
     reminder_from_event, reminder_from_vm_value, reminder_lifecycle_payload,
@@ -59,7 +60,7 @@ pub(crate) use transcript::{
 // `transcript::` submodule; mark as unused-allowed until those callers
 // land.
 #[allow(unused_imports)]
-pub(crate) use transcript::{
+pub use transcript::{
     transcript_drain_decision_event, transcript_reminder_event, transcript_resumption_event,
     transcript_suspension_event, DirectiveAuthority, DrainDecision, DrainDecisionAction,
     DrainDecisionItem, DrainDecisionItemCategory, ReminderPropagate, ReminderRoleHint,

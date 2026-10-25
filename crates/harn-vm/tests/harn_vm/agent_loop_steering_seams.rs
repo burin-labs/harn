@@ -96,7 +96,7 @@ fn run_with_bridge_after(source: &str, setup: impl FnOnce()) -> Result<String, S
         ));
         harn_vm::llm::install_current_host_bridge(bridge.clone());
         let mut vm = harn_vm::new_vm();
-        harn_vm::register_vm_stdlib(&mut vm);
+        harn_runtime::register_vm_stdlib(&mut vm);
         let result = vm
             .execute(&chunk)
             .await

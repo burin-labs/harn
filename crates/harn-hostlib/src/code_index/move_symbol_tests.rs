@@ -753,3 +753,176 @@ fn a_source_file_broken_across_lines_refuses_before_planning() {
     );
     assert!(s(field(&result, "details")).starts_with("`orders.py` does not parse before the edit"));
 }
+
+// The three Rust cases below are reductions of compiler failures a seeded
+// qualification run found in published crates.
+
+#[test]
+fn rust_import_the_source_still_uses_stays_in_the_source() {
+    let fixture = Fixture::new(&[
+        ("Cargo.toml", "[package]\nname = \"kit\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "pub mod buf;\n"),
+        ("src/buf/mod.rs", "pub mod uninit;\n"),
+        (
+            "src/buf/uninit.rs",
+            "use core::fmt;\nuse core::mem::MaybeUninit;\n\n/// Uninitialized bytes.\n#[repr(transparent)]\npub struct Slice([MaybeUninit<u8>]);\n\nimpl Slice {\n    pub fn new(slice: &mut [MaybeUninit<u8>]) -> &mut Slice {\n        unsafe { &mut *(slice as *mut [MaybeUninit<u8>] as *mut Slice) }\n    }\n}\n\nimpl fmt::Debug for Slice {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        f.write_str(\"Slice\")\n    }\n}\n",
+        ),
+    ]);
+    let result = fixture.mv("Slice", "src/buf/uninit.rs", "src/buf/moved.rs");
+    assert_eq!(tag(&result), "applied", "{result:?}");
+    let source = fixture.read("src/buf/uninit.rs");
+    assert!(source.contains("use core::mem::MaybeUninit;"), "{source}");
+    assert!(fixture
+        .read("src/buf/moved.rs")
+        .contains("use core::mem::MaybeUninit;"));
+}
+
+#[test]
+fn rust_source_reading_the_moved_structs_private_fields_refuses() {
+    let fixture = Fixture::new(&[
+        ("Cargo.toml", "[package]\nname = \"kit\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "pub mod chain;\npub mod other;\n"),
+        (
+            "src/chain.rs",
+            "pub struct Chain<T, U> {\n    a: T,\n    b: U,\n}\n\nimpl<T, U> Chain<T, U> {\n    pub fn first_ref(&self) -> &T {\n        &self.a\n    }\n}\n",
+        ),
+        ("src/other.rs", "pub fn other() {}\n"),
+    ]);
+    let result = fixture.refused(
+        "visibility_required",
+        &[
+            ("symbol", vm_string("Chain")),
+            ("path", vm_string("src/chain.rs")),
+            ("to_path", vm_string("src/other.rs")),
+        ],
+    );
+    let sites = list(field(&result, "sites"));
+    assert_eq!(int(field(&sites[0], "line")), 8, "{sites:?}");
+}
+
+#[test]
+fn rust_import_list_in_a_nested_module_refuses() {
+    let fixture = Fixture::new(&[
+        ("Cargo.toml", "[package]\nname = \"kit\"\nversion = \"0.1.0\"\n"),
+        (
+            "src/lib.rs",
+            "pub mod other;\n\npub struct Meta {\n    pub level: u8,\n}\n\npub struct Record {\n    pub meta: Meta,\n}\n\n#[cfg(test)]\nmod tests {\n    use super::{Meta, Record};\n\n    #[test]\n    fn build() {\n        let _ = Record { meta: Meta { level: 1 } };\n    }\n}\n",
+        ),
+        ("src/other.rs", "pub fn other() {}\n"),
+    ]);
+    let result = fixture.refused(
+        "nested_import",
+        &[
+            ("symbol", vm_string("Meta")),
+            ("path", vm_string("src/lib.rs")),
+            ("to_path", vm_string("src/other.rs")),
+        ],
+    );
+    let sites = list(field(&result, "sites"));
+    assert_eq!(int(field(&sites[0], "line")), 13, "{sites:?}");
+}
+
+/// A crate whose `a::model` declares `Meta` and the tuple struct `Wrap`,
+/// with `b::moved` as the destination outside `a`.
+fn restricted_fields_fixture(extra: &[(&str, &str)]) -> Fixture {
+    let mut files = vec![
+        ("Cargo.toml", "[package]\nname = \"kit\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "pub mod a;\npub mod b;\n"),
+        ("src/b/mod.rs", "pub mod moved;\n"),
+        ("src/b/moved.rs", "pub fn other() {}\n"),
+        (
+            "src/a/model.rs",
+            "pub mod child;\n\npub struct Meta {\n    pub(super) level: u8,\n    pub(crate) target: u8,\n    id: u8,\n}\n\npub struct Wrap(u8);\n",
+        ),
+    ];
+    files.extend_from_slice(extra);
+    Fixture::new(&files)
+}
+
+fn moved_out_of_a(fixture: &Fixture, symbol: &str) -> Vec<(String, i64)> {
+    let result = fixture.refused(
+        "visibility_required",
+        &[
+            ("symbol", vm_string(symbol)),
+            ("path", vm_string("src/a/model.rs")),
+            ("to_path", vm_string("src/b/moved.rs")),
+        ],
+    );
+    list(field(&result, "sites"))
+        .iter()
+        .map(|site| (s(field(site, "path")), int(field(site, "line"))))
+        .collect()
+}
+
+#[test]
+fn rust_readers_that_lose_a_restricted_field_refuse() {
+    let fixture = restricted_fields_fixture(&[
+        (
+            "src/a/mod.rs",
+            "pub mod model;\n\npub fn level(m: &model::Meta) -> u8 {\n    m.level\n}\n",
+        ),
+        (
+            "src/a/model/child.rs",
+            "use super::Meta;\n\npub fn id(m: &Meta) -> u8 {\n    m.id + m.target\n}\n\npub fn copy(m: &Meta) -> Meta {\n    Meta { target: 2, ..*m }\n}\n\nimpl std::fmt::Display for Meta {\n    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n        write!(f, \"{}\", self.id)\n    }\n}\n",
+        ),
+    ]);
+    // `pub(super)` from the parent, private from a child module, and a
+    // `..base` update that copies both; `pub(crate)` stays readable.
+    assert_eq!(
+        moved_out_of_a(&fixture, "Meta"),
+        [
+            ("src/a/mod.rs".to_string(), 4),
+            ("src/a/model/child.rs".to_string(), 4),
+            ("src/a/model/child.rs".to_string(), 8),
+            ("src/a/model/child.rs".to_string(), 13),
+        ]
+    );
+}
+
+#[test]
+fn rust_tuple_struct_reads_constructors_and_patterns_in_other_files_refuse() {
+    let fixture = restricted_fields_fixture(&[
+        ("src/a/mod.rs", "pub mod model;\n"),
+        (
+            "src/a/model/child.rs",
+            "pub fn get(w: &super::Wrap) -> u8 {\n    w.0\n}\n\npub fn make() -> super::Wrap {\n    super::Wrap(1)\n}\n\npub fn take(w: super::Wrap) -> u8 {\n    let super::Wrap(x) = w;\n    x\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn reads() {\n        let w = super::make();\n        assert_eq!(w.0, 1);\n        assert!(matches!(w, super::Wrap(1)));\n    }\n}\n",
+        ),
+    ]);
+    let lines: Vec<i64> = moved_out_of_a(&fixture, "Wrap")
+        .into_iter()
+        .map(|(path, line)| {
+            assert_eq!(path, "src/a/model/child.rs");
+            line
+        })
+        .collect();
+    assert_eq!(lines, [2, 6, 10, 19, 20]);
+}
+
+#[test]
+fn rust_tuple_struct_built_through_an_import_alias_refuses() {
+    let fixture = restricted_fields_fixture(&[
+        ("src/a/mod.rs", "pub mod model;\n"),
+        (
+            "src/a/model/child.rs",
+            "use super::Wrap as W;\n\npub fn make() -> W {\n    W(1)\n}\n",
+        ),
+    ]);
+    assert_eq!(
+        moved_out_of_a(&fixture, "Wrap"),
+        [("src/a/model/child.rs".to_string(), 4)]
+    );
+}
+
+#[test]
+fn rust_move_into_the_parent_keeps_child_readers() {
+    let fixture = restricted_fields_fixture(&[
+        ("src/a/mod.rs", "pub mod model;\n"),
+        (
+            "src/a/model/child.rs",
+            "pub fn get(w: &crate::a::model::Wrap) -> u8 {\n    w.0\n}\n",
+        ),
+    ]);
+    // The child module stays a descendant of `a`, so it still sees `Wrap.0`.
+    let result = fixture.mv("Wrap", "src/a/model.rs", "src/a/mod.rs");
+    assert_eq!(tag(&result), "applied", "{result:?}");
+}

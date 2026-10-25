@@ -162,6 +162,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         &root,
         std::slice::from_ref(&file_plan),
         session_id.as_deref(),
+        &crate::host_call::workspace_writes(),
     )?;
     Ok(env.success(&planned, &file_plan, false, failed))
 }

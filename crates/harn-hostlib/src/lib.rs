@@ -57,6 +57,7 @@ pub mod error;
 pub mod fs;
 pub mod fs_snapshot;
 pub mod fs_watch;
+pub(crate) mod host_call;
 pub mod host_conditions;
 pub mod host_env_custody;
 pub mod host_lease;

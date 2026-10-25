@@ -120,7 +120,7 @@ harn_vm_core::stdlib_state_reset!(reset_process_state);
 /// seam is exercised wherever the tests run. A true UNC path
 /// (`\\?\UNC\server\share`) is left alone: there is no drive-letter form of
 /// it to fall back to, and rewriting it would name a different location.
-pub(crate) fn child_process_cwd(path: std::path::PathBuf) -> std::path::PathBuf {
+pub fn child_process_cwd(path: std::path::PathBuf) -> std::path::PathBuf {
     match path.to_str().and_then(strip_windows_verbatim_prefix) {
         Some(stripped) => std::path::PathBuf::from(stripped),
         None => path,
@@ -1312,15 +1312,15 @@ fn session_env_read_with(
     let Some(environment) = current_session_environment() else {
         return Ok(EnvironmentRead::Permitted(std::env::var(name).ok()));
     };
-    let workspace_defaults = workspace_env_defaults();
     let is_grant_target = environment.is_host_inference_target(name)
         || environment
             .grants()
             .iter()
             .any(|grant| grant.exposed_env_var() == Some(name));
     if !is_grant_target {
-        if let Some(value) = workspace_defaults.get(name) {
-            return Ok(EnvironmentRead::Permitted(Some(value.clone())));
+        let read_defaults = crate::stdlib::sandbox::workspace_env::active_workspace_env_for_read();
+        if let Some((_, value)) = read_defaults.into_iter().find(|(key, _)| key == name) {
+            return Ok(EnvironmentRead::Permitted(Some(value)));
         }
     }
     let resolved =

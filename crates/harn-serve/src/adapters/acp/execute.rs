@@ -788,7 +788,8 @@ require_declared_operations_served = true
         });
         let bridge = Arc::new(AcpBridge {
             session_id: "module-progress-test".to_string(),
-            output: super::super::AcpOutput::Channel(tx),
+            output: super::super::AcpOutput::Channel(tx)
+                .observed_by(super::super::module_progress::ModuleProgressGate::default()),
             pending: client_pending,
             next_id_counter: AtomicU64::new(1),
             cancellation: cancellation.clone(),
@@ -922,6 +923,15 @@ require_declared_operations_served = true
                 .and_then(|value| value.as_str()),
             Some("completed"),
             "the terminal live frame must preserve the final timing receipt"
+        );
+        assert_eq!(
+            module_progress
+                .iter()
+                .filter(|meta| meta.pointer("/data/state").and_then(|v| v.as_str())
+                    == Some("completed"))
+                .count(),
+            1,
+            "completion is reported once"
         );
     }
 }

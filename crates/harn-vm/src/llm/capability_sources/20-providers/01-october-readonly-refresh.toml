@@ -96,12 +96,30 @@ reasoning_disable_supported = false
 thinking_modes = []
 
 [[provider.vercel_ai_gateway]]
-model_match = ["vercel/minimax/minimax-m3.1-flash", "minimax/minimax-m3.1-flash", "vercel/deepseek/deepseek-v4.1-flash-1017", "deepseek/deepseek-v4.1-flash-1017", "vercel/deepseek/deepseek-v4.1-flash-1017-fast", "deepseek/deepseek-v4.1-flash-1017-fast", "vercel/inception/mercury-3", "inception/mercury-3", "vercel/elorian/glimpse", "elorian/glimpse"]
+model_match = ["vercel/minimax/minimax-m3.1-flash", "minimax/minimax-m3.1-flash", "vercel/deepseek/deepseek-v4.1-flash-1017-fast", "deepseek/deepseek-v4.1-flash-1017-fast", "vercel/inception/mercury-3", "inception/mercury-3", "vercel/elorian/glimpse", "elorian/glimpse"]
 native_tools = false
 preferred_tool_format = "json"
 text_tool_wire_format_supported = false
 tool_mode_parity = "unknown"
 tool_mode_parity_notes = "Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization."
+vision = false
+vision_supported = false
+video_supported = false
+reasoning_effort_supported = false
+reasoning_none_supported = false
+reasoning_disable_supported = false
+thinking_modes = []
+
+# Probed 2026-10-25 against the live gateway: a request with one function tool returned a
+# parsed `get_weather` tool call with finish_reason `tool_calls`. The read-only refresh row
+# above left this route without tools only because that refresh made no inference calls.
+[[provider.vercel_ai_gateway]]
+model_match = ["vercel/deepseek/deepseek-v4.1-flash-1017", "deepseek/deepseek-v4.1-flash-1017"]
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = false
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "One live native tool call succeeded on 2026-10-25; the text tool grammar was not probed, so text tools stay undeclared."
 vision = false
 vision_supported = false
 video_supported = false

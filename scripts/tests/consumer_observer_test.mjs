@@ -11,6 +11,7 @@ import {
   observerDeclarationName, observerRunNameExpression, observerDispatchActor,
   qualifyOwnedChild, githubArtifactCensus, githubChildCensus, reconcileOwnedChildren,
   createTerminalReceipt, qualifyTerminalReceipt, parentHeadSha, observerParentWorkflows, observerRefusal,
+  readRetry,
 } from '../lib/consumer-observer.mjs';
 
 const context = {
@@ -190,6 +191,52 @@ test('a refused census read carries status and rate limit, retries one exhausted
   await assert.rejects(() => read(async () => { reads += 1; return refused(403, { 'x-ratelimit-remaining': '7' }); }),
     /observer_census_read_refused/);
   assert.equal(reads, 1, 'a refusal with budget left is not a rate limit and is not retried');
+});
+
+test('a run read retries a rate limit, a server error or a dropped connection, and fails a denial at once', async () => {
+  const backoff = readRetry.backoffMs;
+  readRetry.backoffMs = 0;
+  try {
+    const headers = values => ({ get: name => values[name] });
+    const refused = (status, values = {}, body = { message: 'Resource not accessible by integration' }) =>
+      ({ ok: false, status, headers: headers(values), clone: () => ({ json: async () => body }) });
+    const secondary = { message: 'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' };
+    const run = { id: 73, status: 'in_progress', run_attempt: 1 };
+    const read = replies => {
+      const seen = [];
+      const fetchRecord = async () => {
+        const reply = replies[seen.length];
+        seen.push(reply);
+        if (reply instanceof Error) throw reply;
+        return reply ?? { ok: true, json: async () => run };
+      };
+      return { seen, result: githubRecord('fixture-read', 'acme/widget-host', '73', fetchRecord) };
+    };
+    for (const replies of [
+      [refused(403, { 'retry-after': '0' }), refused(502), new Error('socket hang up')],
+      [refused(429, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1' })],
+      [refused(403, { 'x-ratelimit-remaining': '4000' }, secondary)],
+    ]) {
+      const transient = read(replies);
+      assert.equal((await transient.result).id, 73);
+      assert.equal(transient.seen.length, replies.length + 1, 'each refusal is retried, then the read measures');
+    }
+    for (const status of [401, 403, 404]) {
+      const denied = read([refused(status, { 'x-ratelimit-remaining': '4000' })]);
+      const error = await denied.result.then(() => assert.fail('a denial must reject'), failure => failure);
+      assert.equal(denied.seen.length, 1, `a ${status} denial is not retried`);
+      assert.equal(observerRefusal(error, 'fallback').line,
+        `CONSUMER_OBSERVER reason=run_read_refused status=${status} ratelimit_remaining=4000`);
+    }
+    const exhausted = read([refused(503), refused(503), refused(503), refused(503), refused(503)]);
+    await assert.rejects(exhausted.result, /run_read_refused/);
+    assert.equal(exhausted.seen.length, readRetry.attempts, 'retries stop at the bound');
+    const distant = read([refused(403, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '4102444800' })]);
+    await assert.rejects(distant.result, /run_read_refused/);
+    assert.equal(distant.seen.length, 1, 'a reset beyond the wait bound is not slept on');
+  } finally {
+    readRetry.backoffMs = backoff;
+  }
 });
 
 test('every observer entrypoint prints its failure through the one public refusal owner', () => {

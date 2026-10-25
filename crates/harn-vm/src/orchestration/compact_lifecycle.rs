@@ -316,7 +316,7 @@ pub(crate) async fn run_compaction_lifecycle(
     run_compaction_lifecycle_with_ctx(None, messages, config, llm_opts, lifecycle).await
 }
 
-pub(crate) async fn run_compaction_lifecycle_with_ctx(
+pub async fn run_compaction_lifecycle_with_ctx(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     messages: &mut Vec<JsonValue>,
     config: &mut AutoCompactConfig,

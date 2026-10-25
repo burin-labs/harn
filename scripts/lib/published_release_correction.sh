@@ -66,7 +66,7 @@ release_require_published_correction() (
       $entries[0].attestationPredicateType == $predicate and
       $entries[0].artifact == ("harn-" + $target) and $entries[0].file == $asset.filename and
       ($asset.sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
-      $asset.filename == ("harn-" + $target + (if $target == "x86_64-pc-windows-msvc" then ".zip" else ".tar.gz" end)) and
+      $asset.filename == ("harn-" + $target + (if $target == "x86_64-pc-windows-msvc" then ".zip" else ".tar.xz" end)) and
       $asset.url == ("https://github.com/" + $repository + "/releases/download/" + $tag + "/" + $asset.filename) and
       ($asset.size | type == "number" and . > 0 and . == floor) and
       [$release.assets[] | select(.name == $asset.filename)] as $published |

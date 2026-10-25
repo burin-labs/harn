@@ -125,6 +125,55 @@ fn main(harness: Harness) {
 }
 
 #[test]
+fn dotted_source_names_keep_distinct_adjacent_artifacts_after_relocation() {
+    let tmp = tempfile::tempdir().unwrap();
+    let build = tmp.path().join("build");
+    std::fs::create_dir(&build).unwrap();
+    for (name, message) in [
+        ("catalog", "wrong-undotted-module"),
+        ("catalog.generated", "shipped-interface-reached"),
+    ] {
+        std::fs::write(
+            build.join(format!("{name}.harn")),
+            format!("pub fn answer() -> string {{ return \"{message}\" }}\n"),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        build.join("main.harn"),
+        "import { answer } from \"./catalog.generated.harn\"\nfn main(harness: Harness) { harness.stdio.println(answer()) }\n",
+    )
+    .unwrap();
+    let output = harn_e2e_command()
+        .arg("precompile")
+        .arg(&build)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for name in ["main", "catalog", "catalog.generated"] {
+        for extension in ["harnbc", "harnmod", "harnifc"] {
+            assert!(
+                build.join(format!("{name}.{extension}")).is_file(),
+                "missing adjacent {name}.{extension}"
+            );
+        }
+    }
+    let package = tmp.path().join("relocated");
+    std::fs::rename(&build, &package).unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    assert_entry_hit(&run(&package, cache.path()));
+    assert!(
+        entries(cache.path()).is_empty(),
+        "shipped dotted module missed its artifacts: {:?}",
+        entries(cache.path())
+    );
+}
+
+#[test]
 fn shipped_entry_preserves_package_authority_after_relocation() {
     let tmp = tempfile::tempdir().unwrap();
     let build = write_package_fixture(tmp.path());

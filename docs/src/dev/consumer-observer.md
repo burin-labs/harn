@@ -158,7 +158,7 @@ and promotion dispatch callers retain their existing contracts.
 
 An observer failure writes `harn.consumer_observer.failure.v1` before reporting
 its reason. The descriptor contains `reason`, the dispatched numeric `run_id`,
-and `queue`. The canary preserves it as `consumer-observer-failure-<attempt>`
+and `queue`. The canary preserves it as `consumer-observer-failure-<attempt>-<revision>-<consumer run>`
 for seven days. It contains no repository name, workflow name, consumer log,
 or private ownership receipt.
 
