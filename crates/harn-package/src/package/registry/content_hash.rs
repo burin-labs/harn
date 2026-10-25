@@ -62,8 +62,7 @@ pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), PackageEr
             .map_err(|error| format!("failed to stat {}: {error}", entry.path().display()))?;
         let name = entry.file_name();
         if name == OsStr::new(".git")
-            || name == OsStr::new(CONTENT_HASH_FILE)
-            || name == OsStr::new(CACHE_METADATA_FILE)
+            || harn_modules::package_execution::is_package_cache_metadata_name(&name)
         {
             continue;
         }

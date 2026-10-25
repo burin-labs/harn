@@ -231,8 +231,24 @@ pub(super) fn excluded_package_name(name: &OsStr) -> bool {
     name == OsStr::new(".git")
         || name == OsStr::new(".gitignore")
         || name == OsStr::new("CLAUDE.md")
-        || name == OsStr::new(CONTENT_HASH_FILE)
-        || name == OsStr::new(CACHE_METADATA_FILE)
+        || is_package_cache_metadata_name(name)
+}
+
+/// Reserved cache markers and their incomplete atomic-write siblings are not
+/// package content. Use the same classification when materializing packages.
+pub fn is_package_cache_metadata_name(name: &OsStr) -> bool {
+    if name == OsStr::new(CONTENT_HASH_FILE) || name == OsStr::new(CACHE_METADATA_FILE) {
+        return true;
+    }
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    // The atomic writer keeps a bounded marker stem and a compact UUID.
+    // Package tests derive these names from the real atomic writer.
+    name.strip_prefix("..harn-package-ca.")
+        .or_else(|| name.strip_prefix("..harn-content-ha."))
+        .and_then(|suffix| suffix.strip_suffix(".tmp"))
+        .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
 pub fn normalized_package_relative_path(path: &Path) -> String {

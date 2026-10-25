@@ -25,6 +25,69 @@ fn compute_content_hash_ignores_git_and_hash_marker() {
 }
 
 #[test]
+fn frozen_install_ignores_interrupted_cache_metadata_writes() {
+    let (_repo_tmp, repo, _branch) = create_git_package_repo();
+    let project_tmp = tempfile::tempdir().unwrap();
+    let root = project_tmp.path();
+    let workspace = TestWorkspace::new(root);
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+    fs::write(
+        root.join(MANIFEST),
+        format!(
+            "[package]\nname = \"workspace\"\nversion = \"0.1.0\"\n\n[dependencies]\nacme-lib = {{ git = \"{git}\", rev = \"v1.0.0\" }}\n"
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        install_packages_in(workspace.env(), false, None, false).unwrap(),
+        1
+    );
+    let lock_before = fs::read(root.join(LOCK_FILE)).unwrap();
+    let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+    let entry = lock.find("acme-lib").unwrap();
+    let cache = git_cache_dir_in(
+        workspace.env(),
+        &entry.source,
+        entry.commit.as_deref().unwrap(),
+    )
+    .unwrap();
+    let leftovers = [CACHE_METADATA_FILE, CONTENT_HASH_FILE].map(|name| {
+        let temporary = harn_vm::atomic_io::temp_sibling_name_os(OsStr::new(name));
+        fs::write(cache.join(&temporary), "interrupted internal write\n").unwrap();
+        temporary
+    });
+    fs::remove_dir_all(current_packages_dir(root)).unwrap();
+    fs::remove_dir_all(&repo).unwrap();
+    assert_eq!(
+        install_packages_in(workspace.env(), true, None, true).unwrap(),
+        1
+    );
+    assert_eq!(fs::read(root.join(LOCK_FILE)).unwrap(), lock_before);
+    let installed = current_packages_dir(root).join("acme-lib");
+    assert!(installed.join("lib.harn").is_file());
+    for name in leftovers {
+        assert!(
+            !installed.join(name).exists(),
+            "metadata must not be materialized"
+        );
+    }
+    verify_package_cache_in(workspace.env(), false).unwrap();
+    let expected = compute_content_hash(&cache).unwrap();
+    fs::write(
+        cache.join("..harn-package-ca.not-a-uuid.tmp"),
+        "package content",
+    )
+    .unwrap();
+    assert_ne!(compute_content_hash(&cache).unwrap(), expected);
+    let error = verify_package_cache_in(workspace.env(), false).unwrap_err();
+    assert!(
+        error.to_string().contains("content hash mismatch"),
+        "{error}"
+    );
+}
+
+#[test]
 fn package_cache_verify_detects_tampering_even_with_stale_marker() {
     let (_repo_tmp, repo, _branch) = create_git_package_repo();
     let project_tmp = tempfile::tempdir().unwrap();
