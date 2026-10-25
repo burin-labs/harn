@@ -94,3 +94,44 @@ fn reaping_removes_only_dangling_alias_symlinks() {
     assert!(directory.is_dir());
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "host-owned");
 }
+
+#[test]
+fn reaping_rechecks_under_the_lock_and_spares_an_alias_that_went_live() {
+    let base = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let suffix = prepare_in(base.path(), workspace.path()).unwrap();
+    // A scan saw this alias dangling; the workspace came back before the
+    // unlink. The re-check must leave it, and a truly dangling one must go.
+    reap_if_dangling(base.path(), OsStr::new(&suffix));
+    assert_eq!(
+        std::fs::read_link(base.path().join(&suffix)).unwrap(),
+        workspace.path()
+    );
+    let gone = tempfile::tempdir().unwrap();
+    let dangling = prepare_in(base.path(), gone.path()).unwrap();
+    drop(gone);
+    reap_if_dangling(base.path(), OsStr::new(&dangling));
+    assert!(!base.path().join(&dangling).is_symlink());
+}
+
+#[test]
+fn reaping_waits_for_a_spawn_that_is_preparing_an_alias() {
+    let base = tempfile::tempdir().unwrap();
+    let gone = tempfile::tempdir().unwrap();
+    let suffix = prepare_in(base.path(), gone.path()).unwrap();
+    drop(gone);
+    let preparing = AliasLock::acquire(base.path(), false).unwrap();
+    let reaper = {
+        let base = base.path().to_path_buf();
+        let suffix = suffix.clone();
+        std::thread::spawn(move || reap_if_dangling(&base, OsStr::new(&suffix)))
+    };
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(
+        base.path().join(&suffix).is_symlink(),
+        "the reaper unlinked while a spawn held the alias lock"
+    );
+    drop(preparing);
+    reaper.join().unwrap();
+    assert!(!base.path().join(&suffix).is_symlink());
+}

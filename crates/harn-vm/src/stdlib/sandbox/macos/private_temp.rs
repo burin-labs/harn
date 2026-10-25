@@ -70,33 +70,87 @@ pub(in crate::stdlib::sandbox) fn inject_env(
 /// `.java_pid<pid>`. A collision is refused below, never shared.
 const ALIAS_DIGEST_HEX: usize = 16;
 
+/// Serializes alias preparation against reaping across processes. A preparing
+/// spawn holds it shared from reading the alias until it returns, and a reaper
+/// holds it exclusive while it re-checks and unlinks one alias, so an alias that
+/// a spawn just found live is never unlinked under it.
+const ALIAS_LOCK: &str = "harn-aliases.lock";
+
+struct AliasLock(std::fs::File);
+
+impl AliasLock {
+    fn acquire(base: &Path, exclusive: bool) -> io::Result<Self> {
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::io::AsRawFd;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(base.join(ALIAS_LOCK))?;
+        let operation = if exclusive {
+            libc::LOCK_EX
+        } else {
+            libc::LOCK_SH
+        };
+        loop {
+            // SAFETY: the descriptor is open for the life of `file`.
+            if unsafe { libc::flock(file.as_raw_fd(), operation) } == 0 {
+                return Ok(Self(file));
+            }
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+    }
+}
+
+fn alias_name(name: &std::ffi::OsStr) -> bool {
+    name.to_str().is_some_and(|name| {
+        name.strip_prefix("harn-").is_some_and(|digest| {
+            digest.len() == ALIAS_DIGEST_HEX
+                && digest
+                    .bytes()
+                    .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        })
+    })
+}
+
+fn is_dangling_symlink(path: &Path) -> bool {
+    path.symlink_metadata()
+        .is_ok_and(|meta| meta.file_type().is_symlink())
+        && matches!(path.metadata(), Err(error) if error.kind() == io::ErrorKind::NotFound)
+}
+
 /// Remove aliases whose workspace is gone. Only a symlink named like an alias
 /// whose target no longer exists is touched, never a directory, a file, or a
-/// live target. Best effort: the base can be large and shared, so a failure
-/// leaves the entry for the next process.
+/// live target. The base can be large and shared, so the scan holds no lock;
+/// each candidate is re-checked and unlinked under the exclusive lock. Best
+/// effort: a failure leaves the entry for the next process.
 fn reap_dangling_aliases(base: &Path) {
     let Ok(entries) = std::fs::read_dir(base) else {
         return;
     };
     for entry in entries.flatten() {
-        let is_alias = entry.file_name().to_str().is_some_and(|name| {
-            name.strip_prefix("harn-").is_some_and(|digest| {
-                digest.len() == ALIAS_DIGEST_HEX
-                    && digest
-                        .bytes()
-                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-            })
-        });
-        let path = entry.path();
-        let dangling = entry.file_type().is_ok_and(|kind| kind.is_symlink())
-            && matches!(path.metadata(), Err(error) if error.kind() == io::ErrorKind::NotFound);
-        if is_alias && dangling {
-            let _ = std::fs::remove_file(&path);
+        if alias_name(&entry.file_name()) && is_dangling_symlink(&entry.path()) {
+            reap_if_dangling(base, &entry.file_name());
         }
     }
 }
 
+fn reap_if_dangling(base: &Path, name: &std::ffi::OsStr) {
+    let Ok(_lock) = AliasLock::acquire(base, true) else {
+        return;
+    };
+    let path = base.join(name);
+    if is_dangling_symlink(&path) {
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
 fn prepare_in(base: &Path, target: &Path) -> io::Result<String> {
+    let _lock = AliasLock::acquire(base, false)?;
     let mut digest = harn_kernel::pure::sha256_hex(target.as_os_str().as_bytes());
     digest.truncate(ALIAS_DIGEST_HEX);
     let suffix = format!("harn-{digest}");
