@@ -973,7 +973,7 @@ fn __arbitrate_stalled_toolless_turn(
   verdict: dict,
   text: string?,
   iteration: int,
-) {
+) -> dict {
   const verdict_stops = verdict?.kind == "stop"
     || (verdict?.kind == "rich" && (verdict?.stop ?? false))
   if verdict_stops {
