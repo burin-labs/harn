@@ -834,6 +834,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/prune_stale_targets_test.sh
 	./scripts/tests/prune_stale_targets_retention_test.sh
 	./scripts/tests/prune_stale_targets_host_policy_test.sh
+	bash ./scripts/tests/prune_stale_targets_pressure_test.sh
 	./scripts/tests/target_gc_maintenance_test.sh
 	./scripts/tests/report_ci_cache_budget_test.sh
 	./scripts/tests/cache_refresh_admission_test.sh

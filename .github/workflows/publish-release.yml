@@ -100,6 +100,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  # Published artifacts come from the stable compiler with no unstable flags;
+  # the parallel front end (scripts/lib/rustc_frontend.sh) is for iteration.
+  HARN_RUSTC_FRONTEND_THREADS: "1"
 
 jobs:
   detect-drift:

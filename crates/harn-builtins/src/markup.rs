@@ -181,7 +181,7 @@ fn parse_options(mdx: bool) -> Result<ParseOptions, VmError> {
         };
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_typescript::LANGUAGE_TSX.into())
+            .set_language(&harn_grammars::tsx())
             .map_err(|error| VmError::Runtime(format!("markdown_parse: {error}")))?;
         let parser = std::cell::RefCell::new(parser);
         options.mdx_esm_parse = Some(Box::new(move |source| {

@@ -1,5 +1,24 @@
 import { CommandResult } from "std/command/results"
 
+/** Host-owned identities of every input surface read by a verification check. */
+pub type VerificationInputState = {
+  revision: int,
+  workspace: string,
+  source: string,
+  dependencies: string,
+  environment: string,
+}
+
+/** Reuse is scoped to one check in one run; unknown inputs always execute. */
+pub type VerificationReuse = {
+  scope: string,
+  inputs: fn() -> VerificationInputState?,
+  accept: fn(CommandResult) -> bool,
+}
+
+/** The supplied invocation and complete inputs observed around execution. */
+pub type VerificationCheckBinding = {invocation: string, inputs: VerificationInputState}
+
 pub type VerificationFileHashSnapshotEntry = {
   path: string,
   known: bool,
@@ -36,6 +55,8 @@ pub type VerificationRecordedCheck = {
   observation: VerificationCheckObservation,
   row: dict?,
   snapshot: VerificationFileHashSnapshot?,
+  execution: "executed" | "reused" | "observed",
+  binding: VerificationCheckBinding?,
 }
 
 pub type VerificationStartedCheck = {

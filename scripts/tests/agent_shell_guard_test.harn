@@ -1314,6 +1314,51 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
   assert_eq(GIT_ALIASES_UNREADABLE, "<unreadable>")
 }
 
+/**
+ * A substitution body is a command line the shell runs, so a stash write inside `$(...)`, backticks
+ * or process substitution is refused like the bare command. Single-quoted text is literal, and a
+ * body that never closes is refused rather than guessed at.
+ */
+@test
+pipeline test_git_stash_writes_inside_command_substitution_are_denied(
+  harness: Harness,
+  task: unknown,
+) {
+  for command in [
+    "echo $(git stash pop)",
+    "echo $(echo $(git stash drop))",
+    "x=`git stash drop`",
+    "echo \"$(git stash pop)\"",
+    "cat <(git stash pop)",
+    "tee >(git stash drop) < /dev/null",
+    "echo $((1 + $(git stash pop; echo 1)))",
+    "echo $(git -C /workspace stash clear)",
+    "echo $(git stash pop",
+    "echo `git stash pop",
+    "echo $(echo $(echo $(echo $(echo $(git stash pop)))))",
+    "cat <<EOF\n'$(git stash pop)'\nEOF",
+    "cat <<-EOF\n'`git stash drop`'\nEOF",
+    "cat <<EOF\n$(git stash pop)\nEOF",
+  ] {
+    assert(!verdict(claude_payload(command)).allow, command + " writes the shared stash list")
+  }
+  for command in [
+    "echo $(git rev-parse HEAD)",
+    "echo $(git stash list)",
+    "echo `git stash show`",
+    "diff <(git show a) <(git show b)",
+    "echo '$(git stash pop)'",
+    "cat <<'EOF'\n'$(git stash pop)'\nEOF",
+    "cat <<EOF\n$(git rev-parse HEAD)\nEOF",
+    "cat <<< '$(git stash pop)'",
+    "echo \\$(git stash pop)",
+    "echo $((1 + 2))",
+    "git commit -m \"fix (parens) in $(git rev-parse --short HEAD)\"",
+  ] {
+    assert(verdict(claude_payload(command)).allow, command + " does not write the stash list")
+  }
+}
+
 @test
 pipeline test_git_stash_reads_and_lookalikes_are_allowed(harness: Harness, task: unknown) {
   // THE CONTROL. Refusing every command that mentions `stash` would pass the
