@@ -487,3 +487,4 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     *) canary_fail invocation_unrecognized ;;
   esac
 fi
+# TEMPORARY probe: selects the consumer path for this pull request; reverted before merge.
