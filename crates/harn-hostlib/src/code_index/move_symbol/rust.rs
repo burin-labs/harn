@@ -68,21 +68,15 @@ impl Workspace {
             return found.clone();
         }
         let manifest = self.root.join(dir).join("Cargo.toml");
-        let toml = std::fs::read_to_string(&manifest).ok();
-        let target_paths = toml.as_deref().is_some_and(declares_root_paths);
-        let info = toml
+        let info = std::fs::read_to_string(&manifest)
+            .ok()
             .as_deref()
             .and_then(parse_manifest)
-            .map(|(package, lib_name, lib_path)| {
-                let custom_roots =
-                    target_paths || lib_path.as_deref().is_some_and(|path| path != "src/lib.rs");
-                let lib_rel = lib_path.unwrap_or_else(|| "src/lib.rs".to_string());
-                CrateInfo {
-                    dir: dir.to_string(),
-                    ident: lib_name.unwrap_or(package).replace('-', "_"),
-                    has_lib: self.root.join(dir).join(lib_rel).exists(),
-                    custom_roots,
-                }
+            .map(|manifest| CrateInfo {
+                dir: dir.to_string(),
+                ident: manifest.ident,
+                has_lib: self.root.join(dir).join(&manifest.lib_rel).exists(),
+                custom_roots: manifest.custom_roots,
             });
         self.crates.insert(dir.to_string(), info.clone());
         info
@@ -1083,65 +1077,44 @@ fn join_rel(dir: &str, rest: &str) -> String {
     }
 }
 
-/// Whether the manifest gives a `[[bin]]`, `[[example]]`, `[[test]]` or
-/// `[[bench]]` target a `path` (or declares one inline, unread), or names a
-/// build script: any of these can make a file under `src/` a crate root.
-fn declares_root_paths(toml: &str) -> bool {
-    const TARGETS: [&str; 4] = ["bin", "example", "test", "bench"];
-    let mut section = String::new();
-    for line in toml.lines() {
-        let line = line.split('#').next().unwrap_or_default().trim();
-        if line.starts_with('[') {
-            section = line.chars().filter(|c| !c.is_whitespace()).collect();
-            continue;
-        }
-        let Some((key, _)) = line.split_once('=') else {
-            continue;
-        };
-        let key: String = key.chars().filter(|c| !c.is_whitespace()).collect();
-        let table = section.trim_matches(|c| c == '[' || c == ']');
-        let full = if table.is_empty() {
-            key.clone()
-        } else {
-            format!("{table}.{key}")
-        };
-        let head = full.split('.').next().unwrap_or_default();
-        let target_path = TARGETS.contains(&head) && (full == head || full.ends_with(".path"));
-        if target_path || full == "package.build" {
-            return true;
-        }
-    }
-    false
+struct Manifest {
+    ident: String,
+    lib_rel: String,
+    /// See [`CrateInfo::custom_roots`].
+    custom_roots: bool,
 }
 
-fn parse_manifest(toml: &str) -> Option<(String, Option<String>, Option<String>)> {
-    let mut section = "";
-    let mut package = None;
-    let mut lib_name = None;
-    let mut lib_path = None;
-    for line in toml.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            section = line;
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let value = value.trim().trim_matches('"').to_string();
-        match (section, key.trim()) {
-            ("[package]", "name") => package = Some(value),
-            ("[lib]", "name") => lib_name = Some(value),
-            ("[lib]", "path") => lib_path = Some(value),
-            _ => {}
-        }
-    }
-    package.map(|p| (p, lib_name, lib_path))
+/// Reads the crate identity and whether any file under `src/` may be a crate
+/// root: a non-default `[lib] path`, a `[[bin]]`, `[[example]]`, `[[test]]` or
+/// `[[bench]]` target with a `path`, or a build script. A manifest that does
+/// not parse yields `None`.
+fn parse_manifest(text: &str) -> Option<Manifest> {
+    let manifest: toml::Table = text.parse().ok()?;
+    let package = manifest.get("package")?.as_table()?;
+    let lib = manifest.get("lib").and_then(toml::Value::as_table);
+    let lib_field = |key: &str| lib.and_then(|lib| lib.get(key)?.as_str());
+    let lib_rel = lib_field("path").unwrap_or("src/lib.rs").to_string();
+    let target_paths = ["bin", "example", "test", "bench"].iter().any(|kind| {
+        manifest
+            .get(*kind)
+            .and_then(toml::Value::as_array)
+            .is_some_and(|targets| targets.iter().any(|target| target.get("path").is_some()))
+    });
+    let build_script = package
+        .get("build")
+        .is_some_and(|build| build.as_bool() != Some(false));
+    Some(Manifest {
+        ident: lib_field("name")
+            .or_else(|| package.get("name")?.as_str())?
+            .replace('-', "_"),
+        custom_roots: target_paths || build_script || lib_rel != "src/lib.rs",
+        lib_rel,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::declares_root_paths;
+    use super::parse_manifest;
 
     #[test]
     fn manifest_spellings_that_can_root_a_src_file_are_all_seen() {
@@ -1155,6 +1128,10 @@ mod tests {
             ("[[test]]\n path = \"src/t.rs\"\n", true),
             ("example = [{ name = \"e\", path = \"src/e.rs\" }]\n", true),
             ("build = \"src/build.rs\"\n", true),
+            ("build = false\n", false),
+            ("[[bin]]\n\"path\" = \"src/bin.rs\"\n", true),
+            ("[[bin]]\n'path' = \"src/bin.rs\"\n", true),
+            ("[lib]\npath = \"src/root.rs\"\n", true),
         ] {
             // A trailing top-level key belongs to `[package]`, except the
             // inline-array row, which is written before any table.
@@ -1163,7 +1140,8 @@ mod tests {
             } else {
                 format!("{package}{tail}")
             };
-            assert_eq!(declares_root_paths(&toml), roots, "{toml}");
+            let manifest = parse_manifest(&toml).expect("the manifest parses");
+            assert_eq!(manifest.custom_roots, roots, "{toml}");
         }
     }
 }
