@@ -1,11 +1,11 @@
 /**
  * Precise-edit qualification probe.
  *
- *   harn run --no-sandbox scripts/precise_qualify.harn -- <out-dir> <corpus-dir> [plan.json]
+ *   harn run --no-sandbox scripts/precise_qualify.harn -- <plan.json> <out-dir> [corpus-dir]
  *
- * Run from the repository root. The plan defaults to the checked-in
- * `scripts/precise_qualify/plan.json`; each plan `checkout` is a directory under
- * `<corpus-dir>` holding the repository at its pinned commit, with
+ * Run from the repository root. The checked-in plan is
+ * `scripts/precise_qualify/plan.json`; each relative plan `checkout` is a directory under
+ * `[corpus-dir]` (or the working directory when omitted) holding the repository at its pinned commit, with
  * `typescript-language-server` and `rust-analyzer` on PATH.
  *
  * For each pinned repository in the plan, samples symbols from the code index
@@ -46,14 +46,11 @@ import {
   totals,
 } from "./precise_qualify_report.harn"
 
-/** Checked-in plan: the four pinned repositories, their oracles, seed and sampling. */
-const DEFAULT_PLAN = "scripts/precise_qualify/plan.json"
+const USAGE = "usage: precise_qualify.harn -- <plan.json> <out-dir> [corpus-dir]"
 
-const USAGE = "usage: precise_qualify.harn -- <out-dir> <corpus-dir> [plan.json]"
-
-/** A relative `checkout` names a directory under the corpus directory. */
+/** A relative `checkout` names a directory under the corpus directory, when one is given. */
 fn resolve_checkout(corpus_dir: string, checkout: string) -> string {
-  return if checkout.starts_with("/") {
+  return if checkout.starts_with("/") || corpus_dir == "" {
     checkout
   } else {
     path_join(corpus_dir, checkout)
@@ -830,14 +827,13 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln(USAGE)
     return 2
   }
-  const out_dir = argv[0]
-  const corpus_dir = argv[1]
-  const plan_path = if len(argv) == 3 {
+  const out_dir = argv[1]
+  const corpus_dir = if len(argv) == 3 {
     argv[2]
   } else {
-    DEFAULT_PLAN
+    ""
   }
-  const decoded = json_decode(harness.fs.read_text(plan_path), schema_of(Plan))?
+  const decoded = json_decode(harness.fs.read_text(argv[0]), schema_of(Plan))?
   const plan = decoded
     + {
       repos: decoded.repos.map(

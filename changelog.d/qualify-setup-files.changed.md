@@ -1,1 +1,3 @@
-- `scripts/precise_qualify.harn` runs the checked-in `scripts/precise_qualify/plan.json` by default (`-- <out-dir> <corpus-dir> [plan.json]`), and plans accept `setup_files`, text written into the scratch clone before setup, so a generated tsconfig can make the oracle cover sampled files that a repository's own configs skip.
+- `scripts/precise_qualify.harn` now takes `-- <plan.json> <out-dir> [corpus-dir]`: an optional corpus directory
+  resolves relative plan checkouts. Plans accept `setup_files`, text written into the scratch clone before setup,
+  so a generated tsconfig can make the oracle cover sampled files that a repository's own configs skip.
