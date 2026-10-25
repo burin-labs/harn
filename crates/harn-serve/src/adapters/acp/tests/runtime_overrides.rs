@@ -486,3 +486,72 @@ async fn session_new_asks_the_host_to_warm_its_project_root() {
         );
     }
 }
+
+/// A session that re-anchors to another root moves its warm there: the root
+/// it left is released at once, and close releases the new root, so neither
+/// stays held after the session is gone.
+#[tokio::test(flavor = "current_thread")]
+async fn reanchoring_a_session_moves_its_warm_to_the_new_root() {
+    harn_vm::reset_thread_local_state();
+    let workspace = tempfile::tempdir().expect("workspace");
+    let (first, second) = (workspace.path().join("a"), workspace.path().join("b"));
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    let first_root = super::super::sessions::session_project_root_for_cwd(&first);
+    let second_root = super::super::sessions::session_project_root_for_cwd(&second);
+    assert_ne!(first_root, second_root);
+    let warmed = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let released = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let config = AcpServerConfig::new(None).with_runtime_configurator(Arc::new(WarmRecorder {
+        warmed: warmed.clone(),
+        released: released.clone(),
+    }));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(config, AcpOutput::Channel(tx));
+    let mut reply = async |server: &mut AcpServer, id: i64, method: &str, params| {
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0", "id": id, "method": method, "params": params,
+            }))
+            .await;
+        let message = loop {
+            let message = recv_json(&mut rx).await;
+            if message["id"] == id {
+                break message;
+            }
+        };
+        assert!(message["error"].is_null(), "{message}");
+        message
+    };
+    let created = reply(
+        &mut server,
+        1,
+        "session/new",
+        serde_json::json!({
+            "cwd": first,
+            "environmentPolicy": {"kind": "isolated", "grants": []},
+        }),
+    )
+    .await;
+    let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
+    reply(
+        &mut server,
+        2,
+        "harn.session_reanchor",
+        serde_json::json!({"sessionId": session_id, "path": second}),
+    )
+    .await;
+    assert_eq!(
+        *warmed.lock().unwrap(),
+        vec![first_root.clone(), second_root.clone()]
+    );
+    assert_eq!(*released.lock().unwrap(), vec![first_root.clone()]);
+    reply(
+        &mut server,
+        3,
+        "session/close",
+        serde_json::json!({"sessionId": session_id}),
+    )
+    .await;
+    assert_eq!(*released.lock().unwrap(), vec![first_root, second_root]);
+}
