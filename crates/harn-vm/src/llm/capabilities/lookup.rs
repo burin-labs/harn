@@ -411,6 +411,29 @@ mod tests {
         assert!(previous.reasoning_disable_supported);
     }
 
+    /// Probed 2026-10-25: this route returned a parsed native tool call. The
+    /// neighbouring `-fast` route was not probed and stays without tools.
+    #[test]
+    fn vercel_deepseek_flash_declares_tools_only_for_the_probed_route() {
+        reset();
+        for model in [
+            "vercel/deepseek/deepseek-v4.1-flash-1017",
+            "deepseek/deepseek-v4.1-flash-1017",
+        ] {
+            let caps = lookup("vercel_ai_gateway", model);
+            assert!(caps.native_tools, "{model}");
+            // Only a native call was probed, so the text tool grammar stays undeclared.
+            assert!(!caps.text_tool_wire_format_supported, "{model}");
+        }
+        assert!(
+            !lookup(
+                "vercel_ai_gateway",
+                "vercel/deepseek/deepseek-v4.1-flash-1017-fast"
+            )
+            .native_tools
+        );
+    }
+
     /// Mistral rejected `reasoning_effort: "medium"` on this model with HTTP 400,
     /// so the ladder must not offer a rung Mistral does not document.
     #[test]

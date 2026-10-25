@@ -38819,12 +38819,12 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": false,
-        "preferred_format": "json",
+        "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "declared",
-        "parity_notes": "Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization.",
+        "parity_notes": "One live native tool call succeeded on 2026-10-25; the text tool grammar was not probed, so text tools stay undeclared.",
         "tool_search": []
       },
       "structured_output": "none",
@@ -38925,7 +38925,8 @@
       "availability": "unknown",
       "quality_tags": [],
       "capability_tags": [
-        "streaming"
+        "streaming",
+        "tools"
       ],
       "family": "deepseek",
       "lineage": "deepseek",
@@ -49829,8 +49830,10 @@
       "label": "DeepSeek V4.1 Flash 1017 (Vercel AI Gateway)",
       "family": "deepseek",
       "capabilities": [
+        "native_tools",
         "streaming",
-        "structured_output_mode:none"
+        "structured_output_mode:none",
+        "tools"
       ]
     },
     {

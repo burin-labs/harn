@@ -1,3 +1,4 @@
+use super::value_codec::describe_param_oids_uncached;
 use super::*;
 
 type ParameterCache = SyncMutex<BTreeMap<String, Arc<Vec<PgTypeInfo>>>>;

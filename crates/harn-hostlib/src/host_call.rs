@@ -9,13 +9,18 @@
 
 use std::cell::{Cell, RefCell};
 use std::sync::{Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+#[cfg(feature = "ast")]
+use std::time::Duration;
+use std::time::Instant;
 
+#[cfg(feature = "ast")]
 use harn_vm::agent_events::{AgentEvent, ToolCallStatus, ToolMutationStatus};
 
 /// How often a wait that a caller can stop rechecks its interrupt sources.
+#[cfg(feature = "ast")]
 pub(crate) const INTERRUPT_POLL: Duration = Duration::from_millis(50);
 /// How often a long wait reports that it is still in the same phase.
+#[cfg(feature = "ast")]
 pub(crate) const PROGRESS_HEARTBEAT: Duration = Duration::from_secs(1);
 
 static WORKSPACE_WRITES: Mutex<()> = Mutex::new(());
@@ -38,6 +43,7 @@ pub(crate) fn workspace_writes() -> WorkspaceWrites {
 }
 
 /// Why a call stopped before finishing its work.
+#[cfg(feature = "ast")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Interrupt {
     /// The tool call, its VM, or its session was cancelled.
@@ -47,6 +53,7 @@ pub(crate) enum Interrupt {
 }
 
 /// What a call is doing, reported on its tool call's progress channel.
+#[cfg(feature = "ast")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
     /// Starting a language server and waiting until it can answer.
@@ -59,6 +66,7 @@ pub(crate) enum Phase {
     Applying,
 }
 
+#[cfg(feature = "ast")]
 impl Phase {
     fn as_str(self) -> &'static str {
         match self {
@@ -71,6 +79,10 @@ impl Phase {
 }
 
 /// The tool call a builtin runs for, so progress reaches its host.
+#[cfg_attr(
+    not(feature = "ast"),
+    expect(dead_code, reason = "only the code index reads call progress state")
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct CallAddress {
     pub session_id: String,
@@ -95,6 +107,10 @@ impl CallAddress {
 }
 
 /// Deadline, cancellation, and progress for one builtin call.
+#[cfg_attr(
+    not(feature = "ast"),
+    expect(dead_code, reason = "only the code index reads call progress state")
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct HostCallContext {
     call: Option<CallAddress>,
@@ -128,6 +144,7 @@ impl HostCallContext {
         }
     }
 
+    #[cfg(feature = "ast")]
     /// The context the registry installed for this call, or an empty one.
     pub(crate) fn current() -> Self {
         CURRENT
@@ -140,6 +157,7 @@ impl HostCallContext {
         HostCallGuard(CURRENT.with(|slot| slot.borrow_mut().replace(self)))
     }
 
+    #[cfg(feature = "ast")]
     /// This context, also bounded by a request's own `budget`.
     pub(crate) fn with_budget(mut self, budget: Duration) -> Self {
         let until = Instant::now() + budget;
@@ -147,6 +165,7 @@ impl HostCallContext {
         self
     }
 
+    #[cfg(feature = "ast")]
     /// Why the call must stop now, if it must.
     pub(crate) fn interrupted(&self) -> Option<Interrupt> {
         if harn_vm::op_interrupt::cancel_requested() {
@@ -157,6 +176,7 @@ impl HostCallContext {
         expired.then_some(Interrupt::DeadlineExceeded)
     }
 
+    #[cfg(feature = "ast")]
     /// The commit point, reached once the write lease is held. A stop
     /// requested before it, including while waiting for another writer,
     /// returns the interrupt and `write` never runs. Past it, `write` runs to
@@ -175,6 +195,7 @@ impl HostCallContext {
         Ok(write(&writes))
     }
 
+    #[cfg(feature = "ast")]
     /// Report entering `phase`.
     pub(crate) fn report(&self, phase: Phase, detail: &str) {
         let now = Instant::now();
@@ -219,6 +240,7 @@ impl HostCallContext {
         });
     }
 
+    #[cfg(feature = "ast")]
     /// Report `phase` again when a wait has been quiet for a heartbeat.
     pub(crate) fn heartbeat(&self, phase: Phase, detail: &str) {
         let quiet = self

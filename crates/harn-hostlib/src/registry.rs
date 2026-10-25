@@ -234,6 +234,7 @@ impl BuiltinRegistry {
     /// Register a builtin that can wait on an external process. It runs off
     /// the VM's thread under a [`HostCallContext`], so its caller can stop it
     /// and see its progress while it waits.
+    #[cfg(feature = "ast")]
     pub(crate) fn register_interruptible(&mut self, builtin: RegisteredBuiltin) {
         self.interruptible_builtins.insert(builtin.name);
         self.register(builtin);
