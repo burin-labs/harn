@@ -38820,11 +38820,11 @@
       },
       "tool_support": {
         "native": true,
-        "text": true,
+        "text": false,
         "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "declared",
-        "parity_notes": "One live native tool call succeeded on 2026-10-25; text-tool parity is unmeasured.",
+        "parity_notes": "One live native tool call succeeded on 2026-10-25; the text tool grammar was not probed, so text tools stay undeclared.",
         "tool_search": []
       },
       "structured_output": "none",
@@ -49833,7 +49833,6 @@
         "native_tools",
         "streaming",
         "structured_output_mode:none",
-        "text_tools",
         "tools"
       ]
     },

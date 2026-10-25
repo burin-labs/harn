@@ -420,7 +420,10 @@ mod tests {
             "vercel/deepseek/deepseek-v4.1-flash-1017",
             "deepseek/deepseek-v4.1-flash-1017",
         ] {
-            assert!(lookup("vercel_ai_gateway", model).native_tools, "{model}");
+            let caps = lookup("vercel_ai_gateway", model);
+            assert!(caps.native_tools, "{model}");
+            // Only a native call was probed, so the text tool grammar stays undeclared.
+            assert!(!caps.text_tool_wire_format_supported, "{model}");
         }
         assert!(
             !lookup(

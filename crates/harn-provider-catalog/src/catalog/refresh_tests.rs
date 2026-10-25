@@ -308,7 +308,8 @@ fn readonly_october_routes_do_not_inherit_verified_family_capabilities() {
         // The one route a live tool call has since verified (2026-10-25).
         let probed = id == "vercel/deepseek/deepseek-v4.1-flash-1017";
         assert_eq!(caps.native_tools, probed, "{id}");
-        assert_eq!(caps.text_tool_wire_format_supported, probed, "{id}");
+        // Only native calls were probed, so text tools stay undeclared everywhere.
+        assert!(!caps.text_tool_wire_format_supported, "{id}");
         assert!(!caps.vision_supported, "{id}");
         assert!(!caps.reasoning_effort_supported, "{id}");
         assert!(!caps.reasoning_disable_supported, "{id}");
