@@ -153,8 +153,8 @@ refuses a missing or empty URL, and a database connection failure fails the
 suite. It exercises transactions, rollback, settings, migrations, and NULL
 parameter binding without calling an LLM provider.
 
-The test-pattern gate permits `#[ignore]` in the two Postgres fixture files because
-these tests require an external database. Keep deterministic Postgres tests
+The test-pattern gate pins the ignored-test count in each Postgres fixture module
+because these cases require an external database. Keep deterministic Postgres tests
 enabled in the ordinary suite; only database-dependent cases use this exception.
 
 The two tests that consume Harn Cloud's migration history have a separate
@@ -542,9 +542,9 @@ has no deterministic equivalent — you have two options:
    The allowlist is public and tracked as technical debt; entries are expected to
    shrink, not grow, as the codebase matures.
 
-Live provider quality measurements are pinned in `LIVE_PROVIDER_TEST_BASELINE`.
-Each row fixes one file's ignored-test count and records why it needs external
-inputs. The behavioral baseline requires `FIREWORKS_API_KEY`; stance rejudging
+External measurements are pinned in `LIVE_EXTERNAL_TEST_BASELINE`.
+Each row fixes one file's ignored-test count. Postgres cases require an isolated
+database. The behavioral baseline requires `FIREWORKS_API_KEY`; stance rejudging
 requires `STANCE_DUMP` and `STANCE_JUDGE_API_KEY`. Explicit runs fail when these
 inputs are missing. Their deterministic logic remains in the default suite.
 

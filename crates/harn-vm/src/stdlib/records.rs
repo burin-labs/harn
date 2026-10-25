@@ -2,6 +2,10 @@
 
 #[path = "records/execution_identity.rs"]
 mod execution_identity;
+#[path = "records/skill_induction.rs"]
+mod skill_induction;
+
+use skill_induction::{parse_skill_induce_options, parse_skill_induce_traces};
 
 use crate::value::VmDictExt;
 use std::cell::RefCell;
@@ -21,8 +25,7 @@ use crate::orchestration::{
     parse_json_payload, render_artifacts_context, render_unified_diff, replay_fixture_from_run,
     run_persona_eval_ladder, save_run_record, select_artifacts, synthesize_candidate_from_trace,
     validate_eval_pack_split, ArtifactRecord, CapabilityPolicy, ContextPackSuggestionExpectation,
-    ContextPackSuggestionOptions, ContextPolicy, CrystallizationTrace, CrystallizeOptions,
-    ReplayFixture,
+    ContextPackSuggestionOptions, ContextPolicy, ReplayFixture,
 };
 use crate::stdlib::args::Args;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -1105,103 +1108,6 @@ fn skill_induce_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     }))
 }
 
-fn parse_skill_induce_traces(
-    payload: &serde_json::Map<String, serde_json::Value>,
-) -> Result<Vec<CrystallizationTrace>, VmError> {
-    let value = payload
-        .get("traces")
-        .or_else(|| payload.get("trajectory"))
-        .or_else(|| payload.get("trace"))
-        .ok_or_else(|| {
-            VmError::Runtime(
-                "skill_induce: payload requires `traces`, `trajectory`, or `trace`".to_string(),
-            )
-        })?;
-    let traces = match value {
-        serde_json::Value::Array(_) => {
-            serde_json::from_value::<Vec<CrystallizationTrace>>(value.clone())
-        }
-        _ => serde_json::from_value::<CrystallizationTrace>(value.clone()).map(|trace| vec![trace]),
-    }
-    .map_err(|error| VmError::Runtime(format!("skill_induce: invalid trace payload: {error}")))?;
-    if traces.is_empty() {
-        return Err(VmError::Runtime(
-            "skill_induce: at least one trace is required".to_string(),
-        ));
-    }
-    Ok(traces)
-}
-
-fn parse_skill_induce_options(
-    payload: &serde_json::Map<String, serde_json::Value>,
-) -> Result<CrystallizeOptions, VmError> {
-    let mut options = CrystallizeOptions::default();
-    let empty = serde_json::Map::new();
-    let opts = payload
-        .get("options")
-        .and_then(serde_json::Value::as_object)
-        .unwrap_or(&empty);
-    options.min_examples = json_usize(
-        payload
-            .get("min_examples")
-            .or_else(|| opts.get("min_examples")),
-    )
-    .unwrap_or_default();
-    options.promotion_min_confidence = json_f64(
-        payload
-            .get("promotion_min_confidence")
-            .or_else(|| opts.get("promotion_min_confidence")),
-    )
-    .unwrap_or_default();
-    options.workflow_name = json_string(
-        payload
-            .get("workflow_name")
-            .or_else(|| opts.get("workflow_name")),
-    );
-    options.package_name = json_string(
-        payload
-            .get("package_name")
-            .or_else(|| opts.get("package_name")),
-    );
-    options.author = json_string(payload.get("author").or_else(|| opts.get("author")));
-    options.approver = json_string(payload.get("approver").or_else(|| opts.get("approver")));
-    options.eval_pack_link = json_string(
-        payload
-            .get("eval_pack_link")
-            .or_else(|| opts.get("eval_pack_link")),
-    );
-    let heldout = payload
-        .get("heldout_traces")
-        .or_else(|| payload.get("shadow_traces"))
-        .or_else(|| opts.get("heldout_traces"))
-        .or_else(|| opts.get("shadow_traces"));
-    if let Some(value) = heldout {
-        options.shadow_traces = serde_json::from_value::<Vec<CrystallizationTrace>>(value.clone())
-            .map_err(|error| {
-                VmError::Runtime(format!("skill_induce: invalid heldout_traces: {error}"))
-            })?;
-    }
-    Ok(options)
-}
-
-fn json_string(value: Option<&serde_json::Value>) -> Option<String> {
-    value
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn json_usize(value: Option<&serde_json::Value>) -> Option<usize> {
-    value
-        .and_then(serde_json::Value::as_u64)
-        .map(|value| value as usize)
-}
-
-fn json_f64(value: Option<&serde_json::Value>) -> Option<f64> {
-    value.and_then(serde_json::Value::as_f64)
-}
-
 #[harn_builtin(
     exposure = "pure",
     sig = "persona_eval_ladder_manifest(payload: dict) -> dict",
@@ -1534,98 +1440,5 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 mod execution_identity_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn skill_induce_trace(id: &str, version: &str) -> serde_json::Value {
-        serde_json::json!({
-            "id": id,
-            "source_hash": format!("sha256:{id}"),
-            "actions": [
-                {
-                    "id": format!("{id}-branch"),
-                    "kind": "tool_call",
-                    "name": "git.checkout_branch",
-                    "parameters": {
-                        "branch_name": format!("release-{version}")
-                    },
-                    "side_effects": [
-                        {
-                            "kind": "git_ref",
-                            "target": "release-branch",
-                            "capability": "git.write"
-                        }
-                    ],
-                    "capabilities": ["git.write"],
-                    "deterministic": true
-                },
-                {
-                    "id": format!("{id}-manifest"),
-                    "kind": "file_mutation",
-                    "name": "update_manifest_version",
-                    "parameters": {
-                        "version": version
-                    },
-                    "side_effects": [
-                        {
-                            "kind": "file_write",
-                            "target": "harn.toml",
-                            "capability": "fs.write"
-                        }
-                    ],
-                    "capabilities": ["fs.write"],
-                    "deterministic": true
-                }
-            ]
-        })
-    }
-
-    #[test]
-    fn skill_induce_accepts_single_trace_with_heldout_sibling() {
-        let payload = serde_json::json!({
-            "trace": skill_induce_trace("source_trace", "0.9.1"),
-            "heldout_traces": [skill_induce_trace("heldout_trace", "0.9.2")],
-            "options": {
-                "workflow_name": "release_package_maintenance",
-                "package_name": "release-workflows"
-            }
-        });
-
-        let result = skill_induce_impl(
-            &[crate::stdlib::json_to_vm_value(&payload)],
-            &mut String::new(),
-        )
-        .expect("skill_induce");
-        let result = result.as_dict().expect("skill_induce result dict");
-        assert!(matches!(result.get("accepted"), Some(VmValue::Bool(true))));
-
-        let Some(VmValue::List(skills)) = result.get("skill_candidates") else {
-            panic!("skill_candidates should be a list");
-        };
-        assert_eq!(skills.len(), 1);
-
-        let skill = skills[0].as_dict().expect("skill candidate dict");
-        let replay_gate = skill
-            .get("replay_gate")
-            .and_then(VmValue::as_dict)
-            .expect("replay_gate dict");
-        assert_eq!(
-            replay_gate
-                .get("original_trace_count")
-                .and_then(VmValue::as_int),
-            Some(1)
-        );
-        assert_eq!(
-            replay_gate
-                .get("heldout_trace_count")
-                .and_then(VmValue::as_int),
-            Some(1)
-        );
-
-        let receipt = replay_gate
-            .get("receipt")
-            .and_then(VmValue::as_dict)
-            .expect("receipt dict");
-        assert!(matches!(receipt.get("accepted"), Some(VmValue::Bool(true))));
-    }
-}
+#[path = "records/tests.rs"]
+mod tests;
