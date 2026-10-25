@@ -452,6 +452,18 @@ if grep -Eq '^(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=' "$rust_repo/.cargo/confi
   echo "HARN_RUSTC_FRONTEND_THREADS=1 left the parallel front end configured" >&2
   exit 1
 fi
+# A user-owned RUSTC_BOOTSTRAP stays the only one: a duplicate key would make
+# Cargo reject the whole config.
+awk '{ print } /^\[env\][[:space:]]*$/ { print "RUSTC_BOOTSTRAP = \"1\"" }' \
+  "$rust_repo/.cargo/config.toml" > "$rust_repo/.cargo/config.toml.tmp"
+mv "$rust_repo/.cargo/config.toml.tmp" "$rust_repo/.cargo/config.toml"
+grep -Fxq 'RUSTC_BOOTSTRAP = "1"' "$rust_repo/.cargo/config.toml"
+run_setup "$rust_repo" rust "$tmp_root/rust-user-bootstrap-output.txt" "$rust_cargo"
+if [[ "$(grep -Ec '^(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=' "$rust_repo/.cargo/config.toml")" != 1 ]]; then
+  echo "rust setup wrote a front-end line beside a user-owned RUSTC_BOOTSTRAP" >&2
+  cat "$rust_repo/.cargo/config.toml" >&2
+  exit 1
+fi
 prune_output="$(
   HARN_DEV_SETUP_STORAGE_ROOT="$rust_storage_root" \
     HARN_TARGET_GC_ROOTS="$tmp_root/no-repos" \

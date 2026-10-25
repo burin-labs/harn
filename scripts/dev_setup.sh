@@ -281,8 +281,8 @@ write_sccache_env_config() {
 # Turn on rustc's parallel front end (scripts/lib/rustc_frontend.sh owns the
 # flags) with managed `[build] rustflags` and `[env] RUSTC_BOOTSTRAP` lines.
 # The two lines are written and dropped together: the flags without the env
-# line fail every build. A user-owned `rustflags` stays authoritative and gets
-# neither line. RUSTFLAGS in the environment still replaces the config value,
+# line fail every build. A user-owned `rustflags` or `RUSTC_BOOTSTRAP` stays
+# authoritative and gets neither line, since a second key is invalid TOML. RUSTFLAGS in the environment still replaces the config value,
 # as Cargo always does.
 write_rustc_frontend_config() {
   local flags="$1"
@@ -299,7 +299,7 @@ write_rustc_frontend_config() {
   mv "${tmp_path}" "${config_path}"
 
   if [[ -z "${flags}" ]] \
-    || grep -Eq '^[[:space:]]*rustflags[[:space:]]*=' "${config_path}"; then
+    || grep -Eq '^[[:space:]]*(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=' "${config_path}"; then
     return 0
   fi
 
