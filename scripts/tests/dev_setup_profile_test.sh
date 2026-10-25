@@ -438,29 +438,29 @@ if ! grep -Fxq "target-dir = \"$rust_target_dir\" # harn-dev-setup-managed" "$ru
   echo "shared-build migration did not preserve the per-worktree target directory" >&2
   exit 1
 fi
-# The parallel rustc front end is on, written once across repeated setups, and
-# its flags never appear without the bootstrap that lets stable rustc take them.
-frontend_lines='rustflags = ["-Zthreads=8"] # harn-dev-setup-managed
-RUSTC_BOOTSTRAP = { value = "1", force = true } # harn-dev-setup-managed'
-if [[ "$(grep -E '^(rustflags|RUSTC_BOOTSTRAP) =' "$rust_repo/.cargo/config.toml")" != "$frontend_lines" ]]; then
+# The parallel rustc front end is on through this checkout's workspace wrapper,
+# written once across repeated setups.
+frontend_line_re='^rustc-workspace-wrapper = ".*/scripts/rustc_frontend_wrapper\.sh" # harn-dev-setup-managed$'
+if [[ "$(grep -Ec "$frontend_line_re" "$rust_repo/.cargo/config.toml")" != 1 ]] \
+  || [[ "$(grep -Ec '^[[:space:]]*rustc-workspace-wrapper[[:space:]]*=' "$rust_repo/.cargo/config.toml")" != 1 ]]; then
   echo "rust setup did not configure the parallel rustc front end exactly once" >&2
   cat "$rust_repo/.cargo/config.toml" >&2
   exit 1
 fi
 HARN_RUSTC_FRONTEND_THREADS=1 run_setup "$rust_repo" rust "$tmp_root/rust-serial-output.txt" "$rust_cargo"
-if grep -Eq '^(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
+if grep -Eq '^[[:space:]]*rustc-workspace-wrapper[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
   echo "HARN_RUSTC_FRONTEND_THREADS=1 left the parallel front end configured" >&2
   exit 1
 fi
-# A user-owned RUSTC_BOOTSTRAP stays the only one: a duplicate key would make
+# A user-owned workspace wrapper stays the only one: a duplicate key would make
 # Cargo reject the whole config.
-awk '{ print } /^\[env\][[:space:]]*$/ { print "RUSTC_BOOTSTRAP = \"1\"" }' \
+awk '{ print } /^\[build\][[:space:]]*$/ { print "rustc-workspace-wrapper = \"clippy-driver\"" }' \
   "$rust_repo/.cargo/config.toml" > "$rust_repo/.cargo/config.toml.tmp"
 mv "$rust_repo/.cargo/config.toml.tmp" "$rust_repo/.cargo/config.toml"
-grep -Fxq 'RUSTC_BOOTSTRAP = "1"' "$rust_repo/.cargo/config.toml"
-run_setup "$rust_repo" rust "$tmp_root/rust-user-bootstrap-output.txt" "$rust_cargo"
-if [[ "$(grep -Ec '^(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=' "$rust_repo/.cargo/config.toml")" != 1 ]]; then
-  echo "rust setup wrote a front-end line beside a user-owned RUSTC_BOOTSTRAP" >&2
+grep -Fxq 'rustc-workspace-wrapper = "clippy-driver"' "$rust_repo/.cargo/config.toml"
+run_setup "$rust_repo" rust "$tmp_root/rust-user-wrapper-output.txt" "$rust_cargo"
+if [[ "$(grep -Ec '^[[:space:]]*rustc-workspace-wrapper[[:space:]]*=' "$rust_repo/.cargo/config.toml")" != 1 ]]; then
+  echo "rust setup wrote a front-end line beside a user-owned workspace wrapper" >&2
   cat "$rust_repo/.cargo/config.toml" >&2
   exit 1
 fi

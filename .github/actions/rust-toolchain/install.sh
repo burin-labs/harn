@@ -64,22 +64,15 @@ fi
 retry_toolchain_command rustc -Vv
 retry_toolchain_command cargo -V
 
-# Every later step in the job runs rustc's parallel front end. The flags and
-# why they need RUSTC_BOOTSTRAP live in scripts/lib/rustc_frontend.sh. The job's
-# own RUSTFLAGS are kept and the flags appended once, so calling this action
-# twice in a job changes nothing.
+# Every later step in the job compiles Harn's crates with rustc's parallel
+# front end through the workspace wrapper (scripts/lib/rustc_frontend.sh says
+# why). Windows cannot execute the shell wrapper, so its jobs stay serial.
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
 # shellcheck source=scripts/lib/rustc_frontend.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/lib/rustc_frontend.sh"
+source "${repo_root}/scripts/lib/rustc_frontend.sh"
 frontend_flags="$(harn_rustc_frontend_flags)"
-if [[ -n "$frontend_flags" ]]; then
-  case " ${RUSTFLAGS:-} " in
-    *" ${frontend_flags} "*) ;;
-    *)
-      {
-        printf 'RUSTC_BOOTSTRAP=1\n'
-        printf 'RUSTFLAGS=%s\n' "${RUSTFLAGS:+${RUSTFLAGS} }${frontend_flags}"
-      } >> "${GITHUB_ENV:?the front-end flags reach later steps only through GITHUB_ENV}"
-      echo "rustc front end: ${frontend_flags} appended to RUSTFLAGS"
-      ;;
-  esac
+if [[ -n "$frontend_flags" && "${RUNNER_OS:-}" != "Windows" ]]; then
+  printf 'RUSTC_WORKSPACE_WRAPPER=%s\n' "${repo_root}/scripts/rustc_frontend_wrapper.sh" \
+    >> "${GITHUB_ENV:?the workspace wrapper reaches later steps only through GITHUB_ENV}"
+  echo "rustc front end: ${frontend_flags} for workspace crates"
 fi

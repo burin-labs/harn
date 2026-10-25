@@ -5,12 +5,12 @@
 # rustc type-checks a crate on one thread unless `-Zthreads` asks for more.
 # harn-vm is the build's long pole, and eight front-end threads cut its own
 # compile from 58s to 32s and a harn rebuild after a harn-vm edit from 90s to
-# 55s. The flag is unstable, so RUSTC_BOOTSTRAP=1 lets the pinned stable
-# compiler accept it. The value is a constant rather than a per-machine core
-# count because rustc flags are part of every Cargo, sccache, and target-seed
-# key, and one value lets every runner pool share them. rustc's front-end
-# threads draw from Cargo's jobserver, so a smaller machine does not
-# oversubscribe.
+# 55s. The flag is unstable, so scripts/rustc_frontend_wrapper.sh, Cargo's
+# workspace rustc wrapper in local setup and CI, passes it with
+# RUSTC_BOOTSTRAP=1 to Harn's own crates only. Dependencies compile exactly as
+# on stable. The value is a constant rather than a per-machine core count so
+# every machine compiles the same way, and rustc's front-end threads draw from
+# Cargo's jobserver, so a smaller machine does not oversubscribe.
 #
 # HARN_RUSTC_FRONTEND_THREADS=1 turns it off.
 

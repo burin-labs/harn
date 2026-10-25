@@ -2446,6 +2446,8 @@ jobs:
           # cross check does not link; keep incrementality off and let rust-cache
           # handle the mounted target directory.
           CARGO_INCREMENTAL: "0"
+          # The container's compiler runs serially; the wrapper is a host path.
+          RUSTC_WORKSPACE_WRAPPER: ""
         run: |
           # Include test targets: Windows-only test code (unused imports, items
           # only a unix cfg reaches) otherwise first fails on native Windows.

@@ -17,10 +17,10 @@ This script:
 - enables the sccache rustc wrapper via a local `.cargo/config.toml`
 - writes a private Cargo `target-dir` under the developer cache for each
   worktree so parallel builds stay isolated
-- turns on rustc's parallel front end (`-Zthreads=8`, accepted by the pinned
-  stable compiler through `RUSTC_BOOTSTRAP=1`), which roughly halves
-  `harn-vm`'s compile; CI applies the same flags through its Rust toolchain
-  action, and `HARN_RUSTC_FRONTEND_THREADS=1` turns it off
+- compiles Harn's own crates with rustc's parallel front end (`-Zthreads=8`)
+  through a workspace rustc wrapper, which roughly halves `harn-vm`'s compile;
+  dependencies compile as on stable, CI applies the same wrapper through its
+  Rust toolchain action, and `HARN_RUSTC_FRONTEND_THREADS=1` turns it off
 - installs repo-local markdown tooling plus Node dependencies for the portal,
   `tree-sitter-harn/`, and `editors/vscode/` when `npm` is available
 - builds `crates/harn-cli/portal-dist` when `npm` is available
