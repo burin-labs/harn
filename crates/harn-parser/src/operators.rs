@@ -386,7 +386,9 @@ impl Precedence {
     pub fn of_node(node: &crate::Node) -> Precedence {
         match node {
             crate::Node::BinaryOp { op, .. } => op.precedence(),
-            crate::Node::UnaryOp { .. } => Precedence::Prefix,
+            // `try* x` parses its operand with the unary parser, so it binds
+            // exactly like a prefix operator.
+            crate::Node::UnaryOp { .. } | crate::Node::TryStar { .. } => Precedence::Prefix,
             crate::Node::RangeExpr { .. } => Precedence::Range,
             crate::Node::Ternary { .. } => Precedence::Ternary,
             _ => Precedence::Postfix,

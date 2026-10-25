@@ -2451,6 +2451,8 @@ const CONSUMER_DECLARATION_ACTION = "./.github/actions/consumer-observer-declare
 
 const CONSUMER_CANARY_GROUP = "consumer-canary-$"
   + "{{ inputs.source_revision || (github.event_name == 'schedule' && 'scheduled-main' || github.run_id) }}"
+  + "$"
+  + "{{ inputs.pull_request_cli_run && format('-run-{0}', inputs.pull_request_cli_run) || '' }}"
 
 const CONSUMER_CANARY_CANCEL = "$"
   + "{{ github.event_name == 'schedule' && inputs.source_revision == '' }}"
@@ -2502,7 +2504,8 @@ fn consumer_failure_safe(step: dict) -> bool {
           "always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '' || steps.observe-4.outputs.failure-receipt != '' || steps.interrupted.outputs.failure_receipt != '')",
         uses: step.uses,
         with: {
-          name: "consumer-observer-failure-${dollar}{{ github.run_attempt }}",
+          name:
+            "consumer-observer-failure-${dollar}{{ github.run_attempt }}-${dollar}{{ needs.decide.outputs.source_revision }}-${dollar}{{ steps.canary.outputs.run_id || 'undispatched' }}",
           path: "${dollar}{{ ${receipt} }}",
           "if-no-files-found": "error",
           "retention-days": 7,
@@ -2588,7 +2591,8 @@ pub fn consumer_canary_errors(
     const command = to_string(step?.run ?? "")
     if command.contains("consumer_canary.sh")
       && !command.contains("--observe")
-      && !command.contains("--decide") {
+      && !command.contains("--decide")
+      && !command.contains("--record") {
       errors = errors
         + consumer_dispatch_custody_errors(workflow, job, step, custody_before_dispatch)
     }

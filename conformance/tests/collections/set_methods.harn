@@ -37,4 +37,13 @@ pipeline default(harness: Harness, task: unknown) {
   harness.stdio.println(a.any({ x -> x > 3 }))
   harness.stdio.println(a.all({ x -> x > 0 }))
   harness.stdio.println(a.all({ x -> x > 2 }))
+  // set algebra rejects a non-set argument instead of treating it as empty
+  const bad = try {
+    a.union([9])
+  }
+  harness.stdio.println(contains(to_string(unwrap_err(bad)), "set.union: argument must be a set"))
+  // iter.sum shares list.sum, decimals included
+  harness.stdio.println(
+    [decimal("1.50"), decimal("2.50")].iter().sum() == [decimal("1.50"), decimal("2.50")].sum(),
+  )
 }

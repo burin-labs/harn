@@ -110,7 +110,7 @@ pub(super) fn execute_strict_source(source: &str) -> String {
         local
             .run_until(async {
                 let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
+                harn_runtime::register_vm_stdlib(&mut vm);
                 vm.execute(&chunk).await.expect("fixture should execute");
                 vm.output().trim_end().to_string()
             })

@@ -53,7 +53,7 @@ impl VmHotPathFixture {
     fn setup_vm(&self) -> Vm {
         harn_vm::reset_thread_local_state();
         let mut vm = harn_vm::new_vm();
-        harn_vm::register_vm_stdlib(&mut vm);
+        harn_runtime::register_vm_stdlib(&mut vm);
         if self.uses_real_harness {
             vm.set_harness(harn_vm::Harness::real());
         }

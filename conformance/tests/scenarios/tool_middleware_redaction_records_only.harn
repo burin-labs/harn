@@ -1,0 +1,77 @@
+import { agent_loop } from "std/agent/loop"
+import { with_redaction } from "std/llm/tool_middleware"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Redaction rewrites the recorded copy of a call, never the arguments the
+ * handler receives: a secret-named string reaches the handler unchanged while
+ * the result's recorded arguments are masked.
+ */
+fn main(harness: Harness) {
+  const seen = harness.runtime.atomic(0)
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "fetch",
+    "Fetch with a credential",
+    {
+      handler: { args ->
+        require args.api_key == "sk-live-123456789", "the handler must receive the original value"
+        require args.token_budget == "8000", "a token-named setting must arrive unchanged"
+        harness.runtime.atomic_add(seen, 1)
+        return "fetched"
+      },
+      parameters: {api_key: {type: "string"}, token_budget: {type: "string"}},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  const redactor = { record ->
+    if record.phase == "in" {
+      return {args: record.args + {api_key: "***"}, redacted_fields: ["api_key"]}
+    }
+    return {}
+  }
+  const caller = with_redaction(redactor)
+  const recorded = harness.runtime.atomic(0)
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {
+            id: "call-1",
+            name: "fetch",
+            arguments: {api_key: "sk-live-123456789", token_budget: "8000"},
+          },
+        ],
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Fetch it.",
+        nil,
+        {
+          provider: "mock",
+          tools: tools,
+          tool_format: "native",
+          max_iterations: 3,
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          tool_caller: { call, next ->
+            const outcome = caller(call, next)
+            if outcome?.arguments?.api_key == "***" && outcome?.arguments?.token_budget == "8000" {
+              harness.runtime.atomic_add(recorded, 1)
+            }
+            return outcome
+          },
+        },
+      )
+      require result.status == "done", "the session must finish"
+    },
+  )
+  require harness.runtime.atomic_get(seen) == 1, "the handler must run exactly once"
+  require harness.runtime.atomic_get(recorded) == 1, "the recorded arguments must be redacted"
+  harness.stdio.println("redaction recorded only")
+}

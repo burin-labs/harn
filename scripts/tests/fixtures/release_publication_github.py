@@ -32,7 +32,7 @@ index = {"tag": tag, "version": "1.2.3", "release_url": f"{base}/releases/tag/{t
 archives = []
 assets = []
 for ordinal, target in enumerate(targets, 1):
-    name = f"harn-{target}" + (".zip" if target == "x86_64-pc-windows-msvc" else ".tar.gz")
+    name = f"harn-{target}" + (".zip" if target == "x86_64-pc-windows-msvc" else ".tar.xz")
     digest = hashlib.sha256(target.encode()).hexdigest()
     index["assets"][target] = {"filename": name, "sha256": digest, "size": 100 + ordinal,
                                "url": f"{base}/releases/download/{tag}/{name}"}

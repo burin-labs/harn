@@ -14,7 +14,10 @@ curl -fsSL https://harnlang.com/install.sh | sh
 ```
 
 The installer downloads the release for your operating system and CPU. To
-install a particular release, set `HARN_VERSION` to its release tag.
+install a particular release, set `HARN_VERSION` to its release tag. Releases
+ship as `.tar.xz`; on Linux the installer needs `xz` (package `xz-utils` on
+Debian and Ubuntu, `xz` on Fedora and Alpine). Releases through v0.10.178 ship
+`.tar.gz` and need the `install.sh` from their own tag.
 The installer retains project licenses and third-party notices in
 `harn-licenses/` beside the binary, including at custom `HARN_INSTALL_DIR`
 destinations. It refuses releases with missing, empty, or invalid legal files

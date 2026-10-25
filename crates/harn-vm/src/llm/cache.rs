@@ -10,11 +10,11 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::runtime_limits::RuntimeLimits;
-use crate::runtime_sqlite::{initialize_runtime_sqlite, RuntimeSqliteSchema, DEFAULT_BUSY_TIMEOUT};
 use crate::stdlib::clock::now_wall_ms;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use harn_builtin_macros::harn_builtin;
+use harn_sqlite::schema::{initialize_runtime_sqlite, RuntimeSqliteSchema, DEFAULT_BUSY_TIMEOUT};
 
 const DEFAULT_NAMESPACE: &str = "default";
 const DEFAULT_TTL_SECONDS: u64 = 600;

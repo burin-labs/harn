@@ -8,7 +8,7 @@
 #
 # Keep this file free of bash-4 associative arrays. GitHub's macOS runners
 # still invoke /bin/bash 3.2, and under `set -u` a key like
-# `harn-x86_64-apple-darwin.tar.gz` is parsed as arithmetic (`harn - ...`).
+# `harn-x86_64-apple-darwin.tar.xz` is parsed as arithmetic (`harn - ...`).
 
 CANDIDATE_MANIFEST_SCHEMA="burin-labs.candidate_manifest.v1"
 CANDIDATE_RECEIPT_SCHEMA="harn.candidate_archive_receipt.v1"
@@ -18,10 +18,22 @@ RELEASE_ARCHIVE_PREDICATE_TYPE="https://harnlang.com/attestations/release-archiv
 RELEASE_FILES_ARTIFACT="harn-release-files"
 
 EXPECTED_RELEASE_ARCHIVES=(
+  harn-aarch64-apple-darwin.tar.xz
+  harn-aarch64-unknown-linux-gnu.tar.xz
+  harn-x86_64-apple-darwin.tar.xz
+  harn-x86_64-pc-windows-msvc.zip
+  harn-x86_64-unknown-linux-gnu.tar.xz
+)
+
+# The ACP agent registry installs only .zip/.tar.gz/.tar.bz2/.tgz archives, so
+# spec/acp-registry/harn/agent.json is the sole consumer of these gzip copies of
+# the unix .tar.xz archives. Installers, `harn upgrade`, SHA256SUMS and
+# release-assets.json never name them. Delete this list and
+# scripts/build_acp_registry_archives.sh once the registry accepts .tar.xz.
+ACP_REGISTRY_ARCHIVES=(
   harn-aarch64-apple-darwin.tar.gz
   harn-aarch64-unknown-linux-gnu.tar.gz
   harn-x86_64-apple-darwin.tar.gz
-  harn-x86_64-pc-windows-msvc.zip
   harn-x86_64-unknown-linux-gnu.tar.gz
 )
 
@@ -38,11 +50,11 @@ candidate_archive_expected_targets_json() {
 target_for_archive() {
   local archive="${1:-}"
   case "$archive" in
-    harn-aarch64-apple-darwin.tar.gz) printf '%s\n' "aarch64-apple-darwin" ;;
-    harn-aarch64-unknown-linux-gnu.tar.gz) printf '%s\n' "aarch64-unknown-linux-gnu" ;;
-    harn-x86_64-apple-darwin.tar.gz) printf '%s\n' "x86_64-apple-darwin" ;;
+    harn-aarch64-apple-darwin.tar.xz) printf '%s\n' "aarch64-apple-darwin" ;;
+    harn-aarch64-unknown-linux-gnu.tar.xz) printf '%s\n' "aarch64-unknown-linux-gnu" ;;
+    harn-x86_64-apple-darwin.tar.xz) printf '%s\n' "x86_64-apple-darwin" ;;
     harn-x86_64-pc-windows-msvc.zip) printf '%s\n' "x86_64-pc-windows-msvc" ;;
-    harn-x86_64-unknown-linux-gnu.tar.gz) printf '%s\n' "x86_64-unknown-linux-gnu" ;;
+    harn-x86_64-unknown-linux-gnu.tar.xz) printf '%s\n' "x86_64-unknown-linux-gnu" ;;
     *)
       echo "error: unknown release archive: $archive" >&2
       return 1
@@ -53,11 +65,11 @@ target_for_archive() {
 archive_for_target() {
   local target="${1:-}"
   case "$target" in
-    aarch64-apple-darwin) printf '%s\n' "harn-aarch64-apple-darwin.tar.gz" ;;
-    aarch64-unknown-linux-gnu) printf '%s\n' "harn-aarch64-unknown-linux-gnu.tar.gz" ;;
-    x86_64-apple-darwin) printf '%s\n' "harn-x86_64-apple-darwin.tar.gz" ;;
+    aarch64-apple-darwin) printf '%s\n' "harn-aarch64-apple-darwin.tar.xz" ;;
+    aarch64-unknown-linux-gnu) printf '%s\n' "harn-aarch64-unknown-linux-gnu.tar.xz" ;;
+    x86_64-apple-darwin) printf '%s\n' "harn-x86_64-apple-darwin.tar.xz" ;;
     x86_64-pc-windows-msvc) printf '%s\n' "harn-x86_64-pc-windows-msvc.zip" ;;
-    x86_64-unknown-linux-gnu) printf '%s\n' "harn-x86_64-unknown-linux-gnu.tar.gz" ;;
+    x86_64-unknown-linux-gnu) printf '%s\n' "harn-x86_64-unknown-linux-gnu.tar.xz" ;;
     *)
       echo "error: unknown release target: $target" >&2
       return 1

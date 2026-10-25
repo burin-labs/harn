@@ -25,8 +25,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use harn_runtime::register_vm_stdlib;
 use harn_vm::bench_internals::transcript_projection;
-use harn_vm::{register_vm_stdlib, reset_thread_local_state, AsyncBuiltinCtx, VmValue};
+use harn_vm::{reset_thread_local_state, AsyncBuiltinCtx, VmValue};
 use serde_json::{json, Value as JsonValue};
 use tokio::runtime::{Builder, Runtime};
 

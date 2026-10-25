@@ -6,11 +6,14 @@ ARG TARGETARCH
 
 WORKDIR /work
 
-COPY release-container/${TARGETARCH}/harn.tar.gz /tmp/harn.tar.gz
+COPY release-container/${TARGETARCH}/harn.tar.xz /tmp/harn.tar.xz
 
 RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends xz-utils; \
+    rm -rf /var/lib/apt/lists/*; \
     mkdir -p /out/usr/local/bin /out/etc/harn /out/var/lib/harn/state; \
-    tar -xzf /tmp/harn.tar.gz -C /out/usr/local/bin harn harn-container-probe; \
+    tar -xf /tmp/harn.tar.xz -C /out/usr/local/bin harn harn-container-probe; \
     chmod 0755 /out/usr/local/bin/harn /out/usr/local/bin/harn-container-probe; \
     printf "# Mount a Harn orchestrator manifest here.\n" > /out/etc/harn/triggers.toml
 

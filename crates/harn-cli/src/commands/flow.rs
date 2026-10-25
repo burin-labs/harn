@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use harn_vm::flow::{IntentClusterer, ObservedAtom, SqliteFlowStore, TextOp, VcsBackend};
+use harn_flow::{IntentClusterer, ObservedAtom, SqliteFlowStore, TextOp, VcsBackend};
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use serde_json::json;
@@ -57,7 +57,7 @@ pub(crate) fn run_replay_audit(args: &FlowReplayAuditArgs) -> Result<i32, String
         print_discovery_warnings(&diagnostics);
     }
 
-    let current_predicates = harn_vm::flow::resolve_predicates_for_touched_directories(&chains);
+    let current_predicates = harn_flow::resolve_predicates_for_touched_directories(&chains);
     let stored = store
         .shipped_derived_slices_since(since)
         .map_err(|error| format!("failed to list shipped slices: {error}"))?;
@@ -65,7 +65,7 @@ pub(crate) fn run_replay_audit(args: &FlowReplayAuditArgs) -> Result<i32, String
         .iter()
         .map(|stored| (stored.slice.id, stored.created_at.clone()))
         .collect::<std::collections::BTreeMap<_, _>>();
-    let report = harn_vm::flow::replay_audit_report(
+    let report = harn_flow::replay_audit_report(
         stored.into_iter().map(|stored| stored.slice),
         &current_predicates,
     );
@@ -159,7 +159,7 @@ pub fn ship_watch_payload(inputs: &FlowShipWatchInputs<'_>) -> Result<serde_json
         return Err(render_discovery_diagnostics(&diagnostics));
     }
     let bootstrap_payload = bootstrap_policy_payload(inputs.predicate_root);
-    let predicates = harn_vm::flow::resolve_predicates_for_touched_directories(&chains);
+    let predicates = harn_flow::resolve_predicates_for_touched_directories(&chains);
     let predicate_payload = predicates
         .iter()
         .map(|predicate| {
@@ -173,13 +173,13 @@ pub fn ship_watch_payload(inputs: &FlowShipWatchInputs<'_>) -> Result<serde_json
             })
         })
         .collect::<Vec<_>>();
-    let ceiling = harn_vm::flow::PredicateCeiling::default();
-    let ceiling_outcome = harn_vm::flow::enforce_predicate_ceiling(&predicates, &ceiling);
+    let ceiling = harn_flow::PredicateCeiling::default();
+    let ceiling_outcome = harn_flow::enforce_predicate_ceiling(&predicates, &ceiling);
     let ceiling_payload = serialize_ceiling_outcome(&ceiling_outcome, &ceiling);
     let validation_status = match ceiling_outcome.violation().map(|v| v.level) {
         None => "ok",
-        Some(harn_vm::flow::PredicateCeilingLevel::RequireApproval) => "require_approval",
-        Some(harn_vm::flow::PredicateCeilingLevel::Block) => "blocked",
+        Some(harn_flow::PredicateCeilingLevel::RequireApproval) => "require_approval",
+        Some(harn_flow::PredicateCeilingLevel::Block) => "blocked",
     };
 
     let atom_ids: Vec<_> = atom_refs.iter().map(|atom| atom.atom_id).collect();
@@ -288,10 +288,10 @@ fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
 }
 
 fn serialize_ceiling_outcome(
-    outcome: &harn_vm::flow::PredicateCeilingOutcome,
-    ceiling: &harn_vm::flow::PredicateCeiling,
+    outcome: &harn_flow::PredicateCeilingOutcome,
+    ceiling: &harn_flow::PredicateCeiling,
 ) -> serde_json::Value {
-    use harn_vm::flow::{PredicateCeilingLevel, PredicateCeilingOutcome};
+    use harn_flow::{PredicateCeilingLevel, PredicateCeilingOutcome};
     let mut payload = json!({
         "count": outcome.count(),
         "require_approval_threshold": ceiling.require_approval_threshold,
@@ -322,11 +322,11 @@ fn serialize_ceiling_outcome(
 }
 
 fn bootstrap_policy_payload(predicate_root: &Path) -> serde_json::Value {
-    use harn_vm::flow::Approver;
-    let Some(discovered) = harn_vm::flow::discover_bootstrap_policy(predicate_root) else {
+    use harn_flow::Approver;
+    let Some(discovered) = harn_flow::discover_bootstrap_policy(predicate_root) else {
         return json!({
             "status": "absent",
-            "path": predicate_root.join(harn_vm::flow::META_INVARIANTS_FILE),
+            "path": predicate_root.join(harn_flow::META_INVARIANTS_FILE),
         });
     };
     let maintainers = discovered
@@ -357,10 +357,10 @@ fn bootstrap_policy_payload(predicate_root: &Path) -> serde_json::Value {
     })
 }
 
-fn discovery_severity_label(severity: harn_vm::flow::DiscoveryDiagnosticSeverity) -> &'static str {
+fn discovery_severity_label(severity: harn_flow::DiscoveryDiagnosticSeverity) -> &'static str {
     match severity {
-        harn_vm::flow::DiscoveryDiagnosticSeverity::Warning => "warning",
-        harn_vm::flow::DiscoveryDiagnosticSeverity::Error => "error",
+        harn_flow::DiscoveryDiagnosticSeverity::Warning => "warning",
+        harn_flow::DiscoveryDiagnosticSeverity::Error => "error",
     }
 }
 
@@ -378,7 +378,7 @@ fn run_archivist_scan(args: &crate::cli::FlowArchivistScanArgs) -> Result<i32, S
     let mut predicates = Vec::new();
     let mut discovery_diagnostics = Vec::new();
     for dir in &invariant_files {
-        for file in harn_vm::flow::discover_invariants(&repo, dir) {
+        for file in harn_flow::discover_invariants(&repo, dir) {
             let relative_dir = file.relative_dir.clone();
             for diagnostic in &file.diagnostics {
                 discovery_diagnostics.push(json!({
@@ -859,7 +859,7 @@ fn test_motion_proposal(source_date: &str) -> ArchivistProposal {
             "conformance/tests/".to_string(),
         ],
         0.68,
-        vec!["crates/harn-vm/src/flow".to_string(), "conformance/tests".to_string()],
+        vec!["crates/harn-flow/src".to_string(), "conformance/tests".to_string()],
         source_date,
         "flow_invariant_warn(\"Flow predicate/runtime changes should carry focused tests or conformance coverage\")",
     )
@@ -1022,7 +1022,7 @@ fn empty_shadow_results(proposals: &[ArchivistProposal]) -> Vec<serde_json::Valu
         .collect()
 }
 
-fn inserted_text(atom: &harn_vm::flow::Atom) -> String {
+fn inserted_text(atom: &harn_flow::Atom) -> String {
     atom.ops
         .iter()
         .filter_map(|op| match op {
@@ -1033,7 +1033,7 @@ fn inserted_text(atom: &harn_vm::flow::Atom) -> String {
         .join("\n")
 }
 
-fn first_insert_span(atom: &harn_vm::flow::Atom) -> serde_json::Value {
+fn first_insert_span(atom: &harn_flow::Atom) -> serde_json::Value {
     atom.ops
         .iter()
         .find_map(|op| match op {
@@ -1160,14 +1160,14 @@ fn relative_path(root: &Path, path: &Path) -> String {
 fn current_predicate_chains(
     root: &Path,
     touched_dirs: &[PathBuf],
-) -> Vec<Vec<harn_vm::flow::DiscoveredInvariantFile>> {
+) -> Vec<Vec<harn_flow::DiscoveredInvariantFile>> {
     let dirs: Vec<PathBuf> = if touched_dirs.is_empty() {
         vec![PathBuf::from(".")]
     } else {
         touched_dirs.to_vec()
     };
     dirs.into_iter()
-        .map(|dir| harn_vm::flow::discover_invariants(root, &dir))
+        .map(|dir| harn_flow::discover_invariants(root, &dir))
         .collect()
 }
 
@@ -1212,8 +1212,8 @@ fn collect_invariant_dirs(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
 
 fn print_human_report(
     since: &str,
-    report: &harn_vm::flow::ReplayAuditReport,
-    created_at_by_slice: &std::collections::BTreeMap<harn_vm::flow::SliceId, String>,
+    report: &harn_flow::ReplayAuditReport,
+    created_at_by_slice: &std::collections::BTreeMap<harn_flow::SliceId, String>,
 ) {
     println!(
         "Audited {} shipped derived slice(s) since {since}; {} slice(s) have advisory drift.",
@@ -1244,8 +1244,8 @@ fn print_human_report(
 }
 
 fn discovery_diagnostics(
-    chains: &[Vec<harn_vm::flow::DiscoveredInvariantFile>],
-) -> Vec<(String, &harn_vm::flow::DiscoveryDiagnostic)> {
+    chains: &[Vec<harn_flow::DiscoveredInvariantFile>],
+) -> Vec<(String, &harn_flow::DiscoveryDiagnostic)> {
     chains
         .iter()
         .flat_map(|chain| chain.iter())
@@ -1257,22 +1257,22 @@ fn discovery_diagnostics(
         .collect()
 }
 
-fn has_discovery_error(diagnostics: &[(String, &harn_vm::flow::DiscoveryDiagnostic)]) -> bool {
-    diagnostics.iter().any(|(_, diagnostic)| {
-        diagnostic.severity == harn_vm::flow::DiscoveryDiagnosticSeverity::Error
-    })
+fn has_discovery_error(diagnostics: &[(String, &harn_flow::DiscoveryDiagnostic)]) -> bool {
+    diagnostics
+        .iter()
+        .any(|(_, diagnostic)| diagnostic.severity == harn_flow::DiscoveryDiagnosticSeverity::Error)
 }
 
-fn print_discovery_warnings(diagnostics: &[(String, &harn_vm::flow::DiscoveryDiagnostic)]) {
+fn print_discovery_warnings(diagnostics: &[(String, &harn_flow::DiscoveryDiagnostic)]) {
     for (path, diagnostic) in diagnostics.iter().filter(|(_, diagnostic)| {
-        diagnostic.severity == harn_vm::flow::DiscoveryDiagnosticSeverity::Warning
+        diagnostic.severity == harn_flow::DiscoveryDiagnosticSeverity::Warning
     }) {
         eprintln!("warning: {path}: {}", diagnostic.message);
     }
 }
 
 fn render_discovery_diagnostics(
-    diagnostics: &[(String, &harn_vm::flow::DiscoveryDiagnostic)],
+    diagnostics: &[(String, &harn_flow::DiscoveryDiagnostic)],
 ) -> String {
     diagnostics
         .iter()
@@ -1323,7 +1323,7 @@ fn parse_since(raw: &str) -> Result<OffsetDateTime, String> {
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
-    use harn_vm::flow::{Atom, Provenance};
+    use harn_flow::{Atom, Provenance};
 
     #[test]
     fn repo_context_walk_uses_exact_generated_and_harn_state_boundaries() {
@@ -1389,7 +1389,7 @@ mod tests {
             .find(|proposal| proposal.id == "rust-unsafe-safety-comment")
             .expect("rust unsafe proposal");
 
-        let parsed = harn_vm::flow::parse_invariants_source(&rust.source);
+        let parsed = harn_flow::parse_invariants_source(&rust.source);
         assert!(
             parsed.diagnostics.is_empty(),
             "generated source should parse cleanly: {:?}",

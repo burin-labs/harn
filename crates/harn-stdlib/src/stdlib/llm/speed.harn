@@ -16,12 +16,16 @@
  * provider did not report, and every line here is omitted rather than
  * rendered as `0`, so a missing measurement never reads as a slow one.
  */
+/** The settled measurement Harn's inference meter records on each call. */
+pub type LlmInferenceSpeed = {time_to_first_token_ms?: int, output_tokens_per_second?: float}
+
 pub type LlmSpeedTelemetry = {
   server_load_ms?: int,
   server_prompt_eval_ms?: int,
   server_generation_ms?: int,
   server_prompt_tokens?: int,
   server_output_tokens?: int,
+  inference_speed?: LlmInferenceSpeed,
 }
 
 pub type LlmSpeedUsage = {
@@ -71,10 +75,10 @@ pub fn has_rate(tokens: int | float | nil, ms: int | float | nil) -> bool {
 }
 
 /**
- * The decode rate, preferring the server's own generation timing over the
- * caller's wall clock. The server knows how long it actually spent
- * generating; wall time also contains queueing, prefill, and transport, so it
- * understates the model. Returns nil when neither source supports a rate.
+ * The decode rate, preferring the server's own generation timing, then the
+ * rate the inference meter measured over the streamed span, then the caller's
+ * wall clock. Wall time also contains queueing, prefill, and transport, so it
+ * understates the model. Returns nil when no source supports a rate.
  *
  * @effects: []
  * @errors: []
@@ -84,6 +88,10 @@ pub fn decode_rate(usage: LlmSpeedUsage, wall_ms: int | float) -> string? {
   const server_tokens = telemetry["server_output_tokens"] ?? usage["output_tokens"]
   if has_rate(server_tokens, telemetry["server_generation_ms"]) {
     return format_rate(server_tokens, telemetry["server_generation_ms"])
+  }
+  const measured = (telemetry["inference_speed"] ?? {})["output_tokens_per_second"]
+  if measured != nil {
+    return "${round(measured * 100.0) / 100.0} tok/s"
   }
   const output_tokens = usage["output_tokens"] ?? 0
   if has_rate(output_tokens, wall_ms) {

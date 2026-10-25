@@ -1,0 +1,17 @@
+fn main(harness: Harness) {
+  // Both archive writers share one host-independent path rule, so neither can
+  // emit an entry that escapes the extraction root on any extractor.
+  for path in ["../escape.txt", "/etc/escape.txt", "..\\escape.txt", "C:\\escape.txt", "a/../../b"] {
+    const entries = [{path: path, content: "x"}]
+    const tar_result = try {
+      tar_create(entries)
+    }
+    const zip_result = try {
+      zip_create(entries)
+    }
+    assert(contains(to_string(unwrap_err(tar_result)), "must be relative without `..`"), path)
+    assert(contains(to_string(unwrap_err(zip_result)), "must be relative without `..`"), path)
+  }
+  assert_eq(len(zip_extract(zip_create([{path: "./a/b.txt", content: "x"}]))), 1)
+  harness.stdio.println("escaping archive paths refused")
+}

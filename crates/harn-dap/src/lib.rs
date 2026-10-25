@@ -112,7 +112,7 @@ mod environment_tests {
 fn run_stdio() {
     // Defeat rlib dead-code stripping of the linkme distributed slice
     // (linkme issue #36) before reading `all_builtin_manifest()`.
-    harn_vm::stdlib::force_link();
+    harn_runtime::force_link();
     // Install the macro-emitted builtin signature slice into the parser
     // registry so source-file typechecking inside DAP launch covers
     // `#[harn_builtin]`-migrated entries.

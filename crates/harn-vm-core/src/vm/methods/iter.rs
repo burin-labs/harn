@@ -218,42 +218,7 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::Int(n))
             }
-            "sum" => {
-                let items = drain(&handle, self).await?;
-                let mut has_float = false;
-                let mut overflowed = false;
-                let mut int_acc: i64 = 0;
-                let mut float_acc: f64 = 0.0;
-                for v in &items {
-                    match v {
-                        VmValue::Int(i) => {
-                            // Promote to float on i64 overflow rather than
-                            // panicking (debug) / wrapping (release); the float
-                            // accumulator below is the fallback value.
-                            match int_acc.checked_add(*i) {
-                                Some(sum) => int_acc = sum,
-                                None => overflowed = true,
-                            }
-                            float_acc += *i as f64;
-                        }
-                        VmValue::Float(f) => {
-                            has_float = true;
-                            float_acc += f;
-                        }
-                        other => {
-                            return Err(VmError::TypeError(format!(
-                                "iter.sum: expected number, got {}",
-                                other.type_name()
-                            )))
-                        }
-                    }
-                }
-                if has_float || overflowed {
-                    Ok(VmValue::Float(float_acc))
-                } else {
-                    Ok(VmValue::Int(int_acc))
-                }
-            }
+            "sum" => super::list::sum_values(drain(&handle, self).await?.iter()),
             "min" => {
                 let items = drain(&handle, self).await?;
                 let mut best: Option<VmValue> = None;

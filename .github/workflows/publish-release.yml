@@ -315,10 +315,14 @@ jobs:
                 echo "::notice::Could not read $LATEST_TAG release assets after retries; assuming the main-anchored tag publish already shipped and skipping (avoids a spurious finalize from main HEAD)."
               else
                 EXPECTED_ASSETS=(
+                  "harn-aarch64-apple-darwin.tar.xz"
+                  "harn-aarch64-unknown-linux-gnu.tar.xz"
+                  "harn-x86_64-apple-darwin.tar.xz"
+                  "harn-x86_64-pc-windows-msvc.zip"
+                  "harn-x86_64-unknown-linux-gnu.tar.xz"
                   "harn-aarch64-apple-darwin.tar.gz"
                   "harn-aarch64-unknown-linux-gnu.tar.gz"
                   "harn-x86_64-apple-darwin.tar.gz"
-                  "harn-x86_64-pc-windows-msvc.zip"
                   "harn-x86_64-unknown-linux-gnu.tar.gz"
                   "SHA256SUMS"
                   "release-assets.json"
