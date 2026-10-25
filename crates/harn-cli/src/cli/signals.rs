@@ -139,8 +139,10 @@ pub(crate) struct SignalsHookArgs {
     #[arg(long)]
     pub role: Option<String>,
     /// With `--event Stop`: wait in the background for an urgent reminder and
-    /// exit 2 with it, which wakes an idle Claude Code session registered with
-    /// `asyncRewake`. One watcher runs per session; extra ones exit at once.
+    /// exit 2 with a fixed notice, which wakes an idle Claude Code session
+    /// registered with `asyncRewake`; the reminder follows through the woken
+    /// turn's `Stop` hook. One watcher runs per session; extra ones exit at
+    /// once.
     #[arg(long)]
     pub rewake: bool,
     /// How long `--rewake` waits before exiting quietly. Keep it under the

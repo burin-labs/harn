@@ -57,10 +57,12 @@ pub enum Transition {
 }
 
 /// What an idle watcher's poll found.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IdlePoll {
-    /// Urgent reminders leased to this session; possibly none yet.
-    Reminders(Vec<Reminder>),
+    /// The urgent reminders waiting for this session, unleased; possibly
+    /// none yet. The watcher only wakes the session: the session's own next
+    /// check-in leases and renders them.
+    Pending(Vec<ReminderId>),
     /// The session is working again; its foreground hooks deliver now.
     Busy,
     /// The session ended or went stale.
@@ -280,15 +282,14 @@ impl Inbox {
     }
 
     /// One poll of an idle session's background watcher: refresh its
-    /// heartbeat and lease urgent reminders, without overwriting the activity
-    /// a foreground hook recorded since the watcher started.
+    /// heartbeat and count the urgent reminders routed to it, without leasing
+    /// them and without overwriting the activity a foreground hook recorded
+    /// since the watcher started.
     pub fn poll_idle(
         &self,
         session_id: &str,
-        limit: Option<usize>,
         now: OffsetDateTime,
     ) -> Result<IdlePoll, SignalsError> {
-        let lease_for = self.config.lease_for;
         self.transact(now, |state| {
             let Some(session) = state.sessions.get_mut(session_id) else {
                 return IdlePoll::Gone;
@@ -299,15 +300,19 @@ impl Inbox {
             if now - session.last_seen >= HEARTBEAT_GRANULARITY {
                 session.last_seen = now;
             }
-            let (reminders, _) = lease(
-                state,
-                session_id,
-                CheckInScope::UrgentOnly,
-                limit,
-                lease_for,
-                now,
-            );
-            IdlePoll::Reminders(reminders)
+            let pending: Vec<ReminderId> = state
+                .signals
+                .values()
+                .filter(|signal| {
+                    signal.is_pending()
+                        && CheckInScope::UrgentOnly.admits(signal.severity)
+                        && signal.delivery.as_ref().is_some_and(|delivery| {
+                            delivery.session_id == session_id && delivery.lease.is_none()
+                        })
+                })
+                .map(Signal::id)
+                .collect();
+            IdlePoll::Pending(pending)
         })
     }
 

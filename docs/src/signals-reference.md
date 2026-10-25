@@ -63,7 +63,7 @@ the session took at its previous hook, then leases at most three reminders.
 | `UserPromptSubmit` | busy | any severity | `hookSpecificOutput.additionalContext` |
 | `PostToolUse` | busy | any severity | `hookSpecificOutput.additionalContext` |
 | `Stop` | idle, or busy if it delivers | Claude Code: urgent only. Codex: nothing | Claude Code: `hookSpecificOutput.additionalContext`, which continues the turn. Codex: `{}`, because a Codex `Stop` reason becomes a user prompt. |
-| `Stop --rewake` | idle | urgent only, while idle | Claude Code only. Exits 2 with the reminder on stderr, which wakes the session under `asyncRewake`. Claude Code shows the text as a synthetic user turn labeled `Stop hook feedback`, not as a system reminder. Exits 0 after `--max-wait` (default `9m`, under the hook's default 600-second `timeout`), when the session becomes busy, when it ends, or at once when another watcher for the session is running. |
+| `Stop --rewake` | idle | nothing; watches for urgent reminders while idle | Claude Code only. Exits 2 to wake the session under `asyncRewake`, printing only a fixed notice on stderr: Claude Code shows that stderr as a user-role `Stop hook feedback` turn, so it carries no signal text. The woken turn's `Stop` hook then leases the reminder and delivers it as `additionalContext`. Exits 0 after `--max-wait` (default `9m`, under the hook's default 600-second `timeout`), when the session becomes busy, when it ends, or at once when another watcher for the session is running. |
 | `SessionEnd` | removed | nothing | none |
 
 When more reminders are routed to the session than one hook leases, the output

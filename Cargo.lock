@@ -4257,7 +4257,7 @@ dependencies = [
 
 [[package]]
 name = "harn-signals"
-version = "0.10.178"
+version = "0.10.179-dev"
 dependencies = [
  "harn-flock",
  "serde",

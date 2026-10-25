@@ -35,10 +35,11 @@ Claude Code and Codex, and the `std/signals` builtins for an agent session
 running in the Harn VM, which deliver through the session's system reminders.
 Every adapter renders a reminder as a system or developer note. None delivers
 it as a user message, because an alert must never carry the user's authority.
-The one harness-imposed exception is Claude Code's idle wake: Claude Code shows
-an `asyncRewake` hook's output as a synthetic user turn labeled
-`Stop hook feedback`, so the woken session sees the alert there, still framed
-by Harn as a notification rather than a request.
+Claude Code's idle wake needs care here: Claude Code shows an `asyncRewake`
+hook's output as a user-role turn labeled `Stop hook feedback`. The watcher
+therefore prints one fixed sentence saying a signal is pending, never any
+signal text, and the alert arrives through the `Stop` hook's
+`additionalContext` when the woken turn ends.
 
 **Monitors** are Harn scripts that poll a source on a schedule and fire or
 resolve signals. Webhook payloads from alerting tools enter the same way,
@@ -171,8 +172,9 @@ stop.
 - When the agent tries to stop, only urgent reminders keep it going. Others
   wait for the next prompt.
 - An idle Claude Code session can be woken only for urgent reminders, through
-  an `asyncRewake` watcher that waits in the background and exits with the
-  reminder when one arrives. One watcher runs per session: a second one exits
+  an `asyncRewake` watcher that waits in the background and wakes the session
+  with a fixed notice when one is routed to it; the reminder follows as
+  `Stop` context when the woken turn ends. One watcher runs per session: a second one exits
   at once, so repeated stops never stack watchers. A watcher removes its lock
   file as it exits, and session end removes one a killed watcher left.
 

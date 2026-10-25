@@ -38,8 +38,9 @@ checks in. Merge them into any `hooks` you already have:
 ```
 
 The second `Stop` entry is optional. It waits in the background while the
-session is idle and wakes the session when an urgent signal arrives. Claude
-Code shows the alert to the woken session as `Stop hook feedback`. It waits
+session is idle and wakes the session when an urgent signal arrives. The
+wake carries only a fixed notice; the alert itself arrives as a system
+reminder through the first `Stop` entry when the woken turn ends. It waits
 nine minutes by default, inside the hook's default 600-second timeout. To watch
 longer, raise both: for example `"timeout": 3600` with `--max-wait 55m`. Only
 one watcher runs per session, so a session that stops repeatedly does not

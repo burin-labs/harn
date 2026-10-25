@@ -26,6 +26,12 @@ const ROLE_ENV: &str = "HARN_EXT_SIGNALS_ROLE";
 const REWAKE_POLL: StdDuration = StdDuration::from_secs(2);
 /// Claude Code's exit code for "wake the session with my stderr".
 const REWAKE_EXIT: i32 = 2;
+/// The only text a rewake prints. Claude Code shows a rewake hook's stderr as
+/// a user-role turn, so no signal field may appear in it; the alert itself
+/// arrives through the `Stop` hook's `additionalContext` when the woken turn
+/// ends.
+const REWAKE_NOTICE: &str =
+    "A signal is pending; it arrives as a system reminder when this turn ends. No reply is needed until then.";
 
 pub(crate) fn run(args: SignalsArgs) -> Result<(), String> {
     let is_hook = matches!(args.command, SignalsCommand::Hook(_));
@@ -439,9 +445,11 @@ fn render_reminders(reminders: &[Reminder]) -> Result<String, String> {
     harn_vm::stdlib::signals::render_reminders(reminders).map_err(|error| error.to_string())
 }
 
-/// Wait for an urgent reminder while the session idles. Exiting 2 with the
-/// reminder on stderr is Claude Code's `asyncRewake` contract: it wakes the
-/// session and shows the text as synthetic `Stop hook feedback`. Exiting 0 wakes
+/// Wait for an urgent reminder while the session idles. Exiting 2 is Claude
+/// Code's `asyncRewake` contract: it wakes the session and shows stderr as a
+/// user-role `Stop hook feedback` turn. The watcher therefore prints only
+/// [`REWAKE_NOTICE`] and leases nothing; the woken turn's `Stop` hook leases
+/// the reminder and delivers it as `additionalContext`. Exiting 0 wakes
 /// nothing. One watcher runs per session; a second one for the same session
 /// exits at once, so repeated stops never stack watchers.
 fn rewake(inbox: &Inbox, session_id: &str, max_wait: StdDuration) -> Result<(), String> {
@@ -449,19 +457,31 @@ fn rewake(inbox: &Inbox, session_id: &str, max_wait: StdDuration) -> Result<(), 
         return Ok(());
     };
     let started = harn_vm::stdlib::signals::vm_now();
+    // The `Stop` hook that started this watcher delivers whatever was already
+    // pending; waking for those too would announce them twice.
+    let mut owned_by_stop: Option<Vec<ReminderId>> = None;
     loop {
         let now = harn_vm::stdlib::signals::vm_now();
         match inbox
-            .poll_idle(session_id, Some(MAX_REMINDERS_PER_DELIVERY), now)
+            .poll_idle(session_id, now)
             .map_err(|error| error.to_string())?
         {
-            IdlePoll::Reminders(reminders) if !reminders.is_empty() => {
-                eprintln!("{}", render_reminders(&reminders)?);
+            IdlePoll::Pending(pending) if owned_by_stop.is_none() => {
+                owned_by_stop = Some(pending);
+            }
+            IdlePoll::Pending(pending)
+                if pending.iter().any(|id| {
+                    !owned_by_stop
+                        .as_ref()
+                        .is_some_and(|owned| owned.contains(id))
+                }) =>
+            {
+                eprintln!("{REWAKE_NOTICE}");
                 // `process::exit` skips destructors; release the lock first.
                 drop(watcher);
                 process::exit(REWAKE_EXIT);
             }
-            IdlePoll::Reminders(_) => {}
+            IdlePoll::Pending(_) => {}
             IdlePoll::Busy | IdlePoll::Gone => return Ok(()),
         }
         if now - started >= max_wait {
