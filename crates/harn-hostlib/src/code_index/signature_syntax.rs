@@ -337,7 +337,16 @@ pub(super) fn read_declaration(
 
 /// Attribute names whose function must keep its exact parameter list: a
 /// harness or runtime calls it, or its ABI symbol is exported.
-const SIGNATURE_FIXING_ATTRIBUTES: &[&str] = &["test", "bench", "main", "no_mangle", "export_name"];
+const SIGNATURE_FIXING_ATTRIBUTES: &[&str] = &[
+    "test",
+    "bench",
+    "main",
+    "no_mangle",
+    "export_name",
+    "test_case",
+    "rstest",
+    "wasm_bindgen",
+];
 
 fn fixed_signature(node: Node<'_>, bytes: &[u8], family: Family) -> Option<String> {
     match family {
@@ -373,29 +382,57 @@ fn fixed_signature(node: Node<'_>, bytes: &[u8], family: Family) -> Option<Strin
     }
 }
 
-/// The attribute's text when any identifier in it names a signature-fixing
-/// attribute. Reading every identifier covers wrapped forms such as
-/// `#[unsafe(no_mangle)]` and `#[cfg_attr(test, test)]`; `cfg` and `doc` only
-/// mention names, and string literals are never descended into.
+/// The attribute item's text when the attribute in it fixes the signature.
 fn signature_fixing_attribute(item: Node<'_>, bytes: &[u8]) -> Option<String> {
     let attribute = named_children(item)
         .into_iter()
         .find(|c| c.kind() == "attribute")?;
-    let head = named_children(attribute).into_iter().next()?;
-    if matches!(text(head, bytes), "cfg" | "doc") {
-        return None;
+    let mut cursor = attribute.walk();
+    let tokens: Vec<Node<'_>> = attribute.children(&mut cursor).collect();
+    fixes_signature(&tokens, bytes).then(|| text(item, bytes).to_string())
+}
+
+/// Whether one attribute, as its head token and arguments, fixes the
+/// signature. `cfg` and `doc` only mention names. `cfg_attr` applies the
+/// attributes after its condition, so only those are read. Any other
+/// attribute fixes it when an identifier in it names a signature-fixing
+/// attribute, which covers wrapped forms such as `unsafe(no_mangle)`.
+fn fixes_signature(tokens: &[Node<'_>], bytes: &[u8]) -> bool {
+    let Some(head) = tokens.first() else {
+        return false;
+    };
+    match text(*head, bytes) {
+        "cfg" | "doc" => false,
+        "cfg_attr" => {
+            let Some(arguments) = tokens.iter().find(|t| t.kind() == "token_tree") else {
+                return false;
+            };
+            let mut cursor = arguments.walk();
+            let inner: Vec<Node<'_>> = arguments
+                .children(&mut cursor)
+                .filter(|t| !matches!(t.kind(), "(" | ")"))
+                .collect();
+            inner
+                .split(|t| t.kind() == ",")
+                .skip(1)
+                .any(|applied| fixes_signature(applied, bytes))
+        }
+        _ => tokens.iter().any(|token| names_fixing_attribute(*token, bytes)),
     }
-    let mut stack = vec![attribute];
+}
+
+fn names_fixing_attribute(root: Node<'_>, bytes: &[u8]) -> bool {
+    let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         if node.kind().contains("string") {
             continue;
         }
         if node.kind() == "identifier" && SIGNATURE_FIXING_ATTRIBUTES.contains(&text(node, bytes)) {
-            return Some(text(item, bytes).to_string());
+            return true;
         }
         stack.extend(named_children(node));
     }
-    None
+    false
 }
 
 fn enclosing<'t>(node: Node<'t>, kinds: &[&str]) -> Option<Node<'t>> {

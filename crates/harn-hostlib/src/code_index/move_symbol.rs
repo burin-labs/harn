@@ -651,48 +651,84 @@ fn plan(
             blocked,
         ));
     }
-    // Fields a module outside the destination can no longer read: the
-    // source and its descendant modules, which share the source's privacy.
-    if let Lang::Rust(ws) = &mut lang {
-        let hidden = rust::hidden_field_names(item_node, &src.source);
-        let mut readers =
-            rust::field_reads(source_path, &src.source, &src.tree, &hidden, Some(&moved));
-        let mut candidates: BTreeSet<String> = BTreeSet::new();
-        for field in &hidden {
-            candidates.extend(files_in_scope(
-                state,
-                Scope::Workspace,
-                field,
-                source_path,
-                session,
-            ));
+    // Code that reads a restricted field of the moved struct and would not
+    // see it from the destination. Only modules that saw the field before are
+    // scanned; elsewhere a same-named field belongs to another type.
+    if let (
+        Lang::Rust(ws),
+        ModuleRef::Rust {
+            crate_dir: source_crate,
+            path: from,
+        },
+        ModuleRef::Rust { path: to, .. },
+    ) = (&mut lang, &source_module, &dest_module)
+    {
+        let mut regions = Vec::new();
+        for (field, path) in rust::hidden_fields(item_node, &src.source) {
+            let before = rust::visible_from(from, &path).unwrap_or_default();
+            match rust::visible_from(to, &path) {
+                Some(after) if to.starts_with(&after) => regions.push((field, before, after)),
+                _ => {
+                    return Ok(refuse(
+                        "visibility_required",
+                        format!("field `{field}` of `{name}` is visible in `{path}`, which does not contain the destination; widen it first"),
+                    ));
+                }
+            }
         }
-        for path in candidates
-            .iter()
-            .filter(|path| path.as_str() != source_path && path.as_str() != dest_path)
-        {
-            if Language::detect(Path::new(path), None) != Some(Language::Rust) {
+        let fields: Vec<String> = regions.iter().map(|(field, ..)| field.clone()).collect();
+        let mut paths: Vec<&str> = state
+            .files
+            .values()
+            .map(|file| file.relative_path.as_str())
+            .filter(|path| Language::detect(Path::new(path), None) == Some(Language::Rust))
+            .collect();
+        paths.sort_unstable();
+        let mut readers = Vec::new();
+        for path in paths {
+            let Some(ModuleRef::Rust {
+                crate_dir,
+                path: module,
+            }) = ws.module_of(path)
+            else {
+                continue;
+            };
+            let breaks = |field: &str| {
+                regions.iter().any(|(f, before, after)| {
+                    f == field && module.starts_with(before) && !module.starts_with(after)
+                })
+            };
+            if crate_dir != *source_crate || !fields.iter().any(|field| breaks(field)) {
                 continue;
             }
-            let descendant = match (ws.module_of(path), &source_module) {
-                (
-                    Some(ModuleRef::Rust {
-                        crate_dir,
-                        path: module,
-                    }),
-                    ModuleRef::Rust {
-                        crate_dir: source_crate,
-                        path: source_path_segments,
-                    },
-                ) => &crate_dir == source_crate && module.starts_with(source_path_segments),
-                _ => false,
-            };
-            if !descendant {
+            if path == source_path {
+                readers.extend(rust::field_reads(
+                    path,
+                    &src.source,
+                    &src.tree,
+                    name,
+                    &fields,
+                    &breaks,
+                    Some(&moved),
+                ));
                 continue;
             }
             let text = read_source(BUILTIN, &state.root, path, session)?;
-            let tree = parse(&text, Language::Rust)?;
-            readers.extend(rust::field_reads(path, &text, &tree, &hidden, None));
+            let mentions = text.contains(name)
+                || fields.iter().any(|field| {
+                    breaks(field)
+                        && if field.parse::<usize>().is_ok() {
+                            text.contains(&format!(".{field}"))
+                        } else {
+                            text.contains(field.as_str())
+                        }
+                });
+            if mentions {
+                let tree = parse(&text, Language::Rust)?;
+                readers.extend(rust::field_reads(
+                    path, &text, &tree, name, &fields, &breaks, None,
+                ));
+            }
         }
         if !readers.is_empty() {
             return Ok(refuse_with_sites(

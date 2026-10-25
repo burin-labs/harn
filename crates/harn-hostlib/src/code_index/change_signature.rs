@@ -363,6 +363,8 @@ fn plan(
             ),
         )));
     }
+    // The selector may be qualified (`Store.load`); syntax matches the bare name.
+    let name = seed_node.name.to_string();
     let seed_path = seed_node.path.to_string();
     let seed_line = seed_node.line;
     let Some(language) = Language::detect(Path::new(&seed_path), None) else {
@@ -386,7 +388,7 @@ fn plan(
         seed_tree.root_node(),
         seed_source.as_bytes(),
         family,
-        &request.name,
+        &name,
         seed_line,
     ) else {
         return Ok(Err(Refusal::new(
@@ -421,8 +423,8 @@ fn plan(
         .map(|p| (p.name.clone(), p.text.clone()))
         .collect();
 
-    let in_scope = files_in_scope(state, Scope::Workspace, &request.name, &seed_path, session);
-    let competing = competing_declarations(&state.symbols, seed, &request.name, &in_scope);
+    let in_scope = files_in_scope(state, Scope::Workspace, &name, &seed_path, session);
+    let competing = competing_declarations(&state.symbols, seed, &name, &in_scope);
     if !competing.is_empty() {
         let sites = competing
             .iter()

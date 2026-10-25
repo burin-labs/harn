@@ -302,8 +302,9 @@ fn rust_method_calls_keep_the_receiver_and_rename_body_uses() {
              }\n",
         ),
     ]);
+    // The index's qualified name selects the method too.
     let result = ws.change(
-        "area",
+        "Widget.area",
         "src/shapes.rs",
         &[
             &[("name", "factor"), ("from", "scale")],
@@ -892,6 +893,10 @@ fn test_entry_and_typed_arrow_signatures_refuse_as_fixed() {
              fn kv_gated() {}\n\
              #[unsafe(no_mangle)]\n\
              pub extern \"C\" fn exported() {}\n\
+             #[rstest]\n\
+             fn cased() {}\n\
+             #[cfg_attr(test, allow(dead_code))]\n\
+             fn quiet() {}\n\
              #[cfg(test)]\n\
              #[doc = \"a test helper\"]\n\
              fn helper() {}\n",
@@ -911,6 +916,7 @@ fn test_entry_and_typed_arrow_signatures_refuse_as_fixed() {
         ("kv_async", "tests/macros.rs", "#[tokio::test]"),
         ("kv_gated", "tests/macros.rs", "#[cfg_attr(test, test)]"),
         ("exported", "tests/macros.rs", "#[unsafe(no_mangle)]"),
+        ("cased", "tests/macros.rs", "#[rstest]"),
         ("main", "src/main.rs", "entry point"),
     ] {
         let result = ws.refuse("fixed_signature", name, path, extra);
@@ -922,6 +928,8 @@ fn test_entry_and_typed_arrow_signatures_refuse_as_fixed() {
     assert!(text(field(&result, "details")).contains("() => Res"));
     assert_applied(&ws.change("plain", "src/check.ts", ts_extra), 1);
     assert_applied(&ws.change("helper", "tests/macros.rs", extra), 1);
+    // The `cfg_attr` condition is not an attribute it applies.
+    assert_applied(&ws.change("quiet", "tests/macros.rs", extra), 0);
 }
 
 /// `symbol_ref` selects as for `rename_symbol`, so the column the index
