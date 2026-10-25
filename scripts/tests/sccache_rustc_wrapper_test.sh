@@ -94,21 +94,32 @@ RS
 # repository-policy lane installs no compiler cache), stand up a forwarding
 # stub rather than skipping: a probe that quietly does not run is the one
 # result this test must never produce.
-probe_path="$PATH"
+probe_bin="$tmp_root/probe-bin"
+mkdir -p "$probe_bin"
 if sccache_binary=$(command -v sccache 2>/dev/null); then
   probe_sccache="installed at $sccache_binary"
 else
-  stub_bin="$tmp_root/stub-bin"
-  mkdir -p "$stub_bin"
-  cat > "$stub_bin/sccache" <<'SH'
+  sccache_binary=""
+  probe_sccache="absent; forwarding compiler probe"
+fi
+export HARN_TEST_SCCACHE="$sccache_binary"
+cat > "$probe_bin/sccache" <<'SH'
 #!/usr/bin/env bash
-# Stands in for sccache: run the compiler it was handed, cache nothing.
+compiler="${1//\\//}"
+case "${compiler##*/}" in
+  rustc | rustc.exe | clippy-driver | clippy-driver.exe) ;;
+  *)
+    echo "sccache must receive the real compiler after workspace flags are applied" >&2
+    exit 1
+    ;;
+esac
+if [[ -n "$HARN_TEST_SCCACHE" ]]; then
+  exec "$HARN_TEST_SCCACHE" "$@"
+fi
 exec "$@"
 SH
-  chmod +x "$stub_bin/sccache"
-  probe_path="$stub_bin:$PATH"
-  probe_sccache="absent; forwarding stub at $stub_bin/sccache"
-fi
+chmod +x "$probe_bin/sccache"
+probe_path="$probe_bin:$PATH"
 echo "sccache_rustc_wrapper_test: real Cargo probe sccache $probe_sccache"
 
 output="$tmp_root/cargo-output.txt"
