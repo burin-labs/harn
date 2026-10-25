@@ -3,7 +3,7 @@ name: Consumer observer cleanup
 on:
   # Revisit preserved children after the one-shot completion listener returns.
   schedule:
-    - cron: '7,22,37,52 * * * *'
+    - cron: '8,23,38,53 * * * *'
   workflow_dispatch:
   # Trusted default-branch code authenticates same-repository custody; artifacts
   # are bounded JSON data, never downloaded checkout or executable source.

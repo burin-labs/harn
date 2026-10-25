@@ -13,7 +13,7 @@ test('the inert declaration action projects the owning publication step identity
   assert.equal(/^name: (.+)$/m.exec(action)?.[1], observerDeclarationStep);
   const listener = fs.readFileSync(new URL('../../.github/workflows/consumer-observer-cleanup.yml', import.meta.url), 'utf8');
   assert.match(listener, /if: github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch' \|\| \(github\.event_name == 'workflow_run' && github\.event\.workflow_run\.head_repository\.full_name == github\.repository && github\.event\.workflow_run\.status == 'completed'/);
-  assert.match(listener, /cron: '7,22,37,52 \* \* \* \*'/);
+  assert.match(listener, /cron: '8,23,38,53 \* \* \* \*'/);
   assert.match(listener, /workflows: \[Consumer canary, Build release binaries, Promote release, CI\]/);
   assert.doesNotMatch(listener, /ref:.*workflow_run|download-artifact|checkout.*workflow_run/);
 });
