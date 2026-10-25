@@ -1432,3 +1432,32 @@ pipeline main(harness: Harness) {
     );
     assert_eq!(outcome.stdout.trim(), "[harn] ping:active");
 }
+
+#[test]
+fn allow_list_keeps_every_pure_builtin_and_still_denies_effects() {
+    let denied = build_denied_builtins(None, Some("command_risk_scan"));
+    for granted in ["range", "lowercase", "command_risk_scan", "println"] {
+        assert!(!denied.contains(granted), "`{granted}` must stay callable");
+    }
+    let defs = harn_vm::stdlib::all_builtin_defs();
+    let pure_denied: Vec<_> = defs
+        .iter()
+        .filter(|def| {
+            matches!(
+                def.contract.exposure,
+                harn_builtin_meta::BuiltinExposure::PureGlobal
+            ) && denied.contains(def.sig.name)
+        })
+        .map(|def| def.sig.name)
+        .collect();
+    assert!(
+        pure_denied.is_empty(),
+        "pure builtins denied: {pure_denied:?}"
+    );
+    // The control: an allow list that denied nothing would also pass above.
+    assert!(
+        defs.iter()
+            .any(|def| !def.contract.effects.is_empty() && denied.contains(def.sig.name)),
+        "an effectful builtin outside the allow list must stay denied"
+    );
+}

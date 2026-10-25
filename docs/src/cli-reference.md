@@ -116,7 +116,7 @@ harn run --resume .harn/workers/worker_...json
 | `-e <code>` | Evaluate inline code instead of a file |
 | `--resume <handle-or-snapshot>` | Cold-restore a suspended top-level agent from its persisted worker snapshot |
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
-| `--allow <builtins>` | Allow only specific builtins (comma-separated) |
+| `--allow <builtins>` | Allow only specific builtins (comma-separated). Pure builtins such as `range` and `lowercase` declare no effects and stay callable. |
 | `--eager-project-handlers` | Load every project trigger and hook handler module during startup |
 | `--project-triggers` | Register manifest triggers and reconcile their durable state for this run |
 | `--standalone` | Run without loading ambient project configuration, skills, handlers, state roots, or manifest-derived authority |

@@ -109,7 +109,13 @@ const CORE_BUILTINS: &[&str] = &[
 /// Build the set of denied builtin names from `--deny` or `--allow` flags.
 ///
 /// - `--deny a,b,c` denies exactly those names.
-/// - `--allow a,b,c` denies everything *except* the listed names and the core builtins.
+/// - `--allow a,b,c` denies everything *except* the listed names, the core
+///   builtins, and every pure builtin.
+///
+/// A pure builtin's contract guarantees it declares no effects (the builtin
+/// registry refuses one that does), so denying it narrows no authority. It only
+/// turned an ordinary call such as `range` or `lowercase` into a fault the
+/// caller had to discover one name at a time.
 pub(crate) fn build_denied_builtins(
     deny_csv: Option<&str>,
     allow_csv: Option<&str>,
@@ -127,7 +133,18 @@ pub(crate) fn build_denied_builtins(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        let core: HashSet<&str> = CORE_BUILTINS.iter().copied().collect();
+        let mut core: HashSet<&str> = CORE_BUILTINS.iter().copied().collect();
+        core.extend(
+            harn_vm::stdlib::all_builtin_defs()
+                .iter()
+                .filter(|def| {
+                    matches!(
+                        def.contract.exposure,
+                        harn_builtin_meta::BuiltinExposure::PureGlobal
+                    )
+                })
+                .map(|def| def.sig.name),
+        );
 
         // Create a temporary VM with stdlib registered to enumerate all builtin names.
         let mut tmp = harn_vm::new_vm();
