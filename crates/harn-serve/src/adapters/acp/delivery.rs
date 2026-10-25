@@ -140,9 +140,10 @@ impl PendingPrompts {
         }
     }
 
-    /// The queued prompts `select` picks. A prompt whose turn is being
-    /// prepared is flagged, not returned: the turn claims admission once and
-    /// is then the only thing that answers it.
+    /// Flag the prompts `select` picks as withdrawn and return the ones still
+    /// queued, which the caller revokes and answers. A prompt whose turn is
+    /// being prepared is not returned: the turn claims admission once, sees
+    /// the flag, and is then the only thing that answers it.
     fn select_for_withdrawal(
         &self,
         select: impl Fn(&PendingPrompt) -> bool,
@@ -151,9 +152,10 @@ impl PendingPrompts {
         let mut pending = self.lock();
         let mut queued = Vec::new();
         for prompt in pending.iter_mut().filter(|prompt| select(prompt)) {
-            if prompt.admitting {
-                prompt.withdrawn.get_or_insert_with(|| reason.to_string());
-            } else {
+            // Flag every selected prompt at selection: the revocation that
+            // follows awaits, and a drain may admit the prompt meanwhile.
+            prompt.withdrawn.get_or_insert_with(|| reason.to_string());
+            if !prompt.admitting {
                 queued.push((prompt.session_id.clone(), prompt.message_id.clone()));
             }
         }
@@ -793,6 +795,20 @@ mod tests {
             AdmissionClaim::Withdrawn(reason) if reason == "request_cancelled"
         ));
         assert!(!pending.contains("s", "m7"));
+    }
+
+    /// The cancel selects the prompt while it is still queued, then waits on
+    /// revocation; the drain admits it in that interval.
+    #[test]
+    fn a_cancel_that_selected_a_queued_prompt_still_withdraws_it_if_a_drain_admits_it() {
+        let pending = registered();
+        let queued = pending.select_for_withdrawal(|_| true, "request_cancelled");
+        assert_eq!(queued, vec![("s".to_string(), "m7".to_string())]);
+        assert!(pending.begin_admission("s", "m7").is_some());
+        assert!(matches!(
+            pending.claim_admission("s", "m7"),
+            AdmissionClaim::Withdrawn(reason) if reason == "request_cancelled"
+        ));
     }
 
     #[test]
