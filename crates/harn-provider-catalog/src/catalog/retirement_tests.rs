@@ -1,13 +1,9 @@
 use super::*;
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{Duration, NaiveDate};
 
 /// Days a lapsed retirement may stay in the catalog before the sweep fails,
 /// so a retirement that lands on a weekend does not open an issue early.
 const GRACE_DAYS: i64 = 3;
-
-fn lapsed_before() -> NaiveDate {
-    Utc::now().date_naive() - Duration::days(GRACE_DAYS)
-}
 
 fn parsed(date: Option<&str>) -> Option<NaiveDate> {
     date.and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok())
@@ -45,15 +41,18 @@ fn lapsed_retirements(catalog: &ProviderCatalogArtifact, cutoff: NaiveDate) -> V
     problems
 }
 
-/// Reads today's date, so it cannot gate a merge: it would turn every pull
-/// request and the release check red with no code change once a retirement
-/// lapses. The weekly `retirement-sweep` job in provider-contract-probe.yml
-/// runs it with `--ignored` and files or updates an issue; the tests below
-/// gate the logic and the catalog's shape with no clock.
+/// The sweep date is injected by the weekly `retirement-sweep` job in
+/// provider-contract-probe.yml, which files an issue on failure; a date-based
+/// check must never gate a merge, since main would redden on a calendar day.
 #[test]
-#[ignore = "reads the wall clock; runs weekly from provider-contract-probe.yml"]
+#[ignore = "needs RETIREMENT_SWEEP_DATE; runs weekly from provider-contract-probe.yml"]
 fn lapsed_retirements_are_not_left_routable() {
-    let problems = lapsed_retirements(&artifact_embedded(None, None), lapsed_before());
+    let today = std::env::var("RETIREMENT_SWEEP_DATE")
+        .ok()
+        .and_then(|date| NaiveDate::parse_from_str(&date, "%Y-%m-%d").ok())
+        .expect("RETIREMENT_SWEEP_DATE must be a YYYY-MM-DD date");
+    let cutoff = today - Duration::days(GRACE_DAYS);
+    let problems = lapsed_retirements(&artifact_embedded(None, None), cutoff);
     assert!(
         problems.is_empty(),
         "retirements past their date:\n{}",

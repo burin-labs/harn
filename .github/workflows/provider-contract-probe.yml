@@ -93,7 +93,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.OPENROUTER_API_KEY || '' }}
 
   # An announced retirement (`retires_on`) or a sunset must not outlive its
-  # date. The check reads the wall clock, so it runs here weekly and files or
+  # date. The check takes today as RETIREMENT_SWEEP_DATE, runs here weekly, files or
   # updates an issue and stays green, so a lapse never reddens main health or
   # gates a pull request, where it would fail unrelated changes the day it lapses.
   retirement-sweep:
@@ -119,7 +119,7 @@ jobs:
         run: |
           set -uo pipefail
           status=0
-          cargo test --locked -p harn-provider-catalog --lib -- --ignored lapsed_retirements_are_not_left_routable >"$RUNNER_TEMP/sweep.log" 2>&1 || status=$?
+          RETIREMENT_SWEEP_DATE="$(date -u +%F)" cargo test --locked -p harn-provider-catalog --lib -- --ignored lapsed_retirements_are_not_left_routable >"$RUNNER_TEMP/sweep.log" 2>&1 || status=$?
           cat "$RUNNER_TEMP/sweep.log"
           echo "status=$status" >> "$GITHUB_OUTPUT"
 
@@ -131,7 +131,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          title="Provider catalog has lapsed retirements"
+          title="[Models] Provider retirement lapsed"
           run_url="https://github.com/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
           problems="$(sed -n '/retirements past their date:/,/^$/p' "$RUNNER_TEMP/sweep.log" | head -40)"
           body="The weekly retirement sweep found catalog rows whose provider retirement date has passed. Deprecate each with a sunset_date and superseded_by, remove its aliases, or remove the row. The sweep reads only structured \`retires_on\` and \`sunset_date\` fields. Run: $run_url"$'\n\n'"$problems"

@@ -1,4 +1,5 @@
-- **Provider catalog.** Together's Inkling route carries its 2026-11-06 retirement notice. A catalog
-  test fails when an alias still selects a route past its sunset or a retirement notice outlives
-  its date, reading only dates a note ties to a retirement. It reads the clock, so the weekly
-  provider contract probe runs it instead of every pull request (#10430).
+- **Provider catalog.** Together's Inkling route records its announced 2026-11-06 retirement in a
+  new structured `retires_on` field. Catalog validation rejects a malformed `retires_on` or one on
+  an already deprecated row. A weekly provider contract probe job files an issue when an
+  announced retirement has passed or a row still selectable by alias is past its sunset;
+  no pull request or main check depends on today's date (#10430).
