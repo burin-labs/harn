@@ -172,7 +172,7 @@ fn run_vm(
         harn_vm::stdlib::process::set_session_environment(environment);
         harn_vm::stdlib::process::set_thread_execution_context(context);
         let mut vm = harn_vm::new_vm();
-        harn_vm::register_vm_stdlib(&mut vm);
+        harn_runtime::register_vm_stdlib(&mut vm);
         let result = vm
             .execute(&chunk)
             .await

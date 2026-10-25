@@ -17,7 +17,11 @@
 //      filesystem projection cannot diverge. The refusal names the branch-only
 //      form; an issue or pull request URL is optional.
 //
-//   4. Bare `swift build` / `swift test`, and any other build tool whose setup
+//   4. `git stash` forms that write the stash list, which every linked worktree
+//      shares. A pop after another agent's push applies their changes and
+//      loses yours; a work-in-progress commit is private to its branch.
+//
+//   5. Bare `swift build` / `swift test`, and any other build tool whose setup
 //      a repository's root Makefile owns. Unlike Cargo these are not universal,
 //      so the rule fires only against a target the wrapper measured to exist.
 //
@@ -59,7 +63,16 @@ pub type ShellGuardDecision = {allow: bool, reason: string}
  */
 pub type WorktreeAdmission = {available: bool, command: string, denial: string}
 
-type ShellCommandStage = {text: string, argv: list<string>, writes_to_file: bool}
+/**
+ * `xargs_child_argv` is absent from runtimes older than the release that added it, and the
+ * guard must run on the oldest runtime a consumer pins, so it is optional here.
+ */
+type ShellCommandStage = {
+  text: string,
+  argv: list<string>,
+  xargs_child_argv?: list<string>,
+  writes_to_file: bool,
+}
 
 const EMPTY_SHELL_STAGE: ShellCommandStage = {text: "", argv: [], writes_to_file: false}
 
@@ -308,6 +321,42 @@ pub fn make_owned_command_violation(command: string, census: MakeTargetCensus) -
   return ""
 }
 
+/** Git's global options that take a separate value, so the value is not the subcommand. */
+const GIT_VALUE_TAKING_OPTIONS: list<string> = [
+  "-C",
+  "-c",
+  "--git-dir",
+  "--work-tree",
+  "--namespace",
+  "--super-prefix",
+  "--config-env",
+  "--exec-path",
+]
+
+/** The stash subcommands that only read the list. Every other form writes it. */
+const GIT_STASH_READ_ONLY: list<string> = ["list", "show"]
+
+/**
+ * The git subcommand and every token after it, verbatim. Only the global
+ * options before the subcommand are skipped: after it, an option value such as
+ * a stash message must stay in place, or it would read as a verb.
+ */
+fn git_subcommand_args(argv: list<string>) -> list<string> {
+  let consumes_next = false
+  let index = 1
+  for token in argv.slice(1, len(argv)) {
+    if consumes_next {
+      consumes_next = false
+    } else if GIT_VALUE_TAKING_OPTIONS.contains(token) {
+      consumes_next = true
+    } else if !token.starts_with("-") {
+      return argv.slice(index, len(argv))
+    }
+    index = index + 1
+  }
+  return []
+}
+
 fn is_git_worktree_add(argv: list<string>) -> bool {
   let consumes_next = false
   let subcommand = ""
@@ -316,17 +365,7 @@ fn is_git_worktree_add(argv: list<string>) -> bool {
       consumes_next = false
       continue
     }
-    if [
-      "-C",
-      "-c",
-      "--git-dir",
-      "--work-tree",
-      "--namespace",
-      "--super-prefix",
-      "--config-env",
-      "--exec-path",
-    ]
-      .contains(token) {
+    if GIT_VALUE_TAKING_OPTIONS.contains(token) {
       consumes_next = true
       continue
     }
@@ -814,6 +853,168 @@ pub fn disposable_trash_violation(command: string) -> string {
   return ""
 }
 
+/** Marks an inline alias whose value git reads from the environment, which the guard cannot see. */
+const GIT_ALIAS_UNRESOLVED: string = "<unresolved>"
+
+/**
+ * The aliases a command defines before its subcommand with `git -c alias.NAME=VALUE`.
+ * `--config-env=alias.NAME=VAR` reads its value from the environment, so it is refused.
+ */
+fn git_inline_aliases(argv: list<string>) -> dict {
+  let aliases = {}
+  let pending = ""
+  for token in argv.slice(1, len(argv)) {
+    if pending != "" {
+      const parts = token.split("=")
+      const head = parts[0] ?? ""
+      if head.starts_with("alias.") && len(parts) > 1 {
+        const name = head.replace("alias.", "")
+        aliases[name] = if pending == "-c" {
+          parts.slice(1, len(parts)).join("=")
+        } else {
+          GIT_ALIAS_UNRESOLVED
+        }
+      }
+      pending = ""
+    } else if token == "-c" || token == "--config-env" {
+      pending = token
+    } else if token.starts_with("--config-env=") {
+      const head = token.replace("--config-env=", "").split("=")[0] ?? ""
+      if head.starts_with("alias.") {
+        aliases[head.replace("alias.", "")] = GIT_ALIAS_UNRESOLVED
+      }
+    } else if GIT_VALUE_TAKING_OPTIONS.contains(token) {
+      pending = "skip"
+    } else if !token.starts_with("-") {
+      break
+    }
+  }
+  return aliases
+}
+
+/**
+ * Whether a git invocation writes the stash list, directly or through an inline alias.
+ * Git reads the verb only from the token right after `stash`; an option there
+ * (`-u`, `-m list`) means push. Anything but a read-only verb writes.
+ */
+fn git_args_write_stash(argv: list<string>, args: list<string>, depth: int) -> bool {
+  const verb = args[0] ?? ""
+  if verb == "stash" {
+    return !GIT_STASH_READ_ONLY.contains(args[1] ?? "")
+  }
+  const expansion = git_inline_aliases(argv)[verb] ?? ""
+  if expansion == "" || depth >= 4 {
+    return false
+  }
+  if expansion == GIT_ALIAS_UNRESOLVED {
+    return true
+  }
+  if expansion.starts_with("!") {
+    return git_stash_write_in(
+      expansion.replace("!", "") + " " + args.slice(1, len(args)).join(" "),
+      depth + 1,
+    )
+  }
+  const words = expansion.split(" ").filter({ word -> word != "" })
+  const expanded = ["git"] + words + args.slice(1, len(args))
+  return git_args_write_stash(argv, git_subcommand_args(expanded), depth + 1)
+}
+
+/**
+ * Whether raw operand text names a `stash` that is not provably read-only. The text is cut into
+ * words at whitespace, quotes, `;` and brackets, so a payload inside `sh -c`, `python -c`,
+ * `perl -e` or `eval` is read without parsing any interpreter. Every `stash` word must be followed
+ * by `list` or `show`; a bare `stash`, any other verb, and a word that merely contains `stash`
+ * (`alias.s=stash`) all count as a write.
+ */
+fn operand_text_writes_stash(text: string) -> bool {
+  let spaced = text
+  for separator in ["\"", "'", "`", ";", "(", ")", "|", "&", "\n", "\t"] {
+    spaced = spaced.replace(separator, " ")
+  }
+  const words = spaced.split(" ").filter({ word -> word != "" })
+  for index in range(0, len(words)) {
+    const word = words[index] ?? ""
+    if word.starts_with("stash@") || !word.contains("stash") {
+      continue
+    }
+    if word != "stash" || !GIT_STASH_READ_ONLY.contains(words[index + 1] ?? "") {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Fails closed for an `xargs` stage whose launched command the scanner could not place, such as
+ * `xargs -a input git stash drop` (`-a` is outside the scanner's option boundary), or any `xargs`
+ * under a runtime that predates `xargs_child_argv`. A `git` operand gets the precise stash rule,
+ * which also resolves inline aliases; every other operand is judged by its raw text. The accepted
+ * cost is that an unresolved `xargs` whose operands mention a non-read-only `stash`, even as
+ * `xargs -a f grep stash`, is refused.
+ */
+fn xargs_operands_write_stash(argv: list<string>) -> bool {
+  if argv_program(argv) != "xargs" {
+    return false
+  }
+  for index in range(1, len(argv)) {
+    const launched = argv.slice(index, len(argv))
+    if argv_program(launched) == "git"
+      && git_args_write_stash(launched, git_subcommand_args(launched), 0) {
+      return true
+    }
+  }
+  return operand_text_writes_stash(argv.slice(1, len(argv)).join(" "))
+}
+
+fn git_stash_write_in(command: string, depth: int) -> bool {
+  for group in command_groups(command) {
+    for stage in group {
+      // `xargs` launches its operands, so the stash rule reads the child the scanner resolved.
+      const xargs_child = stage.xargs_child_argv ?? []
+      if len(xargs_child) == 0 && xargs_operands_write_stash(stage.argv) {
+        return true
+      }
+      const launched = if len(xargs_child) > 0 {
+        xargs_child
+      } else {
+        stage.argv
+      }
+      const argv = launched_argv(launched, 0)
+      if argv_program(argv) == "git" {
+        if git_args_write_stash(argv, git_subcommand_args(argv), depth) {
+          return true
+        }
+      }
+      if depth < 4 {
+        const nested = nested_shell_payload(argv)
+        if nested != "" && git_stash_write_in(nested, depth + 1) {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Refuse `git stash` forms that write the stash list.
+ *
+ * The list lives in the repository, not the worktree, so every linked worktree
+ * pushes to and pops from the same one. An agent that pops after another agent's
+ * push applies that agent's changes and loses its own. A work-in-progress commit
+ * is private to a branch and has no such collision.
+ */
+pub fn git_stash_violation(command: string) -> string {
+  if !git_stash_write_in(command, 0) {
+    return ""
+  }
+  return "`git stash` is refused: the stash list is shared by every linked worktree, so a pop can apply "
+    + "another agent's changes and drop yours. Commit a work-in-progress commit on your branch instead "
+    + "(`git commit -am wip`), and undo it later with `git reset --soft HEAD~1`. "
+    + "`git stash list` and `git stash show` stay available."
+}
+
 fn is_slow(stage: ShellCommandStage) -> bool {
   return SLOW_COMMANDS.contains(stage_program(stage))
 }
@@ -1187,6 +1388,10 @@ pub fn decision(
   const make_owned = make_owned_command_violation(command, make_targets)
   if make_owned != "" {
     return {allow: false, reason: make_owned}
+  }
+  const stash = git_stash_violation(command)
+  if stash != "" {
+    return {allow: false, reason: stash}
   }
   const disposable_trash = disposable_trash_violation(command)
   if disposable_trash != "" {

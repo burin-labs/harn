@@ -1799,6 +1799,47 @@ harn session view-fixtures
 harn session view-fixtures --check
 harn session view-fixtures --repository-root
 harn session view-fixtures --write
+harn signals
+harn signals --dir
+harn signals ack
+harn signals ack --generation
+harn signals ack --session
+harn signals ack <positional 1>
+harn signals fire
+harn signals fire --action
+harn signals fire --cwd
+harn signals fire --event
+harn signals fire --expires-in
+harn signals fire --json
+harn signals fire --key
+harn signals fire --kind
+harn signals fire --producer
+harn signals fire --provider
+harn signals fire --repo
+harn signals fire --severity
+harn signals fire --signature
+harn signals fire --source-url
+harn signals fire --summary
+harn signals fire --topic
+harn signals fire --why
+harn signals hook
+harn signals hook --event
+harn signals hook --format
+harn signals hook --max-wait
+harn signals hook --rewake
+harn signals hook --role
+harn signals list
+harn signals list --json
+harn signals pending
+harn signals pending --json
+harn signals pending --session
+harn signals resolve
+harn signals resolve --json
+harn signals resolve --signature
+harn signals resolve --summary
+harn signals resolve <positional 1>
+harn signals sessions
+harn signals sessions --json
 harn skill
 harn skill dump
 harn skill dump --all

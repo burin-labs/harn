@@ -19,6 +19,7 @@ mod find_evidence;
 mod find_text;
 pub mod ignore_policy;
 mod line_page;
+mod metadata;
 
 use ignore_policy::IgnorePolicy;
 
@@ -440,7 +441,7 @@ const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &WORKSPACE_TEMP_DIR_BUILTIN_DEF,
     &MKDTEMP_BUILTIN_DEF,
     &MKDTEMP_IN_WORKSPACE_BUILTIN_DEF,
-    &STAT_BUILTIN_DEF,
+    &metadata::STAT_BUILTIN_DEF,
     &MOVE_FILE_BUILTIN_DEF,
     &READ_LINES_BUILTIN_DEF,
     &line_page::READ_LINES_PAGE_RESULT_BUILTIN_DEF,
@@ -1211,35 +1212,6 @@ fn unique_temp_dir_name(args: &[VmValue], default_prefix: &str) -> String {
     #[expect(clippy::string_slice, reason = "simple uuid encoding is ASCII hex")]
     let short_suffix = &suffix[suffix.len().saturating_sub(12)..];
     format!("{sanitized_prefix}{short_suffix}")
-}
-
-#[harn_builtin(
-    exposure = "runtime_internal",
-    sig = "stat(path: string) -> dict",
-    category = "fs",
-    doc = "Return metadata for a file-system path."
-)]
-fn stat_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let path = args.first().map(|a| a.display()).unwrap_or_default();
-    let resolved = resolve_fs_path(&path);
-    crate::stdlib::sandbox::enforce_fs_path(
-        "stat",
-        &resolved,
-        crate::stdlib::sandbox::FsAccess::Read,
-    )?;
-    let metadata = std::fs::metadata(&resolved)
-        .map_err(|e| io_error_thrown(format!("Failed to stat {}: {e}", resolved.display()), &e))?;
-    let mut info = BTreeMap::new();
-    info.put_int("size", metadata.len() as i64);
-    info.put_bool("is_file", metadata.is_file());
-    info.put_bool("is_dir", metadata.is_dir());
-    info.put_bool("readonly", metadata.permissions().readonly());
-    if let Ok(modified) = metadata.modified() {
-        if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
-            info.put("modified", VmValue::Float(dur.as_secs_f64()));
-        }
-    }
-    Ok(VmValue::dict(info))
 }
 
 #[harn_builtin(

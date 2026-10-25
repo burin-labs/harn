@@ -48,6 +48,8 @@ mod pricing_tests;
 #[cfg(test)]
 mod refresh_tests;
 #[cfg(test)]
+mod retirement_tests;
+#[cfg(test)]
 mod schema_shape_tests;
 #[cfg(test)]
 mod tests_parity_provenance;
@@ -451,6 +453,7 @@ fn catalog_model(
             },
             note: model.deprecation_note.clone(),
             sunset_date: model.sunset_date.clone(),
+            retires_on: model.retires_on.clone(),
             superseded_by: model.superseded_by.clone(),
         },
         availability: ModelAvailabilityStatus::from(model.availability),

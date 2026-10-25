@@ -56,6 +56,11 @@ pipeline test_allowlist_exact_and_prefix_rules(harness: Harness, task: unknown) 
     true,
   )
   assert_eq(python_boundary_rule_for("personas/smart_ship/controller.py").allowed, false)
+  assert_eq(
+    python_boundary_rule_for("experiments/shared-agent-guidance/fixtures/oracle.py").allowed,
+    true,
+  )
+  assert_eq(python_boundary_rule_for("experiments/shared-agent-guidance/suite.py").allowed, false)
   const verifier_rule = python_boundary_rule_for(
     "crates/harn-vm/tests/fixtures/source_verifier_unittest.py",
   )

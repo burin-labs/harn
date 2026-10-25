@@ -17,7 +17,7 @@
 //! `ambiguous_symbol` (candidates in `warnings`) | `conflict` |
 //! `unsupported_language` | `syntax_error` | `error`, plus this operation's
 //! refusals `parameter_in_use` | `value_reference` | `unsupported_call_site` |
-//! `overrides_present` and its `call_sites_updated`, `sites`, and parameter
+//! `overrides_present` | `fixed_signature` and its `call_sites_updated`, `sites`, and parameter
 //! lists. A request that does not fit the declaration raises an invalid
 //! parameter error. Every refusal leaves every file byte-identical.
 //!
@@ -54,8 +54,8 @@ use super::builtins::SharedIndex;
 use super::refactor_core::{
     candidates_value, competing_declarations, edit_envelope, failed_paths_value, file_plan_value,
     files_in_scope, first_syntax_error, is_identifier_token, parse_kind, plan_file, read_source,
-    reference_sites, resolve_seed, write_plans, EditEnvelope, EditSpan, EditSymbol, FilePlan,
-    IdentifierSpan, ReferenceKind, Scope, SeedCandidate, SeedLookup,
+    reference_sites, resolve_seed_selected, write_plans, EditEnvelope, EditSpan, EditSymbol,
+    FilePlan, IdentifierSpan, ReferenceKind, Scope, SeedCandidate, SeedLookup,
 };
 use super::signature_syntax::{
     body_uses, find_declaration, read_call_arguments, read_declaration, read_macro_call,
@@ -81,6 +81,7 @@ struct Request {
     name: String,
     path: String,
     line: Option<u32>,
+    col: Option<u32>,
     kind: Option<NodeKind>,
     params: Vec<ParamSpec>,
     dry_run: bool,
@@ -160,6 +161,7 @@ fn parse_request(args: &[VmValue]) -> Result<Request, HostlibError> {
         name: require_string(BUILTIN, symbol, "name")?,
         path: require_string(BUILTIN, symbol, "path")?,
         line,
+        col: super::builtin_args::optional_positive_u32(BUILTIN, symbol, "col")?,
         kind,
         params,
         dry_run: optional_bool(BUILTIN, dict, "dry_run", false)?,
@@ -322,11 +324,12 @@ fn plan(
     let session = request.session_id.as_deref();
     let normalized = super::builtins::normalize_relative_path_for(state, &request.path);
     let kind = request.kind.or(Some(NodeKind::Function));
-    let seed = match resolve_seed(
+    let seed = match resolve_seed_selected(
         &state.symbols,
         &normalized,
         &request.name,
         request.line,
+        request.col,
         kind,
     ) {
         SeedLookup::One(id) => id,
@@ -360,6 +363,8 @@ fn plan(
             ),
         )));
     }
+    // The selector may be qualified (`Store.load`); syntax matches the bare name.
+    let name = seed_node.name.clone();
     let seed_path = seed_node.path.to_string();
     let seed_line = seed_node.line;
     let Some(language) = Language::detect(Path::new(&seed_path), None) else {
@@ -383,7 +388,7 @@ fn plan(
         seed_tree.root_node(),
         seed_source.as_bytes(),
         family,
-        &request.name,
+        &name,
         seed_line,
     ) else {
         return Ok(Err(Refusal::new(
@@ -418,8 +423,8 @@ fn plan(
         .map(|p| (p.name.clone(), p.text.clone()))
         .collect();
 
-    let in_scope = files_in_scope(state, Scope::Workspace, &request.name, &seed_path, session);
-    let competing = competing_declarations(&state.symbols, seed, &request.name, &in_scope);
+    let in_scope = files_in_scope(state, Scope::Workspace, &name, &seed_path, session);
+    let competing = competing_declarations(&state.symbols, seed, &name, &in_scope);
     if !competing.is_empty() {
         let sites = competing
             .iter()
@@ -469,6 +474,23 @@ fn plan(
                 .unwrap_or("")
                 .trim()
                 .to_string(),
+        }])));
+    }
+
+    if let Some(reason) = &decl.fixed {
+        return Ok(Err(Refusal::new(
+            "fixed_signature",
+            format!(
+                "`{}` {reason}, which fixes its parameter list",
+                request.name
+            ),
+        )
+        .with_sites(vec![Site {
+            path: seed_path,
+            line: seed_line as usize,
+            kind: "declaration",
+            reason: reason.clone(),
+            text: String::new(),
         }])));
     }
 
@@ -1263,6 +1285,7 @@ fn finish(
             &state.root,
             &planned.plans,
             request.session_id.as_deref(),
+            &crate::host_call::workspace_writes(),
         )?
     };
     let details = if request.dry_run {

@@ -18,13 +18,45 @@ use crate::orchestration::ProcessSandboxPreset;
 /// this with a `VmError`; both share the same path normalization and
 /// rejection text.
 pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxViolation> {
-    check_fs_path_scope_with_roots(path, access, PATH_SCOPE_ROOTS.with(std::cell::Cell::get))
+    check_fs_path_scope_with_roots(
+        path,
+        access,
+        PATH_SCOPE_ROOTS.with(std::cell::Cell::get),
+        normalize_for_policy,
+    )
+}
+
+pub fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> Result<(), VmError> {
+    check_fs_path_scope(path, access)
+        .map_err(|violation| sandbox_rejection(violation.message(builtin)))
+}
+
+pub(crate) fn enforce_fs_entry_path(
+    builtin: &str,
+    path: &Path,
+    access: FsAccess,
+) -> Result<(), VmError> {
+    // An entry read must authorize its location as well as the target. Keep
+    // target checks for paths whose trailing slash or dot follows a directory.
+    enforce_fs_path(builtin, path, access)?;
+    check_fs_path_scope_with_roots(
+        path,
+        access,
+        PATH_SCOPE_ROOTS.with(std::cell::Cell::get),
+        paths::normalize_entry_for_policy,
+    )
+    .map_err(|violation| sandbox_rejection(violation.message(builtin)))
 }
 
 /// Authorize Git-selected metadata using existing grants, before following
 /// repository pointers. A pointer must not grant access to its own target.
 pub fn check_git_metadata_path_scope(path: &Path) -> Result<(), SandboxViolation> {
-    check_fs_path_scope_with_roots(path, FsAccess::Read, PathScopeRoots::Declared)
+    check_fs_path_scope_with_roots(
+        path,
+        FsAccess::Read,
+        PathScopeRoots::Declared,
+        normalize_for_policy,
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -57,6 +89,7 @@ fn check_fs_path_scope_with_roots(
     path: &Path,
     access: FsAccess,
     root_selection: PathScopeRoots,
+    normalize_path: fn(&Path) -> PathBuf,
 ) -> Result<(), SandboxViolation> {
     let Some(policy) = crate::orchestration::current_execution_policy() else {
         return Ok(());
@@ -77,7 +110,7 @@ fn check_fs_path_scope_with_roots(
     if access_is_exempt_from_scope(path, access) {
         return Ok(());
     }
-    let candidate = normalize_for_policy(path);
+    let candidate = normalize_path(path);
     let scope = match root_selection {
         PathScopeRoots::Assembled => scope_memo::scope_roots(&policy, access),
         PathScopeRoots::Declared => std::rc::Rc::new(scope_memo::ScopeRoots {

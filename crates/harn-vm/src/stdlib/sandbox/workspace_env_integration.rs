@@ -237,6 +237,55 @@ fn enter_policy_with_environment(
     PolicyGuard
 }
 
+#[test]
+fn an_in_process_env_read_writes_nothing_and_a_spawn_materializes() {
+    let workspace = tempfile::tempdir().unwrap();
+    let _guard = enter_policy(workspace.path());
+    let read = |name: &str| crate::stdlib::process::session_env_var(name).unwrap();
+
+    // Each provider's credential lookup reads the environment; building the
+    // child environment for every read rewrote toolchain launchers per step.
+    let tmpdir = read("TMPDIR").expect("the workspace temp dir is a default");
+    let root = workspace.path().canonicalize().unwrap();
+    assert_eq!(Path::new(&tmpdir), root.join(WORKSPACE_TMPDIR_NAME));
+    assert!(read("GOCACHE").is_some());
+    let created: Vec<_> = std::fs::read_dir(workspace.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert!(
+        created.is_empty(),
+        "an environment read created {created:?}"
+    );
+
+    let spawn = super::active_workspace_process_env();
+    assert!(Path::new(&tmpdir).is_dir(), "a spawn creates the temp dir");
+    let spawn_tmpdir = spawn.iter().find(|(key, _)| key == "TMPDIR").unwrap();
+    assert_eq!(
+        spawn_tmpdir.1, tmpdir,
+        "a read and a spawn agree on the value"
+    );
+}
+
+#[test]
+fn an_in_process_env_read_follows_a_session_environment_change() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().canonicalize().unwrap();
+    let cache = |name: &str| root.join(name).display().to_string();
+    let _guard = enter_policy_with_environment(
+        workspace.path(),
+        isolated_environment([("GOCACHE".to_string(), cache("first-go-cache"))]),
+    );
+    let read = || crate::stdlib::process::session_env_var("GOCACHE").unwrap();
+    assert_eq!(read(), Some(cache("first-go-cache")));
+
+    crate::stdlib::process::set_session_environment(Some(isolated_environment([(
+        "GOCACHE".to_string(),
+        cache("second-go-cache"),
+    )])));
+    assert_eq!(read(), Some(cache("second-go-cache")));
+}
+
 fn isolated_environment(
     entries: impl IntoIterator<Item = (String, String)>,
 ) -> crate::security::SessionEnvironment {

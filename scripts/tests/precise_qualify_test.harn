@@ -1,0 +1,137 @@
+import {
+  RepoPlan,
+  Symbol,
+  index_clone,
+  oracle_control,
+  prepare_repo,
+  run_symbol,
+} from "../precise_qualify.harn"
+
+const LIB =
+  "pub fn helper() -> i32 {\n    1\n}\n\npub fn user() -> i32 {\n    helper() + helper()\n}\n"
+
+const HELPER: Symbol = {
+  name: "helper",
+  path: "src/lib.rs",
+  line: 1,
+  col: nil,
+  kind: "Function",
+  container: "",
+}
+
+fn git(process: HarnessProcess, root: string, args: list<string>) {
+  const res = process.run(
+    {
+      program: "git",
+      args: ["-c", "user.name=probe", "-c", "user.email=probe@example.invalid"] + args,
+      cwd: root,
+    },
+  )
+  assert(res.success, res.stderr)
+}
+
+/** A committed one-file crate whose oracle is the given command. */
+fn fixture(harness: Harness, oracle: list<string>) -> {root: string, repo: RepoPlan} {
+  const root = harness.fs.mkdtemp_in_workspace("precise-qualify-")
+  harness.fs.mkdir(root + "/src")
+  harness.fs.write_text(root + "/src/lib.rs", LIB)
+  git(harness.process, root, ["init", "-q"])
+  git(harness.process, root, ["add", "-A"])
+  git(harness.process, root, ["commit", "-q", "-m", "fixture"])
+  assert(index_clone(harness, root).ok)
+  return {
+    root: root,
+    repo: {
+      id: "fixture",
+      language: "rust",
+      url: "",
+      commit: "",
+      checkout: root,
+      setup: [],
+      oracle: [oracle],
+    },
+  }
+}
+
+fn outcome_of(attempts: list<dict>, arm: string) -> dict {
+  return attempts.filter({ attempt -> attempt.arm == arm }).to_list()[0] ?? {}
+}
+
+// Negative control: the oracle requires the old public name, so any applied
+// rename breaks it. The probe must report that edit as wrong, never applied.
+@serial(group: "code_index")
+pipeline test_an_applied_rename_the_oracle_rejects_is_reported_wrong(harness: Harness) {
+  const fx = fixture(harness, ["grep", "-q", "fn helper()", "src/lib.rs"])
+  const attempts = run_symbol(
+    harness,
+    fx.repo,
+    fx.root,
+    HELPER,
+    ["find_references", "rename_symbol:syntax_tree"],
+  )
+  const rename = outcome_of(attempts, "rename_symbol:syntax_tree")
+  assert_eq(rename.outcome, "applied_wrong")
+  assert_eq(rename.reason, "oracle_failed")
+  assert_eq(rename.apply.changed_files, ["src/lib.rs"])
+  assert_eq(outcome_of(attempts, "find_references").outcome, "pending")
+  assert_eq(harness.fs.read_text(fx.root + "/src/lib.rs"), LIB)
+}
+
+@serial(group: "code_index")
+pipeline test_an_applied_rename_the_oracle_accepts_is_correct(harness: Harness) {
+  const fx = fixture(harness, ["grep", "-q", "pub fn user()", "src/lib.rs"])
+  const attempts = run_symbol(
+    harness,
+    fx.repo,
+    fx.root,
+    HELPER,
+    ["find_references", "rename_symbol:syntax_tree"],
+  )
+  assert_eq(outcome_of(attempts, "rename_symbol:syntax_tree").outcome, "applied_correct")
+  const references = outcome_of(attempts, "find_references")
+  assert_eq(references.outcome, "applied_correct")
+  assert_eq(references.oracle_source, "rename_symbol:syntax_tree")
+  assert_eq(harness.fs.read_text(fx.root + "/src/lib.rs"), LIB)
+}
+
+/** An oracle that judges nothing must leave the repo unmeasured, never pass. */
+pipeline test_a_repo_without_an_oracle_is_not_measured(harness: Harness) {
+  const fx = fixture(harness, ["true"])
+  const prepared = prepare_repo(harness, fx.repo + {oracle: []}, fx.root)
+  assert_eq(prepared.ok, false)
+  assert_eq(prepared.reason, "oracle_missing")
+}
+
+@serial(group: "code_index")
+pipeline test_an_oracle_that_passes_a_broken_file_is_blind(harness: Harness) {
+  const blind = fixture(harness, ["true"])
+  const control = oracle_control(harness, blind.repo, blind.root, ["src/lib.rs"])
+  assert_eq(control.reason, "oracle_blind")
+  assert_eq(harness.fs.read_text(blind.root + "/src/lib.rs"), LIB)
+  const sighted = fixture(harness, ["sh", "-c", "! grep -q @@@ src/lib.rs"])
+  assert(oracle_control(harness, sighted.repo, sighted.root, ["src/lib.rs", "src/lib.rs"]).ok)
+  assert_eq(harness.fs.read_text(sighted.root + "/src/lib.rs"), LIB)
+  // Every sampled file is checked: the oracle above never reads `src/other.rs`.
+  harness.fs.write_text(sighted.root + "/src/other.rs", "pub fn other() {}\n")
+  const partial = oracle_control(
+    harness,
+    sighted.repo,
+    sighted.root,
+    ["src/lib.rs", "src/other.rs"],
+  )
+  assert_eq(partial.reason, "oracle_blind")
+  assert(partial.detail.contains("src/other.rs"))
+}
+
+/** A setup file reaches the scratch clone, so a generated config can widen the oracle. */
+@serial(group: "code_index")
+pipeline test_setup_files_widen_the_oracle(harness: Harness) {
+  const fx = fixture(harness, ["grep", "-q", "pub fn", "extra.cfg"])
+  const head = harness.process.run({program: "git", args: ["rev-parse", "HEAD"], cwd: fx.root})
+  const commit = trim(head.stdout)
+  const repo = fx.repo + {commit: commit, setup_files: {"extra.cfg": "pub fn\n"}}
+  const work = harness.fs.mkdtemp_in_workspace("precise-qualify-work-")
+  const prepared = prepare_repo(harness, repo, work)
+  assert_eq(prepared.ok, true)
+  assert_eq(harness.fs.read_text(prepared.root + "/extra.cfg"), "pub fn\n")
+}

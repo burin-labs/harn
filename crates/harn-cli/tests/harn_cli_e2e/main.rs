@@ -132,6 +132,7 @@ mod secret_absence;
 mod shard_coverage_cli;
 #[cfg(unix)]
 mod sidecar_version_cli;
+mod signals_hook_cli;
 mod skills_cli;
 mod supervisor_cli;
 mod test_worker_cli_e2e;

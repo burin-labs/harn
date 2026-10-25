@@ -737,6 +737,24 @@ pub(super) fn read_source(
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// Paths whose current text differs from the text their plan was built
+/// from: another writer changed them since they were read.
+pub(super) fn changed_since_planned(
+    builtin: &'static str,
+    root: &Path,
+    plans: &[FilePlan],
+    session_id: Option<&str>,
+) -> Vec<String> {
+    plans
+        .iter()
+        .filter(|plan| {
+            read_source(builtin, root, &plan.path, session_id)
+                .map_or(true, |current| current != plan.source)
+        })
+        .map(|plan| plan.path.clone())
+        .collect()
+}
+
 fn write_source(
     builtin: &'static str,
     path: &Path,
@@ -771,6 +789,7 @@ pub(super) fn write_plans(
     root: &Path,
     plans: &[FilePlan],
     session_id: Option<&str>,
+    _writes: &crate::host_call::WorkspaceWrites,
 ) -> Result<Vec<(String, String)>, HostlibError> {
     let targets = plans
         .iter()

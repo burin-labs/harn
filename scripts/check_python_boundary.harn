@@ -21,6 +21,14 @@ const SKIP_SEGMENTS = [
 const PYTHON_ALLOWLIST = [
   {
     kind: "prefix",
+    pattern: "experiments/shared-agent-guidance/fixtures/",
+    category: "subprocess-fixture",
+    owner: "Shared agent operating guidance experiment",
+    reason:
+      "Python libraries and unittest behavior oracles are repair fixtures; Harn owns agent execution, calibration, and the trial matrix.",
+  },
+  {
+    kind: "prefix",
     pattern: "personas/smart_ship/fixtures/python/",
     category: "subprocess-fixture",
     owner: "Smart Ship neutral-stack verification",

@@ -19,7 +19,7 @@ const JSON_PARSE_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_json_parse_cach
 
 /// Serde JSON's default container recursion boundary. Detect it before serde
 /// so callers receive a stable structural kind instead of parser prose.
-const JSON_PARSE_MAX_CONTAINER_DEPTH: usize = 127;
+pub(super) const JSON_PARSE_MAX_CONTAINER_DEPTH: usize = 127;
 
 /// Deepest `VmValue` nesting we will hand to a third-party recursive encoder
 /// (pretty JSON via `serde_json`, YAML via `crate::yaml`). Our own JSON writer
@@ -878,7 +878,7 @@ pub(crate) fn escape_json_string_vm(s: &str) -> String {
     out
 }
 
-pub(crate) fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
+pub fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
     match value {
         VmValue::Int(i) => serde_json::json!(i),
         VmValue::Float(f) if f.is_finite() => serde_json::json!(f),
@@ -918,7 +918,7 @@ pub(crate) fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
     }
 }
 
-pub(crate) fn vm_value_to_json(val: &VmValue) -> String {
+pub fn vm_value_to_json(val: &VmValue) -> String {
     let mut out = String::new();
     write_vm_value_to_json(val, &mut out);
     out

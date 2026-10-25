@@ -10,6 +10,7 @@
   "runner_registry": {
     "ubuntu-24.04": {"host_os": "linux", "host_arch": "x86_64", "glibc_version": "2.39", "provider": "github", "usd_per_minute": null},
     "ubuntu-22.04": {"host_os": "linux", "host_arch": "x86_64", "glibc_version": "2.35", "provider": "github", "usd_per_minute": null},
+    "ubuntu-22.04-arm": {"host_os": "linux", "host_arch": "aarch64", "glibc_version": "2.35", "provider": "github", "usd_per_minute": null},
     "ubuntu-16core-release": {"host_os": "linux", "host_arch": "x86_64", "glibc_version": "2.35", "provider": "github", "usd_per_minute": 0.042},
     "ubuntu-32core-release": {"host_os": "linux", "host_arch": "x86_64", "glibc_version": "2.35", "provider": "github", "usd_per_minute": 0.082},
     "blacksmith-16vcpu-ubuntu-2204": {"host_os": "linux", "host_arch": "x86_64", "glibc_version": "2.35", "provider": "blacksmith", "usd_per_minute": 0.032},
@@ -71,11 +72,11 @@
       "use_sccache": "true",
       "sccache_backend": "install",
       "runners": {
-        "warm": "ubuntu-22.04",
-        "primary": "ubuntu-22.04",
-        "recovery": "ubuntu-22.04",
-        "standard": "ubuntu-22.04",
-        "fast": "ubuntu-22.04"
+        "warm": "ubuntu-22.04-arm",
+        "primary": "ubuntu-22.04-arm",
+        "recovery": "ubuntu-22.04-arm",
+        "standard": "ubuntu-22.04-arm",
+        "fast": "ubuntu-22.04-arm"
       }
     },
     {

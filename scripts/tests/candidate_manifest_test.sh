@@ -46,9 +46,12 @@ for target in $(candidate_archive_expected_targets_json | jq -r '.[]'); do
     --run-id "$run_id" \
     --run-attempt "$run_attempt" >/dev/null
 done
-printf 'abc  harn-x86_64-unknown-linux-gnu.tar.gz\n' > "$tmp/files/SHA256SUMS"
+printf 'abc  harn-x86_64-unknown-linux-gnu.tar.xz\n' > "$tmp/files/SHA256SUMS"
 printf '{"assets":[]}\n' > "$tmp/files/release-assets.json"
 printf '## v1.2.3\n\nNotes.\n' > "$tmp/files/release-notes.md"
+for gz in "${ACP_REGISTRY_ARCHIVES[@]}"; do
+  printf 'gzip copy %s\n' "$gz" > "$tmp/files/$gz"
+done
 
 assemble() {
   local output=$1
@@ -97,7 +100,11 @@ jq -e \
   ([.artifacts[] | select(.kind != "archive") | [.kind, .artifact, .file]] == [
     ["checksums", "harn-release-files", "SHA256SUMS"],
     ["asset-index", "harn-release-files", "release-assets.json"],
-    ["notes", "harn-release-files", "release-notes.md"]]) and
+    ["notes", "harn-release-files", "release-notes.md"],
+    ["asset-index", "harn-release-files", "harn-aarch64-apple-darwin.tar.gz"],
+    ["asset-index", "harn-release-files", "harn-aarch64-unknown-linux-gnu.tar.gz"],
+    ["asset-index", "harn-release-files", "harn-x86_64-apple-darwin.tar.gz"],
+    ["asset-index", "harn-release-files", "harn-x86_64-unknown-linux-gnu.tar.gz"]]) and
   all(.artifacts[] | select(.kind != "archive");
     (has("target") | not) and .signingStatus == "not_applicable"
     and .notarizationStatus == "not_applicable") and
@@ -112,11 +119,11 @@ recorded="$(jq -r '.artifacts[] | select(.target == "x86_64-pc-windows-msvc") | 
 
 # Negative control: an archive whose bytes are not the ones its receipt records.
 cp -R "$tmp/archives" "$tmp/archives-substituted"
-printf 'substituted\n' >> "$tmp/archives-substituted/harn-aarch64-apple-darwin.tar.gz"
+printf 'substituted\n' >> "$tmp/archives-substituted/harn-aarch64-apple-darwin.tar.xz"
 ARCHIVES="$tmp/archives-substituted" expect_refusal \
   "assembler recorded an archive whose digest differs from its receipt" \
   "$tmp/substituted.json" assemble "$tmp/substituted.json"
-grep -Fq 'harn-aarch64-apple-darwin.tar.gz has sha256' "$tmp/refusal.out" \
+grep -Fq 'harn-aarch64-apple-darwin.tar.xz has sha256' "$tmp/refusal.out" \
   || fail "substituted-archive refusal did not name the archive: $(cat "$tmp/refusal.out")"
 
 # Negative control: a receipt another commit's build wrote.
@@ -140,6 +147,31 @@ rm "$tmp/files-missing/release-notes.md"
 FILES="$tmp/files-missing" expect_refusal \
   "assembler wrote a manifest without the release notes" \
   "$tmp/missing-notes.json" assemble "$tmp/missing-notes.json"
+
+# Negative control: an ACP registry copy that was never built.
+cp -R "$tmp/files" "$tmp/files-no-gz"
+rm "$tmp/files-no-gz/harn-x86_64-apple-darwin.tar.gz"
+FILES="$tmp/files-no-gz" expect_refusal \
+  "assembler wrote a manifest without every ACP registry archive" \
+  "$tmp/missing-gz.json" assemble "$tmp/missing-gz.json"
+
+# The gzip copies are the xz archives' own tar streams.
+acp_in="$tmp/acp-in"
+mkdir -p "$acp_in/payload"
+printf 'binary\n' > "$acp_in/payload/harn"
+for gz in "${ACP_REGISTRY_ARCHIVES[@]}"; do
+  tar -C "$acp_in/payload" -cf - harn | xz -6 > "$acp_in/${gz%.tar.gz}.tar.xz"
+done
+"$root/scripts/build_acp_registry_archives.sh" --archives-dir "$acp_in" --output-dir "$tmp/acp-out"
+for gz in "${ACP_REGISTRY_ARCHIVES[@]}"; do
+  cmp <(tar -xOzf "$tmp/acp-out/$gz" harn) "$acp_in/payload/harn" \
+    || fail "$gz does not carry the xz archive's contents"
+  cmp <(xz -dc "$acp_in/${gz%.tar.gz}.tar.xz") <(gzip -dc "$tmp/acp-out/$gz") \
+    || fail "$gz is not the xz archive's tar stream"
+done
+if "$root/scripts/build_acp_registry_archives.sh" --archives-dir "$tmp/archives-none" --output-dir "$tmp/acp-none" 2>/dev/null; then
+  fail "ACP archive builder succeeded without its xz sources"
+fi
 
 expect_refusal "assembler overwrote an existing manifest" "$tmp/none.json" \
   assemble "$manifest"

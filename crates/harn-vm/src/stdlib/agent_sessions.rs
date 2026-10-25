@@ -149,7 +149,7 @@ fn reject_unknown_opts(
     Ok(())
 }
 
-fn opt_bool(
+pub fn opt_bool(
     opts: &crate::value::DictMap,
     fn_name: &str,
     arg_name: &str,

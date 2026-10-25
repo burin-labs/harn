@@ -40,10 +40,10 @@ pub mod agent_transcript_budget;
 pub mod atomic_io;
 pub mod autonomy;
 #[cfg(feature = "cloud-aws")]
-pub(crate) mod aws_sigv4;
+pub mod aws_sigv4;
 #[cfg(not(feature = "cloud-aws"))]
 #[path = "aws_sigv4_disabled.rs"]
-pub(crate) mod aws_sigv4;
+pub mod aws_sigv4;
 pub mod boundary;
 pub mod bridge;
 pub use bridge::{
@@ -77,21 +77,21 @@ pub mod external_agent;
 pub mod flight_recorder;
 pub mod harness;
 pub mod harness_auth;
-pub(crate) mod harness_crypto;
+pub mod harness_crypto;
 mod harness_methods;
 pub mod harness_net;
 pub mod harness_system;
 pub mod harness_tenant;
 pub mod host_attachments;
 pub mod host_stdio;
-mod native_vm;
+pub mod native_vm;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod vm_tests;
 pub(crate) use harn_vm_core::runtime_effects;
 use harn_vm_core::source_compile;
-pub(crate) use native_vm::NativeBuiltinCtxExt;
+pub use native_vm::NativeBuiltinCtxExt;
 #[cfg(test)]
 pub(crate) use native_vm::NativeCleanupTestExt;
 pub use native_vm::{new_vm, NativeVmExt};
@@ -109,9 +109,8 @@ pub mod subtask {
         placement, SubtaskPlacement, SubtaskPlacementParseError, PLACEMENT_ENV, PLACEMENT_VALUES,
     };
 }
-mod http;
+pub mod http;
 pub mod jsonrpc;
-pub(crate) use harn_vm_core::limits;
 pub use harn_vm_core::linked_program;
 pub mod llm;
 pub mod llm_config;
@@ -175,7 +174,6 @@ pub mod session_publication;
 pub mod session_recap;
 pub mod session_timeline;
 pub mod sessions;
-pub(crate) use harn_vm_core::shared_state;
 pub mod shells;
 pub mod skills;
 pub mod stdlib;
@@ -194,7 +192,7 @@ pub mod step_runtime;
 pub mod store;
 pub mod tenant;
 pub(crate) mod term;
-pub(crate) mod test_env;
+pub mod test_env;
 pub mod testbench;
 pub use harn_vm_core::text;
 pub mod text_diff;
@@ -206,7 +204,7 @@ pub mod tool_surface;
 pub mod tracing;
 pub mod triggers;
 pub mod trust_graph;
-pub(crate) mod url_encoding;
+pub mod url_encoding;
 pub use harn_vm_core::user_dirs;
 
 /// Initialize process-wide assets whose construction should happen before an
@@ -271,7 +269,7 @@ pub fn initialize_runtime() -> Result<Option<&'static str>, RuntimeInitError> {
 /// the long-lived implementation under `triggers::test_util::clock` so all
 /// callers go through one source of truth.
 pub mod clock_mock {
-    pub(crate) use crate::triggers::test_util::clock::scope_capability_clock;
+    pub use crate::triggers::test_util::clock::scope_capability_clock;
     pub use crate::triggers::test_util::clock::{
         active_clock, active_mock_clock, advance, clear_overrides, install_override, instant_now,
         is_mocked, now_ms, now_utc, sleep, ClockInstant, ClockOverrideGuard, MockClock,
@@ -304,7 +302,6 @@ pub use harn_vm_core::value;
 pub mod verification;
 pub mod visible_text;
 use harn_vm_core::vm;
-pub(crate) use harn_vm_core::wait_for_graph;
 pub mod waitpoints;
 pub use harn_vm_core::windows_path;
 pub mod workspace_anchor;
@@ -488,33 +485,18 @@ pub use stdlib::host::{
     clear_host_call_bridge, dispatch_host_operation, host_call_ready, install_host_call_bridge,
     set_host_call_bridge, HostCallBridge, HostCallBridgeGuard, HostCallDispatchFuture,
 };
-pub use stdlib::http_response::{
-    parse_envelope as parse_http_envelope, HttpEnvelope, HttpHeaderValue, WsUpgradeSpec,
-    HTTP_RESPONSE_TAG_KEY, HTTP_RESPONSE_TAG_VERSION,
-};
-#[cfg(feature = "postgres")]
-pub use stdlib::install_shared_pool_registry;
 pub use stdlib::io::{
     reserve_stdio_for_current_thread, set_stdout_passthrough, take_stderr_buffer,
     StdioReservationGuard,
 };
 pub use stdlib::long_running::cancel_handle as cancel_long_running_handle;
 pub use stdlib::observability::install_default_backend as install_obs_default_backend;
-pub use stdlib::secret_scan::{
-    append_secret_scan_audit, audit_secret_scan_active, scan_content as secret_scan_content,
-    SecretFinding, SECRET_SCAN_AUDIT_TOPIC,
-};
 pub use stdlib::template::{
     lookup_prompt_consumers, lookup_prompt_span, prompt_render_indices, record_prompt_render_index,
     PromptSourceSpan, PromptSpanKind,
 };
 pub use stdlib::waitpoint::{
     process_waitpoint_resume_event, service_waitpoints_once, WAITPOINT_RESUME_TOPIC,
-};
-pub use stdlib::workflow_messages::{
-    workflow_pause_for_base, workflow_publish_query_for_base, workflow_query_for_base,
-    workflow_respond_update_for_base, workflow_resume_for_base, workflow_signal_for_base,
-    workflow_update_for_base, WorkflowMailboxState,
 };
 pub use stdlib::{register_core_stdlib, register_vm_stdlib};
 pub use store::register_store_builtins;

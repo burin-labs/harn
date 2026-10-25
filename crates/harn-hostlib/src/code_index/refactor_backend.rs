@@ -8,6 +8,7 @@
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
+use crate::host_call::Interrupt;
 use crate::tools::args::{build_dict, str_value};
 
 use super::refactor_core::EditSpan;
@@ -29,6 +30,16 @@ pub(super) enum BackendOutcome {
     Declined(String),
     /// The backend could not answer; the next backend may.
     Unavailable(String),
+    /// The caller stopped the call; no backend may run after it.
+    Interrupted(Interrupt),
+}
+
+/// Why a backend step gave no answer.
+pub(super) enum Unanswered {
+    /// The backend could not answer; the next backend may.
+    Unavailable(String),
+    /// The caller stopped the call; no backend may run after it.
+    Interrupted(Interrupt),
 }
 
 /// Which engines a request may use. `HARN_REFACTOR_BACKEND` sets the

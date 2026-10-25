@@ -824,6 +824,13 @@ pub struct ModelDef {
     /// move to `superseded_by`.
     #[serde(default)]
     pub sunset_date: Option<String>,
+    /// ISO 8601 date (`YYYY-MM-DD`) a provider has announced it will stop
+    /// serving this route while the route is still served and selectable. Once
+    /// the retirement takes effect, mark the row `deprecated` with a
+    /// `sunset_date` instead. A scheduled check reports rows whose date has
+    /// passed.
+    #[serde(default)]
+    pub retires_on: Option<String>,
     /// Structured replacement pointer: the catalog id of the model that
     /// supersedes this one (e.g. an older Opus row points at the newest
     /// Opus). Lets release tooling express "migrate to X" in a

@@ -1,0 +1,148 @@
+import { monitor_github_ci, monitor_github_runners } from "std/signals"
+
+fn runner(id: int, status: string) -> dict {
+  return {id: id, status: status, labels: [{name: "linux"}]}
+}
+
+fn runners(count: int, online: int) -> list {
+  let out = []
+  for id in 1..=count {
+    out.push(runner(id, id <= online ? "online" : "offline"))
+  }
+  return out
+}
+
+fn mock(testing: HarnessTesting, url: string, body: dict) {
+  testing.http_mock("GET", url, {status: 200, body: json_stringify(body)})
+}
+
+/**
+ * A missing field, a short listing, or a branch with no finished run is unmeasured, never a reading.
+ */
+pipeline default(harness: Harness) {
+  const api = "https://gh.example.test"
+  const options = {
+    dir: harness.fs.mkdtemp_in_workspace("signals-"),
+    token: "test-token",
+    api_url: api,
+  }
+  const pool = {scope: "acme/api", minimum: 3}
+  const listing = api + "/repos/acme/api/actions/runners?per_page=100&page="
+  // A page without the runners field is not an empty pool.
+  mock(harness.testing, listing + "1", {total_count: 3})
+  harness.stdio.println(
+    "no runners field: " + monitor_github_runners(harness, pool, options).outcome,
+  )
+  // Without total_count, a full page means read on: three online across pages.
+  harness.testing.http_mock_clear()
+  mock(harness.testing, listing + "1", {runners: runners(100, 2)})
+  mock(harness.testing, listing + "2", {runners: [runner(101, "online")]})
+  harness.stdio.println(
+    "no total, two pages: " + monitor_github_runners(harness, pool, options).outcome,
+  )
+  // A listing that stops short of its total_count is incomplete.
+  harness.testing.http_mock_clear()
+  mock(harness.testing, listing + "1", {total_count: 150, runners: runners(100, 1)})
+  mock(harness.testing, listing + "2", {total_count: 150, runners: [runner(101, "offline")]})
+  harness.stdio.println("short of total: " + monitor_github_runners(harness, pool, options).outcome)
+  // CI reads each workflow's own latest completed run.
+  harness.testing.http_mock_clear()
+  const workflows = api + "/repos/acme/api/actions/workflows?per_page=100&page=1"
+  const runs = { id ->
+    api + "/repos/acme/api/actions/workflows/" + to_string(id)
+      + "/runs?branch=main&event=push&status=completed&per_page=20"
+  }
+  mock(
+    harness.testing,
+    workflows,
+    {
+      total_count: 3,
+      workflows: [
+        {id: 1, state: "active"},
+        {id: 2, state: "active"},
+        {id: 3, state: "disabled_manually"},
+      ],
+    },
+  )
+  mock(
+    harness.testing,
+    runs(1),
+    {workflow_runs: [{workflow_id: 1, name: "Docs", status: "completed", conclusion: "success"}]},
+  )
+  // The newest Tests runs were cancelled and skipped, which says nothing
+  // about the branch: the older failure is still the reading.
+  mock(
+    harness.testing,
+    runs(2),
+    {
+      workflow_runs: [
+        {workflow_id: 2, name: "Tests", status: "completed", conclusion: "cancelled"},
+        {workflow_id: 2, name: "Tests", status: "completed", conclusion: "skipped"},
+        {
+          workflow_id: 2,
+          name: "Tests",
+          status: "completed",
+          conclusion: "failure",
+          html_url: "https://github.com/acme/api/actions/runs/9",
+        },
+      ],
+    },
+  )
+  const red = monitor_github_ci(harness, "acme/api", "main", options)
+  harness.stdio.println(
+    "red: " + red.outcome + " " + to_string(red.state) + " " + to_string(red.generation),
+  )
+  const paths = harness.testing.http_mock_calls().map({ call -> replace(call.url, api, "") })
+  harness.stdio.println(len(paths))
+  // No workflow has finished a run yet: not a recovery.
+  harness.testing.http_mock_clear()
+  mock(harness.testing, workflows, {total_count: 1, workflows: [{id: 1, state: "active"}]})
+  mock(harness.testing, runs(1), {workflow_runs: []})
+  harness.stdio.println(
+    "nothing finished: " + monitor_github_ci(harness, "acme/api", "main", options).outcome,
+  )
+  // Only indecisive runs: no reading, not a recovery.
+  harness.testing.http_mock_clear()
+  mock(harness.testing, workflows, {total_count: 1, workflows: [{id: 1, state: "active"}]})
+  mock(
+    harness.testing,
+    runs(1),
+    {
+      workflow_runs: [
+        {workflow_id: 1, name: "Docs", status: "completed", conclusion: "cancelled"},
+        {workflow_id: 1, name: "Docs", status: "completed", conclusion: "stale"},
+        {workflow_id: 1, name: "Docs", status: "completed", conclusion: "neutral"},
+      ],
+    },
+  )
+  harness.stdio.println(
+    "only indecisive runs: " + monitor_github_ci(harness, "acme/api", "main", options).outcome,
+  )
+  // A runs page without workflow_runs: not a recovery either.
+  harness.testing.http_mock_clear()
+  mock(harness.testing, workflows, {total_count: 1, workflows: [{id: 1, state: "active"}]})
+  mock(harness.testing, runs(1), {total_count: 0})
+  harness.stdio.println(
+    "no runs field: " + monitor_github_ci(harness, "acme/api", "main", options).outcome,
+  )
+  // The red signal is untouched by the unmeasured reads.
+  harness.testing.http_mock_clear()
+  mock(
+    harness.testing,
+    workflows,
+    {total_count: 2, workflows: [{id: 1, state: "active"}, {id: 2, state: "active"}]},
+  )
+  mock(
+    harness.testing,
+    runs(1),
+    {workflow_runs: [{workflow_id: 1, name: "Docs", status: "completed", conclusion: "success"}]},
+  )
+  mock(
+    harness.testing,
+    runs(2),
+    {workflow_runs: [{workflow_id: 2, name: "Tests", status: "completed", conclusion: "failure"}]},
+  )
+  const still = monitor_github_ci(harness, "acme/api", "main", options)
+  harness.stdio.println("still red: " + still.outcome + " " + to_string(still.generation))
+  harness.testing.http_mock_clear()
+}

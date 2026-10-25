@@ -89,6 +89,56 @@ fn symbols_filters_by_kind() {
     }
 }
 
+/// Declarations in a function body, a callback, or an inline module carry a
+/// container, so a consumer never mistakes them for module-level items.
+#[rstest]
+#[case(
+    "ts",
+    "export function top() {}\ndescribe('x', () => {\n  function local() {}\n});\n",
+    "<anonymous>"
+)]
+#[case("ts", "export const top = () => {\n  function local() {}\n};\n", "top")]
+#[case(
+    "rs",
+    "pub fn top() {}\n#[cfg(test)]\nmod tests {\n    fn local() {}\n}\n",
+    "tests"
+)]
+#[case("rs", "pub fn top() {\n    fn local() {}\n}\n", "top")]
+fn nested_declarations_carry_their_container(
+    #[case] ext: &str,
+    #[case] source: &str,
+    #[case] container: &str,
+) {
+    use std::io::Write;
+    let mut file = tempfile::Builder::new()
+        .suffix(&format!(".{ext}"))
+        .tempfile()
+        .expect("temp file");
+    file.write_all(source.as_bytes()).expect("write source");
+    let registry = ast_registry();
+    let payload = dict(&[(
+        "path",
+        VmValue::string(file.path().to_string_lossy().as_ref()),
+    )]);
+    let result = call(&registry, "hostlib_ast_symbols", payload);
+    let symbols = extract_list(&dict_field(&result, "symbols"));
+    let find = |name: &str| {
+        symbols
+            .iter()
+            .find(|sym| as_string(&dict_field(sym, "name")) == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("no `{name}` in {symbols:?}"))
+    };
+    assert!(matches!(
+        dict_field(&find("top"), "container"),
+        VmValue::Nil
+    ));
+    assert_eq!(
+        as_string(&dict_field(&find("local"), "container")),
+        container
+    );
+}
+
 #[test]
 fn outline_caps_depth_when_max_depth_supplied() {
     let registry = ast_registry();

@@ -1,6 +1,20 @@
 [
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+    "expression": "render_agent_prompt_id(harness.fs, \"agent.operating_guidance\", {}, opts)",
+    "owner": "render_agent_prompt_id",
+    "evidence": "The prompt renderer validates logical IDs and reads typed overrides at its audited options boundary.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "render_agent_prompt_id",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
     "expression": "agent_required_tools_missing_from_session(opts, state.successful_tools_seen)",
     "owner": "agent_required_tools_missing_from_session",

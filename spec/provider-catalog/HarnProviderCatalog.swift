@@ -833,12 +833,14 @@ public struct HarnModelDeprecation: Codable, Sendable, Equatable {
     public let status: String
     public let note: String?
     public let sunsetDate: String?
+    public let retiresOn: String?
     public let supersededBy: String?
 
     enum CodingKeys: String, CodingKey {
         case status
         case note
         case sunsetDate = "sunset_date"
+        case retiresOn = "retires_on"
         case supersededBy = "superseded_by"
     }
 }

@@ -1,0 +1,125 @@
+pipeline default(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("file-metadata-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const file = path_join(root, "file")
+  harness.fs.write_text(file, "abc")
+  const actual = harness.fs.stat(file)
+  assert_eq(actual.size, 3)
+  assert(actual.is_file && !actual.is_dir && !actual.is_symlink)
+  assert_eq(harness.fs.stat(file, {}).is_file, true)
+  assert_eq(harness.fs.stat(file, nil).is_file, true)
+  assert_eq(harness.fs.stat(file, {follow_symlinks: false}).size, actual.size)
+  const directory = harness.fs.stat(root, {follow_symlinks: false})
+  assert(directory.is_dir && !directory.is_file && !directory.is_symlink)
+  if harness.system.platform().os == "windows" {
+    assert(actual.mode == nil)
+    assert(actual.identity == nil)
+  } else {
+    assert(actual.identity != nil && actual.identity != "")
+    const hard_link = path_join(root, "hard-link")
+    const copy = path_join(root, "copy")
+    assert(harness.process.run({program: "ln", args: [file, hard_link]}).success)
+    harness.fs.copy(file, copy)
+    assert_eq(harness.fs.stat(hard_link).identity, actual.identity)
+    assert(harness.fs.stat(copy).identity != actual.identity)
+    assert(harness.process.run({program: "chmod", args: ["751", file]}).success)
+    assert_eq(harness.fs.stat(file).mode! % 512, 489)
+    const link = path_join(root, "link")
+    const dangling = path_join(root, "dangling")
+    assert(harness.process.run({program: "ln", args: ["-s", "file", link]}).success)
+    assert(harness.process.run({program: "ln", args: ["-s", "missing", dangling]}).success)
+    const target = harness.fs.stat(link)
+    assert(target.is_file && !target.is_symlink)
+    assert_eq(target.identity, actual.identity)
+    assert_eq(target.size, 3)
+    const entry = harness.fs.stat(link, {follow_symlinks: false})
+    assert(entry.is_symlink && !entry.is_file && !entry.is_dir)
+    assert(entry.identity != actual.identity)
+    assert(harness.fs.stat(dangling, {follow_symlinks: false}).is_symlink)
+    assert(
+      is_err(
+        try {
+          harness.fs.stat(dangling)
+        },
+      ),
+      "following a dangling link must fail",
+    )
+    const scoped = path_join(root, "scoped")
+    const external = path_join(root, "external")
+    harness.fs.mkdir(scoped)
+    harness.fs.mkdir(external)
+    const scoped_file = path_join(scoped, "file")
+    harness.fs.write_text(scoped_file, "abc")
+    const scoped_link = path_join(scoped, "link")
+    const external_link = path_join(external, "link")
+    const directory_link = path_join(external, "directory")
+    const external_file = path_join(external, "file")
+    const escape_link = path_join(scoped, "escape")
+    harness.fs.write_text(external_file, "private")
+    assert(harness.process.run({program: "ln", args: ["-s", external_file, escape_link]}).success)
+    for entry_path in [scoped_link, external_link] {
+      assert(harness.process.run({program: "ln", args: ["-s", scoped_file, entry_path]}).success)
+    }
+    assert(harness.process.run({program: "ln", args: ["-s", scoped, directory_link]}).success)
+    harness.runtime.with_execution_policy(
+      {sandbox_profile: "worktree", workspace_roots: [scoped], read_only_roots: [scoped]},
+      { ->
+        assert(harness.fs.stat(scoped_link, {follow_symlinks: false}).is_symlink)
+        assert_eq(harness.fs.stat(external_link).size, 3)
+        assert(
+          is_err(
+            try {
+              harness.fs.stat(escape_link, {follow_symlinks: false})
+            },
+          ),
+          "target scope must still apply",
+        )
+        for entry_path in [
+          external_link,
+          directory_link,
+          "${directory_link}/",
+          "${directory_link}/.",
+        ] {
+          assert(
+            is_err(
+              try {
+                harness.fs.stat(entry_path, {follow_symlinks: false})
+              },
+            ),
+            "external entry must be refused",
+          )
+        }
+      },
+    )
+    harness.runtime.with_execution_policy(
+      {sandbox_profile: "worktree", workspace_roots: [scoped], read_only_roots: [external]},
+      { ->
+        assert(harness.fs.stat(external_link, {follow_symlinks: false}).is_symlink)
+        assert(harness.fs.stat(directory_link, {follow_symlinks: false}).is_symlink)
+        assert(harness.fs.stat("${directory_link}/.", {follow_symlinks: false}).is_dir)
+      },
+    )
+    harness.runtime.with_execution_policy(
+      {
+        sandbox_profile: "worktree",
+        workspace_roots: [root],
+        process_sandbox: {read_deny_roots: [external]},
+      },
+      { ->
+        assert(harness.fs.stat(scoped_link, {follow_symlinks: false}).is_symlink)
+        assert_eq(harness.fs.stat(external_link).size, 3)
+        assert(
+          is_err(
+            try {
+              harness.fs.stat(external_link, {follow_symlinks: false})
+            },
+          ),
+          "entry deny rule must beat a parent grant",
+        )
+      },
+    )
+  }
+  harness.stdio.println("file metadata verified")
+}

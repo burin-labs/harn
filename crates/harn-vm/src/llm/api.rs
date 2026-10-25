@@ -68,7 +68,7 @@ pub use ollama::{
     OLLAMA_DEFAULT_NUM_CTX, OLLAMA_HOST_ENV,
 };
 pub(crate) use openai_normalize::normalize_openai_style_messages;
-pub(crate) use options::{
+pub use options::{
     push_unique_anthropic_beta_feature, DeltaSender, LlmApiMode, LlmCallOptions, LlmRequestPayload,
     LlmRequestPayloadExt, LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy,
     LlmRoutingDecision, LogprobsConfig, MirostatConfig, OutputFormat, PromptCacheTtl,

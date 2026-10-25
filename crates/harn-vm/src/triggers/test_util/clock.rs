@@ -219,7 +219,7 @@ pub fn active_mock_clock() -> Option<Arc<MockClock>> {
 /// scoped context lets those deep implementations observe receiver-owned time
 /// without adding an ambient process override or threading a hidden argument
 /// through every public signature.
-pub(crate) async fn scope_capability_clock<F>(clock: Arc<dyn Clock>, future: F) -> F::Output
+pub async fn scope_capability_clock<F>(clock: Arc<dyn Clock>, future: F) -> F::Output
 where
     F: Future,
 {

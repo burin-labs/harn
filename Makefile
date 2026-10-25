@@ -100,7 +100,7 @@ setup-wasm:
 	fi
 
 setup-wasm-tools:
-	@if [ ! -x "$(HARN_WASM_TOOLS)" ] || [ "$$($(HARN_WASM_TOOLS) --version)" != "wasm-tools $(HARN_WASM_TOOLS_VERSION)" ]; then \
+	@if [ ! -x "$(HARN_WASM_TOOLS)" ] || [ "$$($(HARN_WASM_TOOLS) --version | awk '{print $$1, $$2}')" != "wasm-tools $(HARN_WASM_TOOLS_VERSION)" ]; then \
 		cargo install --locked --root "$(HARN_WASM_COMPONENT_TOOLS_DIR)" --version "=$(HARN_WASM_TOOLS_VERSION)" wasm-tools; \
 	fi
 
@@ -144,7 +144,12 @@ wasm-audit-imports: wasm-build
 
 # Browser tests are intentionally a real dedicated-worker path, not Node.
 wasm-test-browser: setup-wasm
-	@driver="$${HARN_CHROMEDRIVER:-$$(./scripts/resolve_chromedriver.sh)}"; \
+	@set -eu; driver="$${HARN_CHROMEDRIVER:-$$(./scripts/resolve_chromedriver.sh)}"; \
+	if [ -z "$${WASM_BINDGEN_TEST_WEBDRIVER_JSON:-}" ] && [ -n "$${HARN_CHROME_BIN:-}" ]; then \
+		capabilities="$$(mktemp)"; trap 'rm -f "$$capabilities"' EXIT; \
+		node -e 'process.stdout.write(JSON.stringify({"goog:chromeOptions": {binary: process.env.HARN_CHROME_BIN}}))' > "$$capabilities"; \
+		export WASM_BINDGEN_TEST_WEBDRIVER_JSON="$$capabilities"; \
+	fi; \
 	cd crates/harn-wasm && "$(HARN_WASM_PACK)" test --headless --chrome --chromedriver "$$driver"
 
 wasm-check: check-wasm-wit wasm-build check-app-runtime wasm-audit-imports wasm-test-browser
@@ -325,17 +330,19 @@ test-focused:
 
 # Live database tests are ignored by the ordinary suite, never counted as a
 # passing test that returned before opening a connection.
+HARN_POSTGRES_TEST_ARGS = --package harn-builtins --features postgres --lib --ignore-default-filter
+
 test-postgres-live:
 	@ : "$${HARN_TEST_POSTGRES_URL:?set HARN_TEST_POSTGRES_URL to an isolated test database}"
 	$(HARN_REQUIRE_NEXTEST)
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --package harn-vm --lib --run-ignored all --ignore-default-filter -E 'test(stdlib::postgres::) and not test(when_env_set) and not test(when_bench_enabled)'
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run $(HARN_POSTGRES_TEST_ARGS) --run-ignored all -E 'test(postgres::) and not test(when_env_set) and not test(when_bench_enabled)'
 
 test-postgres-cloud:
 	@ : "$${HARN_TEST_POSTGRES_URL:?set HARN_TEST_POSTGRES_URL to an isolated test database}"
 	@ : "$${HARN_TEST_CLOUD_MIGRATIONS_DIR:?set HARN_TEST_CLOUD_MIGRATIONS_DIR to the cloud migrations directory}"
 	@test -d "$${HARN_TEST_CLOUD_MIGRATIONS_DIR}"
 	$(HARN_REQUIRE_NEXTEST)
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --package harn-vm --lib --test-threads 1 --run-ignored only --ignore-default-filter -E 'test(stdlib::postgres::tests::) and test(when_env_set)'
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run $(HARN_POSTGRES_TEST_ARGS) --test-threads 1 --run-ignored only -E 'test(postgres::tests::) and test(when_env_set)'
 
 # Run exactly one Rust test without making nextest enumerate every test binary
 # in the package first. The environment-variable boundary keeps the
@@ -747,6 +754,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/breaking_surface_check_test.sh
 	bash ./scripts/tests/pr_gate_range_test.sh
 	./scripts/tests/public_api_baseline_test.sh
+	bash ./scripts/tests/public_api_rustdoc_test.sh
 	./scripts/tests/release_pr_drift_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_ship_root_harn_bin_test.sh
@@ -1725,6 +1733,7 @@ check-rust-test-lane-policy:
 	@bash scripts/tests/host_telemetry_test.sh
 	@bash scripts/tests/runner_capacity_test.sh
 	@bash scripts/tests/consumer_canary_test.sh
+	@bash scripts/tests/consumer_verdict_test.sh
 
 check-cargo-lock-contract:
 	@echo "=== Checking CI cargo lock contract ==="

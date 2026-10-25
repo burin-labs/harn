@@ -645,7 +645,7 @@ category = "thread_private"
 plan = "thread_private_test"
 
 [[thread_local]]
-path = "src/stdlib/durable_step.rs"
+path = "../harn-builtins/src/durable_step.rs"
 statics = ["STEP_CALL_COUNTS"]
 category = "logical_task"
 plan = "task_local_or_explicit"
@@ -657,7 +657,7 @@ category = "thread_private"
 plan = "thread_private_cache"
 
 [[thread_local]]
-path = "src/stdlib/git.rs"
+path = "../harn-builtins/src/git.rs"
 statics = ["WARNED_GIT_FAILURES"]
 category = "thread_private"
 plan = "thread_private_cache"
@@ -735,13 +735,13 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
-path = "src/stdlib/oauth_dynreg.rs"
+path = "../harn-builtins/src/oauth_dynreg.rs"
 statics = ["DYNREG_STORES"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
-path = "src/stdlib/oauth_storage.rs"
+path = "../harn-builtins/src/oauth_storage.rs"
 statics = ["MEMORY_STORE", "FILE_SECRETS"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
@@ -753,7 +753,7 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/stdlib/postgres/parameter_cache.rs"
+path = "../harn-builtins/src/postgres/parameter_cache.rs"
 statics = ["DESCRIBE_ROUND_TRIPS", "DESCRIBE_SAVEPOINT_ROUND_TRIPS"]
 category = "thread_private"
 plan = "thread_private_test"
@@ -845,13 +845,13 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/stdlib/timing.rs"
+path = "../harn-builtins/src/timing.rs"
 statics = ["FINALIZED"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/stdlib/tool_hooks.rs"
+path = "../harn-builtins/src/tool_hooks.rs"
 statics = ["CLASSIFIER_CACHE"]
 category = "thread_private"
 plan = "thread_private_cache"
@@ -984,7 +984,7 @@ plan = "thread_private_test"
 
 [[thread_local]]
 path = "src/test_env.rs"
-statics = ["OVERRIDES"]
+statics = ["OVERRIDES", "GUARDS"]
 category = "thread_private"
 plan = "thread_private_test"
 

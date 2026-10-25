@@ -141,6 +141,7 @@ fn model_patch_schema() -> &'static PatchSchema {
             "deprecated",
             "deprecation_note",
             "sunset_date",
+            "retires_on",
             "superseded_by",
             "serving_tiers",
             "quality_tags",

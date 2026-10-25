@@ -59,7 +59,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(lexical[0].key)
   // The embedding cache should now contain both stored records plus the
   // last query. Verify entries exist for the configured model.
-  const cache_entries = harness.fs.list_dir(path_join(root, "agent", "vector", "vectors", "test"))
+  const cache_entries = harness.fs.list_dir(
+    path_join(root, "agent", "vector", "vectors", sha256("test")),
+  )
   harness.stdio.println(len(cache_entries) >= 3)
   harness.fs.delete(root)
 }

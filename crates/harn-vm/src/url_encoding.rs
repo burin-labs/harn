@@ -8,7 +8,7 @@
 
 /// Percent-encode `input` as an RFC 3986 component: every byte outside the
 /// unreserved set is escaped, including `/` and `?`.
-pub(crate) fn percent_encode_component(input: &str) -> String {
+pub fn percent_encode_component(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for &byte in input.as_bytes() {
         match byte {

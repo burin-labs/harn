@@ -134,7 +134,7 @@ pipeline main(harness: Harness, _: unknown) {{
                 ));
                 harn_vm::llm::install_current_host_bridge(bridge);
                 let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
+                harn_runtime::register_vm_stdlib(&mut vm);
                 let _ = vm.execute(&chunk).await;
                 harn_vm::llm::clear_current_host_bridge();
             })

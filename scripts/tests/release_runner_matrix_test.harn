@@ -45,7 +45,7 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task: unkn
     "x86_64-apple-darwin=macos-latest",
     "aarch64-apple-darwin=macos-latest",
     "x86_64-unknown-linux-gnu=ubuntu-22.04",
-    "aarch64-unknown-linux-gnu=ubuntu-22.04",
+    "aarch64-unknown-linux-gnu=ubuntu-22.04-arm",
     "x86_64-pc-windows-msvc=windows-latest",
   ]
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode warm")), standard)
@@ -62,7 +62,7 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task: unkn
       "x86_64-apple-darwin=v0-rust-release-x86_64-apple-darwin-Darwin-arm64-",
       "aarch64-apple-darwin=v0-rust-release-aarch64-apple-darwin-Darwin-arm64-",
       "x86_64-unknown-linux-gnu=v1-rust-release-glibc235-x86_64-unknown-linux-gnu-Linux-x64-",
-      "aarch64-unknown-linux-gnu=v1-rust-release-glibc235-aarch64-unknown-linux-gnu-Linux-x64-",
+      "aarch64-unknown-linux-gnu=v1-rust-release-glibc235-aarch64-unknown-linux-gnu-Linux-ARM64-",
       "x86_64-pc-windows-msvc=v0-rust-release-x86_64-pc-windows-msvc-Windows_NT-x64-",
     ],
   )

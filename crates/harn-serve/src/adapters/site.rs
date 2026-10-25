@@ -1103,7 +1103,7 @@ fn is_websocket_upgrade(headers: &HeaderMap) -> bool {
 async fn upgrade_websocket(
     parts: &mut axum::http::request::Parts,
     runtime: Arc<DispatchRuntime>,
-    spec: harn_vm::WsUpgradeSpec,
+    spec: harn_builtins::http_response::WsUpgradeSpec,
     auth_context: Option<SiteAuthContext>,
 ) -> Response {
     let config = ws_config_from_spec(&spec);
@@ -1126,7 +1126,7 @@ async fn upgrade_websocket(
 }
 
 /// Translate the envelope's negotiation hints into a [`WsConfig`].
-fn ws_config_from_spec(spec: &harn_vm::WsUpgradeSpec) -> WsConfig {
+fn ws_config_from_spec(spec: &harn_builtins::http_response::WsUpgradeSpec) -> WsConfig {
     let mut config = WsConfig {
         subprotocols: spec.offered.clone(),
         ..WsConfig::default()

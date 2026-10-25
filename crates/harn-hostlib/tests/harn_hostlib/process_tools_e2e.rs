@@ -1293,7 +1293,11 @@ print("parent-exit", flush=True)
             vm_string(&pid_path_arg),
         ]),
     );
-    req.put_int("timeout_ms", 500);
+    // The escaped holder keeps the pipe open, so this deadline is what triggers
+    // cleanup and the run always lasts the full budget. The parent must start
+    // Python, spawn the holder and print first: 643 ms worst case at 3.5x CPU
+    // oversubscription, so 5 s leaves margin for a loaded CI runner.
+    req.put_int("timeout_ms", 5_000);
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
     assert!(require_bool(&resp, "timed_out"));

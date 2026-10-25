@@ -82,7 +82,7 @@ pub(crate) fn reset_cost_state() {
 // `Serialize` lets the typed-options parity test compare this default key set
 // with `LlmBudget` in `std/llm/options.harn`.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
-pub(crate) struct LlmBudgetEnvelope {
+pub struct LlmBudgetEnvelope {
     pub admission: Option<super::admission::AdmissionMode>,
     pub max_cost_usd: Option<f64>,
     pub total_budget_usd: Option<f64>,

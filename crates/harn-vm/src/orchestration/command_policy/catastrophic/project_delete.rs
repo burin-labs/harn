@@ -41,7 +41,7 @@ pub(super) fn argv_deletes_project(argv: &[String]) -> bool {
     saw_force && saw_recursive && saw_project_target
 }
 
-fn is_project_target(token: &str) -> bool {
+pub(super) fn is_project_target(token: &str) -> bool {
     let value = strip_trailing_slashes(token);
     is_dot_path(value)
         || is_current_directory_reference(value)

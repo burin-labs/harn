@@ -929,7 +929,7 @@ async fn call_provider_export(
         .map_err(|error| vm_error_to_connector_for_export(name, error))
 }
 
-pub(crate) fn active_harn_connector_ctx() -> Option<ConnectorCtx> {
+pub fn active_harn_connector_ctx() -> Option<ConnectorCtx> {
     ACTIVE_HARN_CONNECTOR_CTX.with(|slot| slot.borrow().last().cloned())
 }
 

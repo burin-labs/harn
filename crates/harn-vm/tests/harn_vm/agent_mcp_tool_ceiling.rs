@@ -40,7 +40,7 @@ fn run_with_stub(source: &str, tools_added: &[&str]) -> Result<Vec<String>, Stri
         .map_err(|e| e.to_string())?;
     rt.block_on(harn_clock::test_support::with_local_tasks(async {
         let mut vm = harn_vm::new_vm();
-        harn_vm::register_vm_stdlib(&mut vm);
+        harn_runtime::register_vm_stdlib(&mut vm);
         // Override the runtime-only host builtin with a deterministic
         // stub so the test never opens a real MCP connection.
         let stub_tools = Arc::new(tools);

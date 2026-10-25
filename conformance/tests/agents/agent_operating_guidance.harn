@@ -1,0 +1,67 @@
+import { agent_loop } from "std/agent/loop"
+import { agent_prompt_ids, agent_prompt_overrides } from "std/agent/prompts"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn probe(harness: Harness, options: dict<string, any>, expected: string?) -> nil {
+  with_llm_script(
+    harness.llm,
+    [llm_text("Finished.")],
+    { ->
+      agent_loop(
+        harness,
+        "Answer directly.",
+        "Base system.",
+        options
+          + {
+            provider: "mock",
+            max_iterations: 1,
+            done_sentinel: nil,
+            turn_end_condition: nil,
+            agent_await_resumption_enabled: false,
+          },
+      )
+      const calls = harness.llm.mock_calls()
+      require len(calls) == 1, "the primary provider call must fire"
+      const system = calls[0].system
+      if expected == nil {
+        require !contains(system, "## Operating guidance"),
+          "no unsolicited guidance without a loop or tools"
+      } else {
+        require len(split(system, expected)) == 2, "guidance must occur exactly once"
+      }
+      return nil
+    },
+  )
+  return nil
+}
+
+fn main(harness: Harness) -> nil {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "inspect",
+    "Inspect the current state.",
+    {handler: { _args: dict<string, any> -> "observed" }, parameters: {}},
+  )
+  probe(harness, {loop_until_done: true}, "## Operating guidance")
+  probe(harness, {loop_until_done: false}, nil)
+  for format in ["native", "text", "json"] {
+    for loop_enabled in [false, true] {
+      probe(
+        harness,
+        {tools: tools, tool_format: format, loop_until_done: loop_enabled},
+        "## Operating guidance",
+      )
+    }
+  }
+  const custom = agent_prompt_overrides(
+    {
+      operating_guidance: {text: "CUSTOM OPERATING GUIDANCE"},
+      loop_contract: {text: "CUSTOM COMPLETION"},
+    },
+  )
+  probe(harness, custom + {loop_until_done: true}, "CUSTOM OPERATING GUIDANCE")
+  require contains(agent_prompt_ids(), "agent.operating_guidance"),
+    "catalog exposes the shared prompt"
+  harness.stdio.println("shared guidance reached once across loop and tool modes")
+}

@@ -11,7 +11,7 @@
 
 use crate::value::VmValue;
 
-pub(crate) trait MessageView {
+pub trait MessageView {
     /// The field's value when present, including an explicit `null`/`nil`.
     fn has_field(&self, key: &str) -> bool;
     /// The field when it is a string.
@@ -121,7 +121,7 @@ impl MessageView for VmValue {
 
 /// Whether `value` displays as `expected`, without allocating for the common
 /// string case. Equivalent to `value.display() == expected`.
-pub(crate) fn displays_as(value: &VmValue, expected: &str) -> bool {
+pub fn displays_as(value: &VmValue, expected: &str) -> bool {
     match value {
         VmValue::String(text) => text.as_str() == expected,
         other => other.display() == expected,

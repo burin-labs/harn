@@ -1,0 +1,74 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * The recorded copy of a tool call is masked by the redaction policy while the
+ * handler receives the real value: the pending and the completed tool-call
+ * events must carry neither a bearer token argument nor a credential in the
+ * tool's output, and the session snapshot is built from
+ * those events.
+ */
+fn main(harness: Harness) {
+  const session = harness.agent.open("agent-event-tool-call-redacted-arguments")
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "fetch",
+    "Fetch with a header",
+    {
+      handler: { args ->
+        require args.headers.Authorization == "Bearer sk-abcdef0123456789abcdef",
+          "the handler must receive the original header"
+        return "OPENAI_API_KEY=sk-abcdef0123456789abcdef"
+      },
+      parameters: {url: {type: "string"}, headers: {type: "object"}},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {
+            id: "call-1",
+            name: "fetch",
+            arguments: {
+              url: "https://example.test/data",
+              headers: {Authorization: "Bearer sk-abcdef0123456789abcdef"},
+            },
+          },
+        ],
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        tools: tools,
+        tool_format: "native",
+        session_id: session,
+        max_iterations: 3,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+      }
+      const result = agent_loop(harness, "Fetch it.", nil, opts)
+      require result.status == "done", "the session must finish"
+    },
+  )
+  let tool_events = 0
+  let leaked = 0
+  for event in harness.agent.snapshot(session)?.events ?? [] {
+    const text = json_stringify(event)
+    if starts_with(to_string(event?.kind), "tool_call") {
+      tool_events = tool_events + 1
+      if contains(text, "sk-abcdef") {
+        leaked = leaked + 1
+      }
+    }
+  }
+  require tool_events >= 2, "the pending and completed tool-call events must be recorded"
+  require leaked == 0, "no recorded tool-call event may carry the bearer token"
+  harness.stdio.println("recorded tool-call events are masked")
+}

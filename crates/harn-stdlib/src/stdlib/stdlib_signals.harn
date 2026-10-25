@@ -1,0 +1,992 @@
+import { agent_session_inject_reminder } from "std/agent/state"
+import { filter_nil } from "std/collections"
+import { call } from "std/connectors/github"
+import { triage_normalize } from "std/triage"
+
+/**
+ * std/signals - fire, route, and deliver ambient signals, plus the monitor pack.
+ *
+ * A monitor turns one observation into a `SignalDecision`: the condition holds
+ * (fire) or it does not (resolve). `signal_apply` hands the decision to the
+ * per-machine inbox, which turns repeated observations of the same state into
+ * no reminder at all and each real state change into one reminder, delivered
+ * at least once.
+ *
+ * A session receives reminders by checking in with
+ * `harness.runtime.signal_check_in`, which leases what is pending now, and
+ * acks each lease with `harness.runtime.signal_ack` and its `lease_token`
+ * once the reminder reached the model. A lease nobody acks is leased again.
+ * `signal_deliver` does both for an in-process agent session and renders the
+ * leases as advisory system reminders. Alert text never travels as a user
+ * message.
+ *
+ * Evaluators (`*_decision`) are pure so thresholds and wording can be tested
+ * without a network. Monitors (`monitor_*`) fetch, evaluate, and apply. A
+ * monitor whose read fails returns `unmeasured` and neither fires nor
+ * resolves: a failed read is not a healthy reading.
+ */
+type SignalSeverity = "info" | "warning" | "urgent"
+
+type SignalRouting = {repo?: string, cwd?: string, topic?: string}
+
+/**
+ * `local` for a condition observed on this machine; webhooks say whether their signature was checked.
+ */
+type SignalSignature = "verified" | "unverified" | "local"
+
+type SignalProvenance = {producer: string, signature: SignalSignature}
+
+type SignalTransition = {
+  outcome: "changed" | "unchanged" | "unknown" | "unmeasured",
+  state?: string,
+  generation?: int,
+  error?: string,
+}
+
+/** One condition's verdict. `event` is a normalized `harn.triage_event.v1`. */
+type SignalDecision = {
+  key: string,
+  firing: bool,
+  severity: SignalSeverity,
+  routing: SignalRouting,
+  provenance: SignalProvenance,
+  event: dict,
+  expires_in_seconds?: int,
+}
+
+type SignalApplyOptions = {dir?: string}
+
+/** What a session says about itself at each check-in. */
+type SignalSession = {
+  id: string,
+  harness: string,
+  cwd: string,
+  repo?: string,
+  title?: string,
+  role?: string,
+  activity: "busy" | "idle",
+}
+
+type SignalCheckInOptions = {scope?: "all" | "urgent_only", limit?: int, dir?: string}
+
+/** One generation of one signal leased to the session. */
+type SignalReminder = {
+  key: string,
+  generation: int,
+  state: string,
+  severity: SignalSeverity,
+  attempt: int,
+  event: dict,
+  routing: SignalRouting,
+  provenance: SignalProvenance,
+  lease_token: string,
+  lease_expires_at: string,
+}
+
+type SignalCheckIn = {reminders: list<SignalReminder>, waiting: int}
+
+type SignalReminderId = {key: string, generation: int}
+
+type SignalDelivery = {
+  check_in: SignalCheckIn,
+  reminder_ids: list<string>,
+  acked: list<SignalReminderId>,
+}
+
+/**
+ * GitHub App credentials. Each poll mints a fresh installation token through
+ * the GitHub connector, because a cached token can read a different
+ * rate-limit counter than the one the installation is spending.
+ */
+type GitHubAppAuth = {
+  app_id: int | string,
+  installation_id: int | string,
+  private_key_secret?: string,
+  private_key_pem?: string,
+  installation_scope?: dict,
+}
+
+/**
+ * Credentials, most preferred first: `app` mints an installation token per
+ * poll, `token` is a token the caller resolved (for example from
+ * `harness.secrets`), and `token_env` names an environment variable
+ * (default `GITHUB_TOKEN`).
+ */
+type GitHubMonitorOptions = {
+  app?: GitHubAppAuth,
+  token?: string,
+  token_env?: string,
+  api_url?: string,
+  severity?: SignalSeverity,
+  dir?: string,
+}
+
+/**
+ * A self-hosted runner pool. `scope` is an organization or `owner/name`.
+ * `group`, for an organization, counts only runners in that runner group,
+ * named or by id; on a large organization the flat runner list is mostly
+ * other pools' ephemeral runners. `required_labels` counts only runners that
+ * carry every label.
+ */
+type GitHubRunnerPool = {
+  scope: string,
+  minimum: int,
+  group?: string | int,
+  required_labels?: list<string>,
+}
+
+const GITHUB_API = "https://api.github.com"
+
+const CI_FAILED_CONCLUSIONS = ["failure", "timed_out", "startup_failure", "action_required"]
+
+/**
+ * A run that ended `cancelled`, `skipped`, `stale`, or `neutral` says nothing
+ * about the branch; only these conclusions are a reading.
+ */
+const CI_DECISIVE_CONCLUSIONS = [
+  "success",
+  "failure",
+  "timed_out",
+  "startup_failure",
+  "action_required",
+]
+
+/** How many recent completed runs per workflow to search for a decisive one. */
+const CI_RUNS_PER_WORKFLOW = 20
+
+/**
+ * Installation tokens live an hour; a refresh skew past that makes the connector mint every time.
+ */
+const FRESH_TOKEN_SKEW_SECONDS = 86400
+
+/**
+ * Pagination cap: a pool larger than this many pages reads as unmeasured, never as a partial count.
+ */
+const MAX_PAGES = 50
+
+const PAGE_SIZE = 100
+
+fn __signal_event(
+  key: string,
+  provider: string,
+  source_kind: string,
+  source_url: string,
+  summary: string,
+  why: string,
+  action: string,
+) -> dict {
+  return triage_normalize(
+    {},
+    {
+      provider: provider,
+      source_kind: source_kind,
+      source_url: source_url,
+      source_id: key,
+      dedupe_key: key,
+      summary: summary,
+      why_it_matters: why,
+      proposed_action: action,
+    },
+  )
+}
+
+fn __local(producer: string) -> SignalProvenance {
+  return {producer: "std/signals." + producer, signature: "local"}
+}
+
+fn __decision(
+  key: string,
+  firing: bool,
+  severity: SignalSeverity,
+  routing: SignalRouting,
+  provenance: SignalProvenance,
+  event: dict,
+) -> SignalDecision {
+  return {
+    key: key,
+    firing: firing,
+    severity: severity,
+    routing: routing,
+    provenance: provenance,
+    event: event,
+  }
+}
+
+/**
+ * Fire the decision's signal when it is firing, otherwise resolve it.
+ *
+ * @effects: [state.write]
+ * @errors: []
+ */
+pub fn signal_apply(
+  runtime: HarnessRuntime,
+  decision: SignalDecision,
+  options: SignalApplyOptions = {},
+) -> SignalTransition {
+  if decision.firing {
+    const fired = runtime.signal_fire(
+      filter_nil(
+        {
+          key: decision.key,
+          event: decision.event,
+          severity: decision.severity,
+          routing: decision.routing,
+          provenance: decision.provenance,
+          expires_in_seconds: decision.expires_in_seconds,
+          dir: options.dir,
+        },
+      ),
+    )
+    return schema_expect(fired, schema_of(SignalTransition))
+  }
+  const resolved = runtime.signal_resolve(
+    decision.key,
+    filter_nil({event: decision.event, signature: decision.provenance.signature, dir: options.dir}),
+  )
+  return schema_expect(resolved, schema_of(SignalTransition))
+}
+
+/**
+ * Check `session` in and deliver its leased reminders to the running agent
+ * session `agent_session_id` as advisory system reminders, one per signal,
+ * deduplicated by signal key so a redelivery replaces rather than repeats.
+ * Each lease is acked once its reminder is injected; a lease left unacked
+ * because injection failed is leased again when it lapses.
+ *
+ * @effects: [state.write, host]
+ * @errors: []
+ */
+pub fn signal_deliver(
+  harness: Harness,
+  agent_session_id: string,
+  session: SignalSession,
+  options: SignalCheckInOptions = {},
+) -> SignalDelivery {
+  const check_in = schema_expect(
+    harness.runtime.signal_check_in(session, options),
+    schema_of(SignalCheckIn),
+  )
+  let reminder_ids = []
+  let tokens = []
+  for reminder in check_in.reminders {
+    reminder_ids.push(
+      agent_session_inject_reminder(
+        harness.agent,
+        agent_session_id,
+        {
+          body: harness.runtime.signal_render([reminder]),
+          tags: ["signal"],
+          dedupe_key: "harn.signal:" + reminder.key,
+          ttl_turns: 1,
+          authority: "advisory",
+        },
+      ),
+    )
+    tokens.push(reminder.lease_token)
+  }
+  const acked = len(tokens) == 0 ? [] : harness.runtime.signal_ack(
+    session.id,
+    tokens,
+    filter_nil({dir: options.dir}),
+  )
+  return {check_in: check_in, reminder_ids: reminder_ids, acked: acked}
+}
+
+/**
+ * Default-branch CI: firing while the newest decisive run of any workflow on
+ * `branch` failed. `runs` is the GitHub `workflow_runs` list, newest first; a
+ * run that was cancelled, skipped, stale, or neutral is passed over, so it
+ * neither hides a failure nor reads as a recovery.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ci_branch_decision(
+  repo: string,
+  branch: string,
+  runs: list,
+  severity: SignalSeverity = "warning",
+) -> SignalDecision {
+  let seen = {}
+  let failing = []
+  for run in runs {
+    const workflow = to_string(run?.workflow_id ?? run?.name ?? "")
+    if run?.status != "completed" || seen[workflow] != nil
+      || !contains(CI_DECISIVE_CONCLUSIONS, run?.conclusion ?? "") {
+      continue
+    }
+    seen[workflow] = true
+    if contains(CI_FAILED_CONCLUSIONS, run?.conclusion ?? "") {
+      failing.push(run)
+    }
+  }
+  const key = "github.ci:" + repo + "@" + branch
+  const branch_url = "https://github.com/" + repo + "/actions?query=branch%3A" + branch
+  const firing = len(failing) > 0
+  const names = join(failing.map({ run -> to_string(run?.name ?? "workflow") }), ", ")
+  const summary = firing ? "CI is failing on " + branch + " of " + repo + ": "
+    + names : "CI recovered on " + branch + " of " + repo
+  const source_url = firing ? to_string(failing[0]?.html_url ?? branch_url) : branch_url
+  return __decision(
+    key,
+    firing,
+    severity,
+    {repo: repo},
+    __local("monitor_github_ci"),
+    __signal_event(
+      key,
+      "github",
+      "ci.default_branch",
+      source_url,
+      summary,
+      "A red default branch blocks merges and hides new breakage behind the old one.",
+      "Open the failing run, find the first broken step, and fix forward or revert.",
+    ),
+  )
+}
+
+/**
+ * Open pull requests: firing while `open_count` reaches `threshold`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn open_prs_decision(
+  repo: string,
+  open_count: int,
+  threshold: int,
+  severity: SignalSeverity = "info",
+) -> SignalDecision {
+  const key = "github.open_prs:" + repo
+  const firing = open_count >= threshold
+  const summary = firing ? repo + " has " + to_string(open_count)
+    + " open pull requests (threshold "
+    + to_string(threshold)
+    + ")" : repo + " is back to " + to_string(open_count) + " open pull requests"
+  return __decision(
+    key,
+    firing,
+    severity,
+    {repo: repo},
+    __local("monitor_github_open_prs"),
+    __signal_event(
+      key,
+      "github",
+      "pulls.backlog",
+      "https://github.com/" + repo + "/pulls",
+      summary,
+      "A growing review queue delays every change waiting in it.",
+      "Review, merge, or close the oldest pull requests.",
+    ),
+  )
+}
+
+fn __pool_name(pool: GitHubRunnerPool) -> string {
+  const labels = (pool.required_labels ?? []).sorted()
+  const group = pool.group == nil ? "" : " group " + to_string(pool.group)
+  const label_text = len(labels) == 0 ? "" : " [" + join(labels, ", ") + "]"
+  return pool.scope + group + label_text
+}
+
+/**
+ * Self-hosted runner pool: firing while fewer than `pool.minimum` matching
+ * runners are online.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn runner_pool_decision(
+  pool: GitHubRunnerPool,
+  online: int,
+  severity: SignalSeverity = "warning",
+) -> SignalDecision {
+  const labels = (pool.required_labels ?? []).sorted()
+  const key = "github.runners:" + pool.scope
+    + (pool.group == nil ? "" : "/" + to_string(pool.group))
+    + (len(labels) == 0 ? "" : ":" + join(labels, ","))
+  const name = __pool_name(pool)
+  const firing = online < pool.minimum
+  const repo_scoped = contains(pool.scope, "/")
+  const settings = repo_scoped ? "https://github.com/" + pool.scope
+    + "/settings/actions/runners" : "https://github.com/organizations/" + pool.scope
+    + "/settings/actions/runners"
+  const summary = firing ? "Only " + to_string(online) + " of the minimum "
+    + to_string(pool.minimum)
+    + " self-hosted runners are online for "
+    + name : to_string(online) + " self-hosted runners are online again for " + name
+  return __decision(
+    key,
+    firing,
+    severity,
+    repo_scoped ? {repo: pool.scope} : {topic: "runners"},
+    __local("monitor_github_runners"),
+    __signal_event(
+      key,
+      "github",
+      "runners.pool",
+      settings,
+      summary,
+      "Jobs that need these runners queue until enough of them come back.",
+      "Check the runner hosts and restart the offline runners.",
+    ),
+  )
+}
+
+/**
+ * Count the online runners in a runner list page that carry every required
+ * label.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn runner_pool_online(runners: list, required_labels: list<string> = []) -> int {
+  let online = 0
+  for runner in runners {
+    const labels = (runner?.labels ?? []).map({ entry -> to_string(entry?.name ?? "") })
+    if runner?.status == "online" && required_labels.all({ label -> contains(labels, label) }) {
+      online = online + 1
+    }
+  }
+  return online
+}
+
+/**
+ * API rate limit: firing while `remaining` is under `min_percent` of `limit`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn rate_limit_decision(
+  subject: string,
+  remaining: int,
+  limit: int,
+  min_percent: float,
+  source_url: string = "https://docs.github.com/rest/rate-limit",
+  severity: SignalSeverity = "warning",
+) -> SignalDecision {
+  const key = "github.rate_limit:" + subject
+  const percent = limit > 0 ? to_float(remaining) * 100.0 / to_float(limit) : 0.0
+  const firing = percent < min_percent
+  const summary = firing ? subject + " has " + to_string(remaining) + " of " + to_string(limit)
+    + " API requests left this window" : subject + " API rate limit has recovered"
+  return __decision(
+    key,
+    firing,
+    severity,
+    {topic: "rate_limit"},
+    __local("monitor_github_rate_limit"),
+    __signal_event(
+      key,
+      "github",
+      "rate_limit.low",
+      source_url,
+      summary,
+      "Automation that shares this limit starts failing when it runs out.",
+      "Pause bulk API work until the window resets.",
+    ),
+  )
+}
+
+fn __alert_severity(text: string) -> SignalSeverity {
+  const level = lowercase(text)
+  if level == "critical" || level == "fatal" || level == "page" || level == "urgent" {
+    return "urgent"
+  }
+  if level == "info" || level == "low" {
+    return "info"
+  }
+  return "warning"
+}
+
+fn __sentry_decisions(
+  payload: dict,
+  routing: SignalRouting,
+  provenance: SignalProvenance,
+) -> list<SignalDecision> {
+  const data = payload?.data ?? {}
+  const issue = data?.issue ?? data?.event ?? {}
+  const issue_id = to_string(issue?.issue_id ?? issue?.id ?? "")
+  if issue_id == "" {
+    return []
+  }
+  const key = "sentry:" + issue_id
+  const action = to_string(payload?.action ?? "triggered")
+  const firing = action != "resolved" && action != "ignored" && action != "archived"
+  const url = to_string(issue?.web_url ?? issue?.permalink ?? issue?.url ?? "")
+  const project_field = issue?.project
+  const project = to_string(
+    (type_of(project_field) == "dict" ? project_field.slug : project_field) ?? "sentry",
+  )
+  const title = to_string(issue?.title ?? "Sentry issue " + issue_id)
+  return [
+    __decision(
+      key,
+      firing,
+      __alert_severity(to_string(issue?.level ?? "error") == "fatal" ? "critical" : "warning"),
+      routing,
+      provenance,
+      __signal_event(
+        key,
+        "sentry",
+        "issue." + action,
+        url == "" ? "https://sentry.io/issues/" + issue_id + "/" : url,
+        firing ? project + ": " + title : project + ": resolved " + title,
+        "A production error is reaching users.",
+        "Read the stack trace and recent deploys, then decide whether it belongs to current work.",
+      ),
+    ),
+  ]
+}
+
+fn __grafana_decisions(
+  payload: dict,
+  routing: SignalRouting,
+  provenance: SignalProvenance,
+) -> list<SignalDecision> {
+  let out = []
+  for alert in payload?.alerts ?? [] {
+    const labels = alert?.labels ?? {}
+    const name = to_string(labels?.alertname ?? payload?.title ?? "Grafana alert")
+    const fingerprint = to_string(alert?.fingerprint ?? name)
+    const key = "grafana:" + fingerprint
+    const firing = to_string(alert?.status ?? payload?.status ?? "firing") == "firing"
+    const annotations = alert?.annotations ?? {}
+    const detail = to_string(annotations?.summary ?? annotations?.description ?? "")
+    const url = to_string(alert?.panelURL ?? alert?.generatorURL ?? payload?.externalURL ?? "")
+    out.push(
+      __decision(
+        key,
+        firing,
+        __alert_severity(to_string(labels?.severity ?? "warning")),
+        routing,
+        provenance,
+        __signal_event(
+          key,
+          "grafana",
+          firing ? "alert.firing" : "alert.resolved",
+          url == "" ? "https://grafana.com/" : url,
+          detail == "" ? name : name + ": " + detail,
+          "A monitored service crossed an alert threshold.",
+          "Open the panel, confirm the impact, and decide whether it belongs to current work.",
+        ),
+      ),
+    )
+  }
+  return out
+}
+
+fn __honeycomb_decisions(
+  payload: dict,
+  routing: SignalRouting,
+  provenance: SignalProvenance,
+) -> list<SignalDecision> {
+  const id = to_string(payload?.id ?? payload?.name ?? "")
+  if id == "" {
+    return []
+  }
+  const key = "honeycomb:" + id
+  const firing = uppercase(to_string(payload?.status ?? "TRIGGERED")) == "TRIGGERED"
+  const name = to_string(payload?.name ?? "Honeycomb trigger")
+  const summary = to_string(payload?.summary ?? payload?.trigger_description ?? "")
+  return [
+    __decision(
+      key,
+      firing,
+      __alert_severity(to_string(payload?.severity ?? "warning")),
+      routing,
+      provenance,
+      __signal_event(
+        key,
+        "honeycomb",
+        firing ? "trigger.triggered" : "trigger.ok",
+        to_string(payload?.result_url ?? payload?.trigger_url ?? "https://ui.honeycomb.io/"),
+        summary == "" ? name : name + ": " + summary,
+        "A query over production telemetry crossed its trigger threshold.",
+        "Open the query result, confirm the impact, and decide whether it belongs to current work.",
+      ),
+    ),
+  ]
+}
+
+/**
+ * Normalize a Sentry, Grafana, or Honeycomb alert webhook body into
+ * decisions. One Grafana delivery can carry several alerts. Unrecognized
+ * payloads return an empty list. `signature` reports whether the receiving
+ * trigger verified the delivery's signature; it is shown beside the reminder.
+ * Payload text fills only the summary and source link: why it matters and the
+ * proposed action are written here, never copied from the payload.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn alert_webhook_decisions(
+  provider: string,
+  payload: dict,
+  signature: "verified" | "unverified",
+  routing: SignalRouting = {},
+) -> list<SignalDecision> {
+  const name = lowercase(provider)
+  const provenance: SignalProvenance = {
+    producer: "std/signals.alert_webhook_decisions(" + name + ")",
+    signature: signature,
+  }
+  if name == "sentry" {
+    return __sentry_decisions(payload, routing, provenance)
+  }
+  if name == "grafana" {
+    return __grafana_decisions(payload, routing, provenance)
+  }
+  if name == "honeycomb" {
+    return __honeycomb_decisions(payload, routing, provenance)
+  }
+  return []
+}
+
+type GitHubAccess = {env: HarnessEnv, net: HarnessNet}
+
+type GitHubRateLimit = {resources: {core: {remaining: int, limit: int}}}
+
+/**
+ * The bearer token for one poll: a freshly minted installation token when
+ * `options.app` is set, otherwise `options.token` or `options.token_env`.
+ */
+fn __github_token(github: GitHubAccess, options: GitHubMonitorOptions) -> string {
+  if options.app != nil {
+    const minted = call(
+      github.net,
+      "github.app.installation_token",
+      filter_nil(options.app + {token_refresh_skew_seconds: FRESH_TOKEN_SKEW_SECONDS}),
+      filter_nil({api_base_url: options.api_url}),
+    )
+    const token = to_string(minted?.token ?? "")
+    if token == "" {
+      throw "std/signals: the GitHub connector minted no installation token"
+    }
+    return token
+  }
+  const supplied = options.token ?? ""
+  if supplied != "" {
+    return supplied
+  }
+  const env_name = options.token_env ?? "GITHUB_TOKEN"
+  const token = github.env.get(env_name) ?? ""
+  if token == "" {
+    throw "std/signals: set " + env_name + " to a GitHub token, or pass `app` credentials"
+  }
+  return token
+}
+
+fn __github_get(
+  net: HarnessNet,
+  token: string,
+  path: string,
+  options: GitHubMonitorOptions,
+) -> dict {
+  const response = net.get(
+    (options.api_url ?? GITHUB_API) + path,
+    {
+      headers: {
+        Authorization: "Bearer " + token,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "harn-signals",
+      },
+      timeout_ms: 20000,
+    },
+  )
+  if !response.ok {
+    throw "std/signals: GET " + path + " returned " + to_string(response.status) + ": "
+      + substring(to_string(response.body), 0, 200)
+  }
+  return json_parse(response.body)
+}
+
+/**
+ * Every item of a paginated list endpoint, or a throw. A page without the
+ * list field throws. With `total_count`, the listing ends only once it is
+ * reached; without one, only at a short page. A listing that is cut short or
+ * runs past `MAX_PAGES` throws rather than return a partial list that would
+ * read as a smaller pool.
+ */
+fn __github_all(
+  net: HarnessNet,
+  token: string,
+  path: string,
+  field: string,
+  options: GitHubMonitorOptions,
+) -> list {
+  const separator = contains(path, "?") ? "&" : "?"
+  let items = []
+  let page = 1
+  while page <= MAX_PAGES {
+    const body = __github_get(
+      net,
+      token,
+      path + separator + "per_page=" + to_string(PAGE_SIZE) + "&page=" + to_string(page),
+      options,
+    )
+    const batch = body[field]
+    if type_of(batch) != "list" {
+      throw "std/signals: " + path + " returned no `" + field + "` list"
+    }
+    items = items + batch
+    const reported = body?.total_count
+    if reported != nil {
+      const total = to_int(reported)
+      if len(items) >= total {
+        return items
+      }
+      if len(batch) < PAGE_SIZE {
+        throw "std/signals: " + path + " ended at " + to_string(len(items)) + " of "
+          + to_string(total)
+          + " entries"
+      }
+    } else if len(batch) < PAGE_SIZE {
+      return items
+    }
+    page = page + 1
+  }
+  throw "std/signals: " + path + " has more than " + to_string(MAX_PAGES * PAGE_SIZE) + " entries"
+}
+
+fn __unmeasured(error: any) -> SignalTransition {
+  return {outcome: "unmeasured", error: to_string(error)}
+}
+
+/** Apply a decision only when its observation succeeded. */
+fn __observe(
+  runtime: HarnessRuntime,
+  options: GitHubMonitorOptions,
+  observe: fn() -> SignalDecision,
+) -> SignalTransition {
+  const observed = try {
+    observe()
+  }
+  if is_err(observed) {
+    return __unmeasured(unwrap_err(observed))
+  }
+  return signal_apply(runtime, unwrap(observed), filter_nil({dir: options.dir}))
+}
+
+/**
+ * The newest decisive push run of every active workflow on `branch`, searched
+ * among its recent completed runs. One query per workflow, so a busy workflow
+ * cannot push another's runs out of a shared page. A workflow whose recent
+ * runs are all indecisive contributes no reading.
+ */
+fn __latest_decisive_runs(
+  net: HarnessNet,
+  token: string,
+  repo: string,
+  branch: string,
+  options: GitHubMonitorOptions,
+) -> list {
+  const workflows = __github_all(
+    net,
+    token,
+    "/repos/" + repo + "/actions/workflows",
+    "workflows",
+    options,
+  )
+  let latest = []
+  for workflow in workflows {
+    if (workflow?.state ?? "active") != "active" {
+      continue
+    }
+    if workflow?.id == nil {
+      throw "std/signals: a workflow of " + repo + " has no id"
+    }
+    const page = __github_get(
+      net,
+      token,
+      "/repos/" + repo + "/actions/workflows/" + to_string(workflow.id) + "/runs?branch="
+        + branch
+        + "&event=push&status=completed&per_page="
+        + to_string(CI_RUNS_PER_WORKFLOW),
+      options,
+    )
+    const runs = page?.workflow_runs
+    if type_of(runs) != "list" {
+      throw "std/signals: the runs of workflow " + to_string(workflow.id)
+        + " came back without `workflow_runs`"
+    }
+    for run in runs {
+      if contains(CI_DECISIVE_CONCLUSIONS, run?.conclusion ?? "") {
+        latest.push(run)
+        break
+      }
+    }
+  }
+  return latest
+}
+
+/**
+ * Poll default-branch CI for `repo` and fire or resolve its signal. A branch
+ * where no workflow has a decisive recent run is unmeasured, not recovered.
+ *
+ * @effects: [net, env, state.write]
+ * @errors: []
+ */
+pub fn monitor_github_ci(
+  harness: Harness,
+  repo: string,
+  branch: string = "main",
+  options: GitHubMonitorOptions = {},
+) -> SignalTransition {
+  return __observe(
+    harness.runtime,
+    options,
+    { ->
+      const runs = __latest_decisive_runs(
+        harness.net,
+        __github_token(pick(harness, ["env", "net"]), options),
+        repo,
+        branch,
+        options,
+      )
+      if len(runs) == 0 {
+        throw "std/signals: no workflow has a decisive recent push run on " + branch + " of "
+          + repo
+      }
+      ci_branch_decision(repo, branch, runs, options.severity ?? "warning")
+    },
+  )
+}
+
+/**
+ * Poll the open pull request count for `repo`; fire at `threshold` or more.
+ *
+ * @effects: [net, env, state.write]
+ * @errors: []
+ */
+pub fn monitor_github_open_prs(
+  harness: Harness,
+  repo: string,
+  threshold: int,
+  options: GitHubMonitorOptions = {},
+) -> SignalTransition {
+  return __observe(
+    harness.runtime,
+    options,
+    { ->
+      const page = __github_get(
+        harness.net,
+        __github_token(pick(harness, ["env", "net"]), options),
+        "/search/issues?q=repo:" + repo + "+is:pr+is:open&per_page=1",
+        options,
+      )
+      if page?.total_count == nil {
+        throw "std/signals: the pull request search returned no total_count"
+      }
+      if page?.incomplete_results ?? false {
+        throw "std/signals: the pull request search timed out and reported a partial count"
+      }
+      open_prs_decision(repo, to_int(page.total_count), threshold, options.severity ?? "info")
+    },
+  )
+}
+
+fn __runner_group_id(
+  net: HarnessNet,
+  token: string,
+  org: string,
+  group: string | int,
+  options: GitHubMonitorOptions,
+) -> int {
+  if type_of(group) == "int" {
+    return group
+  }
+  const groups = __github_all(
+    net,
+    token,
+    "/orgs/" + org + "/actions/runner-groups",
+    "runner_groups",
+    options,
+  )
+  for candidate in groups {
+    if to_string(candidate?.name ?? "") == group {
+      return to_int(candidate.id)
+    }
+  }
+  throw "std/signals: " + org + " has no runner group named " + to_string(group)
+}
+
+/**
+ * Poll a self-hosted runner pool and fire while too few matching runners are
+ * online. With `pool.group`, only that organization runner group is listed.
+ * Every page is read; a failed or incomplete read is `unmeasured`.
+ *
+ * @effects: [net, env, state.write]
+ * @errors: []
+ */
+pub fn monitor_github_runners(
+  harness: Harness,
+  pool: GitHubRunnerPool,
+  options: GitHubMonitorOptions = {},
+) -> SignalTransition {
+  return __observe(
+    harness.runtime,
+    options,
+    { ->
+      const token = __github_token(pick(harness, ["env", "net"]), options)
+      let path = ""
+      if contains(pool.scope, "/") {
+        if pool.group != nil {
+          throw "std/signals: runner groups belong to organizations, not " + pool.scope
+        }
+        path = "/repos/" + pool.scope + "/actions/runners"
+      } else if pool.group != nil {
+        path = "/orgs/" + pool.scope + "/actions/runner-groups/"
+          + to_string(__runner_group_id(harness.net, token, pool.scope, pool.group, options))
+          + "/runners"
+      } else {
+        path = "/orgs/" + pool.scope + "/actions/runners"
+      }
+      const runners = __github_all(harness.net, token, path, "runners", options)
+      runner_pool_decision(
+        pool,
+        runner_pool_online(runners, pool.required_labels ?? []),
+        options.severity ?? "warning",
+      )
+    },
+  )
+}
+
+/**
+ * Poll the REST rate limit of the polling credential and fire under
+ * `min_percent` remaining. With `options.app`, the token is minted fresh for
+ * this poll, so the reading is the installation's current counter.
+ *
+ * @effects: [net, env, state.write]
+ * @errors: []
+ */
+pub fn monitor_github_rate_limit(
+  harness: Harness,
+  subject: string,
+  min_percent: float,
+  options: GitHubMonitorOptions = {},
+) -> SignalTransition {
+  return __observe(
+    harness.runtime,
+    options,
+    { ->
+      const page = schema_expect(
+        __github_get(
+          harness.net,
+          __github_token(pick(harness, ["env", "net"]), options),
+          "/rate_limit",
+          options,
+        ),
+        schema_of(GitHubRateLimit),
+      )
+      rate_limit_decision(
+        subject,
+        page.resources.core.remaining,
+        page.resources.core.limit,
+        min_percent,
+        "https://docs.github.com/rest/rate-limit",
+        options.severity ?? "warning",
+      )
+    },
+  )
+}
