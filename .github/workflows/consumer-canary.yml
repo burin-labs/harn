@@ -139,7 +139,9 @@ jobs:
     runs-on: ubuntu-24.04
     # Bound queue wait separately from each job's execution, with cleanup time.
     # scripts/ci/consumer_observation_budget.json owns this checked projection.
-    timeout-minutes: 175
+    # A pull request's status waits on this job and only warns on an
+    # unmeasured result, so the pull-request path gets one window.
+    timeout-minutes: ${{ inputs.pull_request_cli_run != '' && 55 || 175 }}
     permissions:
       actions: read
       contents: read
@@ -233,6 +235,7 @@ jobs:
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
           observer-context: ${{ steps.observer.outputs.context }}
           rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
+          single-window: ${{ inputs.pull_request_cli_run != '' }}
       - name: Observe the second bounded window
         if: steps.observe-1.outputs.verdict == ''
         id: observe-2
@@ -248,6 +251,7 @@ jobs:
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
           observer-context: ${{ steps.observer.outputs.context }}
           rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
+          single-window: ${{ inputs.pull_request_cli_run != '' }}
       - name: Observe the third bounded window
         if: steps.observe-2.outcome == 'success' && steps.observe-2.outputs.verdict == ''
         id: observe-3
@@ -263,6 +267,7 @@ jobs:
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
           observer-context: ${{ steps.observer.outputs.context }}
           rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
+          single-window: ${{ inputs.pull_request_cli_run != '' }}
       - name: Observe the final bounded window
         if: steps.observe-3.outcome == 'success' && steps.observe-3.outputs.verdict == ''
         id: observe-4
@@ -278,6 +283,7 @@ jobs:
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
           observer-context: ${{ steps.observer.outputs.context }}
           rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
+          single-window: ${{ inputs.pull_request_cli_run != '' }}
 
       - name: Renew exact observer cleanup authority
         id: cleanup-token

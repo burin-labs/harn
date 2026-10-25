@@ -626,12 +626,16 @@ verifyNode(steps);
 assert.throws(() => verifyNode(steps.filter((step) => step.id !== 'pairing-node')));
 const windows = steps.filter((step) => step.uses === './.github/actions/observe-consumer');
 assert.equal(windows.length, Math.ceil(policy.wall_seconds / policy.window_seconds));
-assert.equal(jobs.consumers['timeout-minutes'], Math.ceil((policy.wall_seconds + policy.cleanup_seconds) / 60));
+// A pull request's status waits on this job, so its path observes one window.
+const minutes = (seconds) => Math.ceil((seconds + policy.cleanup_seconds) / 60);
+assert.equal(jobs.consumers['timeout-minutes'],
+  `\${{ inputs.pull_request_cli_run != '' && ${minutes(policy.window_seconds)} || ${minutes(policy.wall_seconds)} }}`);
 for (const step of windows) {
   assert.equal(step.with['run-id'], '${{ steps.canary.outputs.run_id }}');
   assert.equal(step.with['started-at'], '${{ steps.canary.outputs.started_at }}');
   assert.equal(step.with['observer-context'], '${{ steps.observer.outputs.context }}');
   assert.equal(step.with['rehearsal-promotion-run-id'], '${{ inputs.rehearsal_promotion_run_id }}');
+  assert.equal(step.with['single-window'], "${{ inputs.pull_request_cli_run != '' }}");
   assert(jobs.consumers.outputs.verdict.includes(`steps.${step.id}.outputs.verdict`));
 }
 const interrupted = steps.find(step => step.id === 'interrupted');
@@ -658,7 +662,8 @@ assert.equal(observe.env.GH_TOKEN, '${{ steps.token.outputs.token }}');
 assert.equal(observe.env.CANARY_STARTED_AT, '${{ inputs.started-at }}');
 assert.equal(observe.env.CANARY_RUN_ID, '${{ inputs.run-id }}');
 assert.equal(observe.env.CANARY_WINDOW_SECONDS, String(policy.window_seconds));
-assert.equal(observe.env.CANARY_DEADLINE_SECONDS, "${{ inputs.observer-context != '' && '9900' || '7200' }}");
+assert.equal(observe.env.CANARY_DEADLINE_SECONDS,
+  `\${{ inputs.single-window == 'true' && '${policy.window_seconds}' || (inputs.observer-context != '' && '${policy.wall_seconds}' || '7200') }}`);
 assert.equal(observe.env.OBSERVER_CONTEXT, '${{ inputs.observer-context }}');
 assert(observe.run.includes('--observe') && !observe.run.includes('--dispatch'));
 JS

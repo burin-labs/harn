@@ -34,6 +34,10 @@ inputs:
     required: false
     default: ''
     description: Prior authenticated promotion when reusing a completed rehearsal
+  single-window:
+    required: false
+    default: 'false'
+    description: End at the first window's deadline; a pull request's status waits on it
 outputs:
   failure-receipt:
     description: Closed failure descriptor with queue counts and numeric run identities
@@ -70,5 +74,5 @@ runs:
         OBSERVER_CONTEXT: ${{ inputs.observer-context }}
         REHEARSAL_PROMOTION_RUN_ID: ${{ inputs.rehearsal-promotion-run-id }}
         CANARY_WINDOW_SECONDS: '2700'
-        CANARY_DEADLINE_SECONDS: ${{ inputs.observer-context != '' && '9900' || '7200' }}
+        CANARY_DEADLINE_SECONDS: ${{ inputs.single-window == 'true' && '2700' || (inputs.observer-context != '' && '9900' || '7200') }}
       run: CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" bash scripts/ci/consumer_canary.sh --observe
