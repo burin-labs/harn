@@ -18,33 +18,30 @@ fn code_index_warm_disabled(value: Option<&str>) -> bool {
     })
 }
 
-/// Hostlib handles for the workspace this server last opened, so a session
-/// warm fills the code index that later VMs over that workspace install.
+/// Hostlib handles per session project root, so a session warm fills the
+/// code index, and holds the single-flight gate, that every later VM over
+/// that workspace installs.
 ///
-/// One slot, as the VM baseline cache holds one: a server that moves to
-/// another workspace starts fresh handles instead of keeping an index per
-/// root, and VMs already built keep the handles they were built with.
+/// Kept for the server's life, as its sessions are. Replacing one root's
+/// handles when another opens would strand an in-flight warm behind a gate
+/// the next VM no longer shares, and that VM would walk the tree again.
 #[cfg(feature = "hostlib")]
 #[derive(Default)]
 struct WorkspaceHostlib {
-    slot: std::sync::Mutex<Option<(std::path::PathBuf, harn_hostlib::DefaultHostlibHandles)>>,
+    by_root: std::sync::Mutex<
+        std::collections::HashMap<std::path::PathBuf, harn_hostlib::DefaultHostlibHandles>,
+    >,
 }
 
 #[cfg(feature = "hostlib")]
 impl WorkspaceHostlib {
     fn handles_for(&self, project_root: &Path) -> harn_hostlib::DefaultHostlibHandles {
-        let mut slot = self
-            .slot
+        self.by_root
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some((root, handles)) = slot.as_ref() {
-            if root == project_root {
-                return handles.clone();
-            }
-        }
-        let handles = crate::default_hostlib_handles();
-        *slot = Some((project_root.to_path_buf(), handles.clone()));
-        handles
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(project_root.to_path_buf())
+            .or_insert_with(crate::default_hostlib_handles)
+            .clone()
     }
 }
 
@@ -317,6 +314,35 @@ pub fn on_tick(_event) -> nil {
                 .map(|state| state.root.clone());
             let expected = warm.then(|| root.clone());
             assert_eq!(live_root, expected, "warm={warm}");
+        }
+    }
+
+    /// A second workspace opening must not strand the first one's warm: the
+    /// first workspace's VMs still install the index its warm filled.
+    #[test]
+    fn opening_another_workspace_keeps_the_first_workspaces_warm_index() {
+        let workspaces = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+        let roots: Vec<_> = workspaces
+            .iter()
+            .map(|dir| {
+                std::fs::write(dir.path().join("lib.rs"), "pub fn f() {}\n").unwrap();
+                dir.path().canonicalize().unwrap()
+            })
+            .collect();
+        let configurator = CliAcpRuntimeConfigurator::new(true);
+        for root in &roots {
+            configurator.warm_session_workspace(root);
+        }
+        for root in &roots {
+            let code_index = configurator.hostlib.handles_for(root).code_index;
+            code_index.wait_until_idle();
+            let shared = code_index.shared();
+            let live_root = shared
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|state| state.root.clone());
+            assert_eq!(live_root.as_ref(), Some(root));
         }
     }
 }

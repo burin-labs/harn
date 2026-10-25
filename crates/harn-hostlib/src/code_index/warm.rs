@@ -1113,14 +1113,14 @@ mod tests {
         schema_checked_rebuild(&cap, dir.path());
         assert_eq!(
             string(&schema_checked_status(&cap), "root"),
-            canonicalize(dir.path()).to_string_lossy()
+            crate::tools::args::to_agent_path(canonicalize(dir.path()))
         );
 
         let other = fixture_tree();
         schema_checked_rebuild(&cap, other.path());
         assert_eq!(
             string(&schema_checked_status(&cap), "root"),
-            canonicalize(other.path()).to_string_lossy()
+            crate::tools::args::to_agent_path(canonicalize(other.path()))
         );
         cap.wait_until_idle();
     }
