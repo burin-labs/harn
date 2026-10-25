@@ -410,7 +410,7 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@43cef7bc7628e9c48d88b97428cb26c887ac3709
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@d1e6050ae5cfe2c94242e31940b9840ababf6d29
     with:
       sha: ${{ needs.plan.outputs.source_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}
