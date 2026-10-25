@@ -402,3 +402,54 @@ async fn acp_runtime_authority_refusal_never_polls_the_engine_future() {
         })
         .await;
 }
+
+struct WarmRecorder {
+    warmed: Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl AcpRuntimeConfigurator for WarmRecorder {
+    fn warm_session_workspace(&self, project_root: &std::path::Path) {
+        self.warmed.lock().unwrap().push(project_root.to_path_buf());
+    }
+}
+
+/// Opening a session hands its project root to the host's warm before any
+/// prompt, including through the endpoint-override wrapper.
+#[tokio::test(flavor = "current_thread")]
+async fn session_new_asks_the_host_to_warm_its_project_root() {
+    harn_vm::reset_thread_local_state();
+    let workspace = tempfile::tempdir().expect("workspace");
+    let expected = workspace.path().canonicalize().unwrap();
+    for wrapped in [false, true] {
+        let warmed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut config = AcpServerConfig::new(None);
+        if wrapped {
+            config = config
+                .with_llm_overrides(Some(endpoint_overlay()), None)
+                .with_runtime_provider_endpoint("fixture", "http://127.0.0.1:9")
+                .expect("endpoint override");
+        }
+        let config = config.with_runtime_configurator(Arc::new(WarmRecorder {
+            warmed: warmed.clone(),
+        }));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server = AcpServer::new_with_output(config, AcpOutput::Channel(tx));
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "session/new",
+                "params": {
+                    "cwd": workspace.path(),
+                    "environmentPolicy": {"kind": "isolated", "grants": []},
+                },
+            }))
+            .await;
+        let created = recv_json(&mut rx).await;
+        assert!(created["result"]["sessionId"].is_string(), "{created}");
+        assert_eq!(
+            *warmed.lock().unwrap(),
+            vec![expected.clone()],
+            "wrapped={wrapped}"
+        );
+    }
+}

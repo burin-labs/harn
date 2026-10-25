@@ -536,6 +536,15 @@ impl AcpServer {
         if let Some(session) = self.sessions.get(&session_id) {
             harn_hostlib::fs::configure_session_root(&session_id, &session.project_root);
         }
+        if let Some(session) = self.sessions.get(&session_id) {
+            // A root the process cannot read would only warm an empty index.
+            let readable = harn_vm::process_sandbox::current_process_confinement()
+                .is_none_or(|confinement| confinement.covers(&session.project_root));
+            if readable {
+                self.runtime_configurator
+                    .warm_session_workspace(&session.project_root);
+            }
+        }
         Ok(())
     }
 }

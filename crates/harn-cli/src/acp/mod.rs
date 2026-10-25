@@ -6,7 +6,68 @@ use harn_serve::{
     AcpProfileConfig, AcpRuntimeConfigurator, AcpSandboxConfig, AcpServerConfig, AuthPolicy,
 };
 
-struct CliAcpRuntimeConfigurator;
+/// Opts a server out of warming the code index when a session opens.
+pub(crate) const DISABLE_CODE_INDEX_WARM_ENV: &str = "HARN_DISABLE_CODE_INDEX_WARM";
+
+fn code_index_warm_disabled(value: Option<&str>) -> bool {
+    value.is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+/// Hostlib handles for the workspace this server last opened, so a session
+/// warm fills the code index that later VMs over that workspace install.
+///
+/// One slot, as the VM baseline cache holds one: a server that moves to
+/// another workspace starts fresh handles instead of keeping an index per
+/// root, and VMs already built keep the handles they were built with.
+#[cfg(feature = "hostlib")]
+#[derive(Default)]
+struct WorkspaceHostlib {
+    slot: std::sync::Mutex<Option<(std::path::PathBuf, harn_hostlib::DefaultHostlibHandles)>>,
+}
+
+#[cfg(feature = "hostlib")]
+impl WorkspaceHostlib {
+    fn handles_for(&self, project_root: &Path) -> harn_hostlib::DefaultHostlibHandles {
+        let mut slot = self
+            .slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((root, handles)) = slot.as_ref() {
+            if root == project_root {
+                return handles.clone();
+            }
+        }
+        let handles = crate::default_hostlib_handles();
+        *slot = Some((project_root.to_path_buf(), handles.clone()));
+        handles
+    }
+}
+
+struct CliAcpRuntimeConfigurator {
+    #[cfg(feature = "hostlib")]
+    hostlib: WorkspaceHostlib,
+    warm_code_index: bool,
+}
+
+impl CliAcpRuntimeConfigurator {
+    fn from_env() -> Self {
+        let disabled = std::env::var(DISABLE_CODE_INDEX_WARM_ENV).ok();
+        Self::new(!code_index_warm_disabled(disabled.as_deref()))
+    }
+
+    fn new(warm_code_index: bool) -> Self {
+        Self {
+            #[cfg(feature = "hostlib")]
+            hostlib: WorkspaceHostlib::default(),
+            warm_code_index,
+        }
+    }
+}
 
 #[async_trait(?Send)]
 impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
@@ -22,7 +83,11 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
         // `crates/harn-hostlib/README.md` for the boundary contract.
         #[cfg(feature = "hostlib")]
         {
-            crate::install_default_hostlib(vm);
+            let handles = match vm.explicit_project_root() {
+                Some(root) => self.hostlib.handles_for(root),
+                None => crate::default_hostlib_handles(),
+            };
+            crate::install_hostlib_with_handles(vm, &handles);
         }
 
         // Install the lazy neural injection-classifier loader (Layer 2, guard
@@ -60,6 +125,28 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
             .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
         Ok(())
     }
+
+    fn warm_session_workspace(&self, project_root: &Path) {
+        if !self.warm_code_index {
+            return;
+        }
+        #[cfg(feature = "hostlib")]
+        {
+            let outcome = self
+                .hostlib
+                .handles_for(project_root)
+                .code_index
+                .warm_session(project_root);
+            tracing::debug!(
+                target: "harn_cli::acp",
+                root = %project_root.display(),
+                ?outcome,
+                "code-index session warm requested",
+            );
+        }
+        #[cfg(not(feature = "hostlib"))]
+        let _ = project_root;
+    }
 }
 
 pub(crate) fn server_config(
@@ -86,7 +173,7 @@ pub(crate) fn server_config_with_boundary(
         .unwrap_or_default();
     let mut config = AcpServerConfig::new(pipeline)
         .with_auth_policy(auth_policy)
-        .with_runtime_configurator(Arc::new(CliAcpRuntimeConfigurator))
+        .with_runtime_configurator(Arc::new(CliAcpRuntimeConfigurator::from_env()))
         .with_llm_overrides(extensions.llm, extensions.capabilities);
     config.host_inference_boundary = host_inference_boundary;
     config
@@ -158,7 +245,7 @@ pub fn on_tick(_event) -> nil {
         let mut vm = harn_vm::new_vm();
         harn_runtime::register_vm_stdlib(&mut vm);
         let result = async {
-            CliAcpRuntimeConfigurator
+            CliAcpRuntimeConfigurator::new(false)
                 .configure(&mut vm, Some(&script))
                 .await?;
             let extensions = crate::package::load_runtime_extensions(&script);
@@ -193,5 +280,43 @@ pub fn on_tick(_event) -> nil {
             error.contains("host_call") && error.contains("not callable source API"),
             "unexpected refusal: {error}"
         );
+    }
+
+    #[test]
+    fn the_code_index_warm_opt_out_reads_boolean_values() {
+        for value in ["1", "true", "YES", " on "] {
+            assert!(code_index_warm_disabled(Some(value)), "{value}");
+        }
+        for value in [None, Some(""), Some("0"), Some("false"), Some("off")] {
+            assert!(!code_index_warm_disabled(value), "{value:?}");
+        }
+    }
+
+    /// The warm fills the index the server's VMs share, and an opted-out
+    /// server leaves it empty.
+    #[test]
+    fn a_session_warm_fills_the_shared_code_index_unless_opted_out() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::create_dir_all(workspace.path().join("src")).unwrap();
+        std::fs::write(
+            workspace.path().join("src/lib.rs"),
+            "pub fn warmed() -> i32 { 1 }\n",
+        )
+        .unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        for warm in [true, false] {
+            let configurator = CliAcpRuntimeConfigurator::new(warm);
+            configurator.warm_session_workspace(&root);
+            let code_index = configurator.hostlib.handles_for(&root).code_index;
+            code_index.wait_until_idle();
+            let shared = code_index.shared();
+            let live_root = shared
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|state| state.root.clone());
+            let expected = warm.then(|| root.clone());
+            assert_eq!(live_root, expected, "warm={warm}");
+        }
     }
 }
