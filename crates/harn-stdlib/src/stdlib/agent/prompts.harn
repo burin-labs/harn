@@ -7,6 +7,7 @@ type AgentPromptId = "agent.completion_judge_feedback" \
   | "agent.deferred_tool_listing" \
   | "agent.loop_contract" \
   | "agent.native_tool_contract_feedback" \
+  | "agent.operating_guidance" \
   | "agent.parse_guidance" \
   | "agent.step_judge_system" \
   | "agent.step_judge_system_adversarial" \
@@ -33,6 +34,7 @@ type AgentPromptOverrides = {
   deferred_tool_listing?: AgentPromptEntry,
   loop_contract?: AgentPromptEntry,
   native_tool_contract_feedback?: AgentPromptEntry,
+  operating_guidance?: AgentPromptEntry,
   parse_guidance?: AgentPromptEntry,
   step_judge_system?: AgentPromptEntry,
   step_judge_system_adversarial?: AgentPromptEntry,
@@ -48,31 +50,8 @@ type AgentPromptOverrides = {
   verification_gate_feedback?: AgentPromptEntry,
 }
 
-fn __agent_prompt_ids() {
-  return [
-    "agent.completion_judge_feedback",
-    "agent.completion_judge_system",
-    "agent.completion_judge_user",
-    "agent.daemon_timer_feedback",
-    "agent.daemon_watch_feedback",
-    "agent.default_nudge",
-    "agent.deferred_tool_listing",
-    "agent.loop_contract",
-    "agent.native_tool_contract_feedback",
-    "agent.parse_guidance",
-    "agent.step_judge_system",
-    "agent.step_judge_system_adversarial",
-    "agent.step_judge_user",
-    "agent.tool_contract_action_native",
-    "agent.tool_contract_action_text",
-    "agent.tool_contract_deferred_tools",
-    "agent.tool_contract_json",
-    "agent.tool_contract_native",
-    "agent.tool_contract_task_ledger",
-    "agent.tool_contract_text",
-    "agent.tool_contract_text_response_protocol",
-    "agent.verification_gate_feedback",
-  ]
+fn __agent_prompt_ids() -> list<string> {
+  return __agent_default_prompt_catalog().keys()
 }
 
 fn __agent_default_prompt_catalog() {
@@ -86,6 +65,7 @@ fn __agent_default_prompt_catalog() {
     "agent.deferred_tool_listing": "deferred_tool_listing.harn.prompt",
     "agent.loop_contract": "loop_until_done_system.harn.prompt",
     "agent.native_tool_contract_feedback": "native_tool_contract_feedback.harn.prompt",
+    "agent.operating_guidance": "operating_guidance.harn.prompt",
     "agent.parse_guidance": "parse_guidance.harn.prompt",
     "agent.step_judge_system": "step_judge_system_default.harn.prompt",
     "agent.step_judge_system_adversarial": "step_judge_system_adversarial.harn.prompt",
@@ -278,6 +258,7 @@ pub fn agent_prompt_override_map(overrides: AgentPromptOverrides) -> dict {
     overrides.native_tool_contract_feedback,
   )
   out = __agent_add_prompt_override(out, "agent.parse_guidance", overrides.parse_guidance)
+  out = __agent_add_prompt_override(out, "agent.operating_guidance", overrides.operating_guidance)
   out = __agent_add_prompt_override(out, "agent.step_judge_system", overrides.step_judge_system)
   out = __agent_add_prompt_override(
     out,

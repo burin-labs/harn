@@ -475,6 +475,7 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = embedded_catalog!(StdlibP
     "agent/prompts/tool_contract_text.harn.prompt" => "stdlib/agent/prompts/tool_contract_text.harn.prompt",
     "agent/prompts/tool_contract_json.harn.prompt" => "stdlib/agent/prompts/tool_contract_json.harn.prompt",
     "agent/prompts/tool_contract_native.harn.prompt" => "stdlib/agent/prompts/tool_contract_native.harn.prompt",
+    "agent/prompts/operating_guidance.harn.prompt" => "stdlib/agent/prompts/operating_guidance.harn.prompt",
     "agent/prompts/tool_contract_text_response_protocol.harn.prompt" => "stdlib/agent/prompts/tool_contract_text_response_protocol.harn.prompt",
     "agent/prompts/tool_contract_action_native.harn.prompt" => "stdlib/agent/prompts/tool_contract_action_native.harn.prompt",
     "agent/prompts/tool_contract_action_text.harn.prompt" => "stdlib/agent/prompts/tool_contract_action_text.harn.prompt",
