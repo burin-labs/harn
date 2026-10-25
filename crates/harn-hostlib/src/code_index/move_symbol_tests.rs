@@ -899,6 +899,21 @@ fn rust_tuple_struct_reads_constructors_and_patterns_in_other_files_refuse() {
 }
 
 #[test]
+fn rust_tuple_struct_built_through_an_import_alias_refuses() {
+    let fixture = restricted_fields_fixture(&[
+        ("src/a/mod.rs", "pub mod model;\n"),
+        (
+            "src/a/model/child.rs",
+            "use super::Wrap as W;\n\npub fn make() -> W {\n    W(1)\n}\n",
+        ),
+    ]);
+    assert_eq!(
+        moved_out_of_a(&fixture, "Wrap"),
+        [("src/a/model/child.rs".to_string(), 4)]
+    );
+}
+
+#[test]
 fn rust_move_into_the_parent_keeps_child_readers() {
     let fixture = restricted_fields_fixture(&[
         ("src/a/mod.rs", "pub mod model;\n"),

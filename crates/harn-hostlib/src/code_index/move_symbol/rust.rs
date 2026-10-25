@@ -688,6 +688,21 @@ pub(crate) fn field_reads(
         .collect();
     let tuple_field = broken.iter().find(|f| f.parse::<usize>().is_ok());
     let named_field = broken.iter().find(|f| f.parse::<usize>().is_err());
+    // `use super::Wrap as W` lets `W(1)` build the moved struct.
+    let mut names = vec![owner.to_string()];
+    text::walk(tree.root_node(), |node| {
+        if node.kind() == "use_as_clause" {
+            let imported = node
+                .child_by_field_name("path")
+                .and_then(|p| path_segments(p, source))
+                .is_some_and(|segs| segs.last().is_some_and(|last| last == owner));
+            if let Some(alias) = node.child_by_field_name("alias").filter(|_| imported) {
+                names.push(text::text(alias, source).to_string());
+            }
+        }
+        true
+    });
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
     let mut sites = Vec::new();
     let mut report = |at: Node<'_>, why: String| {
         sites.push(Site::at(rel, source, at.start_byte(), "reference", why));
@@ -730,7 +745,7 @@ pub(crate) fn field_reads(
                     );
                 }
                 if let Some(hidden) = tuple_field.filter(|_| {
-                    pair[1].kind() == "token_tree" && text::text(pair[0], source) == owner
+                    pair[1].kind() == "token_tree" && names.contains(&text::text(pair[0], source))
                 }) {
                     report(
                         pair[0],
@@ -748,7 +763,7 @@ pub(crate) fn field_reads(
             _ => None,
         };
         if let Some((path, hidden)) = built {
-            if names_type(path, source, owner) {
+            if names_type(path, source, &names) {
                 report(
                     path,
                     format!("builds or matches `{owner}`, whose field `{hidden}` the destination would hide"),
@@ -770,8 +785,9 @@ fn has_base(struct_expression: Node<'_>) -> bool {
         })
 }
 
-/// Whether the path `node` ends in `name`, or is `Self` inside an `impl` of it.
-fn names_type(node: Node<'_>, source: &str, name: &str) -> bool {
+/// Whether the path `node` ends in one of `names`, or is `Self` inside an
+/// `impl` of one.
+fn names_type(node: Node<'_>, source: &str, names: &[&str]) -> bool {
     let tail = match node.kind() {
         "generic_function" => node.child_by_field_name("function"),
         "generic_type" => node.child_by_field_name("type"),
@@ -784,14 +800,14 @@ fn names_type(node: Node<'_>, source: &str, name: &str) -> bool {
         _ => tail,
     });
     match tail.map(|tail| text::text(tail, source)) {
-        Some(tail) if tail == name => true,
+        Some(tail) if names.contains(&tail) => true,
         Some("Self") => {
             let mut ancestor = node.parent();
             while let Some(current) = ancestor {
                 if current.kind() == "impl_item" {
                     return current
                         .child_by_field_name("type")
-                        .is_some_and(|ty| names_type(ty, source, name));
+                        .is_some_and(|ty| names_type(ty, source, names));
                 }
                 ancestor = current.parent();
             }
