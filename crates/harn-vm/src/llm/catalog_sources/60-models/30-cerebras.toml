@@ -14,7 +14,6 @@
 [models."gpt-oss-120b"]
 name = "GPT-OSS 120B (Cerebras)"
 provider = "cerebras"
-context_window = 131072
 logical_model = "openai-gpt-oss-120b"
 equivalence_group = "openai-gpt-oss-120b"
 served_variant = "cerebras-wafer-scale"
@@ -24,7 +23,6 @@ pricing = { input_per_mtok = 0.35, output_per_mtok = 0.75 }
 rate_limits = { rpm = 250, tpm = 250000, tph = 1000000, tpd = 1000000, tier = "developer", source_url = "https://inference-docs.cerebras.ai/support/rate-limits", last_verified = "2026-06-12", notes = "Developer (Pay as You Go) tier confirmed live from x-ratelimit-limit-requests/tokens response headers 2026-06-12 (250 RPM / 250K TPM). The prior Free Trial row (5 RPM / 30K TPM) needlessly throttled the proactive sliding-window limiter to a crawl. Override per-deployment with HARN_RATE_LIMIT_CEREBRAS_RPM / HARN_RATE_LIMIT_CEREBRAS_TPM." }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
 tier = "mid"
-open_weight = true
 strengths = ["speed", "cheap", "tool_use"]
 
 # Serverless Cerebras route, and the only other one Cerebras serves.
@@ -35,10 +33,10 @@ strengths = ["speed", "cheap", "tool_use"]
 # free-tier 65,536; https://inference-docs.cerebras.ai/models/overview
 # publishes 128k on the paid tier, which is the tier this catalog rate-limits
 # for, so the row records 131072 like its gpt-oss-120b sibling.
+models_dev = {provider = "cerebras", model = "gpt-oss-120b", fields = ["context_window", "open_weight"]}
 [models."qwen-3.8-27b"]
 name = "Qwen 3.8 27B (Cerebras)"
 provider = "cerebras"
-context_window = 131072
 logical_model = "qwen3.8-27b"
 equivalence_group = "qwen3.8-27b"
 served_variant = "cerebras-wafer-scale"
@@ -47,7 +45,6 @@ capabilities = ["tools", "vision", "streaming", "thinking", "structured_output"]
 pricing = { input_per_mtok = 0.99, output_per_mtok = 1.49 }
 architecture = { parameter_count_b = 27.0, moe = false, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.8-27B", last_verified = "2026-09-20" }
 tier = "mid"
-open_weight = true
 strengths = ["speed", "cheap", "vision", "tool_use", "reasoning"]
 
 # Removed 2026-09-20: gemma-4-31b, zai-glm-4.7 and llama-3.3-70b. Cerebras
@@ -55,3 +52,4 @@ strengths = ["speed", "cheap", "vision", "tool_use", "reasoning"]
 # https://inference-docs.cerebras.ai/models/overview both list exactly two
 # serverless models, gpt-oss-120b and qwen-3.8-27b. Nothing in 20-routing,
 # 30-aliases or 62-ladders referenced the three removed rows.
+models_dev = {provider = "cerebras", model = "qwen-3.8-27b", fields = ["context_window", "open_weight"]}

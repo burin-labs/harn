@@ -1434,6 +1434,10 @@ harn provider catalog support --json-output
 harn provider catalog support --notes
 harn provider catalog support --output
 harn provider catalog support --stdout
+harn provider catalog update-source
+harn provider catalog update-source --input
+harn provider catalog update-source --live
+harn provider catalog update-source --source-dir
 harn provider catalog validate
 harn provider catalog validate --capabilities-overlay
 harn provider catalog validate --json

@@ -532,7 +532,7 @@ make_all = true
 
 [[artifact]]
 id = "provider-catalog"
-description = "Checked-in provider/model catalog TOML, capability TOML, JSON, schema, and downstream type bindings generated from one source-fragment graph."
+description = "Provider/model catalog TOML, capability TOML, JSON, schema, and type bindings generated from pinned Models.dev facts and Harn-owned source fragments."
 gen = "gen-provider-catalog"
 check = "check-provider-catalog"
 outputs = [

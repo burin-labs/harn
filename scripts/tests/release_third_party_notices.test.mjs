@@ -6,6 +6,18 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { render, configuration, normalizeInventory, sourceFingerprint, verify } from '../release_third_party_notices.mjs';
 
+test('the packaged provider catalog retains the Models.dev MIT notice', () => {
+  const pkg = { name: 'harn-provider-catalog', version: 'workspace', source: null,
+    manifest_path: new URL('../../crates/harn-provider-catalog/Cargo.toml', import.meta.url).pathname };
+  const inventory = normalizeInventory({ crates: [{ package: pkg, license: 'MIT' }],
+    licenses: [{ id: 'MIT', text: 'MIT dependency license', used_by: [{ crate: pkg }] }] });
+  const notice = inventory.crates[0].package.notices.find(entry => entry.name === 'NOTICE.models-dev');
+  assert.ok(notice, 'the owning release inventory must discover the actual source notice');
+  assert.match(notice.text, /Copyright \(c\) 2025 models.dev/);
+  assert.match(notice.text, /THE SOFTWARE IS PROVIDED "AS IS"/);
+  assert.ok(render(inventory).includes(notice.text), 'the full upstream notice must reach packaged notices');
+});
+
 test('modified workspace components retain their actual attribution notice', () => {
   const pkg = { name: 'harn-aws-config', version: '0.10.159', source: null,
     notices: [{ name: 'NOTICE.harn', text: 'Modified AWS SDK source; retain upstream attribution.' }] };

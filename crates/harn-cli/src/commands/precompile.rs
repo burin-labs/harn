@@ -1,7 +1,7 @@
 //! Compile adjacent bytecode and imported interfaces for `harn precompile`.
 //!
-//! The embedded driver owns the directory walk and bounded subprocess fanout.
-//! Its inner compiler validates each source and emits or reuses all artifacts.
+//! The embedded driver owns the directory walk, placement, and rendering. One
+//! inner batch child compiles every source and emits or reuses all artifacts.
 use std::path::Path;
 
 use harn_package::precompile::{precompile_source, Outcome, Precompiled};
@@ -16,6 +16,7 @@ use crate::env_guard::ScopedEnvVar;
 use crate::parse_source_file;
 use crate::typecheck_imports::checker_with_resolved_graph;
 
+mod batch;
 mod warm_cache;
 
 /// Per-source result consumed by the embedded directory driver. Successful
@@ -30,6 +31,7 @@ pub const PRECOMPILE_ARTIFACT_CONTRACT: &str = "harn.precompile.artifacts/reloca
 const PRECOMPILE_OUT_ENV: &str = "HARN_PRECOMPILE_OUT";
 const PRECOMPILE_KEEP_GOING_ENV: &str = "HARN_PRECOMPILE_KEEP_GOING";
 const PRECOMPILE_QUIET_ENV: &str = "HARN_PRECOMPILE_QUIET";
+/// `1` compiles the target here; `batch` compiles every source its manifest names.
 pub const PRECOMPILE_INNER_ENV: &str = "HARN_PRECOMPILE_INNER";
 
 pub async fn run(args: PrecompileArgs) {
@@ -41,9 +43,10 @@ pub async fn run(args: PrecompileArgs) {
         warm_cache::run(&args);
         return;
     }
-    if std::env::var(PRECOMPILE_INNER_ENV).as_deref() == Ok("1") {
-        run_inner_compile(args);
-        return;
+    match std::env::var(PRECOMPILE_INNER_ENV).as_deref() {
+        Ok("1") => return run_inner_compile(args),
+        Ok("batch") => return batch::run_args(&args),
+        _ => {}
     }
 
     let exe = std::env::current_exe().unwrap_or_else(|error| {
@@ -55,17 +58,14 @@ pub async fn run(args: PrecompileArgs) {
         .out
         .as_ref()
         .map(|p| ScopedEnvVar::set(PRECOMPILE_OUT_ENV, &p.to_string_lossy()));
-    let _keep = if args.keep_going {
-        Some(ScopedEnvVar::set(PRECOMPILE_KEEP_GOING_ENV, "1"))
-    } else {
-        None
-    };
-    let _quiet = if args.quiet {
-        Some(ScopedEnvVar::set(PRECOMPILE_QUIET_ENV, "1"))
-    } else {
-        None
-    };
+    let _keep = args
+        .keep_going
+        .then(|| ScopedEnvVar::set(PRECOMPILE_KEEP_GOING_ENV, "1"));
+    let _quiet = args
+        .quiet
+        .then(|| ScopedEnvVar::set(PRECOMPILE_QUIET_ENV, "1"));
     let _jobs = ScopedEnvVar::set(PRECOMPILE_JOBS_ENV, &args.resolved_jobs().to_string());
+    let batch_dir = batch::BatchDir::create();
 
     let target = args
         .target
@@ -83,6 +83,7 @@ pub async fn run(args: PrecompileArgs) {
         /* json_mode */ false,
     )
     .await;
+    drop(batch_dir);
     if exit != 0 {
         std::process::exit(exit);
     }

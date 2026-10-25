@@ -65,6 +65,8 @@
 //! - **`move_symbol`**: move a top-level Rust, TS/JS, or Python
 //!   declaration to another module and rewrite imports and qualified
 //!   uses in every referencing file, all-or-nothing.
+//! - **`language_server`**: whether a rename of a file would reach a
+//!   language server, from the lookup the rename uses, without starting one.
 //!
 //! ## Concurrency model
 //!
@@ -91,6 +93,7 @@ mod imports_swift;
 #[cfg(test)]
 mod java_binding_tests;
 mod java_bindings;
+mod language_server;
 mod lsp;
 mod module_graph;
 mod module_index;
@@ -677,6 +680,13 @@ impl HostlibCapability for CodeIndexCapability {
             module_graph::BUILTIN,
             "module_graph",
             module_graph::run,
+        );
+        register(
+            registry,
+            self.index.clone(),
+            language_server::BUILTIN,
+            "language_server",
+            language_server::run,
         );
 
         // Cross-file safe rename (issue #2508). Builds on the typed

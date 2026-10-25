@@ -1264,7 +1264,8 @@ enum GraphOutputs {
     InterfaceProof,
     /// The hashes plus a manifest a later process can re-check with stats.
     Manifest,
-    /// As [`Self::Manifest`], plus the entry module's compilation context.
+    /// As [`Self::Manifest`], plus the entry module's compilation context and
+    /// the module graph it was projected from.
     ManifestAndEntryContext,
 }
 
@@ -1273,6 +1274,7 @@ struct GraphHashes {
     relocatable: [u8; 32],
     manifest: Option<ContextManifest>,
     entry_compilation_context: Option<ModuleCompilationContext>,
+    module_graph: Option<harn_modules::ModuleGraph>,
 }
 
 fn walk_import_graph_fingerprinted(
@@ -1399,6 +1401,7 @@ fn walk_import_graph_fingerprinted(
     // it beside each source digest; content alone has not been a complete
     // module compilation identity since imported callable lowering shipped.
     let mut entry_compilation_context = None;
+    let mut module_graph = None;
     if manifest.is_some() && outputs != GraphOutputs::InterfaceProof {
         let graph = harn_modules::build_with_source(source_path, source);
         manifest
@@ -1438,6 +1441,9 @@ fn walk_import_graph_fingerprinted(
             manifest = None;
             entry_compilation_context = None;
         }
+        if outputs == GraphOutputs::ManifestAndEntryContext {
+            module_graph = Some(graph);
+        }
     }
 
     let mut canonical_hasher = Sha256::new();
@@ -1466,6 +1472,7 @@ fn walk_import_graph_fingerprinted(
         relocatable,
         manifest,
         entry_compilation_context,
+        module_graph,
     }
 }
 

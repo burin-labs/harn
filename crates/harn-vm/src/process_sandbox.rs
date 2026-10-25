@@ -39,6 +39,7 @@ pub use crate::stdlib::sandbox::{
 
 pub use crate::stdlib::git_topology::check_repository_metadata_scope;
 pub use crate::stdlib::sandbox::command_output_with_declared_roots;
+pub use crate::stdlib::sandbox::workspace_env::rust_toolchain_homes;
 
 impl ProcessSandboxScope {
     /// Parse the shared per-command workspace scope at the process boundary.

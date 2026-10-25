@@ -19,12 +19,12 @@ provider = "dashscope"
 wire_model = "qwen3-coder-plus"
 served_variant = "dashscope"
 api_dialect = "openai_chat"
-context_window = 1048576
 capabilities = ["tools", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.20 }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "long_context", "tool_use"]
+models_dev = {provider = "alibaba", model = "qwen3-coder-plus", fields = ["context_window"]}
 
 [models."dashscope/qwen3-coder-next"]
 name = "Qwen3 Coder Next (DashScope)"
@@ -51,12 +51,11 @@ logical_model = "qwen3.6-35b-a3b"
 equivalence_group = "qwen3.6-35b-a3b"
 served_variant = "dashscope"
 api_dialect = "openai_chat"
-context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.375, output_per_mtok = 2.25, cache_read_per_mtok = 0.075 }
 tier = "mid"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "long_context", "cheap"]
+models_dev = {provider = "alibaba", model = "qwen3.6-35b-a3b", fields = ["context_window", "open_weight"]}
 
 [models."dashscope/qwen3.5-397b-a17b"]
 name = "Qwen3.5 397B A17B (DashScope)"
@@ -64,17 +63,16 @@ provider = "dashscope"
 wire_model = "qwen3.5-397b-a17b"
 served_variant = "dashscope"
 api_dialect = "openai_chat"
-context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.60, output_per_mtok = 3.60, cache_read_per_mtok = 0.12 }
 architecture = { parameter_count_b = 397.0, active_parameter_count_b = 17.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B", last_verified = "2026-07-02" }
 benchmarks = { swe_bench_verified = 76.4 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 
 # Qwen3.7-Max — Alibaba's closed frontier tier; flat (non-tiered) $2.50 /
 # $7.50 per MTok with a 1M window on DashScope.
+models_dev = {provider = "alibaba", model = "qwen3.5-397b-a17b", fields = ["context_window", "open_weight"]}
 [models."dashscope/qwen3.7-max"]
 name = "Qwen3.7 Max (DashScope)"
 provider = "dashscope"
@@ -83,11 +81,9 @@ logical_model = "qwen3.7-max"
 equivalence_group = "qwen3.7-max"
 served_variant = "dashscope"
 api_dialect = "openai_chat"
-context_window = 1000000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.50 }
 tier = "frontier"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning"]
 
 # Qwen3.8 Max on DashScope international (Singapore). Model Studio's pricing
@@ -101,6 +97,7 @@ strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning"]
 # `high` returned 200, and reasoning off was a 400 "Reasoning is mandatory".
 # Model Studio documents `enable_thinking` as a hybrid toggle for this model;
 # the capability rule takes the probe's side so Harn never sends the disable.
+models_dev = {provider = "alibaba", model = "qwen3.7-max", fields = ["context_window", "open_weight"]}
 [models."dashscope/qwen3.8-max"]
 name = "Qwen3.8 Max (DashScope)"
 provider = "dashscope"
@@ -109,13 +106,12 @@ logical_model = "qwen3.8-max"
 equivalence_group = "qwen3.8-max"
 served_variant = "dashscope"
 api_dialect = "openai_chat"
-context_window = 1000000
 released = "2026-09-02"
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 2.50 }
 tier = "frontier"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning", "vision"]
+models_dev = {provider = "alibaba", model = "qwen3.8-max", fields = ["context_window", "open_weight"]}
 
 [models."dashscope/qwen3.8-max-0902"]
 name = "Qwen3.8 Max 0902 (DashScope)"
@@ -125,10 +121,8 @@ logical_model = "qwen3.8-max"
 equivalence_group = "qwen3.8-max"
 served_variant = "dashscope"
 api_dialect = "openai_chat"
-context_window = 1000000
-released = "2026-09-02"
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 2.50 }
 tier = "frontier"
-open_weight = false
 strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning", "vision"]
+models_dev = {provider = "alibaba", model = "qwen3.8-max-0902", fields = ["context_window", "open_weight", "released"]}

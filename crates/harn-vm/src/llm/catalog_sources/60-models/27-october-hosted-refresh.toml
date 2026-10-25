@@ -12,47 +12,41 @@
 [models."nvidia/nemotron-3.5-super-vl"]
 name = "Nemotron 3.5 Super VL (OpenRouter)"
 provider = "openrouter"
-context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.50, cache_read_per_mtok = 0.02 }
 logical_model = "nvidia-nemotron-3.5-super-vl"
 equivalence_group = "nvidia-nemotron-3.5-super-vl"
 family = "nvidia-nemotron"
 lineage = "nvidia-nemotron-3-5"
 tier = "mid"
-open_weight = true
 strengths = ["speed", "tool_use", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "nvidia/nemotron-3.5-super-vl", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."nvidia/nemotron-3.5-super-vl:free"]
 name = "Nemotron 3.5 Super VL (OpenRouter free)"
 provider = "openrouter"
 # The available account excludes this free endpoint under its privacy guard.
 availability = "unknown"
-context_window = 1000000
 capabilities = ["tools", "streaming", "thinking", "vision"]
-pricing = { input_per_mtok = 0.0, output_per_mtok = 0.0 }
 logical_model = "nvidia-nemotron-3.5-super-vl"
 equivalence_group = "nvidia-nemotron-3.5-super-vl"
 family = "nvidia-nemotron"
 lineage = "nvidia-nemotron-3-5"
 tier = "mid"
-open_weight = true
 strengths = ["cheap", "tool_use", "vision", "long_context"]
+models_dev = {provider = "openrouter", model = "nvidia/nemotron-3.5-super-vl:free", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."together/nvidia/NVIDIA-Nemotron-3.5-Super-VL"]
 name = "Nemotron 3.5 Super VL (Together)"
 provider = "together"
 wire_model = "nvidia/NVIDIA-Nemotron-3.5-Super-VL"
-context_window = 262144
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.50, cache_read_per_mtok = 0.02 }
 logical_model = "nvidia-nemotron-3.5-super-vl"
 equivalence_group = "nvidia-nemotron-3.5-super-vl"
 family = "nvidia-nemotron"
 lineage = "nvidia-nemotron-3-5"
 tier = "mid"
-open_weight = true
 strengths = ["speed", "tool_use", "vision", "long_context"]
+models_dev = {provider = "togetherai", model = "nvidia/NVIDIA-Nemotron-3.5-Super-VL", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."deepinfra/nvidia/NVIDIA-Nemotron-3.5-Super-VL"]
 name = "Nemotron 3.5 Super VL (DeepInfra)"
@@ -72,116 +66,103 @@ strengths = ["speed", "tool_use", "vision", "long_context"]
 [models."nvidia/nemotron-3.5-super-vl-120b-a12b"]
 name = "Nemotron 3.5 Super VL (NVIDIA)"
 provider = "nvidia"
-context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "vision"]
 logical_model = "nvidia-nemotron-3.5-super-vl"
 equivalence_group = "nvidia-nemotron-3.5-super-vl"
 family = "nvidia-nemotron"
 lineage = "nvidia-nemotron-3-5"
 tier = "mid"
-open_weight = true
 strengths = ["tool_use", "vision", "long_context"]
+models_dev = {provider = "nvidia", model = "nvidia/nemotron-3.5-super-vl-120b-a12b", fields = ["context_window", "open_weight"]}
 
 [models."vercel/nvidia/nemotron-3.5-super-vl"]
 name = "Nemotron 3.5 Super VL (Vercel AI Gateway)"
 provider = "vercel_ai_gateway"
 wire_model = "nvidia/nemotron-3.5-super-vl"
-context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 0.50, cache_read_per_mtok = 0.04 }
 logical_model = "nvidia-nemotron-3.5-super-vl"
 equivalence_group = "nvidia-nemotron-3.5-super-vl"
 family = "nvidia-nemotron"
 lineage = "nvidia-nemotron-3-5"
 tier = "mid"
-open_weight = true
 strengths = ["tool_use", "vision", "long_context"]
+models_dev = {provider = "vercel", model = "nvidia/nemotron-3.5-super-vl", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."stepfun/step-5-preview"]
 name = "Step 5 Preview (OpenRouter)"
 provider = "openrouter"
-context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
-pricing = { input_per_mtok = 1.00, output_per_mtok = 2.70, cache_read_per_mtok = 0.10 }
 family = "stepfun-step"
 lineage = "stepfun-step-5"
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+models_dev = {provider = "openrouter", model = "stepfun/step-5-preview", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."deepinfra/stepfun-ai/Step-5-Preview"]
 name = "Step 5 Preview (DeepInfra)"
 provider = "deepinfra"
 wire_model = "stepfun-ai/Step-5-Preview"
-context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
 pricing = { input_per_mtok = 1.00, output_per_mtok = 2.70, cache_read_per_mtok = 0.05 }
 family = "stepfun-step"
 lineage = "stepfun-step-5"
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+models_dev = {provider = "deepinfra", model = "stepfun-ai/Step-5-Preview", fields = ["context_window", "open_weight"]}
 
 [models."inception/mercury-2.5"]
 name = "Mercury 2.5 (OpenRouter)"
 provider = "openrouter"
-context_window = 260000
 capabilities = ["streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.04, output_per_mtok = 0.15, cache_read_per_mtok = 0.004 }
 # Indexed, but live tool and effort probes returned upstream 502 errors.
 availability = "unknown"
 family = "inception-mercury"
 lineage = "inception-mercury-2"
 tier = "mid"
-open_weight = false
 strengths = ["speed", "cheap"]
+models_dev = {provider = "openrouter", model = "inception/mercury-2.5", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."mercury-2.5"]
 name = "Mercury 2.5 (Inception)"
 provider = "inception"
-context_window = 260000
 capabilities = ["streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 0.75 }
 availability = "unknown"
 family = "inception-mercury"
 lineage = "inception-mercury-2"
 tier = "mid"
-open_weight = false
 strengths = ["speed", "cheap"]
+models_dev = {provider = "inception", model = "mercury-2.5", fields = ["context_window", "open_weight"]}
 
 [models."fireworks/ember-1"]
 name = "Ember 1 (OpenRouter)"
 provider = "openrouter"
-context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
 family = "fireworks-ember"
 lineage = "fireworks-ember-1"
 tier = "frontier"
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+models_dev = {provider = "openrouter", model = "fireworks/ember-1", fields = ["context_window", "pricing"]}
 
 [models."accounts/fireworks/models/ember-1"]
 name = "Ember 1 (Fireworks)"
 provider = "fireworks"
-context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
 family = "fireworks-ember"
 lineage = "fireworks-ember-1"
 tier = "frontier"
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+models_dev = {provider = "fireworks-ai", model = "accounts/fireworks/models/ember-1", fields = ["context_window", "pricing"]}
 
 [models."inclusionai/ling-3.1-flash"]
 name = "Ling 3.1 Flash (OpenRouter)"
 provider = "openrouter"
-context_window = 262144
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.075, output_per_mtok = 0.225, cache_read_per_mtok = 0.015 }
 family = "inclusionai-ling"
 lineage = "inclusionai-ling-3"
 tier = "mid"
-open_weight = true
 strengths = ["speed", "cheap", "tool_use"]
+models_dev = {provider = "openrouter", model = "inclusionai/ling-3.1-flash", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."deepinfra/inclusionAI/Ling-3.1-flash"]
 name = "Ling 3.1 Flash (DeepInfra)"
@@ -199,24 +180,20 @@ strengths = ["speed", "cheap", "tool_use"]
 [models."liquid/lfm-2.5-24b-a2b"]
 name = "LFM 2.5 24B A2B (OpenRouter)"
 provider = "openrouter"
-context_window = 128000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.05, output_per_mtok = 0.70, cache_read_per_mtok = 0.025 }
 family = "liquid-lfm"
 lineage = "liquid-lfm-2-5"
 tier = "mid"
-open_weight = true
 strengths = ["speed", "cheap", "tool_use"]
 
 # Vision specialists do not advertise function calling in their route index.
+models_dev = {provider = "openrouter", model = "liquid/lfm-2.5-24b-a2b", fields = ["context_window", "open_weight", "pricing"]}
 [models."moondream/moondream3.1-9b-a2b"]
 name = "Moondream 3.1 (OpenRouter)"
 provider = "openrouter"
-context_window = 32000
 capabilities = ["streaming", "vision", "thinking"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50 }
 family = "moondream"
 lineage = "moondream-3"
 tier = "small"
-open_weight = true
 strengths = ["vision"]
+models_dev = {provider = "openrouter", model = "moondream/moondream3.1-9b-a2b", fields = ["context_window", "open_weight", "pricing"]}
