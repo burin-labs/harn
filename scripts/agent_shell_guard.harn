@@ -865,7 +865,7 @@ pub fn git_config_aliases(listing: string) -> dict {
     if !line.starts_with("alias.") {
       continue
     }
-    const body = line.replace("alias.", "")
+    const body = line.substring(len("alias."), len(line))
     const space = body.index_of(" ")
     if space > 0 {
       aliases[body.substring(0, space)] = body.substring(space + 1, len(body)).trim()
@@ -1027,6 +1027,26 @@ const GIT_BUILTIN_COMMANDS: list<string> = [
   "worktree",
   "write-tree",
 ]
+
+/** Environment variables that change which configuration git reads. */
+const GIT_CONFIG_SOURCE_VARIABLES: list<string> = [
+  "GIT_CONFIG",
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "XDG_CONFIG_HOME",
+  "HOME=",
+]
+
+/** Whether the command text names a variable that redirects git's configuration. */
+fn command_sets_git_config_source(command: string) -> bool {
+  for variable in GIT_CONFIG_SOURCE_VARIABLES {
+    if command.contains(variable) {
+      return true
+    }
+  }
+  return false
+}
 
 /** Key a lookup returns when git could not read the configuration the command selects. */
 pub const GIT_ALIASES_UNREADABLE: string = "<unreadable>"
@@ -1222,7 +1242,14 @@ pub fn git_stash_violation(
   command: string,
   alias_lookup: fn(list<string>) -> dict = NO_CONFIG_ALIASES,
 ) -> string {
-  if !git_stash_write_in(command, 0, alias_lookup) {
+  // A command that sets git's configuration sources runs under a configuration the lookup, which
+  // runs in the hook's own environment, cannot see. Its non-built-in subcommands are unreadable.
+  const lookup = if command_sets_git_config_source(command) {
+    { options -> {"<unreadable>": ""} }
+  } else {
+    alias_lookup
+  }
+  if !git_stash_write_in(command, 0, lookup) {
     return ""
   }
   return "`git stash` is refused: the stash list is shared by every linked worktree, so a pop can apply "

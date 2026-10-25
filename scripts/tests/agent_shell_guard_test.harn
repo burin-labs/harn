@@ -1255,6 +1255,38 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
       command + " must not consult the alias lookup",
     )
   }
+  // Config text that itself contains "alias." keeps its expansion intact.
+  const nested = git_config_aliases("alias.foo !git -c alias.s=stash s pop\n")
+  assert_eq(nested["foo"], "!git -c alias.s=stash s pop")
+  assert(
+    !decision(claude_payload("git foo"), ADMITTED, NO_MAKE_TARGETS, { options -> nested }).allow,
+    "an alias that defines an inner alias still reaches the stash write",
+  )
+  // A command-local config source is invisible to the lookup, so a non-built-in subcommand under it
+  // is refused even when the lookup reads nothing; a built-in under it is not.
+  for command in [
+    "GIT_CONFIG_GLOBAL=/tmp/aliases git s",
+    "env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.s GIT_CONFIG_VALUE_0='stash pop' git s",
+    "export GIT_CONFIG_GLOBAL=/tmp/aliases; git s",
+    "HOME=/tmp/h sh -c 'git s'",
+  ] {
+    assert(
+      !decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, lookup).allow,
+      command + " runs under a configuration the lookup cannot read",
+    )
+  }
+  assert(
+    decision(
+      claude_payload("GIT_CONFIG_GLOBAL=/tmp/aliases git status"),
+      ADMITTED,
+      NO_MAKE_TARGETS,
+      lookup,
+    ).allow,
+  )
+  assert(
+    decision(claude_payload("git s"), ADMITTED, NO_MAKE_TARGETS, lookup).allow,
+    "the falsifier: no source override, no alias in A",
+  )
   assert_eq(GIT_ALIASES_UNREADABLE, "<unreadable>")
 }
 
