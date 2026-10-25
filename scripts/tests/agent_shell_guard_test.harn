@@ -1176,6 +1176,12 @@ pipeline test_unresolved_xargs_forms_still_refuse_stash_writes(harness: Harness,
     "xargs -a input bash -lc \"git -C /workspace stash pop\"",
     "xargs -a input env GIT_DIR=/x git stash",
     "xargs -a input -I{} sh -c 'git stash drop {}'",
+    "xargs -a f python3 -c 'import os; os.system(\"git stash drop\")'",
+    "xargs -a f perl -e 'system \"git stash clear\"'",
+    "xargs -a f node -e 'require(\"child_process\").execSync(\"git stash pop\")'",
+    "xargs -a f sh -c 'eval \"git stash\"'",
+    "xargs -a f git --config-env=alias.s=SAVED s pop",
+    "xargs -a f grep stash",
   ] {
     assert(!verdict(claude_payload(command)).allow, command + " writes the shared stash list")
   }
