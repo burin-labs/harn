@@ -165,7 +165,13 @@ Follow the runs for that commit in
 Before promotion, the candidate's exact source needs a successful
 `macos-nightly.yml` run through `workflow_dispatch`. The candidate run starts
 it: `scripts/ci/dispatch_native_qualification.sh` dispatches the main revision of
-the workflow with the candidate's `source_sha`. Before executing candidate code,
+the workflow with the candidate's `source_sha`. The producer waits up to
+85 minutes for the native proof beside the archive builds. Failed, missing,
+or unreadable proof blocks the consumer rehearsal and candidate verdict,
+instead of waiting until promotion. The run preserves
+`harn.release.native_qualification.v1` JSON with the source SHA, verdict,
+pending and failing job names, and next action.
+Before executing candidate code,
 the trusted workflow verifies that this source is a main ancestor and measures
 both allowed execution and a refused write through process confinement on the
 owned Mac. Scheduled source candidates don't start it. Arbitrary branch sources

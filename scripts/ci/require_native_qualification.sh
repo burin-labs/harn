@@ -2,8 +2,10 @@
 # Read-only publication qualification under the release platform policy.
 native_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$native_script_dir/../lib/native_qualification_receipt.sh" ]]; then
+  # shellcheck source=scripts/lib/native_qualification_receipt.sh
   source "$native_script_dir/../lib/native_qualification_receipt.sh"
 else
+  # shellcheck source=scripts/lib/native_qualification_receipt.sh
   source "$native_script_dir/lib/native_qualification_receipt.sh"
 fi
 
@@ -12,7 +14,7 @@ native_qualification_unmeasured() {
 }
 
 require_native_platform() {
-  local repo=$1 source=$2 policy=$3 workflow name metadata pages runs selected id attempt run jobs verdict revision receipt
+  local repo=$1 source=$2 policy=$3 workflow name metadata pages runs selected id attempt run jobs verdict revision discovery
   workflow=$(jq -r .workflow_path <<< "$policy")
   name=$(jq -r .name <<< "$policy")
   # A known positive workflow read precedes trusting an empty run census.
@@ -21,7 +23,8 @@ require_native_platform() {
     native_qualification_unmeasured "$name:workflow"
     return 1
   fi
-  if ! pages=$(gh api --paginate --slurp "repos/$repo/actions/workflows/${workflow##*/}/runs?event=workflow_dispatch&branch=main&per_page=100") ||
+  for ((discovery=0; ; discovery++)); do
+    if ! pages=$(gh api --paginate --slurp "repos/$repo/actions/workflows/${workflow##*/}/runs?event=workflow_dispatch&branch=main&per_page=100") ||
     ! runs=$(jq -ce --arg source "$source" --arg repo "$repo" --arg path "$workflow" --argjson workflow "$(jq .id <<< "$metadata")" '
       if type != "array" or length == 0 or any(.[]; (.workflow_runs | type) != "array" or (.total_count | type) != "number")
       then error("unmeasured native run census")
@@ -34,13 +37,17 @@ require_native_platform() {
           and (.run_attempt | type == "number" and . > 0 and floor == .)) then . else error("foreign native run") end
         | map(select(.display_title == ("Native qualification " + $source))) end
     ' <<< "$pages"); then
-    native_qualification_unmeasured "$name:runs"
-    return 1
-  fi
-  if [[ $(jq length <<< "$runs") == 0 ]]; then
-    jq -nc --arg platform "$name" '{kind:"harn.release.native_qualification",platform:$platform,status:"missing",runs:0,pending_count:1,failed_count:0,missing:["exact-source workflow dispatch"]}'
-    return 1
-  fi
+      native_qualification_unmeasured "$name:runs"
+      return 1
+    fi
+    [[ $(jq length <<< "$runs") == 0 ]] || break
+    if [[ ${WAIT_FOR_FULL_SUITE:-false} != true || $discovery -ge 24 ]]; then
+      jq -nc --arg platform "$name" '{kind:"harn.release.native_qualification",platform:$platform,status:"missing",runs:0,pending_count:1,failed_count:0,missing:["exact-source workflow dispatch"]}'
+      return 1
+    fi
+    # Dispatch acceptance can precede visibility in the run census.
+    sleep 5
+  done
   selected=$(jq -c 'max_by(.id)' <<< "$runs")
   id=$(jq -r .id <<< "$selected")
   attempt=$(jq -r .run_attempt <<< "$selected")
@@ -72,11 +79,7 @@ require_native_platform() {
     native_qualification_unmeasured "$name:jobs"
     return 1
   fi
-  if ! receipt=$(read_native_qualification_receipt "$repo" "$source" "$policy" "$run"); then
-    native_qualification_unmeasured "$name:receipt"
-    return 1
-  fi
-  if ! verdict=$(jq -nce --argjson policy "$policy" --argjson run "$run" --argjson jobs "$jobs" --argjson receipt "$receipt" '
+  if ! verdict=$(jq -nce --argjson policy "$policy" --argjson run "$run" --argjson jobs "$jobs" --arg source "$source" '
     [$jobs[] | select(.name == $policy.required_job)] as $matches |
     (if ($matches | length) == 1 then $matches[0] else null end) as $job |
     [$policy.required_steps[] | . as $name |
@@ -85,7 +88,7 @@ require_native_platform() {
       else $steps[0] | {name,status,conclusion} end] as $steps |
     ([{name:"workflow run",status:$run.status,conclusion:$run.conclusion},
       {name:$policy.required_job,status:($job.status // "missing-or-duplicate"),conclusion:$job.conclusion}] + $steps) as $conditions |
-    {kind:"harn.release.native_qualification",platform:$policy.name,source:$receipt.source_sha,policy_source:$run.head_sha,run_id:$run.id,attempt:$run.run_attempt,
+    {kind:"harn.release.native_qualification",platform:$policy.name,source:$source,policy_source:$run.head_sha,run_id:$run.id,attempt:$run.run_attempt,
       observed_jobs:($jobs|length),required_steps:($steps|length),
       pending:[$conditions[]|select(.status != "completed")|.name],
       failures:[$conditions[]|select(.status == "completed" and .conclusion != "success")|.name],
@@ -96,6 +99,13 @@ require_native_platform() {
       and .job_conclusion == "success" and .pending_count == 0 and .failed_count == 0 then "complete" else "refused" end)
   '); then
     native_qualification_unmeasured "$name:verdict"
+    return 1
+  fi
+  # Failed execution is already a refusal. Only successful execution can have
+  # produced the authenticated receipt required to qualify this source.
+  if jq -e '.status == "complete"' <<< "$verdict" >/dev/null &&
+    ! read_native_qualification_receipt "$repo" "$source" "$policy" "$run" >/dev/null; then
+    native_qualification_unmeasured "$name:receipt"
     return 1
   fi
   printf '%s\n' "$verdict"
@@ -129,5 +139,29 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     echo 'usage: require_native_qualification.sh OWNER/REPO SOURCE_SHA POLICY_JSON' >&2
     exit 2
   fi
-  require_native_qualification "$1" "$2" "$3"
+  if [[ -n ${NATIVE_QUALIFICATION_STATUS_FILE:-} ]]; then
+    jq -nc --arg source "$2" \
+      '{kind:"harn.release.native_qualification.v1",stage:"native-qualification",source_sha:$source,
+        verdict:"unmeasured",pending_count:null,failed_count:null,failing_jobs:[],pending_jobs:[],next_action:"retry-read"}' \
+      > "$NATIVE_QUALIFICATION_STATUS_FILE"
+  fi
+  status=0
+  qualification=$(require_native_qualification "$1" "$2" "$3") || status=$?
+  verdict=$(jq -sc --arg source "$2" --argjson status "$status" '
+    . as $platforms |
+    {kind:"harn.release.native_qualification.v1",stage:"native-qualification",source_sha:$source,platforms:$platforms,
+      pending_jobs:[$platforms[] | (.pending // .missing // [])[]],failing_jobs:[$platforms[].failures[]?]} |
+    .pending_count = (if any($platforms[]; .pending_count == null) then null else [$platforms[].pending_count] | add end) |
+    .failed_count = (if any($platforms[]; .failed_count == null) then null else [$platforms[].failed_count] | add end) |
+    .verdict = (if ($platforms|length) == 0 or any($platforms[]; .status == "unmeasured") then "unmeasured"
+      elif $status == 0 and all($platforms[]; .status == "complete") then "success"
+      else "failure" end) |
+    .next_action = (if .verdict == "success" then "continue" elif .verdict == "unmeasured" then "retry-read" else "inspect-native-qualification" end)
+  ' <<< "$qualification")
+  if [[ -n ${NATIVE_QUALIFICATION_STATUS_FILE:-} ]]; then
+    printf '%s\n' "$verdict" > "$NATIVE_QUALIFICATION_STATUS_FILE"
+  fi
+  printf '%s\n' "$verdict"
+  jq -e '.verdict == "success"' <<< "$verdict" >/dev/null || exit 1
+  exit "$status"
 fi
