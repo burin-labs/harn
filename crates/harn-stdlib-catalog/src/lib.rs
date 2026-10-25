@@ -117,6 +117,12 @@ pub fn install(catalog: &'static LazyCatalog) -> Result<(), CatalogAlreadyInstal
     }
 }
 
+/// Whether a catalog is installed, without building it. Startup checks use
+/// this so a command that never runs Harn code never pays for the catalog.
+pub fn ensure_installed() -> Result<(), CatalogNotInstalled> {
+    INSTALLED.get().map(|_| ()).ok_or(CatalogNotInstalled)
+}
+
 /// The installed catalog.
 pub fn installed() -> Result<&'static StdlibCatalog, CatalogNotInstalled> {
     INSTALLED
@@ -190,13 +196,28 @@ mod tests {
         );
     }
 
+    static BUILDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static COUNTED: LazyCatalog = LazyCatalog::new(|| {
+        BUILDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        StdlibCatalog {
+            sources: &[],
+            prompt_assets: &[],
+            cli_scripts: &[],
+        }
+    });
+
     #[test]
     fn a_reader_before_install_gets_a_typed_error_then_the_one_catalog() {
         assert_eq!(installed().err(), Some(CatalogNotInstalled));
-        install(&ONE).expect("first install");
-        install(&ONE).expect("same catalog again");
+        assert_eq!(ensure_installed(), Err(CatalogNotInstalled));
+        install(&COUNTED).expect("first install");
+        install(&COUNTED).expect("same catalog again");
         assert_eq!(install(&OTHER), Err(CatalogAlreadyInstalled));
-        let one: &StdlibCatalog = &ONE;
-        assert!(std::ptr::eq(installed().expect("installed"), one));
+        // Startup checks must not decode the catalog: `harn --version` does one.
+        ensure_installed().expect("installed");
+        assert_eq!(BUILDS.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let counted: &StdlibCatalog = &COUNTED;
+        assert!(std::ptr::eq(installed().expect("installed"), counted));
+        assert_eq!(BUILDS.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }
