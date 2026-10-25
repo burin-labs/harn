@@ -33,6 +33,8 @@ pub const PRECOMPILE_ARTIFACT_CONTRACT: &str = "harn.precompile.artifacts/reloca
 const PRECOMPILE_OUT_ENV: &str = "HARN_PRECOMPILE_OUT";
 const PRECOMPILE_KEEP_GOING_ENV: &str = "HARN_PRECOMPILE_KEEP_GOING";
 const PRECOMPILE_QUIET_ENV: &str = "HARN_PRECOMPILE_QUIET";
+/// `1` compiles the target in this process; `batch` reads the target as the
+/// directory driver's source manifest and compiles every source it names.
 pub const PRECOMPILE_INNER_ENV: &str = "HARN_PRECOMPILE_INNER";
 
 pub async fn run(args: PrecompileArgs) {
@@ -44,13 +46,20 @@ pub async fn run(args: PrecompileArgs) {
         warm_cache::run(&args);
         return;
     }
-    if std::env::var(PRECOMPILE_INNER_ENV).as_deref() == Ok("1") {
-        if let Some(manifest) = &args.batch {
+    match std::env::var(PRECOMPILE_INNER_ENV).as_deref() {
+        Ok("1") => {
+            run_inner_compile(args);
+            return;
+        }
+        Ok("batch") => {
+            let manifest = args
+                .target
+                .as_deref()
+                .unwrap_or_else(|| command_error("precompile manifest is required"));
             batch::run(manifest, args.resolved_jobs(), args.keep_going);
             return;
         }
-        run_inner_compile(args);
-        return;
+        _ => {}
     }
 
     let exe = std::env::current_exe().unwrap_or_else(|error| {

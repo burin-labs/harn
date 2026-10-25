@@ -2,7 +2,7 @@
  * `harn precompile` ported to .harn — see harn#2313 (W13).
  *
  * Walks a file or directory tree and hands every `.harn` source to one
- * `harn precompile --batch` child that runs the Rust compiler entrypoint on a
+ * batch `harn precompile` child that runs the Rust compiler entrypoint on a
  * worker pool. The .harn script owns:
  *
  *   * argv parsing (target, --out, --keep-going, --quiet)
@@ -12,8 +12,9 @@
  *     failed" summary
  *
  * The actual parse+typecheck+compile work stays in Rust on the spawned
- * child (toggled via HARN_PRECOMPILE_INNER=1 so the child doesn't recurse
- * back into this script). One child shares process startup, stdlib
+ * child (toggled via HARN_PRECOMPILE_INNER=batch, which also makes the
+ * child read its target as the source manifest, so it doesn't recurse back
+ * into this script). One child shares process startup, stdlib
  * preparation, and every shared import's parse across all sources; a child
  * per source repeated them for each file.
  *
@@ -151,11 +152,14 @@ fn __batch_records(
     manifest,
     json_stringify({relocatable: source_root != "", sources: sources}),
   )
-  let args = ["precompile", "--quiet", "--jobs", to_string(jobs), "--batch", manifest]
+  let args = ["precompile", "--quiet", "--jobs", to_string(jobs)]
   if keep_going {
     args.push("--keep-going")
   }
-  const child = harness.process.run({program: bin, args: args, env: {HARN_PRECOMPILE_INNER: "1"}})
+  args.push(manifest)
+  const child = harness.process.run(
+    {program: bin, args: args, env: {HARN_PRECOMPILE_INNER: "batch"}},
+  )
   if (child["exit_code"] ?? -1) != 0 {
     return Err(
       __render_failure("precompile batch", child["stderr"] ?? "", child["exit_code"] ?? -1),

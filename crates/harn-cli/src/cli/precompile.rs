@@ -7,26 +7,22 @@ use clap::Args;
 pub struct PrecompileArgs {
     /// File or directory to precompile. Directories are walked recursively
     /// for `.harn` files.
-    #[arg(required_unless_present_any = ["artifact_contract", "batch"])]
+    #[arg(required_unless_present = "artifact_contract")]
     pub target: Option<PathBuf>,
     /// Print the machine-readable adjacent-artifact compatibility contract.
     #[arg(
         long,
-        conflicts_with_all = ["target", "relocatable", "out", "keep_going", "quiet", "jobs", "warm_cache", "batch"]
+        conflicts_with_all = ["target", "relocatable", "out", "keep_going", "quiet", "jobs", "warm_cache"]
     )]
     pub artifact_contract: bool,
     /// Use a path-independent import-graph key for an artifact that moves
     /// with its complete source tree. Used by the directory-walk child.
     #[arg(long, hide = true)]
     pub relocatable: bool,
-    /// Compile the directory driver's source manifest in this one process and
-    /// print a per-source record for each. Used by the directory walk.
-    #[arg(long, hide = true, value_name = "MANIFEST", conflicts_with_all = ["target", "out", "relocatable"])]
-    pub batch: Option<PathBuf>,
     /// Prepare entries, modules, and interfaces in the runtime's shared cache
     /// for this installed tree, including reachable packages and stdlib. Does
     /// not execute source code. Repeat after moving the tree or changing Harn.
-    #[arg(long, conflicts_with_all = ["out", "relocatable", "jobs", "batch"])]
+    #[arg(long, conflicts_with_all = ["out", "relocatable", "jobs"])]
     pub warm_cache: bool,
     /// Output directory for `.harnbc`, `.harnmod`, and `.harnifc` artifacts. When omitted,
     /// each artifact is written next to its source. The directory tree
