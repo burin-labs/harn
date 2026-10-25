@@ -137,11 +137,14 @@ fn cosine_similarity_handles_orthogonal_and_parallel_vectors() {
 }
 
 #[test]
-fn sanitize_model_hint_strips_path_separators() {
-    assert_eq!(sanitize_model_hint(""), DEFAULT_EMBED_MODEL_HINT);
-    assert_eq!(sanitize_model_hint("voyage-2"), "voyage-2");
-    assert_eq!(sanitize_model_hint("../escape"), "___escape");
-    assert_eq!(sanitize_model_hint("ns/model"), "ns_model");
+fn vector_cache_model_keys_are_distinct_and_confined() {
+    let root = Path::new("memory-root");
+    let first = vector_cache_path(root, "agent", "ns/model", "text-hash").unwrap();
+    let second = vector_cache_path(root, "agent", "ns_model", "text-hash").unwrap();
+    assert_ne!(first, second);
+    let escape = vector_cache_path(root, "agent", "../escape", "text-hash").unwrap();
+    assert!(escape.starts_with(root.join("agent").join(VECTOR_CACHE_DIR)));
+    assert_eq!(escape.parent().unwrap().file_name().unwrap().len(), 64);
 }
 
 #[test]

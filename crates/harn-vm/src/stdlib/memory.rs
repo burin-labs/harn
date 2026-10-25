@@ -29,7 +29,7 @@ use crate::value::{VmError, VmValue};
 mod storage;
 use storage::{active_records, append_event, read_namespace_config, vector_cache_path};
 #[cfg(test)]
-use storage::{event_log_path, sanitize_model_hint};
+use storage::event_log_path;
 
 const MEMORY_TYPE: &str = "memory_record";
 const EVENT_LOG_FILE: &str = "events.jsonl";
