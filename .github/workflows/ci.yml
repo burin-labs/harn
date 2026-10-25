@@ -165,6 +165,14 @@ jobs:
         id: surface_filter
         with:
           filters: |
+            # Markdown the repository policy checks read. The `rust` filter
+            # excludes `*.md`, so these inputs select the proofs through the
+            # heavy-lane gate below instead.
+            policy_markdown:
+              - 'AGENTS.md'
+              - '.codex/**/*.md'
+              - 'crates/harn-skills/src/corpus/**/*.md'
+              - 'docs/src/maintainer-release.md'
             portal:
               - '.github/workflows/ci.yml'
               - 'crates/harn-cli/portal/**'
@@ -385,6 +393,7 @@ jobs:
         id: force
         env:
           F_RUST: ${{ steps.filter.outputs.rust }}
+          F_POLICY_MARKDOWN: ${{ steps.surface_filter.outputs.policy_markdown }}
           F_PACKAGE_AUDIT: ${{ steps.surface_filter.outputs.package_audit }}
           POST_MERGE_TIER_ACTIVE: ${{ steps.post_merge_tier.outputs.active }}
         #
@@ -397,6 +406,9 @@ jobs:
           else
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — heavy Linux Rust lanes gated by paths filter (rust=${F_RUST})"
             rust="${F_RUST}"
+            if [ "${F_POLICY_MARKDOWN}" = "true" ]; then
+              rust=true
+            fi
             package_audit="${F_PACKAGE_AUDIT}"
           fi
           {
