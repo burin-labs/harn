@@ -35,6 +35,18 @@ pipeline test_a_refusal_or_preview_that_writes_is_wrong_not_refused() {
   )
   assert_eq(wrote_preview.outcome, "applied_wrong")
   assert_eq(wrote_preview.reason, "preview_wrote")
+  const thrown: CallObservation = {
+    tag: "",
+    error: "backend exploded",
+    reported_files: [],
+    changed_files: ["src/lib.rs"],
+    wall_ms: 5,
+  }
+  const wrote_then_threw = classify_edit(
+    {preview: thrown, apply: nil, oracle_passed: nil, reference_files: nil},
+  )
+  assert_eq(wrote_then_threw.outcome, "applied_wrong")
+  assert_eq(wrote_then_threw.reason, "preview_wrote")
   const wrote_refusal = classify_edit(
     {
       preview: call("dry_run", ["src/lib.rs"], []),

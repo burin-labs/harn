@@ -58,11 +58,11 @@ fn same_files(a: list<string>, b: list<string>) -> bool {
  */
 pub fn classify_edit(obs: EditObservation) -> Verdict {
   const preview = obs.preview
-  if preview.error != nil {
-    return verdict("crashed", "preview_error")
-  }
   if len(preview.changed_files) > 0 {
     return verdict("applied_wrong", "preview_wrote")
+  }
+  if preview.error != nil {
+    return verdict("crashed", "preview_error")
   }
   if !ACCEPTED_TAGS.contains(preview.tag) {
     return verdict("refused", preview.tag)

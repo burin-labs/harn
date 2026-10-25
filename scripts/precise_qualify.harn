@@ -319,9 +319,9 @@ fn insert_query(language: string, name: string) -> string {
       + "\"))"
   }
   if language == "java" {
-    return "(class_declaration name: (identifier) @name body: (class_body) @anchor (#eq? @name \""
+    return "[(class_declaration name: (identifier) @name body: (class_body) @anchor) (enum_declaration name: (identifier) @name body: (enum_body) @anchor) (record_declaration name: (identifier) @name body: (class_body) @anchor)] (#eq? @name \""
       + name
-      + "\"))"
+      + "\")"
   }
   return "[(class_declaration name: (type_identifier) @name body: (class_body) @anchor) (abstract_class_declaration name: (type_identifier) @name body: (class_body) @anchor)] (#eq? @name \""
     + name
