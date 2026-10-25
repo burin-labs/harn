@@ -80,7 +80,11 @@ private struct RecapBindingProbe {
             } catch {}
         }
         // These kinds are emitted outside AgentEvent, so the adapter fixture omits them.
-        let nonEventKinds: Set<String> = ["available_commands_update", "live_session_client", "log"]
+        let nonEventKinds: Set<String> = [
+            "available_commands_update", "live_session_client", "log", "state_update",
+        ]
+        let stateUpdate: [String: Any] = ["sessionUpdate": "state_update", "state": "idle", "stopReason": "end_turn"]
+        try roundTrip(HarnACPTypedSessionUpdate.self, stateUpdate, stateUpdate)
         guard updateKinds.union(nonEventKinds) == Set(HarnProtocolConstants.acpSessionUpdateExtensions),
               updateKinds.isDisjoint(with: nonEventKinds) else {
             throw RecapBindingProbeError.incompleteSessionUpdateFixture
