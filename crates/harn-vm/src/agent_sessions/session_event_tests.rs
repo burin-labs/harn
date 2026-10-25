@@ -331,7 +331,7 @@ fn only_conversation_rows_are_history_positions() {
         |event: Value, raw: Option<Value>| TranscriptRecord::new(event, raw).is_history_position();
     assert!(position(
         serde_json::json!({"kind": "message", "role": "user"}),
-        Some(message.clone())
+        Some(message)
     ));
     assert!(position(serde_json::json!({"kind": "tool_call"}), None));
     assert!(position(serde_json::json!({"kind": "tool_result"}), None));
