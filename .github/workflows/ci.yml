@@ -151,15 +151,15 @@ jobs:
             exit 1
           fi
 
-      # The base this run's CLI is built on. `pull_request.base.sha` records
-      # the base tip when the event fired and lags main, so a base rehearsal
-      # built there blames the pull request for whatever landed since.
       - name: Resolve the merge commit's base
         id: merged_base
         if: github.event_name == 'pull_request'
         env:
           MERGE_SHA: ${{ github.sha }}
         run: |
+          # The base this run's CLI is built on. `pull_request.base.sha` records
+          # the base tip when the event fired and lags main, so a base rehearsal
+          # built there blames the pull request for whatever landed since.
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$MERGE_SHA" ]] || { echo "::error::checkout is not the merge commit $MERGE_SHA"; exit 1; }
           read -r -a parents <<< "$(git rev-list --parents -n 1 HEAD)"

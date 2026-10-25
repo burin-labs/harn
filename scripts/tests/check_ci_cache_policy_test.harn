@@ -50,7 +50,7 @@ import "./ci_cache_policy/policy_integration_test.harn"
 
 type PathFilters = dict<string, list<string>>
 
-// ci-status checks out its verdict script first, so address the aggregate by name.
+/** ci-status checks out its verdict script first, so address the aggregate by name. */
 fn aggregate_index(workflow: dict) -> int {
   for {index, value: step} in workflow.jobs["ci-status"].steps.enumerate() {
     if step?.name == "Verify required CI jobs" {
@@ -183,8 +183,16 @@ pipeline test_provider_probe_reuses_same_run_cli_without_live_authority(harness:
     status.steps[aggregate_index(ci)].env.PROVIDER_CONTRACT_PROBE_EXPECTED,
     "$" + "{{ needs.changes.outputs.provider_contract_probe }}",
   )
-  assert(status.steps[aggregate_index(ci)].run.contains("Provider contract probe scope was not measured."))
-  assert(status.steps[aggregate_index(ci)].run.contains("test \"$PROVIDER_CONTRACT_PROBE_EXPECTED\" = \"false\""))
+  assert(
+    status.steps[aggregate_index(ci)].run.contains(
+      "Provider contract probe scope was not measured.",
+    ),
+  )
+  assert(
+    status.steps[aggregate_index(ci)].run.contains(
+      "test \"$PROVIDER_CONTRACT_PROBE_EXPECTED\" = \"false\"",
+    ),
+  )
   // Standalone live runs keep their original build, branch policy and notifier.
   assert_eq(standalone.on?.pull_request, nil)
   assert_eq(standalone.on?.push, nil)
