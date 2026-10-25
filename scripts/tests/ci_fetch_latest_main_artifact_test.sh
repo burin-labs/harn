@@ -23,6 +23,15 @@ if (( count <= FAIL_FIRST )); then
   exit 1
 fi
 case "$2" in
+  *"/actions/artifacts?name=prefix-${GH_FAKE_SHA}&per_page=10")
+    jq -n --arg sha "$GH_FAKE_SHA" \
+      '{artifacts: [{id: 42, expired: false, workflow_run: {id: 99, head_branch: "main", head_sha: $sha}}]}'
+    ;;
+  *"/actions/runs/99")
+    jq -n --arg sha "$GH_FAKE_SHA" --arg event "${GH_FAKE_EVENT:-push}" \
+      '{id: 99, event: $event, head_branch: "main", head_sha: $sha,
+        path: ".github/workflows/ci.yml", repository: {id: 1, full_name: "o/r"}, head_repository: {id: 1}}'
+    ;;
   *"/commits?sha=main&per_page=30")
     echo '[{"sha":"aaa"},{"sha":"bbb"},{"sha":"ccc"}]'
     ;;
@@ -56,6 +65,7 @@ GH
 chmod +x "$root/bin/gh"
 export PATH="$root/bin:$PATH" GH_REPO=o/r GH_TOKEN=x FETCH_ARTIFACT_RETRY_SECONDS=0
 export GH_FAKE_COUNT="$root/count"
+export GH_FAKE_SHA=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 printf 'main measurement\n' > "$root/measurement.txt"
 (cd "$root" && zip -q "$root/measurement.zip" measurement.txt)
 export GH_FAKE_ZIP="$root/measurement.zip"
@@ -99,5 +109,20 @@ if out=$(GH_FAKE_EMPTY_OK=1 FAIL_FIRST=99 "$script" prefix- "$root/empty" 2>&1);
 fi
 [[ "$out" != *"No unexpired main artifact"* ]]
 [[ "$(cat "$GH_FAKE_COUNT")" == 3 ]]
+
+# Exact source readers neither scan nor substitute another main commit. A
+# main-named PR is not an authoritative baseline producer.
+rm -f "$GH_FAKE_COUNT"
+out=$(FAIL_FIRST=0 "$script" prefix- "$root/exact" "$GH_FAKE_SHA" 2>&1)
+[[ "$out" == *"Restored main artifact 42"* ]]
+[[ "$(cat "$root/exact/measurement.txt")" == "main measurement" ]]
+[[ "$(cat "$GH_FAKE_COUNT")" == 3 ]]
+rm -f "$GH_FAKE_COUNT"
+if GH_FAKE_EVENT=pull_request FAIL_FIRST=0 "$script" prefix- "$root/untrusted" "$GH_FAKE_SHA" > "$root/untrusted.log" 2>&1; then
+  echo 'A pull request artifact was trusted as a main baseline.' >&2
+  exit 1
+fi
+[[ ! -e "$root/untrusted/measurement.txt" ]]
+[[ "$(cat "$GH_FAKE_COUNT")" == 2 ]]
 
 echo "ci_fetch_latest_main_artifact_test: ok"

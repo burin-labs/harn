@@ -134,6 +134,18 @@ REPORT
 printf '       Crate harn-vm\n\033[1m\033[32m    Checking\033[0m <unknown> v1 -> v1\n\033[1m\033[32m     Checked\033[0m [ 0.1s] 196 checks: 195 pass, 1 fail\n\033[1m\033[33m     Summary\033[0m semver requires new major version: 1 major and 0 minor checks failed\n' \
   > "$tmp_root/colored.log"
 head -4 "$tmp_root/major.log" > "$tmp_root/truncated.log"
+awk '/^[[:space:]]*Checking / { print "       Crate " $2 } { print }' \
+  "$tmp_root/clean.log" > "$tmp_root/omitted-crate.log"
+printf '\n       Crate failed-before-checking\n' >> "$tmp_root/omitted-crate.log"
+cat > "$tmp_root/balanced-missing.log" <<'REPORT'
+       Crate harn-alpha
+    Checking <unknown> v1 -> v1
+     Summary no semver update required
+    Checking <unknown> v1 -> v1
+     Summary no semver update required
+       Crate harn-beta
+error: failed before checking
+REPORT
 : > "$tmp_root/empty.log"
 
 run_gate "$api" "$api_base" pass rust-api "$tmp_root/clean.log" | grep -q "no rust-api break"
@@ -145,6 +157,8 @@ run_gate "$api" "$api_base" fail rust-api "$tmp_root/skipped.log" | grep -q "ran
 run_gate "$api" "$api_base" fail rust-api "$tmp_root/colored.log" \
   | grep -qx "  - harn-vm: semver requires new major version: 1 major and 0 minor checks failed"
 run_gate "$api" "$api_base" fail rust-api "$tmp_root/truncated.log" | grep -q "checked 2 crate(s) and summarized 1"
+run_gate "$api" "$api_base" fail rust-api "$tmp_root/omitted-crate.log" | grep -q "did not finish"
+run_gate "$api" "$api_base" fail rust-api "$tmp_root/balanced-missing.log" | grep -q 'Incomplete crates: harn-alpha'
 run_gate "$api" "$api_base" fail rust-api "$tmp_root/empty.log" | grep -q "missing or empty"
 
 migration_fragment "$api"
