@@ -120,7 +120,7 @@ harn_vm_core::stdlib_state_reset!(reset_process_state);
 /// seam is exercised wherever the tests run. A true UNC path
 /// (`\\?\UNC\server\share`) is left alone: there is no drive-letter form of
 /// it to fall back to, and rewriting it would name a different location.
-pub(crate) fn child_process_cwd(path: std::path::PathBuf) -> std::path::PathBuf {
+pub fn child_process_cwd(path: std::path::PathBuf) -> std::path::PathBuf {
     match path.to_str().and_then(strip_windows_verbatim_prefix) {
         Some(stripped) => std::path::PathBuf::from(stripped),
         None => path,

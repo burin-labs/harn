@@ -45,4 +45,7 @@ concurrency:
 
 jobs:
   cargo-deny:
-    uses: burin-labs/.github/.github/workflows/cargo-deny.yml@96fb8ab9c9b9cc50c222762f4061c48264033e66
+    permissions:
+      contents: read
+      issues: write # the shared workflow's default-branch tracking issue
+    uses: burin-labs/.github/.github/workflows/cargo-deny.yml@bd2f36fff6b659ef6042eeea733fdf9a3050daec

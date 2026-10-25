@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use url::{Host, Url};
 
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct AwsSigV4Credentials {
+pub struct AwsSigV4Credentials {
     pub access_key_id: String,
     pub secret_access_key: String,
     pub session_token: Option<String>,
@@ -28,7 +28,7 @@ impl std::fmt::Debug for AwsSigV4Credentials {
     }
 }
 
-pub(crate) struct AwsSigV4Input<'a> {
+pub struct AwsSigV4Input<'a> {
     pub credentials: &'a AwsSigV4Credentials,
     pub method: &'a str,
     pub url: &'a str,
@@ -40,7 +40,7 @@ pub(crate) struct AwsSigV4Input<'a> {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct AwsSigV4SignedRequest {
+pub struct AwsSigV4SignedRequest {
     pub headers: BTreeMap<String, String>,
     pub authorization: String,
     pub amz_date: String,
@@ -72,7 +72,7 @@ impl std::fmt::Debug for AwsSigV4SignedRequest {
     }
 }
 
-pub(crate) fn sign(input: AwsSigV4Input<'_>) -> Result<AwsSigV4SignedRequest, String> {
+pub fn sign(input: AwsSigV4Input<'_>) -> Result<AwsSigV4SignedRequest, String> {
     validate_required("access_key_id", &input.credentials.access_key_id)?;
     validate_required("secret_access_key", &input.credentials.secret_access_key)?;
     let method = input.method.trim().to_ascii_uppercase();

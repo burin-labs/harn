@@ -31,7 +31,7 @@ fn run_with_spec_aware_stub(source: &str) -> Result<Vec<String>, String> {
         .map_err(|e| e.to_string())?;
     rt.block_on(harn_clock::test_support::with_local_tasks(async {
         let mut vm = harn_vm::new_vm();
-        harn_vm::register_vm_stdlib(&mut vm);
+        harn_runtime::register_vm_stdlib(&mut vm);
         vm.register_builtin("__host_mcp_bootstrap", move |args, out| {
             let specs = match args.get(1) {
                 Some(VmValue::List(list)) => list.clone(),

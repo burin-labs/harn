@@ -181,7 +181,7 @@ locking protocol.
 
 The default implementation is a filesystem backend, but the storage
 layer is split behind a backend trait in
-`crates/harn-vm/src/stdlib/agent_state/backend.rs`.
+`crates/harn-builtins/src/agent_state/backend.rs`.
 
 That trait is designed around:
 

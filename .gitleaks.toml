@@ -67,7 +67,7 @@ paths = ['''^crates/harn-vm/src/redact/(mod|patterns)\.rs$''']
 [[allowlists]]
 description = "Cookie signing-secret fixture (repeated hex filler)"
 targetRules = ["generic-api-key"]
-paths = ['''^crates/harn-vm/src/stdlib/cookies\.rs$''']
+paths = ['''^crates/harn-builtins/src/cookies\.rs$''']
 
 [[allowlists]]
 description = "Observability field-redaction tests"
@@ -77,12 +77,12 @@ paths = ['''^crates/harn-vm/src/stdlib/observability\.rs$''']
 [[allowlists]]
 description = "Self-review test: fake diff adding a fixture OPENAI_API_KEY"
 targetRules = ["generic-api-key"]
-paths = ['''^crates/harn-vm/src/stdlib/review\.rs$''']
+paths = ['''^crates/harn-builtins/src/review\.rs$''']
 
 [[allowlists]]
 description = "Secret-scan detector unit tests: detector inputs by construction"
 targetRules = ["generic-api-key", "private-key"]
-paths = ['''^crates/harn-vm/src/stdlib/secret_scan\.rs$''']
+paths = ['''^crates/harn-builtins/src/secret_scan\.rs$''']
 
 [[allowlists]]
 description = "Token-redaction audit-sink test"

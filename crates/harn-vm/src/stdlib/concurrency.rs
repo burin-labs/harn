@@ -5,14 +5,14 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::shared_state::ScopedKey;
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{
     DeadlockError, VmAtomicHandle, VmChannelCloseState, VmChannelHandle, VmError, VmValue,
 };
 use crate::vm::Vm;
-use crate::wait_for_graph::{channel_target, ChannelTarget, WaitGuard};
+use harn_vm_core::shared_state::ScopedKey;
+use harn_vm_core::wait_for_graph::{channel_target, ChannelTarget, WaitGuard};
 
 mod channel_send;
 

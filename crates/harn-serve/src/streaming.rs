@@ -1,6 +1,6 @@
 //! Streaming request-body primitives for `harn-serve` adapters.
 //!
-//! [`harn_vm::stdlib::multipart::multipart_parse`] buffers the entire
+//! [`harn_builtins::multipart::multipart_parse`] buffers the entire
 //! request body into memory before yielding fields. That's fine for the
 //! small forms (1-100 KB) the cloud gateway sees on the auth + admin
 //! surfaces, but it OOMs on the file-upload routes: a 200 MB part

@@ -462,7 +462,7 @@ fn deep_clone_value(value: &VmValue) -> VmValue {
 /// Otherwise the right-hand value wins, matching the shallow `merge`
 /// semantics for terminal nodes. Nil arguments are treated as empty
 /// dicts so that variadic accumulators don't require a base case.
-pub(super) fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
+pub fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
     let left = dict_arg(a, "deep_merge")?;
     let right = dict_arg(b, "deep_merge")?;
     if right.is_empty() {

@@ -293,6 +293,12 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         let Some(language) = Language::detect(Path::new(path), None) else {
             return Ok(unsupported_language_response(&env, path, None));
         };
+        // Prose and data files only mention the name; they hold no binding.
+        if !language.is_code() {
+            env.stale
+                .push(format!("{path} ({} file left unchanged)", language.name()));
+            continue;
+        }
         if java_method && language != Language::Java {
             return Ok(unsupported_language_response(
                 &env,

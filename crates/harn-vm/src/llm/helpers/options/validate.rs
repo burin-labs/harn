@@ -18,7 +18,7 @@ use harn_builtin_meta::llm_options::{
 /// Validate every key of a caller-supplied options dict. Runs on the RAW
 /// dict, before context merges (`merge_context_options`) or default injection
 /// can add host-owned keys.
-pub(crate) fn validate_llm_option_keys(options: &crate::value::DictMap) -> Result<(), VmError> {
+pub fn validate_llm_option_keys(options: &crate::value::DictMap) -> Result<(), VmError> {
     for (key, _) in options.iter() {
         let key: &str = key.as_ref();
         if key.starts_with('_') {
@@ -39,7 +39,7 @@ pub(crate) fn validate_llm_option_keys(options: &crate::value::DictMap) -> Resul
 
 /// Select canonical LLM options from a broader wrapper/control dict. Removed
 /// spellings still fail; unrelated wrapper keys are intentionally ignored.
-pub(crate) fn project_llm_options(
+pub fn project_llm_options(
     options: &crate::value::DictMap,
 ) -> Result<crate::value::DictMap, VmError> {
     let mut projected = crate::value::DictMap::new();

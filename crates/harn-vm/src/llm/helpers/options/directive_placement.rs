@@ -40,7 +40,7 @@ fn committed_reminder_ids<M: MessageView>(messages: &[M]) -> HashSet<&str> {
 /// of the rest. This is the "do not re-issue" half of the contract: a provider
 /// that re-fires an unchanged body every turn contributes nothing new, and
 /// history is never touched to remove its earlier copy.
-pub(crate) fn uncommitted_directives<M: MessageView>(
+pub fn uncommitted_directives<M: MessageView>(
     messages: &[M],
     rendered: &[RenderedReminder],
 ) -> Vec<RenderedReminder> {
@@ -105,7 +105,7 @@ fn normalized_body(body: &str) -> String {
 /// carried reminder whose body matches `withdrawal_reason` when one exists,
 /// so the model reads the same bytes and authority it read before, and a
 /// corrective directive carrying that reason otherwise.
-pub(crate) fn turn_boundary_directives<M: MessageView>(
+pub fn turn_boundary_directives<M: MessageView>(
     messages: &[M],
     reminders: &[SystemReminder],
     withdrawal_reason: Option<&str>,

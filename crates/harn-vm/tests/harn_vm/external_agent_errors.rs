@@ -1,5 +1,6 @@
+use harn_runtime::register_vm_stdlib;
 use harn_vm::{
-    a2a::A2aClientError, compile_source, external_agent::ExternalAgentError, register_vm_stdlib,
+    a2a::A2aClientError, compile_source, external_agent::ExternalAgentError,
     reset_thread_local_state, VmError,
 };
 

@@ -85,7 +85,7 @@ awk '
   /^\+/ {
     line = substr($0, 2)
     # stdlib builtin registrations — register_builtin("name", ...)
-    if (file ~ /^crates\/harn-vm\/src\/stdlib\/.*\.rs$/) {
+    if (file ~ /^crates\/(harn-vm\/src\/stdlib|harn-builtins\/src|harn-flow\/src)\/.*\.rs$/) {
       if (match(line, /register_builtin\("[^"]+"/) > 0) {
         printf "stdlib-builtin\t%s\t%s\n", file, substr(line, 1, 120)
         next

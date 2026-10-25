@@ -62,6 +62,15 @@ fn embed(out_dir: &Path) -> Vec<(String, PathBuf)> {
     for (module, error) in &build.failed {
         println!("cargo:warning=std/{module} is not embedded and compiles on import: {error}");
     }
+    // A partial selection legitimately skips modules that call an unselected
+    // family. The full product surface has every builtin, so a skip there
+    // means the build script's compiler lost a family and the shipped binary
+    // would silently compile those modules on every import.
+    assert!(
+        std::env::var_os("CARGO_FEATURE_FULL").is_none() || build.failed.is_empty(),
+        "the full product surface must embed every stdlib module; {} failed",
+        build.failed.len()
+    );
     build
         .artifacts
         .into_iter()

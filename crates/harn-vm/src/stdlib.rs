@@ -21,124 +21,65 @@ pub mod macros;
 pub(crate) use crate::value::args;
 
 mod agent_sessions;
-pub mod agent_state;
 pub(crate) mod agents;
 pub(crate) mod agents_daemon;
-mod approval_review_policy;
-mod artifact_emit;
 pub(crate) mod assemble;
 pub mod asset_paths;
 mod bytes;
-mod calendar;
-mod channel_guardrails;
-mod channels;
-pub(crate) mod clock;
-pub(crate) mod collections;
-mod command_policy;
-pub(crate) mod compaction;
-#[cfg(feature = "compression")]
-mod compression;
+pub mod clock;
+pub mod collections;
 mod concurrency;
-mod config;
 mod connectors;
-mod cookies;
-mod cron;
 mod crypto;
-mod csv;
-mod datetime;
-mod diff;
+pub mod datetime;
 pub(crate) use datetime::date_dict_from_millis;
-#[cfg(feature = "content")]
-mod document;
-mod durable_step;
-mod event_log;
-#[cfg(feature = "content")]
-mod markup;
-pub use event_log::mint_hypothesis_native_attestation;
-mod external_agent;
 pub(crate) mod files;
-pub(crate) mod fs;
-mod git;
-pub(crate) mod git_topology;
-mod grounding;
+pub mod fs;
+pub mod git_topology;
 pub(crate) mod harn_entry;
-pub(crate) mod hitl;
-mod hitl_read;
+pub mod hitl;
 pub mod host;
-pub mod http_response;
-pub(crate) mod io;
+pub mod io;
 mod iter;
-pub(crate) mod json;
+pub mod json;
 mod json_query;
 pub(crate) mod json_repair;
 pub(crate) mod json_stream;
-mod jsonrpc;
-pub mod junit;
-mod lifecycle_receipts;
 mod logging;
 pub mod long_running;
 mod math;
 pub(crate) mod memory;
 mod monitors;
-mod multipart;
-mod net;
 mod net_policy;
-mod oauth_dynreg;
-mod oauth_storage;
 pub(crate) mod observability;
 mod package_snapshot;
-pub(crate) use package_snapshot::PackageSnapshotRegistry;
-mod path;
-pub(crate) mod path_scope_guard;
-pub(crate) mod pool;
-mod portable;
-#[cfg(feature = "postgres")]
-mod postgres;
-#[cfg(feature = "postgres")]
-pub use postgres::install_shared_pool_registry;
+pub use package_snapshot::PackageSnapshotRegistry;
 pub(crate) mod canonical_store;
+pub(crate) mod pool;
 pub mod process;
 pub(crate) mod process_spawn;
-mod project;
-mod project_catalog;
-mod project_enrich;
 mod regex;
-mod review;
 mod runtime_scope;
-pub(crate) mod sandbox;
-pub mod secret_scan;
+pub mod sandbox;
 pub(crate) mod session_change;
 pub(crate) mod session_store;
 pub(crate) mod session_wal_watch;
 mod sets;
 pub(crate) mod shapes;
 mod skills;
-#[cfg(any(feature = "sqlite", feature = "postgres"))]
-mod sql_common;
-#[cfg(feature = "sqlite")]
-mod sqlite;
 pub(crate) mod strings;
 pub(crate) mod supervisor;
 pub mod template;
-mod testbench;
 mod testing;
-mod timing;
 pub mod token_redaction;
-pub(crate) mod tool_hooks;
 mod tool_projection;
 pub(crate) mod tools;
 pub mod tracing;
-mod transcript_compact;
 pub(crate) mod transcript_project;
 mod triggers_stdlib;
-mod tui;
 mod types;
-mod url_parse;
 mod vision;
 pub(crate) mod waitpoint;
-#[cfg(feature = "content")]
-mod web;
-pub mod workflow_messages;
 pub(crate) mod xml;
 
 use crate::vm::Vm;
@@ -609,22 +550,6 @@ fn main(harness: Harness) {
             })
         );
         assert_eq!(
-            harness_migration_for_builtin("project_fingerprint"),
-            Some(HarnessBuiltinMigration {
-                capability: CapabilityId::Project,
-                method: "fingerprint",
-                arguments: HarnessBuiltinArgumentMigration::Forward,
-            })
-        );
-        assert_eq!(
-            harness_migration_for_builtin("project_scan_tree_native"),
-            Some(HarnessBuiltinMigration {
-                capability: CapabilityId::Project,
-                method: "scan_tree",
-                arguments: HarnessBuiltinArgumentMigration::Forward,
-            })
-        );
-        assert_eq!(
             harness_migration_for_builtin("llm_call"),
             Some(HarnessBuiltinMigration {
                 capability: CapabilityId::Llm,
@@ -891,8 +816,8 @@ mod installer_tests {
         assert!(
             names
                 .iter()
-                .any(|name| name.ends_with("::reset_timing_state")),
-            "timing's state reset is not linked: {names:?}"
+                .any(|name| name.ends_with("::reset_clock_state")),
+            "clock's state reset is not linked: {names:?}"
         );
         assert!(
             names.iter().all(|name| !name.contains("long_running")),

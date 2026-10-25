@@ -1,0 +1,80 @@
+[package]
+name = "harn-builtins"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Native builtin families of the Harn standard library that sit above the VM"
+
+[features]
+default = []
+# Each feature selects the matching harn-vm family so the two crates agree on
+# the builtin contract.
+full = ["postgres", "sqlite", "content", "compression"]
+postgres = ["harn-vm/postgres", "dep:sqlx-core", "dep:sqlx-postgres"]
+sqlite = ["harn-vm/sqlite"]
+content = ["harn-vm/content", "dep:lopdf", "dep:scraper", "dep:markdown", "dep:tree-sitter-typescript"]
+compression = ["harn-vm/compression", "dep:brotli", "dep:flate2", "dep:zip"]
+
+[dependencies]
+aes-gcm = "0.11"
+arcstr = { version = "1", features = ["serde", "std"] }
+base64 = "0.23"
+brotli = { version = "9.0.0", optional = true }
+chrono = "0.4"
+chrono-tz = "0.10.4"
+cookie = { version = "0.18.1", features = ["signed", "key-expansion"] }
+croner = "4.0.0"
+csv = "1"
+flate2 = { version = "1.1.9", optional = true }
+futures = "0.3"
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.178" }
+harn-clock = { path = "../harn-clock", version = "=0.10.178" }
+harn-kernel = { path = "../harn-kernel", version = "=0.10.178" }
+harn-languages = { path = "../harn-languages", version = "=0.10.178" }
+harn-vm = { path = "../harn-vm", version = "=0.10.178", default-features = false }
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.178" }
+hex = "0.4"
+hkdf = "0.13"
+ignore = "0.4"
+libc = "0.2"
+lopdf = { version = "0.45", default-features = false, features = ["wasm_js"], optional = true }
+markdown = { version = "1.0", optional = true }
+parking_lot = "0.12"
+rand = "0.10"
+regex = "1"
+roxmltree = "0.21.1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+rust_decimal = { version = "1" }
+scraper = { version = "0.27", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["unbounded_depth"] }
+sha2 = "0.11"
+sqlx-core = { version = "0.9", default-features = false, features = ["_rt-tokio", "_tls-rustls-aws-lc-rs", "json"], optional = true }
+sqlx-postgres = { version = "0.9", default-features = false, features = ["json", "time", "uuid", "rust_decimal"], optional = true }
+tar = { version = "0.4.46", default-features = false }
+time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "test-util", "process", "io-util", "io-std", "macros"] }
+toml = "1.1"
+tracing = "0.1"
+tree-sitter = "0.27"
+tree-sitter-typescript = { version = "0.23", optional = true }
+unicode-width = "0.2"
+url = "2"
+uuid = { version = "1", features = ["serde", "v4", "v5", "v7"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"], optional = true }
+zstd = "0.14.0"
+
+[dev-dependencies]
+harn-clock = { path = "../harn-clock", version = "=0.10.178", features = ["test-support"] }
+harn-vm = { path = "../harn-vm", version = "=0.10.178", default-features = false, features = ["vm-test-support"] }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.178" }
+harn-modules = { path = "../harn-modules", version = "=0.10.178", features = ["bundled-stdlib"] }
+harn-parser = { path = "../harn-parser", version = "=0.10.178" }
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.178", features = ["vm-test-support"] }
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -8,7 +8,18 @@ repository.workspace = true
 homepage.workspace = true
 description = "The complete native Harn runtime: the VM and every builtin family crate"
 
+[features]
+default = []
+# The distributed product surface: every optional family in the VM and in the
+# family crates, selected together so their builtin contracts agree.
+full = ["harn-vm/full", "harn-builtins/full"]
+postgres = ["harn-vm/postgres", "harn-builtins/postgres"]
+sqlite = ["harn-vm/sqlite", "harn-builtins/sqlite"]
+content = ["harn-vm/content", "harn-builtins/content"]
+compression = ["harn-vm/compression", "harn-builtins/compression"]
+
 [dependencies]
+harn-builtins = { path = "../harn-builtins", version = "=0.10.178" }
 harn-flow = { path = "../harn-flow", version = "=0.10.178" }
 harn-vm = { path = "../harn-vm", version = "=0.10.178", default-features = false }
 
