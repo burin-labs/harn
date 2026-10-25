@@ -195,6 +195,52 @@ async fn source_position_before_boundary_keeps_interleaved_unlinked_record() {
 }
 
 #[tokio::test]
+async fn bookkeeping_rows_with_source_ids_are_not_history_positions() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let parent = store
+            .create(CreateSession::default())
+            .await
+            .expect("create");
+        let kinds = [
+            (SessionEventKind::Message, "message-1"),
+            (
+                SessionEventKind::Custom {
+                    custom_type: "transcript_event".into(),
+                },
+                "goal-set",
+            ),
+            (SessionEventKind::Control, "control-1"),
+            (SessionEventKind::ToolCall, "tool-call-1"),
+            (SessionEventKind::ToolResult, "tool-result-1"),
+            (
+                SessionEventKind::Custom {
+                    custom_type: "transcript_event".into(),
+                },
+                "goal-clear",
+            ),
+        ];
+        for (kind, identity) in kinds {
+            let mut event = AppendEvent::new(kind, json!({"text": identity}));
+            event
+                .headers
+                .insert("source_event_id".into(), identity.into());
+            store.append(&parent.id, event).await.expect("append");
+        }
+        let history = store
+            .history_boundaries(&parent.id)
+            .await
+            .expect("acknowledged positions");
+        let identities: Vec<_> = history
+            .positions
+            .iter()
+            .map(|position| position.source_event_id.as_str())
+            .collect();
+        assert_eq!(identities, ["message-1", "tool-call-1", "tool-result-1"]);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn append_assigns_monotonic_ids_and_chain_hashes() {
     run_with_hooks(StoreHooks::default(), |store| async move {
         let meta = store
