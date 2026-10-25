@@ -298,6 +298,48 @@ fn isolated_environment(
     .unwrap()
 }
 
+#[cfg(unix)]
+#[test]
+fn a_confined_child_keeps_the_installed_pnpm_home_read_only() {
+    let workspace = tempfile::tempdir().unwrap();
+    let installed = tempfile::tempdir().unwrap();
+    let marker = installed.path().join("installed-manager");
+    std::fs::write(&marker, "INSTALLED-PNPM").unwrap();
+    let home = installed.path().display().to_string();
+    let _guard = enter_policy_with_environment(
+        workspace.path(),
+        isolated_environment([("PNPM_HOME".to_string(), home.clone())]),
+    );
+    let mut policy = crate::orchestration::current_execution_policy().unwrap();
+    pop_execution_policy();
+    policy.process_sandbox.read_roots.push(home.clone());
+    push_execution_policy(policy);
+    assert_eq!(
+        crate::stdlib::process::session_env_var("PNPM_HOME").unwrap(),
+        Some(home)
+    );
+    let run = |source: &str| {
+        command_output(
+            "/bin/sh",
+            &["-c".to_string(), source.to_string()],
+            &ProcessCommandConfig {
+                cwd: Some(workspace.path().to_path_buf()),
+                ..Default::default()
+            },
+        )
+    };
+    let read = run("cat \"$PNPM_HOME/installed-manager\"");
+    if crate::sandbox_host::assert_unavailable_result(&read) {
+        return;
+    }
+    let read = read.unwrap();
+    assert!(read.status.success(), "{read:?}");
+    assert_eq!(read.stdout, b"INSTALLED-PNPM");
+    let write = run("printf poisoned > \"$PNPM_HOME/installed-manager\"").unwrap();
+    assert!(!write.status.success(), "{write:?}");
+    assert_eq!(std::fs::read_to_string(marker).unwrap(), "INSTALLED-PNPM");
+}
+
 fn find_program(name: &str) -> Option<PathBuf> {
     std::env::var_os("PATH").and_then(|path| find_program_in_path(name, &path))
 }
