@@ -1,6 +1,36 @@
 use super::*;
 
 #[test]
+fn failed_hash_refresh_preserves_all_previous_classifications() {
+    let base = temp_path("failed-refresh");
+    std::fs::create_dir(base.path().join("a-valid")).unwrap();
+    let mut state = MetadataState::new(base.path());
+    for dir in ["a-valid", "z-missing"] {
+        state.set_namespace(
+            dir,
+            "classification",
+            BTreeMap::from([("structureHash".into(), serde_json::json!("previous"))]),
+        );
+    }
+    state.dirty = false;
+    assert!(refresh_metadata_hashes(&mut state).is_err());
+    assert!(!state.dirty);
+    for dir in ["a-valid", "z-missing"] {
+        assert_eq!(
+            classification_string(&state.entries[dir], "structureHash").as_deref(),
+            Some("previous")
+        );
+    }
+    let stale = metadata_stale_value(&state, base.path());
+    assert!(matches!(
+        stale.as_dict().unwrap()["any_stale"],
+        VmValue::Bool(true)
+    ));
+    let flags = metadata_inspect_stale_flags(base.path(), "z-missing", &state.entries["z-missing"]);
+    assert_eq!(flags, (true, true));
+}
+
+#[test]
 fn scan_pattern_matching_globs_and_substrings() {
     // Historical recursive-scan form: `*` crosses directory separators.
     assert!(glob_match("*.rs", "src/nested/main.rs"));
