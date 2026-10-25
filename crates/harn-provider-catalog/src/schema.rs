@@ -626,6 +626,10 @@ pub fn schema_value() -> Value {
                         "type": "string",
                         "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
                     },
+                    "retires_on": {
+                        "type": "string",
+                        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                    },
                     "superseded_by": {"type": "string"}
                 },
                 "additionalProperties": false

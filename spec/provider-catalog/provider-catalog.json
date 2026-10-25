@@ -10929,7 +10929,8 @@
       },
       "deprecation": {
         "status": "active",
-        "note": "Fireworks retires this serverless route 2026-11-07; dedicated deployments and Reserved Throughput are unaffected. The official migration is a dedicated GPT-OSS 120B deployment, not another token-billed model. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
+        "note": "Fireworks retires this serverless route 2026-11-07; dedicated deployments and Reserved Throughput are unaffected. The official migration is a dedicated GPT-OSS 120B deployment, not another token-billed model. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21).",
+        "retires_on": "2026-11-07"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -11018,7 +11019,8 @@
       },
       "deprecation": {
         "status": "active",
-        "note": "Fireworks retires this serverless route 2026-11-07 and recommends Muse Spark Open on its US endpoint (regional premium waived). Dedicated deployments and Reserved Throughput are unaffected. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
+        "note": "Fireworks retires this serverless route 2026-11-07 and recommends Muse Spark Open on its US endpoint (regional premium waived). Dedicated deployments and Reserved Throughput are unaffected. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21).",
+        "retires_on": "2026-11-07"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -35488,7 +35490,8 @@
       },
       "deprecation": {
         "status": "active",
-        "note": "SambaNova's authenticated customer notice received 2026-10-23 retires this SambaCloud route on 2026-11-03; cutoff time and timezone are unspecified. SambaStack and SambaManaged remain available. The public record https://docs.sambanova.ai/docs/en/models/deprecations does not yet include this notice (read 2026-10-23)."
+        "note": "SambaNova's authenticated customer notice received 2026-10-23 retires this SambaCloud route on 2026-11-03; cutoff time and timezone are unspecified. SambaStack and SambaManaged remain available. The public record https://docs.sambanova.ai/docs/en/models/deprecations does not yet include this notice (read 2026-10-23).",
+        "retires_on": "2026-11-03"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -35579,7 +35582,8 @@
       },
       "deprecation": {
         "status": "active",
-        "note": "SambaNova's authenticated customer notice received 2026-10-23 retires this SambaCloud route on 2026-11-17; cutoff time and timezone are unspecified. SambaStack and SambaManaged remain available. The public record https://docs.sambanova.ai/docs/en/models/deprecations does not yet include this notice (read 2026-10-23)."
+        "note": "SambaNova's authenticated customer notice received 2026-10-23 retires this SambaCloud route on 2026-11-17; cutoff time and timezone are unspecified. SambaStack and SambaManaged remain available. The public record https://docs.sambanova.ai/docs/en/models/deprecations does not yet include this notice (read 2026-10-23).",
+        "retires_on": "2026-11-17"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -38239,7 +38243,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "Together retires this route on 2026-11-06 per its notice to account holders. The notice is not yet listed on https://docs.together.ai/docs/deprecations (read 2026-10-24), which does list the earlier 2026-09-14 retirement of Inkling Small. No replacement is named.",
+        "retires_on": "2026-11-06"
       },
       "availability": "serverless",
       "quality_tags": [],

@@ -819,6 +819,24 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.arch == 'X64'
         run: echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
+      # The fat-LTO link of `harn` peaks near the 16 GB of a hosted Linux
+      # runner. Without swap the ARM64 runner was killed mid-link (0.10.178).
+      - name: Ensure swap for the final link (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          swap_mib="$(free -m | awk '/^Swap:/ {print $2}')"
+          if (( swap_mib < 12288 )); then
+            sudo swapoff -a || true
+            sudo fallocate -l 16G /mnt/harn-release.swap
+            sudo chmod 600 /mnt/harn-release.swap
+            sudo mkswap /mnt/harn-release.swap >/dev/null
+            sudo swapon /mnt/harn-release.swap
+          fi
+          free -m
+          df -h /mnt "$GITHUB_WORKSPACE"
+
       - name: Build
         id: build
         # Fat LTO with one codegen unit (the dist profile) makes a cold macOS
@@ -837,7 +855,7 @@ jobs:
           # A runner killed mid-link leaves no output; this line every minute
           # shows whether memory ran out first.
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            (while true; do echo "memory: $(free -m | awk '/^Mem:/ {print "used=" $3 "MiB available=" $7 "MiB of " $2 "MiB"}')"; sleep 60; done) &
+            (while true; do echo "memory: $(free -m | awk '/^Mem:/ {m="used=" $3 "MiB available=" $7 "MiB of " $2 "MiB"} /^Swap:/ {s=" swap_used=" $3 "MiB of " $2 "MiB"} END {print m s}')"; sleep 60; done) &
             memory_logger=$!
             trap 'kill "$memory_logger" 2>/dev/null || true' EXIT
           fi

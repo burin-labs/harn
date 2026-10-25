@@ -2813,9 +2813,10 @@ jobs:
   # non-Dependabot pull request that touches the consumer's surfaces. A fail
   # verdict blocks when the consumer passes at the pull request's base on the
   # same consumer commit (`consumer-base-check`); a red the base shares is
-  # inherited and reported, not blocking. A run that reaches no verdict is
-  # retried once; still unmeasured, it is a named warning, not a success, and
-  # becomes blocking when `CONSUMER_UNMEASURED_BLOCKS` in `ci-status` flips.
+  # inherited and reported, not blocking. Each attempt observes one 45-minute
+  # window. A run that reaches no verdict is retried once; still unmeasured, it
+  # is a named warning, not a success, and becomes blocking when
+  # `CONSUMER_UNMEASURED_BLOCKS` in `ci-status` flips.
   # Fork and Dependabot pull requests never run it; it needs the release app
   # credential, which neither receives.
   consumer-check:

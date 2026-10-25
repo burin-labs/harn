@@ -30,6 +30,8 @@ strengths = ["speed", "reasoning", "tool_use", "long_context"]
 name = "Inkling (Together)"
 provider = "together"
 wire_model = "thinkingmachines/Inkling"
+deprecation_note = "Together retires this route on 2026-11-06 per its notice to account holders. The notice is not yet listed on https://docs.together.ai/docs/deprecations (read 2026-10-24), which does list the earlier 2026-09-14 retirement of Inkling Small. No replacement is named."
+retires_on = "2026-11-06"
 context_window = 524288
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
 pricing = { input_per_mtok = 1.00, output_per_mtok = 4.05, cache_read_per_mtok = 0.17 }
@@ -42,6 +44,7 @@ strengths = ["coding", "reasoning", "tool_use", "long_context"]
 name = "Inkling (Fireworks)"
 provider = "fireworks"
 deprecation_note = "Fireworks retires this serverless route 2026-11-07 and recommends Muse Spark Open on its US endpoint (regional premium waived). Dedicated deployments and Reserved Throughput are unaffected. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
+retires_on = "2026-11-07"
 context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "vision"]
 tier = "frontier"

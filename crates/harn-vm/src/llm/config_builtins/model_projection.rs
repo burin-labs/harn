@@ -138,6 +138,7 @@ pub(super) fn model_def_to_vm_value(
     dict.put_bool("deprecated", model.deprecated);
     dict.put_nullable_str("deprecation_note", model.deprecation_note.as_deref());
     dict.put_nullable_str("sunset_date", model.sunset_date.as_deref());
+    dict.put_nullable_str("retires_on", model.retires_on.as_deref());
     dict.put_nullable_str("superseded_by", model.superseded_by.as_deref());
     dict.insert(
         crate::value::intern_key("quality_tags"),

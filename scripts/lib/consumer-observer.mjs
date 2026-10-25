@@ -357,19 +357,64 @@ export async function githubDeclaration(token, context, fetchRecord = fetch, ext
   return declaration;
 }
 
-const censusRetryLimitMs = 60_000;
+/** Bounds for retrying one refused read. Tests may shorten the backoff. */
+export const readRetry = { attempts: 4, backoffMs: 5_000, limitMs: 300_000 };
 
 function rateLimitHeader(response, name) {
   return response.headers?.get?.(`x-ratelimit-${name}`) ?? undefined;
 }
 
-/** Milliseconds until a 403 or 429 with no budget left resets, or undefined when a retry cannot help. */
-function rateLimitWaitMs(response) {
-  if (response.ok || ![403, 429].includes(response.status)) return undefined;
+/** True when a 403's body names a rate limit. A secondary limit can arrive with
+ * primary budget left and no Retry-After, so only its message identifies it. */
+async function namesRateLimit(response) {
+  try {
+    const body = await response.clone().json();
+    return typeof body?.message === 'string' && body.message.includes('rate limit');
+  } catch {
+    return false;
+  }
+}
+
+/** Milliseconds before retrying a refused read, or undefined when a retry cannot help.
+ * A rate limit waits for Retry-After or its reset, and a secondary limit named only
+ * by its message backs off; a server error or a dropped connection (no response)
+ * backs off. A denial or any other status is final. */
+async function readRetryMs(response, attempt) {
+  const backoff = readRetry.backoffMs * 2 ** (attempt - 1);
+  if (response === null || response.status >= 500) return backoff;
+  if (![403, 429].includes(response.status)) return undefined;
+  const retryAfter = response.headers?.get?.('retry-after');
+  if (retryAfter !== undefined && retryAfter !== null && /^[0-9]+$/.test(retryAfter)) return Number(retryAfter) * 1000;
   const reset = Number(rateLimitHeader(response, 'reset'));
-  if (rateLimitHeader(response, 'remaining') !== '0' || !Number.isFinite(reset)) return undefined;
-  const wait = Math.max(0, reset * 1000 - Date.now());
-  return wait <= censusRetryLimitMs ? wait + (wait > 0 ? 1000 : 0) : undefined;
+  if (rateLimitHeader(response, 'remaining') === '0' && Number.isFinite(reset)) {
+    const wait = Math.max(0, reset * 1000 - Date.now());
+    return wait + (wait > 0 ? 1000 : 0);
+  }
+  return response.status === 429 || await namesRateLimit(response) ? backoff : undefined;
+}
+
+/** The one GET path to the GitHub API. A rate limit, a server error or a
+ * dropped connection is retried within readRetry's bounds; the last response
+ * is returned for the caller to qualify, and a last dropped connection throws. */
+async function githubRead(token, url, fetchRecord) {
+  for (let attempt = 1; ; attempt += 1) {
+    let response = null, failure;
+    try {
+      response = await fetchRecord(url, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (error) {
+      failure = error;
+    }
+    if (response?.ok) return response;
+    const wait = await readRetryMs(response, attempt);
+    if (wait === undefined || wait > readRetry.limitMs || attempt >= readRetry.attempts) {
+      if (response === null) throw failure;
+      return response;
+    }
+    await new Promise(resolve => setTimeout(resolve, wait));
+  }
 }
 
 function refusalDiagnostic(response) {
@@ -389,17 +434,7 @@ async function githubCensus(token, url, field, fetchRecord) {
     const endpoint = new URL(url);
     endpoint.searchParams.set('per_page', '100');
     endpoint.searchParams.set('page', String(page));
-    const read = () => fetchRecord(endpoint.toString(), {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-      signal: AbortSignal.timeout(30_000),
-    });
-    let response = await read();
-    // An exhausted rate limit that resets within a minute is worth one more read.
-    const wait = rateLimitWaitMs(response);
-    if (!response.ok && wait !== undefined) {
-      await new Promise(resolve => setTimeout(resolve, wait));
-      response = await read();
-    }
+    const response = await githubRead(token, endpoint.toString(), fetchRecord);
     if (!response.ok) refuse('observer_census_read_refused', refusalDiagnostic(response));
     const census = await response.json();
     if (!Number.isSafeInteger(census?.total_count) || census.total_count < 0
@@ -540,12 +575,9 @@ export async function githubArtifactJson(token, repository, artifact, expected, 
     || artifact.size_in_bytes > 65_536) {
     refuse('dispatch_declaration_identity_unproven');
   }
-  const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' };
-  const base = `https://api.github.com/repos/${repository}/actions`;
-  const archive = await fetchRecord(`${base}/artifacts/${artifact.id}/zip`, {
-    headers, signal: AbortSignal.timeout(30_000),
-  });
-  if (!archive.ok) refuse('dispatch_declaration_read_refused');
+  const archive = await githubRead(token,
+    `https://api.github.com/repos/${repository}/actions/artifacts/${artifact.id}/zip`, fetchRecord);
+  if (!archive.ok) refuse('dispatch_declaration_read_refused', refusalDiagnostic(archive));
   const bytes = Buffer.from(await archive.arrayBuffer());
   if (bytes.length > 65_536
     || `sha256:${createHash('sha256').update(bytes).digest('hex')}` !== artifact.digest) {
@@ -561,11 +593,9 @@ export async function githubRecord(token, repository, runId, fetchRecord = fetch
     refuse('read_authority_or_identity_missing');
   }
   const suffix = attempt === null ? '' : `/attempts/${attempt}`;
-  const response = await fetchRecord(`https://api.github.com/repos/${repository}/actions/runs/${runId}${suffix}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) refuse('run_read_refused');
+  const response = await githubRead(token,
+    `https://api.github.com/repos/${repository}/actions/runs/${runId}${suffix}`, fetchRecord);
+  if (!response.ok) refuse('run_read_refused', refusalDiagnostic(response));
   const record = await response.json();
   if (!record || String(record.id) !== runId || typeof record.status !== 'string'
     || !Number.isSafeInteger(record.run_attempt) || record.run_attempt < 1
@@ -630,10 +660,8 @@ export function consumerPairing(text, requestedPull = '') {
 export async function githubConsumerSource(token, repository, pairedPull = null, fetchRecord = fetch) {
   const read=async suffix=>{
     if (!token || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) refuse('read_authority_or_identity_missing');
-    const response=await fetchRecord(`https://api.github.com/repos/${repository}${suffix}`, {
-      headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json'},signal:AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) refuse('consumer_source_read_refused');
+    const response=await githubRead(token,`https://api.github.com/repos/${repository}${suffix}`,fetchRecord);
+    if (!response.ok) refuse('consumer_source_read_refused', refusalDiagnostic(response));
     return response.json();
   };
   if(pairedPull!==null){
