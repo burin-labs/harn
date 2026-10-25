@@ -226,7 +226,10 @@ it after the release publishes.
 - Opener failed before publication: fix the cause and dispatch
   `bump-release.yml` again. Its admission checks run again.
 - Candidate failed because of infrastructure: rerun the failed jobs in that
-  exact candidate run. A source defect needs a corrected pull request and
+  exact candidate run. Successful matrix legs stay complete. Candidate AOT
+  payloads, license notices, and archives remain available for 30 days so a
+  later retry can restore successful handoffs. Compiler caches are an
+  acceleration aid and may be evicted independently. A source defect needs a corrected pull request and
   certification of the resulting commit. For an unpublished stable version,
   keep that version, build a signed source candidate on corrected main with
   `source_candidate=true`, then use manual promotion recovery. Recovery proves

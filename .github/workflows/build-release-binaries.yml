@@ -548,7 +548,7 @@ jobs:
           name: harn-release-license-notices
           path: dist/release-notices/
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30
 
       - name: Upload CLI AOT payload for release and benchmark targets
         if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
@@ -560,9 +560,9 @@ jobs:
             crates/harn-cli/generated/cli-bytecode/
           if-no-files-found: error
           compression-level: 0
-          # Machine handoff: the build jobs download this in the same run, and
-          # nothing reads it afterwards.
-          retention-days: 1
+          # A failed build leg can resume in this run for as long as its
+          # candidate archives remain available. Benchmarks are disposable.
+          retention-days: ${{ needs.setup.outputs.build_mode == 'candidate' && 30 || 1 }}
 
   build:
     name: Build ${{ matrix.target }}
