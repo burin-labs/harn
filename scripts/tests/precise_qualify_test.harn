@@ -105,10 +105,20 @@ pipeline test_a_repo_without_an_oracle_is_not_measured(harness: Harness) {
 @serial(group: "code_index")
 pipeline test_an_oracle_that_passes_a_broken_file_is_blind(harness: Harness) {
   const blind = fixture(harness, ["true"])
-  const control = oracle_control(harness, blind.repo, blind.root, "src/lib.rs")
+  const control = oracle_control(harness, blind.repo, blind.root, ["src/lib.rs"])
   assert_eq(control.reason, "oracle_blind")
   assert_eq(harness.fs.read_text(blind.root + "/src/lib.rs"), LIB)
   const sighted = fixture(harness, ["sh", "-c", "! grep -q @@@ src/lib.rs"])
-  assert(oracle_control(harness, sighted.repo, sighted.root, "src/lib.rs").ok)
+  assert(oracle_control(harness, sighted.repo, sighted.root, ["src/lib.rs", "src/lib.rs"]).ok)
   assert_eq(harness.fs.read_text(sighted.root + "/src/lib.rs"), LIB)
+  // Every sampled file is checked: the oracle above never reads `src/other.rs`.
+  harness.fs.write_text(sighted.root + "/src/other.rs", "pub fn other() {}\n")
+  const partial = oracle_control(
+    harness,
+    sighted.repo,
+    sighted.root,
+    ["src/lib.rs", "src/other.rs"],
+  )
+  assert_eq(partial.reason, "oracle_blind")
+  assert(partial.detail.contains("src/other.rs"))
 }

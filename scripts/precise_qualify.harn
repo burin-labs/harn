@@ -705,20 +705,31 @@ pub fn prepare_repo(harness: Harness, repo: RepoPlan, work_dir: string) -> dict 
 }
 
 /**
- * Break `path` and require the oracle to fail before trusting it with edits
- * there; a `cargo check` of another crate or a tsconfig that includes no
- * files passes anything.
+ * Break each sampled file in turn and require the oracle to fail before
+ * trusting it with edits there; a `cargo check` of another crate or a
+ * tsconfig that includes no files passes anything.
  */
-pub fn oracle_control(harness: Harness, repo: RepoPlan, root: string, path: string) -> dict {
-  const abs = path_join(root, path)
-  const original = harness.fs.read_text(abs)
-  harness.fs.write_text(abs, original + "\n@@@ precise-qualify oracle control @@@\n")
-  const res = run_oracle(harness, repo, root)
-  harness.fs.write_text(abs, original)
-  if res.passed {
-    return {ok: false, reason: "oracle_blind", detail: "the oracle passed with " + path + " broken"}
+pub fn oracle_control(harness: Harness, repo: RepoPlan, root: string, paths: list<string>) -> dict {
+  let checked: list<string> = []
+  for path in paths {
+    if checked.contains(path) {
+      continue
+    }
+    checked = checked + [path]
+    const abs = path_join(root, path)
+    const original = harness.fs.read_text(abs)
+    harness.fs.write_text(abs, original + "\n@@@ precise-qualify oracle control @@@\n")
+    const res = run_oracle(harness, repo, root)
+    harness.fs.write_text(abs, original)
+    if res.passed {
+      return {
+        ok: false,
+        reason: "oracle_blind",
+        detail: "the oracle passed with " + path + " broken",
+      }
+    }
   }
-  return {ok: true, path: path}
+  return {ok: true, paths: checked}
 }
 
 /**
@@ -826,11 +837,11 @@ fn main(harness: Harness) -> int {
       const types = sample(harness, repo, plan, "Type", plan.types)
       symbols = functions.picked + types.picked
       candidates = {functions: functions.candidates, types: types.candidates}
-      const first = symbols[0]
-      if first == nil {
+      if len(symbols) == 0 {
         prepared = prepared + {ok: false, reason: "no_candidates"}
       } else {
-        const control = oracle_control(harness, repo, prepared.root, first.path)
+        const paths = symbols.map({ symbol -> symbol.path }).to_list()
+        const control = oracle_control(harness, repo, prepared.root, paths)
         if !control.ok {
           prepared = prepared + {ok: false, reason: control.reason, detail: control.detail}
         }

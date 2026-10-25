@@ -238,9 +238,12 @@ pub type Totals = {
   pending: int,
 }
 
-/** A run passes only when it judged something, judged nothing wrong, and measured every repo. */
+/**
+ * A run passes only when it judged every planned attempt, judged nothing
+ * wrong, and measured every repo.
+ */
 pub fn run_passed(t: Totals, unmeasured_repos: int) -> bool {
-  return t.planned > 0 && t.applied_wrong + t.crashed == 0 && unmeasured_repos == 0
+  return t.planned > 0 && t.applied_wrong + t.crashed + t.pending == 0 && unmeasured_repos == 0
 }
 
 pub fn totals(rows: list<SummaryRow>) -> Totals {
