@@ -370,7 +370,7 @@ pub fn agent_loop_post_turn_transition(
       )
     },
   )
-  let adjudication_opts = context.turn_opts
+  let adjudication_opts = context.turn_opts + {_completion_signal: outcome.completion_signal}
   if completion_claim.kind == "valid" {
     agent_emit_event(
       harness.agent,

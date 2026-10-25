@@ -1272,8 +1272,23 @@ The callback receives:
   prior_turn_next_tool_claim: dict | nil,
   text: string,
   visible_text: string,
+  raw_text: string,
+  parsed_done_marker: string | nil,
+  completion_signal: AgentCompletionSignal,
 }
 ```
+
+`completion_signal` is the loop's typed marker decision. Its `declared` field
+answers whether the configured sentinel was emitted. Its `source` is
+`parsed_done_marker`, `raw_text`, or `disabled`. A nonempty parsed done block
+owns the decision even when the raw response contains the sentinel elsewhere.
+Completion evidence supplied to adjudicators carries this same record.
+Consumers read it instead of searching projected or raw text again. A declared
+marker proposes completion; it does not establish that the task succeeded.
+
+For a response outside a running loop, `agent_completion_signal` from
+`std/agent/completion_signal` applies the same rule to raw text, the configured
+sentinel, and the parser's optional done-marker value.
 
 Each `tool_results` entry has:
 
