@@ -247,7 +247,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         match language_server::rename(&mut env, request)? {
             language_server::Answer::Response(response) => return Ok(response),
             language_server::Answer::Interrupted(interrupt) => {
-                return Ok(interrupted_response(&env, interrupt))
+                return Ok(interrupted_response(&env, interrupt, true))
             }
             language_server::Answer::Fallback(reason)
                 if backend == BackendChoice::LanguageServer =>
@@ -595,11 +595,19 @@ fn commit(
             },
         )))
     });
-    committed.unwrap_or_else(|interrupt| Ok(Err(interrupted_response(env, interrupt))))
+    let waited_on_server = env.backend.language_server.is_some();
+    committed
+        .unwrap_or_else(|interrupt| Ok(Err(interrupted_response(env, interrupt, waited_on_server))))
 }
 
 /// The caller stopped the rename before it wrote anything.
-fn interrupted_response(env: &ResponseEnv<'_>, interrupt: Interrupt) -> VmValue {
+/// `waited_on_server` is whether a language server was what the call was
+/// waiting on, which makes the server-free request a useful alternative.
+fn interrupted_response(
+    env: &ResponseEnv<'_>,
+    interrupt: Interrupt,
+    waited_on_server: bool,
+) -> VmValue {
     if interrupt == Interrupt::Cancelled {
         return emit_response(
             env,
@@ -610,7 +618,7 @@ fn interrupted_response(env: &ResponseEnv<'_>, interrupt: Interrupt) -> VmValue 
             },
         );
     }
-    let Some(run) = &env.backend.language_server else {
+    if !waited_on_server {
         return emit_response(
             env,
             "refused",
@@ -619,15 +627,16 @@ fn interrupted_response(env: &ResponseEnv<'_>, interrupt: Interrupt) -> VmValue 
                 ..Default::default()
             },
         );
-    };
-    let retry_after = super::lsp::retry_after(Some(run));
+    }
+    let run = env.backend.language_server.as_ref();
+    let retry_after = super::lsp::retry_after(run);
     emit_response(
         env,
         "refused",
         ResponseExtras {
             details: format!(
                 "rename stopped without writes: the call's deadline passed while waiting on {}, which keeps starting in the background. Retry after `retry_after_ms`, or send `alternative`, which never waits on a language server.",
-                run.server
+                run.map_or("the language server", |run| run.server)
             ),
             extra: vec![
                 (

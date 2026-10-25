@@ -599,3 +599,32 @@ fn a_cancel_while_waiting_for_another_writer_writes_nothing() {
     assert_eq!(s(field(&result, "result")), "cancelled", "{result:?}");
     assert_eq!(snapshot(fixture.workspace.path()), before);
 }
+
+/// Never answers `initialize`.
+const NEVER_INITIALIZES: &str = "#!/bin/sh\nexec cat 3>&1 > /dev/null\n";
+
+#[test]
+fn a_deadline_during_server_startup_still_offers_the_alternative() {
+    let _env = crate::process::test_support::declare_inherited();
+    let fixture = fixture_with(NEVER_INITIALIZES, "");
+    let before = snapshot(fixture.workspace.path());
+    let result = rename(
+        &fixture,
+        &[
+            ("backend", vm_string("language_server")),
+            ("deadline_ms", VmValue::Int(300)),
+        ],
+    );
+
+    assert_eq!(s(field(&result, "result")), "refused", "{result:?}");
+    assert_eq!(
+        s(field(field(&result, "alternative"), "backend")),
+        "syntax_tree",
+        "{result:?}"
+    );
+    assert!(
+        matches!(field(&result, "retry_after_ms"), VmValue::Int(ms) if *ms >= 1_000),
+        "{result:?}"
+    );
+    assert_eq!(snapshot(fixture.workspace.path()), before);
+}
