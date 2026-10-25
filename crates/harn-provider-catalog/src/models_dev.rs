@@ -202,7 +202,7 @@ fn normalize(field: Field, model: &Value) -> Result<toml::Value, String> {
             let context = model
                 .pointer("/limit/context")
                 .and_then(Value::as_u64)
-                .filter(|v| *v > 0 && *v <= i64::MAX as u64)
+                .filter(|v| *v > 0 && i64::try_from(*v).is_ok())
                 .ok_or("context must be a positive integer")?;
             Value::from(context)
         }
