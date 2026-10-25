@@ -398,43 +398,168 @@ fn removing_a_parameter_the_body_reads_refuses() {
     assert_eq!(names, ["job", "verbose"]);
 }
 
+fn symbol_at(name: &str, path: &str, line: i64) -> [(&'static str, VmValue); 1] {
+    [(
+        "symbol_ref",
+        dict(&[
+            ("name", string(name)),
+            ("path", string(path)),
+            ("line", VmValue::Int(line)),
+        ]),
+    )]
+}
+
+/// Change `name` at `path:line` and assert a refusal with `tag` that
+/// leaves every file byte-identical.
+fn refuse_at(ws: &Workspace, tag: &str, (name, path, line): (&str, &str, i64)) -> VmValue {
+    let before = ws.snapshot();
+    let result = ws.change_with(name, path, APPEND_OFFSET, &symbol_at(name, path, line));
+    assert_eq!(
+        text(field(&result, "result")),
+        tag,
+        "details: {}",
+        text(field(&result, "details"))
+    );
+    assert_eq!(ws.snapshot(), before, "a refusal changed files");
+    result
+}
+
+const APPEND_OFFSET: &[&[(&str, &str)]] = &[
+    &[("name", "scale")],
+    &[("name", "offset"), ("type", "u32"), ("call_value", "0")],
+];
+
+const RUST_SHAPES: &str = "pub trait Shape {
+    fn area(&self, scale: u32) -> u32;
+    fn twice(&self) -> u32 {
+        self.area(2) * 2
+    }
+}
+pub struct Square;
+impl Shape for Square {
+    fn area(&self, scale: u32) -> u32 {
+        scale
+    }
+}
+";
+
+/// A trait method changes with every impl of it, from any member.
 #[test]
-fn rust_trait_methods_refuse_as_overrides() {
-    let ws = Workspace::new(&[
-        ("src/lib.rs", "pub mod shapes;\n"),
+fn rust_trait_family_changes_every_impl_and_call() {
+    let files: &[(&str, &str)] = &[
+        ("Cargo.toml", "[package]\nname = \"geo-kit\"\n"),
+        ("src/lib.rs", "pub mod shapes;\npub mod round;\n"),
+        ("src/shapes.rs", RUST_SHAPES),
         (
-            "src/shapes.rs",
-            "pub trait Shape {\n\
-             \x20   fn area(&self, scale: u32) -> u32;\n\
-             }\n\
-             pub struct Square;\n\
-             impl Shape for Square {\n\
-             \x20   fn area(&self, scale: u32) -> u32 {\n\
-             \x20       scale\n\
+            "src/round.rs",
+            "use crate::shapes::Shape;\n\
+             pub struct Circle;\n\
+             impl Shape for Circle {\n\
+             \x20   fn area(&self, _scale: u32) -> u32 {\n\
+             \x20       3\n\
              \x20   }\n\
+             }\n\
+             pub fn total(c: &Circle) -> u32 {\n\
+             \x20   c.area(1) + Shape::area(c, 4)\n\
              }\n",
         ),
+        (
+            "tests/it.rs",
+            "use geo_kit::shapes::{Shape, Square};\n\
+             #[test]\n\
+             fn squares() {\n\
+             \x20   assert_eq!(Square.area(5), 5);\n\
+             }\n",
+        ),
+    ];
+    // The index holds no body-less trait signature, so seeds are impls.
+    for (seed_path, seed_line, kept) in
+        [("src/shapes.rs", 9, "scale"), ("src/round.rs", 4, "_scale")]
+    {
+        let ws = Workspace::new(files);
+        let result = ws.change_with(
+            "area",
+            seed_path,
+            &[
+                &[("name", kept)],
+                &[("name", "offset"), ("type", "u32"), ("call_value", "0")],
+            ],
+            &symbol_at("area", seed_path, seed_line),
+        );
+        assert_applied(&result, 4);
+        assert_eq!(
+            ws.read("src/shapes.rs"),
+            RUST_SHAPES
+                .replace(
+                    "area(&self, scale: u32)",
+                    "area(&self, scale: u32, offset: u32)"
+                )
+                .replace("self.area(2)", "self.area(2, 0)")
+        );
+        let round = ws.read("src/round.rs");
+        assert!(
+            round.contains("fn area(&self, _scale: u32, offset: u32) -> u32"),
+            "{round}"
+        );
+        assert!(
+            round.contains("c.area(1, 0) + Shape::area(c, 4, 0)"),
+            "{round}"
+        );
+        assert!(ws.read("tests/it.rs").contains("Square.area(5, 0)"));
+    }
+}
+
+/// Any member the workspace cannot rewrite soundly keeps the refusal.
+#[test]
+fn rust_trait_family_refuses_external_macro_and_inherent_members() {
+    let base: &[(&str, &str)] = &[
+        ("Cargo.toml", "[package]\nname = \"geo\"\n"),
+        ("src/lib.rs", "pub mod shapes;\npub mod extra;\n"),
+        ("src/shapes.rs", RUST_SHAPES),
+    ];
+    let cases: &[(&str, &str)] = &[
+        // An impl of a same-named trait from another crate.
+        (
+            "use other::Shape;\npub struct Hex;\nimpl Shape for Hex {\n    fn area(&self, scale: u32) -> u32 {\n        scale\n    }\n}\n",
+            "src/extra.rs:3 supertype",
+        ),
+        // An impl written by a macro.
+        (
+            "macro_rules! forward {\n    () => {\n        fn area(&self, scale: u32) -> u32 { scale }\n    };\n}\n",
+            "src/extra.rs:3 macro",
+        ),
+        // An inherent method calls by name cannot tell apart.
+        (
+            "pub struct Hex;\nimpl Hex {\n    pub fn area(&self, scale: u32) -> u32 {\n        scale\n    }\n}\n",
+            "src/extra.rs:3 declaration",
+        ),
+    ];
+    for (extra, blocking) in cases {
+        let mut files = base.to_vec();
+        files.push(("src/extra.rs", extra));
+        let ws = Workspace::new(&files);
+        let result = refuse_at(&ws, "overrides_present", ("area", "src/shapes.rs", 9));
+        assert_eq!(site_lines(&result), [*blocking], "{extra}");
+    }
+    // A method of a trait declared outside the workspace.
+    let ws = Workspace::new(&[
+        ("src/lib.rs", "pub mod show;\n"),
+        (
+            "src/show.rs",
+            "use std::fmt;\npub struct P;\nimpl fmt::Display for P {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        f.write_str(\"p\")\n    }\n}\n",
+        ),
     ]);
-    let before = ws.snapshot();
     let result = ws.change_with(
-        "area",
-        "src/shapes.rs",
+        "fmt",
+        "src/show.rs",
         &[
-            &[("name", "scale")],
-            &[("name", "offset"), ("type", "u32"), ("call_value", "0")],
+            &[("name", "f")],
+            &[("name", "extra"), ("type", "u8"), ("call_value", "0")],
         ],
-        &[(
-            "symbol_ref",
-            dict(&[
-                ("name", string("area")),
-                ("path", string("src/shapes.rs")),
-                ("line", VmValue::Int(6)),
-            ]),
-        )],
+        &symbol_at("fmt", "src/show.rs", 4),
     );
     assert_eq!(text(field(&result, "result")), "overrides_present");
-    assert_eq!(site_lines(&result), ["src/shapes.rs:6 declaration"]);
-    assert_eq!(ws.snapshot(), before);
+    assert_eq!(site_lines(&result), ["src/show.rs:3 supertype"]);
 }
 
 #[test]
@@ -784,39 +909,129 @@ fn python_splat_call_refuses() {
     );
 }
 
+const PY_SHAPES: &str = "from abc import ABC, abstractmethod
+
+
+class Shape(ABC):
+    @abstractmethod
+    def area(self, scale):
+        ...
+
+
+class Square(Shape):
+    def area(self, scale):
+        return scale
+";
+
+/// An overridden method changes with its base and every override.
 #[test]
-fn python_overridden_method_refuses() {
-    let ws = Workspace::new(&[(
-        "pkg/shapes.py",
-        "class Shape:\n\
-         \x20   def area(self, scale):\n\
-         \x20       return 0\n\
-         \n\
-         \n\
-         class Square(Shape):\n\
-         \x20   def area(self, scale):\n\
-         \x20       return scale\n",
-    )]);
-    let before = ws.snapshot();
-    let result = ws.change_with(
-        "area",
-        "pkg/shapes.py",
-        &[
-            &[("name", "scale")],
-            &[("name", "offset"), ("default", "0")],
-        ],
-        &[(
-            "symbol_ref",
-            dict(&[
-                ("name", string("area")),
-                ("path", string("pkg/shapes.py")),
-                ("line", VmValue::Int(2)),
-            ]),
-        )],
-    );
-    assert_eq!(text(field(&result, "result")), "overrides_present");
-    assert_eq!(site_lines(&result), ["pkg/shapes.py:7 Function"]);
-    assert_eq!(ws.snapshot(), before);
+fn python_override_family_changes_every_override_and_call() {
+    let files: &[(&str, &str)] = &[
+        ("pkg/__init__.py", ""),
+        ("pkg/shapes.py", PY_SHAPES),
+        (
+            "pkg/round.py",
+            "from .shapes import Shape, Square\n\
+             \n\
+             \n\
+             class Circle(Shape):\n\
+             \x20   def area(self, scale):\n\
+             \x20       return 3 * scale\n\
+             \n\
+             \n\
+             class Tiny(Square):\n\
+             \x20   pass\n\
+             \n\
+             \n\
+             def total(c, s):\n\
+             \x20   return c.area(scale=1) + Shape.area(s, 2) + Square.area(s, 3) + Tiny.area(s, 4)\n",
+        ),
+    ];
+    for seed_line in [6, 11] {
+        let ws = Workspace::new(files);
+        let result = ws.change_with(
+            "area",
+            "pkg/shapes.py",
+            &[
+                &[("name", "scale")],
+                &[("name", "offset"), ("call_value", "0")],
+            ],
+            &symbol_at("area", "pkg/shapes.py", seed_line),
+        );
+        assert_applied(&result, 4);
+        assert_eq!(
+            ws.read("pkg/shapes.py"),
+            PY_SHAPES.replace("area(self, scale)", "area(self, scale, offset)")
+        );
+        let round = ws.read("pkg/round.py");
+        assert!(round.contains("def area(self, scale, offset):"), "{round}");
+        assert!(
+            round.contains(
+                "c.area(scale=1, offset=0) + Shape.area(s, 2, 0) + Square.area(s, 3, 0) + Tiny.area(s, 4, 0)"
+            ),
+            "{round}"
+        );
+    }
+}
+
+#[test]
+fn python_override_family_refuses_unrelated_and_external_members() {
+    let cases: &[(&str, &str)] = &[
+        // A same-named method on a class outside the hierarchy.
+        (
+            "class Plot:\n    def area(self, scale):\n        return 1\n",
+            "pkg/shapes.py:6 declaration",
+        ),
+        // An override whose class also extends a package class.
+        (
+            "from widgets import Frame\nfrom .shapes import Shape\n\n\nclass Panel(Shape, Frame):\n    def area(self, scale):\n        return 2\n",
+            "pkg/extra.py:5 supertype",
+        ),
+        // A subclass binds the name to a callable in its class body.
+        (
+            "from .shapes import Square\n\n\nclass Lazy(Square):\n    area = lambda self, scale: scale\n",
+            "pkg/extra.py:5 class_attribute",
+        ),
+        // A workspace class shadows the builtin `object`; its subclass inherits.
+        (
+            "from .shapes import Square\nfrom widgets import Frame\n\n\nclass object(Square):\n    pass\n\n\nclass Leaf(Frame, object):\n    pass\n",
+            "pkg/extra.py:9 supertype",
+        ),
+        // A subclass that inherits the method beside a package class.
+        (
+            "from widgets import Frame\nfrom .shapes import Square\n\n\nclass Local(Frame, Square):\n    pass\n",
+            "pkg/extra.py:5 supertype",
+        ),
+    ];
+    for (extra, blocking) in cases {
+        let ws = Workspace::new(&[
+            ("pkg/__init__.py", ""),
+            ("pkg/shapes.py", PY_SHAPES),
+            ("pkg/extra.py", extra),
+        ]);
+        let before = ws.snapshot();
+        let result = ws.change_with(
+            "area",
+            "pkg/shapes.py",
+            &[
+                &[("name", "scale")],
+                &[("name", "offset"), ("default", "0")],
+            ],
+            &symbol_at("area", "pkg/shapes.py", 11),
+        );
+        assert_eq!(
+            text(field(&result, "result")),
+            "overrides_present",
+            "{}",
+            text(field(&result, "details"))
+        );
+        assert!(
+            site_lines(&result).contains(&blocking.to_string()),
+            "{:?}",
+            site_lines(&result)
+        );
+        assert_eq!(ws.snapshot(), before);
+    }
 }
 
 #[test]
@@ -964,4 +1179,148 @@ fn symbol_ref_column_selects_the_declaration() {
     let missed = ws.change_with("helper", "src/lib.rs", params, &at(3));
     assert_eq!(text(field(&missed, "result")), "no_match");
     assert_applied(&ws.change_with("helper", "src/lib.rs", params, &at(8)), 1);
+}
+
+const TS_SHAPE: &str = "export interface Shape {
+  area(scale: number): number
+}
+";
+
+const TS_SQUARE: &str = "import type { Shape } from \"./shape.js\"
+export class Square implements Shape {
+  area(scale: number): number {
+    return scale
+  }
+}
+export const total = (s: Shape, q: Square) => s.area(1) + q.area(2)
+";
+
+/// An interface method changes with every implementation and override.
+#[test]
+fn typescript_interface_family_changes_every_member_and_call() {
+    let files: &[(&str, &str)] = &[
+        ("src/shape.ts", TS_SHAPE),
+        (
+            "src/base.ts",
+            "import { Shape } from \"./shape\"\n\
+             export abstract class Base implements Shape {\n\
+             \x20 abstract area(scale: number): number\n\
+             }\n\
+             export class Circle extends Base {\n\
+             \x20 area(s: number): number {\n\
+             \x20   return s * 3\n\
+             \x20 }\n\
+             }\n",
+        ),
+        ("src/square.ts", TS_SQUARE),
+    ];
+    // Each seed names the kept parameter as it declares it.
+    // The index holds no interface signature, so seeds are class methods.
+    for (seed_path, seed_line, kept) in [("src/square.ts", 3, "scale"), ("src/base.ts", 6, "s")] {
+        let ws = Workspace::new(files);
+        let result = ws.change_with(
+            "area",
+            seed_path,
+            &[
+                &[("name", kept)],
+                &[
+                    ("name", "extra"),
+                    ("type", "number"),
+                    ("default", "0"),
+                    ("call_value", "0"),
+                ],
+            ],
+            &symbol_at("area", seed_path, seed_line),
+        );
+        assert_applied(&result, 2);
+        // A signature without a body cannot carry an initializer.
+        assert_eq!(
+            ws.read("src/shape.ts"),
+            TS_SHAPE.replace("(scale: number)", "(scale: number, extra?: number)")
+        );
+        let base = ws.read("src/base.ts");
+        assert!(
+            base.contains("abstract area(scale: number, extra?: number): number"),
+            "{base}"
+        );
+        assert!(
+            base.contains("area(s: number, extra: number = 0): number {"),
+            "{base}"
+        );
+        let square = ws.read("src/square.ts");
+        assert!(
+            square.contains("area(scale: number, extra: number = 0): number {"),
+            "{square}"
+        );
+        assert!(square.contains("s.area(1, 0) + q.area(2, 0)"), "{square}");
+    }
+}
+
+#[test]
+fn typescript_family_refuses_package_supertypes_and_property_members() {
+    let cases: &[(&str, &str)] = &[
+        // An implementation that also implements a package interface.
+        (
+            "import { Shape } from \"./shape\"\n\
+             import { Sized } from \"geometry-kit\"\n\
+             export class Hex implements Shape, Sized {\n\
+             \x20 area(scale: number): number {\n\
+             \x20   return scale\n\
+             \x20 }\n\
+             }\n",
+            "src/extra.ts:3 supertype",
+        ),
+        // A class field may hold an implementation.
+        (
+            "export class Lazy {\n\
+             \x20 area = (scale: number) => scale\n\
+             }\n",
+            "src/extra.ts:2 property",
+        ),
+        // A mixin call cannot be resolved by name.
+        (
+            "import { Shape } from \"./shape\"\n\
+             import { Base } from \"./base\"\n\
+             const mix = (b: any) => b\n\
+             export class Hex extends mix(Base) implements Shape {\n\
+             \x20 area(scale: number): number {\n\
+             \x20   return scale\n\
+             \x20 }\n\
+             }\n",
+            "src/extra.ts:4 supertype",
+        ),
+        // A class that inherits its implementation from a package base.
+        (
+            "import { Shape } from \"./shape\"\n\
+             import { Widget } from \"ui-kit\"\n\
+             export class Local extends Widget implements Shape {}\n",
+            "src/extra.ts:3 supertype",
+        ),
+    ];
+    for (extra, blocking) in cases {
+        let ws = Workspace::new(&[
+            ("src/shape.ts", TS_SHAPE),
+            ("src/base.ts", "export class Base {}\n"),
+            ("src/square.ts", TS_SQUARE),
+            ("src/extra.ts", extra),
+        ]);
+        let before = ws.snapshot();
+        let result = ws.change_with(
+            "area",
+            "src/shape.ts",
+            &[
+                &[("name", "scale")],
+                &[("name", "extra"), ("type", "number"), ("call_value", "0")],
+            ],
+            &symbol_at("area", "src/square.ts", 3),
+        );
+        assert_eq!(
+            text(field(&result, "result")),
+            "overrides_present",
+            "{}",
+            text(field(&result, "details"))
+        );
+        assert_eq!(site_lines(&result), [*blocking]);
+        assert_eq!(ws.snapshot(), before);
+    }
 }

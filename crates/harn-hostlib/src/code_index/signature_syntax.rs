@@ -31,7 +31,7 @@ impl Family {
         }
     }
 
-    fn declaration_kinds(self) -> &'static [&'static str] {
+    pub(super) fn declaration_kinds(self) -> &'static [&'static str] {
         match self {
             Self::Rust => &["function_item", "function_signature_item"],
             Self::TypeScript => &[
@@ -159,11 +159,11 @@ pub(super) fn slice(source: &str, range: Range<usize>) -> &str {
     source.get(range).unwrap_or("")
 }
 
-fn text<'a>(node: Node<'_>, bytes: &'a [u8]) -> &'a str {
+pub(super) fn text<'a>(node: Node<'_>, bytes: &'a [u8]) -> &'a str {
     std::str::from_utf8(&bytes[node.start_byte()..node.end_byte()]).unwrap_or("")
 }
 
-fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
+pub(super) fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
     let mut cursor = node.walk();
     node.named_children(&mut cursor).collect()
 }
@@ -619,19 +619,24 @@ fn bare_name(pattern: Node<'_>) -> Option<Node<'_>> {
 }
 
 /// Render one parameter. `rename` replaces the bare name; `type_text` and
-/// `default_text` replace (or add) those parts.
+/// `default_text` replace (or add) those parts. A TypeScript signature with
+/// no body cannot carry an initializer, so there a default renders as `?`.
 pub(super) fn render_param(
     family: Family,
     base: Option<&Param>,
     name: &str,
     type_text: Option<&str>,
     default_text: Option<&str>,
+    signature_only: bool,
 ) -> String {
-    let unchanged = base.is_some_and(|p| {
-        p.name == name
-            && type_text.is_none_or(|t| p.type_text.as_deref() == Some(t))
-            && default_text.is_none_or(|d| p.default_text.as_deref() == Some(d))
-    });
+    let optional_marker = signature_only && family == Family::TypeScript && default_text.is_some();
+    let default_text = default_text.filter(|_| !optional_marker);
+    let unchanged = !optional_marker
+        && base.is_some_and(|p| {
+            p.name == name
+                && type_text.is_none_or(|t| p.type_text.as_deref() == Some(t))
+                && default_text.is_none_or(|d| p.default_text.as_deref() == Some(d))
+        });
     if let (true, Some(param)) = (unchanged, base) {
         return param.text.clone();
     }
@@ -652,7 +657,7 @@ pub(super) fn render_param(
     let default = default_text
         .map(str::to_string)
         .or_else(|| base.and_then(|p| p.default_text.clone()));
-    let optional = base.is_some_and(|p| p.optional) && default.is_none();
+    let optional = (base.is_some_and(|p| p.optional) || optional_marker) && default.is_none();
     let mut out = pattern;
     if optional {
         out.push('?');
@@ -776,6 +781,10 @@ pub(super) fn read_macro_call(
     let list = node.next_sibling()?;
     if list.kind() != "token_tree" || !slice(source, list.byte_range()).starts_with('(') {
         return None;
+    }
+    // `fn name(..)` inside a macro body declares a function; it is no call.
+    if node.prev_sibling().map(|p| slice(source, p.byte_range())) == Some("fn") {
+        return Some(Err("a macro declares a function by this name".into()));
     }
     let shape = match node.prev_sibling().map(|p| p.kind()) {
         Some(".") => MacroCallShape::Method,

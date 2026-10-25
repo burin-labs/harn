@@ -137,8 +137,8 @@ pub(crate) const OPERATOR_STEER_TAG: &str = "operator_steer";
 
 /// A steer is an operator control event, not a comment.
 ///
-/// `session/inject` with `mode: "steer"` (and its `interrupt` sibling)
-/// splices the operator's instruction into the transcript as a plain
+/// A `session/prompt` with `delivery: "steer"` (and the in-VM `interrupt`
+/// sibling) splices the operator's instruction into the transcript as a plain
 /// `role: user` message, which carries no directive authority at all. The
 /// turn-end judge's veto feedback, by contrast, is stamped
 /// `DirectiveAuthority::Corrective` in
@@ -218,7 +218,7 @@ fn operator_steer_directive(
 /// Read from the typed control row rather than carried on the queued message:
 /// the row is the replay record of the transition, so the directive the model
 /// sees and the obligations the completion authorities read come from the same
-/// fact. Both acceptance paths (`session/inject` and the in-VM push) enqueue
+/// fact. Both acceptance paths (an ACP steer and the in-VM push) enqueue
 /// and record on the session's own thread without yielding in between, so the
 /// row exists before the drain can run. Were it ever missing, the directive
 /// would fall back to the plain steer wording while the completion
@@ -381,7 +381,7 @@ async fn host_agent_session_push_bridge_injection(
 }
 
 /// Push a user-role message onto the session's host bridge queue. The
-/// in-VM equivalent of the ACP `session/inject` JSON-RPC method (the
+/// in-VM equivalent of an ACP `session/prompt` steer (the
 /// user-message sibling of `__host_agent_session_push_bridge_injection`,
 /// which is the in-VM equivalent of `session/remind`). Exposed so a Harn
 /// script driving the loop (custom CLI host, conformance test, etc.) can
@@ -460,7 +460,7 @@ async fn host_agent_session_push_user_message(
     let message_id = bridge
         .push_queued_user_message(content.clone(), &mode)
         .await;
-    // Accepted here, so recorded here, exactly as `session/inject` records it:
+    // Accepted here, so recorded here, exactly as an ACP steer records it:
     // the typed control row is what the completion authorities and replay read.
     // A session this thread does not own has no stream to land in; the push
     // still stands and the obligations fall back to the delivered message.

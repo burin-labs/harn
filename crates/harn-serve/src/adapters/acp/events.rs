@@ -12,6 +12,7 @@ pub(super) struct AcpAgentEventSink {
     output: AcpOutput,
     replayed: bool,
     hitl_log: Option<super::prompt_owner::PromptExecutionOwner>,
+    receipts: Option<super::delivery::PromptReceipts>,
 }
 
 impl AcpAgentEventSink {
@@ -20,17 +21,20 @@ impl AcpAgentEventSink {
             output,
             replayed: false,
             hitl_log: None,
+            receipts: None,
         }
     }
 
     pub(super) fn for_prompt(
         output: AcpOutput,
         hitl_log: super::prompt_owner::PromptExecutionOwner,
+        receipts: super::delivery::PromptReceipts,
     ) -> Self {
         Self {
             output,
             replayed: false,
             hitl_log: Some(hitl_log),
+            receipts: Some(receipts),
         }
     }
 
@@ -39,6 +43,7 @@ impl AcpAgentEventSink {
             output,
             replayed: true,
             hitl_log: None,
+            receipts: None,
         }
     }
 
@@ -287,6 +292,9 @@ impl AgentEventSink for AcpAgentEventSink {
                     "sessionId": session_id,
                     "update": update,
                 }));
+                if let Some(receipts) = &self.receipts {
+                    receipts.inserted(session_id, message_id);
+                }
             }
             AgentEvent::ToolCall {
                 session_id,

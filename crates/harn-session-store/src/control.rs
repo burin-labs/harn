@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn steer_round_trips_with_the_callers_word_and_the_delivery_mode() {
         let event = ControlEvent::injection(
-            "session/inject",
+            "session/prompt",
             "ctl-1",
             "accepted",
             "steer",
@@ -306,7 +306,7 @@ mod tests {
         let goal = ControlGoal::parse(&serde_json::json!({"objective": "  reply BRAVO  "}))
             .expect("valid goal");
         let event = ControlEvent::injection(
-            "session/inject",
+            "session/prompt",
             "ctl-3",
             "accepted",
             "steer",
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn a_queued_note_is_not_a_steer() {
         let event = ControlEvent::injection(
-            "session/inject",
+            "session/prompt",
             "ctl-2",
             "accepted",
             "queue",

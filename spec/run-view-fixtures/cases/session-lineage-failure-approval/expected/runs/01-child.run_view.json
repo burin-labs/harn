@@ -42,8 +42,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:25dcbb20191a2063be44a91585eb49741f86d0835ab76b6d0016af653ab9b91c",
-    "projection_id": "run_view:run_lineage_child:25dcbb20191a"
+    "projection_hash": "sha256:eadd3a816b17606b935de1b33f7ffc99521e647dba1e9ef1b1b598bc663e5cc7",
+    "projection_id": "run_view:run_lineage_child:eadd3a816b17"
   },
   "providers": [],
   "run": {
@@ -81,6 +81,8 @@
       "started_at": "2026-01-04T00:00:02Z",
       "status": "failed",
       "usage": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
         "call_count": 0,
         "cost_usd": null,
         "input_tokens": 0,
@@ -103,6 +105,8 @@
     "summary": null
   },
   "usage": {
+    "cache_read_tokens": null,
+    "cache_write_tokens": null,
     "call_count": 0,
     "cost_usd": 0.0,
     "input_tokens": 0,

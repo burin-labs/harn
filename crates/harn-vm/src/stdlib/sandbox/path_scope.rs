@@ -133,7 +133,23 @@ fn check_fs_path_scope_with_roots(
             read_only: false,
         });
     }
-    if roots.iter().any(|root| path_is_within(&candidate, root)) {
+    let writable_depth = roots
+        .iter()
+        .filter(|root| path_is_within(&candidate, root))
+        .map(|root| root.components().count())
+        .max();
+    if let Some(depth) = writable_depth {
+        // A read-only session mount nested inside a writable root wins over it.
+        if access != FsAccess::Read
+            && crate::orchestration::read_only_mount_overriding(&candidate, depth).is_some()
+        {
+            return Err(SandboxViolation {
+                attempted: candidate,
+                roots,
+                access,
+                read_only: true,
+            });
+        }
         return Ok(());
     }
     let within_read_only = scope

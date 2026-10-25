@@ -1460,11 +1460,7 @@ fn base_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
             &crate::stdlib::process::execution_root_path(),
         )];
     }
-    policy
-        .workspace_roots
-        .iter()
-        .map(|root| render_policy_root(root))
-        .collect()
+    read_roots::declared_workspace_roots(policy)
 }
 
 pub(crate) fn process_sandbox_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {

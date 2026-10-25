@@ -118,6 +118,28 @@ pipeline default(harness: Harness) {
   harness.stdio.println(
     "only indecisive runs: " + monitor_github_ci(harness, "acme/api", "main", options).outcome,
   )
+  // Tests (failing before) shows only its 20 newest runs, all cancelled, and
+  // Docs passed. Docs alone must not read as a recovery.
+  harness.testing.http_mock_clear()
+  mock(
+    harness.testing,
+    workflows,
+    {total_count: 2, workflows: [{id: 1, state: "active"}, {id: 2, state: "active"}]},
+  )
+  mock(
+    harness.testing,
+    runs(1),
+    {workflow_runs: [{workflow_id: 1, name: "Docs", status: "completed", conclusion: "success"}]},
+  )
+  let cancelled = []
+  for _ in 0..20 {
+    cancelled.push({workflow_id: 2, name: "Tests", status: "completed", conclusion: "cancelled"})
+  }
+  mock(harness.testing, runs(2), {workflow_runs: cancelled})
+  harness.stdio.println(
+    "one workflow without a reading: "
+      + monitor_github_ci(harness, "acme/api", "main", options).outcome,
+  )
   // A runs page without workflow_runs: not a recovery either.
   harness.testing.http_mock_clear()
   mock(harness.testing, workflows, {total_count: 1, workflows: [{id: 1, state: "active"}]})

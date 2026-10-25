@@ -1070,6 +1070,9 @@ pub fn agent_compute_post_turn(
     tool_format: opts?.tool_format,
     successful_tool_names: successful_tool_names,
     rejected_tool_names: rejected_tool_names,
+    // The loop's one definition of progress: activity that is not an exact
+    // repeated observation and not a recurring failing verify.
+    progressing: opts?._turn_progressing ?? (len(successful_tool_names) > 0),
     session_successful_tools: opts?._session_successful_tools ?? successful_tool_names,
     session_rejected_tools: opts?._session_rejected_tools ?? rejected_tool_names,
     // The corrective claimed the PREVIOUS turn for repair, so this turn is the

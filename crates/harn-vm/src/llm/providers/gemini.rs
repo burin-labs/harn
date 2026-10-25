@@ -431,9 +431,7 @@ pub(crate) fn parse_response(
         + json["usageMetadata"]["thoughtsTokenCount"]
             .as_i64()
             .unwrap_or(0);
-    let cache_read_tokens = json["usageMetadata"]["cachedContentTokenCount"]
-        .as_i64()
-        .unwrap_or(0);
+    let cache = crate::llm::usage::extract_cache_counts(&json["usageMetadata"])?;
     let stop_reason = json["candidates"][0]["finishReason"]
         .as_str()
         .map(str::to_string);
@@ -448,7 +446,9 @@ pub(crate) fn parse_response(
         tool_calls,
         input_tokens,
         output_tokens,
-        cache_read_tokens,
+        cache_read_tokens: cache.read_tokens,
+        cache_write_tokens: cache.write_tokens,
+        cache_counts_reported: cache.reported,
         model: request.model.clone(),
         provider: request.provider.clone(),
         thinking: if thinking.is_empty() {
@@ -851,6 +851,7 @@ mod tests {
         assert_eq!(result.output_tokens, 8);
         assert_eq!(result.input_tokens, 10);
         assert_eq!(result.cache_read_tokens, 7);
+        assert!(result.cache_counts_reported);
         assert_eq!(
             result.telemetry.source,
             crate::llm::api::telemetry_source::GEMINI_USAGE

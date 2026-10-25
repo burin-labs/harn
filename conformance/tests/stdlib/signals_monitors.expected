@@ -20,3 +20,7 @@ false
 std/signals.alert_webhook_decisions(honeycomb) unverified
 verified
 0
+verbose: changed
+kept 2000 of 5009
+true
+changed resolved

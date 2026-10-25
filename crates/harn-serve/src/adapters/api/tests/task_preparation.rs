@@ -82,15 +82,7 @@ async fn canceled_task_preparation(inline: bool) {
     assert!(release.send(()).is_ok());
     // A normal read is queued behind the real prompt. Its response proves that
     // preparation and any execution finished, rather than racing a zero read.
-    let settled = state
-        .acp
-        .call(
-            "session/pending_injections",
-            json!({"sessionId":session_id}),
-        )
-        .await
-        .unwrap();
-    assert_eq!(settled["pendingCount"], 0);
+    state.acp.call("session/list", json!({})).await.unwrap();
     let marker = root.path().join("task-preparation.txt");
     assert_eq!(
         runtime.executions.load(Ordering::SeqCst),

@@ -199,13 +199,13 @@ release_validate_retirement_request() {
   if [[ -n "${RETIRE_SOURCE_CI_RUN:-}" ]]; then
     for field in RETIRE_SOURCE_SHA RETIRE_PRODUCER_RUN RETIRE_RELEASE_PR; do
       [[ -n "${!field:-}" ]] || {
-        echo "error: incomplete failed-producer retirement request" >&2; return 1;
+        echo "error: incomplete unpromotable-source retirement request" >&2; return 1;
       }
     done
     for field in RETIRE_PROMOTION_RUN RETIRE_RESOLVER_JOB RETIRE_CONSUMER_JOB \
       RETIRE_AUTHORIZATION_JOB RETIRE_CONSUMER_RUN RETIRE_FAILED_JOB; do
       [[ -z "${!field:-}" ]] || {
-        echo "error: mixed producer and consumer retirement authority" >&2; return 1;
+        echo "error: mixed source-CI and consumer retirement authority" >&2; return 1;
       }
     done
     return 0
@@ -220,56 +220,83 @@ release_validate_retirement_request() {
   fi
 }
 
-# A failed producer can have no manifest or downstream consumer. Bind both
-# terminal failures to the immutable source; publication absence is checked
-# by the caller, including again at the action boundary.
-release_failed_producer_observation() (
+# Retire a source by one question: can it ever promote? Promotion requires a
+# green full-suite main-push CI run at the exact source, so the source CI run
+# decides and the producer's conclusion does not:
+#   source CI                              producer         verdict
+#   failure on a retried attempt (>= 2)    any terminal     retire (source_ci_failed)
+#   failure on attempt 1                   any              refuse: recovery still retries it
+#   success missing a full-suite job       any terminal     retire (source_ci_not_full_suite)
+#   success with every full-suite job      any terminal     refuse: promotable
+#   failure only in derived aggregates     any terminal     refuse: unmeasured
+#   not completed, or cancelled/skipped    any              refuse: unmeasured
+#   any                                    not completed    refuse: unmeasured
+# A failed producer under a green full suite stays refused: rerunning it can
+# still promote the source. Main CI recovery retries a first-attempt failure
+# once, so only a failure that survived that retry is persistent. A consumer
+# rehearsal failure is the separate promotion-run path. Publication absence is checked by the caller, including
+# again at the action boundary.
+release_unpromotable_source_observation() (
   set -euo pipefail
   local repository="$1" source="$2" producer="$3" ci="${RETIRE_SOURCE_CI_RUN:?source CI run required}"
-  local id path run pages census latest comparison observations='[]'
+  local run pages census latest comparison producer_run full_suite
+  # shellcheck source=scripts/lib/full_suite_jobs.sh
+  source "$RELEASE_VERSION_LIB_DIR/full_suite_jobs.sh"
+  full_suite="$(printf '%s\n' "${RELEASE_FULL_SUITE_JOBS[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
   [[ "$ci" =~ ^[1-9][0-9]*$ && "$ci" != "$producer" ]]
-  for id in "$producer" "$ci"; do
-    path=.github/workflows/build-release-binaries.yml
-    [[ "$id" != "$ci" ]] || path=.github/workflows/ci.yml
-    run="$(gh api "repos/$repository/actions/runs/$id")"
-    jq -e --arg repository "$repository" --arg source "$source" --arg id "$id" --arg path "$path" '
-      (.id | tostring) == $id and .repository.full_name == $repository and
-      .head_repository.full_name == $repository and .path == $path and
-      .head_sha == $source and .status == "completed" and .conclusion == "failure" and
-      (.run_attempt | type == "number" and . > 0 and . == floor) and
-      (.event == "merge_group" or (.event == "push" and .head_branch == "main")) and
-      ($path != ".github/workflows/ci.yml" or (.event == "push" and .head_branch == "main"))
-    ' <<< "$run" >/dev/null
-    pages="$(gh api --paginate --slurp "repos/$repository/actions/runs/$id/jobs?filter=latest&per_page=100")"
-    census="$(jq -ce --argjson run "$run" '
-      if type == "array" and length > 0 and
-        all(.[]; (.jobs | type) == "array" and (.total_count | type) == "number")
-      then . else error("missing failed-run job census") end |
-      [.[].jobs[]] as $jobs |
-      if ($jobs | length) > 0 and all(.[]; .total_count == ($jobs | length)) and
-        ([$jobs[].id] | unique | length) == ($jobs | length) and
-        all($jobs[]; (.id | type == "number" and . > 0) and .run_id == $run.id and
-          .run_attempt == $run.run_attempt and .status == "completed" and
-          (.name | type == "string" and length > 0) and
-          (.conclusion as $c | ["success","failure","skipped","cancelled","timed_out"] | index($c) != null)) and
-        any($jobs[]; .conclusion == "failure" and
-          .name != "CI status" and .name != "Release candidate verdict")
-      then {run_id:$run.id,run_attempt:$run.run_attempt,observed:($jobs|length),pending:0,
-        failed_jobs:[$jobs[]|select(.conclusion == "failure")|{id,name}]}
-      else error("incomplete or unmeasured failed-run census") end
-    ' <<< "$pages")"
-    latest="$(gh api "repos/$repository/actions/runs/$id")"
-    jq -e --argjson original "$run" '.id == $original.id and
-      .run_attempt == $original.run_attempt and .head_sha == $original.head_sha and
-      .status == "completed" and .conclusion == "failure"' <<< "$latest" >/dev/null
-    echo "Retirement failure census $census" >&2
-    observations="$(jq -c --argjson census "$census" '. + [$census]' <<< "$observations")"
-  done
+  producer_run="$(gh api "repos/$repository/actions/runs/$producer")"
+  jq -e --arg repository "$repository" --arg source "$source" --arg id "$producer" '
+    (.id | tostring) == $id and .repository.full_name == $repository and
+    .head_repository.full_name == $repository and
+    .path == ".github/workflows/build-release-binaries.yml" and
+    .head_sha == $source and .status == "completed" and
+    (.conclusion as $c | ["success","failure","cancelled","timed_out"] | index($c) != null) and
+    (.run_attempt | type == "number" and . > 0 and . == floor) and
+    (.event == "merge_group" or (.event == "push" and .head_branch == "main"))
+  ' <<< "$producer_run" >/dev/null
+  run="$(gh api "repos/$repository/actions/runs/$ci")"
+  jq -e --arg repository "$repository" --arg source "$source" --arg id "$ci" '
+    (.id | tostring) == $id and .repository.full_name == $repository and
+    .head_repository.full_name == $repository and .path == ".github/workflows/ci.yml" and
+    .head_sha == $source and .status == "completed" and
+    (.conclusion == "failure" or .conclusion == "success") and
+    (.run_attempt | type == "number" and . > 0 and . == floor) and
+    .event == "push" and .head_branch == "main"
+  ' <<< "$run" >/dev/null
+  pages="$(gh api --paginate --slurp "repos/$repository/actions/runs/$ci/jobs?filter=latest&per_page=100")"
+  census="$(jq -ce --argjson run "$run" --argjson full_suite "$full_suite" '
+    if type == "array" and length > 0 and
+      all(.[]; (.jobs | type) == "array" and (.total_count | type) == "number")
+    then . else error("missing source CI job census") end |
+    [.[].jobs[]] as $jobs |
+    if ($jobs | length) > 0 and all(.[]; .total_count == ($jobs | length)) and
+      ([$jobs[].id] | unique | length) == ($jobs | length) and
+      all($jobs[]; (.id | type == "number" and . > 0) and .run_id == $run.id and
+        .run_attempt == $run.run_attempt and .status == "completed" and
+        (.name | type == "string" and length > 0) and
+        (.conclusion as $c | ["success","failure","skipped","cancelled","timed_out"] | index($c) != null))
+    then . else error("incomplete or unmeasured source CI census") end |
+    [$jobs[] | select(.conclusion == "failure" and
+      .name != "CI status" and .name != "Release candidate verdict") | {id,name}] as $failed |
+    [$full_suite[] as $name | select(any($jobs[]; .name == $name and .conclusion == "success") | not) | $name] as $missing |
+    (if $run.conclusion == "failure" and ($failed | length) > 0 and $run.run_attempt >= 2 then "source_ci_failed"
+     elif $run.conclusion == "success" and ($missing | length) > 0 then "source_ci_not_full_suite"
+     else error("source can still promote: green full suite, unretried failure, or unmeasured CI") end) as $reason |
+    {run_id:$run.id,run_attempt:$run.run_attempt,observed:($jobs|length),pending:0,
+      reason:$reason,failed_jobs:$failed,missing_full_suite_jobs:$missing}
+  ' <<< "$pages")"
+  latest="$(gh api "repos/$repository/actions/runs/$ci")"
+  jq -e --argjson original "$run" '.id == $original.id and
+    .run_attempt == $original.run_attempt and .head_sha == $original.head_sha and
+    .status == "completed" and .conclusion == $original.conclusion' <<< "$latest" >/dev/null
+  echo "Retirement source census $census" >&2
   comparison="$(gh api "repos/$repository/compare/$source...main")"
   jq -e --arg source "$source" '(.status == "identical" or .status == "ahead") and
     .merge_base_commit.sha == $source' <<< "$comparison" >/dev/null
-  jq -nc --arg source "$source" --arg producer "$producer" --arg ci "$ci" --argjson observations "$observations" \
-    '{source_sha:$source,producer_run:$producer,source_ci_run:$ci,failure_stage:"producer",observations:$observations}'
+  jq -nc --arg source "$source" --arg producer "$producer" --arg ci "$ci" \
+    --arg producer_conclusion "$(jq -r .conclusion <<< "$producer_run")" --argjson census "$census" '
+    {source_sha:$source,producer_run:$producer,producer_conclusion:$producer_conclusion,
+     source_ci_run:$ci,failure_stage:"source_ci",reason:$census.reason,observations:[$census]}'
 )
 
 release_require_unpublished_retirement() (
@@ -283,7 +310,7 @@ release_require_unpublished_retirement() (
   local producer="${RETIRE_PRODUCER_RUN:?producer required}"
   local parent="${RETIRE_PROMOTION_RUN:-}"
   local release_pr="${RETIRE_RELEASE_PR:?owning release pull request required}"
-  local tags attempts releases runs workflow observation scratch artifacts manifest source_cargo producer_run census status control pull release_head
+  local tags attempts releases runs workflow observation scratch artifacts manifest source_cargo producer_run census status control pull release_head stale pulls
   # shellcheck source=scripts/lib/candidate_archive_contract.sh
   source "$RELEASE_VERSION_LIB_DIR/candidate_archive_contract.sh"
   release_version_is_canonical "$version"
@@ -295,7 +322,7 @@ release_require_unpublished_retirement() (
   scratch="$(mktemp -d)"
   trap 'rm -rf "$scratch"' EXIT
   if [[ -n "${RETIRE_SOURCE_CI_RUN:-}" ]]; then
-    observation="$(release_failed_producer_observation "$repository" "$source" "$producer")"
+    observation="$(release_unpromotable_source_observation "$repository" "$source" "$producer")"
   else
     [[ "$parent" =~ ^[1-9][0-9]*$ ]]
     GITHUB_OUTPUT="$scratch/resolved" CANDIDATE_RUN_ID="$producer" EXPECTED_SOURCE_SHA="$source" \
@@ -357,12 +384,26 @@ release_require_unpublished_retirement() (
   # The immutable attempt records the release PR head. A merge queue gives
   # the landed, certified source a different SHA; the actual merged PR binds
   # those identities, never a matching title or a patch-equivalence guess.
-  awk -v prefix="refs/heads/release-attempt/v$version/" -v source="$release_head" '
+  # Any other attempt must belong to a release PR that closed unmerged, read
+  # from the PR itself; such an attempt can never become this version.
+  stale="$(awk -v prefix="refs/heads/release-attempt/v$version/" -v source="$release_head" '
     NF != 2 || $1 !~ /^[0-9a-f]+$/ || length($1) != 40 {bad=1}
     $2 == "refs/heads/main" {seen++; next}
-    $2 != prefix source || $1 != source {bad=1}
+    $2 != prefix $1 {bad=1}
+    $1 != source {print $1}
     END {exit(bad || seen != 1)}
-  ' <<< "$attempts"
+  ' <<< "$attempts")"
+  if [[ -n "$stale" ]]; then
+    pulls="$(gh api --paginate --slurp "repos/$repository/pulls?state=closed&head=${repository%%/*}:release/v$version&per_page=100")"
+    jq -e --arg repository "$repository" --arg branch "release/v$version" \
+      --argjson stale "$(jq -Rsc 'split("\n") | map(select(length > 0))' <<< "$stale")" '
+      type == "array" and all(.[]; type == "array") and [.[][]] as $pulls |
+      all($stale[]; . as $sha | [$pulls[] | select(.head.sha == $sha and .state == "closed" and
+        .merged_at == null and .base.ref == "main" and .base.repo.full_name == $repository and
+        .head.ref == $branch and .head.repo.full_name == $repository)] | length == 1)
+    ' <<< "$pulls" >/dev/null
+    echo "Retirement ignores attempts of release PRs closed unmerged: $(tr '\n' ' ' <<< "$stale")" >&2
+  fi
   releases="$(gh api --paginate --slurp "repos/$repository/releases?per_page=100")"
   jq -e --arg known "$published_tag" --arg retired "v$version" '
     type == "array" and length > 0 and all(.[]; type == "array" and length <= 100) and

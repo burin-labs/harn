@@ -63,7 +63,10 @@ run_case() {
   local state="$tmp_root/$name"
   mkdir -p "$state"
   local status=0
+  : > "$state/github_env"
   PATH="$tmp_root/bin:$PATH" \
+    GITHUB_ENV="$state/github_env" \
+    RUSTFLAGS="${CASE_RUSTFLAGS:-}" \
     RUNNER_ENVIRONMENT="${CASE_RUNNER_ENVIRONMENT:-self-hosted}" \
     TOOLCHAIN_TEST_STATE="$state" \
     TOOLCHAIN_TEST_MODE="$mode" \
@@ -124,5 +127,18 @@ rustup toolchain list --quiet
 EXPECTED
 # An owned runner's shared rustup home is never touched.
 ! grep -Eq 'rustup (default|toolchain uninstall)' "$tmp_root/cargo-transient/calls"
+
+# Later steps run rustc's parallel front end: the job's own RUSTFLAGS are kept
+# and the flags appended, with the bootstrap that lets stable rustc accept them.
+CASE_RUSTFLAGS='-D warnings' run_case frontend cargo-transient 0
+diff -u - "$tmp_root/frontend/github_env" <<'EXPECTED'
+RUSTC_BOOTSTRAP=1
+RUSTFLAGS=-D warnings -Zthreads=8
+EXPECTED
+# A job with no RUSTFLAGS gets the flags alone.
+[[ "$(sed -n 2p "$tmp_root/rustc-transient/github_env")" == 'RUSTFLAGS=-Zthreads=8' ]]
+# A second call in the same job appends nothing.
+CASE_RUSTFLAGS='-D warnings -Zthreads=8' run_case frontend-again cargo-transient 0
+[[ ! -s "$tmp_root/frontend-again/github_env" ]]
 
 echo 'rust toolchain action tests passed'

@@ -17,6 +17,7 @@ mod checkpoints;
 mod commands;
 mod confinement;
 mod core;
+mod delivery;
 mod dispatch;
 mod event_projection;
 mod events;
@@ -59,10 +60,7 @@ use live_clients::{
 };
 #[cfg(test)]
 use schema::configured_llm_route_for_capabilities;
-use schema::{
-    acp_agent_capabilities, normalize_acp_prompt, normalize_acp_prompt_block,
-    prompt_text_from_content, retarget_prompt_text,
-};
+use schema::{acp_agent_capabilities, normalize_acp_prompt, retarget_prompt_text};
 pub use schema::{
     ACP_SCHEMA_COMPATIBILITY, ACP_SESSION_UPDATE_VARIANTS, HARN_AGENT_EVENT_KINDS,
     HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROMPT_RESULT_EXTENSION_FIELDS,
@@ -75,12 +73,11 @@ pub use sessions::{
 };
 use sessions::{
     cancel_session_command_handles, lookup_session_cancellation, preempt_session_interruption,
-    prepare_session_request, resolve_acp_session_cwd, session_project_root_for_cwd,
-    ConcurrentSessionControl, ConcurrentSessionControls, PreparedSessionRequest,
-    PromptCancellation, Session, SessionBudget, SessionCancellation, SessionInfo,
-    SessionSpendRecorder,
+    prepare_session_request, resolve_acp_session_cwd, send_routed_error,
+    session_project_root_for_cwd, ConcurrentSessionControl, ConcurrentSessionControls,
+    PreparedSessionRequest, PromptCancellation, Session, SessionBudget, SessionCancellation,
+    SessionInfo, SessionSpendRecorder,
 };
-use task_admission::InjectionCommand;
 pub use task_admission::{
     SessionTaskAdmission, TaskAdmissionError, TaskInjectionTarget, TaskPromptTarget,
     TASK_ADMISSION_STORAGE_UNAVAILABLE_RPC_CODE,
@@ -94,19 +91,17 @@ pub use types::{
     AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta, AcpJsonRpcError, AcpJsonRpcErrorResponse,
     AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpMeta, AcpPlanDocumentMutation,
     AcpPlanDocumentMutationParams, AcpPlanDocumentMutationResult, AcpPromptCorrelation,
-    AcpPromptErrorData, AcpPromptErrorSchema, AcpPromptFailureFacts, AcpRoutingAttempt,
-    AcpSessionCancelToolCallParams, AcpSessionEnvironmentConfig, AcpSessionIdParams,
-    AcpSessionInjectContent, AcpSessionInjectHostEventParams, AcpSessionInjectMode,
-    AcpSessionInjectParams, AcpSessionLoadParams, AcpSessionMessageIdParams, AcpSessionNewParams,
-    AcpSessionPromptParams, AcpSessionPromptResult, AcpSessionReplaceInjectParams,
-    AcpSessionRestoreResult, ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL,
-    ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT,
+    AcpPromptDelivery, AcpPromptErrorData, AcpPromptErrorSchema, AcpPromptFailureFacts,
+    AcpRoutingAttempt, AcpSessionCancelToolCallParams, AcpSessionEnvironmentConfig,
+    AcpSessionIdParams, AcpSessionInjectHostEventParams, AcpSessionLoadParams, AcpSessionNewParams,
+    AcpSessionPromptParams, AcpSessionPromptReceipt, AcpSessionPromptResult,
+    AcpSessionRestoreResult, ACP_METHOD_CANCEL_REQUEST, ACP_METHOD_INITIALIZE,
+    ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE,
     ACP_METHOD_SESSION_INJECT_HOST_EVENT, ACP_METHOD_SESSION_INPUTS, ACP_METHOD_SESSION_LOAD,
-    ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_INJECTIONS,
-    ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE, ACP_METHOD_SESSION_PROMPT,
-    ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME, ACP_METHOD_SESSION_REVOKE_INJECT,
+    ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_PROMPTS,
+    ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE, ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_RESUME,
     ACP_PLAN_MUTATION_BUSY_CODE, ACP_PLAN_REVISION_CONFLICT_CODE,
-    ACP_PLAN_REVISION_CONFLICT_SCHEMA, ACP_PROMPT_ERROR_DATA_SCHEMA,
+    ACP_PLAN_REVISION_CONFLICT_SCHEMA, ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_REQUEST_CANCELLED_CODE,
 };
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -189,13 +184,6 @@ fn parse_oauth_redirect_url(
     let state = query("state").ok_or_else(|| "redirectUrl is missing state".to_string())?;
     let code = query("code").ok_or_else(|| "redirectUrl is missing code".to_string())?;
     Ok((state, code, query("iss")))
-}
-
-/// Tracks the ACP actor that owns a pending injected message so that
-/// revoke/replace requests can enforce ownership.
-#[derive(Clone)]
-struct InjectControlRecord {
-    owner: serde_json::Value,
 }
 
 struct TimelineSubscription {
@@ -344,13 +332,6 @@ fn control_actor_from_params(params: &serde_json::Value) -> serde_json::Value {
     serde_json::Value::Object(actor)
 }
 
-fn actor_is_host_owner(actor: &serde_json::Value) -> bool {
-    actor
-        .get("role")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|role| role == "host_owner" || role == "hostOwner" || role == "owner")
-}
-
 fn control_id() -> String {
     format!("ctrl_{}", uuid::Uuid::now_v7().simple())
 }
@@ -441,81 +422,6 @@ fn mount_mode_param(
 
 fn live_state_filter_matches(live_state: &str, filter: Option<&[String]>) -> bool {
     filter.is_none_or(|states| states.iter().any(|state| state == live_state))
-}
-
-fn bridge_mode_for_session_inject(params: &serde_json::Value) -> Result<&'static str, String> {
-    match params.get("mode").and_then(|value| value.as_str()) {
-        // ACP `session/inject.mode = "queue"` is the audit/trail variant —
-        // the message ends up in the transcript on `loop_exit` but is
-        // never rendered into a model prompt. The canonical bridge name
-        // is `audit_only` (harn#2212).
-        Some("queue") => Ok("audit_only"),
-        Some("steer") => Ok("finish_step"),
-        Some("interrupt_immediate" | "interrupt") => Ok("interrupt_immediate"),
-        Some(other) => Err(format!(
-            "session/inject: unsupported mode `{other}`; expected `queue`, `steer`, or `interrupt_immediate`"
-        )),
-        None => Err("session/inject requires mode".to_string()),
-    }
-}
-
-/// The retarget a `session/inject` steer carries, validated once here.
-///
-/// A `queue` note is refused a goal: it lands after the last model call, so a
-/// retarget riding on it would retire acceptance items for an objective the
-/// model was never shown.
-fn session_inject_goal(
-    params: &serde_json::Value,
-    bridge_mode: &str,
-) -> Result<Option<harn_session_store::ControlGoal>, String> {
-    let Some(raw) = params.get("goal").filter(|value| !value.is_null()) else {
-        return Ok(None);
-    };
-    if bridge_mode == "audit_only" {
-        return Err(
-            "session/inject: `goal` retargets the run and needs mode `steer` or \
-             `interrupt_immediate`; a `queue` note never reaches the model"
-                .to_string(),
-        );
-    }
-    harn_session_store::ControlGoal::parse(raw)
-        .map(Some)
-        .map_err(|message| format!("session/inject: {message}"))
-}
-
-fn normalize_session_inject_content(
-    method: &str,
-    params: &serde_json::Value,
-) -> Result<(String, serde_json::Value), String> {
-    let Some(content) = params.get("content") else {
-        return Err(format!("{method} requires content"));
-    };
-    if let Some(text) = content.as_str() {
-        if text.is_empty() {
-            return Err(format!("{method}: content must not be empty"));
-        }
-        return Ok((
-            text.to_string(),
-            serde_json::Value::String(text.to_string()),
-        ));
-    }
-    let Some(blocks) = content.as_array() else {
-        return Err(format!(
-            "{method}: content must be a string or an array of content blocks"
-        ));
-    };
-    if blocks.is_empty() {
-        return Err(format!("{method}: content must not be empty"));
-    }
-    let normalized = blocks
-        .iter()
-        .map(|block| {
-            normalize_acp_prompt_block(block)
-                .map_err(|message| message.replace("session/prompt", method))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let text = prompt_text_from_content(&normalized);
-    Ok((text, serde_json::Value::Array(normalized)))
 }
 
 fn nonnegative_usize_param(

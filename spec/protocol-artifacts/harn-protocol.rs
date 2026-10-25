@@ -1814,20 +1814,18 @@ pub struct HarnSessionTimelineUpdate {
 }
 
 pub const ACP_AGENT_METHOD_INITIALIZE: &str = "initialize";
-pub const ACP_AGENT_METHOD_SESSION_INJECT: &str = "session/inject";
+pub const ACP_AGENT_METHOD_CANCEL_REQUEST: &str = "$/cancel_request";
 pub const ACP_AGENT_METHOD_SESSION_INJECT_HOST_EVENT: &str = "session/inject_host_event";
 pub const ACP_AGENT_METHOD_SESSION_NEW: &str = "session/new";
 pub const ACP_AGENT_METHOD_SESSION_INPUTS: &str = "session/inputs";
 pub const ACP_AGENT_METHOD_SESSION_LOAD: &str = "session/load";
-pub const ACP_AGENT_METHOD_SESSION_REPLACE_INJECT: &str = "session/replace_inject";
 pub const ACP_AGENT_METHOD_SESSION_RESUME: &str = "session/resume";
 pub const ACP_AGENT_METHOD_SESSION_PROMPT: &str = "session/prompt";
-pub const ACP_AGENT_METHOD_SESSION_REVOKE_INJECT: &str = "session/revoke_inject";
+pub const ACP_AGENT_METHOD_SESSION_PENDING_PROMPTS: &str = "session/pending_prompts";
 pub const ACP_AGENT_METHOD_SESSION_TRUNCATE: &str = "session/truncate";
 pub const ACP_AGENT_METHOD_SESSION_ROLLBACK: &str = "session/rollback";
 pub const ACP_AGENT_METHOD_SESSION_REDO: &str = "session/redo";
 pub const ACP_AGENT_METHOD_SESSION_REMIND: &str = "session/remind";
-pub const ACP_AGENT_METHOD_SESSION_PENDING_INJECTIONS: &str = "session/pending_injections";
 pub const ACP_AGENT_METHOD_SESSION_REVOKE_REMINDER: &str = "session/revoke_reminder";
 pub const ACP_AGENT_METHOD_SESSION_CANCEL_TOOL_CALL: &str = "session/cancel_tool_call";
 pub const ACP_AGENT_METHOD_SESSION_CLOSE: &str = "session/close";
@@ -1836,20 +1834,18 @@ pub const ACP_AGENT_METHOD_SESSION_STOP: &str = "session/stop";
 /// Stable host-facing ACP agent methods (matches the TypeScript/Swift/Python/Go bindings).
 pub const ACP_AGENT_METHODS: &[&str] = &[
     "initialize",
-    "session/inject",
+    "$/cancel_request",
     "session/inject_host_event",
     "session/new",
     "session/inputs",
     "session/load",
-    "session/replace_inject",
     "session/resume",
     "session/prompt",
-    "session/revoke_inject",
+    "session/pending_prompts",
     "session/truncate",
     "session/rollback",
     "session/redo",
     "session/remind",
-    "session/pending_injections",
     "session/revoke_reminder",
     "session/cancel_tool_call",
     "session/close",
@@ -1894,12 +1890,9 @@ pub const ACP_DISPATCHED_METHOD_SESSION_CANCEL: &str = "session/cancel";
 pub const ACP_DISPATCHED_METHOD_SESSION_CANCEL_TOOL_CALL: &str = "session/cancel_tool_call";
 pub const ACP_DISPATCHED_METHOD_SESSION_CLOSE: &str = "session/close";
 pub const ACP_DISPATCHED_METHOD_SESSION_STOP: &str = "session/stop";
-pub const ACP_DISPATCHED_METHOD_SESSION_INJECT: &str = "session/inject";
 pub const ACP_DISPATCHED_METHOD_SESSION_INJECT_HOST_EVENT: &str = "session/inject_host_event";
-pub const ACP_DISPATCHED_METHOD_SESSION_REVOKE_INJECT: &str = "session/revoke_inject";
-pub const ACP_DISPATCHED_METHOD_SESSION_REPLACE_INJECT: &str = "session/replace_inject";
 pub const ACP_DISPATCHED_METHOD_SESSION_REMIND: &str = "session/remind";
-pub const ACP_DISPATCHED_METHOD_SESSION_PENDING_INJECTIONS: &str = "session/pending_injections";
+pub const ACP_DISPATCHED_METHOD_SESSION_PENDING_PROMPTS: &str = "session/pending_prompts";
 pub const ACP_DISPATCHED_METHOD_SESSION_REVOKE_REMINDER: &str = "session/revoke_reminder";
 pub const ACP_DISPATCHED_METHOD_SESSION_LIST: &str = "session/list";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_WORKSPACE_ROOTS: &str = "harn.session_workspace_roots";
@@ -1969,12 +1962,9 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "session/cancel_tool_call",
     "session/close",
     "session/stop",
-    "session/inject",
     "session/inject_host_event",
-    "session/revoke_inject",
-    "session/replace_inject",
     "session/remind",
-    "session/pending_injections",
+    "session/pending_prompts",
     "session/revoke_reminder",
     "session/list",
     "harn.session_workspace_roots",
@@ -2052,12 +2042,9 @@ pub const ACP_HANDLED_METHOD_SESSION_CANCEL: &str = "session/cancel";
 pub const ACP_HANDLED_METHOD_SESSION_CANCEL_TOOL_CALL: &str = "session/cancel_tool_call";
 pub const ACP_HANDLED_METHOD_SESSION_CLOSE: &str = "session/close";
 pub const ACP_HANDLED_METHOD_SESSION_STOP: &str = "session/stop";
-pub const ACP_HANDLED_METHOD_SESSION_INJECT: &str = "session/inject";
 pub const ACP_HANDLED_METHOD_SESSION_INJECT_HOST_EVENT: &str = "session/inject_host_event";
-pub const ACP_HANDLED_METHOD_SESSION_REVOKE_INJECT: &str = "session/revoke_inject";
-pub const ACP_HANDLED_METHOD_SESSION_REPLACE_INJECT: &str = "session/replace_inject";
 pub const ACP_HANDLED_METHOD_SESSION_REMIND: &str = "session/remind";
-pub const ACP_HANDLED_METHOD_SESSION_PENDING_INJECTIONS: &str = "session/pending_injections";
+pub const ACP_HANDLED_METHOD_SESSION_PENDING_PROMPTS: &str = "session/pending_prompts";
 pub const ACP_HANDLED_METHOD_SESSION_REVOKE_REMINDER: &str = "session/revoke_reminder";
 pub const ACP_HANDLED_METHOD_SESSION_LIST: &str = "session/list";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_WORKSPACE_ROOTS: &str = "harn.session_workspace_roots";
@@ -2128,12 +2115,9 @@ pub const ACP_HANDLED_METHODS: &[&str] = &[
     "session/cancel_tool_call",
     "session/close",
     "session/stop",
-    "session/inject",
     "session/inject_host_event",
-    "session/revoke_inject",
-    "session/replace_inject",
     "session/remind",
-    "session/pending_injections",
+    "session/pending_prompts",
     "session/revoke_reminder",
     "session/list",
     "harn.session_workspace_roots",
@@ -2236,6 +2220,7 @@ pub const ACP_SESSION_UPDATE_SKILL_DEACTIVATED: &str = "skill_deactivated";
 pub const ACP_SESSION_UPDATE_SKILL_NARROW: &str = "skill_narrow";
 pub const ACP_SESSION_UPDATE_SKILL_SCOPE_TOOLS: &str = "skill_scope_tools";
 pub const ACP_SESSION_UPDATE_STANCE_TRANSITION: &str = "stance_transition";
+pub const ACP_SESSION_UPDATE_STATE_UPDATE: &str = "state_update";
 pub const ACP_SESSION_UPDATE_TOOL_SEARCH_QUERY: &str = "tool_search_query";
 pub const ACP_SESSION_UPDATE_TOOL_SEARCH_RESULT: &str = "tool_search_result";
 pub const ACP_SESSION_UPDATE_TRANSCRIPT_COMPACTED: &str = "transcript_compacted";
@@ -2273,6 +2258,7 @@ pub const ACP_SESSION_UPDATES: &[&str] = &[
     "skill_narrow",
     "skill_scope_tools",
     "stance_transition",
+    "state_update",
     "tool_search_query",
     "tool_search_result",
     "transcript_compacted",
@@ -2297,6 +2283,7 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSION_SKILL_DEACTIVATED: &str = "skill_dea
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_SKILL_NARROW: &str = "skill_narrow";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_SKILL_SCOPE_TOOLS: &str = "skill_scope_tools";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_STANCE_TRANSITION: &str = "stance_transition";
+pub const HARN_ACP_SESSION_UPDATE_EXTENSION_STATE_UPDATE: &str = "state_update";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_TOOL_SEARCH_QUERY: &str = "tool_search_query";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_TOOL_SEARCH_RESULT: &str = "tool_search_result";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_TRANSCRIPT_COMPACTED: &str = "transcript_compacted";
@@ -2321,6 +2308,7 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "skill_narrow",
     "skill_scope_tools",
     "stance_transition",
+    "state_update",
     "tool_search_query",
     "tool_search_result",
     "transcript_compacted",
@@ -3599,6 +3587,34 @@ pub struct ACPStanceTransitionUpdate {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ACPStateUpdateMetaHarn {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replayed: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ACPStateUpdateMeta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harn: Option<ACPStateUpdateMetaHarn>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ACPStateUpdate {
+    #[serde(rename = "sessionUpdate")]
+    pub session_update: String,
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "_meta")]
+    pub meta: Option<ACPStateUpdateMeta>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "deserialize_present_session_update_value")]
+    pub error: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "stopReason")]
+    pub stop_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ACPToolSearchQueryUpdateMetaHarn {
     #[serde(rename = "toolUseId")]
     pub tool_use_id: String,
@@ -3892,6 +3908,7 @@ pub enum ACPTypedSessionUpdate {
     SkillNarrow(ACPSkillNarrowUpdate),
     SkillScopeTools(ACPSkillScopeToolsUpdate),
     StanceTransition(ACPStanceTransitionUpdate),
+    State(ACPStateUpdate),
     ToolSearchQuery(ACPToolSearchQueryUpdate),
     ToolSearchResult(ACPToolSearchResultUpdate),
     TranscriptCompacted(ACPTranscriptCompactedUpdate),
@@ -4158,6 +4175,13 @@ const STANCE_TRANSITION_RULES: &[(&str, SessionUpdateRule)] = &[
 ];
 
 #[rustfmt::skip]
+const STATE_UPDATE_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/sessionUpdate", SessionUpdateRule::Required),
+    ("/state", SessionUpdateRule::Required),
+    ("/state", SessionUpdateRule::Choices(&["running", "idle"])),
+];
+
+#[rustfmt::skip]
 const TOOL_SEARCH_QUERY_RULES: &[(&str, SessionUpdateRule)] = &[
     ("/_meta", SessionUpdateRule::Required),
     ("/_meta", SessionUpdateRule::Present(&[
@@ -4315,6 +4339,9 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                 }),
                 Some("stance_transition") => (STANCE_TRANSITION_RULES, |value| {
                     serde_json::from_value(value).map(Self::StanceTransition)
+                }),
+                Some("state_update") => (STATE_UPDATE_RULES, |value| {
+                    serde_json::from_value(value).map(Self::State)
                 }),
                 Some("tool_search_query") => (TOOL_SEARCH_QUERY_RULES, |value| {
                     serde_json::from_value(value).map(Self::ToolSearchQuery)

@@ -107,6 +107,25 @@ jobs:
           # Sole writer for `workspace-macos`. Pull-request runs restore and do
           # not write, so they never mint a cache generation of their own.
           save: ${{ github.event_name != 'pull_request' }}
+      # A self-hosted runner keeps one workspace target PER RUNNER across
+      # runs. Cargo's fingerprints keep it exact-source: every crate whose
+      # inputs changed (embedded stdlib sources included, through dep-info)
+      # rebuilds, and CARGO_INCREMENTAL=0 leaves no incremental state to go
+      # stale. The directory is keyed on the runner, not the host: two runners
+      # on one host sharing a target would let a later job's rebuild replace
+      # the binary an earlier job's smoke and performance steps still run.
+      # Runs before a dispatch swaps in an older admitted source, because that
+      # source may predate the bounding helper this step invokes.
+      - name: Use the runner's persistent workspace target
+        if: ${{ runner.environment == 'self-hosted' }}
+        shell: bash
+        run: |
+          target="${HOME}/harn-ci/target/macos-workspace-${RUNNER_NAME:?runner name is required}"
+          mkdir -p "${target}"
+          # Superseded dependency generations are never pruned by Cargo; bound
+          # the directory so a full disk cannot fail release qualification.
+          bash scripts/ci/bound_persistent_target.sh "${target}"
+          echo "CARGO_TARGET_DIR=${target}" >> "$GITHUB_ENV"
       - name: Admit reviewed qualification source
         if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
@@ -120,20 +139,6 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
         run: git checkout --detach "$SOURCE_SHA"
-      # A self-hosted runner keeps one workspace target PER RUNNER across
-      # runs. Cargo's fingerprints keep it exact-source: every crate whose
-      # inputs changed (embedded stdlib sources included, through dep-info)
-      # rebuilds, and CARGO_INCREMENTAL=0 leaves no incremental state to go
-      # stale. The directory is keyed on the runner, not the host: two runners
-      # on one host sharing a target would let a later job's rebuild replace
-      # the binary an earlier job's smoke and performance steps still run.
-      - name: Use the runner's persistent workspace target
-        if: ${{ runner.environment == 'self-hosted' }}
-        shell: bash
-        run: |
-          target="${HOME}/harn-ci/target/macos-workspace-${RUNNER_NAME:?runner name is required}"
-          mkdir -p "${target}"
-          echo "CARGO_TARGET_DIR=${target}" >> "$GITHUB_ENV"
       # A pull-request run reads the main-produced warm artifact. It runs after
       # rust-cache so the artifact wins when both exist: the restore replaces
       # the target directory wholesale, and a cache the namespace has already

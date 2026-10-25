@@ -16,7 +16,7 @@ mod test_support;
 mod boundary;
 mod completion_contract;
 mod openai;
-pub(crate) use crate::llm::usage::{extract_cache_read_tokens, extract_cache_write_tokens};
+pub(crate) use crate::llm::usage::extract_cache_counts;
 pub(crate) use completion_contract::{
     billed_noncommittal_completion_error, empty_generation_error,
     is_billed_noncommittal_completion, is_length_stop_reason, openai_message_content_block_types,
@@ -160,8 +160,7 @@ pub(crate) fn parse_llm_response(
         let reported_input_tokens = json["usage"]["input_tokens"].as_i64();
         let reported_output_tokens = json["usage"]["output_tokens"].as_i64();
         let output_tokens = reported_output_tokens.unwrap_or(0);
-        let cache_read_tokens = extract_cache_read_tokens(&json["usage"])?;
-        let cache_write_tokens = extract_cache_write_tokens(&json["usage"])?;
+        let cache = extract_cache_counts(&json["usage"])?;
         let stop_reason = json["stop_reason"].as_str().map(|s| s.to_string());
         let request_id = json["id"].as_str().filter(|value| !value.is_empty());
         let telemetry = ProviderTelemetry::from_anthropic_usage(&json["usage"], request_id);
@@ -172,12 +171,7 @@ pub(crate) fn parse_llm_response(
             crate::llm::serving_tiers::served_fast(model, json),
         )
         .with_billing(telemetry.billing.clone())
-        .with_cache(
-            cache_read_tokens,
-            cache_write_tokens,
-            telemetry.cache_accounting_declared,
-            true,
-        )
+        .with_cache(cache, telemetry.cache_accounting_declared, true)
         .with_input_basis(InputTokenBasis::Fresh)?;
         let input_tokens = provider_usage.input_tokens().unwrap_or(0);
 
@@ -225,8 +219,9 @@ pub(crate) fn parse_llm_response(
             raw_tool_calls,
             input_tokens,
             output_tokens,
-            cache_read_tokens,
-            cache_write_tokens,
+            cache_read_tokens: cache.read_tokens,
+            cache_write_tokens: cache.write_tokens,
+            cache_counts_reported: cache.reported,
             model: model.to_string(),
             provider: provider.to_string(),
             thinking: if thinking_text.is_empty() {
@@ -257,9 +252,8 @@ mod tests {
         extract_openai_choice_logprobs, parse_tool_arguments, preview_chars,
     };
     use super::{
-        extract_cache_read_tokens, extract_cache_write_tokens, is_billed_noncommittal_completion,
-        parse_openai_responses_response, test_support::parse_llm_response,
-        CompletionContractSignals,
+        extract_cache_counts, is_billed_noncommittal_completion, parse_openai_responses_response,
+        test_support::parse_llm_response, CompletionContractSignals,
     };
 
     fn assert_provider_usage_receipt(error: &VmError, input_tokens: i64, output_tokens: i64) {
@@ -595,7 +589,7 @@ mod tests {
             }
         });
 
-        assert_eq!(extract_cache_write_tokens(&usage).unwrap(), 100);
+        assert_eq!(extract_cache_counts(&usage).unwrap().write_tokens, 100);
     }
     #[test]
     fn cache_tokens_support_openai_responses_details_shape() {
@@ -608,8 +602,8 @@ mod tests {
             }
         });
 
-        assert_eq!(extract_cache_read_tokens(&usage).unwrap(), 120);
-        assert_eq!(extract_cache_write_tokens(&usage).unwrap(), 40);
+        assert_eq!(extract_cache_counts(&usage).unwrap().read_tokens, 120);
+        assert_eq!(extract_cache_counts(&usage).unwrap().write_tokens, 40);
     }
     #[test]
     fn cache_tokens_support_deepseek_prompt_cache_hit_field() {
@@ -622,7 +616,7 @@ mod tests {
             "completion_tokens": 42,
             "prompt_cache_hit_tokens": 8800
         });
-        assert_eq!(extract_cache_read_tokens(&usage).unwrap(), 8800);
+        assert_eq!(extract_cache_counts(&usage).unwrap().read_tokens, 8800);
     }
     #[test]
     fn cache_tokens_support_openrouter_cache_subobject_shape() {
@@ -637,8 +631,8 @@ mod tests {
                 "write_input_tokens": 220
             }
         });
-        assert_eq!(extract_cache_read_tokens(&usage).unwrap(), 8800);
-        assert_eq!(extract_cache_write_tokens(&usage).unwrap(), 220);
+        assert_eq!(extract_cache_counts(&usage).unwrap().read_tokens, 8800);
+        assert_eq!(extract_cache_counts(&usage).unwrap().write_tokens, 220);
     }
 
     #[test]

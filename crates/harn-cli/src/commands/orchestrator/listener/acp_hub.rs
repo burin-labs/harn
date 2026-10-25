@@ -17,7 +17,10 @@ use harn_vm::ActorChain;
 use super::routes::{normalize_headers, HttpError, ListenerAuth};
 use crate::commands::orchestrator::errors::OrchestratorError;
 
+mod client_requests;
 pub(super) mod persisted_sessions;
+
+use client_requests::role_may_send_method;
 
 pub(super) const ACP_PATH: &str = "/acp";
 const ACP_TOPIC_PREFIX: &str = "acp.session";
@@ -598,6 +601,7 @@ impl AcpWorker {
             })
         };
         let (client_id, role) = removed?;
+        self.withdraw_client_requests(&client_id);
         if role == AcpAttachRole::HostOwner {
             let mut host_owner = self
                 .host_owner_client_id
@@ -761,7 +765,9 @@ impl AcpWorker {
     ) -> Result<(), AcpClientRequestError> {
         let actor = self.client_control_envelope(client_id, role);
         if let Some(method) = value.get("method").and_then(JsonValue::as_str) {
-            if !role_may_send_method(role, method) {
+            if !role_may_send_method(role, method, &value)
+                || (method == "$/cancel_request" && !self.owns_client_request(client_id, &value))
+            {
                 return Err(AcpClientRequestError::Forbidden {
                     method: method.to_string(),
                     role,
@@ -1940,26 +1946,6 @@ fn request_harn_value<'a>(value: &'a JsonValue, key: &str) -> Option<&'a JsonVal
                 .and_then(|params| params.get("_harn"))
                 .and_then(|harn| harn.get(key))
         })
-}
-
-fn role_may_send_method(role: AcpAttachRole, method: &str) -> bool {
-    match role {
-        AcpAttachRole::HostOwner => true,
-        AcpAttachRole::Controller => matches!(
-            method,
-            "session/cancel"
-                | "session/inject"
-                | "session/revoke_inject"
-                | "session/replace_inject"
-                | "session/truncate"
-                | "session/remind"
-                | "session/pending_injections"
-                | "session/revoke_reminder"
-                | "session/set_mode"
-                | "session/set_config_option"
-        ),
-        AcpAttachRole::Observer => false,
-    }
 }
 
 fn acp_outbound_route(line: &str) -> AcpOutboundRoute {

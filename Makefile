@@ -791,6 +791,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/ci_rust_test_lane_test.sh
 	bash ./scripts/tests/rust_test_duration_budget_test.sh
 	./scripts/tests/macos_nightly_test_env_test.sh
+	./scripts/tests/bound_persistent_target_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
 	./scripts/tests/sccache_action_cache_size_test.sh
 	./scripts/tests/check_release_warm_build_budget_test.sh
@@ -1071,7 +1072,7 @@ check-swift-protocol-binding:
 		tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/harn-swift-binding.XXXXXX"); \
 		trap 'rm -rf "$$tmp"' EXIT; \
 		xcrun swiftc -parse-as-library spec/protocol-artifacts/HarnProtocol.swift scripts/tests/protocol_binding_session_recap.swift -o "$$tmp/probe"; \
-		"$$tmp/probe" spec/protocol-artifacts/fixtures/round_trip.json crates/harn-serve/tests/fixtures/acp/session_update_extensions.json; \
+		"$$tmp/probe" spec/protocol-artifacts/fixtures/round_trip.json crates/harn-serve/tests/fixtures/acp/session_update_extensions.json conformance/protocols/schemas/acp-session-update.schema.json; \
 		xcrun swiftc -emit-module -emit-library -module-name HarnViewProjection spec/protocol-artifacts/HarnProtocol.swift spec/protocol-artifacts/HarnRunSessionView.swift -emit-module-path "$$tmp/HarnViewProjection.swiftmodule" -o "$$tmp/libHarnViewProjection.dylib"; \
 		xcrun swiftc -parse-as-library -I "$$tmp" -L "$$tmp" -lHarnViewProjection -Xlinker -rpath -Xlinker "$$tmp" scripts/tests/run_session_view_binding.swift -o "$$tmp/view-probe"; \
 		"$$tmp/view-probe" spec/run-view-fixtures/cases/*/expected/runs/*.json spec/run-view-fixtures/cases/*/expected/session_view.json
@@ -1733,6 +1734,7 @@ check-rust-test-lane-policy:
 	@bash scripts/tests/host_telemetry_test.sh
 	@bash scripts/tests/runner_capacity_test.sh
 	@bash scripts/tests/consumer_canary_test.sh
+	@bash scripts/tests/consumer_verdict_test.sh
 
 check-cargo-lock-contract:
 	@echo "=== Checking CI cargo lock contract ==="

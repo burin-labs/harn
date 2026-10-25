@@ -117,6 +117,10 @@ pub(crate) struct LlmResult {
     /// every provider that does report cache counts.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub cache_supported: bool,
+    /// Whether the response carried any cache counter. A supported route that
+    /// omits the counters leaves the zeros above unmeasured, not a 0% hit rate.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cache_counts_reported: bool,
     pub model: String,
     pub provider: String,
     pub thinking: Option<String>,
@@ -223,6 +227,7 @@ impl Default for LlmResult {
             cache_read_tokens: 0,
             cache_write_tokens: 0,
             cache_supported: true,
+            cache_counts_reported: false,
             model: String::new(),
             provider: String::new(),
             thinking: None,

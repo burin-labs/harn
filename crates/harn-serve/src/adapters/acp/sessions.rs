@@ -192,8 +192,8 @@ impl ConcurrentSessionControl {
 #[derive(Clone)]
 pub(super) struct ConcurrentSessionControls {
     pub(super) sessions: Arc<std::sync::Mutex<HashMap<String, ConcurrentSessionControl>>>,
-    inject_owners: Arc<std::sync::Mutex<HashMap<String, BTreeMap<String, InjectControlRecord>>>>,
-    authenticated: Arc<AtomicBool>,
+    pub(super) pending_prompts: super::delivery::PendingPrompts,
+    pub(super) authenticated: Arc<AtomicBool>,
     auth_required_data: Arc<serde_json::Value>,
     pub(super) task_admission: Option<Arc<dyn SessionTaskAdmission>>,
     pub(super) machine_spend_quota: Option<harn_vm::llm::MachineSpendQuota>,
@@ -203,7 +203,7 @@ impl ConcurrentSessionControls {
     pub(super) fn new(authenticated: bool, auth_required_data: serde_json::Value) -> Self {
         Self {
             sessions: Arc::default(),
-            inject_owners: Arc::default(),
+            pending_prompts: Default::default(),
             authenticated: Arc::new(AtomicBool::new(authenticated)),
             auth_required_data: Arc::new(auth_required_data),
             task_admission: None,
@@ -312,42 +312,11 @@ impl ConcurrentSessionControls {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .remove(session_id);
-        self.inject_owners
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .remove(session_id);
     }
 
     #[cfg(test)]
     fn apply_budget_rearm(&self, msg: &serde_json::Value) -> bool {
         self.try_apply_budget_rearm(msg).expect("budget rearm")
-    }
-
-    pub(super) fn inject_owner(
-        &self,
-        session_id: &str,
-        message_id: &str,
-    ) -> Option<serde_json::Value> {
-        self.inject_owners
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .get(session_id)
-            .and_then(|records| records.get(message_id))
-            .map(|record| record.owner.clone())
-    }
-
-    pub(super) fn record_inject_owner(
-        &self,
-        session_id: &str,
-        message_id: String,
-        actor: serde_json::Value,
-    ) {
-        self.inject_owners
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .entry(session_id.to_string())
-            .or_default()
-            .insert(message_id, InjectControlRecord { owner: actor });
     }
 
     pub(super) fn preempt_active_live_client_operation(
@@ -389,119 +358,6 @@ impl ConcurrentSessionControls {
         match apply_live_client_operation(method, &session_id, params) {
             Ok(operation) => write_live_client_operation(output, id, &session_id, operation),
             Err(message) => send_routed_error(output, id, -32602, &message),
-        }
-        true
-    }
-
-    pub(super) async fn preempt_active_prompt_inject(
-        &self,
-        msg: &serde_json::Value,
-        output: &AcpOutput,
-    ) -> bool {
-        if msg.get("method").and_then(serde_json::Value::as_str) != Some("session/inject") {
-            return false;
-        }
-        let Some(id) = msg.get("id") else {
-            return false;
-        };
-        if self.reject_unauthenticated(id, output) {
-            return true;
-        }
-        let params = msg.get("params").unwrap_or(&serde_json::Value::Null);
-        let Some(session_id) = session_id_param(params) else {
-            send_routed_error(output, id, -32602, "session/inject requires sessionId");
-            return true;
-        };
-        let control = self
-            .sessions
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .get(&session_id)
-            .cloned();
-        let Some(control) = control else {
-            return false;
-        };
-        if !control.prompt_is_active() {
-            return false;
-        }
-
-        let actor = control_actor_from_params(params);
-        let mode = match bridge_mode_for_session_inject(params) {
-            Ok(mode) => mode,
-            Err(message) => {
-                send_routed_error(output, id, -32602, &message);
-                emit_routed_control_outcome(
-                    self,
-                    &session_id,
-                    "rejected",
-                    actor,
-                    serde_json::json!({"sessionId": session_id}),
-                    Some("invalid_mode"),
-                );
-                return true;
-            }
-        };
-        let (content, transcript_content) =
-            match normalize_session_inject_content("session/inject", params) {
-                Ok(content) => content,
-                Err(message) => {
-                    send_routed_error(output, id, -32602, &message);
-                    emit_routed_control_outcome(
-                        self,
-                        &session_id,
-                        "rejected",
-                        actor,
-                        serde_json::json!({"sessionId": session_id}),
-                        Some("invalid_content"),
-                    );
-                    return true;
-                }
-            };
-        let goal = match session_inject_goal(params, mode) {
-            Ok(goal) => goal,
-            Err(message) => {
-                send_routed_error(output, id, -32602, &message);
-                emit_routed_control_outcome(
-                    self,
-                    &session_id,
-                    "rejected",
-                    actor,
-                    serde_json::json!({"sessionId": session_id}),
-                    Some("invalid_goal"),
-                );
-                return true;
-            }
-        };
-        // The caller's own word, before `bridge_mode_for_session_inject`
-        // normalized it onto a delivery checkpoint.
-        let requested_mode = params
-            .get("mode")
-            .and_then(|value| value.as_str())
-            .unwrap_or(mode)
-            .to_string();
-        let response = match self
-            .enqueue_injection(
-                &session_id,
-                &control.inject_state,
-                params,
-                InjectionCommand {
-                    content,
-                    transcript_content,
-                    mode: mode.to_owned(),
-                    requested_mode,
-                    goal,
-                    actor,
-                },
-            )
-            .await
-        {
-            Ok(result) => harn_vm::jsonrpc::response(id.clone(), result),
-            Err(error) => {
-                harn_vm::jsonrpc::error_response(id.clone(), error.rpc_code(), error.message())
-            }
-        };
-        if let Ok(line) = serde_json::to_string(&response) {
-            output.write_line(&line);
         }
         true
     }
@@ -655,36 +511,16 @@ impl Default for ConcurrentSessionControls {
     }
 }
 
-fn send_routed_error(output: &AcpOutput, id: &serde_json::Value, code: i64, message: &str) {
+pub(super) fn send_routed_error(
+    output: &AcpOutput,
+    id: &serde_json::Value,
+    code: i64,
+    message: &str,
+) {
     let response = harn_vm::jsonrpc::error_response(id.clone(), code, message);
     if let Ok(line) = serde_json::to_string(&response) {
         output.write_line(&line);
     }
-}
-
-fn emit_routed_control_outcome(
-    controls: &ConcurrentSessionControls,
-    session_id: &str,
-    outcome: &str,
-    actor: serde_json::Value,
-    target: serde_json::Value,
-    reason: Option<&str>,
-) {
-    controls.emit_control_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
-        session_id: session_id.to_string(),
-        control_id: control_id(),
-        method: "session/inject".to_string(),
-        outcome: outcome.to_string(),
-        status: if outcome == "accepted" {
-            "accepted".to_string()
-        } else {
-            "rejected".to_string()
-        },
-        actor,
-        target,
-        reason: reason.map(str::to_string),
-        metadata: serde_json::Value::Null,
-    });
 }
 
 #[derive(Clone, Default)]
@@ -718,6 +554,11 @@ pub(super) enum PreparedSessionRequest {
     },
     Cancel {
         result: Result<bool, TaskAdmissionError>,
+    },
+    /// Start the turns a session's pending delivery prompts are owed, once
+    /// the dispatcher reaches this point. Never decoded from the wire.
+    DrainPendingPrompts {
+        session_id: String,
     },
 }
 
@@ -1244,122 +1085,6 @@ mod budget_rearm_tests {
             serde_json::from_str(&rx.try_recv().expect("cancellation response")).expect("json");
         assert_eq!(response["result"]["status"], "cancelled");
         assert_eq!(response["result"]["tool"], "shell");
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn active_prompt_inject_is_handled_on_the_preemptive_control_lane() {
-        let controls = ConcurrentSessionControls::default();
-        let control = ConcurrentSessionControl::new();
-        control.set_prompt_active(true);
-        controls.register("session-1", control.clone());
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let output = AcpOutput::Channel(tx);
-        let actor = json!({
-            "clientId": "mobile",
-            "role": "host_owner",
-            "source": "agents_api",
-        });
-
-        let handled = controls
-            .preempt_active_prompt_inject(
-                &json!({
-                    "jsonrpc": "2.0",
-                    "id": 7,
-                    "method": "session/inject",
-                    "params": {
-                        "sessionId": "session-1",
-                        "mode": "steer",
-                        "content": "continue with the mobile correction",
-                        "_meta": { "harn": { "actor": actor } },
-                    },
-                }),
-                &output,
-            )
-            .await;
-
-        assert!(handled);
-        let response: serde_json::Value =
-            serde_json::from_str(&rx.recv().await.expect("injection response")).expect("json");
-        let message_id = response["result"]["messageId"]
-            .as_str()
-            .expect("message id");
-        assert_eq!(response["result"]["status"], "accepted");
-        assert_eq!(controls.inject_owner("session-1", message_id), Some(actor));
-
-        let pending = control.inject_state.pending_injections_json().await;
-        assert_eq!(pending["pendingCount"], 1);
-        assert_eq!(pending["injections"][0]["messageId"], message_id);
-        assert_eq!(
-            pending["injections"][0]["content"],
-            "continue with the mobile correction"
-        );
-        assert_eq!(pending["injections"][0]["mode"], "finish_step");
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn active_prompt_interrupt_inject_reaches_the_immediate_checkpoint() {
-        let controls = ConcurrentSessionControls::default();
-        let control = ConcurrentSessionControl::new();
-        control.set_prompt_active(true);
-        controls.register("session-1", control.clone());
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let output = AcpOutput::Channel(tx);
-
-        let handled = controls
-            .preempt_active_prompt_inject(
-                &json!({
-                    "jsonrpc": "2.0",
-                    "id": 8,
-                    "method": "session/inject",
-                    "params": {
-                        "sessionId": "session-1",
-                        "mode": "interrupt_immediate",
-                        "content": "stop before the next tool",
-                    },
-                }),
-                &output,
-            )
-            .await;
-
-        assert!(handled);
-        let response: serde_json::Value =
-            serde_json::from_str(&rx.recv().await.expect("injection response")).expect("json");
-        assert_eq!(response["result"]["status"], "accepted");
-
-        let pending = control.inject_state.pending_injections_json().await;
-        assert_eq!(pending["pendingCount"], 1);
-        assert_eq!(pending["injections"][0]["kind"], "user");
-        assert_eq!(pending["injections"][0]["mode"], "interrupt_immediate");
-        assert_eq!(
-            pending["injections"][0]["content"],
-            "stop before the next tool"
-        );
-
-        let bridge = harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-            Arc::new(|_: &str| Ok(())),
-            1,
-            harn_vm::bridge::HostBridgeControlState::new(
-                Arc::new(AtomicBool::new(false)),
-                Arc::new(tokio::sync::Notify::new()),
-                control.inject_state.clone(),
-                control.tool_call_cancellations.clone(),
-            ),
-        );
-        assert!(
-            bridge
-                .take_queued_user_messages_for(
-                    harn_vm::bridge::DeliveryCheckpoint::AfterCurrentOperation
-                )
-                .await
-                .is_empty(),
-            "interrupt_immediate must not be downgraded to finish_step"
-        );
-        let delivered = bridge
-            .take_queued_user_messages_for(harn_vm::bridge::DeliveryCheckpoint::InterruptImmediate)
-            .await;
-        assert_eq!(delivered.len(), 1);
-        assert_eq!(delivered[0].content, "stop before the next tool");
     }
 
     #[tokio::test(flavor = "current_thread")]

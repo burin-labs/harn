@@ -430,7 +430,7 @@ pub fn agent_session_push_bridge_injection(agent: HarnessAgent, session_id: any,
  * agent_session_push_user_message.
  *
  * Queue a user-role message onto the session's host bridge. The in-VM
- * equivalent of the ACP `session/inject` method (the user-message
+ * equivalent of an ACP `session/prompt` steer (the user-message
  * sibling of `agent_session_push_bridge_injection`, which mirrors
  * `session/remind`). The message is spliced into the transcript
  * CHRONOLOGICALLY — after the in-flight tool_result and before the next

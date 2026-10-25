@@ -771,8 +771,10 @@ fn __observe(
 /**
  * The newest decisive push run of every active workflow on `branch`, searched
  * among its recent completed runs. One query per workflow, so a busy workflow
- * cannot push another's runs out of a shared page. A workflow whose recent
- * runs are all indecisive contributes no reading.
+ * cannot push another's runs out of a shared page. A workflow with recent
+ * runs but no decisive one throws, so its last real result, possibly a
+ * failure, is never silently replaced by the other workflows' readings. A
+ * workflow that never ran on the branch contributes nothing.
  */
 fn __latest_decisive_runs(
   net: HarnessNet,
@@ -810,11 +812,16 @@ fn __latest_decisive_runs(
       throw "std/signals: the runs of workflow " + to_string(workflow.id)
         + " came back without `workflow_runs`"
     }
-    for run in runs {
-      if contains(CI_DECISIVE_CONCLUSIONS, run?.conclusion ?? "") {
-        latest.push(run)
-        break
-      }
+    const decisive = runs.filter(
+      { run -> contains(CI_DECISIVE_CONCLUSIONS, run?.conclusion ?? "") },
+    )
+    if len(decisive) > 0 {
+      latest.push(decisive[0])
+    } else if len(runs) > 0 {
+      throw "std/signals: workflow " + to_string(workflow.id) + " has no decisive run among its "
+        + to_string(len(runs))
+        + " most recent on "
+        + branch
     }
   }
   return latest

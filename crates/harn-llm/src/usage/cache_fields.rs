@@ -43,16 +43,26 @@ pub fn reported_cache_write_tokens(value: &serde_json::Value) -> Result<Option<i
     reported_counter(value, WRITE_FIELDS)
 }
 
-pub fn extract_cache_read_tokens(value: &serde_json::Value) -> Result<i64, harn_vm_core::VmError> {
-    reported_cache_read_tokens(value)
-        .map(|count| count.unwrap_or(0))
-        .map_err(invalid_usage)
+/// Cache counters parsed from one usage object. The counts default to zero for
+/// arithmetic, but `reported` is true only when the response carried at least
+/// one cache counter, so an omitted field never reads as a measured zero.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CacheCounts {
+    pub read_tokens: i64,
+    pub write_tokens: i64,
+    pub reported: bool,
 }
 
-pub fn extract_cache_write_tokens(value: &serde_json::Value) -> Result<i64, harn_vm_core::VmError> {
-    reported_cache_write_tokens(value)
-        .map(|count| count.unwrap_or(0))
-        .map_err(invalid_usage)
+pub fn extract_cache_counts(
+    value: &serde_json::Value,
+) -> Result<CacheCounts, harn_vm_core::VmError> {
+    let read = reported_cache_read_tokens(value).map_err(invalid_usage)?;
+    let write = reported_cache_write_tokens(value).map_err(invalid_usage)?;
+    Ok(CacheCounts {
+        read_tokens: read.unwrap_or(0),
+        write_tokens: write.unwrap_or(0),
+        reported: read.is_some() || write.is_some(),
+    })
 }
 
 fn invalid_usage(reason: &'static str) -> harn_vm_core::VmError {

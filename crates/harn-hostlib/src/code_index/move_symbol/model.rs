@@ -216,6 +216,15 @@ impl Lang {
         }
     }
 
+    /// Rust only: the crate directory and the root files whose module tree
+    /// may hold `path`.
+    pub(crate) fn crate_roots(&mut self, path: &str) -> Option<(String, Vec<String>)> {
+        match self {
+            Self::Rust(ws) => ws.crate_roots(path),
+            _ => None,
+        }
+    }
+
     pub(crate) fn model(&mut self, path: &str, tree: &Tree, source: &str) -> FileModel {
         match self {
             Self::Rust(ws) => ws.model(path, tree, source),

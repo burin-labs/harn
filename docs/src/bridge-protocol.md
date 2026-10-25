@@ -732,25 +732,18 @@ Payload:
 {}
 ```
 
-On the ACP adapter surface, hosts can wake the daemon by sending a pending
-user-message inject. `session/inject` accepts `{sessionId, mode, content,
-goal?}` where `content` is a string or ACP content-block array and the
-optional `goal` (`{objective}`, steer or interrupt only) retargets the run, then
-responds
-immediately with `status: "accepted"` and an agent-owned `messageId`. Harn
-later delivers the same id as `session/update` with `sessionUpdate:
-"user_message"`. `mode: "interrupt_immediate"` drains at the next eligible
-checkpoint and skips a pending tool batch when it arrives before dispatch,
-`mode: "steer"` maps to the next safe operation boundary, and `mode: "queue"`
-maps to end-of-interaction delivery. Agents advertise the modes they support under
-`agentCapabilities.session.inject.modes`; clients should use that capability to
-degrade to `steer` when immediate interruption is unavailable. Pending injects
-can be revoked with `session/revoke_inject` or edited in place with
-`session/replace_inject` before delivery; successful mutation responses return
-`status: "revoked"`, `"already_revoked"`, or `"replaced"`. Races return
-structured error data with `reason: "already_delivered"`,
-`"already_revoked"`, `"unknown_message_id"`, or
-`"not_owner_or_not_authorized"`.
+On the ACP adapter surface, hosts can wake the daemon with a `session/prompt`
+that carries `delivery: "steer"` or `"queue"`. The prompt is queued at once
+and its response, `{messageId}`, arrives when the message is inserted; Harn
+announces the insertion as `session/update` with `sessionUpdate:
+"user_message"` and the same id. `steer` lands at the next safe operation
+boundary, and `queue` starts a new turn after the running one. An optional
+`_meta.harn.goal` (`{objective}`, steer only) retargets the run. Agents
+advertise the values they support under
+`agentCapabilities.promptCapabilities.delivery`. A pending prompt is withdrawn
+with `$/cancel_request` and `{requestId}`, which fails it with `-32800`. See
+[MCP and ACP](./mcp-and-acp.md#steering-and-queueing-prompts-during-agent-execution)
+for the full rules.
 
 To inject ambient context without pretending it is a user message, send
 `session/remind`:
@@ -788,11 +781,10 @@ so the pin preserves the current goal across compaction. An optional `max_body`
 preserves the visible-body limit from `pin_reminder` when Harn refreshes the pin.
 
 Hosts that need an operator-facing queue can call
-`session/pending_injections` with `{ "sessionId": "..." }`. The response is
-`{pendingCount, injections}` in FIFO order, with `kind: "user"` rows for
-pending `session/inject` messages and `kind: "reminder"` rows for pending
-`session/remind` reminders. Reminder rows include `reminderId`, `mode`, `body`,
-`tags`, `dedupeKey`, `ttlTurns`, `roleHint`, and `source`.
+`session/pending_prompts` with `{ "sessionId": "..." }`. The response is
+`{prompts, reminders}`, each in delivery order. Prompt rows carry `messageId`,
+`delivery`, `prompt`, and `position`. Reminder rows include `reminderId`,
+`mode`, `body`, `tags`, `dedupeKey`, `ttlTurns`, `roleHint`, and `source`.
 
 Queued reminders can be revoked before delivery with
 `session/revoke_reminder` and `{ "sessionId": "...", "reminderId": "..." }`.

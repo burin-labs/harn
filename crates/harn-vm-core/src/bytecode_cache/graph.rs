@@ -173,7 +173,7 @@ pub(super) fn relocatable_graph_hash(
     nodes.sort_unstable();
 
     let mut hasher = Sha256::new();
-    hasher.update(b"relocatable-entry-graph-v3\0");
+    hasher.update(b"relocatable-entry-graph-v4\0");
     seed_entry_context_hasher(&mut hasher, codegen_fingerprint);
     for (label, node_digest) in nodes {
         hasher.update(label.as_bytes());
@@ -223,11 +223,13 @@ pub(super) fn seed_entry_context_hasher(hasher: &mut Sha256, codegen_fingerprint
     hasher.update(b"\0");
 }
 
+/// A resolved file folds in its memoized digest, not its text: every entry
+/// that imports it would otherwise hash the same bytes again.
 pub(super) fn hash_import_node(hasher: &mut Sha256, node: &ImportNode) {
     match node {
-        ImportNode::Resolved { content } => {
-            hasher.update(b"resolved\0");
-            hasher.update(content.as_bytes());
+        ImportNode::Resolved { source } => {
+            hasher.update(b"resolved-sha256\0");
+            hasher.update(source.sha256());
         }
         ImportNode::Unresolved { import, .. } => {
             hasher.update(b"unresolved\0");
@@ -242,7 +244,7 @@ pub(super) fn hash_import_node(hasher: &mut Sha256, node: &ImportNode) {
 
 pub(super) enum ImportNode {
     Resolved {
-        content: Arc<str>,
+        source: Arc<crate::module_source::ModuleSource>,
     },
     /// `anchor` is the canonical importing file. It is not hashed here: the
     /// canonical key carries it in the sentinel path, the relocatable key in

@@ -14,6 +14,10 @@ pub struct RunViewUsage {
     pub cost_usd: Option<f64>,
     pub known_cost_usd: f64,
     pub total_cost: f64,
+    /// Cache tokens summed over the calls that reported cache accounting;
+    /// null when no call did, which is distinct from a measured zero.
+    pub cache_read_tokens: Option<i64>,
+    pub cache_write_tokens: Option<i64>,
     pub models: Vec<String>,
 }
 
@@ -29,6 +33,8 @@ impl From<&LlmUsageRecord> for RunViewUsage {
             cost_usd: value.cost_usd,
             known_cost_usd: value.known_cost_usd,
             total_cost: value.total_cost,
+            cache_read_tokens: value.cache_read_tokens,
+            cache_write_tokens: value.cache_write_tokens,
             models: value.models.clone(),
         }
     }
@@ -45,10 +51,21 @@ impl RunViewUsage {
         self.known_cost_usd += usage.known_cost_usd;
         self.total_cost = self.known_cost_usd;
         self.cost_usd = (self.unpriced_calls == 0).then_some(self.known_cost_usd);
+        self.cache_read_tokens = add_reported(self.cache_read_tokens, usage.cache_read_tokens);
+        self.cache_write_tokens = add_reported(self.cache_write_tokens, usage.cache_write_tokens);
         for model in &usage.models {
             if !model.is_empty() && !self.models.contains(model) {
                 self.models.push(model.clone());
             }
         }
+    }
+}
+
+/// A reported count plus an unreported one is still a report; two unreported
+/// counts stay unreported rather than summing to a measured zero.
+fn add_reported(total: Option<i64>, more: Option<i64>) -> Option<i64> {
+    match (total, more) {
+        (None, None) => None,
+        (total, more) => Some(total.unwrap_or(0).saturating_add(more.unwrap_or(0))),
     }
 }

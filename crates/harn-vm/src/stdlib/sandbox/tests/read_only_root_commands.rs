@@ -270,3 +270,253 @@ fn windows_never_admits() {
     );
     assert!(!run_admitted(&policy, &root, &file));
 }
+
+/// A mount made on the session after the policy was built reaches the next
+/// child's OS profile: `read_only` reads and cannot write, `extend` writes, and
+/// an unmounted sibling reads nothing. The policy names neither root.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn a_session_mount_reaches_the_child_profile_by_its_mode() {
+    use crate::workspace_anchor::{MountMode, WorkspaceAnchor};
+    if !crate::stdlib::sandbox::active_backend_filesystem_available() {
+        eprintln!("MOUNT-TEST-SKIPPED: no filesystem confinement backend");
+        return;
+    }
+    // Every directory is made under HOME by absolute path, so no other test's
+    // working-directory change can reach this one.
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return;
+    };
+    let (Ok(workspace), Ok(outside), Ok(sibling)) = (
+        tempfile::tempdir_in(&home),
+        tempfile::tempdir_in(&home),
+        tempfile::tempdir_in(&home),
+    ) else {
+        eprintln!("MOUNT-TEST-SKIPPED: no writable home directory");
+        return;
+    };
+    crate::reset_thread_local_state();
+    let ws = canonical(workspace.path());
+    let root = canonical(outside.path());
+    let other = canonical(sibling.path());
+    std::fs::write(root.join("data.txt"), "reference").unwrap();
+    std::fs::write(other.join("data.txt"), "other").unwrap();
+    let mut policy = confined_policy(SandboxProfile::OsHardened, &ws, &[]);
+    policy.workspace_roots = vec![ws.display().to_string()];
+
+    let session = crate::agent_sessions::open_or_create_for_test(Some("mount-child".to_string()));
+    let _current = crate::agent_sessions::enter_current_session(session.clone());
+    let anchor = WorkspaceAnchor {
+        primary: ws,
+        additional_roots: Vec::new(),
+        anchored_at: "0".to_string(),
+    };
+    crate::agent_sessions::set_workspace_anchor(&session, Some(anchor)).unwrap();
+    let read = format!("cat '{}'", root.join("data.txt").display());
+    let write = format!("echo x > '{}'", root.join("f").display());
+
+    assert!(!shell_succeeds(&policy, &read), "unmounted: not readable");
+
+    let root_text = root.display().to_string();
+    crate::stdlib::add_workspace_root(&session, &root_text, Some(MountMode::ReadOnly), None, None)
+        .unwrap();
+    assert!(shell_succeeds(&policy, &read), "read_only mount reads");
+    assert!(
+        !shell_succeeds(&policy, &write),
+        "read_only mount never writes"
+    );
+    assert!(!root.join("f").exists());
+    assert!(
+        !shell_succeeds(
+            &policy,
+            &format!("cat '{}'", other.join("data.txt").display())
+        ),
+        "a different outside path stays unreadable"
+    );
+
+    crate::stdlib::add_workspace_root(&session, &root_text, Some(MountMode::Extend), None, None)
+        .unwrap();
+    assert!(shell_succeeds(&policy, &write), "extend mount writes");
+    assert!(root.join("f").exists());
+    assert!(
+        !shell_succeeds(
+            &policy,
+            &format!("echo x > '{}'", other.join("f").display())
+        ),
+        "a write outside the mount stays refused"
+    );
+    eprintln!("MOUNT-TEST-RAN");
+}
+
+/// A `read_only` session mount nested in the writable workspace, through the
+/// real spawn path: the child's profile must agree with what the backend
+/// reports. macOS re-denies the nested root; Landlock cannot subtract from the
+/// workspace grant, so it reports `Writable` and the write really lands. The
+/// host must not mount a read-only root there on such a backend.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn a_read_only_mount_nested_in_the_workspace_matches_its_backend() {
+    use crate::workspace_anchor::{MountMode, WorkspaceAnchor};
+    if !crate::stdlib::sandbox::active_backend_filesystem_available() {
+        eprintln!("NESTED-MOUNT-TEST-SKIPPED: no filesystem confinement backend");
+        return;
+    }
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return;
+    };
+    let Ok(workspace) = tempfile::tempdir_in(&home) else {
+        return;
+    };
+    crate::reset_thread_local_state();
+    let ws = canonical(workspace.path());
+    let nested = ws.join("vendor");
+    std::fs::create_dir_all(&nested).unwrap();
+    let policy = confined_policy(SandboxProfile::OsHardened, &ws, &[]);
+    let session = crate::agent_sessions::open_or_create_for_test(Some("nested-child".to_string()));
+    let _current = crate::agent_sessions::enter_current_session(session.clone());
+    let anchor = WorkspaceAnchor {
+        primary: ws.clone(),
+        additional_roots: Vec::new(),
+        anchored_at: "0".to_string(),
+    };
+    crate::agent_sessions::set_workspace_anchor(&session, Some(anchor)).unwrap();
+    let beside = format!("echo x > '{}'", ws.join("ok.txt").display());
+    let inside = format!("echo x > '{}'", nested.join("f").display());
+
+    assert!(
+        shell_succeeds(&policy, &inside),
+        "control: writable before the mount"
+    );
+    std::fs::remove_file(nested.join("f")).unwrap();
+    // No current execution policy and no current session: an idle session's
+    // host supplies the policy its children will run under.
+    let mounted = crate::stdlib::add_workspace_root(
+        &session,
+        &nested.to_string_lossy(),
+        Some(MountMode::ReadOnly),
+        None,
+        Some(&policy),
+    );
+    assert!(
+        shell_succeeds(&policy, &beside),
+        "the rest of the workspace stays writable"
+    );
+    let landed = shell_succeeds(&policy, &inside) && nested.join("f").exists();
+    #[cfg(target_os = "macos")]
+    {
+        mounted.unwrap();
+        assert!(
+            !landed,
+            "macOS must refuse a write into the nested read-only mount"
+        );
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // Landlock cannot subtract the workspace grant, so the mount is
+        // refused rather than reported read-only while a child could write it.
+        assert!(
+            mounted.is_err_and(|error| error.contains("cannot subtract write access")),
+            "an unenforceable nested read-only mount must be refused"
+        );
+        assert!(
+            child_write_disposition(&policy, &nested.join("f")) == ChildWriteDisposition::Writable,
+            "the refusal rests on a measured Writable disposition"
+        );
+        assert!(
+            landed,
+            "control: the child really could write the nested path"
+        );
+    }
+    eprintln!("NESTED-MOUNT-TEST-RAN landed={landed}");
+}
+
+/// A read-only mount of a directory that holds the writable workspace: the
+/// most specific root wins on every layer. The workspace stays writable, the
+/// rest of the mount refuses writes, and its files stay readable. macOS
+/// re-asserts the narrower write grant after the broad deny; Landlock grants
+/// the parent read and the child write additively; the file builtins resolve
+/// by the deepest matching root.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn a_read_only_parent_of_a_writable_root_leaves_that_root_writable() {
+    use crate::workspace_anchor::{MountMode, WorkspaceAnchor};
+    if !crate::stdlib::sandbox::active_backend_filesystem_available() {
+        eprintln!("PARENT-MOUNT-TEST-SKIPPED: no filesystem confinement backend");
+        return;
+    }
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return;
+    };
+    let Ok(parent_dir) = tempfile::tempdir_in(&home) else {
+        return;
+    };
+    crate::reset_thread_local_state();
+    let parent = canonical(parent_dir.path());
+    let ws = parent.join("ws");
+    let work = parent.join("work");
+    std::fs::create_dir_all(&ws).unwrap();
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::write(parent.join("data.txt"), "reference").unwrap();
+    let policy = confined_policy(SandboxProfile::OsHardened, &ws, &[]);
+    let session = crate::agent_sessions::open_or_create_for_test(Some("parent-mount".to_string()));
+    let _current = crate::agent_sessions::enter_current_session(session.clone());
+    let anchor = WorkspaceAnchor {
+        primary: ws.clone(),
+        additional_roots: Vec::new(),
+        anchored_at: "0".to_string(),
+    };
+    crate::agent_sessions::set_workspace_anchor(&session, Some(anchor)).unwrap();
+
+    crate::stdlib::add_workspace_root(
+        &session,
+        &parent.to_string_lossy(),
+        Some(MountMode::ReadOnly),
+        None,
+        Some(&policy),
+    )
+    .expect("a read-only parent of the writable workspace mounts");
+    crate::stdlib::add_workspace_root(
+        &session,
+        &work.to_string_lossy(),
+        Some(MountMode::Extend),
+        None,
+        Some(&policy),
+    )
+    .expect("a writable mount inside a read-only one mounts");
+
+    let in_ws = format!("echo x > '{}'", ws.join("f").display());
+    let in_work = format!("echo x > '{}'", work.join("f").display());
+    let in_parent = format!("echo x > '{}'", parent.join("f").display());
+    let read_parent = format!("cat '{}'", parent.join("data.txt").display());
+    assert!(
+        shell_succeeds(&policy, &in_ws),
+        "the workspace stays writable"
+    );
+    assert!(
+        shell_succeeds(&policy, &in_work),
+        "a writable mount inside stays writable"
+    );
+    assert!(
+        !shell_succeeds(&policy, &in_parent) && !parent.join("f").exists(),
+        "a write in the read-only parent outside both is refused"
+    );
+    assert!(
+        shell_succeeds(&policy, &read_parent),
+        "the parent stays readable"
+    );
+
+    // The file builtins agree, by the deepest matching root.
+    use crate::stdlib::sandbox::{check_fs_path_scope, FsAccess};
+    push_execution_policy(policy);
+    let writable = check_fs_path_scope(&ws.join("g"), FsAccess::Write).is_ok()
+        && check_fs_path_scope(&work.join("g"), FsAccess::Write).is_ok();
+    let refused = check_fs_path_scope(&parent.join("g"), FsAccess::Write).is_err();
+    let readable = check_fs_path_scope(&parent.join("data.txt"), FsAccess::Read).is_ok();
+    pop_execution_policy();
+    assert!(writable, "file builtins write the deeper writable roots");
+    assert!(
+        refused,
+        "file builtins refuse a write in the read-only parent"
+    );
+    assert!(readable, "file builtins read the read-only parent");
+}

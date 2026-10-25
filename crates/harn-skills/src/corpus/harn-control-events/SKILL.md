@@ -60,13 +60,13 @@ assumes one of them is wrong two-thirds of the time. Make it a setting.
 |---|---|---|
 | Steer | `steer` | Redirect the running turn at its next iteration or tool boundary. |
 | Interrupt | `interrupt_immediate` | Deliver as soon as the loop will take it, ahead of the next tool. |
-| Queue | *(host-side)* | Hold it and send it as a new turn once this one reaches its terminal. |
+| Queue | `queue` | Hold it and start a new turn with it once this one ends. |
 
-Steer and interrupt are `session/inject` modes and are the runtime's to
-implement. **Queue is not**: "after this turn" means a new turn, which is the
-client's decision, so the queue lives in the host. A host that queues must
-also discard the queue on stop — a stop that then runs what the person had
-lined up behind it has deferred, not stopped.
+Over ACP, steer and queue are `session/prompt` with `delivery: "steer"` or
+`"queue"`; interrupt is in-VM only. A stop (`session/cancel`) ends only the
+running turn: pending steers then open the next turn together and queued
+prompts follow, one turn each. "Deliver now" is a steer followed by a stop.
+Only `$/cancel_request` withdraws a pending prompt.
 
 Give the setting a typed enum with one wire spelling per behavior. No aliases,
 and never fall back to a default in silence: a control policy that quietly

@@ -55,8 +55,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:c717105ad221f224737d9a268119b1094d72babd65a597e1fd2509f663a51187",
-    "projection_id": "session_view:session_lineage:c717105ad221"
+    "projection_hash": "sha256:9ab2ddf88167695c44823c9fba0e5ef3012ac019594315da9e669f3a4bc18024",
+    "projection_id": "session_view:session_lineage:9ab2ddf88167"
   },
   "runs": [
     {
@@ -107,8 +107,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:758a85340d1773ad0a597d4e88a992091c727d89b9431c6135fc0d395fd13ef9",
-        "projection_id": "run_view:run_lineage_root:758a85340d17"
+        "projection_hash": "sha256:96351b53f3b5beed666481f6679e79b044d49c5737d79b52f4f156fa5f391904",
+        "projection_id": "run_view:run_lineage_root:96351b53f3b5"
       },
       "providers": [],
       "run": {
@@ -157,6 +157,8 @@
           "started_at": "2026-01-04T00:00:00Z",
           "status": "completed",
           "usage": {
+            "cache_read_tokens": null,
+            "cache_write_tokens": null,
             "call_count": 0,
             "cost_usd": null,
             "input_tokens": 0,
@@ -179,6 +181,8 @@
         "summary": null
       },
       "usage": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
         "call_count": 0,
         "cost_usd": 0.0,
         "input_tokens": 0,
@@ -236,8 +240,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:25dcbb20191a2063be44a91585eb49741f86d0835ab76b6d0016af653ab9b91c",
-        "projection_id": "run_view:run_lineage_child:25dcbb20191a"
+        "projection_hash": "sha256:eadd3a816b17606b935de1b33f7ffc99521e647dba1e9ef1b1b598bc663e5cc7",
+        "projection_id": "run_view:run_lineage_child:eadd3a816b17"
       },
       "providers": [],
       "run": {
@@ -275,6 +279,8 @@
           "started_at": "2026-01-04T00:00:02Z",
           "status": "failed",
           "usage": {
+            "cache_read_tokens": null,
+            "cache_write_tokens": null,
             "call_count": 0,
             "cost_usd": null,
             "input_tokens": 0,
@@ -297,6 +303,8 @@
         "summary": null
       },
       "usage": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
         "call_count": 0,
         "cost_usd": 0.0,
         "input_tokens": 0,
@@ -325,6 +333,8 @@
     "updated_at": "2026-01-04T00:00:05Z"
   },
   "usage": {
+    "cache_read_tokens": null,
+    "cache_write_tokens": null,
     "call_count": 0,
     "cost_usd": 0.0,
     "input_tokens": 0,

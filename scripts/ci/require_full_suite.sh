@@ -4,6 +4,13 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/ci/require_native_qualification.sh
 source "$script_dir/require_native_qualification.sh"
+if [[ -f "$script_dir/../lib/full_suite_jobs.sh" ]]; then
+  # shellcheck source=scripts/lib/full_suite_jobs.sh
+  source "$script_dir/../lib/full_suite_jobs.sh"
+else
+  # shellcheck source=scripts/lib/full_suite_jobs.sh
+  source "$script_dir/lib/full_suite_jobs.sh"
+fi
 policy_file="$script_dir/release_audit_contract.json"
 if [[ ! -f "$policy_file" ]]; then
   policy_file="$script_dir/../release_audit_contract.json"
@@ -24,7 +31,7 @@ while IFS=$'\t' read -r id sha status conclusion; do
   # Require the deferred families explicitly. An older workflow's successful
   # aggregate can have skipped these jobs and is not full-suite proof.
   missing=0
-  for name in 'CI status' 'Verify publishable crates' 'Stack frame budget' 'Rust workspace tests' 'Run Linux sandbox tests' 'Windows cross-compile check' 'Rust on macOS (deny-warnings build + lint)'; do
+  for name in "${RELEASE_FULL_SUITE_JOBS[@]}"; do
     if ! grep -Fxq "$name"$'\tcompleted\tsuccess' <<< "$jobs"; then
       echo "Full-suite proof missing: $name (run $id)" >&2
       missing=$((missing + 1))

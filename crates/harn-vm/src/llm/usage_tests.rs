@@ -10,6 +10,14 @@ use super::{
 use crate::llm::api::{LlmResult, ProviderAttempts, ProviderTelemetry};
 use crate::value::VmValue;
 
+fn reported_cache(read_tokens: i64, write_tokens: i64) -> super::CacheCounts {
+    super::CacheCounts {
+        read_tokens,
+        write_tokens,
+        reported: true,
+    }
+}
+
 fn accounted_result() -> LlmResult {
     LlmResult {
         text: "ok".to_string(),
@@ -17,6 +25,7 @@ fn accounted_result() -> LlmResult {
         output_tokens: 100,
         cache_read_tokens: 800,
         cache_write_tokens: 25,
+        cache_counts_reported: true,
         model: "claude-sonnet-4-20250514".to_string(),
         provider: "anthropic".to_string(),
         stop_reason: Some("end_turn".to_string()),
@@ -32,8 +41,11 @@ fn accounted_result() -> LlmResult {
             completed_retry_usage: vec![super::LlmUsage::from_provider_receipt(
                 "anthropic",
                 "claude-sonnet-4-20250514",
-                &ProviderUsageReceipt::new(Some(250), Some(10), None, false)
-                    .with_cache(0, 0, None, false),
+                &ProviderUsageReceipt::new(Some(250), Some(10), None, false).with_cache(
+                    super::CacheCounts::default(),
+                    None,
+                    false,
+                ),
             )],
         },
         ..Default::default()
@@ -102,12 +114,7 @@ fn receipt_retains_request_instant_and_audio_counts_without_inventing_rates() {
     });
     let mut receipt = ProviderUsageReceipt::from_openai_usage_tokens(&wire)
         .unwrap()
-        .with_cache(
-            super::extract_cache_read_tokens(&wire).unwrap(),
-            super::extract_cache_write_tokens(&wire).unwrap(),
-            None,
-            true,
-        );
+        .with_cache(super::extract_cache_counts(&wire).unwrap(), None, true);
     assert_eq!(receipt.cache_read_tokens, 100);
     receipt.started_at_ms = Some(1_790_000_000_000);
     let roundtrip = ProviderUsageReceipt::from_vm_value(&receipt.to_vm_value()).unwrap();
@@ -147,7 +154,7 @@ fn contradictory_audio_cache_allocation_stays_partial_on_both_provider_paths() {
         ..Default::default()
     };
     let mut receipt = ProviderUsageReceipt::new(Some(100), Some(0), None, false)
-        .with_cache(100, 0, Some(true), true)
+        .with_cache(reported_cache(100, 0), Some(true), true)
         .with_billing(Some(Box::new(billing)));
     for usage in [
         LlmUsage::from_result(&result),
@@ -312,8 +319,7 @@ fn paid_call_without_reported_usage_stays_unpriced() {
 #[test]
 fn partial_provider_error_receipt_stays_explicitly_unknown() {
     let receipt = ProviderUsageReceipt::new(Some(9), None, Some(0.25), false).with_cache(
-        3,
-        2,
+        reported_cache(3, 2),
         Some(true),
         true,
     );
@@ -959,4 +965,25 @@ fn unknown_attempts_stay_neutral_for_the_accounting_declaration() {
     let declared = usage_with_declaration(Some(true));
     let usage = LlmUsage::aggregate_with_unknown_attempts(&[declared], 1);
     assert_eq!(usage.cache_accounting_declared, Some(true));
+}
+
+#[test]
+fn omitted_cache_counters_on_a_declared_supported_route_stay_unmeasured() {
+    let mut response = accounted_result();
+    response.cache_read_tokens = 0;
+    response.cache_write_tokens = 0;
+    response.cache_counts_reported = false;
+    let omitted = LlmUsage::from_result(&response);
+    assert!(!omitted.cache_counts_reported());
+    assert_eq!(omitted.cache_hit_ratio, None);
+    let mut totals = super::ReportedCacheTotals::default();
+    totals.record_usage(&omitted);
+    assert_eq!(totals.reported_read_tokens(), None);
+
+    response.cache_counts_reported = true;
+    let measured = LlmUsage::from_result(&response);
+    assert!(measured.cache_counts_reported());
+    assert_eq!(measured.cache_hit_ratio, Some(0.0));
+    totals.record_usage(&measured);
+    assert_eq!(totals.reported_read_tokens(), Some(0));
 }

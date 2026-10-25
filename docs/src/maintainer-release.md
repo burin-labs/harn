@@ -80,11 +80,13 @@ attempt, including after a crash. Missing or incomplete reservation history
 refuses automatic repair. Do not change the fixed anchor or seed to clear a
 reservation, and do not infer completed integration from a reserved attempt.
 
-## Retire an unpublished candidate with failed source CI
+## Retire an unpublished candidate whose source can never promote
 
-Read the failed producer and the main-push CI run at its exact source. If both
-are terminal failures and the version was never published, request retirement
-through the existing development bump workflow:
+Promotion requires a green full-suite main-push CI run at the release's exact
+source. When the CI run at that source can never become one, the version can
+never publish, whatever its candidate build concluded. Read the main-push CI
+run at the exact source, then request retirement through the existing
+development bump workflow:
 
 ```bash
 gh workflow run open-development-bump.yml --repo burin-labs/harn --ref main \
@@ -95,14 +97,31 @@ gh workflow run open-development-bump.yml --repo burin-labs/harn --ref main \
 
 Replace the placeholders with the published predecessor and the owning release
 records. Omit every consumer-retirement input: mixing the two evidence paths
-is refused. The planner requires complete terminal job censuses with actual
-failed checks, exact source identity, main ancestry and the merged release PR.
-It also proves that the version has no tag or release and that neither
-publication workflow is active, with known positive reads on those paths.
-The opener repeats those checks after preparation before opening its normal
-development-version PR. Follow that PR through the merge queue, then use the
+is refused. The planner decides from the source CI run's complete job census:
+
+| Source CI run | Candidate build | Decision |
+| --- | --- | --- |
+| Failed with a failed owning job on attempt 2 or later | Any terminal conclusion | Retire |
+| Failed on attempt 1 | Any | Refuse: main CI recovery still retries it |
+| Succeeded without every full-suite job succeeding | Any terminal conclusion | Retire |
+| Succeeded with every full-suite job | Any terminal conclusion | Refuse: the source can still promote |
+| Failed only in derived aggregate jobs | Any | Refuse: unmeasured |
+| Not completed, cancelled, or incomplete census | Any | Refuse: unmeasured |
+| Any | Not completed | Refuse: unmeasured |
+
+A failed candidate build under a green full suite is refused because rerunning
+the build can still promote the source. Main CI recovery reruns a first-attempt
+failure once, so only a failure that survives that retry is persistent. The full-suite job list lives in
+`scripts/lib/full_suite_jobs.sh`, shared with the promotion gate.
+
+The planner also requires exact source identity, main ancestry and the merged
+release PR. Release-attempt refs other than the merged PR's must belong to a
+release PR that closed unmerged. It proves that the version has no tag or
+release and that neither publication workflow is active, with known positive
+reads on those paths. The opener repeats those checks after preparation before
+opening its normal development-version PR. Follow that PR to main, then use the
 release opener for the next version. This retires an unpublished identity; it
-does not publish files from a failed candidate.
+does not publish files from the candidate.
 
 ## Follow certification and publication
 

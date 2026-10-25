@@ -13,7 +13,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 mod backend;
+mod fingerprint;
 mod scan;
+
+use fingerprint::{compute_content_hash_for_dir, compute_structure_hash};
 
 #[cfg(test)]
 use scan::{glob_match, ScanOptions};
@@ -785,13 +788,13 @@ fn metadata_inspect_stale_flags(
     let full_dir = metadata_full_dir(base, dir);
     if let Some(stored_hash) = classification_string(metadata, "structureHash") {
         let current_hash = compute_structure_hash(&full_dir);
-        if current_hash != stored_hash {
+        if !current_hash.is_ok_and(|hash| hash == stored_hash) {
             return (true, true);
         }
     }
     if let Some(stored_hash) = classification_string(metadata, "contentHash") {
         let current_hash = compute_content_hash_for_dir(&full_dir);
-        if current_hash != stored_hash {
+        if !current_hash.is_ok_and(|hash| hash == stored_hash) {
             return (true, true);
         }
     }
@@ -802,17 +805,29 @@ fn optional_string_value(value: Option<String>) -> VmValue {
     value.map(VmValue::string).unwrap_or(VmValue::Nil)
 }
 
-fn refresh_metadata_hashes(st: &mut MetadataState) {
+fn refresh_metadata_hashes(st: &mut MetadataState) -> Result<(), VmError> {
     st.ensure_loaded();
     let base = st.base_dir.clone();
     let dirs: Vec<String> = st.entries.keys().cloned().collect();
-    for dir in dirs {
-        let full_dir = if dir.is_empty() {
-            base.clone()
-        } else {
-            base.join(&dir)
-        };
-        let hash = compute_structure_hash(&full_dir);
+    let hashes = dirs
+        .into_iter()
+        .map(|dir| {
+            let full_dir = metadata_full_dir(&base, &dir);
+            match compute_structure_hash(&full_dir) {
+                Ok(hash) => Ok(Some((dir, hash))),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                    ) =>
+                {
+                    Ok(None)
+                }
+                Err(error) => Err(fingerprint_error(&full_dir, error)),
+            }
+        })
+        .collect::<Result<Vec<_>, VmError>>()?;
+    for (dir, hash) in hashes.into_iter().flatten() {
         let entry = st.entries.entry(dir).or_default();
         let ns = entry
             .namespaces
@@ -821,6 +836,14 @@ fn refresh_metadata_hashes(st: &mut MetadataState) {
         ns.insert("structureHash".to_string(), serde_json::Value::String(hash));
     }
     st.dirty = true;
+    Ok(())
+}
+
+fn fingerprint_error(path: &Path, error: std::io::Error) -> VmError {
+    VmError::Runtime(format!(
+        "cannot fingerprint directory {}: {error}",
+        path.display()
+    ))
 }
 
 fn param_string(params: &crate::value::DictMap, key: &str) -> String {
@@ -980,7 +1003,7 @@ pub(crate) fn project_metadata_host_refresh_hashes(
     _params: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     with_state("project.metadata_refresh_hashes", |st| {
-        refresh_metadata_hashes(st);
+        refresh_metadata_hashes(st)?;
         st.save().map_err(VmError::Runtime)?;
         Ok(VmValue::Nil)
     })
@@ -1007,46 +1030,7 @@ fn metadata_stale_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     with_state("metadata_stale", |st| {
         st.ensure_loaded();
         let base = st.base_dir.clone();
-        let mut tier1_stale: Vec<VmValue> = Vec::new();
-        let mut tier2_stale: Vec<VmValue> = Vec::new();
-
-        for (dir, meta) in &st.entries {
-            let full_dir = if dir.is_empty() {
-                base.clone()
-            } else {
-                base.join(dir)
-            };
-            if let Some(stored_hash) = meta
-                .namespaces
-                .get("classification")
-                .and_then(|ns| ns.get("structureHash"))
-                .and_then(|v| v.as_str())
-            {
-                let current_hash = compute_structure_hash(&full_dir);
-                if current_hash != stored_hash {
-                    tier1_stale.push(VmValue::string(dir.as_str()));
-                    continue;
-                }
-            }
-            if let Some(stored_hash) = meta
-                .namespaces
-                .get("classification")
-                .and_then(|ns| ns.get("contentHash"))
-                .and_then(|v| v.as_str())
-            {
-                let current_hash = compute_content_hash_for_dir(&full_dir);
-                if current_hash != stored_hash {
-                    tier2_stale.push(VmValue::string(dir.as_str()));
-                }
-            }
-        }
-
-        let any_stale = !tier1_stale.is_empty() || !tier2_stale.is_empty();
-        let mut m = BTreeMap::new();
-        m.put_bool("any_stale", any_stale);
-        m.put("tier1", VmValue::list(tier1_stale));
-        m.put("tier2", VmValue::list(tier2_stale));
-        Ok(VmValue::dict(m))
+        Ok(metadata_stale_value(st, &base))
     })
 }
 
@@ -1057,7 +1041,7 @@ fn metadata_stale_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 )]
 fn metadata_refresh_hashes_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     with_state("metadata_refresh_hashes", |st| {
-        refresh_metadata_hashes(st);
+        refresh_metadata_hashes(st)?;
         Ok(VmValue::Nil)
     })
 }
@@ -1134,7 +1118,8 @@ fn compute_content_hash_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
         } else {
             st.base_dir.join(&dir)
         };
-        let hash = compute_content_hash_for_dir(&full_dir);
+        let hash = compute_content_hash_for_dir(&full_dir)
+            .map_err(|error| fingerprint_error(&full_dir, error))?;
         Ok(VmValue::string(hash))
     })
 }
@@ -1326,54 +1311,6 @@ fn path_metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
     })
 }
 
-/// Compute structure hash for a directory (file names + sizes).
-fn compute_structure_hash(dir: &Path) -> String {
-    let mut entries: Vec<String> = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(dir) {
-        for entry in rd.flatten() {
-            if let Ok(meta) = entry.metadata() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                entries.push(format!("{}:{}", name, meta.len()));
-            }
-        }
-    }
-    entries.sort();
-    let joined = entries.join("|");
-    format!("{:x}", fnv_hash(joined.as_bytes()))
-}
-
-/// Compute content hash for a directory (file names + sizes + mtimes).
-fn compute_content_hash_for_dir(dir: &Path) -> String {
-    let mut entries: Vec<String> = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(dir) {
-        for entry in rd.flatten() {
-            if let Ok(meta) = entry.metadata() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                let mtime = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                entries.push(format!("{}:{}:{}", name, meta.len(), mtime));
-            }
-        }
-    }
-    entries.sort();
-    let joined = entries.join("|");
-    format!("{:x}", fnv_hash(joined.as_bytes()))
-}
-
-/// FNV-1a hash (not crypto-grade, just for staleness detection).
-fn fnv_hash(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for &byte in data {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
-}
-
 #[harn_builtin(
     exposure = "runtime_internal",
     sig = "scan_directory(path?: string, pattern_or_options?: string|dict|nil, options?: dict|nil) -> list",
@@ -1409,7 +1346,7 @@ fn metadata_stale_value(state: &MetadataState, base_dir: &Path) -> VmValue {
             .and_then(|v| v.as_str())
         {
             let current_hash = compute_structure_hash(&full_dir);
-            if current_hash != stored_hash {
+            if !current_hash.is_ok_and(|hash| hash == stored_hash) {
                 tier1_stale.push(VmValue::string(normalize_directory_key(dir)));
                 continue;
             }
@@ -1421,7 +1358,7 @@ fn metadata_stale_value(state: &MetadataState, base_dir: &Path) -> VmValue {
             .and_then(|v| v.as_str())
         {
             let current_hash = compute_content_hash_for_dir(&full_dir);
-            if current_hash != stored_hash {
+            if !current_hash.is_ok_and(|hash| hash == stored_hash) {
                 tier2_stale.push(VmValue::string(normalize_directory_key(dir)));
             }
         }

@@ -167,6 +167,7 @@ pub struct SignalInput {
 /// `token`, the check-in that leased it, can ack it; a lease that lapses
 /// without that ack is leased again.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Lease {
     pub token: String,
     #[serde(with = "time::serde::rfc3339")]
@@ -177,7 +178,9 @@ pub struct Lease {
 
 /// The current generation's delivery: the session it is routed to, any
 /// outstanding lease, and the ack that settles it.
+/// Only the inbox creates one, so it can gain fields without breaking readers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Delivery {
     pub generation: u64,
     pub session_id: String,
@@ -187,6 +190,13 @@ pub struct Delivery {
     pub lease: Option<Lease>,
     #[serde(default, with = "time::serde::rfc3339::option")]
     pub acked_at: Option<OffsetDateTime>,
+    /// How many times an idle watcher woke the session for this delivery.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub wakes: u32,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 impl Delivery {

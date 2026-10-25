@@ -19,6 +19,10 @@ struct CrateInfo {
     dir: String,
     ident: String,
     has_lib: bool,
+    /// The manifest moves the library root out of `src/lib.rs`, or names a
+    /// target or build-script path, so a file under `src/` may be a crate
+    /// root rather than a module of `src/lib.rs` or `src/main.rs`.
+    custom_roots: bool,
 }
 
 /// Where one file sits: inside the library's module tree (`in_lib`), or in
@@ -66,14 +70,13 @@ impl Workspace {
         let manifest = self.root.join(dir).join("Cargo.toml");
         let info = std::fs::read_to_string(&manifest)
             .ok()
-            .and_then(|toml| parse_manifest(&toml))
-            .map(|(package, lib_name, lib_path)| {
-                let lib_rel = lib_path.unwrap_or_else(|| "src/lib.rs".to_string());
-                CrateInfo {
-                    dir: dir.to_string(),
-                    ident: lib_name.unwrap_or(package).replace('-', "_"),
-                    has_lib: self.root.join(dir).join(lib_rel).exists(),
-                }
+            .as_deref()
+            .and_then(parse_manifest)
+            .map(|manifest| CrateInfo {
+                dir: dir.to_string(),
+                ident: manifest.ident,
+                has_lib: self.root.join(dir).join(&manifest.lib_rel).exists(),
+                custom_roots: manifest.custom_roots,
             });
         self.crates.insert(dir.to_string(), info.clone());
         info
@@ -117,6 +120,23 @@ impl Workspace {
             crate_dir: ctx.krate.dir,
             path: ctx.module,
         })
+    }
+
+    /// The crate directory and root files (`src/lib.rs`, `src/main.rs`) of
+    /// whichever module tree holds `rel`: a file under `src/` can belong to
+    /// either root. `None` outside a `src/` module tree.
+    pub(crate) fn crate_roots(&mut self, rel: &str) -> Option<(String, Vec<String>)> {
+        let ctx = self.file_ctx(rel)?;
+        if !ctx.in_lib || ctx.krate.custom_roots {
+            return None;
+        }
+        let dir = ctx.krate.dir;
+        let roots: Vec<String> = ["src/lib.rs", "src/main.rs"]
+            .iter()
+            .map(|root| join_rel(&dir, root))
+            .filter(|root| self.root.join(root).is_file())
+            .collect();
+        (!roots.is_empty()).then_some((dir, roots))
     }
 
     /// Whether `module` names a module file of the library.
@@ -1049,27 +1069,79 @@ fn leaf_removal(leaf: Node<'_>, decl: Node<'_>) -> Range<usize> {
 
 /// `(package name, [lib] name, [lib] path)` from a manifest, or `None`
 /// when it declares no package (a virtual workspace root).
-fn parse_manifest(toml: &str) -> Option<(String, Option<String>, Option<String>)> {
-    let mut section = "";
-    let mut package = None;
-    let mut lib_name = None;
-    let mut lib_path = None;
-    for line in toml.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            section = line;
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let value = value.trim().trim_matches('"').to_string();
-        match (section, key.trim()) {
-            ("[package]", "name") => package = Some(value),
-            ("[lib]", "name") => lib_name = Some(value),
-            ("[lib]", "path") => lib_path = Some(value),
-            _ => {}
+fn join_rel(dir: &str, rest: &str) -> String {
+    if dir.is_empty() {
+        rest.to_string()
+    } else {
+        format!("{dir}/{rest}")
+    }
+}
+
+struct Manifest {
+    ident: String,
+    lib_rel: String,
+    /// See [`CrateInfo::custom_roots`].
+    custom_roots: bool,
+}
+
+/// Reads the crate identity and whether any file under `src/` may be a crate
+/// root: a non-default `[lib] path`, a `[[bin]]`, `[[example]]`, `[[test]]` or
+/// `[[bench]]` target with a `path`, or a build script. A manifest that does
+/// not parse yields `None`.
+fn parse_manifest(text: &str) -> Option<Manifest> {
+    let manifest: toml::Table = text.parse().ok()?;
+    let package = manifest.get("package")?.as_table()?;
+    let lib = manifest.get("lib").and_then(toml::Value::as_table);
+    let lib_field = |key: &str| lib.and_then(|lib| lib.get(key)?.as_str());
+    let lib_rel = lib_field("path").unwrap_or("src/lib.rs").to_string();
+    let target_paths = ["bin", "example", "test", "bench"].iter().any(|kind| {
+        manifest
+            .get(*kind)
+            .and_then(toml::Value::as_array)
+            .is_some_and(|targets| targets.iter().any(|target| target.get("path").is_some()))
+    });
+    let build_script = package
+        .get("build")
+        .is_some_and(|build| build.as_bool() != Some(false));
+    Some(Manifest {
+        ident: lib_field("name")
+            .or_else(|| package.get("name")?.as_str())?
+            .replace('-', "_"),
+        custom_roots: target_paths || build_script || lib_rel != "src/lib.rs",
+        lib_rel,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_manifest;
+
+    #[test]
+    fn manifest_spellings_that_can_root_a_src_file_are_all_seen() {
+        let package = "[package]\nname = \"small\"\n";
+        for (tail, roots) in [
+            ("", false),
+            ("[[bin]]\nname = \"tool\"\n", false),
+            ("[dependencies]\nbin = \"1\"\n", false),
+            ("[[bin]]\nname = \"tool\"\npath = \"src/bin.rs\"\n", true),
+            ("[[ bench ]] # timing\npath = \"src/b.rs\"\n", true),
+            ("[[test]]\n path = \"src/t.rs\"\n", true),
+            ("example = [{ name = \"e\", path = \"src/e.rs\" }]\n", true),
+            ("build = \"src/build.rs\"\n", true),
+            ("build = false\n", false),
+            ("[[bin]]\n\"path\" = \"src/bin.rs\"\n", true),
+            ("[[bin]]\n'path' = \"src/bin.rs\"\n", true),
+            ("[lib]\npath = \"src/root.rs\"\n", true),
+        ] {
+            // A trailing top-level key belongs to `[package]`, except the
+            // inline-array row, which is written before any table.
+            let toml = if tail.starts_with("example") {
+                format!("{tail}{package}")
+            } else {
+                format!("{package}{tail}")
+            };
+            let manifest = parse_manifest(&toml).expect("the manifest parses");
+            assert_eq!(manifest.custom_roots, roots, "{toml}");
         }
     }
-    package.map(|p| (p, lib_name, lib_path))
 }

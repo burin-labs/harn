@@ -36,6 +36,7 @@ pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "skill_narrow",
     "skill_scope_tools",
     "stance_transition",
+    "state_update",
     "tool_search_query",
     "tool_search_result",
     "transcript_compacted",
@@ -254,6 +255,7 @@ pub(super) fn acp_prompt_capabilities() -> serde_json::Value {
         "image": capabilities.vision || capabilities.vision_supported,
         "audio": capabilities.audio,
         "embeddedContext": capabilities.pdf || capabilities.files_api_supported,
+        "delivery": {"steer": {}, "queue": {}},
     })
 }
 
@@ -262,12 +264,7 @@ pub(super) fn acp_agent_capabilities() -> serde_json::Value {
         "_meta": harn_acp_extension_meta(),
         "loadSession": true,
         "session": {
-            "inject": {
-                "modes": ["queue", "steer", "interrupt_immediate"],
-                "pending": {
-                    "replace": true,
-                },
-            },
+            "pendingPrompts": {},
             "injectHostEvent": {
                 "kinds": ["host_tool_result", "host_attachment"],
                 "delivery": ["turn_boundary", "immediate", "after_next_tool_call"],

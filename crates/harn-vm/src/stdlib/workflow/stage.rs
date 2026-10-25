@@ -23,7 +23,7 @@ pub(super) struct ExecutedStage {
     pub(super) artifacts: Vec<ArtifactRecord>,
     pub(super) transcript: Option<VmValue>,
     pub(super) verification: Option<serde_json::Value>,
-    pub(super) usage: LlmUsageRecord,
+    pub(super) usage: Box<LlmUsageRecord>,
     pub(super) error: Option<String>,
     pub(super) attempts: Vec<RunStageAttemptRecord>,
     pub(super) consumed_artifact_ids: Vec<String>,
@@ -75,7 +75,7 @@ pub(super) fn replay_stage(
             .as_ref()
             .map(crate::stdlib::json_to_vm_value),
         verification: stage.verification.clone(),
-        usage: stage.usage.clone().unwrap_or_default(),
+        usage: Box::new(stage.usage.clone().unwrap_or_default()),
         error: stage
             .metadata
             .get("error")
@@ -428,7 +428,7 @@ fn executed_stage_from_vm(value: VmValue) -> Result<ExecutedStage, VmError> {
             .collect(),
         transcript,
         verification: parsed.verification,
-        usage: parsed.usage,
+        usage: Box::new(parsed.usage),
         error: parsed.error,
         attempts: parsed.attempts,
         consumed_artifact_ids: parsed.consumed_artifact_ids,

@@ -13,20 +13,18 @@ export const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR = { code: -32022, message: "
 
 export const ACP_AGENT_METHODS = [
   "initialize",
-  "session/inject",
+  "$/cancel_request",
   "session/inject_host_event",
   "session/new",
   "session/inputs",
   "session/load",
-  "session/replace_inject",
   "session/resume",
   "session/prompt",
-  "session/revoke_inject",
+  "session/pending_prompts",
   "session/truncate",
   "session/rollback",
   "session/redo",
   "session/remind",
-  "session/pending_injections",
   "session/revoke_reminder",
   "session/cancel_tool_call",
   "session/close",
@@ -36,20 +34,18 @@ export type ACPAgentMethod = (typeof ACP_AGENT_METHODS)[number]
 
 export const ACP_AGENT_METHOD = {
   initialize: "initialize",
-  sessionInject: "session/inject",
+  cancelRequest: "$/cancel_request",
   sessionInjectHostEvent: "session/inject_host_event",
   sessionNew: "session/new",
   sessionInputs: "session/inputs",
   sessionLoad: "session/load",
-  sessionReplaceInject: "session/replace_inject",
   sessionResume: "session/resume",
   sessionPrompt: "session/prompt",
-  sessionRevokeInject: "session/revoke_inject",
+  sessionPendingPrompts: "session/pending_prompts",
   sessionTruncate: "session/truncate",
   sessionRollback: "session/rollback",
   sessionRedo: "session/redo",
   sessionRemind: "session/remind",
-  sessionPendingInjections: "session/pending_injections",
   sessionRevokeReminder: "session/revoke_reminder",
   sessionCancelToolCall: "session/cancel_tool_call",
   sessionClose: "session/close",
@@ -103,6 +99,7 @@ export const ACP_SESSION_UPDATES = [
   "skill_narrow",
   "skill_scope_tools",
   "stance_transition",
+  "state_update",
   "tool_search_query",
   "tool_search_result",
   "transcript_compacted",
@@ -128,6 +125,7 @@ export const HARN_ACP_SESSION_UPDATE_EXTENSIONS = [
   "skill_narrow",
   "skill_scope_tools",
   "stance_transition",
+  "state_update",
   "tool_search_query",
   "tool_search_result",
   "transcript_compacted",
@@ -1552,6 +1550,22 @@ export interface ACPStanceTransitionUpdate {
   _meta: ACPStanceTransitionUpdateMeta
 }
 
+export interface ACPStateUpdateMetaHarn {
+  replayed?: boolean
+}
+
+export interface ACPStateUpdateMeta {
+  harn?: ACPStateUpdateMetaHarn
+}
+
+export interface ACPStateUpdate {
+  sessionUpdate: "state_update"
+  state: string
+  _meta?: ACPStateUpdateMeta
+  error?: ACPValue
+  stopReason?: string
+}
+
 export interface ACPToolSearchQueryUpdateMetaHarn {
   toolUseId: string
   name: string
@@ -1682,6 +1696,7 @@ export type ACPTypedSessionUpdate =
   | ACPSkillNarrowUpdate
   | ACPSkillScopeToolsUpdate
   | ACPStanceTransitionUpdate
+  | ACPStateUpdate
   | ACPToolSearchQueryUpdate
   | ACPToolSearchResultUpdate
   | ACPTranscriptCompactedUpdate

@@ -751,25 +751,29 @@ fn a_weaker_signature_cannot_resolve_or_refire_a_stronger_signal() {
 }
 
 #[test]
-fn an_oversized_event_is_refused_at_write() {
+fn a_verbose_event_is_trimmed_and_only_one_still_too_large_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let inbox = Inbox::open(dir.path()).unwrap();
-    let mut long_summary = input("alert:long", Some("acme/api"), Severity::Info);
-    long_summary.event.summary = "x".repeat(harn_signals::MAX_SUMMARY_CHARS + 1);
-    let error = inbox.fire(long_summary, t0()).unwrap_err().to_string();
-    assert!(error.contains("summary"), "{error}");
-
-    let mut many_refs = input("alert:refs", Some("acme/api"), Severity::Info);
-    many_refs.event.related_refs = (0..=harn_signals::MAX_LIST_ENTRIES)
+    // A verbose alert still fires, with what the inbox keeps trimmed.
+    let mut verbose = input("alert:verbose", Some("acme/api"), Severity::Info);
+    verbose.event.summary = "x".repeat(5_000);
+    verbose.event.related_refs = (0..=harn_signals::MAX_LIST_ENTRIES)
         .map(|_| harn_signals::TriageRelatedRef {
             kind: "url".into(),
             label: None,
             url: "https://example.test/".into(),
         })
         .collect();
-    let error = inbox.fire(many_refs, t0()).unwrap_err().to_string();
-    assert!(error.contains("related_refs"), "{error}");
+    inbox.fire(verbose, t0()).unwrap();
+    let kept = &inbox.snapshot(t0()).unwrap().signals["alert:verbose"].event;
+    assert_eq!(
+        kept.summary.chars().count(),
+        harn_signals::MAX_SUMMARY_CHARS
+    );
+    assert!(kept.summary.ends_with('\u{2026}'));
+    assert_eq!(kept.related_refs.len(), harn_signals::MAX_LIST_ENTRIES);
 
+    // A field nothing trims that is still too large is refused.
     let mut huge = input("alert:huge", Some("acme/api"), Severity::Info);
     huge.event.why_it_matters = "y".repeat(harn_signals::MAX_KEPT_BYTES);
     let error = inbox.fire(huge, t0()).unwrap_err().to_string();
@@ -780,7 +784,33 @@ fn an_oversized_event_is_refused_at_write() {
     raw.event.raw_payload =
         serde_json::json!({"body": "z".repeat(harn_signals::MAX_KEPT_BYTES * 2)});
     inbox.fire(raw, t0()).unwrap();
-    assert!(inbox.snapshot(t0()).unwrap().signals.len() == 1);
+    assert_eq!(inbox.snapshot(t0()).unwrap().signals.len(), 2);
+}
+
+#[test]
+fn an_idle_watcher_stops_waking_for_a_reminder_nobody_leases() {
+    let dir = tempfile::tempdir().unwrap();
+    let inbox = Inbox::open(dir.path()).unwrap();
+    let mut idle = session("a", Some("acme/api"), None);
+    idle.activity = Activity::Idle;
+    inbox.register_session(idle, t0()).unwrap();
+    inbox
+        .fire(
+            input("alert:acme/api", Some("acme/api"), Severity::Urgent),
+            t0(),
+        )
+        .unwrap();
+    let pending = |now| match inbox.poll_idle("a", now).unwrap() {
+        harn_signals::IdlePoll::Pending(ids) => ids,
+        other => panic!("{other:?}"),
+    };
+    for wake in 0..harn_signals::MAX_WAKES_PER_REMINDER {
+        let now = t0() + Duration::seconds(i64::from(wake));
+        let ids = pending(now);
+        assert_eq!(ids.len(), 1, "wake {wake}");
+        inbox.record_wake("a", &ids, now).unwrap();
+    }
+    assert!(pending(t0() + Duration::seconds(10)).is_empty());
 }
 
 #[test]
@@ -794,12 +824,21 @@ fn the_next_write_sweeps_what_killed_processes_left() {
     let orphan = watchers.join("6f727068616e.lock");
     std::fs::write(&orphan, "").unwrap();
     let held = inbox.claim_watcher("live").unwrap().expect("lock is free");
+    // A registered session's lock file, unheld for the moment (its watcher is
+    // between creating and locking it), is left alone.
+    inbox
+        .register_session(session("a", Some("acme/api"), None), t0())
+        .unwrap();
+    let registered = watchers.join("61.lock");
+    std::fs::write(&registered, "").unwrap();
 
     inbox
         .fire(input("ci:acme/api", Some("acme/api"), Severity::Info), t0())
         .unwrap();
     assert!(!temp.exists(), "a stale temporary inbox file survived");
     assert!(!orphan.exists(), "an orphaned watcher lock survived");
+    assert!(registered.exists(), "a registered session's lock was swept");
+    std::fs::remove_file(&registered).unwrap();
     // A watcher still holding its lock keeps it.
     assert!(inbox.claim_watcher("live").unwrap().is_none());
     drop(held);

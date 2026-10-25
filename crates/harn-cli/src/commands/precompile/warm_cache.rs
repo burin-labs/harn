@@ -60,15 +60,19 @@ fn prepare_entry(
     compiler: &mut bytecode_cache::CachePrecompiler,
 ) -> Result<(), String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let graph = harn_modules::build_with_source(path, &source);
-    crate::package::ensure_reachable_dependencies_materialized(path, &graph)
-        .map_err(|error| error.to_string())?;
+    let mut graph = harn_modules::build_with_source(path, &source);
+    if crate::package::ensure_reachable_dependencies_materialized(path, &graph)
+        .map_err(|error| error.to_string())?
+    {
+        // Materializing may publish a package generation this graph predates.
+        graph = harn_modules::build_with_source(path, &source);
+    }
     let authority = SourceCompilerAuthority::for_source(path);
     let (parsed_source, program) = parse_source_file(&path.to_string_lossy());
     if parsed_source != source {
         return Err("source changed during preparation".into());
     }
-    let checker = checker_with_resolved_imports(authority.typechecker(), path);
+    let checker = checker_with_resolved_graph(authority.typechecker(), path, &graph);
     let errors = checker
         .check_with_source(&program, &source)
         .into_iter()

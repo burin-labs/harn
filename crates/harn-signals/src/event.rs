@@ -12,11 +12,11 @@ use crate::SignalsError;
 
 pub const TRIAGE_EVENT_SCHEMA: &str = "harn.triage_event.v1";
 
-/// Longest summary a stored event may carry.
+/// Longest summary a stored event keeps; a longer one is trimmed.
 pub const MAX_SUMMARY_CHARS: usize = 2_000;
-/// Most actors, related refs, or action intents a stored event may carry.
+/// Most actors, related refs, or action intents a stored event keeps.
 pub const MAX_LIST_ENTRIES: usize = 32;
-/// Largest stored event, serialized without its raw payload.
+/// Largest stored event after trimming, serialized without its raw payload.
 pub const MAX_KEPT_BYTES: usize = 32 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -162,36 +162,6 @@ impl TriageEvent {
                 return Err(SignalsError::InvalidEvent(format!("{name} is required")));
             }
         }
-        let summary_chars = self.summary.chars().count();
-        if summary_chars > MAX_SUMMARY_CHARS {
-            return Err(SignalsError::InvalidEvent(format!(
-                "summary is {summary_chars} characters; the limit is {MAX_SUMMARY_CHARS}"
-            )));
-        }
-        for (name, count) in [
-            ("actors", self.actors.len()),
-            ("related_refs", self.related_refs.len()),
-            ("action_intents", self.action_intents.len()),
-        ] {
-            if count > MAX_LIST_ENTRIES {
-                return Err(SignalsError::InvalidEvent(format!(
-                    "{name} has {count} entries; the limit is {MAX_LIST_ENTRIES}"
-                )));
-            }
-        }
-        // Every other field is bounded by the size of what the inbox keeps:
-        // the event without its raw payload, which is never stored.
-        let mut kept = serde_json::to_value(self)
-            .map_err(|error| SignalsError::InvalidEvent(error.to_string()))?;
-        if let Some(fields) = kept.as_object_mut() {
-            fields.remove("raw_payload");
-        }
-        let kept_bytes = kept.to_string().len();
-        if kept_bytes > MAX_KEPT_BYTES {
-            return Err(SignalsError::InvalidEvent(format!(
-                "the event is {kept_bytes} bytes without its raw payload; the limit is {MAX_KEPT_BYTES}"
-            )));
-        }
         for intent in &self.action_intents {
             if intent.effect != "navigation" && !intent.requires_approval {
                 return Err(SignalsError::InvalidEvent(format!(
@@ -203,11 +173,31 @@ impl TriageEvent {
         Ok(())
     }
 
-    /// The inbox keeps normalized fields only. Provider payloads can be large
-    /// and can carry material the producer did not mean to persist.
-    pub(crate) fn strip_raw_payload(&mut self) {
+    /// Shape the event for the inbox, which keeps normalized fields only:
+    /// drop the raw payload (large, and it can carry material the producer
+    /// did not mean to persist), trim the summary and lists to their limits
+    /// so a verbose alert still fires, and refuse what is still too large.
+    pub(crate) fn prepare_for_storage(&mut self) -> Result<(), SignalsError> {
+        self.validate()?;
         self.raw_payload = JsonValue::Object(Default::default());
         self.privacy.raw_payload_retained = false;
+        if self.summary.chars().count() > MAX_SUMMARY_CHARS {
+            let mut trimmed: String = self.summary.chars().take(MAX_SUMMARY_CHARS - 1).collect();
+            trimmed.push('\u{2026}');
+            self.summary = trimmed;
+        }
+        self.actors.truncate(MAX_LIST_ENTRIES);
+        self.related_refs.truncate(MAX_LIST_ENTRIES);
+        self.action_intents.truncate(MAX_LIST_ENTRIES);
+        let kept_bytes = serde_json::to_vec(self)
+            .map_err(|error| SignalsError::InvalidEvent(error.to_string()))?
+            .len();
+        if kept_bytes > MAX_KEPT_BYTES {
+            return Err(SignalsError::InvalidEvent(format!(
+                "the event is {kept_bytes} bytes after trimming; the limit is {MAX_KEPT_BYTES}"
+            )));
+        }
+        Ok(())
     }
 }
 

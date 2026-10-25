@@ -129,7 +129,7 @@ async fn terminal_failure_emits_one_typed_error_and_no_assistant_chunk() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn compile_error_clears_active_inject_bridge_and_has_typed_data() {
+async fn compile_error_clears_active_prompt_and_has_typed_data() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
     let session_id = new_session(&mut server, &mut rx).await;
@@ -146,24 +146,10 @@ async fn compile_error_clears_active_inject_bridge_and_has_typed_data() {
     .await;
     assert_prompt_error_data(&response, -32000, "generic_throw");
 
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "session/inject",
-            "params": {
-                "sessionId": session_id,
-                "mode": "queue",
-                "content": "must not target the failed prompt",
-            },
-        }))
-        .await;
-    let rejected = recv_json(&mut rx).await;
-    assert_eq!(rejected["error"]["code"], -32004);
-    assert!(rejected["error"]["message"]
-        .as_str()
-        .unwrap_or_default()
-        .contains("no active prompt"));
+    // A steer arriving now must start a turn, not join the failed one.
+    let session = &server.sessions[&session_id];
+    assert!(!session.concurrent_control.prompt_is_active());
+    assert!(session.host_bridge.is_none());
 }
 
 #[tokio::test(flavor = "current_thread")]

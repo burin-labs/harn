@@ -23,9 +23,7 @@ pub use cost::{
 mod receipt;
 #[doc(inline)]
 pub use harn_llm::usage::ReportedCacheUsage;
-pub(crate) use harn_llm::usage::{
-    cache_field_roots, extract_cache_read_tokens, extract_cache_write_tokens,
-};
+pub(crate) use harn_llm::usage::{cache_field_roots, extract_cache_counts, CacheCounts};
 pub(crate) use harn_llm::usage::{InputTokenBasis, PromptTokenCounts, ReportedTokenUsage};
 pub(crate) use receipt::ProviderUsageReceipt;
 
@@ -153,6 +151,10 @@ pub struct LlmUsage {
     /// than borrowing `cache_supported`'s false precision.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_accounting_declared: Option<bool>,
+    /// Whether a provider response carried any cache counter. On a declared,
+    /// supported route `false` means the counters were omitted, not zero.
+    #[serde(default)]
+    pub cache_counts_present: bool,
     pub cache_hit_ratio: Option<f64>,
     pub cache_savings_usd: f64,
     pub cache_hit: bool,
@@ -367,6 +369,59 @@ impl UsageCostCertainty {
     }
 }
 
+/// Cache token totals over the calls whose provider reported cache accounting.
+///
+/// A call counts only when its route declared cache accounting and the
+/// response reported it (`cache_visibility` null). The totals read `None`
+/// until such a call is folded, so an unreported count never reads as a
+/// measured zero.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReportedCacheTotals {
+    pub reported_calls: i64,
+    pub read_tokens: i64,
+    pub write_tokens: i64,
+}
+
+impl ReportedCacheTotals {
+    pub(crate) fn record(&mut self, reported: bool, read_tokens: i64, write_tokens: i64) {
+        if !reported {
+            return;
+        }
+        self.reported_calls = self.reported_calls.saturating_add(1);
+        self.read_tokens = self.read_tokens.saturating_add(read_tokens);
+        self.write_tokens = self.write_tokens.saturating_add(write_tokens);
+    }
+
+    pub(crate) fn record_usage(&mut self, usage: &LlmUsage) {
+        self.record(
+            usage.cache_counts_reported(),
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
+        );
+    }
+
+    /// Calls folded after `before` was taken from the same running total.
+    #[must_use]
+    pub(crate) fn since(&self, before: &Self) -> Self {
+        Self {
+            reported_calls: self.reported_calls.saturating_sub(before.reported_calls),
+            read_tokens: self.read_tokens.saturating_sub(before.read_tokens),
+            write_tokens: self.write_tokens.saturating_sub(before.write_tokens),
+        }
+    }
+
+    #[must_use]
+    pub fn reported_read_tokens(&self) -> Option<i64> {
+        (self.reported_calls > 0).then_some(self.read_tokens)
+    }
+
+    #[must_use]
+    pub fn reported_write_tokens(&self) -> Option<i64> {
+        (self.reported_calls > 0).then_some(self.write_tokens)
+    }
+}
+
 /// Fold cost and accounting certainty once for every reporting projection.
 pub fn summarize_usage_cost_certainty<'a>(
     usages: impl IntoIterator<Item = &'a LlmUsage>,
@@ -490,6 +545,9 @@ impl LlmUsage {
             .try_fold(true, |all_true, declared| {
                 declared.map(|declared| all_true && declared)
             });
+        // A retry or sibling with no response must not erase a response that did
+        // report, so presence is any() rather than all().
+        let cache_counts_present = usages.iter().any(|usage| usage.cache_counts_present);
         Self {
             input_tokens,
             output_tokens,
@@ -504,7 +562,10 @@ impl LlmUsage {
             cache_write_tokens,
             cache_supported,
             cache_accounting_declared,
-            cache_hit_ratio: (cache_accounting_declared == Some(true) && cache_supported)
+            cache_counts_present,
+            cache_hit_ratio: (cache_counts_present
+                && cache_accounting_declared == Some(true)
+                && cache_supported)
                 .then(|| super::cost::cache_hit_ratio(input_tokens, cache_read_tokens)),
             cache_savings_usd: usages.iter().map(|usage| usage.cache_savings_usd).sum(),
             cache_hit: usages.iter().any(|usage| usage.cache_hit),
@@ -609,6 +670,7 @@ impl LlmUsage {
             // undeclared) for the completed logical call.
             cache_supported: true,
             cache_accounting_declared: Some(true),
+            cache_counts_present: false,
             cache_hit_ratio: Some(0.0),
             cache_savings_usd: 0.0,
             cache_hit: false,
@@ -734,7 +796,8 @@ impl LlmUsage {
         } else {
             unpriced_projection(cost_usd, table_cost)
         };
-        let cache_hit_ratio = (result.telemetry.cache_accounting_declared == Some(true)
+        let cache_hit_ratio = (result.cache_counts_reported
+            && result.telemetry.cache_accounting_declared == Some(true)
             && result.cache_supported)
             .then(|| super::cost::cache_hit_ratio(result.input_tokens, result.cache_read_tokens));
         Self {
@@ -746,6 +809,7 @@ impl LlmUsage {
             cache_write_tokens: result.cache_write_tokens,
             cache_supported: result.cache_supported,
             cache_accounting_declared: result.telemetry.cache_accounting_declared,
+            cache_counts_present: result.cache_counts_reported,
             cache_hit_ratio,
             cache_savings_usd: super::cost::cache_savings_usd_for_pricing(
                 detail.as_ref(),
@@ -880,7 +944,9 @@ impl LlmUsage {
             cache_write_tokens: receipt.cache_write_tokens,
             cache_supported: receipt.cache_supported,
             cache_accounting_declared: receipt.cache_accounting_declared,
-            cache_hit_ratio: (receipt.cache_accounting_declared == Some(true)
+            cache_counts_present: receipt.cache_counts_reported,
+            cache_hit_ratio: (receipt.cache_counts_reported
+                && receipt.cache_accounting_declared == Some(true)
                 && receipt.cache_supported)
                 .then(|| super::cost::cache_hit_ratio(input_tokens, receipt.cache_read_tokens)),
             cache_savings_usd: super::cost::cache_savings_usd_for_pricing(
@@ -1075,6 +1141,13 @@ impl LlmUsage {
             (Some(false), _) | (Some(true), false) => Some("unsupported"),
             (Some(true), true) => None,
         }
+    }
+
+    /// Whether the cache counts are a provider measurement: the route declared
+    /// cache accounting and the response carried the counters. An unsupported,
+    /// undeclared, or omitted count is not a measured zero.
+    pub(crate) fn cache_counts_reported(&self) -> bool {
+        self.cache_counts_present && self.cache_visibility().is_none()
     }
 
     /// Mechanically add the canonical accounting fields to the flat provider
@@ -1301,8 +1374,12 @@ impl ToolProbeUsage {
         if input_tokens.is_some() && output_tokens.is_some() {
             let receipt = ProviderUsageReceipt::new(input_tokens, output_tokens, None, false)
                 .with_cache(
-                    reported.cache_read_tokens.unwrap_or(0),
-                    reported.cache_write_tokens.unwrap_or(0),
+                    CacheCounts {
+                        read_tokens: reported.cache_read_tokens.unwrap_or(0),
+                        write_tokens: reported.cache_write_tokens.unwrap_or(0),
+                        reported: reported.cache_read_tokens.is_some()
+                            || reported.cache_write_tokens.is_some(),
+                    },
                     None,
                     reported.cache_read_tokens.is_some() || reported.cache_write_tokens.is_some(),
                 );

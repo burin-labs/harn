@@ -57,7 +57,9 @@ else `HARN_EXT_SIGNALS_ROLE`.
 Every invocation except `SessionEnd` and `Stop --rewake` leases at most three
 reminders, prints them, and after flushing its output acks exactly those leases
 by token. A hook killed before that leaves its leases to lapse and be leased
-again; a hook running beside it never acks them.
+again; a hook running beside it never acks them. A failed ack after the output
+is flushed is reported on stderr and the hook still exits 0, because a harness
+discards the output of a failed hook; the lease lapses and is leased again.
 
 | `--event` | Registers the session as | Leases | Output |
 |---|---|---|---|
@@ -65,7 +67,7 @@ again; a hook running beside it never acks them.
 | `UserPromptSubmit` | busy | any severity | `hookSpecificOutput.additionalContext` |
 | `PostToolUse` | busy | any severity | `hookSpecificOutput.additionalContext` |
 | `Stop` | idle, or busy if it delivers | Claude Code: urgent only. Codex: nothing | Claude Code: `hookSpecificOutput.additionalContext`, which continues the turn. Codex: `{}`, because a Codex `Stop` reason becomes a user prompt. |
-| `Stop --rewake` | idle | nothing; watches for urgent reminders while idle | Claude Code only. Exits 2 to wake the session under `asyncRewake`, printing only a fixed notice on stderr: Claude Code shows that stderr as a user-role `Stop hook feedback` turn, so it carries no signal text. The woken turn's `Stop` hook then leases the reminder and delivers it as `additionalContext`. It wakes for an urgent reminder that appears after its first poll, or one pending at its first poll that still has no lease out two polls later (polls are two seconds apart). Exits 0 after `--max-wait` (default `9m`, under the hook's default 600-second `timeout`), when the session becomes busy, when it ends, or at once when another watcher for the session is running. |
+| `Stop --rewake` | idle | nothing; watches for urgent reminders while idle | Claude Code only. Exits 2 to wake the session under `asyncRewake`, printing only a fixed notice on stderr: Claude Code shows that stderr as a user-role `Stop hook feedback` turn, so it carries no signal text. The woken turn's `Stop` hook then leases the reminder and delivers it as `additionalContext`. It wakes for an urgent reminder that appears after its first poll, or one pending at its first poll that still has no lease out two polls later (polls are two seconds apart). It wakes at most three times for one reminder. Exits 0 after `--max-wait` (default `9m`, under the hook's default 600-second `timeout`), when the session becomes busy, when it ends, or at once when another watcher for the session is running. |
 | `SessionEnd` | removed | nothing | none |
 
 When more reminders are routed to the session than one hook leases, the output
@@ -83,7 +85,7 @@ The inbox directory is `$HARN_EXT_SIGNALS_DIR` when set, else
 |---|---|
 | `inbox.json` | Signals and sessions, schema `harn.signals.inbox.v1`. Replaced atomically on every change. |
 | `inbox.lock` | Advisory lock file every transaction holds exclusively. |
-| `watchers/<hex session id>.lock` | Held by the running `--rewake` watcher for a session. The watcher removes it as it exits; `SessionEnd`, and the next write to the inbox, remove one a killed watcher left. |
+| `watchers/<hex session id>.lock` | Held by the running `--rewake` watcher for a session. The watcher removes it as it exits; `SessionEnd` removes one a killed watcher left, and so does the next write to the inbox once the session is no longer registered. |
 | `.inbox.json.*.tmp` | A write in progress. The next write removes one a killed process left. |
 | `config.toml` | Optional configuration and delivery policy. |
 
@@ -109,7 +111,8 @@ The inbox directory is `$HARN_EXT_SIGNALS_DIR` when set, else
         "session_id": "...",
         "assigned_at": "RFC 3339",
         "lease": {"token": "...", "leased_at": "RFC 3339", "expires_at": "RFC 3339"},
-        "acked_at": "RFC 3339 or null"
+        "acked_at": "RFC 3339 or null",
+        "wakes": 0
       },
       "attempts": 1,
       "fired_recipient": "session id leased the latest fired generation"
@@ -214,9 +217,9 @@ short.
 `monitor_github_ci` lists the repository's active workflows and reads each
 one's 20 most recent completed push runs on the branch, one request per
 workflow, so a busy workflow cannot push another's runs out of a shared page.
-The newest decisive run of each workflow is its reading. A branch where no
-workflow has a decisive recent run, or a response without `workflow_runs`, is
-unmeasured rather than recovered.
+The newest decisive run of each workflow is its reading. A workflow with recent
+runs but no decisive one, a branch where no workflow has run, or a response
+without `workflow_runs` is unmeasured rather than recovered.
 `monitor_github_open_prs` is unmeasured when the search reports
 `incomplete_results`.
 
@@ -226,7 +229,7 @@ underneath `signal_apply`:
 | Builtin | Effect |
 |---|---|
 | `harness.runtime.signal_fire(request)` | Fire a signal. Returns the transition. |
-| `harness.runtime.signal_resolve(key, options?)` | Resolve a fired signal. `options` takes `event`, `signature` (default `"local"`; one weaker than the signal's own is refused), and `dir`. |
+| `harness.runtime.signal_resolve(key, options?)` | Resolve a fired signal. `options` takes `event`, `signature` (default `"unverified"`; one weaker than the signal's own is refused), and `dir`. |
 | `harness.runtime.signal_register(session, options?)` | Record a session without leasing or acking. `session` is `{id, harness, cwd, repo?, title?, role?, activity: "busy" \| "idle"}`. |
 | `harness.runtime.signal_check_in(session, options?)` | Lease pending reminders. `options` takes `scope` (`"all"` or `"urgent_only"`), `limit` (default 3), and `dir`. Returns `{reminders, waiting}`; each reminder carries a `lease_token`. |
 | `harness.runtime.signal_ack(session_id, lease_tokens, options?)` | Ack the leases these tokens name once their reminders reached the model. A token whose lease lapsed and was leased again acks nothing. Returns the `{key, generation}` ids acked. |
@@ -234,9 +237,10 @@ underneath `signal_apply`:
 | `harness.runtime.signal_render(reminders)` | The notification text for leased reminders. |
 
 `request` takes `event` (a normalized `harn.triage_event.v1`), `key`,
-`severity`, `routing`, `provenance` (`{producer, signature}`, default a local
-script), `expires_in_seconds`, and `dir`; unknown fields are refused. Timestamps come
-from the VM clock, so a mocked clock moves signal lifecycles too.
+`severity`, `routing`, `provenance` (`{producer, signature}`; an omitted
+signature, or an omitted provenance, is `unverified`), `expires_in_seconds`,
+and `dir`; unknown fields are refused. Timestamps come from the VM clock, so a
+mocked clock moves signal lifecycles too.
 
 [`examples/triggers/ambient-signals`](https://github.com/burin-labs/harn/tree/main/examples/triggers/ambient-signals)
 wires the monitors to a five-minute cron trigger and the alert normalizers to

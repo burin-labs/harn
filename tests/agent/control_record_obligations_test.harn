@@ -30,7 +30,7 @@ fn steer_row() -> dict {
     schema: "harn.session.control.v1",
     kind: "control",
     action: "steer",
-    method: "session/inject",
+    method: "session/prompt",
     control_id: "ctl-steer-1",
     status: "accepted",
     requested_mode: "steer",

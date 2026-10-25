@@ -20,6 +20,7 @@ pub(crate) struct ProviderUsageReceipt {
     pub(super) cache_write_tokens: i64,
     pub(super) cache_accounting_declared: Option<bool>,
     pub(super) cache_supported: bool,
+    pub(super) cache_counts_reported: bool,
     pub(super) provider_cost_usd: Option<f64>,
     pub(super) served_fast: bool,
     pub(super) started_at_ms: Option<i64>,
@@ -43,6 +44,7 @@ impl ProviderUsageReceipt {
             cache_write_tokens: 0,
             cache_accounting_declared: None,
             cache_supported: true,
+            cache_counts_reported: false,
             provider_cost_usd: provider_cost_usd.filter(|cost| cost.is_finite() && *cost >= 0.0),
             served_fast,
             started_at_ms: None,
@@ -121,13 +123,13 @@ impl ProviderUsageReceipt {
     /// unusable response must not change its accounting convention.
     pub(crate) fn with_cache(
         mut self,
-        cache_read_tokens: i64,
-        cache_write_tokens: i64,
+        cache: crate::llm::usage::CacheCounts,
         cache_accounting_declared: Option<bool>,
         cache_supported: bool,
     ) -> Self {
-        self.cache_read_tokens = cache_read_tokens.max(0);
-        self.cache_write_tokens = cache_write_tokens.max(0);
+        self.cache_read_tokens = cache.read_tokens.max(0);
+        self.cache_write_tokens = cache.write_tokens.max(0);
+        self.cache_counts_reported = cache.reported;
         self.cache_accounting_declared = cache_accounting_declared;
         self.cache_supported = cache_supported;
         self
@@ -191,6 +193,10 @@ impl ProviderUsageReceipt {
                 VmValue::Bool(self.cache_supported),
             ),
             (
+                crate::value::intern_key("cache_counts_reported"),
+                VmValue::Bool(self.cache_counts_reported),
+            ),
+            (
                 crate::value::intern_key("provider_cost_usd"),
                 self.provider_cost_usd.map_or(VmValue::Nil, VmValue::Float),
             ),
@@ -230,6 +236,11 @@ impl ProviderUsageReceipt {
         let VmValue::Bool(cache_supported) = fields.get("cache_supported")? else {
             return None;
         };
+        let cache_counts_reported = match fields.get("cache_counts_reported") {
+            Some(VmValue::Bool(reported)) => *reported,
+            None => false,
+            Some(_) => return None,
+        };
         let provider_cost_usd = optional_non_negative_float(fields, "provider_cost_usd").ok()?;
         let VmValue::Bool(served_fast) = fields.get("served_fast")? else {
             return None;
@@ -243,6 +254,7 @@ impl ProviderUsageReceipt {
             cache_write_tokens,
             cache_accounting_declared,
             cache_supported: *cache_supported,
+            cache_counts_reported,
             provider_cost_usd,
             served_fast: *served_fast,
             started_at_ms: optional_non_negative_int_if_present(fields, "started_at_ms").ok()?,

@@ -103,8 +103,8 @@ if [[ -z "$pr_url" ]]; then
       printf 'Retire failed, never-published v%s and start %s. Carry its notes into the next release; keep %s as the install and comparison base.\n\n' \
         "$retired_version" "$actual" "$RELEASE_PUBLISHED_VERSION"
       if [[ -n "${RETIRE_SOURCE_CI_RUN:-}" ]]; then
-        printf 'Producer %s and main CI %s failed at exact source %s; complete job censuses and fresh nonpublication checks authorize retirement.\n' \
-          "$RETIRE_PRODUCER_RUN" "$RETIRE_SOURCE_CI_RUN" "$RETIRE_SOURCE_SHA"
+        printf 'Source %s can never promote: main CI %s at that exact source is not a green full-suite run, whatever producer %s concluded. A complete job census and fresh nonpublication checks authorize retirement.\n' \
+          "$RETIRE_SOURCE_SHA" "$RETIRE_SOURCE_CI_RUN" "$RETIRE_PRODUCER_RUN"
       else
         printf 'Retained producer %s certifies source %s. Promotion %s refused publication after consumer run %s reached failing required job %s.\n' \
           "$RETIRE_PRODUCER_RUN" "$RETIRE_SOURCE_SHA" "$RETIRE_PROMOTION_RUN" \

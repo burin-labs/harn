@@ -111,12 +111,13 @@ fn untrusted(text: &str, limit: usize) -> String {
 
 harn_vm_core::stdlib_module_installer!(Host, pub fn register_signals_builtins);
 
-/// Producer identity and signature status; defaults to a local script.
+/// Producer identity and signature status. An omitted status claims
+/// nothing, so it is `unverified`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProvenanceInput {
     producer: String,
-    #[serde(default)]
+    #[serde(default = "unverified")]
     signature: SignatureStatus,
 }
 
@@ -140,16 +141,28 @@ struct FireRequest {
     dir: Option<PathBuf>,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ResolveOptions {
     #[serde(default)]
     event: Option<TriageEvent>,
-    /// How the resolving report was checked; defaults to `local`.
-    #[serde(default)]
+    /// How the resolving report was checked. An unsigned report claims
+    /// nothing, so it defaults to `unverified`, whether the options are
+    /// omitted, nil, or lack the field.
+    #[serde(default = "unverified")]
     signature: SignatureStatus,
     #[serde(default)]
     dir: Option<PathBuf>,
+}
+
+impl Default for ResolveOptions {
+    fn default() -> Self {
+        Self {
+            event: None,
+            signature: unverified(),
+            dir: None,
+        }
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -178,6 +191,10 @@ impl Default for CheckInOptions {
             dir: None,
         }
     }
+}
+
+fn unverified() -> SignatureStatus {
+    SignatureStatus::Unverified
 }
 
 fn default_severity() -> Severity {
@@ -209,7 +226,10 @@ fn signal_fire_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             producer: input.producer,
             signature: input.signature,
         },
-        None => Provenance::local("harn script"),
+        None => Provenance {
+            producer: "harn script".into(),
+            signature: SignatureStatus::Unverified,
+        },
     };
     let transition = open_inbox("signal_fire", request.dir)?
         .fire(
@@ -376,7 +396,8 @@ mod tests {
         TriageEvent,
     };
 
-    use super::{render_reminders, MAX_REMINDERS_PER_DELIVERY};
+    use super::{optional, render_reminders, ResolveOptions, MAX_REMINDERS_PER_DELIVERY};
+    use crate::value::VmValue;
 
     fn reminder(key: &str, text: &str, signature: SignatureStatus) -> Reminder {
         Reminder {
@@ -486,6 +507,19 @@ mod tests {
         );
         assert!(!outside.contains("honeycomb"), "{outside}");
         assert!(!outside.contains("make deploy"), "{outside}");
+    }
+
+    #[test]
+    fn an_unsigned_resolve_is_unverified_however_its_options_are_omitted() {
+        let empty = crate::stdlib::json_to_vm_value(&serde_json::json!({}));
+        for options in [None, Some(&VmValue::Nil), Some(&empty)] {
+            let decoded: ResolveOptions = optional("signal_resolve", options).unwrap();
+            assert_eq!(
+                decoded.signature,
+                SignatureStatus::Unverified,
+                "{options:?}"
+            );
+        }
     }
 
     #[test]

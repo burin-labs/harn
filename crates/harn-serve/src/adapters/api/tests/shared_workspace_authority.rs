@@ -164,10 +164,8 @@ async fn restricted_credential(key: &str) {
             "unsupported_authorization_policy"
         );
     }
-    let pending = state.acp.call(
-        "session/pending_injections",
-        json!({"sessionId":session_id}),
-    );
+    // Queued behind the gated prompt, so its answer marks that prompt settled.
+    let settled = state.acp.call("session/list", json!({}));
     // Cancel while preparation is gated. This distinct server-wide actor has
     // shared-workspace authority; neither restricted actor could cancel above.
     let response = request(
@@ -181,7 +179,7 @@ async fn restricted_credential(key: &str) {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(read_json(response).await["status"], "CANCELED");
     assert!(release.send(()).is_ok());
-    assert_eq!(pending.await.unwrap()["pendingCount"], 0);
+    settled.await.unwrap();
     assert!(!root.path().join("task-preparation.txt").exists());
     for path in ["/health", "/version", "/openapi.json", "/v1"] {
         assert_eq!(

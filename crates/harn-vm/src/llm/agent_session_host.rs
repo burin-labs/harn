@@ -534,6 +534,7 @@ pub(crate) fn record_completed_call_usage(
     metadata.put_str("call_role", opts.context_manifest.call_role());
     metadata.put_str("provider", &result.provider);
     metadata.put_str("model", &result.model);
+    metadata.put_bool("cache_counts_reported", usage.cache_counts_reported());
     metadata.put(
         "provider_stop_reason",
         result
@@ -664,10 +665,10 @@ fn first_dict_i64(sources: &[&VmValue], keys: &[&str]) -> i64 {
 
 fn first_provider_cache_usage_i64(
     sources: &[&VmValue],
-    extractor: fn(&serde_json::Value) -> Result<i64, VmError>,
+    counter: fn(super::usage::CacheCounts) -> i64,
 ) -> Result<i64, VmError> {
     for source in sources {
-        let tokens = extractor(&cache_usage_json(source))?;
+        let tokens = counter(super::api::extract_cache_counts(&cache_usage_json(source))?);
         if tokens != 0 {
             return Ok(tokens);
         }
@@ -1128,9 +1129,9 @@ fn host_agent_session_record_usage_builtin(
         first_dict_i64(&[&llm_block, &usage_block, &llm_result], &["output_tokens"]);
     let usage_sources = [&llm_result, &usage_block, &llm_block];
     let cache_read_tokens =
-        first_provider_cache_usage_i64(&usage_sources, super::api::extract_cache_read_tokens)?;
+        first_provider_cache_usage_i64(&usage_sources, |cache| cache.read_tokens)?;
     let cache_write_tokens =
-        first_provider_cache_usage_i64(&usage_sources, super::api::extract_cache_write_tokens)?;
+        first_provider_cache_usage_i64(&usage_sources, |cache| cache.write_tokens)?;
     let provider = dict_get(&llm_result, "provider")
         .map(|v| v.display())
         .unwrap_or_default();

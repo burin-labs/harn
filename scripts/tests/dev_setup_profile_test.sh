@@ -58,6 +58,7 @@ make_fixture_repo() {
   cp "$repo_root/scripts/cargo_target_seed.sh" "$repo/scripts/cargo_target_seed.sh"
   cp "$repo_root/scripts/lib/file_time.sh" "$repo/scripts/lib/file_time.sh"
   cp "$repo_root/scripts/lib/cargo_env.sh" "$repo/scripts/lib/cargo_env.sh"
+  cp "$repo_root/scripts/lib/rustc_frontend.sh" "$repo/scripts/lib/rustc_frontend.sh"
   chmod +x "$repo/scripts/dev_setup.sh" "$repo/scripts/cargo_target_seed.sh"
   printf '[package]\nname = "setup-fixture"\nversion = "0.1.0"\n' > "$repo/Cargo.toml"
   printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/sign_local_macos.sh"
@@ -435,6 +436,32 @@ if grep -Eq '^[[:space:]]*build-dir[[:space:]]*=' "$rust_repo/.cargo/config.toml
 fi
 if ! grep -Fxq "target-dir = \"$rust_target_dir\" # harn-dev-setup-managed" "$rust_repo/.cargo/config.toml"; then
   echo "shared-build migration did not preserve the per-worktree target directory" >&2
+  exit 1
+fi
+# The parallel rustc front end is on, written once across repeated setups, and
+# its flags never appear without the bootstrap that lets stable rustc take them.
+frontend_lines='rustflags = ["-Zthreads=8"] # harn-dev-setup-managed
+RUSTC_BOOTSTRAP = { value = "1", force = true } # harn-dev-setup-managed'
+if [[ "$(grep -E '^(rustflags|RUSTC_BOOTSTRAP) =' "$rust_repo/.cargo/config.toml")" != "$frontend_lines" ]]; then
+  echo "rust setup did not configure the parallel rustc front end exactly once" >&2
+  cat "$rust_repo/.cargo/config.toml" >&2
+  exit 1
+fi
+HARN_RUSTC_FRONTEND_THREADS=1 run_setup "$rust_repo" rust "$tmp_root/rust-serial-output.txt" "$rust_cargo"
+if grep -Eq '^(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
+  echo "HARN_RUSTC_FRONTEND_THREADS=1 left the parallel front end configured" >&2
+  exit 1
+fi
+# A user-owned RUSTC_BOOTSTRAP stays the only one: a duplicate key would make
+# Cargo reject the whole config.
+awk '{ print } /^\[env\][[:space:]]*$/ { print "RUSTC_BOOTSTRAP = \"1\"" }' \
+  "$rust_repo/.cargo/config.toml" > "$rust_repo/.cargo/config.toml.tmp"
+mv "$rust_repo/.cargo/config.toml.tmp" "$rust_repo/.cargo/config.toml"
+grep -Fxq 'RUSTC_BOOTSTRAP = "1"' "$rust_repo/.cargo/config.toml"
+run_setup "$rust_repo" rust "$tmp_root/rust-user-bootstrap-output.txt" "$rust_cargo"
+if [[ "$(grep -Ec '^(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=' "$rust_repo/.cargo/config.toml")" != 1 ]]; then
+  echo "rust setup wrote a front-end line beside a user-owned RUSTC_BOOTSTRAP" >&2
+  cat "$rust_repo/.cargo/config.toml" >&2
   exit 1
 fi
 prune_output="$(

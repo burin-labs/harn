@@ -7,13 +7,17 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 source "${SCRIPT_DIR}/cache_policy.sh"
 # shellcheck source=scripts/lib/sha256.sh
 source "${SCRIPT_DIR}/../lib/sha256.sh"
+# shellcheck source=scripts/lib/rustc_frontend.sh
+source "${SCRIPT_DIR}/../lib/rustc_frontend.sh"
 
 # Owned by .github/cache-policy.json nextest_version (schema v5).
 NEXTEST_VERSION="$(harn_cache_policy_jq '.nextest_version')"
 readonly NEXTEST_VERSION
 readonly NEUTRAL_FILTER='all()'
 readonly SECURITY_FILTER='(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))'
-readonly EXPECTED_RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold'
+# The rust-toolchain action appends the front-end flags to every job's RUSTFLAGS.
+FRONTEND_RUSTFLAGS="$(harn_rustc_frontend_flags)"
+readonly EXPECTED_RUSTFLAGS="-D warnings -Clink-arg=-fuse-ld=mold${FRONTEND_RUSTFLAGS:+ ${FRONTEND_RUSTFLAGS}}"
 # Mirrors `[profile.dev] debug` in Cargo.toml.
 readonly EXPECTED_DEV_DEBUG='line-tables-only'
 # The shared CLI bundle every Harn proof lane executes is built in the

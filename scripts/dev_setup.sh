@@ -7,6 +7,8 @@ cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/lib/file_time.sh"
 # shellcheck source=lib/cargo_env.sh
 source "$ROOT_DIR/scripts/lib/cargo_env.sh"
+# shellcheck source=lib/rustc_frontend.sh
+source "$ROOT_DIR/scripts/lib/rustc_frontend.sh"
 
 SETUP_STATE_DIR="${HARN_DEV_SETUP_STATE_DIR:-$ROOT_DIR/.codex/dev-setup}"
 SETUP_PROFILE="${HARN_DEV_SETUP_PROFILE:-full}"
@@ -276,6 +278,50 @@ write_sccache_env_config() {
   fi
 }
 
+# Turn on rustc's parallel front end (scripts/lib/rustc_frontend.sh owns the
+# flags) with managed `[build] rustflags` and `[env] RUSTC_BOOTSTRAP` lines.
+# The two lines are written and dropped together: the flags without the env
+# line fail every build. A user-owned `rustflags` or `RUSTC_BOOTSTRAP` stays
+# authoritative and gets neither line, since a second key is invalid TOML. RUSTFLAGS in the environment still replaces the config value,
+# as Cargo always does.
+write_rustc_frontend_config() {
+  local flags="$1"
+  local config_path=".cargo/config.toml"
+  local tmp_path
+
+  [[ -f "${config_path}" ]] || return 0
+  tmp_path="$(mktemp)"
+  awk -v managed_marker="${MANAGED_CARGO_CONFIG_MARKER}" '
+    $0 ~ /^[[:space:]]*(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=/ &&
+      $0 ~ "#[[:space:]]*" managed_marker "[[:space:]]*$" { next }
+    { print }
+  ' "${config_path}" > "${tmp_path}"
+  mv "${tmp_path}" "${config_path}"
+
+  if [[ -z "${flags}" ]] \
+    || grep -Eq '^[[:space:]]*(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=' "${config_path}"; then
+    return 0
+  fi
+
+  local flag_list="" flag
+  for flag in ${flags}; do
+    flag_list="${flag_list:+${flag_list}, }\"${flag}\""
+  done
+  local rustflags_line="rustflags = [${flag_list}] # ${MANAGED_CARGO_CONFIG_MARKER}"
+  local bootstrap_line="RUSTC_BOOTSTRAP = { value = \"1\", force = true } # ${MANAGED_CARGO_CONFIG_MARKER}"
+  tmp_path="$(mktemp)"
+  awk -v rustflags_line="${rustflags_line}" -v bootstrap_line="${bootstrap_line}" '
+    { print }
+    /^\[build\][[:space:]]*$/ { print rustflags_line; saw_build = 1 }
+    /^\[env\][[:space:]]*$/ { print bootstrap_line; saw_env = 1 }
+    END {
+      if (!saw_build) { print "\n[build]"; print rustflags_line }
+      if (!saw_env) { print "\n[env]"; print bootstrap_line }
+    }
+  ' "${config_path}" > "${tmp_path}"
+  mv "${tmp_path}" "${config_path}"
+}
+
 hash_setup_inputs() {
   local name="$1"
   shift
@@ -405,6 +451,11 @@ else
 fi
 if [[ -n "${rustc_wrapper}" ]]; then
   echo "Configured sccache as rustc wrapper in .cargo/config.toml"
+fi
+rustc_frontend_flags="$(harn_rustc_frontend_flags)"
+write_rustc_frontend_config "${rustc_frontend_flags}"
+if [[ -n "${rustc_frontend_flags}" ]]; then
+  echo "Configured rustc front end (${rustc_frontend_flags}) in .cargo/config.toml"
 fi
 if [[ -n "${target_dir}" ]] && grep -Fxq \
   "target-dir = \"${target_dir}\" # ${MANAGED_CARGO_CONFIG_MARKER}" \

@@ -157,6 +157,7 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
             .or_else(|| json["cache_creation_input_tokens"].as_i64())
             .unwrap_or(0),
         cache_supported: json["cache_supported"].as_bool().unwrap_or(true),
+        cache_counts_reported: json["cache_counts_reported"].as_bool().unwrap_or(false),
         model: json["model"].as_str().unwrap_or("").to_string(),
         provider: json["provider"].as_str().unwrap_or("mock").to_string(),
         thinking: json["thinking"].as_str().map(|s| s.to_string()),

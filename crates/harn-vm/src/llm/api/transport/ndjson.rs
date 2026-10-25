@@ -263,7 +263,11 @@ where
                     telemetry.provider_cost_usd,
                     false,
                 )
-                .with_cache(0, 0, telemetry.cache_accounting_declared, false),
+                .with_cache(
+                    crate::llm::usage::CacheCounts::default(),
+                    telemetry.cache_accounting_declared,
+                    false,
+                ),
             ),
             format!(
                 "ollama model {model} reported eval_count={output_tokens} but delivered no visible content or tool calls [ollama_empty_content_parser_bug]"

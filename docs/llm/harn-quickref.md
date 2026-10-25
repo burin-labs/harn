@@ -2468,8 +2468,8 @@ and returns a reminder effect, bare spec, effect list, or `nil`.
 
 Hooks can return `{reminder: {...}, then?: ...}`, a bare reminder spec,
 or a session-hook effect list. Hosts inject ambient context with the
-bridge `session/remind` notification; `session/inject` remains user-role
-input.
+bridge `session/remind` notification; a `session/prompt` steer remains
+user-role input.
 
 The runtime commits each reminder envelope as one durable trailing user turn.
 Later requests retain those exact bytes at the same message index. This

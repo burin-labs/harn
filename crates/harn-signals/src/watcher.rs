@@ -25,13 +25,17 @@ impl Drop for WatcherLock {
 pub(crate) fn claim(dir: &Path, session_id: &str) -> Result<Option<WatcherLock>, SignalsError> {
     let watchers = dir.join(WATCHERS_DIR);
     create_private_dir(&watchers)?;
-    // Hex keeps any session id a safe file name.
-    let name: String = session_id
+    take(watchers.join(lock_name(session_id)))
+}
+
+/// Hex keeps any session id a safe file name.
+fn lock_name(session_id: &str) -> String {
+    let hex: String = session_id
         .bytes()
         .take(120)
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    take(watchers.join(format!("{name}.lock")))
+    format!("{hex}.lock")
 }
 
 /// Lock `path` without waiting. A holder, or a sweep, removes the file as it
@@ -57,15 +61,19 @@ fn take(path: PathBuf) -> Result<Option<WatcherLock>, SignalsError> {
     Ok(None)
 }
 
-/// Remove every watcher lock nobody holds: a watcher killed before its
-/// destructor ran leaves one.
-pub(crate) fn sweep_orphans(dir: &Path) {
+/// Remove the watcher locks nobody holds for sessions no longer registered:
+/// a watcher killed before its destructor ran leaves one. A registered
+/// session's lock is never touched, so a sweep cannot race a claim.
+pub(crate) fn sweep_orphans(dir: &Path, sessions: &[String]) {
     let Ok(entries) = fs::read_dir(dir.join(WATCHERS_DIR)) else {
         return;
     };
+    let live: Vec<String> = sessions.iter().map(|id| lock_name(id)).collect();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "lock") {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.ends_with(".lock") && !live.iter().any(|live| *live == name) {
             // Taking the lock and dropping it removes the file.
             let _ = take(path);
         }

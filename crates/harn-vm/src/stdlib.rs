@@ -21,7 +21,10 @@ pub mod macros;
 
 pub(crate) use crate::value::args;
 
+#[path = "stdlib/agent_sessions/mount.rs"]
+mod agent_session_mount;
 mod agent_sessions;
+pub use agent_session_mount::add_workspace_root;
 pub(crate) mod agents;
 pub(crate) mod agents_daemon;
 pub(crate) mod assemble;

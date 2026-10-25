@@ -50,6 +50,16 @@ import "./ci_cache_policy/policy_integration_test.harn"
 
 type PathFilters = dict<string, list<string>>
 
+/** ci-status checks out its verdict script first, so address the aggregate by name. */
+fn aggregate_index(workflow: dict) -> int {
+  for {index, value: step} in workflow.jobs["ci-status"].steps.enumerate() {
+    if step?.name == "Verify required CI jobs" {
+      return index
+    }
+  }
+  throw "ci-status has no 'Verify required CI jobs' step"
+}
+
 @test
 pipeline test_direct_cli_consumers_require_a_successful_shared_producer(harness: Harness) {
   const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
@@ -170,11 +180,19 @@ pipeline test_provider_probe_reuses_same_run_cli_without_live_authority(harness:
   const latency = unwrap(read_json_result(harness.fs, "../../.github/ci-latency.json"))
   assert_eq(latency.required.jobs["provider-contract-probe"].budget_ms, 120000)
   assert_eq(
-    status.steps[0].env.PROVIDER_CONTRACT_PROBE_EXPECTED,
+    status.steps[aggregate_index(ci)].env.PROVIDER_CONTRACT_PROBE_EXPECTED,
     "$" + "{{ needs.changes.outputs.provider_contract_probe }}",
   )
-  assert(status.steps[0].run.contains("Provider contract probe scope was not measured."))
-  assert(status.steps[0].run.contains("test \"$PROVIDER_CONTRACT_PROBE_EXPECTED\" = \"false\""))
+  assert(
+    status.steps[aggregate_index(ci)].run.contains(
+      "Provider contract probe scope was not measured.",
+    ),
+  )
+  assert(
+    status.steps[aggregate_index(ci)].run.contains(
+      "test \"$PROVIDER_CONTRACT_PROBE_EXPECTED\" = \"false\"",
+    ),
+  )
   // Standalone live runs keep their original build, branch policy and notifier.
   assert_eq(standalone.on?.pull_request, nil)
   assert_eq(standalone.on?.push, nil)
@@ -253,7 +271,8 @@ pipeline test_release_order_is_checked_before_expensive_ci_admission(harness: Ha
   assert_eq(steps[1].name, "Keep a release commit last in its merge group")
   assert_eq(steps[1].if, "github.event_name == 'merge_group'")
   assert(steps[1].run.contains("release_range_release_commits"))
-  assert_eq(steps[2].id, "filter")
+  assert_eq(steps[2].id, "merged_base")
+  assert_eq(steps[3].id, "filter")
   // Every compile, artifact consumer, and product proof depends directly on
   // admission. Capacity measurement and inexpensive hygiene can stay parallel.
   for name in [
@@ -284,7 +303,7 @@ pipeline test_release_order_is_checked_before_expensive_ci_admission(harness: Ha
   }
   assert_eq(ci.jobs["ci-status"].if, "always()")
   assert(ci.jobs["ci-status"].needs.contains("changes"))
-  const aggregate = ci.jobs["ci-status"].steps[0].run
+  const aggregate = ci.jobs["ci-status"].steps[aggregate_index(ci)].run
   assert(aggregate.contains("CI tier was not measured."))
   assert(aggregate.contains("[\"Detect changes\"]=\"$" + "{{ needs.changes.result }}\""))
   assert_eq(
@@ -626,8 +645,8 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   )
   // ci-status must not excuse a skip on a pull request that selected Rust proof.
   let push_only_status = ci
-  push_only_status.jobs["ci-status"].steps[0].run = replace(
-    push_only_status.jobs["ci-status"].steps[0].run,
+  push_only_status.jobs["ci-status"].steps[aggregate_index(ci)].run = replace(
+    push_only_status.jobs["ci-status"].steps[aggregate_index(ci)].run,
     "  [ \"$" + "{{ needs.changes.outputs.rust }}\" != \"true\" ]\n\n# The one Windows",
     "  test \"$" + "{EVENT_NAME}:$"
       + "{GIT_REF}\" != \"push:refs/heads/main\"\n\n# The one Windows",
@@ -697,7 +716,7 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
     ),
   )
   let skip_tolerant = ci
-  skip_tolerant.jobs["ci-status"].steps[0].env.WINDOWS_CROSS_REQUIRED = "$"
+  skip_tolerant.jobs["ci-status"].steps[aggregate_index(ci)].env.WINDOWS_CROSS_REQUIRED = "$"
     + "{{ github.event_name == 'push' }}"
   assert(
     minimal_pr_capacity_errors(skip_tolerant, publish).contains(

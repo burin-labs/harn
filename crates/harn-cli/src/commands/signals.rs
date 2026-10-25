@@ -442,19 +442,44 @@ fn deliver(
     event_name: &str,
     result: &CheckIn,
 ) -> Result<(), String> {
-    let output = additional_context(event_name, &render(result)?);
-    let mut stdout = std::io::stdout().lock();
-    writeln!(stdout, "{output}")
-        .and_then(|()| stdout.flush())
-        .map_err(|error| format!("writing the hook output: {error}"))?;
+    let output = additional_context(event_name, &render(result)?).to_string();
     let tokens: Vec<String> = result
         .reminders
         .iter()
         .map(|reminder| reminder.lease_token.clone())
         .collect();
-    inbox
-        .ack_leases(session_id, &tokens, harn_vm::stdlib::signals::vm_now())
-        .map_err(|error| error.to_string())?;
+    finish_delivery(
+        &mut std::io::stdout().lock(),
+        &mut std::io::stderr().lock(),
+        &output,
+        || {
+            inbox
+                .ack_leases(session_id, &tokens, harn_vm::stdlib::signals::vm_now())
+                .map(drop)
+                .map_err(|error| error.to_string())
+        },
+    )
+}
+
+/// Once the output is flushed, a failed ack must not fail the hook: a
+/// harness discards the output of a hook that exits non-zero, which would
+/// drop a reminder already handed over. The unacked lease lapses and is
+/// leased again, so the worst case is a repeat.
+fn finish_delivery(
+    out: &mut impl Write,
+    err: &mut impl Write,
+    output: &str,
+    ack: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    writeln!(out, "{output}")
+        .and_then(|()| out.flush())
+        .map_err(|error| format!("writing the hook output: {error}"))?;
+    if let Err(error) = ack() {
+        let _ = writeln!(
+            err,
+            "harn signals hook: the delivered reminders were not acked and will be sent again: {error}"
+        );
+    }
     Ok(())
 }
 
@@ -516,6 +541,11 @@ fn rewake(inbox: &Inbox, session_id: &str, max_wait: StdDuration) -> Result<(), 
                     .iter()
                     .any(|id| !baseline.contains(id) || polls > BASELINE_GRACE_POLLS);
                 if wake {
+                    // An unrecorded wake would not count against the cap, so
+                    // stop without waking; the hook error exit is not a wake.
+                    inbox
+                        .record_wake(session_id, &pending, now)
+                        .map_err(|error| format!("could not record the wake: {error}"))?;
                     eprintln!("{REWAKE_NOTICE}");
                     // `process::exit` skips destructors; release the lock first.
                     drop(watcher);
@@ -535,4 +565,21 @@ fn rewake(inbox: &Inbox, session_id: &str, max_wait: StdDuration) -> Result<(), 
 /// terminal.
 fn terminal_safe(text: &str) -> String {
     harn_signals::display_safe(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::finish_delivery;
+
+    #[test]
+    fn a_failed_ack_after_a_flushed_delivery_still_succeeds() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let result = finish_delivery(&mut out, &mut err, "{\"reminder\":1}", || {
+            Err("inbox is locked".into())
+        });
+        assert_eq!(result, Ok(()));
+        assert_eq!(String::from_utf8(out).unwrap(), "{\"reminder\":1}\n");
+        assert!(String::from_utf8(err).unwrap().contains("inbox is locked"));
+    }
 }

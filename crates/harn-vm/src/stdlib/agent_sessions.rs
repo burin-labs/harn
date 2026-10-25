@@ -372,7 +372,7 @@ fn agent_session_add_root_builtin(args: &[VmValue], _out: &mut String) -> Result
         .map_err(|message| err(format!("agent_session_add_root: {message}")))?;
     let reason = opt_string(&opts, "agent_session_add_root", "reason")?;
     Ok(
-        match agent_sessions::add_workspace_root(&id, &root, mount_mode, reason) {
+        match crate::stdlib::add_workspace_root(&id, &root, mount_mode, reason, None) {
             Ok(mounted_at) => ok_result(&[("mounted_at", serde_json::Value::String(mounted_at))]),
             Err(message) => seed_result_error(message),
         },

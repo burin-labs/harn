@@ -284,9 +284,14 @@ pub fn promote_unreleased_section(
 /** Preserve the failed identity while carrying its changes into the next cut. */
 pub fn retire_unpublished_section(text: string, version: string, published_base: string) -> string {
   const entries = changelog_entries(text)
+  // Earlier retired identities may sit between the candidate and its base.
+  let base_index = 1
+  while entries[base_index]?.never_published == true {
+    base_index = base_index + 1
+  }
   if entries[0]?.version != version || entries[0]?.never_published != false
-    || entries[1]?.version != published_base
-    || entries[1]?.never_published != false {
+    || entries[base_index]?.version != published_base
+    || entries[base_index]?.never_published != false {
     throw "retirement requires the current unreleased identity and its actual published predecessor"
   }
   const headings = changelog_heading_offsets(text)

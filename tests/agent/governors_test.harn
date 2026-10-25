@@ -6,7 +6,7 @@
 import { governor_post_turn } from "std/agent/governors"
 
 fn __live_payload() {
-  return {iteration: 2, session_id: "gov-test", successful_tool_names: ["edit"]}
+  return {iteration: 2, progressing: true, session_id: "gov-test", successful_tool_names: ["edit"]}
 }
 
 pipeline test_unrecognized_signal_throws(harness: Harness, task: unknown) {
