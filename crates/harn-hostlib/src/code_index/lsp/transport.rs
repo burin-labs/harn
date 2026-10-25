@@ -109,6 +109,27 @@ pub(crate) struct Connection {
     reader: Option<std::thread::JoinHandle<()>>,
 }
 
+/// What a server needs beyond the inherited environment. Discovery can find a
+/// server outside `PATH`, so its own directory goes first: `cargo` beside a
+/// rustup proxy, `node` for an npm launcher's `#!/usr/bin/env node`. The rustup
+/// proxy finds its toolchain through `RUSTUP_HOME`, resolved as the sandbox
+/// resolves it for every other child.
+fn server_env(program: &str) -> std::collections::BTreeMap<String, String> {
+    let mut env = std::collections::BTreeMap::new();
+    let program = Path::new(program);
+    if let Some(dir) = program.parent().filter(|_| program.is_absolute()) {
+        let inherited = std::env::var_os("PATH").unwrap_or_default();
+        let rest = std::env::split_paths(&inherited).filter(|entry| entry != dir);
+        if let Ok(path) = std::env::join_paths(std::iter::once(dir.to_path_buf()).chain(rest)) {
+            env.insert("PATH".to_string(), path.to_string_lossy().into_owned());
+        }
+    }
+    for (name, path) in harn_vm::process_sandbox::rust_toolchain_homes() {
+        env.insert(name.to_string(), path.display().to_string());
+    }
+    env
+}
+
 impl Connection {
     pub(crate) fn spawn(
         spec: &ServerSpec,
@@ -121,7 +142,7 @@ impl Connection {
             program: program.to_string(),
             args: launch.args.iter().map(|arg| arg.to_string()).collect(),
             cwd: Some(root.to_path_buf()),
-            env: Default::default(),
+            env: server_env(program),
             env_remove: Vec::new(),
             env_mode: EnvMode::InheritClean,
             use_stdin: true,

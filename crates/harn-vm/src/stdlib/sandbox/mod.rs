@@ -165,7 +165,8 @@ pub(crate) use replace::{
     read_for_replace_scoped_at_open,
 };
 pub use workspace_env::{
-    active_workspace_process_env, is_workspace_runtime_directory, workspace_local_tmpdir,
+    active_workspace_process_env, is_workspace_runtime_directory, rust_toolchain_homes,
+    workspace_local_tmpdir,
 };
 pub(crate) use workspace_env::{inject_workspace_process_env, WORKSPACE_TMPDIR_NAME};
 #[cfg(test)]

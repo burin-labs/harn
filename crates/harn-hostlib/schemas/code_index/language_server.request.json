@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/language_server.request.json",
+  "title": "code_index.language_server request",
+  "description": "Whether a rename of a file would reach a language server, decided by the lookup `rename_symbol` uses and without starting a process. The lookup checks the server's override variable, the project's own bin directory, `PATH`, then per-user and Homebrew install directories, and skips a rustup proxy whose toolchain lacks the component or a `tsc` older than TypeScript 7.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Workspace-relative or absolute path to the file a rename would start from."
+    },
+    "root": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Workspace root. Defaults to the index root, else the current directory."
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
