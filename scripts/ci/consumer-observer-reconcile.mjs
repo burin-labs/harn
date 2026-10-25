@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { githubParentDeclarations, reconcileOwnedChildren, reconcileStoppedObserver, observerContext, parentHeadSha, observerRefusal } from '../lib/consumer-observer.mjs';
+import { githubParentDeclarations, reconcileOwnedChildren, reconcileStoppedObserver, sweepOwnedChildren, observerContext, parentHeadSha, observerRefusal } from '../lib/consumer-observer.mjs';
 
 async function main() {
   const env = process.env;
@@ -7,6 +7,14 @@ async function main() {
     repository: `${env.CANARY_OWNER}/${env.CANARY_NAME}`,
     workflow: `.github/workflows/${env.CANARY_WORKFLOW}`,
   };
+  if (['schedule', 'workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)) {
+    if (env.GITHUB_REPOSITORY !== 'burin-labs/harn') throw new Error('CONSUMER_OBSERVER reason=cleanup_invocation_unproven');
+    const result = await sweepOwnedChildren(env.GH_TOKEN, configured);
+    console.log(`CONSUMER_OBSERVER cleanup=sweep ${Object.entries(result).map(([key,value])=>`${key}=${value}`).join(' ')}`);
+    // Authenticated retained work is normal until its next budget check.
+    if (result.pending > result.retained || result.refused > 0) process.exitCode = 1;
+    return;
+  }
   if (process.argv[2] === '--observer') {
     const context = observerContext(JSON.parse(env.OBSERVER_CONTEXT));
     if (context.parent_repository !== env.GITHUB_REPOSITORY || context.parent_run_id !== env.GITHUB_RUN_ID

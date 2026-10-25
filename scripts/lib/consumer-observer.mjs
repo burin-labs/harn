@@ -464,8 +464,8 @@ export async function githubWorkflowRuns(token, repository, workflow, selection,
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)
     || !/^[A-Za-z0-9_.-]+\.ya?ml$/.test(workflow)
     || !selection || Object.keys(selection).some(key => !['event', 'status', 'head_sha'].includes(key))
-    || (selection.event !== undefined && selection.event !== 'pull_request')
-    || (selection.status !== undefined && selection.status !== 'queued')
+    || (selection.event !== undefined && !['pull_request', 'workflow_dispatch'].includes(selection.event))
+    || (selection.status !== undefined && !liveStates.has(selection.status))
     || (selection.head_sha !== undefined && !sha.test(selection.head_sha))) {
     refuse('workflow_discovery_identity_invalid');
   }
@@ -925,6 +925,54 @@ export async function reconcileStoppedObserver(token, context, expected, fetchRe
   return reconcileChildren(token, context, expected, fetchRecord, extract, wait, true, now);
 }
 
+/** Revisit live children after a completion listener preserved in-budget work.
+ * Names select a receipt only; the normal reconciler reauthenticates custody,
+ * the exact parent attempt and fresh job timing before any cancellation. */
+export async function sweepOwnedChildren(token, expected, fetchRecord = fetch, extract = artifactJsonFromZip, wait = pause,
+  now = () => Math.floor(Date.now() / 1000)) {
+  if (!/^\.github\/workflows\/[A-Za-z0-9_.-]+\.ya?ml$/.test(expected.workflow)) refuse('child_discovery_identity_invalid');
+  const runs = new Map();
+  for (const status of liveStates) {
+    const census = await githubWorkflowRuns(token, expected.repository, expected.workflow.slice('.github/workflows/'.length),
+      {event:'workflow_dispatch', status}, fetchRecord);
+    // A run can change state between the bounded status censuses.
+    for (const run of census) runs.set(run.id, run);
+  }
+  const total = {scanned:runs.size, declarations:0, discovered:0, owned:0, terminal:0, cancelled:0, pending:0, refused:0, retained:0};
+  const contexts = new Map();
+  for (const candidate of runs.values()) {
+    if (!candidate.display_title?.startsWith('Consumer observer ')) continue;
+    try {
+      const projection = /^Consumer observer ([1-9][0-9]*)\.([1-9][0-9]*)\/([0-9a-f-]{36}) @ ([0-9a-f]{40})$/.exec(candidate.display_title);
+      if (!projection || candidate.actor?.login !== observerDispatchActor || candidate.actor?.type !== 'Bot'
+        || candidate.head_repository?.full_name !== expected.repository || candidate.path !== expected.workflow
+        || candidate.event !== 'workflow_dispatch' || !sha.test(candidate.head_sha)) refuse('child_dispatch_identity_unproven');
+      const name = `consumer-observer-${projection[3]}`;
+      const artifacts = await githubArtifactCensus(token, expected.repository, String(candidate.id), fetchRecord, name);
+      if (artifacts.length === 0) { total.pending += 1; continue; }
+      if (artifacts.length !== 1 || artifacts[0].name !== name) refuse('child_receipt_ambiguous');
+      const receipt = await githubArtifactJson(token, expected.repository, artifacts[0], {
+        runId:String(candidate.id), headSha:candidate.head_sha, name, filename:`${name}.json`,
+      }, fetchRecord, extract);
+      const context = observerContext(receipt?.observer);
+      if (observerRunName(context) !== candidate.display_title) refuse('dispatch_declaration_mismatch');
+      contexts.set(JSON.stringify(context), context);
+    } catch {
+      total.refused += 1;
+    }
+  }
+  for (const context of contexts.values()) {
+    total.declarations += 1;
+    try {
+      const result = await reconcileStoppedObserver(token, context, expected, fetchRecord, extract, wait, now);
+      for (const key of Object.keys(result)) total[key] += result[key];
+    } catch {
+      total.refused += 1;
+    }
+  }
+  return total;
+}
+
 async function reconcileChildren(token, context, expected, fetchRecord, extract, wait, retireFailedObservation, now) {
   const observer = observerContext(context);
   const parent = await githubRecord(token, observer.parent_repository, observer.parent_run_id,
@@ -952,7 +1000,7 @@ async function reconcileChildren(token, context, expected, fetchRecord, extract,
   const runs = await githubChildCensus(token, expected.repository, expected.workflow,
     parent.created_at, fetchRecord);
   const matching = runs.filter(run => run.display_title === observerRunName(observer));
-  const result = { discovered: matching.length, owned: 0, terminal: 0, cancelled: 0, pending: matching.length === 0 ? 1 : 0, refused: 0 };
+  const result = { discovered: matching.length, owned: 0, terminal: 0, cancelled: 0, pending: matching.length === 0 ? 1 : 0, refused: 0, retained: 0 };
   for (const candidate of matching) {
     try {
       const runId = String(candidate.id);
@@ -971,6 +1019,7 @@ async function reconcileChildren(token, context, expected, fetchRecord, extract,
       }
       if (!observerEnded) {
         result.pending += 1;
+        result.retained += 1;
         continue;
       }
       // Losing observation is not a decision about the child. Retain its work
@@ -979,6 +1028,7 @@ async function reconcileChildren(token, context, expected, fetchRecord, extract,
         const jobs = await githubRunJobs(token, expected.repository, runId, child.run_attempt, fetchRecord);
         if (assessConsumerObservation(observer.started_at, child, jobs, now()).reason === null) {
           result.pending += 1;
+          result.retained += 1;
           continue;
         }
       }

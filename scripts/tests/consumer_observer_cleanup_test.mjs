@@ -12,7 +12,8 @@ test('the inert declaration action projects the owning publication step identity
   const action = fs.readFileSync(new URL('../../.github/actions/consumer-observer-declare/action.yml', import.meta.url), 'utf8');
   assert.equal(/^name: (.+)$/m.exec(action)?.[1], observerDeclarationStep);
   const listener = fs.readFileSync(new URL('../../.github/workflows/consumer-observer-cleanup.yml', import.meta.url), 'utf8');
-  assert.match(listener, /if: github\.event_name == 'workflow_run' && github\.event\.workflow_run\.head_repository\.full_name == github\.repository && github\.event\.workflow_run\.status == 'completed'/);
+  assert.match(listener, /if: github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch' \|\| \(github\.event_name == 'workflow_run' && github\.event\.workflow_run\.head_repository\.full_name == github\.repository && github\.event\.workflow_run\.status == 'completed'/);
+  assert.match(listener, /cron: '7,22,37,52 \* \* \* \*'/);
   assert.match(listener, /workflows: \[Consumer canary, Build release binaries, Promote release, CI\]/);
   assert.doesNotMatch(listener, /ref:.*workflow_run|download-artifact|checkout.*workflow_run/);
 });
@@ -125,7 +126,13 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
           const missing=fixture.missing === index;
           record={total_count:missing ? 0 : 1,artifacts:missing ? [] : [fixture.archives[index].metadata]};
         }
-        else if (p.endsWith('/rehearsal.yml/runs')) record={total_count:2,workflow_runs:[fixture.child,{...fixture.child,id:74,display_title:'ordinary reused success',status:'completed',conclusion:'success'}]};
+        else if (p.endsWith('/rehearsal.yml/runs')) {
+          const selected = new URL(url).searchParams.get('status');
+          const runs = selected === null ? [fixture.child,{...fixture.child,id:74,display_title:'ordinary reused success',status:'completed',conclusion:'success'}]
+            : fixture.liveEmpty || selected !== fixture.child.status ? [] : [fixture.child];
+          record = fixture.incompleteLiveCensus && selected !== null ? {total_count:1}
+            : {total_count:runs.length,workflow_runs:runs};
+        }
         else if (p.endsWith('/73')) record=cancelled ? {...fixture.child,status:'completed',conclusion:'cancelled'} : fixture.child;
         else throw new Error('fixture-private-url-unknown');
         return {ok:true,json:async()=>record};
@@ -134,11 +141,12 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
       GITHUB_EVENT_PATH: eventFile, GITHUB_EVENT_NAME: 'workflow_run', GITHUB_REPOSITORY: context.parent_repository,
       GH_TOKEN: 'fixture-read', CANARY_OWNER: 'acme', CANARY_NAME: 'widget-host', CANARY_WORKFLOW: 'rehearsal.yml' };
     const entry = fileURLToPath(new URL('../ci/consumer-observer-reconcile.mjs', import.meta.url));
-    const execute = (changes, observerMode = false) => {
+    const execute = (changes, observerMode = false, sweep = false) => {
       fs.writeFileSync(config, JSON.stringify({ parent, child, archives, jobName: 'Declare consumer observer',
         steps: [{ name: observerDeclarationStep, status: 'completed', conclusion: 'success' }], ...changes }));
       const run = spawnSync(process.execPath, [entry, ...(observerMode ? ['--observer'] : [])], {
-        env: {...env,GITHUB_RUN_ID:'42',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:parent.head_sha,
+        env: {...env,GITHUB_EVENT_NAME:sweep ? 'schedule' : env.GITHUB_EVENT_NAME,
+          GITHUB_RUN_ID:'42',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:parent.head_sha,
           OBSERVER_CONTEXT:JSON.stringify(context)}, encoding: 'utf8' });
       assert.doesNotMatch(run.stdout + run.stderr, /widget-host|\/73|\/74|run_id|fixture-private/);
       return { run, posts: JSON.parse(fs.readFileSync(callsFile, 'utf8')).filter(call => call.method === 'POST') };
@@ -163,6 +171,27 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     const failedParent = execute({parent:{...parent,conclusion:'failure'}});
     assert.equal(failedParent.run.status,1,failedParent.run.stderr);
     assert.deepEqual(failedParent.posts,[],'completion cleanup also preserves a measurement after observer failure');
+    const retained = execute({parent:{...parent,conclusion:'failure'}},false,true);
+    assert.equal(retained.run.status,0,retained.run.stderr);
+    assert.deepEqual(retained.posts,[],'the scheduled pass must preserve the same in-budget child');
+    assert.match(retained.run.stdout,/cleanup=sweep scanned=1 declarations=1 discovered=1 owned=1 terminal=0 cancelled=0 pending=1 refused=0/);
+    const expiredRetained = execute({parent:{...parent,conclusion:'failure'},now:8210},false,true);
+    assert.equal(expiredRetained.run.status,0,expiredRetained.run.stderr);
+    assert.deepEqual(expiredRetained.posts.map(call=>call.path),['/repos/acme/widget-host/actions/runs/73/cancel'],
+      'a later scheduled pass must enforce the original deadline without a second parent completion');
+    const emptySweep = execute({liveEmpty:true},false,true);
+    assert.equal(emptySweep.run.status,0,emptySweep.run.stderr);
+    assert.match(emptySweep.run.stdout,/scanned=0 declarations=0 discovered=0 owned=0 terminal=0 cancelled=0 pending=0 refused=0/);
+    const partialSweep = execute({incompleteLiveCensus:true},false,true);
+    assert.equal(partialSweep.run.status,1);
+    assert.match(partialSweep.run.stderr,/reason=observer_census_unmeasured/);
+    assert.deepEqual(partialSweep.posts,[],'a partial census cannot become a measured zero');
+    for (const changes of [{missing:0},{missing:1},{child:{...child,run_attempt:2}},
+      {child:{...child,actor:{login:'unrelated[bot]',type:'Bot'}}}]) {
+      const unownedSweep = execute({...changes,now:8210},false,true);
+      assert.equal(unownedSweep.run.status,1);
+      assert.deepEqual(unownedSweep.posts,[],'a scheduled deadline still requires exact custody');
+    }
     for(const step of [{...observed,conclusion:'success'}, {...observed,status:'in_progress',conclusion:null},
       {...observed,name:'Unrelated failed step'}, {...observed,number:1}]) {
       const needed = execute({parent:liveParent,steps:[declaration,step]},true);
