@@ -17099,8 +17099,6 @@
         ],
         "effort_supported": true,
         "effort_levels": [
-          "low",
-          "medium",
           "high"
         ],
         "none_supported": false,
