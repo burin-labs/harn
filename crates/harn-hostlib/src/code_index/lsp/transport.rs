@@ -109,6 +109,42 @@ pub(crate) struct Connection {
     reader: Option<std::thread::JoinHandle<()>>,
 }
 
+/// What a server needs beyond the inherited environment. Discovery can find a
+/// server outside `PATH`, so its own directory goes first: `cargo` beside a
+/// rustup proxy, `node` for an npm launcher's `#!/usr/bin/env node`. The rustup
+/// proxy finds its toolchain through `RUSTUP_HOME`, resolved as the sandbox
+/// resolves it for every other child.
+fn server_env(program: &str) -> std::collections::BTreeMap<String, String> {
+    let mut env = std::collections::BTreeMap::new();
+    let program = Path::new(program);
+    if let Some(dir) = program.parent().filter(|_| program.is_absolute()) {
+        let inherited = child_path(program);
+        let rest = std::env::split_paths(&inherited).filter(|entry| entry != dir);
+        if let Ok(path) = std::env::join_paths(std::iter::once(dir.to_path_buf()).chain(rest)) {
+            env.insert("PATH".to_string(), path.to_string_lossy().into_owned());
+        }
+    }
+    for (name, path) in harn_vm::process_sandbox::rust_toolchain_homes() {
+        env.insert(name.to_string(), path.display().to_string());
+    }
+    env
+}
+
+/// The `PATH` the active session gives a child running `program`, so the
+/// override only prepends and never reopens a `PATH` the session closed.
+fn child_path(program: &Path) -> std::ffi::OsString {
+    let Ok(command) = harn_vm::process_sandbox::session_std_command(program) else {
+        return std::ffi::OsString::new();
+    };
+    match command.get_envs().find(|(key, _)| *key == "PATH") {
+        Some((_, value)) => value.map(ToOwned::to_owned).unwrap_or_default(),
+        None if harn_vm::stdlib::process::current_session_environment().is_some() => {
+            std::ffi::OsString::new()
+        }
+        None => std::env::var_os("PATH").unwrap_or_default(),
+    }
+}
+
 impl Connection {
     pub(crate) fn spawn(
         spec: &ServerSpec,
@@ -121,7 +157,7 @@ impl Connection {
             program: program.to_string(),
             args: launch.args.iter().map(|arg| arg.to_string()).collect(),
             cwd: Some(root.to_path_buf()),
-            env: Default::default(),
+            env: server_env(program),
             env_remove: Vec::new(),
             env_mode: EnvMode::InheritClean,
             use_stdin: true,

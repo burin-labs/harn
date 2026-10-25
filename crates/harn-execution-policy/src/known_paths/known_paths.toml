@@ -171,6 +171,8 @@ home = [
   ".local/share/mise",
   ".local/share/pnpm",
   ".local/share/uv",
+  # npm's documented per-user global prefix; language servers install here.
+  ".npm-global",
   ".nvm",
   ".pyenv",
   ".rbenv",

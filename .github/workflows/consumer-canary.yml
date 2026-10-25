@@ -52,6 +52,9 @@ on:
       source_revision:
         description: Exact source rehearsed by this invocation
         value: ${{ inputs.source_revision }}
+      observer_context:
+        description: Issued public context selecting this observer's authenticated measurement
+        value: ${{ jobs.consumers.outputs.observer_context }}
     inputs:
       source_revision:
         required: true
@@ -148,13 +151,14 @@ jobs:
     runs-on: ubuntu-24.04
     # Bound queue wait separately from each job's execution, with cleanup time.
     # scripts/ci/consumer_observation_budget.json owns this checked projection.
-    # A pull request's status waits on this job and only warns on an
-    # unmeasured result, so the pull-request path gets one window.
-    timeout-minutes: ${{ inputs.pull_request_cli_run != '' && 55 || 175 }}
+    # Every caller observes the original child through the declared queue and
+    # execution budget, renewing read authority at each window boundary.
+    timeout-minutes: 175
     permissions:
       actions: read
       contents: read
     outputs:
+      observer_context: ${{ steps.observer.outputs.context }}
       verdict: ${{ steps.observe-1.outputs.verdict || steps.observe-2.outputs.verdict || steps.observe-3.outputs.verdict || steps.observe-4.outputs.verdict }}
       consumer_run: ${{ steps.canary.outputs.run_id }}
       consumer_head: ${{ steps.record.outputs.consumer_head }}
@@ -247,7 +251,6 @@ jobs:
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
           observer-context: ${{ steps.observer.outputs.context }}
           rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
-          single-window: ${{ inputs.pull_request_cli_run != '' }}
       - name: Observe the second bounded window
         if: steps.observe-1.outputs.verdict == ''
         id: observe-2
@@ -263,7 +266,6 @@ jobs:
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
           observer-context: ${{ steps.observer.outputs.context }}
           rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
-          single-window: ${{ inputs.pull_request_cli_run != '' }}
       - name: Observe the third bounded window
         if: steps.observe-2.outcome == 'success' && steps.observe-2.outputs.verdict == ''
         id: observe-3
@@ -279,7 +281,6 @@ jobs:
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
           observer-context: ${{ steps.observer.outputs.context }}
           rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
-          single-window: ${{ inputs.pull_request_cli_run != '' }}
       - name: Observe the final bounded window
         if: steps.observe-3.outcome == 'success' && steps.observe-3.outputs.verdict == ''
         id: observe-4
@@ -295,7 +296,6 @@ jobs:
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
           observer-context: ${{ steps.observer.outputs.context }}
           rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
-          single-window: ${{ inputs.pull_request_cli_run != '' }}
 
       - name: Renew exact observer cleanup authority
         id: cleanup-token

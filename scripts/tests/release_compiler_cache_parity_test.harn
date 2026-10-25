@@ -10,6 +10,21 @@ fn step_by_name(steps: list, name: string) {
 }
 
 @test
+pipeline test_candidate_build_handoffs_survive_the_archive_recovery_window(harness: Harness) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/build-release-binaries.yml", nil)
+  const steps = workflow.jobs.prepare_cli_aot.steps
+  const notices = step_by_name(steps, "Upload release license notices")
+  const aot = step_by_name(steps, "Upload CLI AOT payload for release and benchmark targets")
+  assert(notices != nil)
+  assert(aot != nil)
+  assert_eq(notices.with["retention-days"], 30)
+  assert_eq(
+    aot.with["retention-days"],
+    gha_expression("needs.setup.outputs.build_mode == 'candidate' && 30 || 1"),
+  )
+}
+
+@test
 pipeline test_release_attribution_uses_the_release_feature_identity(harness: Harness) {
   const workflow = read_yaml(harness.fs, "../../.github/workflows/build-release-binaries.yml", nil)
   const build_job = workflow.jobs.build

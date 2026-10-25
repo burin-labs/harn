@@ -108,13 +108,11 @@ wire_model = "typesafe-ai/jev-1.13.0"
 logical_model = "typesafe-jev-1.13"
 equivalence_group = "typesafe-jev-1.13"
 operations = ["decision"]
-context_window = 32000
-pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
 tier = "small"
-open_weight = false
 row_kind = "snapshot"
 family = "typesafe-jev"
 lineage = "typesafe-jev-1"
+models_dev = {provider = "vercel", model = "typesafe-ai/jev-1.13.0", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."vercel/typesafe-ai/jev-1.14.0"]
 name = "Jev 1.14.0 (Vercel AI Gateway)"
@@ -124,18 +122,15 @@ wire_model = "typesafe-ai/jev-1.14.0"
 logical_model = "typesafe-jev-1.14"
 equivalence_group = "typesafe-jev-1.14"
 operations = ["decision"]
-context_window = 32000
-pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
 tier = "small"
-open_weight = false
 row_kind = "snapshot"
-released = "2026-10-14"
 family = "typesafe-jev"
 lineage = "typesafe-jev-1"
 
 # The decisions endpoint has a model-specific index; absence from the chat
 # /models list is not deprecation evidence for a decision-only route.
 # https://openrouter.ai/api/v1/models/typesafe/jev-1.14/endpoints
+models_dev = {provider = "vercel", model = "typesafe-ai/jev-1.14.0", fields = ["context_window", "open_weight", "released", "pricing"]}
 [models."openrouter/typesafe/jev-1.14"]
 name = "Jev 1.14 (OpenRouter)"
 provider = "openrouter"
@@ -144,16 +139,14 @@ logical_model = "typesafe-jev-1.14"
 equivalence_group = "typesafe-jev-1.14"
 operations = ["decision"]
 context_window = 32000
-pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
 tier = "small"
-open_weight = false
 row_kind = "snapshot"
-released = "2026-10-14"
 family = "typesafe-jev"
 lineage = "typesafe-jev-1"
 
 # Direct TypeSafe, moving selector. `jev-latest` resolves to `jev-1.13.0`
 # today. https://docs.typesafe.ai/models
+models_dev = {provider = "openrouter", model = "typesafe/jev-1.14", fields = ["open_weight", "released", "pricing"]}
 [models."typesafe/jev-latest"]
 name = "Jev Latest (TypeSafe)"
 blurb = "Follows TypeSafe's current flagship decision model instead of pinning a version."
@@ -187,10 +180,7 @@ logical_model = "typesafe-jev-1.13"
 equivalence_group = "typesafe-jev-1.13"
 served_variant = "vercel-ai-gateway"
 operations = ["decision"]
-context_window = 32000
-pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
 tier = "small"
-open_weight = false
 strengths = ["speed", "cheap"]
 row_kind = "selector"
 current_snapshot = "typesafe/jev-1.13.0"
@@ -202,6 +192,7 @@ lineage = "typesafe-jev-1"
 # and $0.000014952. Receipt identity must use the actual response model, not
 # assume the requested route alias is an immutable revision.
 # https://openrouter.ai/typesafe
+models_dev = {provider = "vercel", model = "typesafe-ai/jev", fields = ["context_window", "open_weight", "pricing"]}
 [models."openrouter/typesafe/jev-1.13"]
 name = "Jev 1.13 (OpenRouter)"
 blurb = "Jev's decision answers through OpenRouter's alpha decisions endpoint."
@@ -212,9 +203,7 @@ equivalence_group = "typesafe-jev-1.13"
 served_variant = "openrouter"
 operations = ["decision"]
 context_window = 32000
-pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
 tier = "small"
-open_weight = false
 strengths = ["speed", "cheap"]
 row_kind = "snapshot"
 family = "typesafe-jev"
@@ -224,6 +213,7 @@ lineage = "typesafe-jev-1"
 # `~typesafe/jev-latest` on /api/alpha/decisions came back from
 # typesafe/jev-1.13-20260917. On 2026-10-15 it returned
 # typesafe/jev-1.14-20261014, ahead of the direct TypeSafe stable alias.
+models_dev = {provider = "openrouter", model = "typesafe/jev-1.13", fields = ["open_weight", "pricing"]}
 [models."openrouter/typesafe/jev-latest"]
 name = "Jev Latest (OpenRouter)"
 blurb = "Follows TypeSafe's current Jev release through OpenRouter's alpha decisions endpoint."
@@ -234,11 +224,10 @@ equivalence_group = "typesafe-jev-1.14"
 served_variant = "openrouter"
 operations = ["decision"]
 context_window = 32000
-pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
 tier = "small"
-open_weight = false
 strengths = ["speed", "cheap"]
 row_kind = "selector"
 current_snapshot = "openrouter/typesafe/jev-1.14"
 family = "typesafe-jev"
 lineage = "typesafe-jev-1"
+models_dev = {provider = "openrouter", model = "~typesafe/jev-latest", fields = ["open_weight", "pricing"]}

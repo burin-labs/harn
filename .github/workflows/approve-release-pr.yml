@@ -32,6 +32,7 @@ jobs:
       github.repository == 'burin-labs/harn' && (github.event_name == 'workflow_dispatch'
       || (github.event.pull_request.user.login == 'harn-release-bot[bot]'
       && (startsWith(github.event.pull_request.head.ref, 'release/v')
+      || startsWith(github.event.pull_request.head.ref, 'release-attempt/v')
       || startsWith(github.event.pull_request.head.ref, 'automation/development-'))))
     runs-on: ubuntu-24.04
     timeout-minutes: 10

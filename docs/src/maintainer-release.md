@@ -35,10 +35,24 @@ unreleased fragments produces `action=none`, with a notice explaining why.
 An unreadable pull-request list fails instead of opening a duplicate.
 
 The signed commit is recorded at `release-attempt/vX.Y.Z/<commit>` before the
-pull request opens. An existing release stays frozen at that attempt. Later
-fragments remain for the next release, including when their changes merge ahead
-of this release. A push changing `changelog.d` checks the existing attempt
-without rebuilding or opening a release.
+pull request opens from that ref. A mergeable release stays frozen at that
+attempt. New fragments remain for the next release, including when they merge
+ahead of this release. A push changing `changelog.d` checks existing attempts
+before restoring or building Harn.
+
+If a fragment already folded into the attempt is edited on main, Git reports a
+modify/delete conflict. The opener waits until green contains the exact edited
+fragment blobs, then refolds from green into a new signed, immutable attempt.
+It enrolls the replacement in Smart Ship and closes the conflicted PR with a
+link to the replacement. It preserves the earlier commit and attempt ref.
+Other conflicts, missing attempt records, and multiple mergeable attempts fail
+closed instead of choosing a source.
+
+If replacement cleanup fails after the new PR opens, dispatch the same opener
+again. It selects the prepared replacement and finishes closing the superseded
+PR without rebuilding, republishing, or changing the existing PR's `ship`
+grant. The `release-opener-<run>-<attempt>` artifact records the recovery plan,
+selected source, outcome, and next action, including when an invocation fails.
 
 An existing `release/vX.Y.Z` branch without a matching attempt fails closed.
 To replace an unrecorded stale attempt, close its pull request and dispatch the
@@ -129,7 +143,15 @@ Record the release pull request and the exact commit that lands on main.
 Follow the runs for that commit in
 [Harn Actions](https://github.com/burin-labs/harn/actions).
 
-1. `build-release-binaries.yml` builds the candidate on the version commit's
+1. `build-release-binaries.yml` first requires successful full-suite main CI
+   at the exact candidate source, using promotion's job list in
+   `scripts/lib/full_suite_jobs.sh`. It waits up to 85 minutes for a running
+   suite and refuses missing or failed proof before building, signing, or
+   dispatching the consumer rehearsal. The gate emits
+   `harn.release.full_suite.v1` JSON with the stage, source SHA, verdict,
+   pending and failing job names, and next action. Native qualification starts
+   after this admission and runs beside the artifact builds; publication still
+   requires it. The workflow then builds the candidate on the version commit's
    push to main. The release's merge group builds nothing; its
    `Release candidate verdict` passes only after the exact-source consumer
    rehearsal passes at the commit that lands. A merge group can't build the
@@ -165,7 +187,13 @@ Follow the runs for that commit in
 Before promotion, the candidate's exact source needs a successful
 `macos-nightly.yml` run through `workflow_dispatch`. The candidate run starts
 it: `scripts/ci/dispatch_native_qualification.sh` dispatches the main revision of
-the workflow with the candidate's `source_sha`. Before executing candidate code,
+the workflow with the candidate's `source_sha`. The producer waits up to
+85 minutes for the native proof beside the archive builds. Failed, missing,
+or unreadable proof blocks the consumer rehearsal and candidate verdict,
+instead of waiting until promotion. The run preserves
+`harn.release.native_qualification.v1` JSON with the source SHA, verdict,
+pending and failing job names, and next action.
+Before executing candidate code,
 the trusted workflow verifies that this source is a main ancestor and measures
 both allowed execution and a refused write through process confinement on the
 owned Mac. Scheduled source candidates don't start it. Arbitrary branch sources
@@ -226,7 +254,10 @@ it after the release publishes.
 - Opener failed before publication: fix the cause and dispatch
   `bump-release.yml` again. Its admission checks run again.
 - Candidate failed because of infrastructure: rerun the failed jobs in that
-  exact candidate run. A source defect needs a corrected pull request and
+  exact candidate run. Successful matrix legs stay complete. Candidate AOT
+  payloads, license notices, and archives remain available for 30 days so a
+  later retry can restore successful handoffs. Compiler caches are an
+  acceleration aid and may be evicted independently. A source defect needs a corrected pull request and
   certification of the resulting commit. For an unpublished stable version,
   keep that version, build a signed source candidate on corrected main with
   `source_candidate=true`, then use manual promotion recovery. Recovery proves

@@ -10,6 +10,7 @@ use crate::cli::{
 
 mod artifacts;
 mod build;
+mod models_dev;
 mod overlay_audit;
 mod source_snapshot;
 mod tool_probe_audit;
@@ -34,6 +35,7 @@ pub(crate) async fn dispatch_catalog(command: ProviderCatalogCommand) {
         ProviderCatalogCommand::Refresh(refresh) => run_refresh(refresh).await,
         ProviderCatalogCommand::Validate(validate) => run_validate(validate),
         ProviderCatalogCommand::Generate(generate) => run_generate(generate),
+        ProviderCatalogCommand::UpdateSource(update) => models_dev::update(update).await,
         ProviderCatalogCommand::Export(export) => run_export(export),
         ProviderCatalogCommand::OverlayAudit(audit) => run_overlay_audit(audit),
         ProviderCatalogCommand::Matrix(matrix) => run_matrix(matrix),

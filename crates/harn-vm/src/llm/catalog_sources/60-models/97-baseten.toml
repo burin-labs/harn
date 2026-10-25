@@ -27,13 +27,10 @@ logical_model = "glm-5.2"
 equivalence_group = "glm-5.2"
 served_variant = "baseten-model-api"
 api_dialect = "openai_chat"
-context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.14 }
 architecture = { parameter_count_b = 744.0, active_parameter_count_b = 40.0, moe = true, quantization = "fp8", license = "MIT", source_url = "https://www.baseten.co/blog/how-we-built-the-worlds-fastest-api-for-glm-52/", last_verified = "2026-08-15" }
 performance = { output_tokens_per_sec = 281.2, time_to_answer_s = 7.95, source = "artificial_analysis", source_url = "https://artificialanalysis.ai/models/glm-5-2/providers", last_verified = "2026-06-23", notes = "Artificial Analysis GLM-5.2 provider benchmark. The 2026-06-23 Harn probe that accompanied this figure also recorded native-tool unreliability; a 2026-08-15 re-probe found 16/16 clean native tool calls and that verdict was withdrawn." }
 tier = "frontier"
-open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "kimi", "deepseek"]
 
@@ -42,6 +39,7 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "kimi",
 # tier priced at a 50% premium. Modelled the way `deepinfra-turbo` and
 # `moonshot-direct-highspeed` are: one equivalence group, distinct
 # served_variant.
+models_dev = {provider = "baseten", model = "zai-org/GLM-5.2", fields = ["context_window", "open_weight", "pricing"]}
 [models."baseten/zai-org/GLM-5.2-Fast"]
 name = "GLM 5.2 Fast (Baseten)"
 provider = "baseten"
@@ -50,14 +48,12 @@ logical_model = "glm-5.2"
 equivalence_group = "glm-5.2"
 served_variant = "baseten-model-api-fast"
 api_dialect = "openai_chat"
-context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 2.10, output_per_mtok = 6.60, cache_read_per_mtok = 0.21 }
 architecture = { parameter_count_b = 744.0, active_parameter_count_b = 40.0, moe = true, quantization = "fp8", license = "MIT", source_url = "https://www.baseten.co/blog/how-we-built-the-worlds-fastest-api-for-glm-52/", last_verified = "2026-08-15" }
 tier = "frontier"
-open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "kimi", "deepseek"]
+models_dev = {provider = "baseten", model = "zai-org/GLM-5.2-Fast", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."baseten/moonshotai/Kimi-K2.7-Code"]
 name = "Kimi K2.7 Code (Baseten)"
@@ -104,14 +100,12 @@ logical_model = "deepseek-v4-pro-0813"
 equivalence_group = "deepseek-v4-pro-0813"
 served_variant = "baseten-model-api"
 api_dialect = "openai_chat"
-context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok = 0.132 }
 architecture = { parameter_count_b = 1600.0, active_parameter_count_b = 49.0, moe = true, quantization = "fp4", source_url = "https://www.baseten.co/library/deepseek-v4/", last_verified = "2026-08-15" }
 tier = "frontier"
-open_weight = true
 strengths = ["reasoning", "coding", "agentic", "tool_use", "long_context"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+models_dev = {provider = "baseten", model = "deepseek-ai/DeepSeek-V4-Pro-0813", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."baseten/deepseek-ai/DeepSeek-V4-Flash-0731"]
 name = "DeepSeek V4 Flash 0731 (Baseten)"
@@ -121,14 +115,12 @@ logical_model = "deepseek-v4-flash-0731"
 equivalence_group = "deepseek-v4-flash-0731"
 served_variant = "baseten-model-api"
 api_dialect = "openai_chat"
-context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.13, output_per_mtok = 0.26, cache_read_per_mtok = 0.028 }
 architecture = { parameter_count_b = 284.0, active_parameter_count_b = 13.0, moe = true, quantization = "fp8", source_url = "https://www.baseten.co/library/deepseek-v4/", last_verified = "2026-08-15" }
 tier = "mid"
-open_weight = true
 strengths = ["speed", "cheap", "reasoning", "coding", "agentic", "tool_use", "long_context"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+models_dev = {provider = "baseten", model = "deepseek-ai/DeepSeek-V4-Flash-0731", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."baseten/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B"]
 name = "Nemotron 3 Ultra 550B A55B (Baseten)"
@@ -138,14 +130,12 @@ logical_model = "nemotron-3-ultra-550b-a55b"
 equivalence_group = "nemotron-3-ultra-550b-a55b"
 served_variant = "baseten-model-api"
 api_dialect = "openai_chat"
-context_window = 202800
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40, cache_read_per_mtok = 0.12 }
 architecture = { parameter_count_b = 550.0, active_parameter_count_b = 55.0, moe = true, quantization = "fp4", source_url = "https://www.baseten.co/library/nemotron-3-ultra/", last_verified = "2026-08-15" }
 tier = "frontier"
-open_weight = true
 strengths = ["reasoning", "coding", "agentic", "tool_use", "long_context"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+models_dev = {provider = "baseten", model = "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."baseten/openai/gpt-oss-120b"]
 name = "GPT-OSS 120B (Baseten)"
@@ -155,14 +145,12 @@ logical_model = "openai-gpt-oss-120b"
 equivalence_group = "openai-gpt-oss-120b"
 served_variant = "baseten-model-api"
 api_dialect = "openai_chat"
-context_window = 128072
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.10 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, quantization = "fp4", license = "Apache-2.0", source_url = "https://www.baseten.co/library/gpt-oss-120b/", last_verified = "2026-08-15" }
 tier = "mid"
-open_weight = true
 strengths = ["cheap", "tool_use", "reasoning", "coding"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+models_dev = {provider = "baseten", model = "openai/gpt-oss-120b", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."baseten/zai-org/GLM-4.7"]
 name = "GLM 4.7 (Baseten)"

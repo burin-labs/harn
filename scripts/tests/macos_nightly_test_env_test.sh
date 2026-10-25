@@ -95,6 +95,21 @@ if ! grep -Fq 'target="${HOME}/harn-ci/target/macos-workspace-${RUNNER_NAME' "$w
   echo "macOS workspace tests must key the persistent target on the runner, not the host" >&2
   exit 1
 fi
+# The persistent target must be bounded before it is used, or it grows until the
+# disk is full and fails release qualification.
+bound_line=$(grep -nF 'bash scripts/ci/bound_persistent_target.sh "${target}"' "$workflow" | head -1 | cut -d: -f1)
+export_line=$(grep -nF 'echo "CARGO_TARGET_DIR=${target}" >> "$GITHUB_ENV"' "$workflow" | head -1 | cut -d: -f1)
+if [[ -z "$bound_line" || -z "$export_line" || "$bound_line" -ge "$export_line" ]]; then
+  echo "macOS workspace tests must bound the persistent target before building into it" >&2
+  exit 1
+fi
+# A dispatch checks out an older admitted source, which can predate the helper:
+# the bound must run from the trusted workflow checkout, before that swap.
+select_line=$(grep -nF 'run: git checkout --detach "$SOURCE_SHA"' "$workflow" | head -1 | cut -d: -f1)
+if [[ -z "$select_line" || "$bound_line" -ge "$select_line" ]]; then
+  echo "the persistent target must be bounded before the admitted source is checked out" >&2
+  exit 1
+fi
 # Owned hardware is judged against its own measured baseline profile.
 if ! grep -Fq 'macos_owned_arm64' "$ROOT_DIR/bench/test-case-performance/baselines.toml"; then
   echo "the owned Apple Silicon performance profile must exist in the baseline file" >&2

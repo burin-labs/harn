@@ -1,9 +1,9 @@
 /**
  * `harn precompile` ported to .harn — see harn#2313 (W13).
  *
- * Walks a file or directory tree, dispatches each `.harn` source to a
- * `harn precompile <single-file>` child that runs the Rust compiler
- * entrypoint. The .harn script owns:
+ * Walks a file or directory tree and hands every `.harn` source to one
+ * batch `harn precompile` child that runs the Rust compiler entrypoint on a
+ * worker pool. The .harn script owns:
  *
  *   * argv parsing (target, --out, --keep-going, --quiet)
  *   * directory walking (single source vs recursive .harn discovery)
@@ -12,10 +12,11 @@
  *     failed" summary
  *
  * The actual parse+typecheck+compile work stays in Rust on the spawned
- * child (toggled via HARN_PRECOMPILE_INNER=1 so the child doesn't recurse
- * back into this script). That keeps the bytecode-cache wire-format,
- * compiler diagnostics, and module artifact emission untouched while
- * letting the orchestration / file-walk layer live in Harn.
+ * child (toggled via HARN_PRECOMPILE_INNER=batch, which also makes the
+ * child read its target as the source manifest, so it doesn't recurse back
+ * into this script). One child shares process startup, stdlib
+ * preparation, and every shared import's parse across all sources; a child
+ * per source repeated them for each file.
  *
  * Inputs (from the dispatch shim in crates/harn-cli/src/commands/precompile.rs):
  *   HARN_CLI_SELF_EXE   — absolute path to the running `harn` binary,
@@ -25,15 +26,19 @@
  *   HARN_PRECOMPILE_OUT — output directory (optional; mirrors source tree)
  *   HARN_PRECOMPILE_KEEP_GOING — "1" to continue after a per-file error
  *   HARN_PRECOMPILE_QUIET      — "1" to suppress per-file progress
- *   HARN_PRECOMPILE_JOBS       — maximum concurrent children (>= 1); the
+ *   HARN_PRECOMPILE_JOBS       — maximum concurrent compiles (>= 1); the
  *                                shim always sets it, defaulting to the
  *                                machine's available parallelism
+ *   HARN_PRECOMPILE_BATCH_DIR  — shim-owned directory for the source manifest
  *
- * Children run concurrently up to that bound, but every line of output is
- * rendered afterwards in sorted source order, so stdout, stderr, the summary,
- * and the exit status do not depend on the bound or on completion order.
+ * The child reports one record per source, in source order, holding what that
+ * source's own single-file compile prints and exits with. Every line is
+ * rendered from those records afterwards, so stdout, stderr, the summary, and
+ * the exit status do not depend on the bound or on completion order.
  */
-import { settle_with_abort } from "std/abort"
+type PrecompileRecord = {source: string, exit_code: int, stdout: string, stderr: string}
+
+const RECORD_PREFIX = "precompile-record:"
 
 fn __walk_harn_files(fs: HarnessFs, root: string) -> dict {
   // walk_dir returns a flat list of {path, is_dir, is_file, depth}. We
@@ -121,37 +126,65 @@ fn __ensure_parent(fs: HarnessFs, path: string) {
   }
 }
 
-fn __spawn_precompile(
-  process: HarnessProcess,
+fn __batch_records(
+  harness: Harness,
   bin: string,
-  source_path: string,
-  per_file_out: string,
+  plans: list,
   source_root: string,
-) -> dict {
+  jobs: int,
+  keep_going: bool,
+) -> Result<list<PrecompileRecord>, string> {
   // Always force the child into the Rust compiler entrypoint: this script IS
   // the .harn dispatch target, so leaving HARN_PRECOMPILE_INNER unset would
-  // re-enter us and spin forever.
-  //
-  // --quiet on the child suppresses its own per-file println; the
-  // parent script owns the user-visible output so the byte-for-byte
-  // shape is preserved when this port becomes the default.
-  let args = ["precompile", "--quiet", source_path]
-  if source_root != "" {
-    args.push("--relocatable")
+  // re-enter us and spin forever. The manifest carries each source's exact
+  // single-file arguments: --relocatable for a directory walk, and the
+  // directory its artifacts land in.
+  const batch_dir = harness.env.get_or("HARN_PRECOMPILE_BATCH_DIR", "")
+  if batch_dir == "" {
+    return Err("HARN_PRECOMPILE_BATCH_DIR not set by dispatch shim")
   }
-  if per_file_out != "" {
-    args.push("--out")
-    args.push(per_file_out)
+  let sources = []
+  for plan in plans {
+    sources.push({source: plan.source, out: plan.per_file_out})
   }
-  return process.run({program: bin, args: args, env: {HARN_PRECOMPILE_INNER: "1"}})
+  const manifest = path_join(batch_dir, "sources.json")
+  harness.fs.write_text(
+    manifest,
+    json_stringify({relocatable: source_root != "", sources: sources}),
+  )
+  let args = ["precompile", "--quiet", "--jobs", to_string(jobs)]
+  if keep_going {
+    args.push("--keep-going")
+  }
+  args.push(manifest)
+  const child = harness.process.run(
+    {program: bin, args: args, env: {HARN_PRECOMPILE_INNER: "batch"}},
+  )
+  if (child["exit_code"] ?? -1) != 0 {
+    return Err(
+      __render_failure("precompile batch", child["stderr"] ?? "", child["exit_code"] ?? -1),
+    )
+  }
+  let records = []
+  for line in split(child["stdout"] ?? "", "\n") {
+    if !starts_with(line, RECORD_PREFIX) {
+      continue
+    }
+    const decoded = json_decode(
+      substring(line, len(RECORD_PREFIX), len(line)),
+      schema_of(PrecompileRecord),
+    )
+    match decoded {
+      Ok(record) -> { records.push(record) }
+      Err(error) -> { return Err("unreadable precompile record: " + error.message) }
+    }
+  }
+  return Ok(records)
 }
 
-fn __child_reused(child: dict) -> bool {
-  // The child reports per-source outcome on stdout, which this driver captures
-  // and never forwards. Absence means compiled, not unknown: a child that
-  // succeeded without printing the marker is an older binary than this script,
-  // and counting that as a reuse would report work as skipped that was done.
-  const stdout = child["stdout"] ?? ""
+fn __reused(stdout: string) -> bool {
+  // Absence means compiled, not unknown: counting a missing marker as a reuse
+  // would report work as skipped that was done.
   for line in split(stdout, "\n") {
     if trim(line) == "precompile-outcome: reused" {
       return true
@@ -160,16 +193,14 @@ fn __child_reused(child: dict) -> bool {
   return false
 }
 
-fn __render_failure(source: string, child: dict) -> string {
+fn __render_failure(source: string, stderr: string, exit_code: int) -> string {
   // Match the Rust eprintln format `{source}: {err}` where `err` is
-  // either the child's first stderr line or a compact exit summary.
-  const stderr = child["stderr"] ?? ""
+  // either the compile's first stderr line or a compact exit summary.
   const trimmed = trim(stderr)
   if trimmed != "" {
     const lines = split(trimmed, "\n")
     return source + ": " + lines[0]
   }
-  const exit_code = child["exit_code"] ?? -1
   return source + ": precompile exited with code " + to_string(exit_code)
 }
 
@@ -245,37 +276,34 @@ fn main(harness: Harness) {
     }
     plans.push({source: source, mirrored: mirrored, per_file_out: per_file_out})
   }
-  // Without --keep-going the first failure stops children that have not
-  // started yet; children already running finish, and their results past the
-  // first failure in source order are discarded below, exactly as the serial
-  // walk never ran them.
-  const settle_options = if keep_going {
-    {max_concurrent: jobs}
-  } else {
-    {max_concurrent: jobs, max_failures: 1}
+  // Without --keep-going the child starts no source after the first failure
+  // and reports none past it, exactly as the serial walk never ran them.
+  const batch = __batch_records(harness, bin, plans, source_root, jobs, keep_going)
+  if is_err(batch) {
+    harness.stdio.eprintln("internal error: " + unwrap_err(batch))
+    harness.runtime.exit(70)
   }
-  const process = harness.process
-  const outcome = settle_with_abort(
-    harness.random,
-    harness.runtime,
-    plans,
-    { plan ->
-      const child = __spawn_precompile(process, bin, plan.source, plan.per_file_out, source_root)
-      if (child["exit_code"] ?? -1) == 0 {
-        return Ok(child)
-      }
-      return Err(child)
-    },
-    settle_options,
-  )
+  const records = unwrap(batch)
   let compiled = 0
   let reused = 0
   let failed = 0
-  for (index, result) in iter(outcome.results).enumerate() {
-    const plan = plans[index]
-    if is_ok(result) {
-      const child = unwrap(result)
-      if __child_reused(child) {
+  for (index, plan) in iter(plans).enumerate() {
+    if index >= len(records) {
+      // Records stop only after a failure without --keep-going, and the break
+      // below has already left the loop by then.
+      harness.stdio.eprintln("internal error: " + plan.source + " was skipped before any failure")
+      harness.runtime.exit(70)
+    }
+    const record = records[index]
+    if record.source != plan.source {
+      harness.stdio.eprintln(
+        "internal error: precompile record for " + record.source + " where " + plan.source
+          + " was expected",
+      )
+      harness.runtime.exit(70)
+    }
+    if record.exit_code == 0 {
+      if __reused(record.stdout) {
         reused = reused + 1
       } else {
         compiled = compiled + 1
@@ -285,20 +313,8 @@ fn main(harness: Harness) {
       }
       continue
     }
-    if outcome.abandoned_indexes.contains(index) {
-      // Branches start in source order, so a skipped source always follows
-      // the failure that stopped the walk and the break below reaches it first.
-      harness.stdio.eprintln("internal error: " + plan.source + " was skipped before any failure")
-      harness.runtime.exit(70)
-    }
-    const error = unwrap_err(result)
     failed = failed + 1
-    if type_of(error) == "dict" && error["exit_code"] != nil {
-      harness.stdio.eprintln(__render_failure(plan.source, error))
-    } else {
-      // A thrown spawn error rather than a child that exited nonzero.
-      harness.stdio.eprintln(plan.source + ": " + to_string(error))
-    }
+    harness.stdio.eprintln(__render_failure(plan.source, record.stderr, record.exit_code))
     if !keep_going {
       break
     }

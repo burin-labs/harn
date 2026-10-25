@@ -213,7 +213,7 @@ pub fn precompile_source(
         out_root,
         INTERFACE_CACHE_EXTENSION,
     )?;
-    let (keys, interface) = artifact_keys(
+    let (keys, mut interface) = artifact_keys(
         source_path,
         &source,
         source_root,
@@ -235,8 +235,11 @@ pub fn precompile_source(
     let program = harn_parser::parse_source(&source).map_err(|e| format!("parse error: {e}"))?;
 
     // Resolve imports so a call to an imported symbol that shadows a builtin
-    // is checked against the right signature.
-    let graph = harn_modules::build(&[source_path.to_path_buf()]);
+    // is checked against the right signature. The interface's graph was built
+    // from this same source text.
+    let graph = interface
+        .take_module_graph()
+        .unwrap_or_else(|| harn_modules::build_with_source(source_path, &source));
     let checker = graph
         .typecheck_import_config_for_file(source_path)
         .apply_imports_to(authority.typechecker());
@@ -342,7 +345,9 @@ fn artifact_keys(
         harn_vm::bytecode_cache::prepare_precompiled_interface(interface_dest, source_path, source)
             .map_err(|e| format!("prepare {}: {e}", interface_dest.display()))?;
     if !interface.package_import_aliases().is_empty() {
-        let graph = harn_modules::build_with_source(source_path, source);
+        let graph = interface
+            .take_module_graph()
+            .unwrap_or_else(|| harn_modules::build_with_source(source_path, source));
         package::ensure_reachable_dependencies_materialized(source_path, &graph)
             .map_err(|e| e.to_string())?;
         // Setup may publish a replacement package generation; key from that one.

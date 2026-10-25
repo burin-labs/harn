@@ -278,12 +278,10 @@ write_sccache_env_config() {
   fi
 }
 
-# Turn on rustc's parallel front end (scripts/lib/rustc_frontend.sh owns the
-# flags) with managed `[build] rustflags` and `[env] RUSTC_BOOTSTRAP` lines.
-# The two lines are written and dropped together: the flags without the env
-# line fail every build. A user-owned `rustflags` or `RUSTC_BOOTSTRAP` stays
-# authoritative and gets neither line, since a second key is invalid TOML. RUSTFLAGS in the environment still replaces the config value,
-# as Cargo always does.
+# Compile Harn's own crates with rustc's parallel front end through a managed
+# `[build] rustc-workspace-wrapper` line (scripts/lib/rustc_frontend.sh says
+# why). A user-owned workspace wrapper stays authoritative and gets no second
+# key, which would be invalid TOML.
 write_rustc_frontend_config() {
   local flags="$1"
   local config_path=".cargo/config.toml"
@@ -291,33 +289,29 @@ write_rustc_frontend_config() {
 
   [[ -f "${config_path}" ]] || return 0
   tmp_path="$(mktemp)"
+  # The managed `rustflags` and `RUSTC_BOOTSTRAP` lines are an earlier
+  # build-wide form of this setting; dropping them migrates such checkouts.
   awk -v managed_marker="${MANAGED_CARGO_CONFIG_MARKER}" '
-    $0 ~ /^[[:space:]]*(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=/ &&
+    $0 ~ /^[[:space:]]*(rustc-workspace-wrapper|rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=/ &&
       $0 ~ "#[[:space:]]*" managed_marker "[[:space:]]*$" { next }
     { print }
   ' "${config_path}" > "${tmp_path}"
   mv "${tmp_path}" "${config_path}"
 
   if [[ -z "${flags}" ]] \
-    || grep -Eq '^[[:space:]]*(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=' "${config_path}"; then
+    || grep -Eq '^[[:space:]]*rustc-workspace-wrapper[[:space:]]*=' "${config_path}"; then
     return 0
   fi
 
-  local flag_list="" flag
-  for flag in ${flags}; do
-    flag_list="${flag_list:+${flag_list}, }\"${flag}\""
-  done
-  local rustflags_line="rustflags = [${flag_list}] # ${MANAGED_CARGO_CONFIG_MARKER}"
-  local bootstrap_line="RUSTC_BOOTSTRAP = { value = \"1\", force = true } # ${MANAGED_CARGO_CONFIG_MARKER}"
+  local wrapper
+  wrapper="$(harn_rustc_frontend_install_wrapper "${ROOT_DIR}/scripts" \
+    "$(derive_storage_root)/rustc-frontend")" || return 1
+  local wrapper_line="rustc-workspace-wrapper = \"${wrapper}\" # ${MANAGED_CARGO_CONFIG_MARKER}"
   tmp_path="$(mktemp)"
-  awk -v rustflags_line="${rustflags_line}" -v bootstrap_line="${bootstrap_line}" '
+  awk -v wrapper_line="${wrapper_line}" '
     { print }
-    /^\[build\][[:space:]]*$/ { print rustflags_line; saw_build = 1 }
-    /^\[env\][[:space:]]*$/ { print bootstrap_line; saw_env = 1 }
-    END {
-      if (!saw_build) { print "\n[build]"; print rustflags_line }
-      if (!saw_env) { print "\n[env]"; print bootstrap_line }
-    }
+    /^\[build\][[:space:]]*$/ { print wrapper_line; saw_build = 1 }
+    END { if (!saw_build) { print "\n[build]"; print wrapper_line } }
   ' "${config_path}" > "${tmp_path}"
   mv "${tmp_path}" "${config_path}"
 }

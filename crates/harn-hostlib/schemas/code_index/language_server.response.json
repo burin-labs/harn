@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/language_server.response.json",
+  "title": "code_index.language_server response",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "resolvable": {
+      "type": "boolean",
+      "description": "True when a registered server for the file's language resolves to an executable."
+    },
+    "language": {
+      "type": ["string", "null"],
+      "description": "The detected language, or null when none is recognized."
+    },
+    "server": {
+      "type": ["string", "null"],
+      "description": "The launch that resolved, as `rename_symbol` reports it in `backend.server`."
+    },
+    "program": {
+      "type": ["string", "null"],
+      "description": "The executable that would start."
+    },
+    "reason": {
+      "type": ["string", "null"],
+      "description": "Why no server resolves; null when one does."
+    }
+  },
+  "required": ["path", "resolvable", "language", "server", "program", "reason"],
+  "additionalProperties": false
+}

@@ -1,7 +1,2 @@
-# cross forwards RUSTFLAGS into its container but not RUSTC_BOOTSTRAP, which
-# the parallel front-end flags need (scripts/lib/rustc_frontend.sh).
-[build.env]
-passthrough = ["RUSTC_BOOTSTRAP"]
-
 [target.x86_64-pc-windows-gnu]
 image = "ghcr.io/cross-rs/x86_64-pc-windows-gnu@sha256:ac42d6e624b8b63b1803ea960ac901cead36592f9f3b47d22156ccd154c3b83f"

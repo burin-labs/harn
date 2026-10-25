@@ -255,10 +255,17 @@ canary_dispatch() {
   local -a producer_inputs=()
   if [[ -n "$producer_run$producer_attempt" ]]; then
     [[ "$producer_run" =~ ^[1-9][0-9]*$ && "$producer_attempt" =~ ^[1-9][0-9]*$ \
-      && "$producer_run" == "${GITHUB_RUN_ID:-}" && "$producer_attempt" == "${GITHUB_RUN_ATTEMPT:-}" \
-      && "$revision" == "${GITHUB_SHA:-}" && "${GITHUB_REF:-}" == refs/heads/main \
+      && "${GITHUB_REF:-}" == refs/heads/main \
       && -z "${CANARY_PULL_REQUEST_CLI_RUN:-}${CANARY_PULL_REQUEST_BASE:-}${REHEARSAL_PROMOTION_RUN_ID:-}" ]] \
       || canary_fail release_producer_identity_invalid
+    if [[ "$producer_run" == "${GITHUB_RUN_ID:-}" && "$producer_attempt" == "${GITHUB_RUN_ATTEMPT:-}" \
+      && "$revision" == "${GITHUB_SHA:-}" ]]; then
+      :
+    else
+      [[ "${CONSUMER_PULL_REQUEST:-}" =~ ^[1-9][0-9]*$ ]] || canary_fail release_producer_identity_invalid
+      node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-observer-dispatch.mjs" --archive-producer >/dev/null \
+        || canary_fail release_producer_identity_invalid
+    fi
     producer_inputs=(-f release_producer_run_id="$producer_run" -f release_producer_run_attempt="$producer_attempt")
   fi
   # The consumer reads the target as a tag name, so resolve the source's
