@@ -14,9 +14,9 @@ import * as tool_middleware from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
- * Natural tool schemas omit `reason` and `token`. The reason decorator
- * advertises an optional reason, its caller requires and strips it, and
- * redaction removes the token before runtime argument validation.
+ * Natural tool schemas omit `reason`. The reason decorator advertises an
+ * optional reason and its caller requires and strips it. Redaction removes the
+ * token from the recorded arguments only; the handler still receives it.
  */
 fn tools() {
   let r = tool_registry()
@@ -26,10 +26,10 @@ fn tools() {
     "Read a file",
     {
       handler: { args ->
-        assert(args?.token == nil, "redaction must remove the token before dispatch")
+        assert(args?.token == "fixture-secret", "the handler must receive the original token")
         return "contents of " + to_string(args?.path ?? "")
       },
-      parameters: {path: {type: "string"}},
+      parameters: {path: {type: "string"}, token: {type: "string", required: false}},
     },
   )
   r = tool_define(
@@ -155,7 +155,13 @@ pipeline default(harness: Harness) {
           tool_format: "native",
           max_iterations: 3,
           loop_until_done: true,
-          tool_caller: stack,
+          tool_caller: { call, next ->
+            const outcome = stack(call, next)
+            if call.tool_name == "read" {
+              assert(outcome?.arguments?.token == nil, "the recorded arguments must omit the token")
+            }
+            return outcome
+          },
         },
       )
       assert(harness.runtime.atomic_get(consent_records) == 3, "all calls reach consent")
