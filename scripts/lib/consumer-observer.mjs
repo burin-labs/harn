@@ -364,10 +364,22 @@ function rateLimitHeader(response, name) {
   return response.headers?.get?.(`x-ratelimit-${name}`) ?? undefined;
 }
 
+/** True when a 403's body names a rate limit. A secondary limit can arrive with
+ * primary budget left and no Retry-After, so only its message identifies it. */
+async function namesRateLimit(response) {
+  try {
+    const body = await response.clone().json();
+    return typeof body?.message === 'string' && body.message.includes('rate limit');
+  } catch {
+    return false;
+  }
+}
+
 /** Milliseconds before retrying a refused read, or undefined when a retry cannot help.
- * A rate limit waits for Retry-After or its reset; a server error or a dropped
- * connection (no response) backs off. A denial or any other status is final. */
-function readRetryMs(response, attempt) {
+ * A rate limit waits for Retry-After or its reset, and a secondary limit named only
+ * by its message backs off; a server error or a dropped connection (no response)
+ * backs off. A denial or any other status is final. */
+async function readRetryMs(response, attempt) {
   const backoff = readRetry.backoffMs * 2 ** (attempt - 1);
   if (response === null || response.status >= 500) return backoff;
   if (![403, 429].includes(response.status)) return undefined;
@@ -378,7 +390,7 @@ function readRetryMs(response, attempt) {
     const wait = Math.max(0, reset * 1000 - Date.now());
     return wait + (wait > 0 ? 1000 : 0);
   }
-  return response.status === 429 ? backoff : undefined;
+  return response.status === 429 || await namesRateLimit(response) ? backoff : undefined;
 }
 
 /** The one GET path to the GitHub API. A rate limit, a server error or a
@@ -396,7 +408,7 @@ async function githubRead(token, url, fetchRecord) {
       failure = error;
     }
     if (response?.ok) return response;
-    const wait = readRetryMs(response, attempt);
+    const wait = await readRetryMs(response, attempt);
     if (wait === undefined || wait > readRetry.limitMs || attempt >= readRetry.attempts) {
       if (response === null) throw failure;
       return response;

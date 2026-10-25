@@ -198,7 +198,9 @@ test('a run read retries a rate limit, a server error or a dropped connection, a
   readRetry.backoffMs = 0;
   try {
     const headers = values => ({ get: name => values[name] });
-    const refused = (status, values = {}) => ({ ok: false, status, headers: headers(values) });
+    const refused = (status, values = {}, body = { message: 'Resource not accessible by integration' }) =>
+      ({ ok: false, status, headers: headers(values), clone: () => ({ json: async () => body }) });
+    const secondary = { message: 'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' };
     const run = { id: 73, status: 'in_progress', run_attempt: 1 };
     const read = replies => {
       const seen = [];
@@ -213,6 +215,7 @@ test('a run read retries a rate limit, a server error or a dropped connection, a
     for (const replies of [
       [refused(403, { 'retry-after': '0' }), refused(502), new Error('socket hang up')],
       [refused(429, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1' })],
+      [refused(403, { 'x-ratelimit-remaining': '4000' }, secondary)],
     ]) {
       const transient = read(replies);
       assert.equal((await transient.result).id, 73);
