@@ -58,16 +58,27 @@ struct Fixture {
 }
 
 fn fixture() -> Fixture {
+    fixture_with(NEVER_QUIESCENT, "")
+}
+
+/// The crate served by `server_script`, with `padding` appended to the
+/// declaration's file.
+fn fixture_with(server_script: &str, padding: &str) -> Fixture {
     let server = tempdir().unwrap();
     let program = server.path().join("rust-analyzer");
-    fs::write(&program, NEVER_QUIESCENT).unwrap();
+    fs::write(&program, server_script).unwrap();
     fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
     super::test_override::set("rust-analyzer", &program.to_string_lossy());
     let workspace = tempdir().unwrap();
     for (path, text) in CRATE {
         let path = workspace.path().join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, text).unwrap();
+        let padding = if path.ends_with("src/reading.rs") {
+            padding
+        } else {
+            ""
+        };
+        fs::write(path, format!("{text}{padding}")).unwrap();
     }
     let capability = CodeIndexCapability::new();
     let (state, _) = IndexState::build_from_root(workspace.path());
@@ -514,4 +525,77 @@ fn progress_phases_arrive_in_order() {
         ["server_start", "indexing", "resolving", "applying"],
         "{result:?}"
     );
+}
+
+/// Answers `initialize`, reports quiescence, then never reads stdin again, so
+/// a large document fills the pipe to it.
+const STOPS_READING: &str = r#"#!/bin/sh
+len=0
+while IFS= read -r line; do
+  line=$(printf '%s' "$line" | tr -d '\r')
+  [ -z "$line" ] && break
+  case "$line" in Content-Length:*) len=${line#Content-Length: } ;; esac
+done
+head -c "$len" > /dev/null
+body='{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"renameProvider":true}}}'
+printf 'Content-Length: %s\r\n\r\n%s' "${#body}" "$body"
+ready='{"jsonrpc":"2.0","method":"experimental/serverStatus","params":{"health":"ok","quiescent":true}}'
+printf 'Content-Length: %s\r\n\r\n%s' "${#ready}" "$ready"
+exec sleep 120
+"#;
+
+#[test]
+fn a_server_that_stops_reading_cannot_hold_the_rename_past_its_deadline() {
+    let _env = crate::process::test_support::declare_inherited();
+    // Far larger than a pipe buffer, so opening the file fills the pipe.
+    let padding = "// padding line that the language server never reads\n".repeat(8_192);
+    let fixture = fixture_with(STOPS_READING, &padding);
+    let before = snapshot(fixture.workspace.path());
+    let result = rename(
+        &fixture,
+        &[
+            ("backend", vm_string("language_server")),
+            ("deadline_ms", VmValue::Int(1_500)),
+        ],
+    );
+
+    assert_eq!(s(field(&result, "result")), "refused", "{result:?}");
+    assert_eq!(snapshot(fixture.workspace.path()), before);
+}
+
+#[test]
+fn a_cancel_while_waiting_for_another_writer_writes_nothing() {
+    let fixture = fixture();
+    let before = snapshot(fixture.workspace.path());
+    let cancel = Arc::new(AtomicBool::new(false));
+    let held = crate::host_call::workspace_writes();
+    let renamer = harn_parser::runtime_stack::spawn({
+        let shared = fixture.capability.shared();
+        let cancel = cancel.clone();
+        move || {
+            let _interrupt = harn_vm::op_interrupt::install(Some(cancel), None);
+            let request = dict(&[
+                (
+                    "symbol_ref",
+                    dict(&[
+                        ("name", vm_string("Reading")),
+                        ("path", vm_string("src/reading.rs")),
+                        ("kind", vm_string("Type")),
+                    ]),
+                ),
+                ("new_name", vm_string("Measurement")),
+                ("scope", vm_string("workspace")),
+                ("backend", vm_string("syntax_tree")),
+            ]);
+            crate::code_index::rename::run(&shared, &[request]).expect("rename runs")
+        }
+    });
+    // Let the rename reach the lease; a slow host only weakens the check.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    cancel.store(true, Ordering::SeqCst);
+    drop(held);
+    let result = renamer.join().unwrap();
+
+    assert_eq!(s(field(&result, "result")), "cancelled", "{result:?}");
+    assert_eq!(snapshot(fixture.workspace.path()), before);
 }

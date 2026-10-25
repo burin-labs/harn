@@ -157,19 +157,20 @@ impl HostCallContext {
         expired.then_some(Interrupt::DeadlineExceeded)
     }
 
-    /// The commit point. A stop requested before it returns the interrupt and
-    /// `write` never runs. Past it, `write` runs to completion under the
-    /// workspace write lease, so a later stop cannot leave a partial write and
-    /// no other builtin's writes interleave with it.
+    /// The commit point, reached once the write lease is held. A stop
+    /// requested before it, including while waiting for another writer,
+    /// returns the interrupt and `write` never runs. Past it, `write` runs to
+    /// completion under the lease, so a later stop cannot leave a partial
+    /// write and no other builtin's writes interleave with it.
     pub(crate) fn commit<T>(
         &self,
         detail: &str,
         write: impl FnOnce(&WorkspaceWrites) -> T,
     ) -> Result<T, Interrupt> {
+        let writes = workspace_writes();
         if let Some(interrupt) = self.interrupted() {
             return Err(interrupt);
         }
-        let writes = workspace_writes();
         self.report(Phase::Applying, detail);
         Ok(write(&writes))
     }

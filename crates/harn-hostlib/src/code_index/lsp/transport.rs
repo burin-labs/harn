@@ -93,7 +93,9 @@ impl Shared {
     }
 }
 
-type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
+/// Frames bound for the server's stdin. One thread owns the pipe, so a server
+/// that stops reading blocks that thread, never a caller watching for a stop.
+type Writer = Sender<Vec<u8>>;
 
 pub(crate) struct Connection {
     writer: Writer,
@@ -137,7 +139,11 @@ impl Connection {
             status: Mutex::new(Status::default()),
             changed: Condvar::new(),
         });
-        let writer: Writer = Arc::new(Mutex::new(stdin));
+        let (writer, frames) = channel::<Vec<u8>>();
+        harn_parser::runtime_stack::builder()
+            .name(format!("lsp-writer-{}", launch.id))
+            .spawn(move || write_loop(stdin, frames))
+            .map_err(|err| format!("spawn writer: {err}"))?;
         let connection = Self {
             writer: writer.clone(),
             shared: shared.clone(),
@@ -339,10 +345,24 @@ impl Drop for Connection {
 
 fn write_frame(writer: &Writer, message: &Value) -> std::io::Result<()> {
     let body = serde_json::to_vec(message)?;
-    let mut writer = writer.lock().expect("lsp writer poisoned");
-    write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
-    writer.write_all(&body)?;
-    writer.flush()
+    let mut frame = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
+    frame.extend_from_slice(&body);
+    writer
+        .send(frame)
+        .map_err(|_| std::io::ErrorKind::BrokenPipe.into())
+}
+
+/// Write queued frames in order until the pipe breaks or every sender drops.
+fn write_loop(mut stdin: Box<dyn Write + Send>, frames: std::sync::mpsc::Receiver<Vec<u8>>) {
+    for frame in frames {
+        if stdin
+            .write_all(&frame)
+            .and_then(|()| stdin.flush())
+            .is_err()
+        {
+            break;
+        }
+    }
 }
 
 fn drain_stderr(mut stderr: Box<dyn Read + Send>, shared: &Shared) {
