@@ -35,10 +35,24 @@ unreleased fragments produces `action=none`, with a notice explaining why.
 An unreadable pull-request list fails instead of opening a duplicate.
 
 The signed commit is recorded at `release-attempt/vX.Y.Z/<commit>` before the
-pull request opens. An existing release stays frozen at that attempt. Later
-fragments remain for the next release, including when their changes merge ahead
-of this release. A push changing `changelog.d` checks the existing attempt
-without rebuilding or opening a release.
+pull request opens from that ref. A mergeable release stays frozen at that
+attempt. New fragments remain for the next release, including when they merge
+ahead of this release. A push changing `changelog.d` checks existing attempts
+before restoring or building Harn.
+
+If a fragment already folded into the attempt is edited on main, Git reports a
+modify/delete conflict. The opener waits until green contains the exact edited
+fragment blobs, then refolds from green into a new signed, immutable attempt.
+It enrolls the replacement in Smart Ship and closes the conflicted PR with a
+link to the replacement. It preserves the earlier commit and attempt ref.
+Other conflicts, missing attempt records, and multiple mergeable attempts fail
+closed instead of choosing a source.
+
+If replacement cleanup fails after the new PR opens, dispatch the same opener
+again. It selects the prepared replacement and finishes closing the superseded
+PR without rebuilding, republishing, or changing the existing PR's `ship`
+grant. The `release-opener-<run>-<attempt>` artifact records the recovery plan,
+selected source, outcome, and next action, including when an invocation fails.
 
 An existing `release/vX.Y.Z` branch without a matching attempt fails closed.
 To replace an unrecorded stale attempt, close its pull request and dispatch the
