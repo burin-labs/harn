@@ -870,8 +870,9 @@ jobs:
           df -h /mnt "$GITHUB_WORKSPACE"
 
       # Job-scoped so the size gate records the identity that was built. On
-      # ARM64 Linux the fat-LTO link peaked at 15.5 GB RAM plus 15 GB swap, so
-      # that target keeps the thin profile until a fat-LTO link fits.
+      # ARM64 Linux the fat-LTO link peaked at 15.5 GB RAM plus 15 GB swap, and
+      # both macOS fat-LTO builds hit the 135-minute Build timeout (135m13s,
+      # 135m14s). These targets keep the thin profile until a fat-LTO build fits.
       - name: Scope the dist profile to what the runner can link
         shell: bash
         env:
@@ -879,7 +880,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$HARN_RELEASE_TARGET" in
-            aarch64-unknown-linux-gnu)
+            aarch64-unknown-linux-gnu | aarch64-apple-darwin | x86_64-apple-darwin)
               {
                 echo "CARGO_PROFILE_DIST_LTO=thin"
                 echo "CARGO_PROFILE_DIST_CODEGEN_UNITS=16"
