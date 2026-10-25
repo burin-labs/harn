@@ -3778,7 +3778,6 @@ dependencies = [
  "grep-regex",
  "grep-searcher",
  "harn-builtin-meta",
- "harn-builtins",
  "harn-clock",
  "harn-flock",
  "harn-languages",
