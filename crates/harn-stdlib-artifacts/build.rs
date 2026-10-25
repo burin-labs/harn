@@ -16,10 +16,15 @@ fn main() {
         "/// Stdlib module artifacts compiled by this crate's build script, sorted by file name.\n\
          pub static ARTIFACTS: &[harn_vm::bytecode_cache::EmbeddedStdlibArtifact] = &[\n",
     );
-    for (file_name, path) in rows {
+    for Row {
+        file_name,
+        len,
+        path,
+    } in rows
+    {
         writeln!(
             table,
-            "    harn_vm::bytecode_cache::EmbeddedStdlibArtifact {{ file_name: {file_name:?}, bytes: include_bytes!({:?}) }},",
+            "    harn_vm::bytecode_cache::EmbeddedStdlibArtifact {{ file_name: {file_name:?}, len: {len}, zstd: include_bytes!({:?}) }},",
             path.display().to_string(),
         )
         .expect("format table row");
@@ -28,10 +33,23 @@ fn main() {
     std::fs::write(out_dir.join("stdlib_artifacts.rs"), table).expect("write artifact table");
 }
 
+/// One embedded artifact: its cache file name, decoded size, and the file
+/// holding it zstd-compressed.
+struct Row {
+    file_name: String,
+    len: usize,
+    path: PathBuf,
+}
+
 #[cfg(not(feature = "embed"))]
-fn embed(_out_dir: &Path) -> Vec<(String, PathBuf)> {
+fn embed(_out_dir: &Path) -> Vec<Row> {
     Vec::new()
 }
+
+/// The artifacts are about 10 MB raw and 2.4 MB at this level; level 3 would
+/// leave 2.6 MB. Decoding costs the same at any level.
+#[cfg(feature = "embed")]
+const ZSTD_LEVEL: i32 = 19;
 
 /// Compiler-option overrides a developer shell may carry. Either changes the
 /// key every artifact is stored under, so a build that inherited one would
@@ -43,7 +61,7 @@ const COMPILER_OPTION_ENV: &[&str] = &[
 ];
 
 #[cfg(feature = "embed")]
-fn embed(out_dir: &Path) -> Vec<(String, PathBuf)> {
+fn embed(out_dir: &Path) -> Vec<Row> {
     for name in COMPILER_OPTION_ENV {
         println!("cargo:rerun-if-env-changed={name}");
         // The build script is still single-threaded here.
@@ -71,13 +89,34 @@ fn embed(out_dir: &Path) -> Vec<(String, PathBuf)> {
         "the full product surface must embed every stdlib module; {} failed",
         build.failed.len()
     );
-    build
-        .artifacts
-        .into_iter()
-        .map(|artifact| {
-            let path = artifact_dir.join(&artifact.file_name);
-            std::fs::write(&path, &artifact.bytes).expect("write stdlib artifact");
-            (artifact.file_name, path)
-        })
-        .collect()
+    let artifacts = build.artifacts;
+    let chunk = artifacts.len().div_ceil(threads).max(1);
+    std::thread::scope(|scope| {
+        let workers = artifacts
+            .chunks(chunk)
+            .map(|chunk| {
+                let artifact_dir = &artifact_dir;
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .map(|artifact| {
+                            let packed = zstd::bulk::compress(&artifact.bytes, ZSTD_LEVEL)
+                                .expect("compress stdlib artifact");
+                            let path = artifact_dir.join(format!("{}.zst", artifact.file_name));
+                            std::fs::write(&path, packed).expect("write stdlib artifact");
+                            Row {
+                                file_name: artifact.file_name.clone(),
+                                len: artifact.bytes.len(),
+                                path,
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect::<Vec<_>>();
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().expect("compression worker"))
+            .collect()
+    })
 }

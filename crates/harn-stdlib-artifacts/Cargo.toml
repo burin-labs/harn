@@ -15,7 +15,7 @@ build = "build.rs"
 # `harn` build took 337 s -> 390 s (dev) and 625 s -> 664 s (release), with
 # about 40% more compiler CPU. Hosts enable it for the binaries they ship.
 # Without it the table is empty and every import behaves as it always has.
-embed = ["dep:harn-vm", "dep:harn-runtime", "dep:harn-stdlib"]
+embed = ["dep:harn-vm", "dep:harn-runtime", "dep:harn-stdlib", "dep:zstd"]
 
 # Embedded bytecode is keyed by the complete builtin contract, which these
 # families change. Select exactly the families the host's runtime resolves to;
@@ -44,6 +44,8 @@ harn-vm = { path = "../harn-vm", version = "=0.10.180", default-features = false
 harn-runtime = { path = "../harn-runtime", version = "=0.10.180", optional = true }
 # The sources the build script compiles; a stdlib edit reruns the script.
 harn-stdlib = { path = "../harn-stdlib", version = "=0.10.180", optional = true }
+# Each artifact is embedded zstd-compressed; harn-vm decodes it on import.
+zstd = { version = "0.14", default-features = false, optional = true }
 
 [dev-dependencies]
 harn-stdlib = { path = "../harn-stdlib", version = "=0.10.180" }

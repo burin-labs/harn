@@ -7817,8 +7817,8 @@ The module exposes:
 | `macro_pass_at_1(rows)` | Computes the uniform-case-weighted mean pass rate over decided cases |
 | `reliability_breakdown(rows)` | Returns all-pass, flaky, all-fail, and no-decision fractions plus raw case counts |
 | `pass_caret_k(rows)` / `pass_at_k(rows)` | Computes strict pass^k over decided cases |
-| `paired_case_deltas(baseline, current)` | Pairs decided rows by case and compatible fingerprint, returning current-minus-baseline pass-rate deltas |
-| `paired_delta_report(baseline, current, resamples?, seed?)` | Reports paired bootstrap delta and `status`, where `improved` requires CI lower bound `> 0`, `regression` requires current macro below `baseline - sigma`, and all other results are `inconclusive` |
+| `paired_case_deltas(baseline, current)` | Pairs the first decided row per nonempty case name and compatible fingerprint, preserving current-arm order and returning current-minus-baseline pass-rate deltas |
+| `paired_delta_report(baseline, current, resamples?, seed?)` | Computes all statistics on that same paired cohort; `improved` requires CI lower bound `> 0`, `regression` requires current macro below `baseline - sigma`, and all other results are `inconclusive` |
 | `regression_gate(baseline, current, k?)` | Fails when current macro pass@1 is below `baseline - k * sigma` |
 | `skip_rate(rows)` / `timeout_rate(rows)` | Mean per-row skip and timeout fractions |
 | `worst_group(rows)` | Lowest macro pass@1 group |
@@ -8671,6 +8671,16 @@ The following environment variables configure runtime behavior:
 | `LOCAL_LLM_MODEL` | Default model ID for the local OpenAI-compatible provider. |
 | `MLX_BASE_URL` | Base URL for the MLX OpenAI-compatible provider. Default `http://127.0.0.1:8002`. |
 | `MLX_MODEL_ID` | Default model ID for the MLX OpenAI-compatible provider readiness probe. |
+
+Run records default to `.harn-runs` under the active project/runtime root.
+On Unix, a runtime rooted directly in the system temporary directory uses
+`harn-user-<effective-uid>/.harn-runs` beneath that directory instead.
+The per-user directory is created with mode `0700`; persistence refuses an
+existing symlink, another owner's directory, or group or world access.
+Temporary ancestors must be owned by the effective user or root; a shared
+writable ancestor must have the sticky bit to prevent namespace replacement.
+This separates privileged and ordinary command drivers.
+An explicit `HARN_RUN_DIR` takes precedence.
 
 ### Sandbox and egress
 

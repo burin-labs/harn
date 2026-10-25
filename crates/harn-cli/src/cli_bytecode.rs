@@ -1,6 +1,6 @@
 //! AOT-compiled bytecode for embedded CLI scripts (G7 / harn#2300).
 //!
-//! `harn-cli-aot-gen` compiles [`harn_stdlib::STDLIB_CLI_SCRIPTS`] into
+//! `harn-cli-aot-gen` compiles the CLI scripts in [`harn_stdlib::CATALOG`] into
 //! release/package cache-format `.harnbc` artifacts. The generator validates
 //! source and compiler freshness in the full workspace; `build.rs` validates
 //! the package-local manifest and payload before baking each entry into the
@@ -53,7 +53,7 @@ mod tests {
             return;
         }
         assert!(!STDLIB_CLI_SCRIPT_BYTECODE.is_empty());
-        for script in harn_stdlib::STDLIB_CLI_SCRIPTS {
+        for script in harn_stdlib::CATALOG.cli_scripts {
             if STDLIB_CLI_SCRIPT_BYTECODE_SKIPPED
                 .iter()
                 .any(|(name, reason)| *name == script.name && !reason.is_empty())

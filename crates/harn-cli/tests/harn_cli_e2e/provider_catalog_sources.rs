@@ -16,17 +16,38 @@ fn catalog_renderers_read_source_changes_without_rebuilding() {
     let sources = root.path().join("crates/harn-vm/src/llm");
     fs::create_dir_all(sources.join("capability_sources")).unwrap();
     fs::create_dir_all(sources.join("catalog_sources")).unwrap();
+    // Edit the catalog by table path: the generated file's key order is not
+    // stable, so a text anchor can land in the wrong table.
+    let mut catalog: toml::Value =
+        toml::from_str(harn_provider_catalog::EMBEDDED_PROVIDERS_TOML).unwrap();
+    let fixture: toml::Value = toml::from_str(
+        "[providers.mock]\ndisplay_name = \"Mock source fixture\"\nauth_style = \"none\"\nfeatures = [\"wire_model_capabilities\"]\n\n[models.\"mock/source-falsifier-8062\"]\nname = \"Source falsifier 8062\"\nprovider = \"mock\"\nwire_model = \"source-wire-route-8062\"\ncontext_window = 8192\n",
+    )
+    .unwrap();
+    for table in ["providers", "models"] {
+        let rows = fixture[table].as_table().unwrap().clone();
+        catalog[table].as_table_mut().unwrap().extend(rows);
+    }
+    for (table, list) in [
+        ("usage_accounting_audit", "unverified"),
+        ("presentation", "featured_providers"),
+    ] {
+        catalog[table][list]
+            .as_array_mut()
+            .unwrap()
+            .insert(0, "mock".into());
+    }
+    // Support generation needs a chosen recommendation for a provider with
+    // chat routes; name the source row.
+    catalog["qc_defaults"]
+        .as_table_mut()
+        .unwrap()
+        .insert("mock".into(), "mock/source-falsifier-8062".into());
     fs::write(
         sources.join("catalog_sources/catalog.toml"),
-        format!("{}{}",
-            harn_provider_catalog::EMBEDDED_PROVIDERS_TOML,
-            "\n[providers.mock]\ndisplay_name = \"Mock source fixture\"\nauth_style = \"none\"\nfeatures = [\"wire_model_capabilities\"]\n\n[models.\"mock/source-falsifier-8062\"]\nname = \"Source falsifier 8062\"\nprovider = \"mock\"\nwire_model = \"source-wire-route-8062\"\ncontext_window = 8192\n"
-        ).replacen("unverified = [", "unverified = [\"mock\",", 1)
-            .replacen("featured_providers = [", "featured_providers = [\"mock\",", 1)
-            // Support generation needs a chosen recommendation for a
-            // provider with chat routes; name the source row.
-            .replacen("[qc_defaults]\n", "[qc_defaults]\nmock = \"mock/source-falsifier-8062\"\n", 1),
-    ).unwrap();
+        toml::to_string(&catalog).unwrap(),
+    )
+    .unwrap();
     fs::write(
         sources.join("capability_sources/capabilities.toml"),
         "[[provider.mock]]\nmodel_match = \"source-wire-route-8062\"\nstreaming = true\nprompt_caching = true\n",
