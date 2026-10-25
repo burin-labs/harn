@@ -102,6 +102,11 @@ git reset --soft HEAD~1   # later, to continue editing
 
 `git stash list` and `git stash show` stay available, since they only read.
 
+The guard checks Git aliases too. It asks the selected Git executable which
+commands are builtins, so a name introduced in a newer Git cannot hide an alias
+on an older installation. When a payload changes Git configuration, run a custom
+alias in a separate shell call so the guard can read its effective configuration.
+
 ## Keep complete command output
 
 Do not send a build or test directly into `grep`, `head`, or another filter.

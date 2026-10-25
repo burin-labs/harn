@@ -693,4 +693,32 @@ for stash_command in 'WORKTREE_MODE=review git stash push' 'git -c alias.hidden=
   fi
 done
 
+config_alias_verdict="$(
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git config alias.hidden stash; git hidden push"}}' \
+    | standalone_verdict
+)"
+if [[ "$config_alias_verdict" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$config_alias_verdict" != *'git stash'* ]] \
+  || [[ "$config_alias_verdict" == *'policy faulted'* ]]; then
+  echo "standalone guard trusted alias configuration changed by the payload" >&2
+  exit 1
+fi
+
+system_builtins="$(/usr/bin/git --list-cmds=builtins)"
+if [[ $'\n'"$system_builtins"$'\n' != *$'\nhistory\n'* ]]; then
+  history_verdict="$(
+    printf '%s' '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/git history"}}' \
+      | GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.history GIT_CONFIG_VALUE_0='stash push' standalone_verdict
+  )"
+  if [[ "$history_verdict" != *'"permissionDecision":"deny"'* ]] \
+    || [[ "$history_verdict" != *'git stash'* ]] \
+    || [[ "$history_verdict" == *'policy faulted'* ]]; then
+    echo "standalone guard assumed a builtin absent from the selected Git" >&2
+    exit 1
+  fi
+  echo "selected-Git history alias control: reached"
+else
+  echo "selected-Git history alias control: unmeasured, this Git owns the builtin"
+fi
+
 echo "agent_shell_guard_adapter_test: ok"

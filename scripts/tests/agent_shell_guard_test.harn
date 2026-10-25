@@ -1,6 +1,27 @@
 // Tests for the shared Codex and Claude shell guard.
-import "../agent_shell_guard.harn"
+import {
+  ADMISSION_CHECKED_ENV,
+  GIT_ALIASES_UNREADABLE,
+  MakeTargetCensus,
+  NO_CONFIG_ALIASES,
+  ShellGuardDecision,
+  UNMEASURED_MAKE_TARGETS,
+  WorktreeAdmissionCensus,
+  cargo_violation,
+  discarded_output_violation,
+  disposable_trash_violation,
+  git_config_aliases,
+  is_disposable_path,
+  make_target_census,
+  program_of,
+  raw_worktree_add_attempt,
+  raw_worktree_add_violation,
+  segments_of,
+  worktree_admission_census,
+  worktree_admission_for,
+} from "../agent_shell_guard.harn"
 import { WORKTREE_ADMISSION_POLICY } from "../agent_shell_guard_policy"
+import { TEST_GIT_BUILTINS, decision } from "./agent_shell_guard_test_fixtures"
 
 // A repository that owns the admission command, and one that does not. The
 // worktree rule must answer differently in the two, so every other case in
@@ -1251,7 +1272,13 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
   // refuse it if it were consulted.
   for command in ["git -C /missing status", "git -C /missing log -1", "git diff"] {
     assert(
-      decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, unreadable).allow,
+      decision(
+        claude_payload(command),
+        ADMITTED,
+        NO_MAKE_TARGETS,
+        unreadable,
+        { program -> ["status", "log", "diff"] },
+      ).allow,
       command + " must not consult the alias lookup",
     )
   }
@@ -1290,6 +1317,7 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
       ADMITTED,
       NO_MAKE_TARGETS,
       lookup,
+      { program -> ["status"] },
     ).allow,
   )
   assert(
@@ -1312,6 +1340,72 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
   assert(!verdict(claude_payload("eval 'git stash pop'")).allow)
   assert(!verdict(claude_payload("eval git stash drop")).allow)
   assert_eq(GIT_ALIASES_UNREADABLE, "<unreadable>")
+}
+
+pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
+  const aliases = { options ->
+    {
+      history: "stash push",
+      hidden: "stash push",
+      rewrite: "!git config alias.future 'stash push'; git future",
+    }
+  }
+  assert(
+    !decision(claude_payload("git rewrite"), ADMITTED, NO_MAKE_TARGETS, aliases, TEST_GIT_BUILTINS)
+      .allow,
+  )
+  assert(
+    !decision(
+      claude_payload("git history"),
+      ADMITTED,
+      NO_MAKE_TARGETS,
+      aliases,
+      { program -> ["status"] },
+    ).allow,
+  )
+  assert(
+    decision(
+      claude_payload("git history"),
+      ADMITTED,
+      NO_MAKE_TARGETS,
+      aliases,
+      { program -> ["history"] },
+    ).allow,
+  )
+  const versions = { program -> program == "/old/git" ? ["status"] : ["status", "history"] }
+  assert(
+    !decision(claude_payload("/old/git history"), ADMITTED, NO_MAKE_TARGETS, aliases, versions)
+      .allow,
+  )
+  assert(
+    decision(claude_payload("/new/git history"), ADMITTED, NO_MAKE_TARGETS, aliases, versions)
+      .allow,
+  )
+  for command in [
+    "git config alias.hidden 'stash push'; git hidden",
+    "git -C /repo config alias.hidden 'stash push' && git -C /repo hidden",
+    "bash -c 'git config alias.hidden \"stash push\"; git hidden'",
+    "git config --file aliases alias.hidden 'stash push'; git --config-env=alias.hidden=VALUE hidden",
+  ] {
+    assert(
+      !decision(
+        claude_payload(command),
+        ADMITTED,
+        NO_MAKE_TARGETS,
+        NO_CONFIG_ALIASES,
+        { program -> ["config", "status"] },
+      ).allow,
+    )
+  }
+  assert(
+    decision(
+      claude_payload("git config user.name Agent; git status"),
+      ADMITTED,
+      NO_MAKE_TARGETS,
+      NO_CONFIG_ALIASES,
+      { program -> ["config", "status"] },
+    ).allow,
+  )
 }
 
 /**

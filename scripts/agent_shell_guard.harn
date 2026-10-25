@@ -878,159 +878,14 @@ pub fn git_config_aliases(listing: string) -> dict {
   return aliases
 }
 
-/**
- * Git's built-in subcommands (`git --list-cmds=builtins`). Git never lets an alias shadow one, so only
- * another subcommand can be an alias. A built-in missing here (a newer git) costs a lookup, not a bypass.
- */
-const GIT_BUILTIN_COMMANDS: list<string> = [
-  "add",
-  "am",
-  "annotate",
-  "apply",
-  "archive",
-  "backfill",
-  "bisect",
-  "blame",
-  "branch",
-  "bugreport",
-  "bundle",
-  "cat-file",
-  "check-attr",
-  "check-ignore",
-  "check-mailmap",
-  "check-ref-format",
-  "checkout",
-  "checkout--worker",
-  "checkout-index",
-  "cherry",
-  "cherry-pick",
-  "clean",
-  "clone",
-  "column",
-  "commit",
-  "commit-graph",
-  "commit-tree",
-  "config",
-  "count-objects",
-  "credential",
-  "credential-cache",
-  "credential-cache--daemon",
-  "credential-store",
-  "describe",
-  "diagnose",
-  "diff",
-  "diff-files",
-  "diff-index",
-  "diff-pairs",
-  "diff-tree",
-  "difftool",
-  "fast-export",
-  "fast-import",
-  "fetch",
-  "fetch-pack",
-  "fmt-merge-msg",
-  "for-each-ref",
-  "for-each-repo",
-  "format-patch",
-  "fsck",
-  "fsck-objects",
-  "fsmonitor--daemon",
-  "gc",
-  "get-tar-commit-id",
-  "grep",
-  "hash-object",
-  "help",
-  "history",
-  "hook",
-  "index-pack",
-  "init",
-  "init-db",
-  "interpret-trailers",
-  "last-modified",
-  "log",
-  "ls-files",
-  "ls-remote",
-  "ls-tree",
-  "mailinfo",
-  "mailsplit",
-  "maintenance",
-  "merge",
-  "merge-base",
-  "merge-file",
-  "merge-index",
-  "merge-ours",
-  "merge-recursive",
-  "merge-recursive-ours",
-  "merge-recursive-theirs",
-  "merge-subtree",
-  "merge-tree",
-  "mktag",
-  "mktree",
-  "multi-pack-index",
-  "mv",
-  "name-rev",
-  "notes",
-  "pack-objects",
-  "pack-redundant",
-  "pack-refs",
-  "patch-id",
-  "pickaxe",
-  "prune",
-  "prune-packed",
-  "pull",
-  "push",
-  "range-diff",
-  "read-tree",
-  "rebase",
-  "receive-pack",
-  "reflog",
-  "refs",
-  "remote",
-  "remote-ext",
-  "remote-fd",
-  "repack",
-  "replace",
-  "replay",
-  "repo",
-  "rerere",
-  "reset",
-  "restore",
-  "rev-list",
-  "rev-parse",
-  "revert",
-  "rm",
-  "send-pack",
-  "shortlog",
-  "show",
-  "show-branch",
-  "show-index",
-  "show-ref",
-  "sparse-checkout",
-  "stage",
-  "stash",
-  "status",
-  "stripspace",
-  "submodule--helper",
-  "switch",
-  "symbolic-ref",
-  "tag",
-  "unpack-file",
-  "unpack-objects",
-  "update-index",
-  "update-ref",
-  "update-server-info",
-  "upload-archive",
-  "upload-archive--writer",
-  "upload-pack",
-  "var",
-  "verify-commit",
-  "verify-pack",
-  "verify-tag",
-  "version",
-  "whatchanged",
-  "worktree",
-  "write-tree",
-]
+/** Only the installed Git can establish which command names cannot be aliases. */
+pub fn git_builtin_commands(process: HarnessProcess, program: string) -> list<string> {
+  const listed = process.run({program: program, args: ["--list-cmds=builtins"]})
+  if listed.exit_code != 0 {
+    return []
+  }
+  return listed.stdout.trim().split("\n")
+}
 
 /**
  * Shell builtins and wrappers that change the environment, directory or shell state for what follows.
@@ -1065,6 +920,19 @@ const VARIABLE_NAME_CHARACTERS: string =
 fn command_may_change_git_environment(command: string) -> bool {
   if command.contains("(") || command.contains("`") {
     return true
+  }
+  for group in command_groups(command) {
+    for stage in group {
+      const child = stage.xargs_child_argv ?? []
+      const args = launched_argv(len(child) > 0 ? child : stage.argv, 0)
+      if argv_program(args) == "git" && (git_subcommand_args(args)[0] ?? "") == "config" {
+        return true
+      }
+      const nested = nested_shell_payload(args)
+      if nested != "" && command_may_change_git_environment(nested) {
+        return true
+      }
+    }
   }
   let spaced = command
   for separator in ["\"", "'", ";", "&", "|", ")", "{", "}", "\n", "\t"] {
@@ -1107,6 +975,8 @@ pub const GIT_ALIASES_UNREADABLE: string = "<unreadable>"
 
 /** The lookup for callers that read no configuration. */
 pub const NO_CONFIG_ALIASES: fn(list<string>) -> dict = { options -> {} }
+
+pub const NO_GIT_BUILTINS: fn(string) -> list<string> = { program -> [] }
 
 /**
  * Aliases git defines for the configuration that `options` (a command's own
@@ -1175,13 +1045,17 @@ fn git_args_write_stash(
   args: list<string>,
   depth: int,
   alias_lookup: fn(list<string>) -> dict,
+  builtin_lookup: fn(string) -> list<string>,
 ) -> bool {
   const verb = args[0] ?? ""
   if verb == "stash" {
     return !GIT_STASH_READ_ONLY.contains(args[1] ?? "")
   }
+  if builtin_lookup(argv[0] ?? "git").contains(verb) {
+    return false
+  }
   let expansion = git_inline_aliases(argv)[verb] ?? ""
-  if expansion == "" && !GIT_BUILTIN_COMMANDS.contains(verb) {
+  if expansion == "" {
     // The configuration that applies is the one the command's own global options select.
     const configured = alias_lookup(argv.slice(1, len(argv) - len(git_subcommand_args(argv))))
     if configured.has(GIT_ALIASES_UNREADABLE) {
@@ -1200,11 +1074,18 @@ fn git_args_write_stash(
       expansion.replace("!", "") + " " + args.slice(1, len(args)).join(" "),
       depth + 1,
       alias_lookup,
+      builtin_lookup,
     )
   }
   const words = expansion.split(" ").filter({ word -> word != "" })
   const expanded = ["git"] + words + args.slice(1, len(args))
-  return git_args_write_stash(argv, git_subcommand_args(expanded), depth + 1, alias_lookup)
+  return git_args_write_stash(
+    argv,
+    git_subcommand_args(expanded),
+    depth + 1,
+    alias_lookup,
+    builtin_lookup,
+  )
 }
 
 /**
@@ -1240,14 +1121,24 @@ fn operand_text_writes_stash(text: string) -> bool {
  * cost is that an unresolved `xargs` whose operands mention a non-read-only `stash`, even as
  * `xargs -a f grep stash`, is refused.
  */
-fn xargs_operands_write_stash(argv: list<string>, alias_lookup: fn(list<string>) -> dict) -> bool {
+fn xargs_operands_write_stash(
+  argv: list<string>,
+  alias_lookup: fn(list<string>) -> dict,
+  builtin_lookup: fn(string) -> list<string>,
+) -> bool {
   if argv_program(argv) != "xargs" {
     return false
   }
   for index in range(1, len(argv)) {
     const launched = argv.slice(index, len(argv))
     if argv_program(launched) == "git"
-      && git_args_write_stash(launched, git_subcommand_args(launched), 0, alias_lookup) {
+      && git_args_write_stash(
+        launched,
+        git_subcommand_args(launched),
+        0,
+        alias_lookup,
+        builtin_lookup,
+      ) {
       return true
     }
   }
@@ -1383,7 +1274,18 @@ fn has_expanding_heredoc(command: string) -> bool {
   return false
 }
 
-fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>) -> dict) -> bool {
+fn git_stash_write_in(
+  command: string,
+  depth: int,
+  alias_lookup: fn(list<string>) -> dict,
+  builtin_lookup: fn(string) -> list<string>,
+) -> bool {
+  // Alias and nested-shell bodies can change configuration after the outer preflight too.
+  const lookup = if command_may_change_git_environment(command) {
+    { options -> {"<unreadable>": ""} }
+  } else {
+    alias_lookup
+  }
   // A substitution body is a command line the shell runs, so it gets the same analysis. A body that
   // never closes, or one nested past the depth cap, cannot be proven harmless and is refused.
   const substitutions = substitution_bodies(command, !has_expanding_heredoc(command))
@@ -1391,7 +1293,7 @@ fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>
     return true
   }
   for body in substitutions.bodies {
-    if git_stash_write_in(body, depth + 1, alias_lookup) {
+    if git_stash_write_in(body, depth + 1, lookup, builtin_lookup) {
       return true
     }
   }
@@ -1399,7 +1301,8 @@ fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>
     for stage in group {
       // `xargs` launches its operands, so the stash rule reads the child the scanner resolved.
       const xargs_child = stage.xargs_child_argv ?? []
-      if len(xargs_child) == 0 && xargs_operands_write_stash(stage.argv, alias_lookup) {
+      if len(xargs_child) == 0
+        && xargs_operands_write_stash(stage.argv, lookup, builtin_lookup) {
         return true
       }
       const launched = if len(xargs_child) > 0 {
@@ -1409,13 +1312,13 @@ fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>
       }
       const argv = launched_argv(launched, 0)
       if argv_program(argv) == "git" {
-        if git_args_write_stash(argv, git_subcommand_args(argv), depth, alias_lookup) {
+        if git_args_write_stash(argv, git_subcommand_args(argv), depth, lookup, builtin_lookup) {
           return true
         }
       }
       if depth < 4 {
         const nested = nested_shell_payload(argv)
-        if nested != "" && git_stash_write_in(nested, depth + 1, alias_lookup) {
+        if nested != "" && git_stash_write_in(nested, depth + 1, lookup, builtin_lookup) {
           return true
         }
       }
@@ -1435,15 +1338,9 @@ fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>
 pub fn git_stash_violation(
   command: string,
   alias_lookup: fn(list<string>) -> dict = NO_CONFIG_ALIASES,
+  builtin_lookup: fn(string) -> list<string> = NO_GIT_BUILTINS,
 ) -> string {
-  // A command that may change git's environment runs git under a configuration the lookup, which
-  // runs in the hook's own environment, cannot see. Its non-built-in subcommands are unreadable.
-  const lookup = if command_may_change_git_environment(command) {
-    { options -> {"<unreadable>": ""} }
-  } else {
-    alias_lookup
-  }
-  if !git_stash_write_in(command, 0, lookup) {
+  if !git_stash_write_in(command, 0, alias_lookup, builtin_lookup) {
     return ""
   }
   return "`git stash` is refused: the stash list is shared by every linked worktree, so a pop can apply "
@@ -1737,6 +1634,7 @@ pub fn decision(
   census: WorktreeAdmissionCensus,
   make_targets: MakeTargetCensus,
   alias_lookup: fn(list<string>) -> dict = NO_CONFIG_ALIASES,
+  builtin_lookup: fn(string) -> list<string> = NO_GIT_BUILTINS,
 ) -> ShellGuardDecision {
   let parsed = nil
   try {
@@ -1827,7 +1725,7 @@ pub fn decision(
   if make_owned != "" {
     return {allow: false, reason: make_owned}
   }
-  const stash = git_stash_violation(command, alias_lookup)
+  const stash = git_stash_violation(command, alias_lookup, builtin_lookup)
   if stash != "" {
     return {allow: false, reason: stash}
   }
@@ -1852,6 +1750,7 @@ fn main(harness: Harness) {
     worktree_admission_census_from_env(harness.env),
     make_target_census_from_env(harness.env),
     { options -> git_config_aliases_for(harness.process, options) },
+    { program -> git_builtin_commands(harness.process, program) },
   )
   if verdict.allow {
     return nil
