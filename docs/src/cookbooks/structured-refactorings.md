@@ -170,10 +170,18 @@ parameter left out is removed. `edit_reorder_parameters` permutes parameters
 and every call's arguments together. Python keyword arguments are matched by
 name.
 
+A trait, interface, or overridden method changes with its whole override
+family: the root declaration, every implementation and override in the
+workspace, and every call. Each member keeps its own parameter names. In a
+TypeScript signature without a body, a new parameter's `default` becomes `?`.
+The family must be closed in the workspace: every supertype on a member's chain
+resolves to one workspace declaration, and no namesake sits in a macro, a class
+field, a generated file, or an unrelated type.
+
 Every refusal writes nothing and lists the blocking `sites`: a removed
 parameter the body still reads (`parameter_in_use`), the function passed as a
 value (`value_reference`), a spread or splat call (`unsupported_call_site`),
-a trait, interface, or overridden method (`overrides_present`), or a
+an override family that cannot be enumerated soundly (`overrides_present`), or a
 parameter list fixed from outside the function (`fixed_signature`): a test,
 bench or entry attribute, `fn main`, an exported ABI symbol, or a declared
 function type.
