@@ -157,9 +157,7 @@ fn a_cancel_stops_the_wait_within_a_heartbeat_and_writes_nothing() {
     let canceller = std::thread::spawn({
         let cancel = cancel.clone();
         move || {
-            heartbeat_rx
-                .recv_timeout(std::time::Duration::from_secs(20))
-                .expect("the wait reports a heartbeat");
+            harn_clock::test_support::recv_within("the wait's heartbeat", &heartbeat_rx);
             cancel.store(true, Ordering::SeqCst);
             Instant::now()
         }

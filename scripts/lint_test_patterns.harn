@@ -28,6 +28,10 @@ import { scan_glob } from "./path_visibility.harn"
 import { is_mechanically_checked_source_projection } from "./source_projections.harn"
 
 const THREAD_SLEEP_ALLOWLIST: list<string> = [
+  // Proves a writer stays blocked on the workspace write lease while a rename
+  // commits. Blocked progress is only observable over time; a slow host can
+  // weaken the check but never fail it, because the blocked writer cannot run.
+  "crates/harn-hostlib/src/code_index/lsp/interrupt_tests.rs",
   // Process-group disappearance is observed through kill(2), after the child
   // and its descendant have reported readiness. A virtual clock cannot reap
   // OS processes; the bounded poll names the surviving process group.
