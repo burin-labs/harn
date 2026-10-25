@@ -880,10 +880,10 @@ fn __post_turn_verdict_result(
 }
 
 fn __post_turn_with_narrowing(
-  outcome: any,
-  narrowing: any,
+  outcome: dict,
+  narrowing: dict?,
   completion_signal: AgentCompletionSignal,
-) {
+) -> dict {
   const signalled = outcome + {completion_signal: completion_signal}
   if narrowing == nil {
     return signalled
