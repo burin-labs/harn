@@ -102,8 +102,11 @@ pub(crate) struct Connection {
     shared: Arc<Shared>,
     next_id: AtomicI64,
     killer: Arc<dyn ProcessKiller>,
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pid: Option<u32>,
+    /// The thread that waits on the child, so a test can join it.
+    #[cfg(all(test, target_os = "linux"))]
+    reader: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Connection {
@@ -128,7 +131,7 @@ impl Connection {
         })
         .map_err(|err| format!("could not start `{program}`: {err}"))?;
         let killer = handle.killer();
-        #[cfg(test)]
+        #[cfg(all(test, target_os = "linux"))]
         let pid = handle.pid();
         let (Some(stdin), Some(stdout), Some(stderr)) = (
             handle.take_stdin(),
@@ -148,13 +151,16 @@ impl Connection {
             .name(format!("lsp-writer-{}", launch.id))
             .spawn(move || write_loop(stdin, frames))
             .map_err(|err| format!("spawn writer: {err}"))?;
-        let connection = Self {
+        #[cfg_attr(not(all(test, target_os = "linux")), allow(unused_mut))]
+        let mut connection = Self {
             writer: writer.clone(),
             shared: shared.clone(),
             next_id: AtomicI64::new(1),
             killer,
-            #[cfg(test)]
+            #[cfg(all(test, target_os = "linux"))]
             pid,
+            #[cfg(all(test, target_os = "linux"))]
+            reader: None,
         };
         let stderr_shared = shared.clone();
         harn_parser::runtime_stack::builder()
@@ -162,7 +168,7 @@ impl Connection {
             .spawn(move || drain_stderr(stderr, &stderr_shared))
             .map_err(|err| format!("spawn stderr reader: {err}"))?;
         let settings = spec.settings();
-        harn_parser::runtime_stack::builder()
+        let _reader = harn_parser::runtime_stack::builder()
             .name(format!("lsp-reader-{}", launch.id))
             .spawn(move || {
                 read_loop(stdout, &shared, &writer, settings);
@@ -171,6 +177,10 @@ impl Connection {
                 let _ = handle.wait();
             })
             .map_err(|err| format!("spawn reader: {err}"))?;
+        #[cfg(all(test, target_os = "linux"))]
+        {
+            connection.reader = Some(_reader);
+        }
         Ok(connection)
     }
 
@@ -532,15 +542,14 @@ mod tests {
         let launch = &spec.launches[0];
         let _env = crate::process::test_support::declare_inherited();
         let root = tempfile::tempdir().unwrap();
-        let connection = Connection::spawn(spec, launch, "cat", root.path()).expect("spawn");
+        let mut connection = Connection::spawn(spec, launch, "cat", root.path()).expect("spawn");
         let pid = connection.pid.expect("pid");
         let status = format!("/proc/{pid}/status");
         assert!(Path::new(&status).exists());
+        let reader = connection.reader.take().expect("reader thread");
         drop(connection);
-        let until = Instant::now() + Duration::from_secs(10);
-        while Path::new(&status).exists() && Instant::now() < until {
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        // The reader returns only after it has waited on the child.
+        reader.join().expect("reader thread");
         let state = std::fs::read_to_string(&status).unwrap_or_default();
         assert!(
             !Path::new(&status).exists(),
