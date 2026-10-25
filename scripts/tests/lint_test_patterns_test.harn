@@ -263,6 +263,26 @@ pipeline test_literal_timeout_baseline_is_a_ratchet(harness: Harness, task: unkn
 pipeline test_live_measurements_have_exact_exemptions(harness: Harness) {
   assert_eq(pattern_baseline_count("ignore_attr", "crates/harn-vm/src/security/behavioral.rs"), 1)
   assert_eq(pattern_baseline_count("ignore_attr", "crates/harn-vm/src/security/stance_judge.rs"), 1)
+  assert_eq(pattern_baseline_count("ignore_attr", "crates/harn-builtins/src/postgres/tests.rs"), 15)
+  assert_eq(
+    pattern_baseline_count("ignore_attr", "crates/harn-builtins/src/postgres/describe_tests.rs"),
+    5,
+  )
+  assert_eq(
+    pattern_baseline_count("ignore_attr", "crates/harn-builtins/src/postgres/tests/migrations.rs"),
+    11,
+  )
+  assert_eq(
+    pattern_baseline_count(
+      "ignore_attr",
+      "crates/harn-builtins/src/postgres/tests/transactions.rs",
+    ),
+    5,
+  )
+  assert_eq(
+    pattern_baseline_count("ignore_attr", "crates/harn-builtins/src/postgres/tests/other.rs"),
+    nil,
+  )
   assert_eq(pattern_baseline_count("ignore_attr", "crates/harn-vm/src/security/other.rs"), nil)
   assert_eq(pattern_baseline_count("tokio_sleep", "crates/harn-vm/src/security/behavioral.rs"), nil)
   assert_eq(shell_spawn_literal_baseline("crates/harn-vm/src/op_interrupt.rs"), 0)

@@ -278,7 +278,7 @@ impl SharedHostSessions {
     }
 }
 
-pub(crate) struct AgentHostSessionRuntime {
+pub struct AgentHostSessionRuntime {
     sessions: SharedHostSessions,
 }
 
@@ -691,14 +691,14 @@ fn cache_usage_json(source: &VmValue) -> serde_json::Value {
     vm_to_json(&VmValue::dict(projected))
 }
 
-fn opt_str(map: &crate::value::DictMap, key: &str) -> Option<String> {
+pub fn opt_str(map: &crate::value::DictMap, key: &str) -> Option<String> {
     map.get(key).and_then(|v| match v {
         VmValue::String(s) => Some(s.to_string()),
         _ => None,
     })
 }
 
-fn opt_int(map: &crate::value::DictMap, key: &str) -> Option<i64> {
+pub fn opt_int(map: &crate::value::DictMap, key: &str) -> Option<i64> {
     map.get(key).and_then(|v| match v {
         VmValue::Int(i) => Some(*i),
         VmValue::Float(f) => Some(*f as i64),

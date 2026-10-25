@@ -36,6 +36,10 @@ TITLE="Breaking surface"
 
 # shellcheck source=.github/scripts/lib/breaking-fragments.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/breaking-fragments.sh"
+# shellcheck source=scripts/lib/sha256.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../scripts/lib/sha256.sh"
+# shellcheck source=.github/scripts/lib/public-api-rustdoc.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/public-api-rustdoc.sh"
 
 usage() {
   echo "usage: $0 cli | rust-api [REPORT]" >&2
@@ -94,7 +98,7 @@ cli_breaks() {
 # cargo-semver-checks assume a major release and skip every lint unless the
 # release type is given, which is the zero this refuses.
 rust_api_breaks() {
-  local report=$1 plain checked summarized unchecked
+  local report=$1 plain checked summarized unchecked named incomplete pending
   if [ ! -s "$report" ]; then
     echo "::error title=$TITLE::cargo-semver-checks report $report is missing or empty." >&2
     return 1
@@ -103,8 +107,21 @@ rust_api_breaks() {
   plain=$(sed $'s/\x1b\\[[0-9;]*m//g' "$report")
   checked=$(grep -Ec '^[[:space:]]*Checking[[:space:]]' <<<"$plain" || true)
   summarized=$(grep -Ec '^[[:space:]]*Summary[[:space:]]' <<<"$plain" || true)
-  if [ "$checked" -eq 0 ] || [ "$checked" -ne "$summarized" ]; then
-    echo "::error title=$TITLE::cargo-semver-checks report $report checked $checked crate(s) and summarized $summarized, so it did not finish; read it for the build error." >&2
+  named=$(grep -Ec '^[[:space:]]*Crate[[:space:]]' <<<"$plain" || true)
+  incomplete=$(awk '
+    /^[[:space:]]*Crate[[:space:]]/ {
+      if (name != "" && (checks != 1 || summaries != 1)) print name
+      name = $2; checks = 0; summaries = 0
+    }
+    /^[[:space:]]*Checking[[:space:]]/ { checks++ }
+    /^[[:space:]]*Summary[[:space:]]/ { summaries++ }
+    END { if (name != "" && (checks != 1 || summaries != 1)) print name }
+  ' <<<"$plain")
+  pending=$(printf '%s\n' "$incomplete" | awk 'NF { count++ } END { print count + 0 }')
+  if [ "$checked" -eq 0 ] || [ "$checked" -ne "$summarized" ] \
+    || [ -n "$incomplete" ] \
+    || { [ "$named" -ne 0 ] && [ "$named" -ne "$checked" ]; }; then
+    echo "::error title=$TITLE::cargo-semver-checks report $report checked $checked crate(s) and summarized $summarized; named=$named pending=$pending, so it did not finish. Incomplete crates: ${incomplete:-<unreported>}." >&2
     return 1
   fi
   unchecked=$(grep -Ec '^[[:space:]]*Checked[[:space:]].* 0 checks' <<<"$plain" || true)
@@ -112,7 +129,7 @@ rust_api_breaks() {
     echo "::error title=$TITLE::cargo-semver-checks ran zero lints on $unchecked crate(s), so it measured nothing; pass an explicit release type." >&2
     return 1
   fi
-  echo "::notice title=$TITLE::cargo-semver-checks checked $checked crate(s) against $merge_base." >&2
+  echo "::notice title=$TITLE::cargo-semver-checks checked $checked crate(s) against $merge_base; pending=0 incomplete=[]." >&2
   # semver_report heads each crate with `Crate <package>`; cargo-semver-checks
   # then prints `Checking`, its failed lints, and a `Summary` line. A report
   # from `cargo semver-checks --workspace` names the crate on `Checking`.
@@ -126,38 +143,12 @@ rust_api_breaks() {
   ' <<<"$plain"
 }
 
-# publishable_rustdoc OUT: write rustdoc JSON for every publishable library
-# crate of the checked-out tree into OUT, and list them in OUT/crates.tsv as
-# `package<TAB>crate`. One `cargo doc` covers every crate, so the dependency
-# graph and feature unification build once per side rather than once per
-# crate, in the target directory the rest of the job already warmed.
-publishable_rustdoc() {
-  local out=$1 metadata target_dir package crate
-  local -a packages=()
-  mkdir -p "$out"
-  metadata=$(cargo metadata --format-version 1 --no-deps --locked)
-  target_dir=$(jq -r .target_directory <<<"$metadata")
-  # `publish = false` reads as []; proc-macro crates have no rustdoc API to diff.
-  jq -r '.packages[] | select(.publish != [])
-    | . as $package | .targets[] | select(.kind | index("lib") or index("rlib"))
-    | [$package.name, (.name | gsub("-"; "_"))] | @tsv' <<<"$metadata" >"$out/crates.tsv"
-  while IFS=$'\t' read -r package crate; do
-    packages+=(-p "$package")
-  done <"$out/crates.tsv"
-  rm -f "$target_dir"/doc/*.json
-  RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="-Z unstable-options --output-format json" \
-    cargo doc --locked --no-deps --lib "${packages[@]}" >&2
-  while IFS=$'\t' read -r package crate; do
-    cp "$target_dir/doc/$crate.json" "$out/$crate.json"
-  done <"$out/crates.tsv"
-}
-
 # semver_report WORK: print a cargo-semver-checks report for every publishable
 # crate, current tree against the merge base. The exit status of each check is
 # not the verdict: an unchanged 0.x version fails on minor-level additions too.
 # The report's per-crate summaries are, and rust_api_breaks reads them.
 #
-# The baseline is documented by checking the merge base out in place and back.
+# An uncached baseline is documented by checking the merge base out and back.
 # A second checkout at another path cannot share the target directory: Cargo
 # keys a workspace crate's build-script output by its workspace-relative path,
 # so the two checkouts would reuse each other's generated sources, which name
@@ -171,10 +162,21 @@ semver_report() {
   # Return to the branch when there is one, else to the detached commit.
   head=$(git symbolic-ref --quiet --short HEAD || git rev-parse HEAD)
   publishable_rustdoc "$work/current"
+  if [[ -n "${PUBLIC_API_RUSTDOC_OUTPUT:-}" ]]; then
+    mkdir -p "$PUBLIC_API_RUSTDOC_OUTPUT"
+    cp "$work/current/"* "$PUBLIC_API_RUSTDOC_OUTPUT/"
+  fi
   trap 'git checkout --quiet "'"$head"'"; rm -rf "'"$work"'"' EXIT
-  git checkout --quiet --detach "$merge_base"
-  publishable_rustdoc "$work/baseline-doc"
-  git checkout --quiet "$head"
+  if [[ -n "${PUBLIC_API_RUSTDOC_BASELINE:-}" ]] \
+    && public_api_rustdoc_valid "$PUBLIC_API_RUSTDOC_BASELINE" "$merge_base"; then
+    cp -R "$PUBLIC_API_RUSTDOC_BASELINE" "$work/baseline-doc"
+    echo "::notice title=$TITLE::Reused exact baseline rustdoc for $merge_base." >&2
+  else
+    echo "::notice title=$TITLE::No matching baseline rustdoc; documenting $merge_base." >&2
+    git checkout --quiet --detach "$merge_base"
+    publishable_rustdoc "$work/baseline-doc"
+    git checkout --quiet "$head"
+  fi
   while IFS=$'\t' read -r package crate; do
     if [ ! -f "$work/baseline-doc/$crate.json" ]; then
       echo "::notice title=$TITLE::$package is new since $merge_base; nothing to compare." >&2

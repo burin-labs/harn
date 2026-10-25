@@ -129,7 +129,7 @@ fn production_construction_and_dispatch_share_the_typed_owner() {
             "RunApprovalPolicy::construct_with_resolver",
         ),
         (
-            "stdlib/git/approval.rs",
+            "../../harn-builtins/src/git/approval.rs",
             "enforce_git_approval",
             "current_run_approval_policy",
         ),

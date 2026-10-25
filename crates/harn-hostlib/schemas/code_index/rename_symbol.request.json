@@ -47,6 +47,11 @@
       "enum": ["auto", "language_server", "syntax_tree"],
       "description": "Which engine computes a rename. `auto` (the default, overridable with `HARN_REFACTOR_BACKEND`) asks the language's server and falls back to the syntax-tree engine when the server is missing or cannot answer; `language_server` never falls back; `syntax_tree` never starts a server. Replace mode always uses the syntax-tree engine."
     },
+    "deadline_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Longest the call may take. When it passes first, the rename stops without writes and returns `refused` instead of waiting on, or falling back from, a slow language server."
+    },
     "dry_run": {
       "type": "boolean",
       "description": "When true, validate end-to-end (parse, conflict, syntax) and return the planned edits without writing. Defaults to false."

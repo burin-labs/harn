@@ -23,9 +23,25 @@
         "syntax_error",
         "declined",
         "scope_exceeded",
-        "backend_unavailable"
+        "backend_unavailable",
+        "cancelled",
+        "refused"
       ],
-      "description": "`declined`: the language server refused the rename. `scope_exceeded`: the server found references outside `scope`. `backend_unavailable`: `backend` was `language_server` and no server could answer."
+      "description": "`declined`: the language server refused the rename. `scope_exceeded`: the server found references outside `scope`. `backend_unavailable`: `backend` was `language_server` and no server could answer. `cancelled`: the call was stopped before it wrote anything. `refused`: `deadline_ms` or the caller's deadline passed before anything was written."
+    },
+    "retry_after_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Set on `refused` when a language server was still starting: how long it may keep starting in the background before asking it again is worthwhile."
+    },
+    "alternative": {
+      "type": "object",
+      "description": "Set on `refused` when a language server was the wait: request fields that answer without waiting on one.",
+      "properties": {
+        "backend": { "type": "string", "enum": ["syntax_tree"] }
+      },
+      "required": ["backend"],
+      "additionalProperties": false
     },
     "backend": {
       "type": "object",

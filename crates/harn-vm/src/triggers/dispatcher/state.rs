@@ -15,11 +15,11 @@ tokio::task_local! {
     pub(super) static ACTIVE_DISPATCH_IS_REPLAY: bool;
 }
 
-pub(crate) fn current_dispatch_context() -> Option<DispatchContext> {
+pub fn current_dispatch_context() -> Option<DispatchContext> {
     ACTIVE_DISPATCH_CONTEXT.with(|slot| slot.borrow().clone())
 }
 
-pub(crate) fn current_dispatch_is_replay() -> bool {
+pub fn current_dispatch_is_replay() -> bool {
     ACTIVE_DISPATCH_IS_REPLAY
         .try_with(|is_replay| *is_replay)
         .unwrap_or(false)
@@ -36,7 +36,7 @@ pub(crate) fn current_dispatch_is_replay() -> bool {
 /// driven by the dispatch context. Real binaries still honour `HARN_REPLAY`,
 /// which is how a child `harn` process spawned during replay inherits its
 /// replay state.
-pub(crate) fn is_replay() -> bool {
+pub fn is_replay() -> bool {
     current_dispatch_is_replay() || replay_env_flag()
 }
 
@@ -64,7 +64,7 @@ pub(crate) async fn with_replay_scope<F: std::future::Future>(
     ACTIVE_DISPATCH_IS_REPLAY.scope(is_replay, fut).await
 }
 
-pub(crate) fn current_dispatch_wait_lease() -> Option<DispatchWaitLease> {
+pub fn current_dispatch_wait_lease() -> Option<DispatchWaitLease> {
     ACTIVE_DISPATCH_WAIT_LEASE.with(|slot| slot.borrow().clone())
 }
 

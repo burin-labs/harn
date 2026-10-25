@@ -61,14 +61,18 @@ jobs:
           tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
           echo "released runtime: $tag"
           gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
-            --pattern 'harn-x86_64-unknown-linux-gnu.tar.gz' \
+            --pattern 'harn-x86_64-unknown-linux-gnu.tar.*' \
             --pattern 'SHA256SUMS' --dir "$dir"
           cd "$dir"
           # A downloaded executable is checked before it is run, and the check
           # is scoped to the one asset: `sha256sum -c` on the whole file would
           # fail on every asset this job deliberately did not download.
-          grep 'harn-x86_64-unknown-linux-gnu.tar.gz' SHA256SUMS | sha256sum -c -
-          tar -xzf harn-x86_64-unknown-linux-gnu.tar.gz
+          # Newer releases also carry a .tar.gz copy for the ACP registry, so
+          # prefer .tar.xz and fall back to .tar.gz for older releases.
+          asset=harn-x86_64-unknown-linux-gnu.tar.xz
+          [ -f "$asset" ] || asset=harn-x86_64-unknown-linux-gnu.tar.gz
+          grep -F "$asset" SHA256SUMS | sha256sum -c -
+          tar -xf "$asset"
           # Located rather than assumed: the archive's internal layout is the
           # release pipeline's to change, and a hard-coded path would fail as a
           # missing file long after the reason was forgotten.

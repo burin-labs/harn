@@ -70,6 +70,7 @@ define_runtime_build_features! {
     full => "full",
     llm_bench_internals => "llm-bench-internals",
     vm_bench_internals => "vm-bench-internals",
+    vm_test_support => "vm-test-support",
     content => "content",
     compression => "compression",
     http_compression => "http-compression",

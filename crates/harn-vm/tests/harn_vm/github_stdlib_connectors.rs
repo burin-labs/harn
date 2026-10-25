@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::{json, Value as JsonValue};
 
+use harn_runtime::register_vm_stdlib;
 use harn_vm::{
-    compile_source, install_active_connector_clients, register_vm_stdlib, reset_thread_local_state,
-    ClientError, ConnectorClient, ProviderId, VmError,
+    compile_source, install_active_connector_clients, reset_thread_local_state, ClientError,
+    ConnectorClient, ProviderId, VmError,
 };
 
 #[derive(Default)]
@@ -49,12 +50,12 @@ impl ConnectorClient for RecordingClient {
             "github.release.latest" => json!({
                 "ok": true,
                 "tag_name": "v0.8.4",
-                "asset_names": ["harn-aarch64-apple-darwin.tar.gz"]
+                "asset_names": ["harn-aarch64-apple-darwin.tar.xz"]
             }),
             "github.release.assets" => json!({
                 "ok": true,
                 "release_id": 501,
-                "asset_names": ["harn-x86_64-unknown-linux-gnu.tar.gz"]
+                "asset_names": ["harn-x86_64-unknown-linux-gnu.tar.xz"]
             }),
             "github.pr.enable_auto_merge" => json!({
                 "state": "already_enabled",
@@ -116,7 +117,7 @@ pipeline main(harness: Harness, task: unknown) {
   assert_eq(workflow_run_cancel(harness.net, "octo-org/octo-repo", 123).accepted, true, "cancel result")
   assert_eq(trim(read_file_at_ref(harness.net, "https://github.com/octo-org/octo-repo.git", ".harn-version", "main").text), "v0.8.4", "file text")
   assert_eq(latest_release(harness.net, "octo-org/octo-repo").tag_name, "v0.8.4", "release tag")
-  assert_eq(release_assets(harness.net, "octo-org/octo-repo", 501).asset_names[0], "harn-x86_64-unknown-linux-gnu.tar.gz", "asset names")
+  assert_eq(release_assets(harness.net, "octo-org/octo-repo", 501).asset_names[0], "harn-x86_64-unknown-linux-gnu.tar.xz", "asset names")
   const auto_merge = enable_auto_merge(harness.net, "octo-org/octo-repo", 7, {method: "squash"})
   assert_eq(auto_merge.ok, true, "auto-merge ok")
   assert_eq(auto_merge.state, "already_enabled", "auto-merge state")

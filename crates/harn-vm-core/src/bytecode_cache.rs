@@ -876,10 +876,7 @@ fn adjacent_path_with_extension(source_path: &Path, ext: &str) -> Option<PathBuf
     if stem.is_empty() {
         return None;
     }
-    let parent = source_path.parent().unwrap_or_else(|| Path::new(""));
-    let mut out = parent.join(stem);
-    out.set_extension(ext);
-    Some(out)
+    Some(source_path.with_extension(ext))
 }
 
 fn ensure_parent_dir(path: &Path) -> io::Result<()> {

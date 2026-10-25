@@ -3,10 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::orchestration::CapabilityPolicy;
 
-use super::{
-    base_workspace_roots, normalize_for_policy, normalized_workspace_roots, path_is_within,
-    warn_once,
-};
+use super::{base_workspace_roots, normalize_for_policy, path_is_within, warn_once};
 
 pub(crate) const WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
 pub(crate) const TMPDIR_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
@@ -17,18 +14,25 @@ pub fn is_workspace_runtime_directory(name: &OsStr) -> bool {
     name == OsStr::new(WORKSPACE_TMPDIR_NAME) || name == OsStr::new(WORKSPACE_TOOLCHAIN_CACHE_NAME)
 }
 
+/// Where a workspace-local runtime directory lives, without creating it. The
+/// first normalized root is always the first base root, so this skips the git
+/// topology walk.
+fn planned_workspace_dir(policy: &CapabilityPolicy, name: &str) -> Option<PathBuf> {
+    if !policy.sandbox_profile.enforces_path_scope() {
+        return None;
+    }
+    Some(base_workspace_roots(policy).into_iter().next()?.join(name))
+}
+
 fn create_self_ignored_dir(
     policy: &CapabilityPolicy,
     name: &str,
     warning_key: &str,
     label: &str,
 ) -> Option<PathBuf> {
-    if !policy.sandbox_profile.enforces_path_scope() {
-        return None;
-    }
-    let root = normalized_workspace_roots(policy).into_iter().next()?;
-    let path = root.join(name);
-    if let Err(error) = initialize_self_ignored_dir(&root, name) {
+    let path = planned_workspace_dir(policy, name)?;
+    let root = path.parent()?;
+    if let Err(error) = initialize_self_ignored_dir(root, name) {
         warn_once(
             warning_key,
             &format!(
@@ -199,6 +203,18 @@ fn workspace_toolchain_env_with_package_cache(
     let Some(root) = workspace_local_toolchain_cache(policy) else {
         return Vec::new();
     };
+    toolchain_env_at(policy, &root, package_cache, true)
+}
+
+/// The toolchain environment rooted at `root`. `seed` writes the credential-free
+/// npm and Composer stand-ins the values point at; a read passes `false` and
+/// gets the same values.
+fn toolchain_env_at(
+    policy: &CapabilityPolicy,
+    root: &Path,
+    package_cache: Option<PathBuf>,
+    seed: bool,
+) -> Vec<(String, String)> {
     let path = |key: &str, suffix: &str| {
         inherited_workspace_cache_path(policy, key)
             .unwrap_or_else(|| root.join(suffix).display().to_string())
@@ -340,9 +356,13 @@ fn workspace_toolchain_env_with_package_cache(
         // and never carries a token into the workspace.
         env.push((
             "NPM_CONFIG_USERCONFIG".to_string(),
-            seed_sanitized_npmrc(&home.join(".npmrc"), &root.join("npm/npmrc"))
-                .display()
-                .to_string(),
+            if seed {
+                seed_sanitized_npmrc(&home.join(".npmrc"), &root.join("npm/npmrc"))
+            } else {
+                root.join("npm/npmrc")
+            }
+            .display()
+            .to_string(),
         ));
         // Composer treats an unreadable `auth.json` as fatal, and that file
         // is on the credential denylist. Pointing COMPOSER_HOME at a
@@ -350,9 +370,13 @@ fn workspace_toolchain_env_with_package_cache(
         // keeps repositories and preferred-install settings and drops tokens.
         env.push((
             "COMPOSER_HOME".to_string(),
-            seed_composer_home(&home, &root.join("composer/home"))
-                .display()
-                .to_string(),
+            if seed {
+                seed_composer_home(&home, &root.join("composer/home"))
+            } else {
+                root.join("composer/home")
+            }
+            .display()
+            .to_string(),
         ));
     }
     env
@@ -425,9 +449,12 @@ fn workspace_toolchain_env(policy: &CapabilityPolicy) -> Vec<(String, String)> {
 }
 
 pub(crate) fn inject_workspace_tmpdir(env: &mut Vec<(String, String)>, policy: &CapabilityPolicy) {
-    let Some(tmpdir) = workspace_local_tmpdir(policy) else {
-        return;
-    };
+    if let Some(tmpdir) = workspace_local_tmpdir(policy) {
+        push_tmpdir(env, &tmpdir);
+    }
+}
+
+fn push_tmpdir(env: &mut Vec<(String, String)>, tmpdir: &Path) {
     let tmpdir = tmpdir.display().to_string();
     for key in TMPDIR_ENV_KEYS {
         if !env.iter().any(|(existing, _)| existing == key) {
@@ -436,6 +463,17 @@ pub(crate) fn inject_workspace_tmpdir(env: &mut Vec<(String, String)>, policy: &
     }
 }
 
+fn push_absent(env: &mut Vec<(String, String)>, entries: Vec<(String, String)>) {
+    for (key, value) in entries {
+        if !env.iter().any(|(existing, _)| existing == &key) {
+            env.push((key, value));
+        }
+    }
+}
+
+/// The environment a confined child starts with. Creates the workspace temp
+/// and cache directories and, on macOS, the launchers that keep the child's
+/// temporary storage inside the workspace.
 pub(crate) fn inject_workspace_process_env(
     env: &mut Vec<(String, String)>,
     policy: &CapabilityPolicy,
@@ -443,14 +481,31 @@ pub(crate) fn inject_workspace_process_env(
     inject_workspace_tmpdir(env, policy);
     #[cfg(target_os = "macos")]
     super::macos::private_temp::inject_env(env, policy);
-    for (key, value) in workspace_toolchain_env(policy) {
-        if !env.iter().any(|(existing, _)| existing == &key) {
-            env.push((key, value));
-        }
-    }
+    push_absent(env, workspace_toolchain_env(policy));
     inject_jvm_loopback_env(env, policy);
     #[cfg(target_os = "macos")]
     super::macos::swiftpm::inject_env(env, policy);
+}
+
+/// The workspace defaults an in-process environment read sees, computed
+/// without touching disk. A read must not materialize anything: a provider
+/// catalog reads the environment once per provider, and building the child
+/// environment for each read rewrote toolchain launchers every agent step.
+/// The macOS launchers and temp alias exist only for children, so they are
+/// absent here.
+fn workspace_process_env_for_read(policy: &CapabilityPolicy) -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    if let Some(tmpdir) = planned_workspace_dir(policy, WORKSPACE_TMPDIR_NAME) {
+        push_tmpdir(&mut env, &tmpdir);
+    }
+    if let Some(root) = planned_workspace_dir(policy, WORKSPACE_TOOLCHAIN_CACHE_NAME) {
+        push_absent(
+            &mut env,
+            toolchain_env_at(policy, &root, crate::user_dirs::package_cache_dir(), false),
+        );
+    }
+    inject_jvm_loopback_env(&mut env, policy);
+    env
 }
 
 /// The JVM option that makes a loopback-only grant hold for Java children.
@@ -522,6 +577,14 @@ pub fn active_workspace_process_env() -> Vec<(String, String)> {
     let mut env = Vec::new();
     inject_workspace_process_env(&mut env, &policy);
     env
+}
+
+/// [`active_workspace_process_env`] for an in-process read: the same values a
+/// read can see, with nothing created on disk.
+pub(crate) fn active_workspace_env_for_read() -> Vec<(String, String)> {
+    crate::orchestration::current_execution_policy()
+        .map(|policy| workspace_process_env_for_read(&policy))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

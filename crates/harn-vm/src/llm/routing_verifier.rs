@@ -65,7 +65,7 @@ impl VerifierSignal {
 /// Each verifier kind has a defensible default but scripts can flip
 /// it via `on_fail` in the spec.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum FailMode {
+pub enum FailMode {
     Escalate,
     Refine,
 }
@@ -87,7 +87,7 @@ impl FailMode {
 /// the script-facing spec, telemetry name, and receipt rendering all
 /// stay in lockstep.
 #[derive(Clone, Debug)]
-pub(crate) enum Verifier {
+pub enum Verifier {
     TypeCheck {
         name: String,
         extract_fenced: bool,

@@ -6,7 +6,7 @@ pub(super) const DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET: &str =
     "llm/prompts/directive_envelope_instructions.harn.prompt";
 pub(super) const DIRECTIVE_NONCE_AUTHORITY_ASSET: &str =
     "llm/prompts/directive_nonce_authority.harn.prompt";
-pub(crate) const DIRECTIVE_IDS_KEY: &str = "_harn_directive_ids";
+pub const DIRECTIVE_IDS_KEY: &str = "_harn_directive_ids";
 pub(crate) const DIRECTIVE_NONCE_KEY: &str = "_harn_directive_nonce";
 
 fn recorded_directive_nonce<M: MessageView>(messages: &[M]) -> Option<String> {
@@ -24,7 +24,7 @@ fn recorded_directive_nonce<M: MessageView>(messages: &[M]) -> Option<String> {
 /// The session transcript owns the nonce even before a directive is committed.
 /// Legacy directive receipts can recover it during replay. Neither path trusts
 /// message text or tool output, and a new session gets a fresh marker.
-pub(crate) fn directive_nonce_for_session(session_id: &str) -> String {
+pub fn directive_nonce_for_session(session_id: &str) -> String {
     static NONCES: std::sync::OnceLock<
         std::sync::Mutex<std::collections::HashMap<String, String>>,
     > = std::sync::OnceLock::new();
@@ -206,7 +206,7 @@ fn envelope_speaker(rendered: &[RenderedReminder]) -> DirectiveSpeaker {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct RenderedReminder {
+pub struct RenderedReminder {
     reminder_id: Option<String>,
     text: String,
     speaker: DirectiveSpeaker,
@@ -273,7 +273,7 @@ pub(crate) fn directive_envelope(rendered: &[RenderedReminder], nonce: &str) -> 
 
 /// One trailing message carrying the directive envelope, under the transport
 /// role its speaker projects onto.
-pub(crate) fn directive_envelope_message(
+pub fn directive_envelope_message(
     rendered: &[RenderedReminder],
     nonce: &str,
 ) -> Option<serde_json::Value> {
@@ -322,7 +322,7 @@ pub(crate) fn strip_internal_message_metadata(messages: &mut [serde_json::Value]
     }
 }
 
-pub(crate) fn has_directive_commit_metadata<M: MessageView>(message: &M) -> bool {
+pub fn has_directive_commit_metadata<M: MessageView>(message: &M) -> bool {
     message
         .list_len_field(DIRECTIVE_IDS_KEY)
         .is_some_and(|len| len > 0)
@@ -348,7 +348,7 @@ pub(super) fn reminder_directive_text(reminder: &SystemReminder) -> String {
     )
 }
 
-pub(crate) fn render_pending_reminders(
+pub fn render_pending_reminders(
     _caps: &crate::llm::capabilities::Capabilities,
     reminders: &[SystemReminder],
 ) -> Vec<RenderedReminder> {
@@ -407,7 +407,7 @@ pub(super) fn emit_dropped_reminder_lifecycle(session_id: &str, reminder_id: Str
     );
 }
 
-pub(crate) fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<SystemReminder> {
+pub fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<SystemReminder> {
     let Some(session_id) = session_id.filter(|id| !id.is_empty()) else {
         return Vec::new();
     };

@@ -2,7 +2,8 @@
 
 mod context;
 pub use context::{
-    install, installed, requested, with_deadline, InterruptSources, OpInterruptGuard,
+    cancel_requested, install, installed, requested, with_deadline, InterruptSources,
+    OpInterruptGuard,
 };
 pub use context::{operation_budget_expired, requested_error, with_operation_budget};
 

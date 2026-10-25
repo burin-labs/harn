@@ -46,27 +46,52 @@ pub(crate) fn env_var_seamed(key: &str) -> Option<String> {
     {
         overrides::get(key)
     }
-    #[cfg(not(test))]
+    // Another crate's tests opt in through `vm-test-support`; feature
+    // unification can also turn it on for a product binary, so the override
+    // map only answers while a guard is alive on this thread.
+    #[cfg(all(not(test), feature = "vm-test-support"))]
+    {
+        if overrides::active() {
+            overrides::get(key)
+        } else {
+            std::env::var(key).ok()
+        }
+    }
+    #[cfg(not(any(test, feature = "vm-test-support")))]
     {
         std::env::var(key).ok()
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "vm-test-support"))]
 mod overrides {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::collections::BTreeMap;
 
     thread_local! {
         static OVERRIDES: RefCell<BTreeMap<String, String>> =
             const { RefCell::new(BTreeMap::new()) };
+        static GUARDS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    #[cfg_attr(test, allow(dead_code))]
+    pub(super) fn active() -> bool {
+        GUARDS.with(|guards| guards.get() > 0)
+    }
+
+    pub(super) fn enter() {
+        GUARDS.with(|guards| guards.set(guards.get() + 1));
+    }
+
+    pub(super) fn exit() {
+        GUARDS.with(|guards| guards.set(guards.get().saturating_sub(1)));
     }
 
     pub(super) fn get(key: &str) -> Option<String> {
         OVERRIDES.with(|overrides| overrides.borrow().get(key).cloned())
     }
 
-    pub(super) fn set(key: &str, value: &str) {
+    pub fn set(key: &str, value: &str) {
         OVERRIDES.with(|overrides| {
             overrides
                 .borrow_mut()
@@ -85,31 +110,33 @@ mod overrides {
 /// out. All seamed state is thread-keyed, so no cross-test serialization is
 /// needed and the guard is safe to hold across `await` points on a
 /// single-threaded runtime.
-#[cfg(test)]
+#[cfg(any(test, feature = "vm-test-support"))]
 #[must_use]
-pub(crate) fn test_env_guard() -> TestEnvGuard {
+pub fn test_env_guard() -> TestEnvGuard {
     overrides::clear();
+    overrides::enter();
     TestEnvGuard {}
 }
 
 /// Guard returned by [`test_env_guard`]. Injects env values for this thread via
 /// [`TestEnvGuard::set`] and clears all overrides on drop.
-#[cfg(test)]
-pub(crate) struct TestEnvGuard {}
+#[cfg(any(test, feature = "vm-test-support"))]
+pub struct TestEnvGuard {}
 
-#[cfg(test)]
+#[cfg(any(test, feature = "vm-test-support"))]
 impl TestEnvGuard {
     /// Sets an environment variable for this thread only, visible to
     /// [`env_var_seamed`] readers on the same thread.
-    pub(crate) fn set(&self, key: &str, value: &str) {
+    pub fn set(&self, key: &str, value: &str) {
         overrides::set(key, value);
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "vm-test-support"))]
 impl Drop for TestEnvGuard {
     fn drop(&mut self) {
         overrides::clear();
+        overrides::exit();
     }
 }
 

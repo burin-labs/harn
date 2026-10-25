@@ -55,9 +55,11 @@ and [Blacksmith pricing](https://www.blacksmith.sh/pricing).
 
 Release candidates, recovery runs, warm-cache refreshes, and benchmarks use
 GitHub's free standard runners: `macos-latest`,
-`ubuntu-22.04`, and `windows-latest`. Both macOS targets build on arm64
+`ubuntu-22.04`, `ubuntu-22.04-arm`, and `windows-latest`. Both macOS targets build on arm64
 `macos-latest`; `x86_64-apple-darwin` is cross-compiled there because the hosted
-Intel runner timed out the 90-minute build. CLI AOT preparation uses
+Intel runner timed out the 90-minute build. `aarch64-unknown-linux-gnu`
+builds natively on `ubuntu-22.04-arm`, which keeps the glibc 2.35 floor and
+removes the cross toolchain install. CLI AOT preparation uses
 `ubuntu-24.04`. The resolver refuses a paid runner in any active policy role,
 and the workflow policy rejects paid-provider switches before they can route a
 job. Historical runner and pricing rows remain below so earlier measurements

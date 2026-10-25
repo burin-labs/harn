@@ -17,7 +17,11 @@
 //      filesystem projection cannot diverge. The refusal names the branch-only
 //      form; an issue or pull request URL is optional.
 //
-//   4. Bare `swift build` / `swift test`, and any other build tool whose setup
+//   4. `git stash` forms that write the stash list, which every linked worktree
+//      shares. A pop after another agent's push applies their changes and
+//      loses yours; a work-in-progress commit is private to its branch.
+//
+//   5. Bare `swift build` / `swift test`, and any other build tool whose setup
 //      a repository's root Makefile owns. Unlike Cargo these are not universal,
 //      so the rule fires only against a target the wrapper measured to exist.
 //
@@ -308,6 +312,42 @@ pub fn make_owned_command_violation(command: string, census: MakeTargetCensus) -
   return ""
 }
 
+/** Git's global options that take a separate value, so the value is not the subcommand. */
+const GIT_VALUE_TAKING_OPTIONS: list<string> = [
+  "-C",
+  "-c",
+  "--git-dir",
+  "--work-tree",
+  "--namespace",
+  "--super-prefix",
+  "--config-env",
+  "--exec-path",
+]
+
+/** The stash subcommands that only read the list. Every other form writes it. */
+const GIT_STASH_READ_ONLY: list<string> = ["list", "show"]
+
+/**
+ * The git subcommand and every token after it, verbatim. Only the global
+ * options before the subcommand are skipped: after it, an option value such as
+ * a stash message must stay in place, or it would read as a verb.
+ */
+fn git_subcommand_args(argv: list<string>) -> list<string> {
+  let consumes_next = false
+  let index = 1
+  for token in argv.slice(1, len(argv)) {
+    if consumes_next {
+      consumes_next = false
+    } else if GIT_VALUE_TAKING_OPTIONS.contains(token) {
+      consumes_next = true
+    } else if !token.starts_with("-") {
+      return argv.slice(index, len(argv))
+    }
+    index = index + 1
+  }
+  return []
+}
+
 fn is_git_worktree_add(argv: list<string>) -> bool {
   let consumes_next = false
   let subcommand = ""
@@ -316,17 +356,7 @@ fn is_git_worktree_add(argv: list<string>) -> bool {
       consumes_next = false
       continue
     }
-    if [
-      "-C",
-      "-c",
-      "--git-dir",
-      "--work-tree",
-      "--namespace",
-      "--super-prefix",
-      "--config-env",
-      "--exec-path",
-    ]
-      .contains(token) {
+    if GIT_VALUE_TAKING_OPTIONS.contains(token) {
       consumes_next = true
       continue
     }
@@ -814,6 +844,47 @@ pub fn disposable_trash_violation(command: string) -> string {
   return ""
 }
 
+fn git_stash_write_in(command: string, depth: int) -> bool {
+  for group in command_groups(command) {
+    for stage in group {
+      const argv = launched_argv(stage.argv, 0)
+      if argv_program(argv) == "git" {
+        const args = git_subcommand_args(argv)
+        // Git reads the verb only from the token right after `stash`; an option
+        // there (`-u`, `-m list`) means push. Anything but a read-only verb writes.
+        if (args[0] ?? "") == "stash" && !GIT_STASH_READ_ONLY.contains(args[1] ?? "") {
+          return true
+        }
+      }
+      if depth < 4 {
+        const nested = nested_shell_payload(argv)
+        if nested != "" && git_stash_write_in(nested, depth + 1) {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Refuse `git stash` forms that write the stash list.
+ *
+ * The list lives in the repository, not the worktree, so every linked worktree
+ * pushes to and pops from the same one. An agent that pops after another agent's
+ * push applies that agent's changes and loses its own. A work-in-progress commit
+ * is private to a branch and has no such collision.
+ */
+pub fn git_stash_violation(command: string) -> string {
+  if !git_stash_write_in(command, 0) {
+    return ""
+  }
+  return "`git stash` is refused: the stash list is shared by every linked worktree, so a pop can apply "
+    + "another agent's changes and drop yours. Commit a work-in-progress commit on your branch instead "
+    + "(`git commit -am wip`), and undo it later with `git reset --soft HEAD~1`. "
+    + "`git stash list` and `git stash show` stay available."
+}
+
 fn is_slow(stage: ShellCommandStage) -> bool {
   return SLOW_COMMANDS.contains(stage_program(stage))
 }
@@ -1187,6 +1258,10 @@ pub fn decision(
   const make_owned = make_owned_command_violation(command, make_targets)
   if make_owned != "" {
     return {allow: false, reason: make_owned}
+  }
+  const stash = git_stash_violation(command)
+  if stash != "" {
+    return {allow: false, reason: stash}
   }
   const disposable_trash = disposable_trash_violation(command)
   if disposable_trash != "" {

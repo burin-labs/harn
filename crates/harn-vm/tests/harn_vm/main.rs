@@ -62,6 +62,7 @@ mod session_environment_leak;
 mod skill_activation_evidence_conformance;
 mod spawn_audit;
 mod stdlib_event_registration;
+mod stdlib_warm;
 mod thread_local_audit;
 mod tool_call_abandoned_mutation;
 mod tool_call_cancellation;

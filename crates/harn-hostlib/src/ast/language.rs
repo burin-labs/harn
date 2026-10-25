@@ -351,6 +351,12 @@ impl Language {
     /// and style grammars parse and edit fine but expose no symbol
     /// projection.
     pub fn supports_symbol_extraction(self) -> bool {
+        self.is_code()
+    }
+
+    /// Whether the grammar is a programming language, as opposed to data,
+    /// markup, or style.
+    pub fn is_code(self) -> bool {
         self.registry().class() == LanguageClass::Code
     }
 

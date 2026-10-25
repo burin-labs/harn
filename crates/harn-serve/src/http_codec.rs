@@ -2,7 +2,7 @@
 //!
 //! Authors return either a plain value (rendered as `200 OK + JSON`)
 //! or a tagged `HttpResponse` envelope produced by the `http_*`
-//! builtins ([`harn_vm::HttpEnvelope`]). This module bridges the two
+//! builtins ([`harn_builtins::http_response::HttpEnvelope`]). This module bridges the two
 //! into an `axum::Response`, applying:
 //!
 //! * status code (validated 100-599)
@@ -28,7 +28,9 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use base64::Engine;
 use futures::stream;
-use harn_vm::{parse_http_envelope, HttpEnvelope, HttpHeaderValue};
+use harn_builtins::http_response::parse_envelope as parse_http_envelope;
+use harn_builtins::http_response::HttpEnvelope;
+use harn_builtins::http_response::HttpHeaderValue;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -185,7 +187,9 @@ pub fn decode_call_response(response: CallResponse, request_id: &str) -> HttpCod
 /// plain-HTTP rendering path and dispatch through
 /// [`crate::ws::ws_route`] instead. Returns `None` for every other
 /// envelope shape (or untagged value).
-pub fn classify_ws_upgrade(response: &CallResponse) -> Option<harn_vm::WsUpgradeSpec> {
+pub fn classify_ws_upgrade(
+    response: &CallResponse,
+) -> Option<harn_builtins::http_response::WsUpgradeSpec> {
     let envelope = parse_http_envelope(&response.value)?;
     envelope.ws_upgrade
 }

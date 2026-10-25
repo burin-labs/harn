@@ -138,9 +138,20 @@ case "$VERSION" in
   *) die "invalid version: $VERSION (expected v0.0.0)" ;;
 esac
 
-ASSET="harn-${TARGET}.tar.gz"
+# Releases before XZ_FIRST_RELEASE ship .tar.gz; later ones ship .tar.xz.
+XZ_FIRST_RELEASE=0.10.179
+ARCHIVE_EXT="tar.gz"
+[ "$(printf '%s\n%s\n' "${VERSION#v}" "$XZ_FIRST_RELEASE" | sort -V | head -n 1)" != "$XZ_FIRST_RELEASE" ] || ARCHIVE_EXT="tar.xz"
+ASSET="harn-${TARGET}.${ARCHIVE_EXT}"
 ASSET_URL="${RELEASES_URL}/download/${VERSION}/${ASSET}"
 CHECKSUMS_URL="${RELEASES_URL}/download/${VERSION}/SHA256SUMS"
+
+# bsdtar (macOS) decompresses xz natively; GNU tar calls the xz binary, which
+# minimal Linux images often lack.
+if [ "$ARCHIVE_EXT" = "tar.xz" ] && ! tar --version 2>/dev/null | grep -q bsdtar \
+  && ! command -v xz >/dev/null 2>&1; then
+  die "xz is required to unpack ${ASSET}; install xz-utils (apt, dnf) or xz (apk) and re-run"
+fi
 
 note "Installing harn ${VERSION} for ${TARGET}"
 
@@ -210,7 +221,7 @@ Set HARN_NO_VERIFY=1 to override (NOT recommended)."
 fi
 
 info "Extracting"
-tar -xzf "$WORKDIR/$ASSET" -C "$WORKDIR"
+tar -xf "$WORKDIR/$ASSET" -C "$WORKDIR"
 
 # Refuse incomplete archives before changing an existing installation. Keep
 # Harn's legal files in their own directory when PATH is shared with other tools.

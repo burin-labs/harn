@@ -679,8 +679,10 @@ impl HostlibCapability for CodeIndexCapability {
 
         // Cross-file safe rename (issue #2508). Builds on the typed
         // symbol graph (#2434) and routes writes through staged-fs
-        // (#1722) so all touched files succeed or none do.
-        register(
+        // (#1722) so all touched files succeed or none do. A language-server
+        // rename can wait on a cold server, so its caller must be able to
+        // stop it and see its progress.
+        register_interruptible(
             registry,
             self.index.clone(),
             rename::BUILTIN,
@@ -728,12 +730,31 @@ fn register(
     method: &'static str,
     runner: fn(&SharedIndex, &[VmValue]) -> Result<VmValue, HostlibError>,
 ) {
-    let captured = index;
-    let handler: SyncHandler = Arc::new(move |args| runner(&captured, args));
-    registry.register(RegisteredBuiltin {
+    registry.register(index_builtin(index, name, method, runner));
+}
+
+/// [`register`] for a builtin that can wait on an external process.
+fn register_interruptible(
+    registry: &mut BuiltinRegistry,
+    index: SharedIndex,
+    name: &'static str,
+    method: &'static str,
+    runner: fn(&SharedIndex, &[VmValue]) -> Result<VmValue, HostlibError>,
+) {
+    registry.register_interruptible(index_builtin(index, name, method, runner));
+}
+
+fn index_builtin(
+    index: SharedIndex,
+    name: &'static str,
+    method: &'static str,
+    runner: fn(&SharedIndex, &[VmValue]) -> Result<VmValue, HostlibError>,
+) -> RegisteredBuiltin {
+    let handler: SyncHandler = Arc::new(move |args| runner(&index, args));
+    RegisteredBuiltin {
         name,
         module: "code_index",
         method,
         handler,
-    });
+    }
 }

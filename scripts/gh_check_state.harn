@@ -144,6 +144,11 @@ pub const PATH_GATED_CHECKS = [
   {filter: "docs_site", check_prefix: "Docs site"},
   {filter: "setup_action", check_prefix: "Setup Harn action"},
   {
+    filter: "swift_protocol_binding",
+    check_prefix: "Swift protocol binding probe",
+    always_main: true,
+  },
+  {
     filter: "release_contract",
     check_prefix: "Harn and release orchestrator agree",
     always_main: true,

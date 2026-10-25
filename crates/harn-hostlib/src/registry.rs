@@ -14,6 +14,7 @@ use std::sync::Arc;
 use harn_vm::{Vm, VmError, VmValue};
 
 use crate::error::HostlibError;
+use crate::host_call::{CallAddress, HostCallContext};
 
 fn capability_binding(
     module: &'static str,
@@ -36,16 +37,48 @@ pub type AsyncHandler = Arc<
 
 /// A dropped async host call must still interrupt the synchronous operation
 /// that was moved to Tokio's blocking pool. `JoinHandle::abort` cannot stop a
-/// blocking closure, so the owning VM's cancellation token is the explicit
-/// handoff to the process wait loop.
-struct CancelOnDrop(Option<Arc<AtomicBool>>);
+/// blocking closure, so a per-call token is the explicit handoff to its wait
+/// loops. Tripping it after the operation finished is harmless.
+struct CancelOnDrop(Arc<AtomicBool>);
 
 impl Drop for CancelOnDrop {
     fn drop(&mut self) {
-        if let Some(token) = self.0.take() {
-            token.store(true, Ordering::SeqCst);
-        }
+        self.0.store(true, Ordering::SeqCst);
     }
+}
+
+/// Run a validated sync handler on Tokio's blocking pool, so the VM's thread
+/// keeps delivering cancellation and progress while the handler waits.
+///
+/// The worker observes the VM's deadlines and a token of its own that the VM
+/// trips by dropping the call: a tool-call cancel, a VM cancel, or an expired
+/// deadline. It never shares the VM's token, so stopping one call leaves the
+/// VM running. The worker also gets the [`HostCallContext`] of the tool call
+/// that dispatched it.
+async fn run_interruptible(
+    ctx: &harn_vm::AsyncBuiltinCtx,
+    builtin: &'static str,
+    handler: SyncHandler,
+    request: VmValue,
+) -> Result<VmValue, VmError> {
+    let mut sources = ctx.interrupt_sources();
+    let cancelled = sources
+        .cancel
+        .as_ref()
+        .is_some_and(|token| token.load(Ordering::SeqCst));
+    let cancel = Arc::new(AtomicBool::new(cancelled));
+    sources.cancel = Some(Arc::clone(&cancel));
+    let call = HostCallContext::new(CallAddress::current());
+    let _cancel_on_drop = CancelOnDrop(cancel);
+    harn_vm::orchestration::run_blocking_with_ambient(move || {
+        let _interrupt = sources.install();
+        let _call = call.enter();
+        handler(&[request]).map_err(VmError::from)
+    })
+    .await
+    .map_err(|error| {
+        VmError::Runtime(format!("{builtin} blocking host operation failed: {error}"))
+    })?
 }
 
 #[derive(Clone)]
@@ -92,6 +125,7 @@ pub struct BuiltinRegistry {
     builtins: Vec<RegisteredBuiltin>,
     async_builtins: Vec<RegisteredAsyncBuiltin>,
     command_policy_builtins: BTreeSet<&'static str>,
+    interruptible_builtins: BTreeSet<&'static str>,
 }
 
 impl BuiltinRegistry {
@@ -142,6 +176,28 @@ impl BuiltinRegistry {
         });
     }
 
+    /// [`register_fn`](Self::register_fn) for a builtin that writes files: it
+    /// holds the workspace write lease for its whole run, so its writes never
+    /// interleave with those of a builtin running off the VM's thread.
+    pub(crate) fn register_writer_fn(
+        &mut self,
+        module: &'static str,
+        name: &'static str,
+        method: &'static str,
+        runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
+    ) {
+        let handler: SyncHandler = Arc::new(move |args| {
+            let _writes = crate::host_call::workspace_writes();
+            runner(args)
+        });
+        self.register(RegisteredBuiltin {
+            name,
+            module,
+            method,
+            handler,
+        });
+    }
+
     /// Register a deterministic command-execution builtin whose request must
     /// cross the VM command-policy boundary before the hostlib handler runs.
     pub(crate) fn register_command_fn(
@@ -175,8 +231,21 @@ impl BuiltinRegistry {
         });
     }
 
+    /// Register a builtin that can wait on an external process. It runs off
+    /// the VM's thread under a [`HostCallContext`], so its caller can stop it
+    /// and see its progress while it waits.
+    #[cfg(feature = "ast")]
+    pub(crate) fn register_interruptible(&mut self, builtin: RegisteredBuiltin) {
+        self.interruptible_builtins.insert(builtin.name);
+        self.register(builtin);
+    }
+
     fn uses_command_policy(&self, name: &str) -> bool {
         self.command_policy_builtins.contains(name)
+    }
+
+    fn is_interruptible(&self, name: &str) -> bool {
+        self.interruptible_builtins.contains(name)
     }
 
     /// Iterate over every registered builtin.
@@ -338,34 +407,13 @@ impl HostlibRegistry {
                                         &[rewritten],
                                     )
                                     .map_err(VmError::from)?;
-                                    // Keep the scope deadline and the handler window
-                                    // apart so the worker reports the same interrupt
-                                    // kind the VM would.
-                                    let mut sources = ctx.interrupt_sources();
-                                    let cancel = Arc::clone(sources.cancel.get_or_insert_with(|| {
-                                        Arc::new(AtomicBool::new(false))
-                                    }));
-                                    let mut cancel_on_drop = CancelOnDrop(Some(cancel));
-                                    let handler_for_blocking = handler.clone();
-                                    let completed = harn_vm::orchestration::run_blocking_with_ambient(
-                                        move || {
-                                            let _interrupt = sources.install();
-                                            handler_for_blocking(&[validated]).map_err(VmError::from)
-                                        },
+                                    let result = run_interruptible(
+                                        &ctx,
+                                        ambient_name,
+                                        handler.clone(),
+                                        validated,
                                     )
-                                    .await;
-                                    // The blocking operation is no longer running, even when it
-                                    // completed with a normal host error (for example ENOENT).
-                                    // Disarm before propagating either layer of Result; otherwise
-                                    // error unwinding drops the guard and poisons the parent VM's
-                                    // shared cancellation token.
-                                    cancel_on_drop.0 = None;
-                                    let result = completed
-                                    .map_err(|error| {
-                                        VmError::Runtime(format!(
-                                            "{ambient_name} blocking host operation failed: {error}"
-                                        ))
-                                    })??;
+                                    .await?;
                                     if crate::tools::run_command_request_is_background(&params) {
                                         return crate::schemas::validate_response(
                                             ambient_name,
@@ -407,6 +455,40 @@ impl HostlibRegistry {
                 // only re-exposes the pre-cutover global call shape.
                 if harn_parser::legacy_ambient_capabilities_enabled() {
                     let ambient_dispatch = Arc::clone(&policy_handler);
+                    vm.register_async_builtin(ambient_name, move |ctx, args| {
+                        ambient_dispatch(ctx, args)
+                    });
+                }
+            } else if self.builtins.is_interruptible(builtin.name) {
+                let ambient_name = builtin.name;
+                let interruptible_handler = Arc::new({
+                    let handler = handler.clone();
+                    move |ctx: harn_vm::AsyncBuiltinCtx,
+                          args: Vec<VmValue>|
+                          -> Pin<
+                        Box<dyn Future<Output = Result<VmValue, VmError>> + Send>,
+                    > {
+                        let handler = handler.clone();
+                        Box::pin(async move {
+                            let request = crate::schemas::validate_request_args(
+                                ambient_name,
+                                module,
+                                method,
+                                &args,
+                            )
+                            .map_err(VmError::from)?;
+                            run_interruptible(&ctx, ambient_name, handler, request).await
+                        })
+                    }
+                });
+                let capability_dispatch = Arc::clone(&interruptible_handler);
+                vm.register_async_capability_method(
+                    capability,
+                    capability_method,
+                    move |ctx, args| capability_dispatch(ctx, args),
+                );
+                if harn_parser::legacy_ambient_capabilities_enabled() {
+                    let ambient_dispatch = Arc::clone(&interruptible_handler);
                     vm.register_async_builtin(ambient_name, move |ctx, args| {
                         ambient_dispatch(ctx, args)
                     });

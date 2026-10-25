@@ -1,0 +1,18 @@
+fn main(harness: Harness) -> nil {
+  const large = to_float("1e308")
+  assert_eq(percentile([-large, large], 0), -large)
+  assert_eq(percentile([-large, large], 50), 0)
+  assert_eq(percentile([-large, large], 100), large)
+  for p in [25, 75] {
+    const expected = if p == 25 {
+      -large / 2
+    } else {
+      large / 2
+    }
+    const actual = percentile([-large, large], p)
+    assert(!is_infinite(actual))
+    assert(abs((actual - expected) / expected) < 0.000000000000001)
+  }
+  assert_eq(percentile([1, 2, 3, 4], 25), 1.75)
+  harness.stdio.println("finite percentile interpolation ok")
+}

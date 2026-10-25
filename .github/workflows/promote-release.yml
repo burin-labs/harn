@@ -398,17 +398,17 @@ jobs:
 
           gh release download "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern harn-x86_64-unknown-linux-gnu.tar.gz \
-            --pattern harn-aarch64-unknown-linux-gnu.tar.gz \
+            --pattern harn-x86_64-unknown-linux-gnu.tar.xz \
+            --pattern harn-aarch64-unknown-linux-gnu.tar.xz \
             --dir "$assets_dir"
 
-          cp "$assets_dir/harn-x86_64-unknown-linux-gnu.tar.gz" release-container/amd64/harn.tar.gz
-          cp "$assets_dir/harn-aarch64-unknown-linux-gnu.tar.gz" release-container/arm64/harn.tar.gz
+          cp "$assets_dir/harn-x86_64-unknown-linux-gnu.tar.xz" release-container/amd64/harn.tar.xz
+          cp "$assets_dir/harn-aarch64-unknown-linux-gnu.tar.xz" release-container/arm64/harn.tar.xz
 
           for arch in amd64 arm64; do
-            archive="release-container/${arch}/harn.tar.gz"
+            archive="release-container/${arch}/harn.tar.xz"
             archive_list="${assets_dir}/${arch}.lst"
-            tar tzf "$archive" > "$archive_list"
+            tar tf "$archive" > "$archive_list"
             for binary in harn harn-container-probe; do
               if ! grep -Fxq "$binary" "$archive_list"; then
                 echo "::error::${archive} is missing ${binary}; container image must be assembled from release artifacts, not a Docker source rebuild."

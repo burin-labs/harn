@@ -67,7 +67,7 @@ use subtask_state::SubtaskAmbientState;
 /// An isolated snapshot of every ambient capability/identity stack a worker
 /// task owns while it runs. `Default` is the empty scope (no policies, depth 0).
 #[derive(Default, Clone)]
-pub(crate) struct AmbientExecutionScope {
+pub struct AmbientExecutionScope {
     execution: Vec<CapabilityPolicy>,
     approval: Vec<RunApprovalPolicy>,
     prepared_approval: Option<std::sync::Arc<RunApprovalPolicy>>,
@@ -441,14 +441,14 @@ impl Drop for SourceDirRestore<'_> {
 /// changes to this slot across polls and restores the polling thread on unwind.
 /// Other capability slots stay live: capturing the full ambient scope for every
 /// yielded value previously measured 42% more CPU on a 200k-yield loop.
-pub(crate) fn poll_source_dir<T>(scoped: &mut Option<PathBuf>, inner: impl FnOnce() -> T) -> T {
+pub fn poll_source_dir<T>(scoped: &mut Option<PathBuf>, inner: impl FnOnce() -> T) -> T {
     *scoped = swap_source_dir(scoped.take());
     let _restore = SourceDirRestore { slot: scoped };
     inner()
 }
 
 /// Run `inner` with an execution-owned run-event sink.
-pub(crate) fn scope_run_event_sink<F: Future>(
+pub fn scope_run_event_sink<F: Future>(
     sink: std::sync::Arc<dyn RunEventSink>,
     inner: F,
 ) -> Scoped<F> {
@@ -459,7 +459,7 @@ pub(crate) fn scope_run_event_sink<F: Future>(
 
 mod policy_scope;
 pub use policy_scope::{scope_ambient_context, scope_execution_policy};
-pub(crate) use policy_scope::{
+pub use policy_scope::{
     scope_approval_policy, scope_autonomy_policy, scope_command_policy, scope_dynamic_permissions,
     RegisteredExecutionPolicy,
 };
@@ -544,7 +544,7 @@ pub fn scope_fresh_run_runtime<F: Future>(inner: F) -> impl Future<Output = F::O
 pin_project! {
     /// A future that runs `inner` with `scope` installed as the ambient
     /// execution scope. See the module docs.
-    pub(crate) struct Scoped<F> {
+    pub struct Scoped<F> {
         #[pin]
         inner: F,
         // Keep the large, extensible ambient snapshot out of the future's
@@ -559,7 +559,7 @@ pin_project! {
 /// Run `inner` with its own isolated [`AmbientExecutionScope`]. The scope is
 /// swapped into the thread-locals around every poll, so the task never observes
 /// — and never leaks to — a sibling's capability context.
-pub(crate) fn scope_ambient<F: Future>(scope: AmbientExecutionScope, inner: F) -> Scoped<F> {
+pub fn scope_ambient<F: Future>(scope: AmbientExecutionScope, inner: F) -> Scoped<F> {
     Scoped {
         inner,
         scope: Box::new(scope),
@@ -572,7 +572,7 @@ pub(crate) fn scope_ambient<F: Future>(scope: AmbientExecutionScope, inner: F) -
 /// A pending or panicking poll restores the exact caller scope. Once `inner`
 /// reaches `Ready`, its final ambient state stays installed, preserving the
 /// synchronous completion semantics of the wrapped operation.
-pub(crate) fn scope_ambient_transaction<F: Future>(inner: F) -> Scoped<F> {
+pub fn scope_ambient_transaction<F: Future>(inner: F) -> Scoped<F> {
     Scoped {
         inner,
         scope: Box::new(AmbientExecutionScope::capture_for_inline_subtask()),
@@ -581,7 +581,7 @@ pub(crate) fn scope_ambient_transaction<F: Future>(inner: F) -> Scoped<F> {
 }
 
 /// Preserve the caller's complete logical execution scope in a spawned task.
-pub(crate) fn scope_inline_subtask<F: Future>(inner: F) -> Scoped<F> {
+pub fn scope_inline_subtask<F: Future>(inner: F) -> Scoped<F> {
     scope_ambient(AmbientExecutionScope::capture_for_inline_subtask(), inner)
 }
 
@@ -596,7 +596,7 @@ pub(crate) fn scope_persistent_state_context<F: Future>(
 
 /// Install a ceiling for one closure and all workers it spawns. Nested scopes
 /// can tighten the inherited ceiling but cannot grant a wider destination.
-pub(crate) fn scope_inference_boundary<F: Future>(
+pub fn scope_inference_boundary<F: Future>(
     boundary: crate::llm::api::InferenceBoundary,
     inner: F,
 ) -> Scoped<F> {
@@ -615,7 +615,7 @@ pub(crate) fn scope_inference_boundary<F: Future>(
 /// must install the dispatcher's resolved identity around every poll. Keeping
 /// this as a specialization of [`scope_ambient`] avoids holding a raw
 /// thread-local guard across an `.await`.
-pub(crate) fn scope_agent_session<F: Future>(session_id: String, inner: F) -> Scoped<F> {
+pub fn scope_agent_session<F: Future>(session_id: String, inner: F) -> Scoped<F> {
     let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
     if scope.session_stack.last().map(|frame| frame.session_id()) != Some(session_id.as_str()) {
         scope.session_stack.push(

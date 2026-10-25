@@ -50,6 +50,8 @@ fn thread_local_audit_tracks_every_vm_thread_local_site() {
         manifest_dir.join("src"),
         crates_dir.join("harn-vm-core/src"),
         crates_dir.join("harn-kernel/src"),
+        crates_dir.join("harn-builtins/src"),
+        crates_dir.join("harn-flow/src"),
     ];
     let actual = scan_thread_local_sites(&manifest_dir, &source_dirs);
     let audit = parse_audit(&audit_path);

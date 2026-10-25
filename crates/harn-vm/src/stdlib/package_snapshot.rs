@@ -9,7 +9,7 @@ use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmDictExt, VmError, VmValue};
 
 #[derive(Default)]
-pub(crate) struct PackageSnapshotRegistry {
+pub struct PackageSnapshotRegistry {
     snapshots: Mutex<BTreeMap<String, PackageSnapshot>>,
 }
 

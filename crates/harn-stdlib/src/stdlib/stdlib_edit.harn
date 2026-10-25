@@ -674,7 +674,8 @@ pub fn edit_inline(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params
  * comment block directly above it; `comments_left_behind` lists comment
  * blocks separated from it by a blank line, which stay. Refusals
  * (`no_match`, `ambiguous_symbol`, `unsupported_language`, `syntax_error`,
- * `destination_conflict`, `visibility_required`, `import_cycle`, `error`)
+ * `destination_conflict`, `visibility_required`, `import_cycle`,
+ * `nested_import`, `not_top_level`, `error`)
  * leave every file unchanged and name the blocking locations in `sites`.
  *
  * @effects: [host, fs]

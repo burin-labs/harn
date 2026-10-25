@@ -18,10 +18,14 @@
 //! previous value before releasing it, which makes "mutate the environment
 //! without the lock" unrepresentable rather than merely discouraged.
 
+// Other crates' tests reach this module through `vm-test-support` and use
+// only part of it; this crate's own tests use the rest.
+#![cfg_attr(not(test), allow(dead_code))]
+
 use std::cell::Cell;
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
-pub(crate) fn env_lock() -> &'static Mutex<()> {
+pub fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
 }
@@ -38,7 +42,7 @@ thread_local! {
 }
 
 /// Exclusive access to the process environment for the caller's thread.
-pub(crate) struct EnvGuard {
+pub struct EnvGuard {
     /// `None` when an outer guard on this thread already holds the lock.
     _inner: Option<MutexGuard<'static, ()>>,
 }
@@ -55,7 +59,7 @@ impl Drop for EnvGuard {
 /// own, so a panicking holder leaves nothing corrupted behind. Treating poison
 /// as fatal would turn one failing case into a failure in every sibling that
 /// touches an environment variable.
-pub(crate) fn env_guard() -> EnvGuard {
+pub fn env_guard() -> EnvGuard {
     let already_held = DEPTH.with(|depth| {
         let held = depth.get();
         depth.set(held + 1);
@@ -71,7 +75,7 @@ pub(crate) fn env_guard() -> EnvGuard {
 ///
 /// The guard field is declared last so the restore in `Drop::drop` runs while
 /// the lock is still held.
-pub(crate) struct ScopedEnvVar {
+pub struct ScopedEnvVar {
     key: &'static str,
     previous: Option<String>,
     _guard: EnvGuard,
@@ -79,7 +83,7 @@ pub(crate) struct ScopedEnvVar {
 
 impl ScopedEnvVar {
     /// Set `key` to `value` until the returned value is dropped.
-    pub(crate) fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+    pub fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
         let guard = env_guard();
         let previous = std::env::var(key).ok();
         unsafe {
@@ -140,7 +144,7 @@ const AWS_DISCOVERY_ENV: &[&str] = &[
 /// every AWS discovery variable removed, and the AWS shared config and
 /// credentials files pointed at empty files so the developer's own `~/.aws`
 /// cannot answer. Individual variables can be set back with [`Self::set`].
-pub(crate) struct UnconfiguredProviderEnv {
+pub struct UnconfiguredProviderEnv {
     vars: Vec<ScopedEnvVar>,
     aws_dir: tempfile::TempDir,
 }
@@ -181,7 +185,7 @@ impl UnconfiguredProviderEnv {
         Self { vars, aws_dir }
     }
 
-    pub(crate) fn set(&mut self, key: &'static str, value: &str) {
+    pub fn set(&mut self, key: &'static str, value: &str) {
         self.vars.push(ScopedEnvVar::set(key, value));
     }
 

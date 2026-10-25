@@ -29,14 +29,14 @@ mod tool_choice;
 mod tool_search;
 mod validate;
 
-pub(crate) use directive_placement::{turn_boundary_directives, uncommitted_directives};
-pub(crate) use reminders::{
+pub use directive_placement::{turn_boundary_directives, uncommitted_directives};
+pub use reminders::{
     directive_envelope_message, directive_nonce_for_session, has_directive_commit_metadata,
     pending_reminders_from_session, render_pending_reminders, DIRECTIVE_IDS_KEY,
 };
 #[cfg(test)]
 pub(crate) use reminders::{strip_internal_message_metadata, tracked_directive_envelope_message};
-pub(crate) use validate::{project_llm_options, validate_llm_option_keys};
+pub use validate::{project_llm_options, validate_llm_option_keys};
 
 #[cfg(test)]
 mod cache_default_tests;
@@ -76,7 +76,7 @@ mod tool_choice_tests;
 
 pub(super) use crate::value::{VmError, VmValue};
 
-pub(super) use super::{
+pub use super::{
     emit_reminder_lifecycle_event, opt_bool, opt_float, opt_int, opt_str, reminder_from_event,
     vm_messages_to_json, vm_resolve_model, vm_resolve_model_selector, vm_resolve_provider,
     vm_value_dict_to_json, vm_value_to_json, ReminderRoleHint, SystemReminder,
@@ -84,17 +84,17 @@ pub(super) use super::{
 };
 
 // Public surface consumed by `super` (llm::helpers::mod).
-pub(crate) use extract::extract_llm_options;
-pub(crate) use generation::validate_options;
-pub(crate) use governance::project_agent_tools;
-pub(crate) use json::{expects_structured_output, extract_json};
+pub use extract::extract_llm_options;
+pub use generation::validate_options;
+pub use governance::project_agent_tools;
+pub use json::{expects_structured_output, extract_json};
 pub(crate) use model_resolution::model_resolution_error;
-pub(crate) use system_prompt::{
+pub use system_prompt::{
     assemble_system_prompt, compose_system_prompt, system_prompt_event_metadata,
     system_prompt_metadata,
 };
 pub use thinking::admit_reasoning_literals;
-pub(crate) use thinking::{
+pub use thinking::{
     parse_reasoning_effort_field, resolve_catalog_thinking_config, resolve_thinking_config,
 };
 
@@ -102,7 +102,7 @@ pub(crate) use thinking::{
 ///
 /// Ordinary throwing calls retain their established text errors. The safe
 /// surface uses [`prepare_llm_options_safe`] to preserve local error taxonomy.
-pub(crate) async fn prepare_llm_options(
+pub async fn prepare_llm_options(
     args: &[VmValue],
 ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
     prepare_llm_options_result(args)
@@ -111,7 +111,7 @@ pub(crate) async fn prepare_llm_options(
 }
 
 /// Resolve an outbound call without discarding structured local failures.
-pub(crate) async fn prepare_llm_options_safe(
+pub async fn prepare_llm_options_safe(
     args: &[VmValue],
 ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
     prepare_llm_options_result(args).await

@@ -587,6 +587,236 @@ pub(crate) fn module_declaration_edit(source: &str, tree: &Tree, line: &str) -> 
     }
 }
 
+/// Fields of the moved struct not visible crate-wide, in declaration order,
+/// each with the module path its visibility names (`self` when private).
+/// Tuple fields are named by index.
+pub(crate) fn hidden_fields(item: Node<'_>, source: &str) -> Vec<(String, String)> {
+    let mut hidden = Vec::new();
+    let Some(body) = (item.kind() == "struct_item")
+        .then(|| item.child_by_field_name("body"))
+        .flatten()
+    else {
+        return hidden;
+    };
+    match body.kind() {
+        "field_declaration_list" => {
+            for field in text::members(body) {
+                if field.kind() != "field_declaration" {
+                    continue;
+                }
+                if let (Some(path), Some(name)) = (
+                    restriction(visibility(field, source)),
+                    field.child_by_field_name("name"),
+                ) {
+                    hidden.push((text::text(name, source).to_string(), path));
+                }
+            }
+        }
+        "ordered_field_declaration_list" => {
+            let mut index = 0;
+            let mut modifier = None;
+            let mut cursor = body.walk();
+            for child in body.named_children(&mut cursor) {
+                match child.kind() {
+                    "visibility_modifier" => modifier = Some(text::text(child, source)),
+                    "attribute_item" => {}
+                    kind if kind.contains("comment") => {}
+                    _ => {
+                        if let Some(path) = restriction(modifier) {
+                            hidden.push((index.to_string(), path));
+                        }
+                        index += 1;
+                        modifier = None;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    hidden
+}
+
+/// The module path a visibility restricts to, or `None` when crate-wide.
+fn restriction(modifier: Option<&str>) -> Option<String> {
+    let Some(modifier) = modifier else {
+        return Some("self".into());
+    };
+    let inner = modifier.strip_prefix("pub")?.trim();
+    let path = inner
+        .strip_prefix('(')
+        .and_then(|rest| rest.strip_suffix(')'))
+        .map_or("", str::trim);
+    let path = path.strip_prefix("in ").unwrap_or(path).replace(' ', "");
+    (!matches!(path.as_str(), "" | "crate")).then_some(path)
+}
+
+/// The module whose subtree sees a field restricted to `path` when its
+/// struct is declared in `module`; `None` when `path` climbs past the root.
+pub(crate) fn visible_from(module: &[String], path: &str) -> Option<Vec<String>> {
+    let mut anchor = module.to_vec();
+    for segment in path.split("::") {
+        match segment {
+            "self" => {}
+            "super" => {
+                anchor.pop()?;
+            }
+            "crate" => anchor.clear(),
+            name => anchor.push(name.to_string()),
+        }
+    }
+    Some(anchor)
+}
+
+/// Code in `source` outside `skip` that reads a field `breaks` names, or
+/// constructs or matches `owner` while one of its fields breaks: a tuple
+/// struct's constructor and patterns need every field, and a `..base`
+/// update copies the fields it does not name. Matching is by name, so a
+/// same-named field or type also counts.
+pub(crate) fn field_reads(
+    rel: &str,
+    source: &str,
+    tree: &Tree,
+    owner: &str,
+    fields: &[String],
+    breaks: &dyn Fn(&str) -> bool,
+    skip: Option<&Range<usize>>,
+) -> Vec<Site> {
+    let broken: Vec<&str> = fields
+        .iter()
+        .map(String::as_str)
+        .filter(|f| breaks(f))
+        .collect();
+    let tuple_field = broken.iter().find(|f| f.parse::<usize>().is_ok());
+    let named_field = broken.iter().find(|f| f.parse::<usize>().is_err());
+    // `use super::Wrap as W` lets `W(1)` build the moved struct.
+    let mut names = vec![owner.to_string()];
+    text::walk(tree.root_node(), |node| {
+        if node.kind() == "use_as_clause" {
+            let imported = node
+                .child_by_field_name("path")
+                .and_then(|p| path_segments(p, source))
+                .is_some_and(|segs| segs.last().is_some_and(|last| last == owner));
+            if let Some(alias) = node.child_by_field_name("alias").filter(|_| imported) {
+                names.push(text::text(alias, source).to_string());
+            }
+        }
+        true
+    });
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let mut sites = Vec::new();
+    let mut report = |at: Node<'_>, why: String| {
+        sites.push(Site::at(rel, source, at.start_byte(), "reference", why));
+    };
+    text::walk(tree.root_node(), |node| {
+        if skip.is_some_and(|skip| text::covers(skip, &node.byte_range())) {
+            return false;
+        }
+        let method_call = node.parent().is_some_and(|parent| {
+            parent.kind() == "call_expression" && text::is_field_child(parent, "function", node)
+        });
+        let field = match node.kind() {
+            "field_expression" if method_call => None,
+            "field_expression" | "field_initializer" | "field_pattern" => node
+                .child_by_field_name("field")
+                .or_else(|| node.child_by_field_name("name")),
+            "shorthand_field_initializer" => node.named_child(0),
+            _ => None,
+        };
+        if let Some(field) = field {
+            let name = text::text(field, source);
+            if broken.contains(&name) {
+                report(
+                    field,
+                    format!("reads the field `{name}`, which the destination would hide"),
+                );
+            }
+        }
+        // Macro arguments stay unparsed tokens (`write!(f, "{}", self.id)`),
+        // so a `.` before a field name counts as a read.
+        if node.kind() == "token_tree" {
+            let mut cursor = node.walk();
+            let tokens: Vec<Node<'_>> = node.children(&mut cursor).collect();
+            for pair in tokens.windows(2) {
+                let name = text::text(pair[1], source);
+                if pair[0].kind() == "." && broken.contains(&name) {
+                    report(
+                        pair[1],
+                        format!("reads the field `{name}`, which the destination would hide"),
+                    );
+                }
+                if let Some(hidden) = tuple_field.filter(|_| {
+                    pair[1].kind() == "token_tree" && names.contains(&text::text(pair[0], source))
+                }) {
+                    report(
+                        pair[0],
+                        format!("builds or matches `{owner}`, whose field `{hidden}` the destination would hide"),
+                    );
+                }
+            }
+        }
+        let built = match node.kind() {
+            "call_expression" => node.child_by_field_name("function").zip(tuple_field),
+            "tuple_struct_pattern" => node.child_by_field_name("type").zip(tuple_field),
+            "struct_expression" if has_base(node) => {
+                node.child_by_field_name("name").zip(named_field)
+            }
+            _ => None,
+        };
+        if let Some((path, hidden)) = built {
+            if names_type(path, source, &names) {
+                report(
+                    path,
+                    format!("builds or matches `{owner}`, whose field `{hidden}` the destination would hide"),
+                );
+            }
+        }
+        true
+    });
+    sites
+}
+
+fn has_base(struct_expression: Node<'_>) -> bool {
+    struct_expression
+        .child_by_field_name("body")
+        .is_some_and(|body| {
+            text::members(body)
+                .iter()
+                .any(|m| m.kind() == "base_field_initializer")
+        })
+}
+
+/// Whether the path `node` ends in one of `names`, or is `Self` inside an
+/// `impl` of one.
+fn names_type(node: Node<'_>, source: &str, names: &[&str]) -> bool {
+    let tail = match node.kind() {
+        "generic_function" => node.child_by_field_name("function"),
+        "generic_type" => node.child_by_field_name("type"),
+        _ => Some(node),
+    };
+    let tail = tail.map(|tail| match tail.kind() {
+        "scoped_identifier" | "scoped_type_identifier" => {
+            tail.child_by_field_name("name").unwrap_or(tail)
+        }
+        _ => tail,
+    });
+    match tail.map(|tail| text::text(tail, source)) {
+        Some(tail) if names.contains(&tail) => true,
+        Some("Self") => {
+            let mut ancestor = node.parent();
+            while let Some(current) = ancestor {
+                if current.kind() == "impl_item" {
+                    return current
+                        .child_by_field_name("type")
+                        .is_some_and(|ty| names_type(ty, source, names));
+                }
+                ancestor = current.parent();
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
 /// Names the moved item uses (first path segments, types, values) and the
 /// fields and methods it reads.
 pub(crate) fn free_names(

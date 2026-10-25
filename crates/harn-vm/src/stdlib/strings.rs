@@ -286,9 +286,9 @@ fn str_pad_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     };
     Ok(VmValue::string(format!(
         "{}{}{}",
-        crate::limits::checked_repeat(fill, left)?,
+        harn_vm_core::limits::checked_repeat(fill, left)?,
         s,
-        crate::limits::checked_repeat(fill, right)?
+        harn_vm_core::limits::checked_repeat(fill, right)?
     )))
 }
 
@@ -719,7 +719,7 @@ fn repeat_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     }
     // Reject pathological sizes so a typo doesn't try to allocate
     // multi-gigabyte strings (or panic `capacity overflow`) inside a script.
-    let repeated = crate::limits::checked_repeat(&s, count as usize)?;
+    let repeated = harn_vm_core::limits::checked_repeat(&s, count as usize)?;
     Ok(VmValue::string(repeated))
 }
 

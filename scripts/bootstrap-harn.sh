@@ -28,9 +28,13 @@ if [ -z "$version" ]; then
 fi
 printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || { echo 'invalid pinned bootstrap seed version' >&2; exit 1; }
 case "$(uname -m)" in arm64|aarch64) arch=aarch64;; x86_64|amd64) arch=x86_64;; *) echo 'unsupported seed architecture' >&2; exit 1;; esac
+# Releases before XZ_FIRST_RELEASE ship .tar.gz; later ones ship .tar.xz.
+XZ_FIRST_RELEASE=0.10.179
+unix_extension=tar.gz
+[ "$(printf '%s\n%s\n' "$version" "$XZ_FIRST_RELEASE" | sort -V | head -n 1)" != "$XZ_FIRST_RELEASE" ] || unix_extension=tar.xz
 case "$(uname -s)" in
-  Darwin) target=$arch-apple-darwin; extension=tar.gz; name=harn;;
-  Linux) target=$arch-unknown-linux-gnu; extension=tar.gz; name=harn;;
+  Darwin) target=$arch-apple-darwin; extension=$unix_extension; name=harn;;
+  Linux) target=$arch-unknown-linux-gnu; extension=$unix_extension; name=harn;;
   MINGW*|MSYS*|CYGWIN*) target=x86_64-pc-windows-msvc; extension=zip; name=harn.exe;;
   *) echo 'unsupported seed platform' >&2; exit 1;;
 esac
@@ -120,7 +124,7 @@ if [ "$extension" = zip ]; then
   HARN_EXT_SEED_ARCHIVE="$work/$asset" HARN_EXT_SEED_BINARY="$work/$name" powershell.exe -NoProfile -NonInteractive -Command \
     'Add-Type -AssemblyName System.IO.Compression.FileSystem; $zip=[IO.Compression.ZipFile]::OpenRead($env:HARN_EXT_SEED_ARCHIVE); try { $entry=$zip.GetEntry("harn.exe"); [IO.Compression.ZipFileExtensions]::ExtractToFile($entry,$env:HARN_EXT_SEED_BINARY) } finally { $zip.Dispose() }'
 else
-  tar -xzf "$work/$asset" -C "$work" "$name"
+  tar -xf "$work/$asset" -C "$work" "$name"
 fi
 chmod +x "$work/$name"
 if [ "$downloaded" = 1 ]; then
