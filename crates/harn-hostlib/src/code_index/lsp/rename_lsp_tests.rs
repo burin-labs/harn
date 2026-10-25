@@ -517,37 +517,43 @@ fn a_method_rename_leaves_a_free_function_path_in_a_macro_alone() {
         format!("{declaration}\n\n#[macro_export]\nmacro_rules! run {{\n    () => {{\n        $crate::{path}()\n    }};\n}}\n")
     };
     // `$crate::parser::parse` names the module's free function, never the
-    // method. A conditional `mod` or module file, or a path through the
-    // type, may reach it.
+    // method. A conditional `mod` or module file, a path through the type,
+    // or a manifest target path that makes a `src/` file a crate root may
+    // reach it.
+    let bin = "[[bin]]\nname = \"tool\"\npath = \"src/bin.rs\"\n";
     let cases = [
-        ("pub mod parser;", "", "parser::parse", true),
+        ("pub mod parser;", "", "parser::parse", "", true),
         (
             "#[cfg(not(any()))]\npub mod parser;",
             "",
             "parser::parse",
+            "",
             false,
         ),
         (
             "pub mod parser;",
             "#![cfg(not(any()))] ",
             "parser::parse",
+            "",
             false,
         ),
-        ("pub mod parser;", "", "parser::Parser::parse", false),
+        ("pub mod parser;", "", "parser::Parser::parse", "", false),
+        ("pub mod parser;", "", "parser::parse", bin, false),
     ];
-    for (declaration, inner, path, applies) in cases {
+    for (declaration, inner, path, targets, applies) in cases {
         let dir = tempdir().unwrap();
         let lib = macro_lib(declaration, path);
         let parser = format!("{inner}{parser}");
+        let manifest = format!(
+            "[package]\nname = \"small\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n{targets}"
+        );
         write_tree(
             dir.path(),
             &[
-                (
-                    "Cargo.toml",
-                    "[package]\nname = \"small\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-                ),
+                ("Cargo.toml", manifest.as_str()),
                 ("src/lib.rs", &lib),
                 ("src/parser.rs", &parser),
+                ("src/bin.rs", "fn main() {}\n"),
             ],
         );
         let capability = index(dir.path());
@@ -578,7 +584,7 @@ fn a_method_rename_leaves_a_free_function_path_in_a_macro_alone() {
             assert_eq!(
                 s(field(&result, "result")),
                 "backend_unavailable",
-                "{declaration} {inner}{path}: {result:?}"
+                "{declaration} {inner}{path} {targets}: {result:?}"
             );
             assert!(
                 s(field(&result, "details")).contains("src/lib.rs:"),

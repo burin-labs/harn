@@ -19,9 +19,10 @@ struct CrateInfo {
     dir: String,
     ident: String,
     has_lib: bool,
-    /// The manifest moves the library root out of `src/lib.rs`, so module
-    /// paths do not follow the `src/` layout.
-    custom_lib: bool,
+    /// The manifest moves the library root out of `src/lib.rs`, or names a
+    /// target or build-script path, so a file under `src/` may be a crate
+    /// root rather than a module of `src/lib.rs` or `src/main.rs`.
+    custom_roots: bool,
 }
 
 /// Where one file sits: inside the library's module tree (`in_lib`), or in
@@ -67,17 +68,20 @@ impl Workspace {
             return found.clone();
         }
         let manifest = self.root.join(dir).join("Cargo.toml");
-        let info = std::fs::read_to_string(&manifest)
-            .ok()
-            .and_then(|toml| parse_manifest(&toml))
+        let toml = std::fs::read_to_string(&manifest).ok();
+        let target_paths = toml.as_deref().is_some_and(declares_root_paths);
+        let info = toml
+            .as_deref()
+            .and_then(parse_manifest)
             .map(|(package, lib_name, lib_path)| {
-                let custom_lib = lib_path.as_deref().is_some_and(|path| path != "src/lib.rs");
+                let custom_roots =
+                    target_paths || lib_path.as_deref().is_some_and(|path| path != "src/lib.rs");
                 let lib_rel = lib_path.unwrap_or_else(|| "src/lib.rs".to_string());
                 CrateInfo {
                     dir: dir.to_string(),
                     ident: lib_name.unwrap_or(package).replace('-', "_"),
                     has_lib: self.root.join(dir).join(lib_rel).exists(),
-                    custom_lib,
+                    custom_roots,
                 }
             });
         self.crates.insert(dir.to_string(), info.clone());
@@ -129,7 +133,7 @@ impl Workspace {
     /// either root. `None` outside a `src/` module tree.
     pub(crate) fn crate_roots(&mut self, rel: &str) -> Option<(String, Vec<String>)> {
         let ctx = self.file_ctx(rel)?;
-        if !ctx.in_lib || ctx.krate.custom_lib {
+        if !ctx.in_lib || ctx.krate.custom_roots {
             return None;
         }
         let dir = ctx.krate.dir;
@@ -1079,6 +1083,37 @@ fn join_rel(dir: &str, rest: &str) -> String {
     }
 }
 
+/// Whether the manifest gives a `[[bin]]`, `[[example]]`, `[[test]]` or
+/// `[[bench]]` target a `path` (or declares one inline, unread), or names a
+/// build script: any of these can make a file under `src/` a crate root.
+fn declares_root_paths(toml: &str) -> bool {
+    const TARGETS: [&str; 4] = ["bin", "example", "test", "bench"];
+    let mut section = String::new();
+    for line in toml.lines() {
+        let line = line.split('#').next().unwrap_or_default().trim();
+        if line.starts_with('[') {
+            section = line.chars().filter(|c| !c.is_whitespace()).collect();
+            continue;
+        }
+        let Some((key, _)) = line.split_once('=') else {
+            continue;
+        };
+        let key: String = key.chars().filter(|c| !c.is_whitespace()).collect();
+        let table = section.trim_matches(|c| c == '[' || c == ']');
+        let full = if table.is_empty() {
+            key.clone()
+        } else {
+            format!("{table}.{key}")
+        };
+        let head = full.split('.').next().unwrap_or_default();
+        let target_path = TARGETS.contains(&head) && (full == head || full.ends_with(".path"));
+        if target_path || full == "package.build" {
+            return true;
+        }
+    }
+    false
+}
+
 fn parse_manifest(toml: &str) -> Option<(String, Option<String>, Option<String>)> {
     let mut section = "";
     let mut package = None;
@@ -1102,4 +1137,33 @@ fn parse_manifest(toml: &str) -> Option<(String, Option<String>, Option<String>)
         }
     }
     package.map(|p| (p, lib_name, lib_path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::declares_root_paths;
+
+    #[test]
+    fn manifest_spellings_that_can_root_a_src_file_are_all_seen() {
+        let package = "[package]\nname = \"small\"\n";
+        for (tail, roots) in [
+            ("", false),
+            ("[[bin]]\nname = \"tool\"\n", false),
+            ("[dependencies]\nbin = \"1\"\n", false),
+            ("[[bin]]\nname = \"tool\"\npath = \"src/bin.rs\"\n", true),
+            ("[[ bench ]] # timing\npath = \"src/b.rs\"\n", true),
+            ("[[test]]\n path = \"src/t.rs\"\n", true),
+            ("example = [{ name = \"e\", path = \"src/e.rs\" }]\n", true),
+            ("build = \"src/build.rs\"\n", true),
+        ] {
+            // A trailing top-level key belongs to `[package]`, except the
+            // inline-array row, which is written before any table.
+            let toml = if tail.starts_with("example") {
+                format!("{tail}{package}")
+            } else {
+                format!("{package}{tail}")
+            };
+            assert_eq!(declares_root_paths(&toml), roots, "{toml}");
+        }
+    }
 }
