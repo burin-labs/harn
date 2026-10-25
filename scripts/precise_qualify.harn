@@ -772,6 +772,13 @@ fn main(harness: Harness) -> int {
   }
   const plan = json_decode(harness.fs.read_text(argv[0]), schema_of(Plan))?
   const out_dir = argv[1]
+  // With no oracle command nothing compiles an edit, so every apply would read correct.
+  const unchecked = plan.repos.filter({ repo -> len(repo.oracle) == 0 }).map({ repo -> repo.id })
+    .to_list()
+  if len(unchecked) > 0 {
+    harness.stdio.eprintln("every repo needs an oracle command; none for " + unchecked.join(", "))
+    return 2
+  }
   if harness.fs.exists(path_join(out_dir, "receipt.json")) {
     harness.stdio.eprintln("refusing to overwrite an existing receipt in " + out_dir)
     return 2
