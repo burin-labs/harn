@@ -1,7 +1,7 @@
 //! Compile adjacent bytecode and imported interfaces for `harn precompile`.
 //!
-//! The embedded driver owns the directory walk and bounded subprocess fanout.
-//! Its inner compiler validates each source and emits or reuses all artifacts.
+//! The embedded driver owns the directory walk, placement, and rendering. One
+//! inner batch child compiles every source and emits or reuses all artifacts.
 use std::path::Path;
 
 use harn_package::precompile::{precompile_source, Outcome, Precompiled};
@@ -16,7 +16,10 @@ use crate::env_guard::ScopedEnvVar;
 use crate::parse_source_file;
 use crate::typecheck_imports::checker_with_resolved_graph;
 
+mod batch;
 mod warm_cache;
+
+pub use batch::PRECOMPILE_RECORD_PREFIX;
 
 /// Per-source result consumed by the embedded directory driver. Successful
 /// children distinguish compiled output from reused output on this stream.
@@ -42,6 +45,10 @@ pub async fn run(args: PrecompileArgs) {
         return;
     }
     if std::env::var(PRECOMPILE_INNER_ENV).as_deref() == Ok("1") {
+        if let Some(manifest) = &args.batch {
+            batch::run(manifest, args.resolved_jobs(), args.keep_going);
+            return;
+        }
         run_inner_compile(args);
         return;
     }
@@ -66,6 +73,14 @@ pub async fn run(args: PrecompileArgs) {
         None
     };
     let _jobs = ScopedEnvVar::set(PRECOMPILE_JOBS_ENV, &args.resolved_jobs().to_string());
+    let batch_dir = tempfile::Builder::new()
+        .prefix("harn-precompile-")
+        .tempdir()
+        .unwrap_or_else(|error| command_error(&format!("create precompile batch dir: {error}")));
+    let _batch_dir_env = ScopedEnvVar::set(
+        batch::PRECOMPILE_BATCH_DIR_ENV,
+        &batch_dir.path().to_string_lossy(),
+    );
 
     let target = args
         .target
@@ -83,6 +98,7 @@ pub async fn run(args: PrecompileArgs) {
         /* json_mode */ false,
     )
     .await;
+    drop(batch_dir);
     if exit != 0 {
         std::process::exit(exit);
     }
