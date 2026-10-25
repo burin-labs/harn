@@ -507,7 +507,7 @@ fn a_read_only_parent_of_a_writable_root_leaves_that_root_writable() {
 
     // The file builtins agree, by the deepest matching root.
     use crate::stdlib::sandbox::{check_fs_path_scope, FsAccess};
-    push_execution_policy(policy.clone());
+    push_execution_policy(policy);
     let writable = check_fs_path_scope(&ws.join("g"), FsAccess::Write).is_ok()
         && check_fs_path_scope(&work.join("g"), FsAccess::Write).is_ok();
     let refused = check_fs_path_scope(&parent.join("g"), FsAccess::Write).is_err();
