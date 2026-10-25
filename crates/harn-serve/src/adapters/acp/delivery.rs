@@ -519,6 +519,10 @@ impl AcpServer {
                 .get(session_id)
                 .map(|session| session.inject_state.clone())
             else {
+                // The session is gone: answer what is still pending for it.
+                self.concurrent_controls
+                    .cancel_pending_prompts(session_id, "session_closed", &self.output)
+                    .await;
                 return;
             };
             let Some((request_id, _meta, inserted)) = self
