@@ -819,7 +819,7 @@ fn __post_turn_verdict_result(
   _opts: any,
   verdict: dict,
   feedback_kind: string = "post_turn",
-) {
+) -> dict? {
   if verdict.kind == "stop" {
     const stop_reason = "post_turn_stop"
     return {
@@ -1082,12 +1082,7 @@ pub fn agent_compute_post_turn(
     prior_turn_next_tool_claim: opts?._next_tool_claim,
     text: text,
     visible_text: text,
-    // `text`/`visible_text` are the PROJECTION: the parser has already removed
-    // completion markers and structural tags from them. Anything deciding
-    // whether the model declared completion must read `raw_text` instead —
-    // it is the same string the sentinel detector below reads, so host
-    // completion checks and the loop's own detector cannot disagree about
-    // what the turn said. Projection is for display; raw is for semantics.
+    // Keep response bytes for evidence; completion_signal owns recognition.
     raw_text: sentinel_text,
     parsed_done_marker: parsed_done_marker,
     completion_signal: completion_signal,
