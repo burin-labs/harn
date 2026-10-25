@@ -19,8 +19,6 @@ use crate::typecheck_imports::checker_with_resolved_graph;
 mod batch;
 mod warm_cache;
 
-pub use batch::PRECOMPILE_RECORD_PREFIX;
-
 /// Per-source result consumed by the embedded directory driver. Successful
 /// children distinguish compiled output from reused output on this stream.
 pub const PRECOMPILE_OUTCOME_PREFIX: &str = "precompile-outcome:";
@@ -33,8 +31,7 @@ pub const PRECOMPILE_ARTIFACT_CONTRACT: &str = "harn.precompile.artifacts/reloca
 const PRECOMPILE_OUT_ENV: &str = "HARN_PRECOMPILE_OUT";
 const PRECOMPILE_KEEP_GOING_ENV: &str = "HARN_PRECOMPILE_KEEP_GOING";
 const PRECOMPILE_QUIET_ENV: &str = "HARN_PRECOMPILE_QUIET";
-/// `1` compiles the target in this process; `batch` reads the target as the
-/// directory driver's source manifest and compiles every source it names.
+/// `1` compiles the target here; `batch` compiles every source its manifest names.
 pub const PRECOMPILE_INNER_ENV: &str = "HARN_PRECOMPILE_INNER";
 
 pub async fn run(args: PrecompileArgs) {
@@ -47,18 +44,8 @@ pub async fn run(args: PrecompileArgs) {
         return;
     }
     match std::env::var(PRECOMPILE_INNER_ENV).as_deref() {
-        Ok("1") => {
-            run_inner_compile(args);
-            return;
-        }
-        Ok("batch") => {
-            let manifest = args
-                .target
-                .as_deref()
-                .unwrap_or_else(|| command_error("precompile manifest is required"));
-            batch::run(manifest, args.resolved_jobs(), args.keep_going);
-            return;
-        }
+        Ok("1") => return run_inner_compile(args),
+        Ok("batch") => return batch::run_args(&args),
         _ => {}
     }
 
@@ -71,25 +58,14 @@ pub async fn run(args: PrecompileArgs) {
         .out
         .as_ref()
         .map(|p| ScopedEnvVar::set(PRECOMPILE_OUT_ENV, &p.to_string_lossy()));
-    let _keep = if args.keep_going {
-        Some(ScopedEnvVar::set(PRECOMPILE_KEEP_GOING_ENV, "1"))
-    } else {
-        None
-    };
-    let _quiet = if args.quiet {
-        Some(ScopedEnvVar::set(PRECOMPILE_QUIET_ENV, "1"))
-    } else {
-        None
-    };
+    let _keep = args
+        .keep_going
+        .then(|| ScopedEnvVar::set(PRECOMPILE_KEEP_GOING_ENV, "1"));
+    let _quiet = args
+        .quiet
+        .then(|| ScopedEnvVar::set(PRECOMPILE_QUIET_ENV, "1"));
     let _jobs = ScopedEnvVar::set(PRECOMPILE_JOBS_ENV, &args.resolved_jobs().to_string());
-    let batch_dir = tempfile::Builder::new()
-        .prefix("harn-precompile-")
-        .tempdir()
-        .unwrap_or_else(|error| command_error(&format!("create precompile batch dir: {error}")));
-    let _batch_dir_env = ScopedEnvVar::set(
-        batch::PRECOMPILE_BATCH_DIR_ENV,
-        &batch_dir.path().to_string_lossy(),
-    );
+    let batch_dir = batch::BatchDir::create();
 
     let target = args
         .target

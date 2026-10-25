@@ -12,13 +12,47 @@ use harn_package::precompile::{precompile_source, Outcome, Precompiled};
 use serde::{Deserialize, Serialize};
 
 use super::PRECOMPILE_OUTCOME_PREFIX;
+use crate::cli::PrecompileArgs;
 use crate::command_error;
+use crate::env_guard::ScopedEnvVar;
 
 /// Prefix of each per-source line the batch child prints for the driver.
-pub const PRECOMPILE_RECORD_PREFIX: &str = "precompile-record:";
+const PRECOMPILE_RECORD_PREFIX: &str = "precompile-record:";
 
 /// Directory the dispatch shim owns, where the driver writes the manifest.
-pub(super) const PRECOMPILE_BATCH_DIR_ENV: &str = "HARN_PRECOMPILE_BATCH_DIR";
+const PRECOMPILE_BATCH_DIR_ENV: &str = "HARN_PRECOMPILE_BATCH_DIR";
+
+/// The manifest directory, exported to the driver while this value lives and
+/// removed when it drops.
+pub(super) struct BatchDir {
+    _env: ScopedEnvVar,
+    _dir: tempfile::TempDir,
+}
+
+impl BatchDir {
+    pub(super) fn create() -> Self {
+        let dir = tempfile::Builder::new()
+            .prefix("harn-precompile-")
+            .tempdir()
+            .unwrap_or_else(|error| {
+                command_error(&format!("create precompile batch dir: {error}"))
+            });
+        let env = ScopedEnvVar::set(PRECOMPILE_BATCH_DIR_ENV, &dir.path().to_string_lossy());
+        Self {
+            _env: env,
+            _dir: dir,
+        }
+    }
+}
+
+/// Compile every source named by the manifest at `args.target`.
+pub(super) fn run_args(args: &PrecompileArgs) {
+    let manifest = args
+        .target
+        .as_deref()
+        .unwrap_or_else(|| command_error("precompile manifest is required"));
+    run(manifest, args.resolved_jobs(), args.keep_going);
+}
 
 #[derive(Deserialize)]
 struct Manifest {
@@ -43,7 +77,7 @@ struct Record<'a> {
     stderr: String,
 }
 
-pub(super) fn run(manifest_path: &Path, jobs: usize, keep_going: bool) {
+fn run(manifest_path: &Path, jobs: usize, keep_going: bool) {
     let text = std::fs::read_to_string(manifest_path).unwrap_or_else(|error| {
         command_error(&format!(
             "read precompile manifest {}: {error}",
