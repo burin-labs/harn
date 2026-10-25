@@ -342,7 +342,21 @@ fn catastrophic_floor_reaches_commands_inside_substitutions() {
 
 #[test]
 fn floor_does_not_block_a_doas_permit_check_that_launches_nothing() {
-    assert!(!is_cat_root("doas -C /etc/doas.conf rm -rf /"));
+    for cmd in [
+        "doas -C /etc/doas.conf rm -rf /",
+        "doas -C/etc/doas.conf rm -rf /",
+        "doas -nC /etc/doas.conf rm -rf /",
+        "doas -nC/etc/doas.conf rm -rf /",
+    ] {
+        assert!(!is_cat_root(cmd), "{cmd}");
+    }
+    for cmd in [
+        "doas -uroot rm -rf /",
+        "doas -nuroot rm -rf /",
+        "doas -n -u root rm -rf /",
+    ] {
+        assert!(is_cat_root(cmd), "{cmd}");
+    }
     assert!(is_cat_root("doas -u root rm -rf /"));
 }
 

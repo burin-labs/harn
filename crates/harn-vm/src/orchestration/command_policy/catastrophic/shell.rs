@@ -199,19 +199,27 @@ pub(super) fn skip_doas_wrapper(tokens: &[String], start: usize, end: usize) -> 
         if token == "--" {
             return index + 1;
         }
-        if !token.starts_with('-') {
+        if !token.starts_with('-') || token == "-" {
             break;
         }
-        // `-C file` only checks the permit rules for the command; nothing launches.
-        if token == "-C" {
-            return end;
-        }
         index += 1;
-        if matches!(token.as_str(), "-a" | "-u") && index < end {
-            index += 1;
+        // getopt clusters: an option that takes a value uses the rest of the
+        // token (`-uroot`, `-nC/etc/doas.conf`) or else the next one.
+        for (offset, flag) in token.char_indices().skip(1) {
+            if !matches!(flag, 'a' | 'C' | 'u') {
+                continue;
+            }
+            // `-C file` only checks the permit rules for the command; nothing launches.
+            if flag == 'C' {
+                return end;
+            }
+            if offset + flag.len_utf8() == token.len() {
+                index += 1;
+            }
+            break;
         }
     }
-    index
+    index.min(end)
 }
 
 pub(super) fn skip_env_wrapper(tokens: &[String], start: usize, end: usize) -> usize {
