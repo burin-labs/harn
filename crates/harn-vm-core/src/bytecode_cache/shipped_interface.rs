@@ -41,11 +41,19 @@ pub struct PrecompiledInterface {
     key: CacheKey,
     needs_write: bool,
     destination: PathBuf,
+    module_graph: Option<harn_modules::ModuleGraph>,
 }
 
 impl PrecompiledInterface {
     pub fn context(&self) -> &ModuleCompilationContext {
         &self.payload.entry
+    }
+
+    /// The entry's module graph when preparing this interface built one, so
+    /// the caller need not build the same graph again. `None` when a stored
+    /// interface was reused without building a graph.
+    pub fn take_module_graph(&mut self) -> Option<harn_modules::ModuleGraph> {
+        self.module_graph.take()
     }
 
     pub fn package_import_aliases(&self) -> &[String] {
@@ -116,6 +124,7 @@ pub fn prepare_precompiled_interface(
         key: key(source, result.relocatable),
         needs_write,
         destination: destination.to_path_buf(),
+        module_graph: result.module_graph,
     })
 }
 

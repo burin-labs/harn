@@ -165,7 +165,8 @@ impl Language {
     /// lean build still *recognizes* a `.py` file, it just returns `None`
     /// here and the edit primitives degrade to the text fallback. The full
     /// (default) build enables every family, so `None` never occurs there.
-    /// Cheap when present; the underlying `LANGUAGE` constants are static.
+    /// The first call for a grammar unpacks its parse tables; later calls
+    /// are cheap.
     pub fn ts_language(self) -> Option<TsLanguage> {
         // Return `Option` from each arm so a build with zero `grammar-*`
         // features (lean `ast` only) stays warning-clean: the catch-all is
@@ -173,72 +174,72 @@ impl Language {
         // wrapper around `return None`.
         match self {
             #[cfg(feature = "grammar-harn")]
-            Language::Harn => Some(tree_sitter_harn::LANGUAGE.into()),
+            Language::Harn => Some(harn_grammars::harn()),
 
             #[cfg(feature = "grammar-web")]
-            Language::TypeScript => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
+            Language::TypeScript => Some(harn_grammars::typescript()),
             #[cfg(feature = "grammar-web")]
-            Language::Tsx => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
+            Language::Tsx => Some(harn_grammars::tsx()),
             #[cfg(feature = "grammar-web")]
-            Language::JavaScript | Language::Jsx => Some(tree_sitter_javascript::LANGUAGE.into()),
+            Language::JavaScript | Language::Jsx => Some(harn_grammars::javascript()),
             #[cfg(feature = "grammar-web")]
-            Language::Html => Some(tree_sitter_html::LANGUAGE.into()),
+            Language::Html => Some(harn_grammars::html()),
             #[cfg(feature = "grammar-web")]
-            Language::Css => Some(tree_sitter_css::LANGUAGE.into()),
+            Language::Css => Some(harn_grammars::css()),
 
             #[cfg(feature = "grammar-systems")]
-            Language::Rust => Some(tree_sitter_rust::LANGUAGE.into()),
+            Language::Rust => Some(harn_grammars::rust()),
             #[cfg(feature = "grammar-systems")]
-            Language::C => Some(tree_sitter_c::LANGUAGE.into()),
+            Language::C => Some(harn_grammars::c()),
             #[cfg(feature = "grammar-systems")]
-            Language::Cpp => Some(tree_sitter_cpp::LANGUAGE.into()),
+            Language::Cpp => Some(harn_grammars::cpp()),
             #[cfg(feature = "grammar-systems")]
-            Language::Go => Some(tree_sitter_go::LANGUAGE.into()),
+            Language::Go => Some(harn_grammars::go()),
             #[cfg(feature = "grammar-systems")]
-            Language::Zig => Some(tree_sitter_zig::LANGUAGE.into()),
+            Language::Zig => Some(harn_grammars::zig()),
 
             #[cfg(feature = "grammar-scripting")]
-            Language::Python => Some(tree_sitter_python::LANGUAGE.into()),
+            Language::Python => Some(harn_grammars::python()),
             #[cfg(feature = "grammar-scripting")]
-            Language::Ruby => Some(tree_sitter_ruby::LANGUAGE.into()),
+            Language::Ruby => Some(harn_grammars::ruby()),
             #[cfg(feature = "grammar-scripting")]
-            Language::Bash => Some(tree_sitter_bash::LANGUAGE.into()),
+            Language::Bash => Some(harn_grammars::bash()),
             #[cfg(feature = "grammar-scripting")]
-            Language::Lua => Some(tree_sitter_lua::LANGUAGE.into()),
+            Language::Lua => Some(harn_grammars::lua()),
             #[cfg(feature = "grammar-scripting")]
-            Language::Php => Some(tree_sitter_php::LANGUAGE_PHP.into()),
+            Language::Php => Some(harn_grammars::php()),
             #[cfg(feature = "grammar-scripting")]
-            Language::R => Some(tree_sitter_r::LANGUAGE.into()),
+            Language::R => Some(harn_grammars::r()),
 
             #[cfg(feature = "grammar-jvm")]
-            Language::Java => Some(tree_sitter_java::LANGUAGE.into()),
+            Language::Java => Some(harn_grammars::java()),
             #[cfg(feature = "grammar-jvm")]
-            Language::Kotlin => Some(tree_sitter_kotlin_ng::LANGUAGE.into()),
+            Language::Kotlin => Some(harn_grammars::kotlin()),
             #[cfg(feature = "grammar-jvm")]
-            Language::Scala => Some(tree_sitter_scala::LANGUAGE.into()),
+            Language::Scala => Some(harn_grammars::scala()),
 
             #[cfg(feature = "grammar-enterprise")]
-            Language::CSharp => Some(tree_sitter_c_sharp::LANGUAGE.into()),
+            Language::CSharp => Some(harn_grammars::c_sharp()),
             #[cfg(feature = "grammar-enterprise")]
-            Language::Swift => Some(tree_sitter_swift::LANGUAGE.into()),
+            Language::Swift => Some(harn_grammars::swift()),
             #[cfg(feature = "grammar-enterprise")]
-            Language::Elixir => Some(tree_sitter_elixir::LANGUAGE.into()),
+            Language::Elixir => Some(harn_grammars::elixir()),
             #[cfg(feature = "grammar-enterprise")]
-            Language::Haskell => Some(tree_sitter_haskell::LANGUAGE.into()),
+            Language::Haskell => Some(harn_grammars::haskell()),
 
             #[cfg(feature = "grammar-data")]
-            Language::Json => Some(tree_sitter_json::LANGUAGE.into()),
+            Language::Json => Some(harn_grammars::json()),
             #[cfg(feature = "grammar-data")]
-            Language::Yaml => Some(tree_sitter_yaml::LANGUAGE.into()),
+            Language::Yaml => Some(harn_grammars::yaml()),
             #[cfg(feature = "grammar-data")]
-            Language::Toml => Some(tree_sitter_toml_ng::LANGUAGE.into()),
+            Language::Toml => Some(harn_grammars::toml()),
             #[cfg(feature = "grammar-data")]
-            Language::Sql => Some(tree_sitter_sequel::LANGUAGE.into()),
+            Language::Sql => Some(harn_grammars::sql()),
             // tree-sitter-md ships a split block/inline grammar; the block
             // grammar is the structural tree the edit primitives operate
             // on (headings, lists, fenced code, …).
             #[cfg(feature = "grammar-data")]
-            Language::Markdown => Some(tree_sitter_md::LANGUAGE.into()),
+            Language::Markdown => Some(harn_grammars::markdown()),
 
             // Any language whose family was not compiled into this build.
             // Unreachable under the default (all-families) build.

@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 
 use crate::ast::Language;
 
+use super::install;
+
 /// When a freshly started server can answer semantic queries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Readiness {
@@ -108,43 +110,143 @@ impl ServerSpec {
 }
 
 impl Launch {
+    /// The executable that starts this server for `root`, or why there is none.
     pub(crate) fn resolve_program(&self, root: &Path) -> Result<String, String> {
         #[cfg(test)]
         if let Some(program) = test_override::get(self.id) {
             return Ok(program);
         }
-        if let Some(program) = std::env::var_os(self.program_env) {
-            return Ok(program.to_string_lossy().into_owned());
+        self.resolve_with(&install::ProcessProbe, root)
+    }
+
+    /// Search order: the override variable, the project's own bin directory,
+    /// `PATH`, then the install directories `PATH` may omit.
+    pub(crate) fn resolve_with(
+        &self,
+        probe: &dyn install::Probe,
+        root: &Path,
+    ) -> Result<String, String> {
+        if let Some(program) = probe.var(self.program_env) {
+            // A set override wins even when it names nothing, so evals can
+            // force the fallback.
+            let program = PathBuf::from(program);
+            return if program.is_file() {
+                Ok(program.to_string_lossy().into_owned())
+            } else {
+                Err(format!(
+                    "{} names `{}`, which is not a file",
+                    self.program_env,
+                    program.display()
+                ))
+            };
         }
-        let project = self.project_bin.map(|dir| root.join(dir));
-        self.programs
-            .iter()
-            .find_map(|program| {
-                project
-                    .as_deref()
-                    .and_then(|dir| find_in(dir, program))
-                    .or_else(|| find_on_path(program))
-            })
-            .map(|path| path.to_string_lossy().into_owned())
-            .ok_or_else(|| {
+        let mut dirs: Vec<PathBuf> = self
+            .project_bin
+            .map(|dir| root.join(dir))
+            .into_iter()
+            .collect();
+        if let Some(path) = probe.var("PATH") {
+            dirs.extend(std::env::split_paths(&path).filter(|dir| dir.is_absolute()));
+        }
+        dirs.extend(install::install_dirs(probe, root));
+        let mut skipped = Vec::new();
+        for program in self.programs {
+            for dir in &dirs {
+                let Some(found) = find_in(dir, program) else {
+                    continue;
+                };
+                match self.unusable(probe, root, &found, program) {
+                    Some(reason) => skipped.push(reason),
+                    None => return Ok(found.to_string_lossy().into_owned()),
+                }
+            }
+        }
+        skipped.dedup();
+        if !skipped.is_empty() {
+            return Err(skipped.join("; "));
+        }
+        Err(format!(
+            "{} is not installed (looked for {} on PATH and in {})",
+            self.id,
+            self.programs.join(", "),
+            install::install_dirs(probe, root)
+                .iter()
+                .map(|dir| dir.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    }
+
+    /// Why a found executable cannot serve: a rustup proxy whose selected
+    /// toolchain lacks the component, or a `tsc` older than TypeScript 7.
+    fn unusable(
+        &self,
+        probe: &dyn install::Probe,
+        root: &Path,
+        found: &Path,
+        program: &str,
+    ) -> Option<String> {
+        if install::is_rustup_proxy(found) {
+            let Some(toolchain) = install::rustup_toolchain(probe, root) else {
+                return Some(format!(
+                    "`{}` is a rustup proxy, and rustup selects no installed toolchain for {}",
+                    found.display(),
+                    root.display()
+                ));
+            };
+            return find_in(&toolchain.bin, program).is_none().then(|| {
                 format!(
-                    "{} is not installed (looked for {})",
-                    self.id,
-                    self.programs.join(", ")
+                    "{program} is not installed for the {} toolchain (rustup component add {program})",
+                    toolchain.name
                 )
-            })
+            });
+        }
+        if program == "tsc" {
+            let major = typescript_major(found)?;
+            return (major < 7).then(|| {
+                format!(
+                    "`{}` is TypeScript {major}; `tsc --lsp` needs TypeScript 7",
+                    found.display()
+                )
+            });
+        }
+        None
     }
 }
 
-fn find_in(dir: &Path, program: &str) -> Option<PathBuf> {
-    [dir.join(program), dir.join(format!("{program}.exe"))]
-        .into_iter()
-        .find(|candidate| candidate.is_file())
+/// The major version of the `typescript` package a `tsc` launcher belongs to,
+/// when its `package.json` can be found.
+fn typescript_major(tsc: &Path) -> Option<u64> {
+    let script = std::fs::canonicalize(tsc).ok()?;
+    let package = script.parent()?.parent()?.join("package.json");
+    let manifest: Value = serde_json::from_str(&std::fs::read_to_string(package).ok()?).ok()?;
+    if manifest.get("name")?.as_str()? != "typescript" {
+        return None;
+    }
+    manifest
+        .get("version")?
+        .as_str()?
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
 }
 
-fn find_on_path(program: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).find_map(|dir| find_in(&dir, program))
+/// The executable `program` names in `dir`. Windows launches by extension, and
+/// npm installs its global shims there as `.cmd` files.
+fn find_in(dir: &Path, program: &str) -> Option<PathBuf> {
+    let names: Vec<String> = if cfg!(windows) {
+        ["exe", "cmd", "bat"]
+            .iter()
+            .map(|extension| format!("{program}.{extension}"))
+            .collect()
+    } else {
+        vec![program.to_string()]
+    };
+    names
+        .into_iter()
+        .map(|name| dir.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 const RUST_ANALYZER: ServerSpec = ServerSpec {

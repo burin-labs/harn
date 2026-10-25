@@ -15,6 +15,7 @@ pub mod decision_contract;
 mod from_artifact;
 pub mod model_def;
 pub mod model_operation;
+pub mod models_dev;
 pub mod presentation;
 pub mod pricing;
 mod schema;

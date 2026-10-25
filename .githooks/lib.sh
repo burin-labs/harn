@@ -24,7 +24,6 @@ HOOK_SESSION_BUNDLE_SCHEMA_PATTERN='(^crates/harn-vm/src/session_bundle\.rs$|^cr
 HOOK_PROMPT_PROSE_PATTERN='(^crates/harn-vm/src/(llm/|orchestration/(workflow|artifacts|compaction)\.rs$)|^conformance/|^scripts/(allowed_long_strings\.txt|check_no_rust_prompt_prose\.sh|check_rust_prompt_prose\.harn)$)'
 HOOK_XFAIL_RATCHET_PATTERN='(^conformance/|^scripts/(check_xfail_count\.harn|xfail_threshold\.txt)$)'
 HOOK_RATCHET_PATTERN="($HOOK_PROMPT_PROSE_PATTERN|$HOOK_XFAIL_RATCHET_PATTERN)"
-HOOK_PROVIDER_CATALOG_PATTERN='(^crates/harn-vm/src/llm/(catalog_sources/|capability_sources/|providers\.toml$|capabilities\.toml$)|^spec/provider-catalog/|^docs/src/provider-(matrix|support)\.md$|^docs/provider-support\.json$)'
 # Lexer KEYWORDS const <-> tree-sitter keyword mirror.
 HOOK_TREESITTER_PATTERN='(^crates/harn-lexer/src/token\.rs$|^tree-sitter-harn/grammar/keywords\.js$)'
 # The generated-artifact registry and the consumers its audit cross-checks:
@@ -54,8 +53,8 @@ hook_is_provider_catalog_data_path() {
   case "$path" in
     crates/harn-vm/src/llm/catalog_sources/*|\
     crates/harn-vm/src/llm/capability_sources/*|\
-    crates/harn-vm/src/llm/providers.toml|\
-    crates/harn-vm/src/llm/capabilities.toml|\
+    crates/harn-provider-catalog/src/providers.toml|\
+    crates/harn-provider-catalog/src/capabilities.toml|\
     spec/provider-catalog/*|\
     docs/src/provider-matrix.md|\
     docs/src/provider-support.md|\
@@ -63,6 +62,15 @@ hook_is_provider_catalog_data_path() {
       return 0
       ;;
   esac
+  return 1
+}
+
+hook_paths_have_provider_catalog_data() {
+  while IFS= read -r path; do
+    if hook_is_provider_catalog_data_path "$path"; then
+      return 0
+    fi
+  done < "$1"
   return 1
 }
 

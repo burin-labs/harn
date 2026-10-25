@@ -66,7 +66,9 @@ run_case() {
   : > "$state/github_env"
   PATH="$tmp_root/bin:$PATH" \
     GITHUB_ENV="$state/github_env" \
-    RUSTFLAGS="${CASE_RUSTFLAGS:-}" \
+    OS="${CASE_OS:-}" \
+    RUNNER_TEMP="$state/runner-temp" \
+    HARN_RUSTC_FRONTEND_THREADS="${CASE_FRONTEND_THREADS:-8}" \
     RUNNER_ENVIRONMENT="${CASE_RUNNER_ENVIRONMENT:-self-hosted}" \
     TOOLCHAIN_TEST_STATE="$state" \
     TOOLCHAIN_TEST_MODE="$mode" \
@@ -128,17 +130,30 @@ EXPECTED
 # An owned runner's shared rustup home is never touched.
 ! grep -Eq 'rustup (default|toolchain uninstall)' "$tmp_root/cargo-transient/calls"
 
-# Later steps run rustc's parallel front end: the job's own RUSTFLAGS are kept
-# and the flags appended, with the bootstrap that lets stable rustc accept them.
-CASE_RUSTFLAGS='-D warnings' run_case frontend cargo-transient 0
-diff -u - "$tmp_root/frontend/github_env" <<'EXPECTED'
+# Later steps compile workspace crates through the parallel front-end wrapper,
+# and nothing else reaches the job's environment.
+# The wrapper is a copy outside the checkout, so switching the checkout to a
+# commit without it keeps building.
+wrapper_line="$(cat "$tmp_root/rustc-transient/github_env")"
+[[ "$wrapper_line" =~ ^RUSTC_WORKSPACE_WRAPPER=$tmp_root/rustc-transient/runner-temp/harn-rustc-frontend/[0-9]+-[0-9]+/rustc_frontend_wrapper\.sh$ ]]
+wrapper="${wrapper_line#RUSTC_WORKSPACE_WRAPPER=}"
+# A compilation gets the flags and the bootstrap, and keeps Cargo's
+# CARGO_BIN_EXE_* variables, whose names are not shell identifiers.
+cat > "$tmp_root/fake-rustc" <<'SCRIPT'
+#!/usr/bin/env bash
+env | grep -E '^(RUSTC_BOOTSTRAP|CARGO_BIN_EXE_echo-env)='
+printf 'last-arg %s\n' "${!#}"
+SCRIPT
+chmod +x "$tmp_root/fake-rustc"
+diff -u - <(env 'CARGO_BIN_EXE_echo-env=/bin/echo' 'HARN_RUSTC_FRONTEND_THREADS=8' "$wrapper" "$tmp_root/fake-rustc" --crate-name t | sort) <<'EXPECTED'
+CARGO_BIN_EXE_echo-env=/bin/echo
 RUSTC_BOOTSTRAP=1
-RUSTFLAGS=-D warnings -Zthreads=8
+last-arg -Zthreads=8
 EXPECTED
-# A job with no RUSTFLAGS gets the flags alone.
-[[ "$(sed -n 2p "$tmp_root/rustc-transient/github_env")" == 'RUSTFLAGS=-Zthreads=8' ]]
-# A second call in the same job appends nothing.
-CASE_RUSTFLAGS='-D warnings -Zthreads=8' run_case frontend-again cargo-transient 0
-[[ ! -s "$tmp_root/frontend-again/github_env" ]]
+# Windows cannot run the shell wrapper, and the opt-out leaves the job serial.
+CASE_OS=Windows_NT run_case frontend-windows cargo-transient 0
+[[ ! -s "$tmp_root/frontend-windows/github_env" ]]
+CASE_FRONTEND_THREADS=1 run_case frontend-off cargo-transient 0
+[[ ! -s "$tmp_root/frontend-off/github_env" ]]
 
 echo 'rust toolchain action tests passed'

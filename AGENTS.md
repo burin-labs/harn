@@ -158,6 +158,13 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   `crates/harn-provider-catalog/src/capabilities.toml`, which are generated along with
   everything under `spec/provider-catalog/` and the provider docs. Edit the
   source fragments only.
+- Selected model facts use source-only `models_dev` bindings and the pinned
+  `catalog_sources/models-dev.json` cache. Run `harn provider catalog
+  update-source --live` to refresh it, or `--input <response.json>` offline.
+  Generation and checks never fetch upstream data. Imported fields must not
+  also be authored locally. Preserve complete Harn pricing cards for conditions,
+  modalities, or fees the importer rejects; keep runtime behavior and measured
+  capabilities in Harn. See [Update model facts](docs/src/llm/models-dev-source.md).
 - Regenerate with `make gen-provider-catalog`, `make gen-provider-matrix`, and
   `make gen-provider-support`, then verify with the matching `check-` targets.
   All three generators read the current source fragments from the repository
@@ -274,8 +281,11 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   an automated reviewer that did not finish on the head use the org-admin
   labels `bypass-ci`, `bypass-merge-queue`, and `force-merge`. The workflow
   refuses a queue bypass when none of those holds; a long queue is not one.
+- GitHub identities: author as `burin-labs-agent`; control actions and bulk
+  reads run as the `burin-control` App. See
+  [Agent GitHub identities](https://github.com/burin-labs/.github/blob/main/docs/agent-identity.md).
 - Labels are a trigger only. The workflow re-checks organization or repository
-  admin permission and refuses fork PRs. See
+  admin permission (or the `burin-control` App) and refuses fork PRs. See
   [Merge overrides](docs/src/dev/merge-overrides.md) and the
   [`burin-labs/.github` README](https://github.com/burin-labs/.github#merge-overrides).
 - Ship a ready PR by adding the `ship` label (Smart Ship arms it, lands it, and

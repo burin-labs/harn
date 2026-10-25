@@ -61,16 +61,13 @@ impl ModuleCompilationContext {
     }
 
     pub fn from_graph(graph: &harn_modules::ModuleGraph, source_path: &Path) -> Self {
-        let mut context = Self::new(
-            graph
-                .imported_names_by_kind_for_file(source_path, DefKind::Enum)
-                .unwrap_or_default(),
-            graph
-                .imported_callable_names_for_file(source_path)
-                .unwrap_or_default(),
-        );
-        context.type_alias_names = graph
-            .imported_names_by_kind_for_file(source_path, DefKind::Type)
+        let mut grouped = graph
+            .imported_names_grouped_by_kind(source_path)
+            .unwrap_or_default();
+        let callable = harn_modules::callable_names(&grouped);
+        let mut context = Self::new(grouped.remove(&DefKind::Enum).unwrap_or_default(), callable);
+        context.type_alias_names = grouped
+            .remove(&DefKind::Type)
             .unwrap_or_default()
             .into_iter()
             .collect();

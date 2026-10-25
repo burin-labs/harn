@@ -226,7 +226,7 @@ pub(crate) use provider::{ProviderPortableOptionArg, ProviderToolProbeModeArg};
 pub(crate) use providers::{
     ProviderCatalogCommand, ProvidersExportArgs, ProvidersGenerateArgs, ProvidersMatrixArgs,
     ProvidersOverlayAuditArgs, ProvidersRecommendArgs, ProvidersRefreshArgs, ProvidersSupportArgs,
-    ProvidersValidateArgs,
+    ProvidersUpdateSourceArgs, ProvidersValidateArgs,
 };
 pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use routes::RoutesArgs;

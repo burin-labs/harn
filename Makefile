@@ -791,6 +791,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/ci_rust_test_lane_test.sh
 	bash ./scripts/tests/rust_test_duration_budget_test.sh
 	./scripts/tests/macos_nightly_test_env_test.sh
+	./scripts/tests/bound_persistent_target_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
 	./scripts/tests/sccache_action_cache_size_test.sh
 	./scripts/tests/check_release_warm_build_budget_test.sh
@@ -833,6 +834,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/prune_stale_targets_test.sh
 	./scripts/tests/prune_stale_targets_retention_test.sh
 	./scripts/tests/prune_stale_targets_host_policy_test.sh
+	bash ./scripts/tests/prune_stale_targets_pressure_test.sh
 	./scripts/tests/target_gc_maintenance_test.sh
 	./scripts/tests/report_ci_cache_budget_test.sh
 	./scripts/tests/cache_refresh_admission_test.sh
@@ -1128,31 +1130,23 @@ check-trigger-quickref:
 	@echo "    Harn trigger quickref OK."
 
 # Regenerate the provider/model capability matrix from capabilities.toml.
-gen-provider-matrix:
-	@$(HARN_BIN_ASSIGN) && \
-	"$$harn_bin" provider catalog generate && \
-	"$$harn_bin" provider catalog matrix
+gen-provider-matrix: gen-provider-catalog
+	$(HARN_CMD) provider catalog matrix
 
 # CI guard: fail if the provider matrix docs drift from capabilities.toml.
-check-provider-matrix:
+check-provider-matrix: check-provider-catalog
 	@echo "=== Checking docs/src/provider-matrix.md is up to date ==="
-	@$(HARN_BIN_ASSIGN) && \
-	"$$harn_bin" provider catalog generate --check && \
-	"$$harn_bin" provider catalog matrix --check
+	@$(HARN_CMD) provider catalog matrix --check
 	@echo "    Harn provider matrix OK."
 
 # Regenerate provider support recommendations from catalog/capabilities/notes.
-gen-provider-support:
-	@$(HARN_BIN_ASSIGN) && \
-	"$$harn_bin" provider catalog generate && \
-	"$$harn_bin" provider catalog support
+gen-provider-support: gen-provider-catalog
+	$(HARN_CMD) provider catalog support
 
 # CI guard: fail if provider support markdown or JSON drift.
-check-provider-support:
+check-provider-support: check-provider-catalog
 	@echo "=== Checking provider support artifacts are up to date ==="
-	@$(HARN_BIN_ASSIGN) && \
-	"$$harn_bin" provider catalog generate --check && \
-	"$$harn_bin" provider catalog support --check
+	@$(HARN_CMD) provider catalog support --check
 	@echo "    Harn provider support OK."
 
 # Regenerate the checked-in provider/model catalog JSON, schema, and downstream bindings.

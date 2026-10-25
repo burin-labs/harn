@@ -129,6 +129,12 @@ pub(super) struct GeneratedProviderCapabilities {
 pub(super) fn generated_provider_config(
     source_dir: &Path,
 ) -> Result<GeneratedProviderConfig, String> {
+    let (source, fragment_count) = provider_source_body(source_dir)?;
+    let body = super::models_dev::resolve(source_dir, &source)?;
+    validate_provider_config(body, fragment_count)
+}
+
+pub(super) fn provider_source_body(source_dir: &Path) -> Result<(String, usize), String> {
     let mut fragments = Vec::new();
     collect_toml_fragments(source_dir, &mut fragments)?;
     fragments.sort();
@@ -165,6 +171,13 @@ pub(super) fn generated_provider_config(
         body.push('\n');
     }
 
+    Ok((body, fragments.len()))
+}
+
+fn validate_provider_config(
+    body: String,
+    fragment_count: usize,
+) -> Result<GeneratedProviderConfig, String> {
     let parsed = harn_vm::llm_config::parse_config_toml_with_diagnostics(&body)
         .map_err(|error| format!("generated provider config does not parse: {error}"))?;
     if !parsed.diagnostics.is_empty() {
@@ -201,7 +214,7 @@ pub(super) fn generated_provider_config(
 
     Ok(GeneratedProviderConfig {
         body,
-        fragment_count: fragments.len(),
+        fragment_count,
         config: parsed.config,
     })
 }
@@ -510,9 +523,8 @@ auth_style = "none"
 chat_endpoint = "/v1/chat/completions"
 
 [models."private/fast"]
-name = "Private Fast"
 provider = "private"
-context_window = 8192
+models_dev = { provider = "source", model = "fast", fields = ["name", "context_window"] }
 family = "private"
 lineage = "private"
 
@@ -530,6 +542,21 @@ provider = "private"
 "#,
         )
         .expect("write catalog source");
+        let source_config = toml::from_str(
+            &fs::read_to_string(catalog_source.join("00-base/private.toml")).unwrap(),
+        )
+        .unwrap();
+        let snapshot = harn_provider_catalog::models_dev::Snapshot::capture(
+            &serde_json::json!({"source": {"models": {"fast": {
+                "name": "Private Fast", "limit": {"context": 8192}
+            }}}}),
+            &source_config,
+            "a".repeat(64),
+        )
+        .unwrap();
+        let snapshot_body = serde_json::to_string(&snapshot).unwrap();
+        let snapshot_path = catalog_source.join("models-dev.json");
+        fs::write(&snapshot_path, &snapshot_body).unwrap();
         let capability_path = capability_source.join("00-base/private.toml");
         fs::write(
             &capability_path,
@@ -570,9 +597,24 @@ prompt_caching = true
             .expect("private model");
         assert_eq!(model["tool_support"]["native"], true);
         assert_eq!(model["prompt_cache"], true);
+        assert_eq!(model["context_window"], 8192);
         let stdlib_names =
             fs::read_to_string(&args.stdlib_provider_names_output).expect("stdlib provider names");
         assert!(stdlib_names.contains("\"private\""));
+
+        fs::write(
+            &snapshot_path,
+            snapshot_body.replace("harn.models-dev.v1", "harn.models-dev.v999"),
+        )
+        .unwrap();
+        let error =
+            run_generate(&args).expect_err("unsupported source schema must refuse generation");
+        assert!(error.contains("unsupported Models.dev snapshot"), "{error}");
+        assert_eq!(
+            fs::read_to_string(&args.providers_output).unwrap(),
+            providers
+        );
+        fs::write(&snapshot_path, snapshot_body).unwrap();
 
         fs::write(
             &capability_path,

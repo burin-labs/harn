@@ -13,21 +13,6 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ship_script="$repo_root/scripts/release_ship.sh"
 guard_library="$repo_root/scripts/lib/release_tree_guard.sh"
 
-# Extract just the guardrail function so we can exercise it in isolation without
-# running the whole release (which builds crates). If the function is renamed or
-# removed this extraction yields nothing and the first assertion fails loudly.
-listing_src=$(sed -n '/^unfolded_fragment_paths() {/,/^}/p' "$guard_library")
-if [[ -z "$listing_src" ]]; then
-  echo "FAIL: unfolded_fragment_paths not found in $guard_library" >&2
-  exit 1
-fi
-guard_src=$(sed -n '/^require_no_unfolded_fragments() {/,/^}/p' "$guard_library")
-if [[ -z "$guard_src" ]]; then
-  echo "FAIL: require_no_unfolded_fragments not found in $guard_library" >&2
-  exit 1
-fi
-guard_src="$listing_src"$'\n'"$guard_src"
-
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
 global_git_config="$tmp_root/global.gitconfig"
@@ -39,14 +24,14 @@ export GIT_EDITOR=false
 run_guard() {
   # Run the guardrail in a subshell cd'd into $1, capture exit + stderr.
   local workdir="$1"
-  ( cd "$workdir" && eval "$guard_src"'; require_no_unfolded_fragments' )
+  ( cd "$workdir" && source "$guard_library" && require_no_unfolded_fragments )
 }
 
 run_guard_allowing() {
   # Same, with the tagged-release recovery escape armed.
   local workdir="$1"
-  ( cd "$workdir" \
-      && ALLOW_UNFOLDED_FRAGMENTS=1 eval "$guard_src"'; require_no_unfolded_fragments' )
+  ( cd "$workdir" && source "$guard_library" && \
+      ALLOW_UNFOLDED_FRAGMENTS=1 require_no_unfolded_fragments )
 }
 
 # --- Case 1: no fragments (only non-fragment files) -> PASS (exit 0) ----------

@@ -21,7 +21,9 @@ subdirectory adds rules for changes under it.
   `docs/src/language-spec.md`, the provider catalog projections, and the provider docs. A new
   artifact needs Makefile targets, a registry entry, `make all`, and CI wiring. (AGENTS.md#Source
   ownership and generated files; `scripts/generated_artifacts.toml`)
-- Provider catalog changes edit only catalog_sources/ and capability_sources/ fragments, ship a row
+- Model facts use catalog_sources/ fragments and their pinned Models.dev cache;
+  imported fields must not also be authored locally. Provider behavior stays in Harn.
+  Model and capability changes ship a row
   and capability rule on every route the model is served on, and give every catalog test a negative
   control. Capability claims need a live probe, not a model card. (AGENTS.md#Adding a model or
   provider to the catalog)

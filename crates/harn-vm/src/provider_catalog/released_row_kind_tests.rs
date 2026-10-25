@@ -3,11 +3,7 @@ use crate::llm_config::{self, ModelRowKind};
 
 #[test]
 fn anthropic_sonnet_4_5_selector_and_snapshot_stay_distinct() {
-    let overlay = llm_config::parse_config_toml(include_str!(
-        "../llm/catalog_sources/60-models/00-anthropic.toml"
-    ))
-    .expect("anthropic catalog fragment parses");
-    let catalog = artifact_embedded(Some(&overlay), None);
+    let catalog = artifact_embedded(None, None);
     let selector = catalog
         .models
         .iter()
@@ -32,11 +28,7 @@ fn anthropic_sonnet_4_5_selector_and_snapshot_stay_distinct() {
 
 #[test]
 fn dated_sonnet_3_5_snapshots_order_by_released() {
-    let overlay = llm_config::parse_config_toml(include_str!(
-        "../llm/catalog_sources/60-models/00-anthropic.toml"
-    ))
-    .expect("anthropic catalog fragment parses");
-    let catalog = artifact_embedded(Some(&overlay), None);
+    let catalog = artifact_embedded(None, None);
     let june = catalog
         .models
         .iter()

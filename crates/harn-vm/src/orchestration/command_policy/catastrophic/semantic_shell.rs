@@ -191,10 +191,7 @@ fn collect_powershell(command: &str, depth: usize, analysis: &mut ShellAnalysis)
     }
 
     let mut parser = tree_sitter::Parser::new();
-    if parser
-        .set_language(&tree_sitter_powershell::LANGUAGE.into())
-        .is_err()
-    {
+    if parser.set_language(&harn_grammars::powershell()).is_err() {
         analysis.unresolved = true;
         return;
     }
@@ -584,10 +581,7 @@ fn collect_shell(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
         return;
     }
     let mut parser = tree_sitter::Parser::new();
-    if parser
-        .set_language(&tree_sitter_bash::LANGUAGE.into())
-        .is_err()
-    {
+    if parser.set_language(&harn_grammars::bash()).is_err() {
         analysis.unresolved = true;
         return;
     }

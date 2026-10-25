@@ -144,8 +144,36 @@ Unknown row ids return `row = nil`, matching
 `verification_run_check(row_id, spec, options)` is the one-call path for harness
 authors: capture optional launch-time `snapshot_paths`, run the command through
 `std/command::command_run`, record exactly one profile observation, and return
-the same receipt shape. It rejects `command_options.background = true`; use the
+the same receipt shape, with `execution: "executed"`. Recording an existing
+result reports `execution: "observed"`. It rejects `command_options.background = true`; use the
 background pair below when the check must outlive the current turn.
+
+For a deterministic check whose complete inputs are known, `options.reuse`
+accepts a `VerificationReuse` record:
+
+- `scope`: a unique key for this check in this run. Do not share it across
+  concurrent checks.
+- `inputs`: a callback returning `VerificationInputState` or `nil` when any
+  input cannot be identified. The record contains nonempty `workspace`,
+  `source`, `dependencies`, and `environment` identities plus a nonnegative
+  monotonic `revision`. The revision must advance for every relevant input
+  change, including a change followed by an undo. Read the identities and
+  revision as one coherent snapshot. Return `nil` when the input owner cannot
+  guarantee that revision contract. Fingerprint the
+  actual dependency installation, toolchain and effective environment, not
+  just a lockfile or agent edit counter. Equal endpoint hashes alone cannot
+  detect a change and restore during execution. Supply digests instead of secrets.
+- `accept`: the check's verdict callback over `CommandResult`, for example
+  rejecting an exit-zero test run that collected no tests.
+
+The helper adds the complete supplied invocation and options to that identity.
+It reuses only an accepted successful result whose input state was unchanged
+across execution and still matches now. A hit returns the original result and
+observation with `execution: "reused"`; it launches no child and adds no timing
+sample. Missing identities, changed inputs, failed commands and rejected
+verdicts execute again. A changed input during execution prevents reuse of
+that result. This contract does not make an incomplete dependency census or a
+nondeterministic check safe to cache.
 
 `verification_start_check(row_id, spec, options)` starts a check in the
 background after capturing optional launch-time hashes. It returns a receipt
