@@ -49,6 +49,7 @@ fn unwrapped_command_inner(
             "builtin" | "nohup" => index + 1,
             "exec" => skip_exec_wrapper(tokens, index + 1, end),
             "sudo" => skip_sudo_wrapper(tokens, index + 1, end),
+            "doas" => skip_doas_wrapper(tokens, index + 1, end),
             "env" => skip_env_wrapper(tokens, index + 1, end),
             "nice" => skip_nice_wrapper(tokens, index + 1, end),
             "time" => skip_time_wrapper(tokens, index + 1, end),
@@ -185,6 +186,24 @@ pub(super) fn skip_sudo_wrapper(tokens: &[String], start: usize, end: usize) -> 
         }
         index += 1;
         if sudo_option_consumes_argument(token) && index < end {
+            index += 1;
+        }
+    }
+    index
+}
+
+pub(super) fn skip_doas_wrapper(tokens: &[String], start: usize, end: usize) -> usize {
+    let mut index = start;
+    while index < end {
+        let token = &tokens[index];
+        if token == "--" {
+            return index + 1;
+        }
+        if !token.starts_with('-') {
+            break;
+        }
+        index += 1;
+        if matches!(token.as_str(), "-a" | "-C" | "-u") && index < end {
             index += 1;
         }
     }

@@ -113,9 +113,12 @@ pub(super) fn scan_command_risk_scan_json(
         labels.insert("network_exfil".to_string());
         rationale.push("network transfer primitive detected");
     }
-    if lower.contains("sudo ") || lower.starts_with("sudo") {
+    if ["sudo", "doas"]
+        .iter()
+        .any(|program| lower.contains(&format!("{program} ")) || lower.starts_with(program))
+    {
         labels.insert("sudo".to_string());
-        rationale.push("privilege escalation via sudo detected");
+        rationale.push("privilege escalation via sudo or doas detected");
     }
     if has_package_install(&lower) {
         labels.insert("package_install".to_string());

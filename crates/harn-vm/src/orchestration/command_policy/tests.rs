@@ -341,6 +341,31 @@ fn catastrophic_floor_reaches_commands_inside_substitutions() {
 }
 
 #[test]
+fn deterministic_scan_projects_privilege_wrappers_to_the_launched_command() {
+    for (command, argv) in [
+        (
+            "sudo -u builder git stash",
+            serde_json::json!(["git", "stash"]),
+        ),
+        (
+            "doas -u builder git stash",
+            serde_json::json!(["git", "stash"]),
+        ),
+        (
+            "doas -n -- git reset --hard",
+            serde_json::json!(["git", "reset", "--hard"]),
+        ),
+    ] {
+        let scan = command_risk_scan_json(&shell_ctx(command), None);
+        assert_eq!(
+            scan["shell_command_groups"][0][0]["argv"], argv,
+            "{command}"
+        );
+        assert!(labels(&scan).contains(&"sudo".to_string()), "{command}");
+    }
+}
+
+#[test]
 fn deterministic_scan_projects_quote_aware_shell_command_groups() {
     let scan = command_risk_scan_json(
         &shell_ctx(
@@ -1045,6 +1070,8 @@ fn floor_blocks_quoting_and_chaining_adversarial_forms() {
         "git reset --hard && echo done",
         "echo start; git clean -fdx; echo end",
         "sudo rm -rf /etc",
+        "doas rm -rf /etc",
+        "doas -u root git reset --hard",
     ] {
         assert!(
             is_cat_root(cmd),
@@ -1101,6 +1128,7 @@ fn floor_blocks_in_root_project_wipes() {
         "echo ok & rm -rf ./*",
         "env FOO=bar rm -rf ${PWD}/*",
         "sudo -u root rm --recursive --force .",
+        "doas -n -u root rm --recursive --force .",
         "command -- rm -rf .",
         "command -p rm -rf .",
         "bash -lc 'rm -rf ./*'",
