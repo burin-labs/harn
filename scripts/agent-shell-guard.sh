@@ -129,12 +129,9 @@ guard_command=(
   "$harn_runner" run
 )
 [[ "$harn_mode" == "standalone" ]] && guard_command+=(--standalone)
-# `lowercase` folds Windows path spellings before the disposable-path match.
-# Standalone mode permits no builtin that is not granted, and an ungranted one
-# does not degrade: it throws, the adapter fails closed, and every `trash`
-# command outside a POSIX temp root is refused with an interpreter error in
-# place of a rule. The unit tests never saw it because they run in a full host.
-guard_command+=(--allow=command_risk_scan,lowercase "$script_dir/agent_shell_guard.harn")
+# Standalone rules need explicit grants for case folding and assignment-name
+# iteration as well as the command parser.
+guard_command+=(--allow=command_risk_scan,lowercase,range "$script_dir/agent_shell_guard.harn")
 
 # The worktree rule may only name an admission command this repository actually
 # has. The guard runs in a hook host with no filesystem builtin, so the answer

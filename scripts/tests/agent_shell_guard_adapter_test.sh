@@ -637,15 +637,19 @@ if [[ "$still_guarded" != *'"permissionDecision":"deny"'* ]]; then
   exit 1
 fi
 
-# Every rule the policy owns must reach a verdict in the standalone host, not
-# only in the full host the unit tests run in. An ungranted builtin does not
-# degrade: it throws, the adapter fails closed, and the operator gets an
-# interpreter error where a rule should be. The disposable-path matcher folds
-# case for Windows spellings, and that fold is only reached past the POSIX temp
-# roots, so the arm below is the one a unit test cannot stand in for.
+# Exercise the attested standalone interpreter: an explicit HARN_BIN selects
+# the project host and cannot prove the standalone capability grants.
+standalone_harn="$(cd "$(dirname "$HARN_BIN")" && pwd -P)/$(basename "$HARN_BIN")"
+ln -s "$standalone_harn" "$make_root/standalone-harn"
+printf '%s\n' 'harn-run-standalone-v1' >"$make_root/standalone-harn.standalone-v1"
+standalone_verdict() {
+  env -u HARN_BIN AGENT_SHELL_GUARD_HARN_BIN="$make_root/standalone-harn" \
+    "$make_root/scripts/agent-shell-guard.sh"
+}
+
 windows_temp="$(
   printf '%s' '{"tool_name":"Bash","tool_input":{"command":"trash %TEMP%/build.log"}}' \
-    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+    | standalone_verdict
 )"
 if [[ "$windows_temp" != *'visible Trash'* ]]; then
   echo "the disposable-path rule did not reach a verdict in the standalone host" >&2
@@ -657,12 +661,36 @@ fi
 # without this arm the deny above could be an error message rather than a rule.
 user_file="$(
   printf '%s' '{"tool_name":"Bash","tool_input":{"command":"trash /Users/alice/Documents/report.txt"}}' \
-    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+    | standalone_verdict
 )"
 if [[ -n "$user_file" ]]; then
   echo "the disposable-path rule refused a user file, which it must never do" >&2
   printf '%s\n' "$user_file" >&2
   exit 1
 fi
+
+git_read="$(
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git log -1 --format=%H"}}' \
+    | standalone_verdict
+)"
+if [[ -n "$git_read" ]]; then
+  echo "standalone assignment analysis refused an ordinary Git format argument" >&2
+  printf '%s\n' "$git_read" >&2
+  exit 1
+fi
+
+for stash_command in 'WORKTREE_MODE=review git stash push' 'git -c alias.hidden=stash hidden'; do
+  stash_verdict="$(
+    printf '{"tool_name":"Bash","tool_input":{"command":"%s"}}' "$stash_command" \
+      | standalone_verdict
+  )"
+  if [[ "$stash_verdict" != *'"permissionDecision":"deny"'* ]] \
+    || [[ "$stash_verdict" != *'git stash'* ]] \
+    || [[ "$stash_verdict" == *'policy faulted'* ]]; then
+    echo "standalone assignment analysis did not reach the stash rule: $stash_command" >&2
+    printf '%s\n' "$stash_verdict" >&2
+    exit 1
+  fi
+done
 
 echo "agent_shell_guard_adapter_test: ok"
