@@ -1364,7 +1364,8 @@ fn has_expanding_heredoc(command: string) -> bool {
       if command.substring(after, after + 1) == "-" {
         after = after + 1
       }
-      while command.substring(after, after + 1) == " " || command.substring(after, after + 1) == "\t" {
+      while command.substring(after, after + 1) == " "
+        || command.substring(after, after + 1) == "\t" {
         after = after + 1
       }
       const first = command.substring(after, after + 1)
