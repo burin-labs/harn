@@ -6,11 +6,11 @@
 #   1. main must declare X.Y.Z-dev. Any other workspace version means the
 #      release for it already merged and the development bump has not landed,
 #      so there is nothing to release yet.
-#   2. An open release pull request stops the opener. Its published commit
-#      must match its immutable release-attempt record; later fragments wait
-#      for the next version instead of replacing the prepared commit.
+#   2. A mergeable release stays frozen at its recorded immutable attempt.
+#      Modified folded fragments can supersede a conflicted attempt once green
+#      contains their current blobs. Other conflicts refuse recovery.
 #   3. Without unreleased changelog fragments there is nothing to release.
-# Otherwise the opener branches release/vX.Y.Z, runs
+# Otherwise the opener prepares on a local release/vX.Y.Z branch, runs
 # `release_ship.sh --prepare --materialize-candidate` (which folds the
 # fragments, bumps the version to X.Y.Z, and regenerates derived files),
 # publishes that tree as one GitHub-signed commit, opens the pull request, and
@@ -18,13 +18,12 @@
 # request still merges only through its required checks and review.
 #
 # Usage: open_release_pr.sh [--plan] [--existing-only]
-#   --plan         decide only. Writes action=open|existing|none to
+#   --plan         decide only. Writes action=open|existing|reconcile|blocked|none to
 #                  $GITHUB_OUTPUT.
-#   --existing-only never open a new release pull request. A push to main
-#                  runs this way, so merging a fragment
-#                  does not start a release by itself.
+#   --existing-only only inspect or replace an existing release. A push to main
+#                  runs this way, so adding a fragment cannot start a release.
 # Without --plan the decision is taken again (it may be minutes newer than the
-# plan) and action=opened|existing|none is written, with version and
+# plan) and action=opened|existing|blocked|none is written, with version and
 # pr_url.
 #
 # Requires GH_TOKEN. Opening also requires HARN_BIN (the release-source Harn
@@ -37,6 +36,7 @@ release_ship="${HARN_RELEASE_SHIP_SCRIPT:-$script_root/scripts/release_ship.sh}"
 cd "$root"
 source "$script_root/scripts/lib/release_version.sh"
 source "$script_root/scripts/lib/release_tree_guard.sh"
+source "$script_root/scripts/lib/release_attempt_plan.sh"
 source "$script_root/scripts/lib/release_ship_enrollment.sh"
 
 mode=open
@@ -62,6 +62,7 @@ receipt_action=pending
 receipt_version=""
 receipt_pr_url=""
 receipt_release_source=""
+supersession_plan='{"superseded":[]}'
 receipt_source="$(git rev-parse HEAD)"
 if [[ -n "$receipt_path" ]]; then
   if [[ -z "${GITHUB_REPOSITORY:-}" ]] \
@@ -86,12 +87,16 @@ write_outcome() {
       --arg source_sha "$receipt_source" --arg phase "$mode" \
       --arg decision "$receipt_action" --arg version "$receipt_version" \
       --arg pr_url "$receipt_pr_url" --arg release_source_sha "$receipt_release_source" \
+      --argjson recovery "$supersession_plan" \
       --argjson exit_code "$exit_code" \
       '{schema:"harn.release-opener.v1", repository:$repository,
         workflow:"bump-release.yml", run_id:$run_id, run_attempt:$run_attempt,
         source_sha:$source_sha, phase:$phase, decision:$decision,
         version:$version, pr_url:$pr_url, release_source_sha:$release_source_sha,
-        exit_code:$exit_code}' > "$temporary"
+        exit_code:$exit_code,stage:"release-opener",recovery:$recovery,
+        next_action:(if $exit_code != 0 then "inspect-opener" elif $decision == "blocked" then "wait-for-green"
+          elif $decision == "reconcile" then "complete-supersession" elif $decision == "open" then "prepare"
+          elif $decision == "opened" or $decision == "existing" then "wait-for-delivery" else "none" end)}' > "$temporary"
     mv -- "$temporary" "$receipt_path"
   fi
   exit "$exit_code"
@@ -129,55 +134,60 @@ if [[ "$version" == "$current" ]] \
 fi
 title="Release v$version"
 branch="release/v$version"
+canonical_branch="$branch"
 
-# Find the open release pull request for this version and set existing_url and
-# existing_branch (both empty when none is open). A failed lookup must not read
+# Find all open release pull requests for this version. A failed lookup must not read
 # as "no pull request": opening a second release pull request for one version
 # is the failure this check exists to prevent.
 read_release_pr() {
   local found
   if ! found="$(gh pr list --state open --base main --limit 1000 \
     --json url,title,headRefName \
-    --jq "[.[] | select(.title == \"$title\" or .headRefName == \"$branch\")] | .[0] // empty | \"\(.url) \(.headRefName)\"")"; then
+    --jq "[.[] | select(.title == \"$title\" or .headRefName == \"$canonical_branch\" or (.headRefName | startswith(\"release-attempt/v$version/\")))]")"; then
     echo "error: could not list open pull requests; refusing to open $title on unproved state" >&2
     exit 1
   fi
-  existing_url=""
-  existing_branch=""
-  if [[ -n "$found" ]]; then
-    existing_url="${found%% *}"
-    existing_branch="${found#* }"
-  fi
+  existing_prs="$(jq -ce 'if type == "array" then . else error("unmeasured release PR list") end' <<< "$found")"
 }
 
-# An existing release is frozen by its immutable attempt, not by whichever
-# fragments happen to be on main today. Unrecorded branches require an explicit
-# restart; silently rebuilding them would establish a second release policy.
-stop_for_existing_attempt() {
-  local release_oid attempt_ref attempt_record
-  if ! git fetch --quiet origin "refs/heads/$existing_branch" \
-    || ! release_oid="$(git rev-parse --verify FETCH_HEAD)"; then
-    echo "error: could not read $existing_branch; refusing to reuse $title on unproved state" >&2
+# Resolve frozen, conflicted, and partially delivered attempts before preparing.
+resolve_existing_attempts() {
+  local plan action current_url current_sha
+  if ! plan="$(release_attempt_plan "$version" "$receipt_source" "$existing_prs")"; then
+    echo "error: refusing to reuse $title on unproved state" >&2
     exit 1
   fi
-  attempt_ref="refs/heads/release-attempt/v$version/$release_oid"
-  if ! attempt_record="$(git ls-remote --refs origin "$attempt_ref")"; then
-    echo "error: could not read $attempt_ref; refusing to reuse $title on unproved state" >&2
-    exit 1
-  fi
-  if [[ "$attempt_record" != "$release_oid"$'\t'"$attempt_ref" ]]; then
-    echo "error: $existing_branch has no matching immutable release attempt; close the unrecorded pull request and restart the opener explicitly" >&2
-    exit 1
-  fi
-  echo "::notice title=Release pull request already open::$title is frozen at $release_oid: $existing_url. Later fragments wait for the next release."
-  receipt_release_source="$release_oid"
-  emit action=existing "version=$version" "pr_url=$existing_url"
-  exit 0
+  supersession_plan="$plan"
+  action="$(jq -r .action <<< "$plan")"
+  case "$action" in
+    wait-green)
+      echo "::notice::Folded fragments changed on main; waiting for green to include those exact blobs before refolding $title."
+      emit action=blocked "version=$version" pr_url=
+      exit 0 ;;
+    open)
+      echo "::notice::Refolding modified fragments into a new immutable $title attempt."
+      return 0 ;;
+    existing|reconcile)
+      current_url="$(jq -r .current.url <<< "$plan")"
+      current_sha="$(jq -r .current.head_sha <<< "$plan")"
+      receipt_release_source="$current_sha"
+      if [[ "$action" == reconcile ]]; then
+        if [[ "$mode" == plan ]]; then
+          emit action=reconcile "version=$version" "pr_url=$current_url"
+          exit 0
+        fi
+        release_deliver_attempt "$plan" "$current_url" "$current_sha"
+      fi
+      echo "::notice title=Release pull request already open::$title is frozen at $current_sha: $current_url. Later fragments wait for the next release."
+      emit action=existing "version=$version" "pr_url=$current_url"
+      exit 0 ;;
+    *) echo 'error: unmeasured release-attempt recovery decision' >&2; exit 1 ;;
+  esac
 }
 
 read_release_pr
-if [[ -n "$existing_url" ]]; then
-  stop_for_existing_attempt
+if (( $(jq length <<< "$existing_prs") > 0 )); then
+  resolve_existing_attempts
 elif (( existing_only )); then
   echo "::notice title=Nothing to release::no $title pull request is open, and this run only checks existing releases."
   emit action=none "version=$version" pr_url=
@@ -253,20 +263,25 @@ if [[ "$main_version" != "$current" ]]; then
 fi
 # The pull request may have merged, closed, or opened while this run prepared.
 read_release_pr
-if [[ -n "$existing_url" ]]; then
-  stop_for_existing_attempt
+if (( $(jq length <<< "$existing_prs") > 0 )); then
+  resolve_existing_attempts
+elif (( $(jq '.superseded | length' <<< "$supersession_plan") > 0 )); then
+  echo '::notice::The conflicted release was closed while preparation ran; stopping replacement.'
+  emit action=none "version=$version" pr_url=
+  exit 0
 fi
 
 # Publish one signed release commit and freeze its identity.
+publication_branch="release-staging/v$version/${GITHUB_RUN_ID:-$base_oid}-${GITHUB_RUN_ATTEMPT:-1}"
 publication="$(HARN_BRANCH_COMMIT_TOKEN="$GH_TOKEN" \
-  HARN_BRANCH_COMMIT_BRANCH="$branch" \
+  HARN_BRANCH_COMMIT_BRANCH="$publication_branch" \
   HARN_BRANCH_COMMIT_BASE_OID="$base_oid" \
   HARN_BRANCH_COMMIT_HEADLINE="$title" \
   "$harn_bin" run --no-sandbox "$script_root/scripts/bump-driver/publish_branch_commit.harn")"
 published_oid="$(jq -er '.oid | select(type == "string" and test("^[0-9a-f]{40}$"))' <<< "$publication")"
 receipt_release_source="$published_oid"
-published_record="$(git ls-remote --refs origin "refs/heads/$branch")"
-if [[ "$published_record" != "$published_oid"$'\t'"refs/heads/$branch" ]]; then
+published_record="$(git ls-remote --refs origin "refs/heads/$publication_branch")"
+if [[ "$published_record" != "$published_oid"$'\t'"refs/heads/$publication_branch" ]]; then
   echo "error: published branch read-back did not match the signed publisher receipt" >&2
   exit 1
 fi
@@ -290,10 +305,10 @@ Moves the workspace from $current to $version and folds ${#fragments[@]} changel
 
 When this merges, the push to main builds and checks the release candidate at that commit, and promotion publishes exactly those files. Prepared by \`scripts/open_release_pr.sh\` from green at $base_oid.
 EOF
-pr_url="$(gh pr create --base main --head "$branch" --title "Release v$version" --body-file "$body_file")"
+pr_url="$(gh pr create --base main --head "${attempt_ref#refs/heads/}" --title "Release v$version" --body-file "$body_file")"
 echo "Opened $title: $pr_url"
 # Arm now, before the checks settle. The URL is emitted first so a failed arm
 # still names the pull request it left unarmed.
 emit "version=$version" "pr_url=$pr_url"
-release_enroll_ship "$pr_url"
+release_deliver_attempt "$supersession_plan" "$pr_url" "$published_oid" true
 emit action=opened

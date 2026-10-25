@@ -61,8 +61,8 @@
 # policy from a receipt beside the shared target cache.
 #
 # `--host-maintenance` is the policy for the scheduled and disk-pressure
-# sweeps. It implies `--measure-bytes`, keeps only the 3 most recent warm trees
-# on rank alone, and sets the size ceiling to an eighth of the filesystem that
+# sweeps. It implies `--measure-bytes`, protects the 3 most recent warm trees
+# under pressure, and sets the size ceiling to an eighth of the filesystem that
 # holds the cache (64 GiB when that size cannot be read). The setup defaults
 # below are for a developer's own worktree setup, where a cap of 10 is the
 # working set. On a host with 10 or fewer entries that cap protected every one
@@ -99,6 +99,11 @@
 #                               seconds to minutes on a large root and is not
 #                               a price every dev-setup should pay; enable it
 #                               on the periodic cleanup path.
+#   HARN_TARGET_GC_MIN_FREE_BYTES free-space floor for the cache filesystem.
+#                               Host maintenance defaults to 10% of its size;
+#                               setup defaults to 0, which disables this bound.
+#                               Pressure bypasses the 72-hour idle limit, while
+#                               preserving minimum age, recent keys, and live owners.
 #   HARN_DEV_SETUP_STORAGE_ROOT one base for harn-target; when unset, sweep
 #                               both the legacy $TMPDIR and durable cache roots
 #   HARN_TARGET_GC_PROTECT      the caller's own entry (path or name), kept
@@ -153,7 +158,7 @@ Usage: scripts/prune_stale_targets.sh [options]
 
   --dry-run            Report candidates without removing entries.
   --measure-bytes      Measure reclaimed and retained allocated bytes.
-  --host-maintenance   Apply the host retention and size policy; measure bytes.
+  --host-maintenance   Apply retention, size and free-space bounds; measure bytes.
   --remove-entry NAME  Retire this exact basename regardless of rank or age.
   --protect-entry NAME Keep this exact basename ahead of every removal rule.
   --help               Show this help without scanning or changing caches.
@@ -222,7 +227,7 @@ report_pending_named_entry() {
 matched_entries=()
 
 gc_policy_version="harn-target-gc/v2-$(cksum "$SCRIPT_DIR/prune_stale_targets.sh" | awk '{print $1 "-" $2}')"
-scanned=0; removed=0; kept=0; pending_candidates=0; blocked_named_entries=0; ceiling_unproven_roots=0; summary_printed=0
+scanned=0; removed=0; kept=0; pending_candidates=0; blocked_named_entries=0; ceiling_unproven_roots=0; pressure_unproven_roots=0; summary_printed=0
 reclaimed_bytes=0; retained_bytes=0; unmeasured_entries=0
 completed=0
 receipt_root="${HARN_DEV_SETUP_STORAGE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/harn/dev-setup}"
@@ -279,7 +284,7 @@ print_summary() {
     status="complete"
     if [ "$dry_run" -eq 1 ]; then
       status="dry-run"
-    elif [ "$ceiling_unproven_roots" -gt 0 ] || [ "$blocked_named_entries" -gt 0 ]; then
+    elif [ "$ceiling_unproven_roots" -gt 0 ] || [ "$pressure_unproven_roots" -gt 0 ] || [ "$blocked_named_entries" -gt 0 ]; then
       status="partial"
     fi
   fi
@@ -294,7 +299,7 @@ print_summary() {
   fi
   # scanned is reported alongside the verdict so a zero here is readable as
   # "walked these roots and found nothing" rather than "walked nothing".
-  echo "harn-target GC: policy=$gc_policy_version status=$status last_success=$last_success last_success_policy=$last_success_policy scanned=$scanned kept=$kept removed=$removed reclaimed_bytes=$reported_reclaimed retained_bytes=$reported_retained pending_candidates=$reported_pending unmeasured_entries=$unmeasured_entries ceiling_unproven_roots=$ceiling_unproven_roots blocked_named_entries=$blocked_named_entries (roots=$roots)$suffix"
+  echo "harn-target GC: policy=$gc_policy_version status=$status last_success=$last_success last_success_policy=$last_success_policy scanned=$scanned kept=$kept removed=$removed reclaimed_bytes=$reported_reclaimed retained_bytes=$reported_retained pending_candidates=$reported_pending unmeasured_entries=$unmeasured_entries ceiling_unproven_roots=$ceiling_unproven_roots pressure_unproven_roots=$pressure_unproven_roots blocked_named_entries=$blocked_named_entries (roots=$roots)$suffix"
 }
 
 record_success() {
@@ -303,6 +308,7 @@ record_success() {
   # A protected/live name is a measured policy refusal, not a failed deletion.
   # Report a partial pass without advancing the last-success receipt.
   [ "$blocked_named_entries" -eq 0 ] || return 0
+  [ "$ceiling_unproven_roots" -eq 0 ] && [ "$pressure_unproven_roots" -eq 0 ] || return 0
   mkdir -p "$receipt_root"
   local receipt_tmp="${receipt_file}.$$" new_success
   new_success="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -323,6 +329,25 @@ storage_roots() {
 
   printf '%s\n' "${TMPDIR:-/tmp}"
   printf '%s/harn/dev-setup\n' "${XDG_CACHE_HOME:-$HOME/.cache}"
+}
+
+# Return measured total and available KiB; an empty or failed read is unknown.
+filesystem_space() {
+  local report total available
+  report="$(df -Pk "$1" 2>/dev/null)" || return 1
+  read -r total available <<< "$(printf '%s\n' "$report" | awk 'NR == 2 { print $2, $4 }')"
+  case "$total" in ''|*[!0-9]*|0) return 1 ;; esac
+  case "$available" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$available" -le "$total" ] || return 1
+  printf '%s %s\n' "$total" "$available"
+}
+
+pressure_floor_bytes() {
+  if [ "$host_maintenance" -eq 1 ] && [ -z "${HARN_TARGET_GC_MIN_FREE_BYTES:-}" ]; then
+    printf '%s\n' "$(( $1 * 1024 / 10 ))"
+  else
+    printf '%s\n' "$min_free_bytes"
+  fi
 }
 
 # One run at a time per host. The daily job and a disk-pressure trigger can
@@ -434,6 +459,7 @@ cutoff=$(( $(date +%s) - min_age ))
 # fleet that touches every entry inside the idle bound keeps all of them, and
 # the count cap alone protects the newest ten however large they are.
 default_max_bytes=0
+default_min_free_bytes=0
 default_keep_recent=10
 max_bytes_source=default
 if [ "$host_maintenance" -eq 1 ]; then
@@ -442,18 +468,23 @@ if [ "$host_maintenance" -eq 1 ]; then
   # large workstation each keep a share they can afford. A size that cannot be
   # read falls back to 64 GiB, about an eighth of the fleet's 460 GiB hosts.
   default_max_bytes=68719476736
+  default_min_free_bytes=107374182400
   max_bytes_source=fallback
   policy_root="${target_roots[0]:-${release_target_roots[0]:-}}"
-  fs_kib="$(df -Pk "$policy_root" 2>/dev/null | awk 'NR == 2 { print $2 }' || true)"
-  case "$fs_kib" in
-    ''|*[!0-9]*|0) ;;
-    *) default_max_bytes=$((fs_kib * 1024 / 8)); max_bytes_source=disk ;;
-  esac
+  if space="$(filesystem_space "$policy_root")"; then
+    fs_kib="${space%% *}"
+    default_max_bytes=$((fs_kib * 1024 / 8)); max_bytes_source=disk
+    default_min_free_bytes=$((fs_kib * 1024 / 10))
+  fi
 fi
 [ -n "${HARN_TARGET_GC_MAX_BYTES:-}" ] && max_bytes_source="env"
 max_bytes="${HARN_TARGET_GC_MAX_BYTES:-$default_max_bytes}"
 case "$max_bytes" in
   ''|*[!0-9]*) echo "HARN_TARGET_GC_MAX_BYTES must be a non-negative integer: $max_bytes" >&2; exit 2 ;;
+esac
+min_free_bytes="${HARN_TARGET_GC_MIN_FREE_BYTES:-$default_min_free_bytes}"
+case "$min_free_bytes" in
+  ''|*[!0-9]*) echo "HARN_TARGET_GC_MIN_FREE_BYTES must be a non-negative integer: $min_free_bytes" >&2; exit 2 ;;
 esac
 keep_recent="${HARN_TARGET_GC_KEEP_RECENT:-$default_keep_recent}"
 max_idle="${HARN_TARGET_GC_MAX_IDLE_SECS:-259200}"
@@ -542,8 +573,8 @@ entry_live_pids() {
   # Capture the whole listing and then match it. Piping `ps` into `grep -q`
   # would let grep exit on its first hit and SIGPIPE `ps`, which under
   # `pipefail` turns a present process into a failed read.
-  snapshot="$(ps -eo pid=,args= 2>/dev/null || true)"
-  [ -n "$snapshot" ] || return 0
+  snapshot="$(ps -eo pid=,args= 2>/dev/null)" || return 1
+  [ -n "$snapshot" ] || return 1
   while IFS= read -r line; do
     case "$line" in
       ''|*[!0-9]*) continue ;;
@@ -574,6 +605,15 @@ warm_file="$(mktemp)"
 # activity, or the caller's own entry wins no matter how far over the ceiling
 # the root sits.
 evictable_file="$(mktemp)"
+pressure_recent_paths=()
+
+pressure_protected() {
+  local recent
+  for recent in ${pressure_recent_paths[@]+"${pressure_recent_paths[@]}"}; do
+    [ "$recent" = "$1" ] && return 0
+  done
+  return 1
+}
 # Print the summary from the EXIT trap so no stray failure can ever make the
 # GC die silently again.
 trap 'rm -f "$keep_file" "$release_keep_file" "$warm_file" "$evictable_file"; print_summary; release_run_lock' EXIT
@@ -644,6 +684,7 @@ prune_root() {
   # Same for the size pass: its candidates are per-root, and carrying them
   # between roots would let one root's ceiling evict another root's entries.
   : > "$evictable_file"
+  pressure_recent_paths=()
   local warm_entry=0
   for d in "$target_root"/*; do
     [ -d "$d" ] || continue
@@ -673,7 +714,12 @@ prune_root() {
     # Liveness is decided by process. An age bound alone cannot answer it: a
     # build paused between steps leaves its tree untouched and reads as idle.
     if [ "$probe_mode" = "process" ]; then
-      pids="$(entry_live_pids "$d" | sort -u | tr '\n' ' ')"
+      if ! pids="$(entry_live_pids "$d" | sort -u | tr '\n' ' ')"; then
+        echo "keep (process ownership unmeasured): $name"
+        report_pending_named_entry "$name"
+        pending_candidates=$((pending_candidates + 1))
+        kept=$((kept + 1)); kept_paths+=("$d"); continue
+      fi
       pids="${pids% }"
       if [ -n "$pids" ]; then
         echo "keep (live process: $pids): $name"
@@ -731,6 +777,7 @@ prune_root() {
       rank=$((rank + 1))
       base="$(basename "$path")"
       if [ "$rank" -le "$keep_recent" ]; then
+        pressure_recent_paths+=("$path")
         echo "keep (within the $keep_recent most recent): $base"
         kept=$((kept + 1)); kept_paths+=("$path")
         printf '%s %s\n' "$mtime" "$path" >> "$evictable_file"
@@ -746,7 +793,7 @@ prune_root() {
     done < <(sort -rn "$warm_file")
   fi
 
-  enforce_size_ceiling "$target_root"
+  enforce_storage_bounds "$target_root"
 }
 
 # Drop one path from the kept list. The size pass runs after entries have
@@ -785,22 +832,17 @@ entry_kib() {
   printf '%s\n' "$kib"
 }
 
-# Third pass: the size ceiling, over entries the earlier rules kept on rank or
-# age alone. Count and age cannot answer "is this root too big": a fleet that
-# touches every entry inside the idle bound keeps all of them, so a root can
-# sit at any size and every rule still reports a pass. This runs last so that
-# liveness, recent activity, the caller's own entry, and an explicit name all
-# outrank it. An old oversized tree remains reclaimable; a fresh one makes the
-# ceiling explicitly unproven until it crosses the shared idle-age boundary.
-enforce_size_ceiling() {
+# Enforce both storage bounds in the existing oldest-first eviction pass.
+enforce_storage_bounds() {
   local target_root="$1"
-  [ "$max_bytes" -gt 0 ] || return 0
+  local min_free_bytes="$min_free_bytes"
+  if [ "$max_bytes" -eq 0 ] && [ "$min_free_bytes" -eq 0 ]; then return 0; fi
 
   # Measure every entry the run kept, protected ones included: the ceiling is a
   # statement about the root's total size, and ignoring the protected entries
   # would let a root sit permanently over it while this pass evicted the rest.
-  local total_kib=0 kib path mtime measured=0 unmeasured=0
-  for path in "${kept_paths[@]}"; do
+  local total_kib=0 kib path mtime measured=0 unmeasured=0 space available_kib=""
+  for path in ${kept_paths[@]+"${kept_paths[@]}"}; do
     case "$path" in "$target_root"/*) ;; *) continue ;; esac
     if kib="$(entry_kib "$path")"; then
       total_kib=$((total_kib + kib)); measured=$((measured + 1))
@@ -809,40 +851,76 @@ enforce_size_ceiling() {
     fi
   done
   local ceiling_kib=$((max_bytes / 1024))
-  echo "size ceiling: root holds ${total_kib}KiB in ${measured} measured entr(y|ies), ceiling ${ceiling_kib}KiB"
+  if [ "$min_free_bytes" -gt 0 ]; then
+    if space="$(filesystem_space "$target_root")"; then
+      min_free_bytes="$(pressure_floor_bytes "${space%% *}")"
+      available_kib="${space#* }"
+      echo "free space before: root=$target_root available_bytes=$((available_kib * 1024)) floor_bytes=$min_free_bytes"
+    else
+      echo "free space before: root=$target_root unavailable" >&2
+    fi
+  fi
+  local floor_kib=$(((min_free_bytes + 1023) / 1024))
+  if [ "$max_bytes" -gt 0 ]; then
+    echo "size ceiling: root holds ${total_kib}KiB in ${measured} measured entr(y|ies), ceiling ${ceiling_kib}KiB"
+  fi
   # An entry this run could not measure is not a zero. Say so rather than
   # letting a failed `du` read as headroom.
   if [ "$unmeasured" -gt 0 ]; then
     echo "size ceiling: ${unmeasured} kept entr(y|ies) could not be measured; the total above is a lower bound" >&2
   fi
-  [ "$total_kib" -gt "$ceiling_kib" ] || return 0
-
   # Coldest first. `sort -n` puts the oldest activity stamp at the top, which
   # is the opposite order from the retention cap above and is deliberate.
+  local over_size under_pressure reason removed_before
   while IFS=' ' read -r mtime path; do
     [ -n "$path" ] || continue
-    [ "$total_kib" -gt "$ceiling_kib" ] || break
+    over_size=0; under_pressure=0
+    if [ "$max_bytes" -gt 0 ] && [ "$total_kib" -gt "$ceiling_kib" ]; then over_size=1; fi
+    if [ -n "$available_kib" ] && [ "$available_kib" -lt "$floor_kib" ]; then under_pressure=1; fi
+    if [ "$over_size" -eq 0 ] && [ "$under_pressure" -eq 0 ]; then break; fi
     case "$path" in "$target_root"/*) ;; *) continue ;; esac
     [ -d "$path" ] || continue
+    if [ "$min_free_bytes" -gt 0 ] && pressure_protected "$path"; then
+      echo "keep (recent working set; storage grace): $(basename "$path")"
+      continue
+    fi
+    if [ "$under_pressure" -eq 1 ] && [ "$probe_mode" != process ]; then
+      echo "keep (process ownership unmeasured; pressure grace): $(basename "$path")"
+      continue
+    fi
     if [ "$mtime" -ge "$cutoff" ]; then
       echo "keep (recently active within ${min_age}s; size grace): $(basename "$path")"
       continue
     fi
     kib="$(entry_kib "$path")" || continue
-    remove_entry "$target_root" "$path" "over the size ceiling"
+    reason="over the size ceiling"
+    [ "$under_pressure" -eq 0 ] || reason="below the free-space floor"
+    removed_before="$removed"
+    remove_entry "$target_root" "$path" "$reason"
     # Only count the space back when the entry is really gone. Under --dry-run
     # nothing is removed, but the projection must still advance or the loop
     # would report every entry as needing removal.
-    if [ "$dry_run" -eq 1 ] || [ ! -e "$path" ]; then
+    if [ "$removed" -gt "$removed_before" ]; then
       total_kib=$((total_kib - kib))
       kept=$((kept - 1))
       forget_kept_path "$path"
+      if [ "$dry_run" -eq 1 ]; then
+        if [ -n "$available_kib" ]; then available_kib=$((available_kib + kib)); fi
+      elif [ "$min_free_bytes" -gt 0 ]; then
+        if space="$(filesystem_space "$target_root")"; then
+          available_kib="${space#* }"
+        else
+          available_kib=""
+        fi
+      fi
     fi
   done < <(sort -n "$evictable_file")
-  echo "size ceiling: root now holds ${total_kib}KiB against ceiling ${ceiling_kib}KiB"
-  if [ "$total_kib" -gt "$ceiling_kib" ] || [ "$unmeasured" -gt 0 ]; then
-    ceiling_unproven_roots=$((ceiling_unproven_roots + 1))
-    echo "size ceiling: cannot prove this root fits while protected or unmeasured entries remain" >&2
+  if [ "$max_bytes" -gt 0 ]; then
+    echo "size ceiling: root now holds ${total_kib}KiB against ceiling ${ceiling_kib}KiB"
+    if [ "$total_kib" -gt "$ceiling_kib" ] || [ "$unmeasured" -gt 0 ]; then
+      ceiling_unproven_roots=$((ceiling_unproven_roots + 1))
+      echo "size ceiling: cannot prove this root fits while protected or unmeasured entries remain" >&2
+    fi
   fi
 }
 
@@ -880,6 +958,22 @@ remove_entry() {
     remember_kept_path "$d"
     pending_candidates=$((pending_candidates + 1))
     return 0
+  fi
+  # Discovery and size measurement can outlast a build's startup.
+  if [ "$probe_mode" = process ]; then
+    local pids
+    if ! pids="$(entry_live_pids "$d" | sort -u | tr '\n' ' ')"; then
+      echo "keep (process ownership unmeasured before removal): $name" >&2
+      remember_kept_path "$d"
+      pending_candidates=$((pending_candidates + 1))
+      return 0
+    fi
+    if [ -n "$pids" ]; then
+      echo "keep (live process before removal: $pids): $name"
+      remember_kept_path "$d"
+      report_pending_named_entry "$name"
+      return 0
+    fi
   fi
   if [ "$dry_run" -eq 1 ]; then
     echo "would remove $reason: $name (${sz:-?})"
@@ -957,6 +1051,20 @@ if [ "$measure_bytes" -eq 1 ] && [ "${#kept_paths[@]}" -gt 0 ]; then
     else
       unmeasured_entries=$((unmeasured_entries + 1))
     fi
+  done
+fi
+
+if [ "$min_free_bytes" -gt 0 ]; then
+  for target_root in ${walked_roots[@]+"${walked_roots[@]}"}; do
+    if space="$(filesystem_space "$target_root")"; then
+      available_kib="${space#* }"
+      root_floor_bytes="$(pressure_floor_bytes "${space%% *}")"
+      echo "free space after: root=$target_root available_bytes=$((available_kib * 1024)) floor_bytes=$root_floor_bytes"
+      if [ $((available_kib * 1024)) -ge "$root_floor_bytes" ]; then continue; fi
+    else
+      echo "free space after: root=$target_root unavailable" >&2
+    fi
+    pressure_unproven_roots=$((pressure_unproven_roots + 1))
   done
 fi
 

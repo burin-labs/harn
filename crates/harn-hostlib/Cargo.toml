@@ -80,45 +80,45 @@ grammars-all = [
     "grammar-enterprise",
     "grammar-data",
 ]
-grammar-harn = ["dep:tree-sitter-harn"]
+grammar-harn = ["harn-grammars/harn"]
 grammar-web = [
-    "dep:tree-sitter-typescript",
-    "dep:tree-sitter-javascript",
-    "dep:tree-sitter-html",
-    "dep:tree-sitter-css",
+    "harn-grammars/typescript",
+    "harn-grammars/javascript",
+    "harn-grammars/html",
+    "harn-grammars/css",
 ]
 grammar-systems = [
-    "dep:tree-sitter-rust",
-    "dep:tree-sitter-c",
-    "dep:tree-sitter-cpp",
-    "dep:tree-sitter-go",
-    "dep:tree-sitter-zig",
+    "harn-grammars/rust",
+    "harn-grammars/c",
+    "harn-grammars/cpp",
+    "harn-grammars/go",
+    "harn-grammars/zig",
 ]
 grammar-scripting = [
-    "dep:tree-sitter-python",
-    "dep:tree-sitter-ruby",
-    "dep:tree-sitter-bash",
-    "dep:tree-sitter-lua",
-    "dep:tree-sitter-php",
-    "dep:tree-sitter-r",
+    "harn-grammars/python",
+    "harn-grammars/ruby",
+    "harn-grammars/bash",
+    "harn-grammars/lua",
+    "harn-grammars/php",
+    "harn-grammars/r",
 ]
 grammar-jvm = [
-    "dep:tree-sitter-java",
-    "dep:tree-sitter-kotlin-ng",
-    "dep:tree-sitter-scala",
+    "harn-grammars/java",
+    "harn-grammars/kotlin",
+    "harn-grammars/scala",
 ]
 grammar-enterprise = [
-    "dep:tree-sitter-c-sharp",
-    "dep:tree-sitter-swift",
-    "dep:tree-sitter-elixir",
-    "dep:tree-sitter-haskell",
+    "harn-grammars/c-sharp",
+    "harn-grammars/swift",
+    "harn-grammars/elixir",
+    "harn-grammars/haskell",
 ]
 grammar-data = [
-    "dep:tree-sitter-json",
-    "dep:tree-sitter-yaml",
-    "dep:tree-sitter-toml-ng",
-    "dep:tree-sitter-sequel",
-    "dep:tree-sitter-md",
+    "harn-grammars/json",
+    "harn-grammars/yaml",
+    "harn-grammars/toml",
+    "harn-grammars/sql",
+    "harn-grammars/markdown",
 ]
 
 [dependencies]
@@ -185,48 +185,9 @@ xcap = { version = "0.9", optional = true }
 enigo = { version = "0.6", optional = true }
 image = { version = "0.25", optional = true }
 
-# Tree-sitter grammars driving `ast::*` (issue #564). Versions match the
-# Swift `ASTEngine` set verbatim — see the `ast` module for the language
-# table. Each crate exposes a `LANGUAGE` (or `LANGUAGE_*` for multi-grammar
-# crates) constant so we can construct `tree_sitter::Language` cheaply.
-#
-# Every grammar is optional and grouped into a `grammar-*` family feature
-# (see `[features]`). Each grammar is a C-compiled crate, so an embedding
-# client that only edits a few languages compiles only those families
-# instead of all ~27 — and adding a new grammar no longer raises the
-# compile/link cost for clients that don't enable its family.
-tree-sitter-rust = { version = "0.24", optional = true }
-tree-sitter-typescript = { version = "0.23", optional = true }
-tree-sitter-javascript = { version = "0.25", optional = true }
-tree-sitter-python = { version = "0.25", optional = true }
-tree-sitter-go = { version = "0.25", optional = true }
-tree-sitter-java = { version = "0.23", optional = true }
-tree-sitter-c = { version = "0.24", optional = true }
-tree-sitter-cpp = { version = "0.23", optional = true }
-tree-sitter-c-sharp = { version = "0.23", optional = true }
-tree-sitter-ruby = { version = "0.23", optional = true }
-tree-sitter-kotlin-ng = { version = "1.1", optional = true }
-tree-sitter-php = { version = "0.25", optional = true }
-tree-sitter-scala = { version = "0.26", optional = true }
-tree-sitter-bash = { version = "0.25", optional = true }
-tree-sitter-swift = { version = "0.7.4", optional = true }
-tree-sitter-zig = { version = "1.1", optional = true }
-tree-sitter-elixir = { version = "0.3", optional = true }
-tree-sitter-lua = { version = "0.5", optional = true }
-tree-sitter-haskell = { version = "0.24", optional = true }
-tree-sitter-r = { version = "1.2", optional = true }
-# Data / markup / config grammars (B.7). These have no symbol-graph
-# projection (no rename, empty symbol/outline extraction), but the
-# query-driven edit primitives (`apply_node`, `insert_at_anchor`) work
-# against them like any other grammar.
-tree-sitter-json = { version = "0.24", optional = true }
-tree-sitter-yaml = { version = "0.7", optional = true }
-tree-sitter-toml-ng = { version = "0.7", optional = true }
-tree-sitter-css = { version = "0.25", optional = true }
-tree-sitter-html = { version = "0.23", optional = true }
-tree-sitter-sequel = { version = "0.3", optional = true }
-tree-sitter-md = { version = "0.5", optional = true }
-tree-sitter-harn = { path = "../../tree-sitter-harn", version = "=0.10.180", optional = true }
+# Tree-sitter grammars driving `ast::*` (issue #564). Each `grammar-*`
+# family above turns on its grammars here.
+harn-grammars = { path = "../harn-grammars", version = "=0.10.180", default-features = false }
 arcstr = { version = "1", features = ["serde", "std"] }
 
 # Native process supervision uses POSIX process and group signals.

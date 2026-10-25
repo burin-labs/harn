@@ -1907,11 +1907,12 @@ jobs:
 
   consumer-rehearsal:
     name: Consumer release rehearsal
-    needs: [setup, build, collect_candidate_manifest]
+    needs: [setup, build, collect_candidate_manifest, native-qualification]
     if: >-
       !cancelled() && needs.setup.result == 'success' && needs.setup.outputs.rehearsal_source_sha != '' &&
       (needs.setup.outputs.build_mode != 'candidate' ||
-      (needs.build.result == 'success' && needs.collect_candidate_manifest.result == 'success'))
+      (needs.build.result == 'success' && needs.collect_candidate_manifest.result == 'success' &&
+      (github.event_name == 'schedule' || needs.native-qualification.result == 'success')))
     uses: ./.github/workflows/consumer-canary.yml
     with:
       source_revision: ${{ needs.setup.outputs.rehearsal_source_sha }}
@@ -1925,11 +1926,11 @@ jobs:
   # Promotion requires exact-source macOS qualification; start it beside the
   # build so the release does not wait on a person to dispatch it.
   native-qualification:
-    name: Start native release qualification
+    name: Qualify native release source
     needs: [setup, source-ci]
     if: needs.setup.outputs.build_mode == 'candidate' && github.event_name != 'schedule'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 90
     permissions:
       actions: write
       contents: write
@@ -1943,6 +1944,25 @@ jobs:
           GH_REPO: ${{ github.repository }}
           SOURCE_SHA: ${{ needs.setup.outputs.candidate_source_sha }}
         run: bash scripts/ci/dispatch_native_qualification.sh
+      - name: Require successful native qualification before consumer work
+        timeout-minutes: 85
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.setup.outputs.candidate_source_sha }}
+          WAIT_FOR_FULL_SUITE: 'true'
+          NATIVE_QUALIFICATION_STATUS_FILE: ${{ runner.temp }}/native-qualification.json
+        run: >-
+          bash scripts/ci/require_native_qualification.sh
+          "$GH_REPO" "$SOURCE_SHA" scripts/release_audit_contract.json
+      - name: Preserve native qualification verdict
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-qualification.json
+          if-no-files-found: error
+          retention-days: 7
 
   # One check for the whole candidate, so the merge queue can require it. A
   # release's merge group passes only after its exact-source consumer
@@ -1951,7 +1971,7 @@ jobs:
   # reads.
   candidate-verdict:
     name: Release candidate verdict
-    needs: [setup, source-ci, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal]
+    needs: [setup, source-ci, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal, native-qualification]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1963,6 +1983,8 @@ jobs:
           CANDIDATE_PURPOSE: ${{ needs.setup.outputs.candidate_purpose }}
           REHEARSAL_SOURCE_SHA: ${{ needs.setup.outputs.rehearsal_source_sha }}
           CONSUMER_RESULT: ${{ needs.consumer-rehearsal.result }}
+          NATIVE_RESULT: ${{ needs.native-qualification.result }}
+          EVENT_NAME: ${{ github.event_name }}
           RESULTS: ${{ toJSON(needs) }}
         run: |
           set -euo pipefail
@@ -1982,6 +2004,10 @@ jobs:
           if [[ "$BUILD_MODE" != candidate ]]; then
             echo "This run builds no candidate (build mode ${BUILD_MODE:-unset})."
             exit 0
+          fi
+          if [[ "$EVENT_NAME" != schedule && "$NATIVE_RESULT" != success ]]; then
+            echo "::error::Native release qualification finished ${NATIVE_RESULT:-missing}; candidate refused."
+            exit 1
           fi
           if ! jq -e '
             ["setup", "source-ci", "prepare_cli_aot", "build", "collect_candidate_manifest", "release-residual-audit", "release-smoke"] as $required |

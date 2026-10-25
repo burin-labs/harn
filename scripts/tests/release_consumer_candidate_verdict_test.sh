@@ -9,6 +9,7 @@ awk '/      - name: Require every candidate job to pass/{found=1} found && /    
 [[ -s "$tmp/verdict.sh" ]] || { echo 'missing aggregate verdict' >&2; exit 1; }
 results='{"setup":{"result":"success"},"source-ci":{"result":"success"},"prepare_cli_aot":{"result":"success"},"build":{"result":"success"},"collect_candidate_manifest":{"result":"success"},"release-residual-audit":{"result":"success"},"release-smoke":{"result":"success"}}'
 sha=1111111111111111111111111111111111111111
+export NATIVE_RESULT=success EVENT_NAME=push
 for mode in candidate none; do
   for consumer in skipped failure cancelled '' success; do
     status=0
@@ -22,6 +23,14 @@ for mode in candidate none; do
       grep -Fq 'Consumer release rehearsal' "$tmp/result.log"
     fi
   done
+done
+for native in failure cancelled skipped ''; do
+  if env SETUP_RESULT=success BUILD_MODE=candidate CANDIDATE_PURPOSE=release \
+    REHEARSAL_SOURCE_SHA="$sha" CONSUMER_RESULT=success RESULTS="$results" NATIVE_RESULT="$native" \
+    bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1; then
+    echo "accepted native qualification ${native:-missing}"; exit 1
+  fi
+  grep -Fq 'Native release qualification finished' "$tmp/result.log"
 done
 for source_ci in failure cancelled skipped missing; do
   refused_results="$(jq --arg result "$source_ci" \

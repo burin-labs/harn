@@ -2,7 +2,7 @@
 # Approve the release bot's own version-only pull requests.
 #
 # Two pull requests exist only to move the workspace version: `Release vX.Y.Z`
-# (release/vX.Y.Z, written by scripts/open_release_pr.sh) and `Start X.Y.Z-dev
+# (release-attempt/vX.Y.Z/<head>, written by scripts/open_release_pr.sh) and `Start X.Y.Z-dev
 # development` (automation/development-X.Y.Z-dev). The bot that opens them
 # cannot approve its own pull request, and the automatic reviewer skips
 # bot-authored pull requests, so each waited for a person. This script approves
@@ -57,7 +57,12 @@ title=$(jq -r '.title' <<< "$meta")
 # published release (which differs from the patch before it after a retired,
 # never-published version), in stable or -dev form. Those are the only strings
 # a version-only change may rewrite.
-if [[ "$head_ref" =~ ^release/v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+if [[ "$head_ref" =~ ^release-attempt/v([0-9]+)\.([0-9]+)\.([0-9]+)/([0-9a-f]{40})$ ]]; then
+  major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
+  [[ "${BASH_REMATCH[4]}" == "$head_sha" ]] || refuse "immutable attempt ref does not name its head"
+  [[ "$title" == "Release v$major.$minor.$patch" ]] || refuse "title '$title' does not match branch $head_ref"
+  kind=release
+elif [[ "$head_ref" =~ ^release/v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
   major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
   [[ "$title" == "Release v$major.$minor.$patch" ]] || refuse "title '$title' does not match branch $head_ref"
   kind=release

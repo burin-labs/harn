@@ -10,7 +10,13 @@ set -euo pipefail
 [[ "${FAKE_GH_FAILURE:-false}" != true ]] || exit 1
 case "$*" in
   *workflows/ci.yml/runs*) cat "$FIXTURE/runs" ;;
-  *workflows/macos-nightly.yml/runs*) cat "$FIXTURE/native-runs" ;;
+  *workflows/macos-nightly.yml/runs*)
+    if [[ ${FAKE_NATIVE_DISCOVERY:-false} == true && ! -f "$FIXTURE/discovery-read" ]]; then
+      touch "$FIXTURE/discovery-read"
+      printf '[{"total_count":0,"workflow_runs":[]}]\n'
+    else
+      cat "$FIXTURE/native-runs"
+    fi ;;
   *workflows/macos-nightly.yml*) cat "$FIXTURE/native-workflow" ;;
   *runs/81/attempts/1/jobs*) cat "$FIXTURE/native-jobs" ;;
   *runs/81/attempts/1*) cat "$FIXTURE/native-run" ;;
@@ -24,6 +30,11 @@ case "$*" in
 esac
 SH
 chmod +x "$scratch/bin/gh"
+cat > "$scratch/bin/sleep" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FIXTURE/discovery-waits"
+SH
+chmod +x "$scratch/bin/sleep"
 export PATH="$scratch/bin:$PATH" FIXTURE="$scratch" GH_REPO=fixture/repo
 export SOURCE_SHA=1111111111111111111111111111111111111111
 export FULL_SUITE_STATUS_FILE="$scratch/source-ci.json"
@@ -52,6 +63,26 @@ grep -q '"status":"complete"' "$scratch/log"
 head -n 1 "$scratch/log" | jq -e \
   '.kind == "harn.release.full_suite.v1" and .verdict == "success" and .pending_count == 0 and .failed_count == 0 and .next_action == "continue"' >/dev/null
 jq -e '.verdict == "success" and .next_action == "continue"' "$FULL_SUITE_STATUS_FILE" >/dev/null
+WAIT_FOR_FULL_SUITE=true FAKE_NATIVE_DISCOVERY=true NATIVE_QUALIFICATION_STATUS_FILE="$scratch/native-status.json" \
+  bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/discovery-log"
+[[ $(cat "$scratch/discovery-waits") == 5 ]]
+jq -e '.verdict == "success" and .source_sha == "1111111111111111111111111111111111111111" and .pending_count == 0 and .failed_count == 0' "$scratch/native-status.json" >/dev/null
+: > "$scratch/discovery-waits"
+jq '.[0].workflow_runs=[] | .[0].total_count=0' "$scratch/good-native/native-runs" > "$scratch/native-runs"
+if WAIT_FOR_FULL_SUITE=true NATIVE_QUALIFICATION_STATUS_FILE="$scratch/native-status.json" \
+  bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/missing-discovery-log"; then
+  echo 'Unreported native qualification passed admission' >&2; exit 1
+fi
+[[ $(wc -l < "$scratch/discovery-waits" | tr -d ' ') == 24 ]]
+jq -e '.verdict == "failure" and .pending_count == 1 and .failed_count == 0 and .platforms[0].status == "missing"' "$scratch/native-status.json" >/dev/null
+cp "$scratch/good-native/native-runs" "$scratch/native-runs"
+jq '.conclusion="failure"' "$scratch/good-native/native-run" > "$scratch/native-run"
+jq '.[0].artifacts=[] | .[0].total_count=0' "$scratch/good-native/native-artifacts" > "$scratch/native-artifacts"
+if bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/failed-native-log"; then
+  echo 'A failed native execution passed without a receipt' >&2; exit 1
+fi
+jq -e '.verdict == "failure" and .failed_count == 1 and .failing_jobs == ["workflow run"]' "$scratch/failed-native-log" >/dev/null
+cp "$scratch/good-native/"* "$scratch/"
 for name in "${names[@]}"; do
   cp "$scratch/jobs" "$scratch/good"
   awk -F '\t' -v name="$name" '$1 != name' "$scratch/good" > "$scratch/jobs"

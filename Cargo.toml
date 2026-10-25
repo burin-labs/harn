@@ -15,6 +15,7 @@ members = [
     "crates/harn-signals",
     "crates/harn-glob",
     "crates/harn-languages",
+    "crates/harn-grammars",
     "crates/harn-secret-catalog",
     "crates/harn-provider-catalog",
     "crates/harn-prompt-syntax",
