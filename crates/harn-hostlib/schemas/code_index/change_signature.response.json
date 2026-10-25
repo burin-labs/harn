@@ -19,9 +19,10 @@
         "parameter_in_use",
         "value_reference",
         "unsupported_call_site",
-        "overrides_present"
+        "overrides_present",
+        "fixed_signature"
       ],
-      "description": "`ambiguous_symbol`: several declarations match the seed, another free function shares the name, or a call by that name cannot reach this declaration; candidates are in `warnings`. `conflict`: renaming a parameter would capture an existing name in the body. `error`: the declaration's parameter list cannot be rewritten (a comment inside it, keyword-only markers). `parameter_in_use`: the body still uses a removed parameter. `value_reference`: the function is used as a value. `unsupported_call_site`: a call passes a spread, splat, or an argument count that cannot be remapped. `overrides_present`: the function is a trait, interface, or overridden method."
+      "description": "`ambiguous_symbol`: several declarations match the seed, another free function shares the name, or a call by that name cannot reach this declaration; candidates are in `warnings`. `conflict`: renaming a parameter would capture an existing name in the body. `error`: the declaration's parameter list cannot be rewritten (a comment inside it, keyword-only markers). `parameter_in_use`: the body still uses a removed parameter. `value_reference`: the function is used as a value. `unsupported_call_site`: a call passes a spread, splat, or an argument count that cannot be remapped. `overrides_present`: the function is a trait, interface, or overridden method. `fixed_signature`: something outside the function fixes its parameter list: a test, bench or entry attribute, `fn main`, an exported ABI symbol, or a declared function type."
     },
     "applied": { "type": "boolean" },
     "dry_run": { "type": "boolean" },

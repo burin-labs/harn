@@ -63,7 +63,16 @@ pub type ShellGuardDecision = {allow: bool, reason: string}
  */
 pub type WorktreeAdmission = {available: bool, command: string, denial: string}
 
-type ShellCommandStage = {text: string, argv: list<string>, writes_to_file: bool}
+/**
+ * `xargs_child_argv` is absent from runtimes older than the release that added it, and the
+ * guard must run on the oldest runtime a consumer pins, so it is optional here.
+ */
+type ShellCommandStage = {
+  text: string,
+  argv: list<string>,
+  xargs_child_argv?: list<string>,
+  writes_to_file: bool,
+}
 
 const EMPTY_SHELL_STAGE: ShellCommandStage = {text: "", argv: [], writes_to_file: false}
 
@@ -844,15 +853,136 @@ pub fn disposable_trash_violation(command: string) -> string {
   return ""
 }
 
+/** Marks an inline alias whose value git reads from the environment, which the guard cannot see. */
+const GIT_ALIAS_UNRESOLVED: string = "<unresolved>"
+
+/**
+ * The aliases a command defines before its subcommand with `git -c alias.NAME=VALUE`.
+ * `--config-env=alias.NAME=VAR` reads its value from the environment, so it is refused.
+ */
+fn git_inline_aliases(argv: list<string>) -> dict {
+  let aliases = {}
+  let pending = ""
+  for token in argv.slice(1, len(argv)) {
+    if pending != "" {
+      const parts = token.split("=")
+      const head = parts[0] ?? ""
+      if head.starts_with("alias.") && len(parts) > 1 {
+        const name = head.replace("alias.", "")
+        aliases[name] = if pending == "-c" {
+          parts.slice(1, len(parts)).join("=")
+        } else {
+          GIT_ALIAS_UNRESOLVED
+        }
+      }
+      pending = ""
+    } else if token == "-c" || token == "--config-env" {
+      pending = token
+    } else if token.starts_with("--config-env=") {
+      const head = token.replace("--config-env=", "").split("=")[0] ?? ""
+      if head.starts_with("alias.") {
+        aliases[head.replace("alias.", "")] = GIT_ALIAS_UNRESOLVED
+      }
+    } else if GIT_VALUE_TAKING_OPTIONS.contains(token) {
+      pending = "skip"
+    } else if !token.starts_with("-") {
+      break
+    }
+  }
+  return aliases
+}
+
+/**
+ * Whether a git invocation writes the stash list, directly or through an inline alias.
+ * Git reads the verb only from the token right after `stash`; an option there
+ * (`-u`, `-m list`) means push. Anything but a read-only verb writes.
+ */
+fn git_args_write_stash(argv: list<string>, args: list<string>, depth: int) -> bool {
+  const verb = args[0] ?? ""
+  if verb == "stash" {
+    return !GIT_STASH_READ_ONLY.contains(args[1] ?? "")
+  }
+  const expansion = git_inline_aliases(argv)[verb] ?? ""
+  if expansion == "" || depth >= 4 {
+    return false
+  }
+  if expansion == GIT_ALIAS_UNRESOLVED {
+    return true
+  }
+  if expansion.starts_with("!") {
+    return git_stash_write_in(
+      expansion.replace("!", "") + " " + args.slice(1, len(args)).join(" "),
+      depth + 1,
+    )
+  }
+  const words = expansion.split(" ").filter({ word -> word != "" })
+  const expanded = ["git"] + words + args.slice(1, len(args))
+  return git_args_write_stash(argv, git_subcommand_args(expanded), depth + 1)
+}
+
+/**
+ * Whether raw operand text names a `stash` that is not provably read-only. The text is cut into
+ * words at whitespace, quotes, `;` and brackets, so a payload inside `sh -c`, `python -c`,
+ * `perl -e` or `eval` is read without parsing any interpreter. Every `stash` word must be followed
+ * by `list` or `show`; a bare `stash`, any other verb, and a word that merely contains `stash`
+ * (`alias.s=stash`) all count as a write.
+ */
+fn operand_text_writes_stash(text: string) -> bool {
+  let spaced = text
+  for separator in ["\"", "'", "`", ";", "(", ")", "|", "&", "\n", "\t"] {
+    spaced = spaced.replace(separator, " ")
+  }
+  const words = spaced.split(" ").filter({ word -> word != "" })
+  for index in range(0, len(words)) {
+    const word = words[index] ?? ""
+    if word.starts_with("stash@") || !word.contains("stash") {
+      continue
+    }
+    if word != "stash" || !GIT_STASH_READ_ONLY.contains(words[index + 1] ?? "") {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Fails closed for an `xargs` stage whose launched command the scanner could not place, such as
+ * `xargs -a input git stash drop` (`-a` is outside the scanner's option boundary), or any `xargs`
+ * under a runtime that predates `xargs_child_argv`. A `git` operand gets the precise stash rule,
+ * which also resolves inline aliases; every other operand is judged by its raw text. The accepted
+ * cost is that an unresolved `xargs` whose operands mention a non-read-only `stash`, even as
+ * `xargs -a f grep stash`, is refused.
+ */
+fn xargs_operands_write_stash(argv: list<string>) -> bool {
+  if argv_program(argv) != "xargs" {
+    return false
+  }
+  for index in range(1, len(argv)) {
+    const launched = argv.slice(index, len(argv))
+    if argv_program(launched) == "git"
+      && git_args_write_stash(launched, git_subcommand_args(launched), 0) {
+      return true
+    }
+  }
+  return operand_text_writes_stash(argv.slice(1, len(argv)).join(" "))
+}
+
 fn git_stash_write_in(command: string, depth: int) -> bool {
   for group in command_groups(command) {
     for stage in group {
-      const argv = launched_argv(stage.argv, 0)
+      // `xargs` launches its operands, so the stash rule reads the child the scanner resolved.
+      const xargs_child = stage.xargs_child_argv ?? []
+      if len(xargs_child) == 0 && xargs_operands_write_stash(stage.argv) {
+        return true
+      }
+      const launched = if len(xargs_child) > 0 {
+        xargs_child
+      } else {
+        stage.argv
+      }
+      const argv = launched_argv(launched, 0)
       if argv_program(argv) == "git" {
-        const args = git_subcommand_args(argv)
-        // Git reads the verb only from the token right after `stash`; an option
-        // there (`-u`, `-m list`) means push. Anything but a read-only verb writes.
-        if (args[0] ?? "") == "stash" && !GIT_STASH_READ_ONLY.contains(args[1] ?? "") {
+        if git_args_write_stash(argv, git_subcommand_args(argv), depth) {
           return true
         }
       }

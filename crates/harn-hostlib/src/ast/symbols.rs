@@ -327,8 +327,11 @@ fn extract_rust(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                     prefix: "fn",
                     out,
                 });
-                None
+                // Items declared in a body or an inline module are not
+                // module level.
+                field_text(node, "name", source)
             }
+            "mod_item" => field_text(node, "name", source),
             "struct_item" => named_decl_with_keyword(NamedDeclArgs {
                 node,
                 source,

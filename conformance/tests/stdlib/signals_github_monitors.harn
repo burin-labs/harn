@@ -1,0 +1,147 @@
+import { monitor_github_rate_limit, monitor_github_runners } from "std/signals"
+
+fn runner(id: int, status: string, labels: list<string>) -> dict {
+  return {id: id, status: status, labels: labels.map({ name -> {name: name} })}
+}
+
+/** Runner pools are read per group across every page; a failed read is not a reading. */
+pipeline default(harness: Harness) {
+  const api = "https://gh.example.test"
+  const options = {
+    dir: harness.fs.mkdtemp_in_workspace("signals-"),
+    token: "test-token",
+    api_url: api,
+  }
+  const pool = {scope: "acme", group: "linux-pool", minimum: 2, required_labels: ["linux", "x64"]}
+  // Page one: 100 runners, only one online with both labels. Page two holds
+  // the second. The flat org list would show neither.
+  let page_one = [runner(1, "online", ["self-hosted", "linux", "x64"])]
+  for id in 2..=100 {
+    page_one.push(runner(id, "offline", ["self-hosted", "linux", "x64"]))
+  }
+  harness.testing.http_mock(
+    "GET",
+    api + "/orgs/acme/actions/runner-groups?per_page=100&page=1",
+    {
+      status: 200,
+      body: json_stringify(
+        {total_count: 2, runner_groups: [{id: 9, name: "vendor"}, {id: 7, name: "linux-pool"}]},
+      ),
+    },
+  )
+  harness.testing.http_mock(
+    "GET",
+    api + "/orgs/acme/actions/runner-groups/7/runners?per_page=100&page=1",
+    {status: 200, body: json_stringify({total_count: 102, runners: page_one})},
+  )
+  harness.testing.http_mock(
+    "GET",
+    api + "/orgs/acme/actions/runner-groups/7/runners?per_page=100&page=2",
+    {
+      status: 200,
+      body: json_stringify(
+        {
+          total_count: 102,
+          runners: [runner(101, "online", ["linux", "x64"]), runner(102, "online", ["linux"])],
+        },
+      ),
+    },
+  )
+  const healthy = monitor_github_runners(harness, pool, options)
+  harness.stdio.println("two pages, two online: " + healthy.outcome)
+  const paths = harness.testing.http_mock_calls().map({ call -> replace(call.url, api, "") })
+  harness.stdio.println(paths)
+  // One fewer online runner: the pool fires.
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
+    "GET",
+    api + "/orgs/acme/actions/runner-groups?per_page=100&page=1",
+    {
+      status: 200,
+      body: json_stringify({total_count: 1, runner_groups: [{id: 7, name: "linux-pool"}]}),
+    },
+  )
+  harness.testing.http_mock(
+    "GET",
+    api + "/orgs/acme/actions/runner-groups/7/runners?per_page=100&page=1",
+    {
+      status: 200,
+      body: json_stringify({total_count: 1, runners: [runner(1, "online", ["linux", "x64"])]}),
+    },
+  )
+  const short = monitor_github_runners(harness, pool, options)
+  harness.stdio.println("one online: " + short.outcome + " " + to_string(short.state))
+  // The listing fails: neither fires again nor reads as recovered.
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock("GET", api + "/orgs/acme/*", {status: 502, body: "bad gateway"})
+  const failed = monitor_github_runners(harness, pool, options)
+  harness.stdio.println("listing failed: " + failed.outcome)
+  harness.stdio.println(contains(failed.error ?? "", "502"))
+  // A listing that never reaches total_count is incomplete, not small.
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
+    "GET",
+    api + "/orgs/acme/actions/runner-groups?per_page=100&page=1",
+    {
+      status: 200,
+      body: json_stringify({total_count: 1, runner_groups: [{id: 7, name: "linux-pool"}]}),
+    },
+  )
+  harness.testing.http_mock(
+    "GET",
+    api + "/orgs/acme/actions/runner-groups/7/runners?per_page=100&page=*",
+    {status: 200, body: json_stringify({total_count: 100000, runners: page_one})},
+  )
+  harness.stdio.println(
+    "endless listing: " + monitor_github_runners(harness, pool, options).outcome,
+  )
+  // No credential at all is unmeasured too; so is a GitHub App whose token
+  // cannot be minted.
+  harness.testing.http_mock_clear()
+  harness.stdio.println(
+    "no token: "
+      + monitor_github_rate_limit(
+        harness,
+        "bot",
+        10.0,
+        {dir: options.dir, token_env: "SIGNALS_TEST_UNSET_TOKEN"},
+      ).outcome,
+  )
+  harness.stdio.println(
+    "no mint: "
+      + monitor_github_rate_limit(
+        harness,
+        "bot",
+        10.0,
+        {
+          dir: options.dir,
+          api_url: api,
+          app: {app_id: 1, installation_id: 2, private_key_pem: "x"},
+        },
+      ).outcome,
+  )
+  // The signal is still fired at generation 1 from the short read: the
+  // failures above changed nothing.
+  harness.testing.http_mock(
+    "GET",
+    api + "/orgs/acme/actions/runner-groups?per_page=100&page=1",
+    {
+      status: 200,
+      body: json_stringify({total_count: 1, runner_groups: [{id: 7, name: "linux-pool"}]}),
+    },
+  )
+  harness.testing.http_mock(
+    "GET",
+    api + "/orgs/acme/actions/runner-groups/7/runners?per_page=100&page=1",
+    {
+      status: 200,
+      body: json_stringify({total_count: 1, runners: [runner(1, "online", ["linux", "x64"])]}),
+    },
+  )
+  const still = monitor_github_runners(harness, pool, options)
+  harness.stdio.println(
+    "still short: " + still.outcome + " " + to_string(still.state) + " "
+      + to_string(still.generation),
+  )
+  harness.testing.http_mock_clear()
+}

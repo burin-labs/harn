@@ -76,7 +76,7 @@ impl HostlibCapability for FsSnapshotCapability {
 
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
         registry.register_fn("fs", SNAPSHOT_BUILTIN, "snapshot", snapshot_builtin);
-        registry.register_fn("fs", RESTORE_BUILTIN, "restore", restore_builtin);
+        registry.register_writer_fn("fs", RESTORE_BUILTIN, "restore", restore_builtin);
         registry.register_fn("fs", LIST_BUILTIN, "list_snapshots", list_snapshots_builtin);
         registry.register_fn("fs", DROP_BUILTIN, "drop_snapshot", drop_snapshot_builtin);
     }

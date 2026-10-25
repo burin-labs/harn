@@ -173,7 +173,10 @@ name.
 Every refusal writes nothing and lists the blocking `sites`: a removed
 parameter the body still reads (`parameter_in_use`), the function passed as a
 value (`value_reference`), a spread or splat call (`unsupported_call_site`),
-or a trait, interface, or overridden method (`overrides_present`).
+a trait, interface, or overridden method (`overrides_present`), or a
+parameter list fixed from outside the function (`fixed_signature`): a test,
+bench or entry attribute, `fn main`, an exported ABI symbol, or a declared
+function type.
 
 ## Verify the result
 

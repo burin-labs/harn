@@ -728,6 +728,18 @@ impl TranscriptRecord {
 
     /// The identity the journal files a row under when it writes it: the
     /// provider message's id fields, then the envelope's, then its metadata's.
+    /// Whether a row is something a person can fork or rewind to: a message, a
+    /// tool call or result, or a published answer. Run, goal and other
+    /// bookkeeping rows are not, so they carry no source identity.
+    pub(crate) fn is_history_position(&self) -> bool {
+        matches!(
+            self.store_kind(),
+            SessionEventKind::Message | SessionEventKind::ToolCall | SessionEventKind::ToolResult
+        ) || self
+            .transcript_event
+            .is(TranscriptKind::AssistantPublication)
+    }
+
     pub(crate) fn journal_tool_call_id(&self) -> Option<String> {
         fn from_value(value: &Value) -> Option<String> {
             ["tool_call_id", "tool_use_id", "toolUseId"]

@@ -8,11 +8,12 @@
     "proof": { "type": "boolean", "default": false, "description": "Include bounded edit excerpts and per-file syntax evidence. Does not run a project check." },
     "symbol_ref": {
       "type": "object",
-      "description": "The function to change. `name` and `path` (the defining file) are required; `line` (1-based) picks one declaration when several share the name; `kind` defaults to `Function`.",
+      "description": "The function to change, selected as for `rename_symbol`. `name` and `path` (the defining file) are required; `line` (1-based) and `col` pick one declaration when several share the name and must match it; `kind` defaults to `Function`.",
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "path": { "type": "string", "minLength": 1 },
         "line": { "type": "integer", "minimum": 1 },
+        "col": { "type": "integer", "minimum": 1, "description": "1-based UTF-16 column of the declaration name, as reported by the index." },
         "kind": { "type": "string", "enum": ["Function"] }
       },
       "required": ["name", "path"],

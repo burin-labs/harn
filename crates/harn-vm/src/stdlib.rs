@@ -67,6 +67,7 @@ pub(crate) mod session_store;
 pub(crate) mod session_wal_watch;
 mod sets;
 pub(crate) mod shapes;
+pub mod signals;
 mod skills;
 pub(crate) mod strings;
 pub(crate) mod supervisor;

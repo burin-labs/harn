@@ -559,11 +559,9 @@ fn aws_sigv4_timestamp(value: Option<&VmValue>) -> Result<DateTime<Utc>, VmError
     let value = value.ok_or_else(|| aws_sigv4_error("timestamp is required"))?;
     match value {
         VmValue::String(text) => aws_sigv4_timestamp_string(text),
-        VmValue::Int(seconds) => Utc
-            .timestamp_opt(*seconds, 0)
-            .single()
-            .ok_or_else(|| aws_sigv4_error("timestamp is out of range")),
-        VmValue::Float(seconds) => aws_sigv4_timestamp_float(*seconds),
+        VmValue::Int(_) | VmValue::Float(_) => {
+            super::datetime::datetime_from_arg(Some(value), "aws_sigv4_headers")
+        }
         VmValue::Dict(dict) => aws_sigv4_timestamp(
             dict.get("timestamp").or_else(|| dict.get("iso8601")),
         ),
@@ -581,24 +579,6 @@ fn aws_sigv4_timestamp_string(text: &str) -> Result<DateTime<Utc>, VmError> {
     NaiveDateTime::parse_from_str(text, "%Y%m%dT%H%M%SZ")
         .map(|dt| Utc.from_utc_datetime(&dt))
         .map_err(|_| aws_sigv4_error("timestamp must be RFC 3339 or YYYYMMDDTHHMMSSZ"))
-}
-
-fn aws_sigv4_timestamp_float(seconds: f64) -> Result<DateTime<Utc>, VmError> {
-    if !seconds.is_finite() {
-        return Err(aws_sigv4_error("timestamp must be finite"));
-    }
-    let mut secs = seconds.trunc() as i64;
-    let mut nanos = ((seconds - secs as f64) * 1_000_000_000.0).round() as i64;
-    if nanos < 0 {
-        secs -= 1;
-        nanos += 1_000_000_000;
-    } else if nanos >= 1_000_000_000 {
-        secs += 1;
-        nanos -= 1_000_000_000;
-    }
-    Utc.timestamp_opt(secs, nanos as u32)
-        .single()
-        .ok_or_else(|| aws_sigv4_error("timestamp is out of range"))
 }
 
 fn aws_sigv4_headers_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {

@@ -20,6 +20,10 @@
 //! - `syntax_error` — a rewritten file failed re-parse with `validate=true`.
 //! - `invalid_identifier` — `new_name` is empty / shaped wrong for any
 //!   in-scope language.
+//! - `cancelled` — the call was stopped before it wrote anything.
+//! - `refused` — `deadline_ms` or the caller's deadline passed first; it
+//!   carries `retry_after_ms` and an `alternative` request when a language
+//!   server was the wait.
 //!
 //! # Algorithm
 //!
@@ -52,6 +56,7 @@ use harn_vm::VmValue;
 
 use crate::ast::{api as ast_api, Language, TEXT_PATCH_FALLBACK};
 use crate::error::HostlibError;
+use crate::host_call::{HostCallContext, Interrupt};
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_string, require_string, str_value,
 };
@@ -124,6 +129,11 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         BUILTIN,
         optional_string(BUILTIN, dict, "backend")?.as_deref(),
     )?;
+    let call = HostCallContext::current();
+    let call = match super::builtin_args::optional_positive_u64(BUILTIN, dict, "deadline_ms")? {
+        Some(ms) => call.with_budget(std::time::Duration::from_millis(ms)),
+        None => call,
+    };
 
     let new_name = match &replacement_text {
         // In rename mode `new_name` is required and reported as the after-text.
@@ -156,7 +166,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     // A cold language server can take its whole startup budget; start it
     // before taking the index lock so other code-index calls are not held.
     let warmed = (is_rename && backend != BackendChoice::SyntaxTree)
-        .then(|| language_server::warm(index, &symbol_path))
+        .then(|| language_server::warm(index, &symbol_path, &call))
         .flatten();
 
     let guard = index.lock().expect("code_index mutex poisoned");
@@ -232,9 +242,13 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             dry_run,
             validate,
             warmed,
+            call: &call,
         };
         match language_server::rename(&mut env, request)? {
             language_server::Answer::Response(response) => return Ok(response),
+            language_server::Answer::Interrupted(interrupt) => {
+                return Ok(interrupted_response(&env, interrupt, true))
+            }
             language_server::Answer::Fallback(reason)
                 if backend == BackendChoice::LanguageServer =>
             {
@@ -295,8 +309,10 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         };
         // Prose and data files only mention the name; they hold no binding.
         if !language.is_code() {
-            env.stale
-                .push(format!("{path} ({} file left unchanged)", language.name()));
+            env.stale.push(format!(
+                "{path} ({} file left unchanged; it may still reference `{symbol_name}`, so review it)",
+                language.name()
+            ));
             continue;
         }
         if java_method && language != Language::Java {
@@ -445,7 +461,10 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let failed = if dry_run {
         Vec::new()
     } else {
-        write_plans(BUILTIN, &state.root, &plans, session_id.as_deref())?
+        match commit(&env, &call, &state.root, &plans, session_id.as_deref())? {
+            Ok(failed) => failed,
+            Err(stopped) => return Ok(stopped),
+        }
     };
 
     Ok(applied_response(&env, &plans, dry_run, failed))
@@ -497,6 +516,8 @@ struct ResponseExtras {
     /// so the agent loop can fall back without a hard-coded language list.
     fallback_suggestion: Option<String>,
     proof: Option<VmValue>,
+    /// Variant-specific fields beside the shared envelope.
+    extra: Vec<(&'static str, VmValue)>,
 }
 
 #[derive(Clone, Copy)]
@@ -535,7 +556,7 @@ fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtra
             match_count: extras.match_count,
             details: extras.details,
             fallback_suggestion: extras.fallback_suggestion,
-            extra: vec![
+            extra: [
                 ("backend", env.backend.value()),
                 (
                     "ambiguity_reason",
@@ -543,8 +564,99 @@ fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtra
                         .ambiguity_reason
                         .map_or(VmValue::Nil, |reason| str_value(reason.as_str())),
                 ),
-            ],
+            ]
+            .into_iter()
+            .chain(extras.extra)
+            .collect(),
             proof: extras.proof,
+        },
+    )
+}
+
+/// Write the plans past the call's commit point: a stop before it writes
+/// nothing, and once it passes every file is written. The plans were read
+/// without the write lease, so a file another builtin changed since then
+/// refuses the whole rename.
+fn commit(
+    env: &ResponseEnv<'_>,
+    call: &HostCallContext,
+    root: &Path,
+    plans: &[FilePlan],
+    session_id: Option<&str>,
+) -> Result<Result<Vec<(String, String)>, VmValue>, HostlibError> {
+    let committed = call.commit(BUILTIN, |writes| {
+        let changed =
+            super::refactor_core::changed_since_planned(BUILTIN, root, plans, session_id);
+        if changed.is_empty() {
+            return write_plans(BUILTIN, root, plans, session_id, writes).map(Ok);
+        }
+        Ok(Err(emit_response(
+            env,
+            "refused",
+            ResponseExtras {
+                details: format!(
+                    "rename stopped without writes: {} changed after the rename read them (listed in `warnings`); run it again",
+                    changed.join(", ")
+                ),
+                warnings: changed.into_iter().map(str_value).collect(),
+                ..Default::default()
+            },
+        )))
+    });
+    let waited_on_server = env.backend.language_server.is_some();
+    committed
+        .unwrap_or_else(|interrupt| Ok(Err(interrupted_response(env, interrupt, waited_on_server))))
+}
+
+/// The caller stopped the rename before it wrote anything.
+/// `waited_on_server` is whether a language server was what the call was
+/// waiting on, which makes the server-free request a useful alternative.
+fn interrupted_response(
+    env: &ResponseEnv<'_>,
+    interrupt: Interrupt,
+    waited_on_server: bool,
+) -> VmValue {
+    if interrupt == Interrupt::Cancelled {
+        return emit_response(
+            env,
+            "cancelled",
+            ResponseExtras {
+                details: "rename stopped without writes: the call was cancelled".into(),
+                ..Default::default()
+            },
+        );
+    }
+    if !waited_on_server {
+        return emit_response(
+            env,
+            "refused",
+            ResponseExtras {
+                details: "rename stopped without writes: the call's deadline passed".into(),
+                ..Default::default()
+            },
+        );
+    }
+    let run = env.backend.language_server.as_ref();
+    let retry_after = super::lsp::retry_after(run);
+    emit_response(
+        env,
+        "refused",
+        ResponseExtras {
+            details: format!(
+                "rename stopped without writes: the call's deadline passed while waiting on {}, which keeps starting in the background. Retry after `retry_after_ms`, or send `alternative`, which never waits on a language server.",
+                run.map_or("the language server", |run| run.server)
+            ),
+            extra: vec![
+                (
+                    "retry_after_ms",
+                    VmValue::Int(retry_after.as_millis() as i64),
+                ),
+                (
+                    "alternative",
+                    build_dict([("backend", str_value("syntax_tree"))]),
+                ),
+            ],
+            ..Default::default()
         },
     )
 }

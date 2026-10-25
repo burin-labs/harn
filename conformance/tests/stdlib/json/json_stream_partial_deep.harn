@@ -1,0 +1,15 @@
+import { stream_validator } from "std/json"
+
+fn main(harness: Harness) -> nil {
+  const validator = stream_validator(harness.runtime, {})
+  validator.feed("[".repeat(8192))
+  let partial = validator.partial()
+  let depth = 0
+  while type_of(partial) == "list" && len(partial) > 0 {
+    depth += 1
+    partial = partial[0]
+  }
+  assert_eq(depth, 126)
+  assert_eq(partial, [])
+  harness.stdio.println("deep partial recovery ok")
+}

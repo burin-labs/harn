@@ -149,6 +149,9 @@ pub(super) struct Declaration {
     /// Why other signatures must change with this one: it declares or
     /// implements a trait or interface method, or is an overload.
     pub contract: Option<String>,
+    /// Why the parameter list cannot change at all: a test, bench or entry
+    /// attribute (or `fn main`) fixes it, or a declared function type does.
+    pub fixed: Option<String>,
 }
 
 /// `source[range]`, or empty when the range is not on character boundaries.
@@ -328,7 +331,110 @@ pub(super) fn read_declaration(
         is_method,
         owner: is_method.then(|| owner_name(node, bytes)).flatten(),
         contract: contract(node, bytes, family),
+        fixed: fixed_signature(node, bytes, family),
     })
+}
+
+/// Attribute names whose function must keep its exact parameter list: a
+/// harness or runtime calls it, or its ABI symbol is exported.
+const SIGNATURE_FIXING_ATTRIBUTES: &[&str] = &[
+    "test",
+    "bench",
+    "main",
+    "no_mangle",
+    "export_name",
+    "test_case",
+    "rstest",
+    "wasm_bindgen",
+];
+
+fn fixed_signature(node: Node<'_>, bytes: &[u8], family: Family) -> Option<String> {
+    match family {
+        Family::Rust => {
+            let mut sibling = node.prev_sibling();
+            while let Some(current) = sibling {
+                match current.kind() {
+                    "attribute_item" => {
+                        if let Some(attribute) = signature_fixing_attribute(current, bytes) {
+                            return Some(format!("carries `{attribute}`"));
+                        }
+                    }
+                    "line_comment" | "block_comment" => {}
+                    _ => break,
+                }
+                sibling = current.prev_sibling();
+            }
+            let top_level = node.parent().is_some_and(|p| p.kind() == "source_file");
+            let name = node.child_by_field_name("name").map(|n| text(n, bytes));
+            (top_level && name == Some("main")).then(|| "is the program entry point".into())
+        }
+        Family::TypeScript => {
+            let annotation = match node.kind() {
+                "variable_declarator" => node.child_by_field_name("type"),
+                _ => None,
+            }?;
+            Some(format!(
+                "is bound to the declared type `{}`",
+                text(annotation, bytes).trim_start_matches(':').trim()
+            ))
+        }
+        Family::Python => None,
+    }
+}
+
+/// The attribute item's text when the attribute in it fixes the signature.
+fn signature_fixing_attribute(item: Node<'_>, bytes: &[u8]) -> Option<String> {
+    let attribute = named_children(item)
+        .into_iter()
+        .find(|c| c.kind() == "attribute")?;
+    let mut cursor = attribute.walk();
+    let tokens: Vec<Node<'_>> = attribute.children(&mut cursor).collect();
+    fixes_signature(&tokens, bytes).then(|| text(item, bytes).to_string())
+}
+
+/// Whether one attribute, as its head token and arguments, fixes the
+/// signature. `cfg` and `doc` only mention names. `cfg_attr` applies the
+/// attributes after its condition, so only those are read. Any other
+/// attribute fixes it when an identifier in it names a signature-fixing
+/// attribute, which covers wrapped forms such as `unsafe(no_mangle)`.
+fn fixes_signature(tokens: &[Node<'_>], bytes: &[u8]) -> bool {
+    let Some(head) = tokens.first() else {
+        return false;
+    };
+    match text(*head, bytes) {
+        "cfg" | "doc" => false,
+        "cfg_attr" => {
+            let Some(arguments) = tokens.iter().find(|t| t.kind() == "token_tree") else {
+                return false;
+            };
+            let mut cursor = arguments.walk();
+            let inner: Vec<Node<'_>> = arguments
+                .children(&mut cursor)
+                .filter(|t| !matches!(t.kind(), "(" | ")"))
+                .collect();
+            inner
+                .split(|t| t.kind() == ",")
+                .skip(1)
+                .any(|applied| fixes_signature(applied, bytes))
+        }
+        _ => tokens
+            .iter()
+            .any(|token| names_fixing_attribute(*token, bytes)),
+    }
+}
+
+fn names_fixing_attribute(root: Node<'_>, bytes: &[u8]) -> bool {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.kind().contains("string") {
+            continue;
+        }
+        if node.kind() == "identifier" && SIGNATURE_FIXING_ATTRIBUTES.contains(&text(node, bytes)) {
+            return true;
+        }
+        stack.extend(named_children(node));
+    }
+    false
 }
 
 fn enclosing<'t>(node: Node<'t>, kinds: &[&str]) -> Option<Node<'t>> {

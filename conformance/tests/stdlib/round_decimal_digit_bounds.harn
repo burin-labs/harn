@@ -1,0 +1,31 @@
+fn main(harness: Harness) -> nil {
+  assert_eq(round(decimal("1250"), -2), decimal("1200"))
+  const minimum = -9223372036854775807 - 1
+  for digits in [-29, -400, -4294967296, minimum] {
+    const rounded = round(decimal("12.5"), digits)
+    assert_eq(rounded, decimal("0"))
+    assert_eq(type_of(rounded), "decimal")
+  }
+  assert_eq(round(decimal("12.5"), 4294967296), decimal("12.5"))
+  assert_eq(round(decimal("50000000000000000000000000000"), -29), decimal("0"))
+  for text in ["50000000000000000000000000001", "-50000000000000000000000000001"] {
+    const result = try {
+      round(decimal(text), -29)
+    }
+    require is_err(result), "a rounded result beyond the decimal range must be rejected"
+    require contains(to_string(unwrap_err(result)), "out of range"), "stable rounding range error"
+  }
+  require is_err(
+    try {
+      round(decimal("79228162514264337593543950335"), -28)
+    },
+  ),
+    "a representable bucket can still overflow the result"
+  assert_eq(
+    round(decimal("74999999999999999999999999999"), -28),
+    decimal("70000000000000000000000000000"),
+  )
+  assert_eq(round(decimal("45.0"), -1), decimal("40"))
+  assert_eq(round(decimal("55.0"), -1), decimal("60"))
+  harness.stdio.println("decimal digit bounds ok")
+}

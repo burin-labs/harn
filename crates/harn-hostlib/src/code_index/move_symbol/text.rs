@@ -154,6 +154,11 @@ pub(crate) fn members<'tree>(node: Node<'tree>) -> Vec<Node<'tree>> {
         .collect()
 }
 
+/// Whether `outer` holds all of `inner`.
+pub(crate) fn covers(outer: &Range<usize>, inner: &Range<usize>) -> bool {
+    outer.start <= inner.start && inner.end <= outer.end
+}
+
 pub(crate) fn is_field_child(parent: Node<'_>, field: &str, node: Node<'_>) -> bool {
     parent.child_by_field_name(field).map(|c| c.id()) == Some(node.id())
 }

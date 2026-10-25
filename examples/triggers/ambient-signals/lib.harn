@@ -1,0 +1,91 @@
+import {
+  alert_webhook_decisions,
+  monitor_github_ci,
+  monitor_github_open_prs,
+  monitor_github_rate_limit,
+  monitor_github_runners,
+  signal_apply,
+} from "std/signals"
+import "std/triggers"
+
+/**
+ * What to watch. Edit these values; every threshold lives here. A runner pool
+ * names its organization runner group and the labels a runner must carry to
+ * count. A rate-limit entry with `app` credentials mints a fresh installation
+ * token through the GitHub connector on every poll.
+ */
+const MONITORS = {
+  default_branch_ci: [{repo: "OWNER/NAME", branch: "main"}],
+  open_prs: [{repo: "OWNER/NAME", threshold: 20}],
+  runner_pools: [
+    {scope: "OWNER", group: "RUNNER-GROUP", minimum: 2, required_labels: ["self-hosted", "linux"]},
+  ],
+  rate_limits: [
+    {
+      subject: "deploy-bot",
+      min_percent: 10.0,
+      app: {app_id: 0, installation_id: 0, private_key_secret: "github/app-private-key"},
+    },
+  ],
+}
+
+/**
+ * Run every GitHub monitor once. A monitor whose read fails reports
+ * `unmeasured` and leaves its signal as it was; it does not stop the others.
+ */
+pub fn poll_github(harness: Harness, _event: TriggerEvent) -> dict {
+  let results = []
+  for entry in MONITORS.default_branch_ci {
+    results.push(
+      try {
+        monitor_github_ci(harness, entry.repo, entry.branch)
+      },
+    )
+  }
+  for entry in MONITORS.open_prs {
+    results.push(
+      try {
+        monitor_github_open_prs(harness, entry.repo, entry.threshold)
+      },
+    )
+  }
+  for entry in MONITORS.runner_pools {
+    results.push(
+      try {
+        monitor_github_runners(harness, entry)
+      },
+    )
+  }
+  for entry in MONITORS.rate_limits {
+    results.push(
+      try {
+        monitor_github_rate_limit(harness, entry.subject, entry.min_percent, {app: entry.app})
+      },
+    )
+  }
+  return {monitors: len(results), results: results}
+}
+
+fn apply_alerts(runtime: HarnessRuntime, provider: string, event: TriggerEvent) -> dict {
+  const signature = event.signature_status.state == "verified" ? "verified" : "unverified"
+  const decisions = alert_webhook_decisions(provider, event.provider_payload.raw, signature)
+  return {
+    provider: provider,
+    transitions: decisions.map({ decision -> signal_apply(runtime, decision) }),
+  }
+}
+
+/** Sentry issue-alert and issue webhooks. */
+pub fn on_sentry(harness: Harness, event: TriggerEvent) -> dict {
+  return apply_alerts(harness.runtime, "sentry", event)
+}
+
+/** Grafana unified-alerting webhook contact point. */
+pub fn on_grafana(harness: Harness, event: TriggerEvent) -> dict {
+  return apply_alerts(harness.runtime, "grafana", event)
+}
+
+/** Honeycomb trigger webhook recipient. */
+pub fn on_honeycomb(harness: Harness, event: TriggerEvent) -> dict {
+  return apply_alerts(harness.runtime, "honeycomb", event)
+}

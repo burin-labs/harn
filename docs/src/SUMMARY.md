@@ -13,6 +13,7 @@
 - [The expressiveness spectrum](./concepts/expressiveness-spectrum.md)
 - [Steering seams](./concepts/steering-seams.md)
 - [Stop, steer, and queue as control events](./concepts/control-events.md)
+- [Ambient signals](./concepts/ambient-signals.md)
 - [Cross-session pattern knowledge](./concepts/cross-session-pattern-knowledge.md)
 - [Why Harn has model jobs](./concepts/model-jobs.md)
 - [Why Harn apps separate behavior from pixels](./concepts/interactive-apps.md)
@@ -67,6 +68,7 @@
 - [Debugging agent runs](./debugging.md)
 - [Editor setup (VS Code, Neovim, Zed)](./editor-setup.md)
 - [Use Harn from ACP editor hosts](./acp-editor-hosts.md)
+- [Deliver signals to Claude Code and Codex](./signals-hooks.md)
 - [Run a portable reducer in a browser](./portable-kernel-browser.md)
 
 # Reference
@@ -308,6 +310,7 @@
 ## CLI and tooling
 
 - [CLI reference](./cli-reference.md)
+- [Signals reference](./signals-reference.md)
 - [Benchmark the portable kernel](./portable-kernel-benchmarking.md)
 - [Linked-program reachability](./dev/linked-program-reachability.md)
 - [CLI `--json` contract](./cli-json-contract.md)

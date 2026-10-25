@@ -1004,6 +1004,17 @@ enum CarrierOption {
     Value,
 }
 
+/// The command an `xargs` stage launches, read with the same option boundary
+/// the scanner uses. Empty for any other stage or an unresolved option form.
+pub(crate) fn xargs_child_argv(argv: &[String]) -> Vec<String> {
+    if argv.first().map(|program| command_basename(program)) != Some("xargs") {
+        return Vec::new();
+    }
+    input_command_start(ArgumentExecution::InputArgv, argv)
+        .map(|index| argv[index..].to_vec())
+        .unwrap_or_default()
+}
+
 fn input_command_start(carrier: ArgumentExecution, argv: &[String]) -> Option<usize> {
     let mut index = 1;
     while index < argv.len() {

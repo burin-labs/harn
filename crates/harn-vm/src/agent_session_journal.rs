@@ -526,7 +526,7 @@ fn append_event_for_payload(
                 .transcript_event
                 .id
                 .clone()
-                .filter(|id| !id.trim().is_empty()),
+                .filter(|id| !id.trim().is_empty() && record.is_history_position()),
             record.message_id(),
             record.journal_tool_call_id(),
         ),

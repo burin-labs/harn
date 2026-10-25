@@ -330,17 +330,19 @@ test-focused:
 
 # Live database tests are ignored by the ordinary suite, never counted as a
 # passing test that returned before opening a connection.
+HARN_POSTGRES_TEST_ARGS = --package harn-builtins --features postgres --lib --ignore-default-filter
+
 test-postgres-live:
 	@ : "$${HARN_TEST_POSTGRES_URL:?set HARN_TEST_POSTGRES_URL to an isolated test database}"
 	$(HARN_REQUIRE_NEXTEST)
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --package harn-vm --lib --run-ignored all --ignore-default-filter -E 'test(stdlib::postgres::) and not test(when_env_set) and not test(when_bench_enabled)'
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run $(HARN_POSTGRES_TEST_ARGS) --run-ignored all -E 'test(postgres::) and not test(when_env_set) and not test(when_bench_enabled)'
 
 test-postgres-cloud:
 	@ : "$${HARN_TEST_POSTGRES_URL:?set HARN_TEST_POSTGRES_URL to an isolated test database}"
 	@ : "$${HARN_TEST_CLOUD_MIGRATIONS_DIR:?set HARN_TEST_CLOUD_MIGRATIONS_DIR to the cloud migrations directory}"
 	@test -d "$${HARN_TEST_CLOUD_MIGRATIONS_DIR}"
 	$(HARN_REQUIRE_NEXTEST)
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --package harn-vm --lib --test-threads 1 --run-ignored only --ignore-default-filter -E 'test(stdlib::postgres::tests::) and test(when_env_set)'
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run $(HARN_POSTGRES_TEST_ARGS) --test-threads 1 --run-ignored only -E 'test(postgres::tests::) and test(when_env_set)'
 
 # Run exactly one Rust test without making nextest enumerate every test binary
 # in the package first. The environment-variable boundary keeps the
@@ -752,6 +754,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/breaking_surface_check_test.sh
 	bash ./scripts/tests/pr_gate_range_test.sh
 	./scripts/tests/public_api_baseline_test.sh
+	bash ./scripts/tests/public_api_rustdoc_test.sh
 	./scripts/tests/release_pr_drift_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_ship_root_harn_bin_test.sh

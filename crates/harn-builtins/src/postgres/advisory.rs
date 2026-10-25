@@ -206,17 +206,10 @@ fn resolve_key(
             let hash = sha256_to_i64_pair(text);
             LockKey::Pair(hash.0, hash.1)
         }
-        VmValue::Dict(dict) => {
-            let class = dict
-                .get("class")
-                .and_then(VmValue::as_int)
-                .ok_or_else(|| runtime_error(format!("{builtin}: key.class must be int")))?;
-            let instance = dict
-                .get("instance")
-                .and_then(VmValue::as_int)
-                .ok_or_else(|| runtime_error(format!("{builtin}: key.instance must be int")))?;
-            LockKey::Pair(class as i32, instance as i32)
-        }
+        VmValue::Dict(dict) => LockKey::Pair(
+            key_component(dict, "class", builtin)?,
+            key_component(dict, "instance", builtin)?,
+        ),
         _ => {
             return Err(runtime_error(format!(
                 "{builtin}: key must be int, string, or {{class, instance}} dict"
@@ -245,6 +238,22 @@ fn resolve_key(
     Ok(key)
 }
 
+fn key_component(
+    key: &harn_vm_core::value::DictMap,
+    field: &str,
+    builtin: &str,
+) -> Result<i32, VmError> {
+    let value = key
+        .get(field)
+        .and_then(VmValue::as_int)
+        .ok_or_else(|| runtime_error(format!("{builtin}: key.{field} must be int")))?;
+    i32::try_from(value).map_err(|_| {
+        runtime_error(format!(
+            "{builtin}: key.{field} must fit a signed 32-bit integer"
+        ))
+    })
+}
+
 #[cfg(test)]
 pub(super) fn tenant_salt_for_test() -> i64 {
     let tenant = super::current_tenant_namespace();
@@ -268,4 +277,41 @@ fn sha256_to_i64(text: &str) -> i64 {
 fn sha256_to_i64_pair(text: &str) -> (i32, i32) {
     let raw = sha256_to_i64(text);
     ((raw >> 32) as i32, raw as i32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harn_vm_core::value::{DictMap, VmDictExt};
+
+    #[test]
+    fn pair_keys_preserve_boundaries_and_refuse_aliasing_values() {
+        let mut key = DictMap::new();
+        key.put_int("class", i64::from(i32::MIN));
+        key.put_int("instance", i64::from(i32::MAX));
+        assert!(matches!(
+            resolve_key(&VmValue::dict(key.clone()), None, "pg_advisory_xact_lock").unwrap(),
+            LockKey::Pair(i32::MIN, i32::MAX)
+        ));
+        for field in ["class", "instance"] {
+            for value in [
+                i64::from(i32::MIN) - 1,
+                i64::from(i32::MAX) + 1,
+                1_i64 << 32,
+            ] {
+                let mut invalid = key.clone();
+                invalid.put_int(field, value);
+                let result = resolve_key(&VmValue::dict(invalid), None, "pg_advisory_xact_lock");
+                let error = match result {
+                    Err(error) => error.to_string(),
+                    Ok(_) => panic!("out-of-range {field}={value} was accepted"),
+                };
+                assert!(error.contains(&format!("key.{field}")), "{error}");
+            }
+        }
+        assert!(matches!(
+            resolve_key(&VmValue::Int(i64::MAX), None, "pg_advisory_xact_lock").unwrap(),
+            LockKey::Single(i64::MAX)
+        ));
+    }
 }

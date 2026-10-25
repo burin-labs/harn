@@ -837,9 +837,30 @@ jobs:
           free -m
           df -h /mnt "$GITHUB_WORKSPACE"
 
+      # Job-scoped so the size gate records the identity that was built. On
+      # ARM64 Linux the fat-LTO link peaked at 15.5 GB RAM plus 15 GB swap,
+      # and the macOS and Windows builds ran past 100 minutes. These targets
+      # keep the pre-fat-LTO thin profile until a fat-LTO build fits.
+      - name: Scope the dist profile to what the runner can link
+        shell: bash
+        env:
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          case "$HARN_RELEASE_TARGET" in
+            aarch64-unknown-linux-gnu | aarch64-apple-darwin | x86_64-apple-darwin | x86_64-pc-windows-msvc)
+              {
+                echo "CARGO_PROFILE_DIST_LTO=thin"
+                echo "CARGO_PROFILE_DIST_CODEGEN_UNITS=16"
+              } >> "$GITHUB_ENV"
+              echo "dist profile for $HARN_RELEASE_TARGET: thin LTO, 16 codegen units"
+              ;;
+            *) echo "dist profile for $HARN_RELEASE_TARGET: Cargo.toml (fat LTO, 1 codegen unit)" ;;
+          esac
+
       - name: Build
         id: build
-        # Fat LTO with one codegen unit (the dist profile) makes a cold macOS
+        # Fat LTO with one codegen unit (the dist profile) made a cold macOS
         # build outrun 90 minutes; the job cap covers this plus signing.
         timeout-minutes: 135
         shell: bash
