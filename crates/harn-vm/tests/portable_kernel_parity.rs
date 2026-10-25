@@ -107,7 +107,10 @@ fn native_failure_class(error: &harn_vm::value::VmError) -> Option<FailureClass>
 /// per-value budget, so it completes these. The differential pins that: if
 /// the native VM starts failing them, the budgets converged and the entry
 /// should go.
-const NATIVE_LARGER_BUDGET: &[&str] = &["string-repetition-rejects-output-over-byte-limit"];
+const NATIVE_LARGER_BUDGET: &[&str] = &[
+    "catch-cannot-bypass-a-value-limit",
+    "string-repetition-rejects-output-over-byte-limit",
+];
 
 /// Run `entry` from `case_source` in the native VM the way a host calls an
 /// exported function: execute the module, then invoke the closure. Errors come

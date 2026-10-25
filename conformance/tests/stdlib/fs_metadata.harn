@@ -64,7 +64,7 @@ pipeline default(harness: Harness) {
     }
     assert(harness.process.run({program: "ln", args: ["-s", scoped, directory_link]}).success)
     harness.runtime.with_execution_policy(
-      {sandbox_profile: "worktree", workspace_roots: [scoped]},
+      {sandbox_profile: "worktree", workspace_roots: [scoped], read_only_roots: [scoped]},
       { ->
         assert(harness.fs.stat(scoped_link, {follow_symlinks: false}).is_symlink)
         assert_eq(harness.fs.stat(external_link).size, 3)
