@@ -129,13 +129,13 @@ fn a_full_inbox_is_delivered_a_few_reminders_per_hook() {
     let text = first["hookSpecificOutput"]["additionalContext"]
         .as_str()
         .unwrap();
-    assert_eq!(text.matches("<signal-data ").count(), 3, "{text}");
+    assert_eq!(text.matches("<signal-data>").count(), 3, "{text}");
     assert!(text.contains("2 more signals"), "{text}");
     let second = json(&hook(dir.path(), "claude-code", "PostToolUse"));
     let text = second["hookSpecificOutput"]["additionalContext"]
         .as_str()
         .unwrap();
-    assert_eq!(text.matches("<signal-data ").count(), 2, "{text}");
+    assert_eq!(text.matches("<signal-data>").count(), 2, "{text}");
 }
 
 #[test]
@@ -200,6 +200,51 @@ fn a_second_rewake_watcher_for_one_session_exits_at_once() {
     let output = first.wait_with_output().unwrap();
     assert_eq!(output.status.code(), Some(2), "{output:?}");
     assert!(String::from_utf8_lossy(&output.stderr).contains("alert:app#1"));
+    // A watcher leaves no lock file behind.
+    let left: Vec<_> = std::fs::read_dir(&watchers).unwrap().collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
+#[test]
+fn session_end_removes_the_lock_a_killed_watcher_left() {
+    let dir = TempDir::new().unwrap();
+    hook(dir.path(), "claude-code", "UserPromptSubmit");
+    let watchers = dir.path().join("watchers");
+    std::fs::create_dir_all(&watchers).unwrap();
+    // `s1`, hex-encoded: the file a watcher killed mid-wait leaves.
+    let stale = watchers.join("7331.lock");
+    std::fs::write(&stale, "").unwrap();
+    let end = hook(dir.path(), "claude-code", "SessionEnd");
+    assert_eq!(end.status.code(), Some(0), "{end:?}");
+    assert!(
+        !stale.exists(),
+        "the stale watcher lock survived SessionEnd"
+    );
+    let sessions = harn(dir.path(), &["sessions"], "");
+    assert!(sessions.stdout.is_empty(), "{sessions:?}");
+}
+
+#[test]
+fn listing_never_passes_source_control_characters_to_the_terminal() {
+    let dir = TempDir::new().unwrap();
+    let output = harn(
+        dir.path(),
+        &[
+            "fire",
+            "--key",
+            "alert:term",
+            "--summary",
+            "red\u{1b}[2J\nfaked line",
+            "--source-url",
+            "https://example.test/run/1",
+        ],
+        "",
+    );
+    assert!(output.status.success(), "{output:?}");
+    let list = harn(dir.path(), &["list"], "");
+    let text = String::from_utf8_lossy(&list.stdout);
+    assert!(!text.contains('\u{1b}'), "{text:?}");
+    assert_eq!(text.lines().count(), 1, "{text:?}");
 }
 
 #[test]

@@ -114,8 +114,9 @@ impl Inbox {
         &self.config
     }
 
-    /// Fire a signal. Firing one that is already fired refreshes its content
-    /// and owes no reminder.
+    /// Fire a signal. Firing one that is already fired extends its expiry and
+    /// owes no reminder; its text stays frozen for the generation, so every
+    /// redelivery reads the same. A higher severity is a new generation.
     pub fn fire(
         &self,
         input: SignalInput,
@@ -135,15 +136,25 @@ impl Inbox {
         if key.trim().is_empty() {
             return Err(SignalsError::InvalidInput("signal key is empty".into()));
         }
+        // Keys are identities built from source text; a line break or escape
+        // sequence in one could forge lines wherever the key is shown.
+        if key.chars().any(char::is_control) {
+            return Err(SignalsError::InvalidInput(
+                "signal key contains a control character".into(),
+            ));
+        }
         if provenance.producer.trim().is_empty() {
             return Err(SignalsError::InvalidInput(
                 "signal provenance names no producer".into(),
             ));
         }
+        let expires_at = Some(expires_at.unwrap_or(now + self.config.fired_ttl));
+        let max_signals = self.config.max_signals;
         self.transact(now, |state| {
             let signal = match state.signals.get_mut(&key) {
                 Some(signal) => signal,
                 None => {
+                    make_room(state, max_signals)?;
                     state.signals.insert(
                         key.clone(),
                         Signal {
@@ -162,27 +173,30 @@ impl Inbox {
                             fired_recipient: None,
                         },
                     );
-                    return Transition::Changed {
+                    return Ok(Transition::Changed {
                         state: SignalState::Fired,
                         generation: 1,
-                    };
+                    });
                 }
             };
+            signal.expires_at = expires_at;
+            let escalated = severity > signal.severity;
+            if signal.state == SignalState::Fired && !escalated {
+                return Ok(Transition::Unchanged {
+                    state: SignalState::Fired,
+                    generation: signal.generation,
+                });
+            }
+            if signal.state != SignalState::Fired {
+                signal.fired_recipient = None;
+                signal.fired_at = now;
+            }
             signal.event = event;
             signal.severity = severity;
             signal.routing = routing;
             signal.provenance = provenance;
-            signal.expires_at = expires_at;
-            if signal.state == SignalState::Fired {
-                return Transition::Unchanged {
-                    state: SignalState::Fired,
-                    generation: signal.generation,
-                };
-            }
-            signal.fired_recipient = None;
-            signal.fired_at = now;
-            advance(signal, SignalState::Fired, now)
-        })
+            Ok(advance(signal, SignalState::Fired, now))
+        })?
     }
 
     /// Resolve a fired signal, optionally replacing its content with the
@@ -319,6 +333,7 @@ impl Inbox {
                     continue;
                 };
                 if delivery.acked_at.is_some()
+                    || delivery.lease.is_none()
                     || session_id.is_some_and(|session| session != delivery.session_id)
                 {
                     continue;
@@ -433,8 +448,9 @@ fn upsert_session(
     }
 }
 
-/// Expire lapsed signals, prune settled ones past retention, drop stale
-/// sessions, and release lapsed leases so they are leased again.
+/// Expire lapsed signals, prune settled ones past retention, and drop stale
+/// sessions. A lapsed lease keeps its record: the holder's next check-in still
+/// acks it, so a slow turn never sees the same reminder twice.
 fn maintain(state: &mut InboxSnapshot, config: &Config, now: OffsetDateTime) {
     for signal in state.signals.values_mut() {
         if signal.state == SignalState::Fired
@@ -443,14 +459,6 @@ fn maintain(state: &mut InboxSnapshot, config: &Config, now: OffsetDateTime) {
                 .is_some_and(|expires_at| expires_at <= now)
         {
             advance(signal, SignalState::Expired, now);
-        }
-        if let Some(delivery) = signal.delivery.as_mut() {
-            if delivery.acked_at.is_none()
-                && delivery.lease.is_some()
-                && !delivery.lease_active(now)
-            {
-                delivery.lease = None;
-            }
         }
     }
     state.signals.retain(|_, signal| {
@@ -461,8 +469,13 @@ fn maintain(state: &mut InboxSnapshot, config: &Config, now: OffsetDateTime) {
         .retain(|_, session| now - session.last_seen <= config.stale_after);
 }
 
-/// Give every pending generation a live recipient the policy allows, keeping
-/// existing live assignments so a reminder does not move once routed. An
+/// Give every pending generation a live recipient the policy allows.
+///
+/// An assignment stays put while its holder is responsive, so a reminder does
+/// not bounce between sessions. A holder that has been silent for a lease
+/// length (crashed, or deep in one long tool call) loses the reminder to a
+/// responsive session when the router finds one; the silent holder's next
+/// check-in then sees it reassigned and neither acks nor renders it. An
 /// unleased assignment the policy now holds is withdrawn; an outstanding lease
 /// is left to be acked.
 fn route_pending(
@@ -476,21 +489,41 @@ fn route_pending(
         .values()
         .filter(|session| now - session.last_seen <= config.stale_after)
         .collect();
+    let responsive = |session: &Session| now - session.last_seen < config.lease_for;
     for signal in state.signals.values_mut() {
         if !signal.is_pending() {
             continue;
         }
-        let leased = signal
-            .delivery
-            .as_ref()
-            .is_some_and(|delivery| delivery.lease_active(now));
         let held = config.policy.hold(signal, now).is_some();
         if let Some(delivery) = &signal.delivery {
-            let recipient_live = live.iter().any(|session| session.id == delivery.session_id);
-            // A lease whose holder went away is rerouted now rather than
-            // waiting out a lease nobody can ack.
-            if recipient_live && (leased || !held) {
-                continue;
+            if let Some(holder) = live
+                .iter()
+                .find(|session| session.id == delivery.session_id)
+            {
+                let leased = delivery.lease.is_some();
+                if delivery.lease_active(now) || responsive(holder) {
+                    if leased || !held {
+                        continue;
+                    }
+                } else if !held {
+                    let others: Vec<&Session> = live
+                        .iter()
+                        .copied()
+                        .filter(|session| session.id != holder.id && responsive(session))
+                        .collect();
+                    if let Some(session_id) = router.route(signal, &others) {
+                        signal.delivery = Some(Delivery {
+                            generation: signal.generation,
+                            session_id,
+                            assigned_at: now,
+                            lease: None,
+                            acked_at: None,
+                        });
+                    }
+                    continue;
+                } else if leased {
+                    continue;
+                }
             }
         }
         signal.delivery = if held {
@@ -507,8 +540,9 @@ fn route_pending(
     }
 }
 
-/// Ack every lease this session holds from an earlier transaction: checking
-/// in again is the evidence its last output reached the model.
+/// Ack every lease this session took at an earlier check-in, lapsed or not,
+/// unless the reminder has since moved to another session: checking in again
+/// is the evidence its last output reached the model.
 fn ack_held(state: &mut InboxSnapshot, session_id: &str, now: OffsetDateTime) -> Vec<ReminderId> {
     let mut acked = Vec::new();
     for signal in state.signals.values_mut() {
@@ -518,7 +552,7 @@ fn ack_held(state: &mut InboxSnapshot, session_id: &str, now: OffsetDateTime) ->
         };
         if delivery.session_id == session_id
             && delivery.acked_at.is_none()
-            && delivery.lease_active(now)
+            && delivery.lease.is_some()
         {
             delivery.acked_at = Some(now);
             delivery.lease = None;
@@ -545,7 +579,7 @@ fn lease(
         .filter(|signal| {
             signal.is_pending()
                 && signal.delivery.as_ref().is_some_and(|delivery| {
-                    delivery.session_id == session_id && !delivery.lease_active(now)
+                    delivery.session_id == session_id && delivery.lease.is_none()
                 })
         })
         .collect();
@@ -579,6 +613,30 @@ fn lease(
         reminders.push(Reminder::leased(signal, lease));
     }
     (reminders, waiting)
+}
+
+/// Make room for one more signal under `max_signals`: prune the oldest
+/// settled signal, or refuse when every kept signal is still fired.
+fn make_room(state: &mut InboxSnapshot, max_signals: usize) -> Result<(), SignalsError> {
+    while state.signals.len() >= max_signals {
+        let oldest = state
+            .signals
+            .values()
+            .filter(|signal| signal.state != SignalState::Fired)
+            .min_by(|left, right| {
+                left.changed_at
+                    .cmp(&right.changed_at)
+                    .then(left.key.cmp(&right.key))
+            })
+            .map(|signal| signal.key.clone());
+        match oldest {
+            Some(key) => {
+                state.signals.remove(&key);
+            }
+            None => return Err(SignalsError::Full(state.signals.len())),
+        }
+    }
+    Ok(())
 }
 
 fn read_document(path: &Path) -> Result<InboxSnapshot, SignalsError> {

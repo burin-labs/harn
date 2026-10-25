@@ -35,21 +35,25 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(pending[0]?.reminder?.authority)
   harness.stdio.println(contains(pending[0]?.reminder?.body ?? "", "github.ci:acme/api@main#1"))
-  // The lease lapses unacked and the reminder comes back: it replaces the
-  // pending one instead of stacking a second copy.
-  harness.testing.clock_advance(11 * 60 * 1000)
+  // The signal recovered before the next turn: generation 1 is superseded, so
+  // there is nothing left to ack, and the recovery replaces the pending
+  // reminder for the same signal instead of stacking a second one.
+  signal_apply(harness.runtime, ci_branch_decision("acme/api", "main", []), options)
+  harness.testing.clock_advance(1000)
   const again = signal_deliver(harness, agent_session, me, options)
   const replaced = transcript_events_by_kind(
     harness.agent.snapshot(agent_session),
     "system_reminder",
   )
   harness.stdio.println(
-    "redelivered " + to_string(len(again.reminder_ids)) + ", pending "
+    "acked " + to_string(len(again.check_in.acked)) + ", delivered "
+      + to_string(len(again.reminder_ids))
+      + ", pending "
       + to_string(len(replaced)),
   )
-  harness.stdio.println(contains(replaced[0]?.reminder?.body ?? "", "sent again"))
-  // The next turn's check-in acks it.
-  harness.testing.clock_advance(1000)
+  harness.stdio.println(contains(replaced[0]?.reminder?.body ?? "", "github.ci:acme/api@main#2"))
+  // A turn slower than the lease still acks rather than repeats.
+  harness.testing.clock_advance(12 * 60 * 1000)
   const next = signal_deliver(harness, agent_session, me, options)
   harness.stdio.println(
     "acked " + to_string(len(next.check_in.acked)) + ", delivered "

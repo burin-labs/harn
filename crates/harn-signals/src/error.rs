@@ -21,6 +21,8 @@ pub enum SignalsError {
     InvalidEvent(String),
     #[error("signals: {0}")]
     InvalidInput(String),
+    #[error("signals: the inbox already holds {0} fired signals (max_signals); resolve some or raise the cap")]
+    Full(usize),
 }
 
 impl SignalsError {

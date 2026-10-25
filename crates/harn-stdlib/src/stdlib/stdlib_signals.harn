@@ -669,9 +669,11 @@ fn __github_get(
 }
 
 /**
- * Every item of a paginated list endpoint, or a throw. A listing that does not
- * reach `total_count` within `MAX_PAGES` throws rather than return a partial
- * list that would read as a smaller pool.
+ * Every item of a paginated list endpoint, or a throw. A page without the
+ * list field throws. With `total_count`, the listing ends only once it is
+ * reached; without one, only at a short page. A listing that is cut short or
+ * runs past `MAX_PAGES` throws rather than return a partial list that would
+ * read as a smaller pool.
  */
 fn __github_all(
   net: HarnessNet,
@@ -690,10 +692,23 @@ fn __github_all(
       path + separator + "per_page=" + to_string(PAGE_SIZE) + "&page=" + to_string(page),
       options,
     )
-    const batch = body[field] ?? []
+    const batch = body[field]
+    if type_of(batch) != "list" {
+      throw "std/signals: " + path + " returned no `" + field + "` list"
+    }
     items = items + batch
-    const total = to_int(body?.total_count ?? len(items))
-    if len(batch) < PAGE_SIZE || len(items) >= total {
+    const reported = body?.total_count
+    if reported != nil {
+      const total = to_int(reported)
+      if len(items) >= total {
+        return items
+      }
+      if len(batch) < PAGE_SIZE {
+        throw "std/signals: " + path + " ended at " + to_string(len(items)) + " of "
+          + to_string(total)
+          + " entries"
+      }
+    } else if len(batch) < PAGE_SIZE {
       return items
     }
     page = page + 1
@@ -721,7 +736,55 @@ fn __observe(
 }
 
 /**
- * Poll default-branch CI for `repo` and fire or resolve its signal.
+ * The latest completed push run of every active workflow on `branch`. One
+ * query per workflow, so a busy workflow cannot push another's last
+ * completed run out of a shared page.
+ */
+fn __latest_completed_runs(
+  net: HarnessNet,
+  token: string,
+  repo: string,
+  branch: string,
+  options: GitHubMonitorOptions,
+) -> list {
+  const workflows = __github_all(
+    net,
+    token,
+    "/repos/" + repo + "/actions/workflows",
+    "workflows",
+    options,
+  )
+  let latest = []
+  for workflow in workflows {
+    if (workflow?.state ?? "active") != "active" {
+      continue
+    }
+    if workflow?.id == nil {
+      throw "std/signals: a workflow of " + repo + " has no id"
+    }
+    const page = __github_get(
+      net,
+      token,
+      "/repos/" + repo + "/actions/workflows/" + to_string(workflow.id) + "/runs?branch="
+        + branch
+        + "&event=push&status=completed&per_page=1",
+      options,
+    )
+    const runs = page?.workflow_runs
+    if type_of(runs) != "list" {
+      throw "std/signals: the runs of workflow " + to_string(workflow.id)
+        + " came back without `workflow_runs`"
+    }
+    if len(runs) > 0 {
+      latest.push(runs[0])
+    }
+  }
+  return latest
+}
+
+/**
+ * Poll default-branch CI for `repo` and fire or resolve its signal. A branch
+ * where no workflow has a completed run yet is unmeasured, not recovered.
  *
  * @effects: [net, env, state.write]
  * @errors: []
@@ -736,13 +799,17 @@ pub fn monitor_github_ci(
     harness.runtime,
     options,
     { ->
-      const page = __github_get(
+      const runs = __latest_completed_runs(
         harness.net,
         __github_token(pick(harness, ["env", "net"]), options),
-        "/repos/" + repo + "/actions/runs?branch=" + branch + "&event=push&per_page=30",
+        repo,
+        branch,
         options,
       )
-      ci_branch_decision(repo, branch, page?.workflow_runs ?? [], options.severity ?? "warning")
+      if len(runs) == 0 {
+        throw "std/signals: no workflow has a completed push run on " + branch + " of " + repo
+      }
+      ci_branch_decision(repo, branch, runs, options.severity ?? "warning")
     },
   )
 }
@@ -771,6 +838,9 @@ pub fn monitor_github_open_prs(
       )
       if page?.total_count == nil {
         throw "std/signals: the pull request search returned no total_count"
+      }
+      if page?.incomplete_results ?? false {
+        throw "std/signals: the pull request search timed out and reported a partial count"
       }
       open_prs_decision(repo, to_int(page.total_count), threshold, options.severity ?? "info")
     },

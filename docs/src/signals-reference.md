@@ -12,7 +12,7 @@ Commands that print data accept `--json` and emit the standard
 
 | Command | Effect |
 |---|---|
-| `harn signals list` | Every signal with its key, state and generation, severity, delivery (`held (<reason>)`, `routed to`, `leased to ... (attempt N)`, or `acked by`), and summary. |
+| `harn signals list` | Every signal with its key, state and generation, severity, delivery (`held (<reason>)`, `routed to`, `leased to ... (attempt N)`, `lease lapsed for ... (attempt N)`, or `acked by`), and summary. Control characters print as spaces. |
 | `harn signals pending [--session ID]` | Signals whose current generation has not been acked. |
 | `harn signals sessions` | Registered sessions: id, harness, busy or idle, repository, role, working directory. |
 | `harn signals fire ...` | Fire a signal. See [Firing](#firing). |
@@ -36,7 +36,7 @@ Commands that print data accept `--json` and emit the standard
 | `--repo OWNER/NAME` | none | Routing hint: sessions in this repository. |
 | `--cwd DIR` | none | Routing hint: sessions working inside this directory. |
 | `--topic TOPIC` | none | Routing hint for custom routers. |
-| `--expires-in DURATION` | never | Expire the signal if it is still fired after this long, for example `4h`. |
+| `--expires-in DURATION` | `fired_ttl_seconds` | Expire the signal if it is still fired after this long, for example `4h`. |
 | `--event FILE` | none | Read a `harn.triage_event.v1` document from a file, or `-` for stdin, instead of the text flags. |
 
 `fire` and `resolve` print the transition: `fired (generation N)` for a state
@@ -63,7 +63,7 @@ the session took at its previous hook, then leases at most three reminders.
 | `UserPromptSubmit` | busy | any severity | `hookSpecificOutput.additionalContext` |
 | `PostToolUse` | busy | any severity | `hookSpecificOutput.additionalContext` |
 | `Stop` | idle, or busy if it delivers | Claude Code: urgent only. Codex: nothing | Claude Code: `hookSpecificOutput.additionalContext`, which continues the turn. Codex: `{}`, because a Codex `Stop` reason becomes a user prompt. |
-| `Stop --rewake` | idle | urgent only, while idle | Claude Code only. Exits 2 with the reminder on stderr, which Claude Code shows as a system reminder and which wakes the session under `asyncRewake`. Exits 0 after `--max-wait` (default `9m`, under the hook's default 600-second `timeout`), when the session becomes busy, when it ends, or at once when another watcher for the session is running. |
+| `Stop --rewake` | idle | urgent only, while idle | Claude Code only. Exits 2 with the reminder on stderr, which wakes the session under `asyncRewake`. Claude Code shows the text as a synthetic user turn labeled `Stop hook feedback`, not as a system reminder. Exits 0 after `--max-wait` (default `9m`, under the hook's default 600-second `timeout`), when the session becomes busy, when it ends, or at once when another watcher for the session is running. |
 | `SessionEnd` | removed | nothing | none |
 
 When more reminders are routed to the session than one hook leases, the output
@@ -81,7 +81,7 @@ The inbox directory is `$HARN_EXT_SIGNALS_DIR` when set, else
 |---|---|
 | `inbox.json` | Signals and sessions, schema `harn.signals.inbox.v1`. Replaced atomically on every change. |
 | `inbox.lock` | Advisory lock file every transaction holds exclusively. |
-| `watchers/<hex session id>.lock` | Held by the running `--rewake` watcher for a session. |
+| `watchers/<hex session id>.lock` | Held by the running `--rewake` watcher for a session. The watcher removes it as it exits; `SessionEnd` removes one a killed watcher left. |
 | `config.toml` | Optional configuration and delivery policy. |
 
 ### `inbox.json`
@@ -139,7 +139,9 @@ A document with any other `schema` is refused rather than migrated.
 |---|---|---|
 | `stale_after_seconds` | `7200` | A session not seen for this long is removed, and its unacked reminders are routed again. |
 | `retain_for_seconds` | `604800` | Resolved and expired signals are pruned this long after their last change. |
-| `lease_seconds` | `600` | A leased reminder not acked within this long is leased again. |
+| `lease_seconds` | `600` | How long a lease runs. A session silent this long loses its unacked reminders to a responsive session; the session's own next check-in acks its leases, lapsed or not. |
+| `fired_ttl_seconds` | `86400` | A fired signal that is not fired again within this long expires, unless the producer set its own expiry. |
+| `max_signals` | `1000` | The most signals the inbox keeps. The oldest settled signal is pruned to make room; with every signal still fired, firing a new key fails. |
 | `fallback_role` | `"control"` | The role that receives signals no session matches. |
 | `min_severity` | `"info"` | Signals below this severity are held. |
 | `muted` | `[]` | Signal keys to hold. An entry ending in `*` matches every key with that prefix, for example `"github.open_prs:*"`. |
@@ -177,7 +179,7 @@ as a user message.
 |---|---|
 | `signal_apply(runtime, decision, options?)` | Fire the decision's signal when `decision.firing`, otherwise resolve it. Returns `{outcome, state?, generation?}`. |
 | `signal_deliver(harness, agent_session_id, session, options?)` | Check in and inject each leased reminder into a running agent session as an advisory system reminder, deduplicated by signal key. Returns `{check_in, reminder_ids}`. |
-| `ci_branch_decision(repo, branch, runs, severity?)` | Firing while the latest completed run of any workflow on `branch` failed. `runs` is GitHub's `workflow_runs`, newest first. Key `github.ci:<repo>@<branch>`. |
+| `ci_branch_decision(repo, branch, runs, severity?)` | Firing while the latest completed run of any workflow on `branch` failed. `runs` holds GitHub workflow runs; the first completed run per workflow counts. Key `github.ci:<repo>@<branch>`. |
 | `open_prs_decision(repo, open_count, threshold, severity?)` | Firing while `open_count >= threshold`. Key `github.open_prs:<repo>`. |
 | `runner_pool_decision(pool, online, severity?)` | Firing while `online < pool.minimum`. `pool` is `{scope, minimum, group?, required_labels?}`. Key `github.runners:<scope>[/<group>][:<sorted labels>]`. |
 | `runner_pool_online(runners, required_labels?)` | Online runners in a runner list that carry every required label. |
@@ -197,7 +199,18 @@ GitHub monitor options:
 
 `monitor_github_runners` lists the organization runner group in `pool.group`
 when set, or else the repository's or organization's runners, reading every
-page. A listing past 5,000 runners is unmeasured rather than counted short.
+page. A listing stops at `total_count`, or at a short page when the response
+has none. A page without the `runners` field, a listing that ends short of its
+`total_count`, or one past 5,000 runners is unmeasured rather than counted
+short.
+
+`monitor_github_ci` lists the repository's active workflows and reads each
+one's latest completed push run on the branch, one request per workflow, so a
+busy workflow cannot push another's last completed run out of a shared page. A
+branch where no workflow has a completed run, or a response without
+`workflow_runs`, is unmeasured rather than recovered.
+`monitor_github_open_prs` is unmeasured when the search reports
+`incomplete_results`.
 
 The runtime builtins are the session lifecycle and the producer calls
 underneath `signal_apply`:

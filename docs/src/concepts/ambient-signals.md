@@ -35,6 +35,10 @@ Claude Code and Codex, and the `std/signals` builtins for an agent session
 running in the Harn VM, which deliver through the session's system reminders.
 Every adapter renders a reminder as a system or developer note. None delivers
 it as a user message, because an alert must never carry the user's authority.
+The one harness-imposed exception is Claude Code's idle wake: Claude Code shows
+an `asyncRewake` hook's output as a synthetic user turn labeled
+`Stop hook feedback`, so the woken session sees the alert there, still framed
+by Harn as a notification rather than a request.
 
 **Monitors** are Harn scripts that poll a source on a schedule and fire or
 resolve signals. Webhook payloads from alerting tools enter the same way,
@@ -43,26 +47,34 @@ normalized to the envelope.
 ## One reminder per state change, delivered at least once
 
 A signal is `fired`, `resolved`, or `expired`. Firing a signal that is already
-fired is not news, so the inbox treats it as a refresh: it updates the stored
-content and delivers nothing. Each real transition increments the signal's
-generation, and each generation is owed to one session. A monitor that polls
+fired is not news: the inbox extends its expiry and delivers nothing. The text
+stays frozen for the generation, so a redelivery reads exactly like the first
+delivery. Each real transition increments the signal's generation, and each
+generation is owed to one session. A rise in severity is also a new
+generation, because an alert that got worse is news. A monitor that polls
 every minute while CI stays red therefore produces one reminder when CI breaks
 and one when it recovers, not sixty an hour.
 
 Delivery is at least once. When a session checks in, the inbox **leases** it
 the reminders routed to it; it does not mark them delivered. The session's next
-check-in acks those leases, because a session that runs another hook or turn
-evidently received the previous output. A lease that is not acked within the
-lease window (ten minutes by default) lapses, and the reminder is leased again,
-to the same session if it is still live or to another one. A harness that
-crashes between leasing and rendering therefore loses nothing; it may see the
-same reminder twice. Rendering is keyed by the reminder's id, `key#generation`,
-so a redelivery reads the same, says it was sent again, and replaces rather
-than repeats an in-process reminder. A design that marked reminders delivered
-when they were taken would lose every reminder taken just before a crash.
+check-in acks those leases, lapsed or not, because a session that runs
+another hook or turn evidently received the previous output. A turn slower than
+the lease therefore never sees its reminder twice. A session that has been
+silent for a lease window (ten minutes by default), because it crashed or is
+deep in one long tool call, loses its unacked reminders, leased or not, to a
+responsive session the router picks. The silent session's next check-in sees
+them reassigned and neither acks nor renders them. A harness that crashes
+between leasing and rendering therefore loses nothing while another session
+can take the reminder; two sessions may both see it. Rendering is keyed by the
+reminder's id, `key#generation`, so a redelivery reads the same, says it was
+sent again, and replaces rather than repeats an in-process reminder for the
+same signal. A design that marked reminders delivered when they were taken
+would lose every reminder taken just before a crash.
 
 Expiry exists for conditions that may never be explicitly resolved, such as a
-one-off production alert. An expired signal produces a reminder only if its
+one-off production alert. A fired signal that nothing fires again within a day
+(configurable) expires even when its producer set no expiry, so an alert
+nobody resolves cannot stay pending forever. An expired signal produces a reminder only if its
 fired reminder was leased to a session. A session that was told about something learns
 that it lapsed; a session that never heard about it is not told about it now.
 
@@ -103,8 +115,10 @@ Routing is deterministic first:
 
 Ties go to the most recently seen session, then to the lexically smallest
 session id, so two concurrent routing passes reach the same answer. Once a
-generation is assigned to a session, the assignment sticks until the session
-goes stale or ends, which keeps a reminder from bouncing between sessions.
+generation is assigned to a session, the assignment sticks while the session
+stays responsive, which keeps a reminder from bouncing between sessions. It
+moves when the session ends, goes stale, or stays silent for a lease window
+while another suitable session is responsive.
 
 The rule step is a trait, not a hard-coded function, so a triage pipeline can
 replace it. That pipeline is an LLM-gated Harn workflow that uses the trigger
@@ -127,8 +141,11 @@ the first one's assignment.
 The alternative, one file per signal, makes routing a multi-file transaction.
 SQLite would work, but a small, inspectable document is enough for the volume
 a single machine produces, and garbage collection keeps it small: resolved and
-expired signals are pruned after a retention window, and stale sessions are
-removed.
+expired signals are pruned after a retention window, stale sessions are
+removed, and the inbox holds at most `max_signals` signals (1,000 by default).
+Past the cap, the oldest settled signal is pruned to make room; when every
+signal is still fired, firing a new key is refused with an error the producer
+sees, never dropped silently.
 
 ## Liveness
 
@@ -156,7 +173,8 @@ stop.
 - An idle Claude Code session can be woken only for urgent reminders, through
   an `asyncRewake` watcher that waits in the background and exits with the
   reminder when one arrives. One watcher runs per session: a second one exits
-  at once, so repeated stops never stack watchers.
+  at once, so repeated stops never stack watchers. A watcher removes its lock
+  file as it exits, and session end removes one a killed watcher left.
 
 Codex differs at two points. Its `Stop` hook can keep a session going only by
 turning its reason into a new user prompt, so the Codex adapter never delivers
@@ -173,11 +191,17 @@ directing it. Nothing in the signal path takes an action.
 
 **Source content is untrusted.** A Sentry error message, a pull request title,
 or a webhook body can contain text written to look like an instruction. The
-renderer places every source-derived field inside a `signal-data` block and
-substitutes `&`, `<`, `>`, and `"` with their entities, so no content can close
-the block or impersonate harness markup; nothing is deleted, so the agent still
-reads what the source said. Every field is capped in length. The model sees
-exactly one frame, written by Harn, around data it should read but not obey.
+renderer places every source-derived field, the signal id and producer
+included, inside a `signal-data` block. It substitutes `&`, `<`, `>`, and `"`
+with their entities and turns line breaks, other control characters, Unicode
+line separators, and bidirectional overrides into spaces, so no content can
+close the block, impersonate harness markup, or start a line of its own; the
+agent still reads what the source said. Every field is capped in length. The
+lines outside the block carry only values Harn chose: state, severity,
+signature status, and whether this is a redelivery. The inbox also refuses a
+signal key that contains a control character, and the command line never
+prints one to a terminal. The model sees exactly one frame, written by Harn,
+around data it should read but not obey.
 
 **Provenance is mandatory.** Every signal names its producer, such as
 `std/signals.monitor_github_ci`, and its signature status: `verified` for a

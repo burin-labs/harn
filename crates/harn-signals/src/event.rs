@@ -68,7 +68,7 @@ pub struct TriagePrivacy {
     pub flags: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TriageActionIntent {
     pub kind: String,
@@ -177,6 +177,8 @@ impl TriageEvent {
 fn short_id(seed: &str) -> String {
     uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, seed.as_bytes())
         .simple()
-        .to_string()[..24]
         .to_string()
+        .chars()
+        .take(24)
+        .collect()
 }

@@ -2,9 +2,10 @@ leased github.ci:acme/api@main#1 attempt 1
 true
 true
 true
-acked 0, redelivered attempt 2
-acked 1, leased 0
+slow turn: acked 1, leased 0
 resolved
+b leased resolved attempt 2
+a acked 0, leased 0
 1
 1
 b leased 3 attempt 2

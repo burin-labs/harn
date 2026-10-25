@@ -79,15 +79,15 @@ fn run_command(args: SignalsArgs) -> Result<(), String> {
             for session in sessions {
                 println!(
                     "{}\t{}\t{}\t{}\t{}\t{}",
-                    session.id,
+                    terminal_safe(&session.id),
                     session.harness,
                     match session.activity {
                         Activity::Busy => "busy",
                         Activity::Idle => "idle",
                     },
-                    session.repo.as_deref().unwrap_or("-"),
-                    session.role.as_deref().unwrap_or("-"),
-                    session.cwd.display(),
+                    terminal_safe(session.repo.as_deref().unwrap_or("-")),
+                    terminal_safe(session.role.as_deref().unwrap_or("-")),
+                    terminal_safe(&session.cwd.display().to_string()),
                 );
             }
             Ok(())
@@ -267,16 +267,20 @@ fn print_signals(
                 "leased to {} (attempt {})",
                 delivery.session_id, signal.attempts
             ),
+            Some(delivery) if delivery.lease.is_some() => format!(
+                "lease lapsed for {} (attempt {})",
+                delivery.session_id, signal.attempts
+            ),
             Some(delivery) => format!("routed to {}", delivery.session_id),
         };
         println!(
             "{}\t{}#{}\t{}\t{}\t{}",
-            signal.key,
+            terminal_safe(&signal.key),
             signal.state.as_str(),
             signal.generation,
             signal.severity.as_str(),
-            delivery,
-            signal.event.summary,
+            terminal_safe(&delivery),
+            terminal_safe(&signal.event.summary),
         );
     }
     Ok(())
@@ -324,9 +328,13 @@ fn run_hook(inbox: &Inbox, args: SignalsHookArgs, now: OffsetDateTime) -> Result
     let input: HookInput = serde_json::from_str(&stdin)
         .map_err(|error| format!("hook payload is not the expected JSON: {error}"))?;
     if args.event == SignalsHookEvent::SessionEnd {
-        return inbox
+        inbox
             .end_session(&input.session_id, now)
-            .map_err(|error| error.to_string());
+            .map_err(|error| error.to_string())?;
+        // A running watcher sees the session gone at its next poll and removes
+        // its own lock; this clears one a killed watcher left behind.
+        drop(claim_watcher(inbox.dir(), &input.session_id)?);
+        return Ok(());
     }
     let cwd = input
         .cwd
@@ -432,12 +440,12 @@ fn render_reminders(reminders: &[Reminder]) -> Result<String, String> {
 }
 
 /// Wait for an urgent reminder while the session idles. Exiting 2 with the
-/// reminder on stderr is Claude Code's `asyncRewake` contract: the text is
-/// shown to the session as a system reminder and wakes it. Exiting 0 wakes
+/// reminder on stderr is Claude Code's `asyncRewake` contract: it wakes the
+/// session and shows the text as synthetic `Stop hook feedback`. Exiting 0 wakes
 /// nothing. One watcher runs per session; a second one for the same session
 /// exits at once, so repeated stops never stack watchers.
 fn rewake(inbox: &Inbox, session_id: &str, max_wait: StdDuration) -> Result<(), String> {
-    let Some(_watcher) = claim_watcher(inbox.dir(), session_id)? else {
+    let Some(watcher) = claim_watcher(inbox.dir(), session_id)? else {
         return Ok(());
     };
     let started = harn_vm::stdlib::signals::vm_now();
@@ -449,6 +457,8 @@ fn rewake(inbox: &Inbox, session_id: &str, max_wait: StdDuration) -> Result<(), 
         {
             IdlePoll::Reminders(reminders) if !reminders.is_empty() => {
                 eprintln!("{}", render_reminders(&reminders)?);
+                // `process::exit` skips destructors; release the lock first.
+                drop(watcher);
                 process::exit(REWAKE_EXIT);
             }
             IdlePoll::Reminders(_) => {}
@@ -461,10 +471,22 @@ fn rewake(inbox: &Inbox, session_id: &str, max_wait: StdDuration) -> Result<(), 
     }
 }
 
+/// A held watcher lock. Dropping it removes the lock file while the lock is
+/// still held, so no watcher file outlives its watcher.
+struct Watcher {
+    path: PathBuf,
+    _file: std::fs::File,
+}
+
+impl Drop for Watcher {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 /// Take this session's watcher lock without waiting, or `None` when another
-/// watcher holds it. The lock is released when the returned file drops or the
-/// process exits.
-fn claim_watcher(dir: &Path, session_id: &str) -> Result<Option<std::fs::File>, String> {
+/// watcher holds it.
+fn claim_watcher(dir: &Path, session_id: &str) -> Result<Option<Watcher>, String> {
     let watchers = dir.join("watchers");
     std::fs::create_dir_all(&watchers)
         .map_err(|error| format!("{}: {error}", watchers.display()))?;
@@ -475,15 +497,49 @@ fn claim_watcher(dir: &Path, session_id: &str) -> Result<Option<std::fs::File>, 
         .map(|byte| format!("{byte:02x}"))
         .collect();
     let path = watchers.join(format!("{name}.lock"));
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&path)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
-    match file.try_lock() {
-        Ok(()) => Ok(Some(file)),
-        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
-        Err(std::fs::TryLockError::Error(error)) => Err(format!("{}: {error}", path.display())),
+    // A holder removes the file as it exits, so a lock taken on a file that
+    // was removed in between guards nothing: retry on the current file.
+    for _ in 0..3 {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::fs::TryLockError::Error(error)) => {
+                return Err(format!("{}: {error}", path.display()))
+            }
+        }
+        if same_file(&file, &path) {
+            return Ok(Some(Watcher { path, _file: file }));
+        }
     }
+    Ok(None)
+}
+
+#[cfg(unix)]
+fn same_file(file: &std::fs::File, path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (file.metadata(), std::fs::metadata(path)) {
+        (Ok(held), Ok(current)) => held.dev() == current.dev() && held.ino() == current.ino(),
+        _ => false,
+    }
+}
+
+/// Windows refuses to remove a file another process has open, so the file a
+/// lock was taken on is always the one at the path.
+#[cfg(not(unix))]
+fn same_file(_file: &std::fs::File, path: &Path) -> bool {
+    path.exists()
+}
+
+/// Inbox text comes from monitors and webhooks; never let it drive the
+/// terminal.
+fn terminal_safe(text: &str) -> String {
+    text.chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect()
 }
