@@ -227,12 +227,17 @@ impl<'a> Exclusions<'a> {
     }
 }
 
-/// `.d.ts`, `.d.mts` or `.d.cts`.
+/// A TypeScript declaration file. TypeScript's `getDeclarationFileExtension`
+/// takes `.d.ts`, `.d.mts`, `.d.cts`, and any `.ts` file whose base name
+/// contains `.d.` (`styles.d.css.ts`); this also takes `.mts` and `.cts`
+/// and ignores case, which only widens the back-off.
 fn is_declaration_file(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
-    [".d.ts", ".d.mts", ".d.cts"]
+    let base = lower.rsplit('/').next().unwrap_or(&lower);
+    [".ts", ".mts", ".cts"]
         .iter()
-        .any(|suffix| lower.ends_with(suffix))
+        .any(|extension| base.ends_with(extension))
+        && base.contains(".d.")
 }
 
 /// Whether index-relative paths `a` and `b` may name one file. Index paths
@@ -353,6 +358,10 @@ const FUNCTION_SCOPES: &[&str] = &[
 /// not export it. A shorthand property (`{ name }`) ties a property to the
 /// binding, so its presence anywhere in the file defeats the rule.
 fn script_file_local(tree: &Tree, source: &str, identifier: Node<'_>, name: &str) -> bool {
+    // An export swallowed by an error or missing node is invisible below.
+    if tree.root_node().has_error() {
+        return false;
+    }
     let Some(declaration) = identifier.parent().filter(|node| {
         BINDING_DECLARATIONS.contains(&node.kind())
             && node.child_by_field_name("name") == Some(identifier)
@@ -466,6 +475,13 @@ mod tests {
                 "length",
                 false,
             ),
+            // A syntax error can hide an export from the top-level check.
+            (
+                "const length = 1;\nfunction f( {\nexport { length };\n",
+                "length",
+                false,
+            ),
+            ("const length = 1;\nexport { length\n", "length", false),
         ] {
             let source = format!("{module}{body}");
             assert_eq!(reach("a.ts", ts, &source, name, f), local, "{source}");
@@ -481,7 +497,14 @@ mod tests {
             "Options",
             NodeKind::Type
         ));
-        for path in ["types.d.ts", "types.d.mts", "types.d.cts", "Types.D.TS"] {
+        for path in [
+            "types.d.ts",
+            "types.d.mts",
+            "types.d.cts",
+            "Types.D.TS",
+            "src/styles.d.css.ts",
+            "src/page.d.html.mts",
+        ] {
             assert!(
                 !reach(path, ts, declarations, "Options", NodeKind::Type),
                 "{path}"
