@@ -1,6 +1,48 @@
 use super::*;
 
 #[test]
+fn deterministic_scan_preserves_binding_only_and_outer_shell_source_stages() {
+    let scan = command_risk_scan_json(
+        &shell_ctx("PATH='/older git/bin'; HOME=/other sh -c 'git history'"),
+        None,
+    );
+    assert_eq!(
+        scan["shell_source_groups"],
+        serde_json::json!([
+            [{"argv": [], "source_argv": ["PATH=/older git/bin"]}],
+            [{"argv": ["sh", "-c", "git history"],
+              "source_argv": ["HOME=/other", "sh", "-c", "git history"]}]
+        ])
+    );
+    assert_eq!(scan["shell_command_groups"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        scan["execution_stages"][0]["argv"],
+        serde_json::json!(["git", "history"])
+    );
+    let literal = command_risk_scan_json(
+        &shell_ctx("git commit -m 'PATH=/older/bin; HOME=/other'"),
+        None,
+    );
+    let argv = serde_json::json!(["git", "commit", "-m", "PATH=/older/bin; HOME=/other"]);
+    assert_eq!(literal["shell_source_groups"][0][0]["argv"], argv);
+    assert_eq!(literal["shell_source_groups"][0][0]["source_argv"], argv);
+    assert_eq!(
+        command_risk_scan_json(&shell_ctx(""), None)["shell_source_groups"],
+        serde_json::json!([])
+    );
+    let literal_argv = command_risk_scan_json(&ctx(&["printf", "%s", "PATH=x; git history"]), None);
+    assert!(literal_argv["shell_source_groups"].is_null());
+    for shell in ["cmd", "pwsh", "unsupported-shell"] {
+        let mut context = shell_ctx("PATH=x; git history");
+        context["request"]["shell"]["id"] = serde_json::json!(shell);
+        assert!(
+            command_risk_scan_json(&context, None)["shell_source_groups"].is_null(),
+            "{shell}"
+        );
+    }
+}
+
+#[test]
 fn deterministic_scan_projects_structural_shell_redirects() {
     for context in [
         shell_ctx("node -e 'console.log(Number(process.env.LIMIT) > 1)'"),

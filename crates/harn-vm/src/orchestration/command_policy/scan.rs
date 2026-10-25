@@ -33,11 +33,13 @@ pub(super) fn scan_command_risk_scan_json(
             })
         })
         .collect::<Vec<_>>();
-    let shell_command_groups = super::catastrophic::shell_command_groups(&command_text)
-        .into_iter()
+    let source_groups = super::catastrophic::shell_source_groups(&command_text);
+    let shell_command_groups = source_groups
+        .iter()
         .map(|group| {
             group
-                .into_iter()
+                .iter()
+                .filter(|stage| !stage.argv.is_empty())
                 .map(|stage| {
                     let writes_to_file =
                         has_output_redirect_write_intent(&stage.text.to_ascii_lowercase());
@@ -50,7 +52,23 @@ pub(super) fn scan_command_risk_scan_json(
                 })
                 .collect::<Vec<_>>()
         })
+        .filter(|group| !group.is_empty())
         .collect::<Vec<_>>();
+    let shell_source_groups = (request_mode(ctx) == Some("shell")
+        && shell_dialect == Some(crate::shells::ShellDialect::Posix))
+    .then(|| {
+        source_groups
+            .into_iter()
+            .map(|group| {
+                group
+                    .into_iter()
+                    .map(|stage| {
+                        serde_json::json!({ "argv": stage.argv, "source_argv": stage.source_argv })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    });
     let mut labels = BTreeSet::new();
     let mut rationale = Vec::new();
 
@@ -183,6 +201,7 @@ pub(super) fn scan_command_risk_scan_json(
         "shell_io_complete": shell_io_complete,
         "shell_redirects": shell_redirects,
         "shell_command_groups": shell_command_groups,
+        "shell_source_groups": shell_source_groups,
     });
     if let Some(reason) = catastrophe {
         scan["catastrophic_reason"] = JsonValue::String(reason);

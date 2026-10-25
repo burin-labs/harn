@@ -71,11 +71,10 @@ pub(super) fn command_segments(command: &str) -> Vec<String> {
     command_segments_inner(command, 0)
 }
 
-/// Parse a shell command into chain groups and pipeline stages. This is the
-/// shared shell boundary for policy written outside Rust; consumers receive
-/// normalized argv while the original stage text remains available for
-/// syntax-sensitive checks such as output redirection.
-pub(super) fn shell_command_groups(command: &str) -> Vec<Vec<ShellCommandStage>> {
+/// Parse source chain groups and pipeline stages for policy outside Rust.
+/// Assignment-only stages and outer shell wrappers preserve the environment
+/// before executable unwrapping; text retains syntax such as redirects.
+pub(super) fn shell_source_groups(command: &str) -> Vec<Vec<ShellCommandStage>> {
     split_chained_command(command)
         .into_iter()
         .filter_map(|group| {
@@ -84,7 +83,7 @@ pub(super) fn shell_command_groups(command: &str) -> Vec<Vec<ShellCommandStage>>
                 .filter_map(|text| {
                     let tokens = shell_words(&text);
                     let index = unwrapped_shell_command_index(&tokens, 0, tokens.len());
-                    (index < tokens.len()).then(|| ShellCommandStage {
+                    (!tokens.is_empty()).then(|| ShellCommandStage {
                         text: text.trim().to_string(),
                         argv: tokens[index..].to_vec(),
                         source_argv: tokens.clone(),
