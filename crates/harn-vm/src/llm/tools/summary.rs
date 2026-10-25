@@ -75,20 +75,48 @@ pub(crate) fn tool_summary(description: &str) -> String {
     head.get(..taken).unwrap_or(head).trim().to_string()
 }
 
+/// Abbreviations whose trailing period never ends a sentence, lowercase and
+/// without the final period.
+const ABBREVIATIONS: &[&str] = &["e.g", "i.e", "etc", "vs"];
+
+/// Whether the period at `index` closes one of [`ABBREVIATIONS`]. The token is
+/// the run of letters and periods directly before it, so `(e.g` and `, i.e`
+/// match while `file.rs` or `Done` do not.
+fn closes_abbreviation(text: &str, index: usize) -> bool {
+    let before = text.get(..index).unwrap_or("");
+    let start = before
+        .char_indices()
+        .rev()
+        .take_while(|(_, ch)| ch.is_alphabetic() || *ch == '.')
+        .last()
+        .map_or(index, |(offset, _)| offset);
+    let token = before.get(start..).unwrap_or("").to_lowercase();
+    ABBREVIATIONS.contains(&token.as_str())
+}
+
 /// Byte offsets just past each sentence-ending punctuation run in `text`.
 ///
 /// A period is only a boundary when whitespace follows, which keeps dotted
 /// tokens such as `.gitignore`, `v1.2`, and `tool_schema({ name })` whole.
-///
-/// Known limitation: an abbreviation that ends a word — `e.g.`, `etc.` — does
-/// read as a boundary here. [`MIN_SUMMARY_CHARS`] carries the summary past it
-/// rather than serving four words, so the cheap rule is left cheap instead of
-/// growing an abbreviation table.
+/// Nothing inside parentheses or backticks is a boundary, and neither is the
+/// period of `e.g.`, `i.e.`, `etc.`, or `vs.`: a summary cut there would end
+/// mid-clause, for example at `(e.g.`.
 fn sentence_ends(text: &str) -> Vec<usize> {
     let bytes = text.as_bytes();
     let mut ends = Vec::new();
+    let mut paren_depth = 0usize;
+    let mut in_code = false;
     for (index, ch) in text.char_indices() {
-        if !matches!(ch, '.' | '!' | '?') {
+        match ch {
+            '`' => in_code = !in_code,
+            '(' if !in_code => paren_depth += 1,
+            ')' if !in_code => paren_depth = paren_depth.saturating_sub(1),
+            _ => {}
+        }
+        if !matches!(ch, '.' | '!' | '?') || in_code || paren_depth > 0 {
+            continue;
+        }
+        if ch == '.' && closes_abbreviation(text, index) {
             continue;
         }
         let next = index + ch.len_utf8();
@@ -203,6 +231,53 @@ mod tests {
         assert!(
             summary.is_char_boundary(summary.len()),
             "the summary must be valid UTF-8 through its end"
+        );
+    }
+
+    #[test]
+    fn an_abbreviation_inside_parentheses_is_not_a_boundary() {
+        // The shipped failure: a summary that ended at `(e.g.` once the floor
+        // was met inside the parenthetical.
+        let description = "Scan the workspace for files that match the request and report \
+                           their layout (e.g. languages, build files, and test roots) before \
+                           you edit. Results are capped.";
+        assert_eq!(
+            tool_summary(description),
+            "Scan the workspace for files that match the request and report their layout \
+             (e.g. languages, build files, and test roots) before you edit."
+        );
+    }
+
+    #[test]
+    fn abbreviations_and_backticked_text_never_end_a_summary() {
+        for abbreviation in ["e.g.", "i.e.", "etc.", "vs.", "E.G."] {
+            let description = format!(
+                "Search the workspace for a symbol across many languages, {abbreviation} \
+                 the closest definition. Extra detail follows."
+            );
+            let summary = tool_summary(&description);
+            assert!(
+                summary.ends_with("the closest definition."),
+                "{abbreviation} must not end the summary, got {summary:?}"
+            );
+        }
+        let summary = tool_summary(
+            "Read the line range named by `start. end` from the file and return it. Done.",
+        );
+        assert!(
+            summary.ends_with("return it."),
+            "a period inside backticks is not a boundary, got {summary:?}"
+        );
+    }
+
+    #[test]
+    fn a_trailing_period_after_an_ordinary_word_still_ends_the_sentence() {
+        let summary = tool_summary(
+            "Run the configured verifier and report the result to the caller. Use it after edits.",
+        );
+        assert_eq!(
+            summary,
+            "Run the configured verifier and report the result to the caller."
         );
     }
 }
