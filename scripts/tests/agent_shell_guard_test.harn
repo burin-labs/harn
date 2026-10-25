@@ -1273,6 +1273,11 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
     "env -i git s",
     "unset HOME; git s",
     "env --unset=HOME git s",
+    "FOO=1 git s",
+    "cd /repo/b && git s",
+    "(cd /repo/b; git s)",
+    "eval 'git s'",
+    "git -C /repo/a s; export X=1",
   ] {
     assert(
       !decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, lookup).allow,
@@ -1291,6 +1296,21 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
     decision(claude_payload("git s"), ADMITTED, NO_MAKE_TARGETS, lookup).allow,
     "the falsifier: no source override, no alias in A",
   )
+  // A plain custom subcommand with no environment change still runs, after the lookup finds no alias.
+  for command in [
+    "git frobnicate --flag",
+    "git -C /repo/a frobnicate",
+    "git frobnicate | cat",
+    "git commit -m a=b",
+  ] {
+    assert(
+      decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, lookup).allow,
+      command + " changes no environment and is no alias",
+    )
+  }
+  // `eval` runs its operands as a command line, so a stash write behind it is refused too.
+  assert(!verdict(claude_payload("eval 'git stash pop'")).allow)
+  assert(!verdict(claude_payload("eval git stash drop")).allow)
   assert_eq(GIT_ALIASES_UNREADABLE, "<unreadable>")
 }
 

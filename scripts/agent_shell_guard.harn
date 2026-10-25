@@ -472,6 +472,10 @@ fn launched_argv(argv: list<string>, depth: int) -> list<string> {
 }
 
 fn nested_shell_payload(argv: list<string>) -> string {
+  // `eval` runs its operands as a command line, the same as a `-c` payload.
+  if argv_program(argv) == "eval" {
+    return argv.slice(1, len(argv)).join(" ")
+  }
   if !["bash", "dash", "sh", "zsh"].contains(argv_program(argv)) {
     return ""
   }
@@ -1029,30 +1033,20 @@ const GIT_BUILTIN_COMMANDS: list<string> = [
 ]
 
 /**
- * Variables, and the `env`/`unset` forms that clear them, that change which configuration git reads.
+ * Whether anything in the command line could change git's environment, working directory or
+ * configuration sources before git runs: a `NAME=` assignment, `env`, `unset`, `export`, `cd` and
+ * the other builtins that change the shell's state, a subshell, or command substitution. The alias
+ * lookup runs in the hook's own environment, so a command like this runs git under a configuration
+ * the lookup cannot read. The rule is structural, not a list of variable names.
  */
-const GIT_CONFIG_SOURCE_VARIABLES: list<string> = [
-  "GIT_CONFIG",
-  "GIT_DIR",
-  "GIT_WORK_TREE",
-  "GIT_COMMON_DIR",
-  "XDG_CONFIG_HOME",
-  "HOME",
-  "env -i",
-  "env -u",
-  "env --ignore-environment",
-  "env --unset",
-  "unset ",
-]
-
-/** Whether the command text names a variable that redirects git's configuration. */
-fn command_sets_git_config_source(command: string) -> bool {
-  for variable in GIT_CONFIG_SOURCE_VARIABLES {
-    if command.contains(variable) {
-      return true
-    }
-  }
-  return false
+fn command_may_change_git_environment(command: string) -> bool {
+  const start = "(^|[\\s;&|(`{])"
+  const assignment = start + "[A-Za-z_][A-Za-z0-9_]*\\+?="
+  const state_builtin = start
+    + "(env|unset|export|cd|pushd|popd|source|eval|exec|declare|typeset|readonly|set|\\.)(\\s|;|$|\\))"
+  return regex_match(assignment, command) != nil
+    || regex_match(state_builtin, command) != nil
+    || regex_match("[(`]", command) != nil
 }
 
 /** Key a lookup returns when git could not read the configuration the command selects. */
@@ -1249,9 +1243,9 @@ pub fn git_stash_violation(
   command: string,
   alias_lookup: fn(list<string>) -> dict = NO_CONFIG_ALIASES,
 ) -> string {
-  // A command that sets git's configuration sources runs under a configuration the lookup, which
+  // A command that may change git's environment runs git under a configuration the lookup, which
   // runs in the hook's own environment, cannot see. Its non-built-in subcommands are unreadable.
-  const lookup = if command_sets_git_config_source(command) {
+  const lookup = if command_may_change_git_environment(command) {
     { options -> {"<unreadable>": ""} }
   } else {
     alias_lookup
