@@ -187,6 +187,13 @@ pub struct Delivery {
     pub lease: Option<Lease>,
     #[serde(default, with = "time::serde::rfc3339::option")]
     pub acked_at: Option<OffsetDateTime>,
+    /// How many times an idle watcher woke the session for this delivery.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub wakes: u32,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 impl Delivery {

@@ -111,12 +111,13 @@ fn untrusted(text: &str, limit: usize) -> String {
 
 harn_vm_core::stdlib_module_installer!(Host, pub fn register_signals_builtins);
 
-/// Producer identity and signature status; defaults to a local script.
+/// Producer identity and signature status. An omitted status claims
+/// nothing, so it is `unverified`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProvenanceInput {
     producer: String,
-    #[serde(default)]
+    #[serde(default = "unverified")]
     signature: SignatureStatus,
 }
 
@@ -145,8 +146,9 @@ struct FireRequest {
 struct ResolveOptions {
     #[serde(default)]
     event: Option<TriageEvent>,
-    /// How the resolving report was checked; defaults to `local`.
-    #[serde(default)]
+    /// How the resolving report was checked. An unsigned report claims
+    /// nothing, so it defaults to `unverified`.
+    #[serde(default = "unverified")]
     signature: SignatureStatus,
     #[serde(default)]
     dir: Option<PathBuf>,
@@ -180,6 +182,10 @@ impl Default for CheckInOptions {
     }
 }
 
+fn unverified() -> SignatureStatus {
+    SignatureStatus::Unverified
+}
+
 fn default_severity() -> Severity {
     Severity::Warning
 }
@@ -209,7 +215,10 @@ fn signal_fire_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             producer: input.producer,
             signature: input.signature,
         },
-        None => Provenance::local("harn script"),
+        None => Provenance {
+            producer: "harn script".into(),
+            signature: SignatureStatus::Unverified,
+        },
     };
     let transition = open_inbox("signal_fire", request.dir)?
         .fire(

@@ -185,7 +185,8 @@ stop.
   `Stop` context when the woken turn ends. The watcher starts beside the
   `Stop` hook that leases what is already pending, so it gives a reminder
   pending at its first poll two more polls to be leased before it wakes for
-  it; one routed after that hook ran is not missed. One watcher runs per
+  it; one routed after that hook ran is not missed. A reminder the woken turns
+  never lease stops waking the session after three wakes. One watcher runs per
   session: a second one exits at once, so repeated stops never stack watchers.
   A watcher removes its lock file as it exits; session end, and the next write
   to the inbox, remove one a killed watcher left.
@@ -216,9 +217,10 @@ lines outside the block carry only values Harn chose: state, severity,
 signature status, and whether this is a redelivery. The inbox also refuses a
 signal key that contains a control character, and the command line prints
 source text to a terminal through the same character filter as the renderer.
-The inbox refuses an event whose summary exceeds 2,000 characters, that lists
-more than 32 actors, related references, or action intents, or that exceeds
-32 KiB without its raw payload, which is never stored. The model sees exactly one frame, written by Harn,
+The inbox keeps at most 2,000 characters of a summary and 32 actors, related
+references, or action intents, trimming a verbose alert rather than dropping
+it, and refuses an event still over 32 KiB after trimming. The raw payload is
+never stored. The model sees exactly one frame, written by Harn,
 around data it should read but not obey.
 
 **Provenance is mandatory.** Every signal names its producer, such as
@@ -228,7 +230,8 @@ did not, and `local` for a condition observed on the machine. The reminder
 shows both beside the envelope's `source_url`, so an agent can weigh the claim
 and check it at its source. A report about an existing signal may not be
 weaker than the signal's own: an unverified webhook cannot resolve, re-fire, or
-extend a verified or local signal, and the inbox refuses it with an error.
+extend a verified or local signal, and the inbox refuses it with an error. A
+report that states no signature status counts as `unverified`.
 
 **The proposed action is Harn's.** The monitor pack and the alert normalizers
 write why a signal matters and what to do next themselves; they copy only the

@@ -26,7 +26,10 @@ pub use event::{
     ManualEvent, TriageActionIntent, TriageActor, TriageEvent, TriagePrivacy, TriageRelatedRef,
     MAX_KEPT_BYTES, MAX_LIST_ENTRIES, MAX_SUMMARY_CHARS, TRIAGE_EVENT_SCHEMA,
 };
-pub use inbox::{IdlePoll, Inbox, InboxSnapshot, Transition, INBOX_SCHEMA, SIGNALS_DIR_ENV};
+pub use inbox::{
+    IdlePoll, Inbox, InboxSnapshot, Transition, INBOX_SCHEMA, MAX_WAKES_PER_REMINDER,
+    SIGNALS_DIR_ENV,
+};
 pub use model::{
     Activity, CheckIn, CheckInScope, Delivery, HarnessKind, Lease, Provenance, Reminder,
     ReminderId, RoutingHints, Session, SessionAnnouncement, Severity, Signal, SignalInput,

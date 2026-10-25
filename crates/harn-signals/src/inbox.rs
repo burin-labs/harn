@@ -31,6 +31,10 @@ const LOCK_DEADLINE: Duration = Duration::from_secs(2);
 /// A check-in inside this window only refreshes `last_seen` in memory, so a
 /// burst of tool calls does not rewrite the file on every hook.
 const HEARTBEAT_GRANULARITY: time::Duration = time::Duration::seconds(10);
+/// Wakes an idle watcher spends on one delivery. A reminder the woken turn
+/// never leases (its `Stop` hook is missing or failing) stops waking the
+/// session after this many tries instead of waking it forever.
+pub const MAX_WAKES_PER_REMINDER: u32 = 3;
 
 /// Everything in the inbox, as stored.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -61,8 +65,8 @@ pub enum Transition {
 /// What an idle watcher's poll found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IdlePoll {
-    /// The urgent reminders waiting for this session with no lease out;
-    /// possibly none yet. The watcher only wakes the session: the session's own next
+    /// The urgent reminders waiting for this session with no lease out and
+    /// wakes left; possibly none yet. The watcher only wakes the session: the session's own next
     /// check-in leases and renders them.
     Pending(Vec<ReminderId>),
     /// The session is working again; its foreground hooks deliver now.
@@ -134,8 +138,7 @@ impl Inbox {
             provenance,
             expires_at,
         } = input;
-        event.validate()?;
-        event.strip_raw_payload();
+        event.prepare_for_storage()?;
         let key = key.unwrap_or_else(|| event.dedupe_key.clone());
         if key.trim().is_empty() {
             return Err(SignalsError::InvalidInput("signal key is empty".into()));
@@ -219,8 +222,7 @@ impl Inbox {
     ) -> Result<Transition, SignalsError> {
         let event = match event {
             Some(mut event) => {
-                event.validate()?;
-                event.strip_raw_payload();
+                event.prepare_for_storage()?;
                 Some(event)
             }
             None => None,
@@ -355,12 +357,40 @@ impl Inbox {
                     signal.is_pending()
                         && CheckInScope::UrgentOnly.admits(signal.severity)
                         && signal.delivery.as_ref().is_some_and(|delivery| {
-                            delivery.session_id == session_id && !delivery.lease_active(now)
+                            delivery.session_id == session_id
+                                && !delivery.lease_active(now)
+                                && delivery.wakes < MAX_WAKES_PER_REMINDER
                         })
                 })
                 .map(Signal::id)
                 .collect();
             IdlePoll::Pending(pending)
+        })
+    }
+
+    /// Count one wake of `session_id` against each of these reminders.
+    pub fn record_wake(
+        &self,
+        session_id: &str,
+        ids: &[ReminderId],
+        now: OffsetDateTime,
+    ) -> Result<(), SignalsError> {
+        self.transact(now, |state| {
+            for id in ids {
+                let Some(signal) = state.signals.get_mut(&id.key) else {
+                    continue;
+                };
+                if signal.generation != id.generation {
+                    continue;
+                }
+                if let Some(delivery) = signal
+                    .delivery
+                    .as_mut()
+                    .filter(|delivery| delivery.session_id == session_id)
+                {
+                    delivery.wakes = delivery.wakes.saturating_add(1);
+                }
+            }
         })
     }
 
@@ -429,10 +459,11 @@ impl Inbox {
         let result = apply(&mut state, self.router.as_ref(), &self.config);
         route_pending(&mut state, self.router.as_ref(), &self.config, now);
         if state != before {
+            let sessions: Vec<String> = state.sessions.keys().cloned().collect();
             write_document(&path, state)?;
-            // Still under the lock: no write or watcher claim is in flight
-            // that this could race, so what it finds is debris.
-            sweep_debris(&self.dir);
+            // Still under the lock, so no inbox write is in flight. A live
+            // session's watcher lock is left to its watcher and `SessionEnd`.
+            sweep_debris(&self.dir, &sessions);
         }
         Ok(result)
     }
@@ -589,6 +620,7 @@ fn assign(generation: u64, session_id: String, now: OffsetDateTime) -> Delivery 
         assigned_at: now,
         lease: None,
         acked_at: None,
+        wakes: 0,
     }
 }
 
@@ -737,7 +769,7 @@ fn write_document(path: &Path, state: InboxSnapshot) -> Result<(), SignalsError>
 /// Remove what a killed process left: a temporary inbox file whose rename
 /// never ran, and a watcher lock no watcher holds. Best effort; debris is
 /// harmless, only untidy.
-fn sweep_debris(dir: &Path) {
+fn sweep_debris(dir: &Path, sessions: &[String]) {
     let prefix = format!(".{INBOX_FILE}.");
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -748,7 +780,7 @@ fn sweep_debris(dir: &Path) {
             }
         }
     }
-    watcher::sweep_orphans(dir);
+    watcher::sweep_orphans(dir, sessions);
 }
 
 pub(crate) fn open_private(path: &Path) -> Result<File, SignalsError> {

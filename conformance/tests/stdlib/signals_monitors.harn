@@ -115,4 +115,40 @@ pipeline default(harness: Harness) {
   }
   harness.stdio.println(grafana[0]?.provenance?.signature)
   harness.stdio.println(len(alert_webhook_decisions("pagerduty", {id: "x"}, "unverified")))
+  // A verbose alert still fires; the inbox trims what it keeps.
+  const verbose_decisions = alert_webhook_decisions(
+    "grafana",
+    {
+      alerts: [
+        {
+          status: "firing",
+          fingerprint: "c3",
+          labels: {alertname: "Verbose"},
+          annotations: {description: "x".repeat(5000)},
+        },
+      ],
+    },
+    "verified",
+  )
+  for verbose in verbose_decisions {
+    harness.stdio.println("verbose: " + signal_apply(harness.runtime, verbose, options).outcome)
+    const control = {id: "m", harness: "harn", cwd: "/work", role: "control", activity: "busy"}
+    const leased = harness.runtime.signal_check_in(control, options).reminders.filter(
+      { reminder -> reminder.key == "grafana:c3" },
+    )
+    harness.stdio.println(
+      "kept " + to_string(len(leased[0].event.summary)) + " of "
+        + to_string(len(verbose.event.summary)),
+    )
+  }
+  // An unsigned resolve claims nothing, so it cannot settle a verified alert.
+  const unsigned = try {
+    harness.runtime.signal_resolve("grafana:c3", options)
+  }
+  harness.stdio.println(is_err(unsigned) && contains(to_string(unwrap_err(unsigned)), "signature"))
+  const signed = harness.runtime.signal_resolve(
+    "grafana:c3",
+    {signature: "verified", dir: options.dir},
+  )
+  harness.stdio.println(signed.outcome + " " + to_string(signed.state))
 }
