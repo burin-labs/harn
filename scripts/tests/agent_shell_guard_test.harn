@@ -1247,6 +1247,14 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
   assert(
     !decision(claude_payload("git -C /missing s"), ADMITTED, NO_MAKE_TARGETS, unreadable).allow,
   )
+  // A built-in is never an alias, so it triggers no lookup: a lookup that reports unreadable would
+  // refuse it if it were consulted.
+  for command in ["git -C /missing status", "git -C /missing log -1", "git diff"] {
+    assert(
+      decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, unreadable).allow,
+      command + " must not consult the alias lookup",
+    )
+  }
   assert_eq(GIT_ALIASES_UNREADABLE, "<unreadable>")
 }
 
