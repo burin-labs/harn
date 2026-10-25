@@ -4322,6 +4322,7 @@ name = "harn-stdlib"
 version = "0.10.180"
 dependencies = [
  "harn-stdlib-catalog",
+ "zstd",
 ]
 
 [[package]]

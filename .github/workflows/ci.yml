@@ -258,6 +258,7 @@ jobs:
               - 'crates/harn-cli/src/commands/providers.rs'
               - 'crates/harn-cli/src/commands/providers/tool_probe_request.rs'
               - 'crates/harn-stdlib/src/lib.rs'
+              - 'crates/harn-stdlib/src/catalog_entries.rs'
               - 'crates/harn-provider-catalog/Cargo.toml'
               - 'crates/harn-provider-catalog/src/**'
               - 'crates/harn-vm/src/llm/capability_sources/**'
