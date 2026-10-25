@@ -14,7 +14,8 @@ pub(super) struct UsageSnapshot {
     pub(super) usage_unknown_calls: i64,
     pub(super) trace_len: usize,
     #[serde(default)]
-    pub(super) cache: ReportedCacheTotals,
+    // Boxed: snapshots sit by value in workflow frames across awaits, so inline size is paid per frame.
+    pub(super) cache: Box<ReportedCacheTotals>,
 }
 
 pub(super) fn llm_usage_snapshot() -> UsageSnapshot {
@@ -28,7 +29,7 @@ pub(super) fn llm_usage_snapshot() -> UsageSnapshot {
         unpriced_calls: trace.cost.unpriced_calls,
         usage_unknown_calls: trace.cost.usage_unknown_calls,
         trace_len: usize::try_from(trace.call_count).unwrap_or(usize::MAX),
-        cache: trace.cache,
+        cache: Box::new(trace.cache),
     }
 }
 

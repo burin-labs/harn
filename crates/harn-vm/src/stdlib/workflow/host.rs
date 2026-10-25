@@ -282,7 +282,7 @@ pub(super) async fn host_workflow_map_execute_branch_builtin(
             status: executed.status,
             result: executed.result,
             artifacts: executed.artifacts,
-            usage: executed.usage,
+            usage: *executed.usage,
             error: executed.error,
         }
     } else {

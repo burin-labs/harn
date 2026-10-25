@@ -49,7 +49,7 @@ pub(super) struct WorkflowRunState {
     pub(super) replay_stages: Option<Vec<RunStageRecord>>,
     pub(super) workflow_verification_contracts: Vec<VerificationContract>,
     pub(super) mutation_session: MutationSessionRecord,
-    pub(super) run_usage_before: UsageSnapshot,
+    pub(super) run_usage_before: Box<UsageSnapshot>,
     pub(super) workflow_span_id: u64,
     pub(super) max_steps: usize,
     pub(super) stage_scope: Option<StageExecutionScope>,
@@ -568,7 +568,7 @@ pub(super) fn prepare_workflow_state(
         replay_stages: replay_source.map(|source| source.stages),
         workflow_verification_contracts,
         mutation_session,
-        run_usage_before,
+        run_usage_before: Box::new(run_usage_before),
         workflow_span_id,
         max_steps,
         stage_scope: None,
@@ -748,7 +748,7 @@ fn failed_executed_stage_from_error(
         artifacts: Vec::new(),
         transcript,
         verification: None,
-        usage,
+        usage: Box::new(usage),
         error: Some(error_message.clone()),
         attempts: vec![crate::orchestration::RunStageAttemptRecord {
             attempt: 1,
@@ -829,7 +829,7 @@ async fn complete_harn_stage_call(
         artifacts: produced,
         transcript: next_transcript,
         verification: Some(verification.clone()),
-        usage,
+        usage: Box::new(usage),
         error: if success {
             None
         } else {
@@ -911,7 +911,7 @@ fn complete_harn_map_stage_call(
         artifacts,
         transcript: input_transcript,
         verification: None,
-        usage,
+        usage: Box::new(usage),
         error: if success {
             None
         } else {
@@ -1248,7 +1248,7 @@ pub(super) async fn complete_workflow_stage_state(
             .as_ref()
             .map(crate::llm::vm_value_to_json),
         verification: executed.verification.clone(),
-        usage: Some(executed.usage.clone()),
+        usage: Some((*executed.usage).clone()),
         artifacts: executed.artifacts.clone(),
         consumed_artifact_ids: executed.consumed_artifact_ids.clone(),
         produced_artifact_ids: produced_artifact_ids.clone(),
