@@ -105,10 +105,31 @@ fn sentence_ends(text: &str) -> Vec<usize> {
     let bytes = text.as_bytes();
     let mut ends = Vec::new();
     let mut paren_depth = 0usize;
-    let mut in_code = false;
+    // Length of the backtick run that opened the current code span. A span
+    // closes only on a run of the same length, so ``a ` b`` stays one span.
+    let mut code_fence: Option<usize> = None;
+    let mut run_end = 0usize;
     for (index, ch) in text.char_indices() {
+        if index < run_end {
+            continue;
+        }
+        let in_code = code_fence.is_some();
         match ch {
-            '`' => in_code = !in_code,
+            '`' => {
+                let run = text
+                    .get(index..)
+                    .unwrap_or("")
+                    .chars()
+                    .take_while(|c| *c == '`')
+                    .count();
+                run_end = index + run;
+                match code_fence {
+                    None => code_fence = Some(run),
+                    Some(open) if open == run => code_fence = None,
+                    Some(_) => {}
+                }
+                continue;
+            }
             '(' if !in_code => paren_depth += 1,
             ')' if !in_code => paren_depth = paren_depth.saturating_sub(1),
             _ => {}
@@ -281,6 +302,18 @@ mod tests {
             summary,
             "Run the configured verifier against the changed files and report the structured \
              result back to the caller."
+        );
+    }
+
+    #[test]
+    fn a_multi_backtick_code_span_closes_only_on_a_matching_run() {
+        let summary = tool_summary(
+            "Return every line of the requested range together with its number, or fall back \
+             to ``Range. ` Full`` when no range is given. Done.",
+        );
+        assert!(
+            summary.ends_with("no range is given."),
+            "a lone backtick inside a double-backtick span must not close it, got {summary:?}"
         );
     }
 }
