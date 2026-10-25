@@ -616,6 +616,17 @@ impl ModuleGraph {
         file: &Path,
         kind: DefKind,
     ) -> Option<HashSet<String>> {
+        let mut grouped = self.imported_names_grouped_by_kind(file)?;
+        Some(grouped.remove(&kind).unwrap_or_default())
+    }
+
+    /// Every name `file` imports, grouped by the kind its import gives it, in
+    /// one pass over the imports. A name that two imports bind with different
+    /// kinds is listed under each. `None` when any import is unresolved.
+    pub fn imported_names_grouped_by_kind(
+        &self,
+        file: &Path,
+    ) -> Option<HashMap<DefKind, HashSet<String>>> {
         let file = normalize_path(file);
         let module = self.modules.get(&file)?;
         if module.has_unresolved_wildcard_import
@@ -625,24 +636,27 @@ impl ModuleGraph {
             return None;
         }
 
-        let mut names = HashSet::new();
+        let mut grouped: HashMap<DefKind, HashSet<String>> = HashMap::new();
         for import in &module.imports {
             // Namespace aliases are variables, not flattened member kinds.
             if import.namespace_alias.is_some() {
                 continue;
             }
             let import_path = import.path.as_ref()?;
+            let target = normalize_path(import_path);
+            let sibling = sibling_module_access(&file, &target);
             let imported_names: Vec<String> = match &import.selective_names {
                 Some(selective) => selective.iter().cloned().collect(),
                 None => self.exports_for_import(&file, import_path),
             };
             for name in imported_names {
-                if self.exported_kind_for_import(&file, import_path, &name) == Some(kind) {
-                    names.insert(name);
+                if let Some(kind) = self.exported_kind_for_resolved_import(sibling, &target, &name)
+                {
+                    grouped.entry(kind).or_default().insert(name);
                 }
             }
         }
-        Some(names)
+        Some(grouped)
     }
 
     /// Collect imported declarations that can be invoked with ordinary call
@@ -650,16 +664,8 @@ impl ModuleGraph {
     /// compilers; it includes function-like declarations and struct
     /// constructors while preserving import visibility and resolution.
     pub fn imported_callable_names_for_file(&self, file: &Path) -> Option<HashSet<String>> {
-        let mut names = HashSet::new();
-        for kind in [
-            DefKind::Function,
-            DefKind::Pipeline,
-            DefKind::Tool,
-            DefKind::Struct,
-        ] {
-            names.extend(self.imported_names_by_kind_for_file(file, kind)?);
-        }
-        Some(names)
+        let grouped = self.imported_names_grouped_by_kind(file)?;
+        Some(callable_names(&grouped))
     }
 
     /// Collect type / struct / enum / interface declarations made visible to
@@ -1120,7 +1126,15 @@ impl ModuleGraph {
     /// Explicit and wildcard re-exports are followed so callers can consume
     /// the same source-owned contract regardless of the import path used.
     pub fn exported_kind(&self, file: &Path, name: &str) -> Option<DefKind> {
-        self.exported_kind_inner(file, name, &mut HashSet::new())
+        let file = normalize_path(file);
+        // Most names are the module's own: answer those without the re-export
+        // walk's cycle guard, which allocates.
+        if let Some(module) = self.modules.get(&file) {
+            if module.own_exports.contains(name) {
+                return own_export_kind(module, &file, name);
+            }
+        }
+        self.exported_kind_inner(&file, name, &mut HashSet::new())
     }
 
     fn exported_kind_inner(
@@ -1135,17 +1149,7 @@ impl ModuleGraph {
         }
         let result = self.modules.get(&file).and_then(|module| {
             if module.own_exports.contains(name) {
-                return module
-                    .declarations
-                    .get(name)
-                    .map(|definition| definition.kind)
-                    .or_else(|| {
-                        stdlib_module_name(&file).and_then(|stdlib_module| {
-                            stdlib::builtin_reexports(stdlib_module)
-                                .contains(&name)
-                                .then_some(DefKind::Function)
-                        })
-                    });
+                return own_export_kind(module, &file, name);
             }
             if let Some(sources) = module.selective_re_exports.get(name) {
                 for source in sources {
@@ -1164,6 +1168,39 @@ impl ModuleGraph {
         visited.remove(&file);
         result
     }
+}
+
+/// The kind of a name `module` exports itself.
+fn own_export_kind(module: &ModuleInfo, file: &Path, name: &str) -> Option<DefKind> {
+    module
+        .declarations
+        .get(name)
+        .map(|definition| definition.kind)
+        .or_else(|| {
+            stdlib_module_name(file).and_then(|stdlib_module| {
+                stdlib::builtin_reexports(stdlib_module)
+                    .contains(&name)
+                    .then_some(DefKind::Function)
+            })
+        })
+}
+
+/// Declaration kinds that ordinary call syntax can invoke.
+const CALLABLE_KINDS: [DefKind; 4] = [
+    DefKind::Function,
+    DefKind::Pipeline,
+    DefKind::Tool,
+    DefKind::Struct,
+];
+
+/// The callable names in a [`ModuleGraph::imported_names_grouped_by_kind`] result.
+pub fn callable_names(grouped: &HashMap<DefKind, HashSet<String>>) -> HashSet<String> {
+    CALLABLE_KINDS
+        .iter()
+        .filter_map(|kind| grouped.get(kind))
+        .flatten()
+        .cloned()
+        .collect()
 }
 
 /// A duplicate or ambiguous re-export inside a single module. Reported by
