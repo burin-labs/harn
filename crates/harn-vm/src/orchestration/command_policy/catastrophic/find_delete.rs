@@ -85,7 +85,7 @@ pub(super) fn find_delete_catastrophe(args: &[String], roots: &[String]) -> Opti
             "`find {start} … -delete` is blocked: it deletes under an absolute path or outside the project root. Search and delete only inside the workspace."
         ));
     }
-    (!(filtered && !unselective) && starts.iter().any(|start| is_project_target(start)))
+    ((unselective || !filtered) && starts.iter().any(|start| is_project_target(start)))
         .then(|| PROJECT_DELETE_REASON.to_string())
 }
 
