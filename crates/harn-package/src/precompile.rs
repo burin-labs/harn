@@ -213,7 +213,7 @@ pub fn precompile_source(
         out_root,
         INTERFACE_CACHE_EXTENSION,
     )?;
-    let (keys, mut interface) = artifact_keys(
+    let (keys, interface) = artifact_keys(
         source_path,
         &source,
         source_root,
@@ -237,9 +237,14 @@ pub fn precompile_source(
     // Resolve imports so a call to an imported symbol that shadows a builtin
     // is checked against the right signature. The interface's graph was built
     // from this same source text.
-    let graph = interface
-        .take_module_graph()
-        .unwrap_or_else(|| harn_modules::build_with_source(source_path, &source));
+    let built;
+    let graph = match interface.module_graph() {
+        Some(graph) => graph,
+        None => {
+            built = harn_modules::build_with_source(source_path, &source);
+            &built
+        }
+    };
     let checker = graph
         .typecheck_import_config_for_file(source_path)
         .apply_imports_to(authority.typechecker());
@@ -333,6 +338,15 @@ impl ArtifactKeys {
     }
 }
 
+/// The published package generation `anchor` resolves through, read from its
+/// pointer file without leasing it. Equal reads bracket a window in which no
+/// replacement generation was published.
+fn current_package_generation(anchor: &Path) -> Option<(PathBuf, String)> {
+    let root = harn_modules::package_snapshot::PackageSnapshot::nearest_project_root(anchor)?;
+    let pointer = harn_modules::package_snapshot::package_current_path(&root);
+    Some((root, std::fs::read_to_string(pointer).ok()?))
+}
+
 /// Derive both bytecode keys from the prepared imported interface.
 fn artifact_keys(
     source_path: &Path,
@@ -341,22 +355,30 @@ fn artifact_keys(
     authority: &SourceCompilerAuthority,
     interface_dest: &Path,
 ) -> Result<(ArtifactKeys, PrecompiledInterface), String> {
+    let generation = current_package_generation(source_path);
     let mut interface =
         harn_vm::bytecode_cache::prepare_precompiled_interface(interface_dest, source_path, source)
             .map_err(|e| format!("prepare {}: {e}", interface_dest.display()))?;
     if !interface.package_import_aliases().is_empty() {
-        let graph = interface
-            .take_module_graph()
-            .unwrap_or_else(|| harn_modules::build_with_source(source_path, source));
-        package::ensure_reachable_dependencies_materialized(source_path, &graph)
+        let built;
+        let graph = match interface.module_graph() {
+            Some(graph) => graph,
+            None => {
+                built = harn_modules::build_with_source(source_path, source);
+                &built
+            }
+        };
+        package::ensure_reachable_dependencies_materialized(source_path, graph)
             .map_err(|e| e.to_string())?;
         // Setup may publish a replacement package generation; key from that one.
-        interface = harn_vm::bytecode_cache::prepare_precompiled_interface(
-            interface_dest,
-            source_path,
-            source,
-        )
-        .map_err(|e| e.to_string())?;
+        if generation.is_none() || current_package_generation(source_path) != generation {
+            interface = harn_vm::bytecode_cache::prepare_precompiled_interface(
+                interface_dest,
+                source_path,
+                source,
+            )
+            .map_err(|e| e.to_string())?;
+        }
     }
     let aliases =
         package::declared_package_import_aliases(source_path, interface.package_import_aliases())

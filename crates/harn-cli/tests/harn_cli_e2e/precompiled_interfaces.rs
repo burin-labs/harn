@@ -176,7 +176,7 @@ fn dotted_source_names_keep_distinct_adjacent_artifacts_after_relocation() {
 #[test]
 fn shipped_entry_preserves_package_authority_after_relocation() {
     let tmp = tempfile::tempdir().unwrap();
-    let build = write_package_fixture(tmp.path());
+    let build = write_package_fixture(tmp.path(), true);
     let output = harn_e2e_command()
         .arg("precompile")
         .arg(&build)
@@ -223,7 +223,34 @@ fn shipped_entry_preserves_package_authority_after_relocation() {
     );
 }
 
-fn write_package_fixture(root: &Path) -> std::path::PathBuf {
+#[test]
+fn precompile_interface_comes_from_the_generation_its_setup_publishes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let build = write_package_fixture(tmp.path(), false);
+    let interface = build.join("main.harnifc");
+    let precompile = || {
+        let output = harn_e2e_command()
+            .arg("precompile")
+            .arg(build.join("main.harn"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        std::fs::read(&interface).unwrap()
+    };
+    let after_setup = precompile();
+    std::fs::remove_file(&interface).unwrap();
+    // The replacement generation is current now, so this run publishes
+    // nothing. An interface walked before setup would still name the stale one.
+    assert_eq!(after_setup, precompile());
+}
+
+/// `published: false` publishes a generation holding an older `acme` than the
+/// lock pins, so setup must publish a replacement before keying from it.
+fn write_package_fixture(root: &Path, published: bool) -> std::path::PathBuf {
     use crate::test_util::package_generation::{
         create_package_generation, package_content_hash, publish_package_generation,
     };
@@ -250,8 +277,15 @@ fn write_package_fixture(root: &Path) -> std::path::PathBuf {
     let packages = create_package_generation(&build);
     std::fs::create_dir(packages.join("acme")).unwrap();
     std::fs::write(packages.join("acme/harn.toml"), package_manifest).unwrap();
-    std::fs::write(packages.join("acme/lib.harn"), module).unwrap();
-    publish_package_generation(&build, &lock);
+    if published {
+        std::fs::write(packages.join("acme/lib.harn"), module).unwrap();
+        publish_package_generation(&build, &lock);
+    } else {
+        let stale = "pub fn answer() -> string { return \"stale\" }\n";
+        std::fs::write(packages.join("acme/lib.harn"), stale).unwrap();
+        let stale_lock = lock.replace(&package_content_hash(&dependency), "sha256:stale");
+        publish_package_generation(&build, &stale_lock);
+    }
     std::fs::write(
         build.join("main.harn"),
         "import { answer } from \"acme/lib\"\nfn main(harness: Harness) { harness.stdio.println(answer()) }\n",
@@ -263,7 +297,7 @@ fn write_package_fixture(root: &Path) -> std::path::PathBuf {
 #[test]
 fn explicit_cache_preparation_uses_runtime_package_and_authority_keys() {
     let tmp = tempfile::tempdir().unwrap();
-    let build = write_package_fixture(tmp.path());
+    let build = write_package_fixture(tmp.path(), true);
     let manifest = std::fs::read_to_string(build.join("harn.toml")).unwrap();
     std::fs::write(
         build.join("harn.toml"),
