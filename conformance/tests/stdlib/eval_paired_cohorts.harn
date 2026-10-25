@@ -1,0 +1,108 @@
+import { paired_delta_cs } from "std/eval/sequential"
+import { paired_case_deltas, paired_delta_report, regression_gate } from "std/eval/stats"
+
+fn paired_improvement_uses_the_same_cohort_for_every_verdict() -> nil {
+  const baseline = [
+    {name: "shared", passes: 1, trials: 2},
+    {name: "baseline-only", passes: 1, trials: 1},
+  ]
+  const current = [
+    {name: "shared", passes: 1, trials: 1},
+    {name: "current-only", passes: 0, trials: 1},
+  ]
+  const report = paired_delta_report(baseline, current, 100, 7)
+  assert_eq(report.n_cases, 1)
+  assert_eq(report.mean_delta, 0.5)
+  assert_eq(report.baseline_macro, 0.5)
+  assert_eq(report.current_macro, 1.0)
+  assert_eq(report.baseline_std, 0.0)
+  assert(report.improved && !report.regressed && !report.regression)
+  assert_eq(report.status, "improved")
+}
+
+fn unmatched_cases_cannot_hide_a_paired_regression() -> nil {
+  const baseline = [
+    {name: "shared", passes: 1, trials: 1},
+    {name: "baseline-only", passes: 0, trials: 1},
+  ]
+  const current = [
+    {name: "shared", passes: 0, trials: 1},
+    {name: "current-only", passes: 1, trials: 1},
+  ]
+  const report = paired_delta_report(baseline, current, 100, 7)
+  assert_eq(report.n_cases, 1)
+  assert_eq(report.baseline_macro, 1.0)
+  assert_eq(report.current_macro, 0.0)
+  assert_eq(report.mean_delta, -1.0)
+  assert(report.regressed && report.regression && !report.improved)
+  assert_eq(report.status, "regression")
+}
+
+fn fingerprint_rejections_are_excluded_from_paired_headlines() -> nil {
+  const baseline = [
+    {name: "shared", passes: 1, trials: 2},
+    {name: "changed", passes: 1, trials: 1, case_fingerprint: "old"},
+    {name: "harness-changed", passes: 1, trials: 1, harness_config_fingerprint: "old"},
+  ]
+  const current = [
+    {name: "shared", passes: 1, trials: 2},
+    {name: "changed", passes: 0, trials: 1, case_fingerprint: "new"},
+    {name: "harness-changed", passes: 0, trials: 1, harness_config_fingerprint: "new"},
+  ]
+  const report = paired_delta_report(baseline, current, 100, 7)
+  assert_eq(report.n_cases, 1)
+  assert_eq(report.baseline_macro, 0.5)
+  assert_eq(report.current_macro, 0.5)
+  assert_eq(report.mean_delta, 0.0)
+  assert(!report.improved && !report.regressed && !report.regression)
+  assert_eq(report.status, "inconclusive")
+}
+
+fn pairing_uses_the_first_decided_row_per_named_case() -> nil {
+  const baseline = [
+    {name: "shared", passes: 0, trials: 1, skips: 1},
+    {name: "shared", passes: 0, trials: 1},
+    {name: "shared", passes: 1, trials: 1},
+  ]
+  const current = [
+    {name: "shared", passes: 0, trials: 1, skips: 1},
+    {name: "shared", passes: 1, trials: 1},
+    {name: "shared", passes: 0, trials: 1},
+  ]
+  assert_eq(paired_case_deltas(baseline, current), [1.0])
+  const report = paired_delta_report(baseline, current, 100, 7)
+  assert_eq(report.n_cases, 1)
+  assert_eq(report.baseline_macro, 0.0)
+  assert_eq(report.current_macro, 1.0)
+  const sequential = paired_delta_cs(baseline, current, 0.05)
+  assert_eq(sequential.n, 1)
+  assert_eq(sequential.mean, 1.0)
+}
+
+fn unnamed_and_undecided_rows_never_form_a_pair() -> nil {
+  const baseline = [{passes: 0, trials: 1}, {name: "skipped", passes: 0, trials: 1, skips: 1}]
+  const current = [{passes: 1, trials: 1}, {name: "skipped", passes: 1, trials: 1}]
+  assert_eq(paired_case_deltas(baseline, current), [])
+  const report = paired_delta_report(baseline, current, 100, 7)
+  assert_eq(report.n_cases, 0)
+  assert_eq(report.status, "inconclusive")
+  assert(!report.improved && !report.regressed && !report.regression)
+}
+
+fn unpaired_regression_gate_retains_unnamed_cohort_support() -> nil {
+  const report = regression_gate([{passes: 1, trials: 1}], [{passes: 0, trials: 1}])
+  assert(!report.passed)
+  assert_eq(report.baseline_macro, 1.0)
+  assert_eq(report.current_macro, 0.0)
+  assert_eq(report.status, "regression")
+}
+
+pipeline test(harness: Harness) {
+  paired_improvement_uses_the_same_cohort_for_every_verdict()
+  unmatched_cases_cannot_hide_a_paired_regression()
+  fingerprint_rejections_are_excluded_from_paired_headlines()
+  pairing_uses_the_first_decided_row_per_named_case()
+  unnamed_and_undecided_rows_never_form_a_pair()
+  unpaired_regression_gate_retains_unnamed_cohort_support()
+  harness.stdio.println("[harn] stdlib eval paired cohorts ok")
+}

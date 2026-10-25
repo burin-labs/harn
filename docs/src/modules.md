@@ -635,6 +635,11 @@ Existing ledger aliases such as `pass_rate`, `case_fingerprint`, and
 `harness_config_fingerprint` are accepted when present. Paired comparisons skip
 rows whose case or harness-config fingerprints are incompatible.
 
+Pairing uses the first decided row for each nonempty case name in each arm,
+preserving current-arm order. `paired_delta_report` computes its deltas, arm
+means, baseline deviation, and verdict from that same matched cohort.
+`regression_gate` compares the full arms independently and accepts unnamed rows.
+
 | Function | Description |
 |---|---|
 | `aggregate_trials(name, outcomes, metadata?)` | Summarize trial outcomes into a generic eval row |
