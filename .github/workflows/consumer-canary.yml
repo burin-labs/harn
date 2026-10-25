@@ -127,6 +127,7 @@ jobs:
         id: decide
         env:
           GH_TOKEN: ${{ github.token }}
+          CANARY_TOKEN_LABEL: github-token
           EVENT_NAME: ${{ github.event_name }}
           SOURCE_REVISION: ${{ inputs.source_revision }}
           CURRENT_RUN_ID: ${{ github.run_id }}
@@ -198,6 +199,7 @@ jobs:
         id: canary
         env:
           GH_TOKEN: ${{ steps.consumer-token.outputs.token }}
+          CANARY_TOKEN_LABEL: consumer-dispatch-app-token
           PARENT_READ_TOKEN: ${{ github.token }}
           OBSERVER_CONTEXT: ${{ steps.observer.outputs.context }}
           CANARY_OWNER: ${{ github.repository_owner }}
@@ -315,6 +317,7 @@ jobs:
         if: always() && steps.cleanup-token.outcome == 'success'
         env:
           GH_TOKEN: ${{ steps.cleanup-token.outputs.token }}
+          CANARY_TOKEN_LABEL: cleanup-app-token
           CANARY_OWNER: ${{ github.repository_owner }}
           CANARY_NAME: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           CANARY_RECORD_RUN: ${{ steps.canary.outputs.run_id }}

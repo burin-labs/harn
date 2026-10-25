@@ -61,6 +61,7 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
+        CANARY_TOKEN_LABEL: observe-consumer-read-app-token
         CANARY_OWNER: ${{ inputs.owner }}
         CANARY_NAME: ${{ inputs.repository }}
         CANARY_RUN_ID: ${{ inputs.run-id }}
