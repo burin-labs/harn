@@ -396,7 +396,8 @@ harness.stdio.log(bytes_to_hex(uploaded))
 | `percentile(items, p)` | items: list[number], p: 0..100 | float | R-7 percentile interpolation |
 
 Decimal rounding keeps the decimal type and uses midpoint-to-even rounding.
-A decimal precision below `-28` returns decimal zero, including the minimum `int` value.
+A decimal precision below `-29` returns decimal zero, including the minimum `int` value.
+Rounding throws when the nearest bucket is outside the decimal range.
 Finite averages and percentiles stay finite when an intermediate sum or endpoint difference would overflow.
 
 ### Trigonometry

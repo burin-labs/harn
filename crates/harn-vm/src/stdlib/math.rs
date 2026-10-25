@@ -116,7 +116,7 @@ fn round_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
         // half-away-from-zero midpoint rule; ints stay ints when possible.
         (VmValue::Float(n), Some(d)) => Ok(VmValue::Float(round_float_to_digits(*n, d))),
         (VmValue::Int(n), Some(d)) => Ok(round_int_to_digits(*n, d)),
-        (VmValue::Decimal(x), Some(d)) => Ok(VmValue::decimal(round_decimal_to_digits(**x, d))),
+        (VmValue::Decimal(x), Some(d)) => round_decimal_to_digits(**x, d).map(VmValue::decimal),
         _ => Ok(VmValue::Nil),
     }
 }
@@ -189,24 +189,35 @@ fn round_int_to_digits(n: i64, digits: i64) -> VmValue {
 /// banker's (midpoint-nearest-even) rounding, consistent with the 1-arg
 /// `round(decimal)` form. Negative digits round to power-of-ten buckets via
 /// exact scale/unscale.
-fn round_decimal_to_digits(x: rust_decimal::Decimal, digits: i64) -> rust_decimal::Decimal {
+fn round_decimal_to_digits(
+    x: rust_decimal::Decimal,
+    digits: i64,
+) -> Result<rust_decimal::Decimal, VmError> {
     use rust_decimal::Decimal;
     if digits >= 0 {
         // Decimal carries at most 28 fractional digits, so any larger request
         // is the identity; `round_dp` already treats it that way.
         let dp = u32::try_from(digits).unwrap_or(u32::MAX).min(28);
-        return x.round_dp(dp);
+        return Ok(x.round_dp(dp));
     }
-    // 96-bit decimals top out just under 8e28, so any coarser bucket is zero.
-    if digits < -28 {
-        return Decimal::ZERO;
+    if digits < -29 {
+        return Ok(Decimal::ZERO);
     }
     let neg = (-digits) as u32;
-    let factor = Decimal::from_i128_with_scale(10i128.pow(neg), 0);
-    match x.checked_div(factor).map(|scaled| scaled.round()) {
-        Some(rounded) => rounded.checked_mul(factor).unwrap_or(x),
-        None => x,
+    let exponent = neg + x.scale();
+    // Twice the largest 96-bit mantissa is below 10^30.
+    if exponent >= 30 {
+        return Ok(Decimal::ZERO);
     }
+    let mantissa = x.mantissa();
+    let factor = 10i128.pow(exponent);
+    let mut bucket = mantissa / factor;
+    let twice_remainder = (mantissa % factor).abs() * 2;
+    if twice_remainder > factor || (twice_remainder == factor && bucket % 2 != 0) {
+        bucket += mantissa.signum();
+    }
+    Decimal::try_from_i128_with_scale(bucket * 10i128.pow(neg), 0)
+        .map_err(|_| VmError::Runtime("round: decimal result is out of range".to_string()))
 }
 
 #[harn_builtin(
