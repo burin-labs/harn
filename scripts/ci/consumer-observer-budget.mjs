@@ -1,4 +1,4 @@
-import {observeConsumerTiming, observerContext, parentHeadSha, observerRefusal } from '../lib/consumer-observer.mjs';
+import {observeConsumerTiming, observerContext, parentHeadSha, observerRefusal, observerReadRetryable } from '../lib/consumer-observer.mjs';
 import {consumerObservationBudget} from '../lib/consumer-observation-budget.mjs';
 
 try {
@@ -24,7 +24,14 @@ try {
     console.log(JSON.stringify(reading));
   }
 } catch (error) {
-  const {line} = observerRefusal(error, 'job_timing_unmeasured');
-  console.error(`::error::${line}`);
-  process.exitCode = 1;
+  const {line, reason} = observerRefusal(error, 'job_timing_unmeasured');
+  if (observerReadRetryable(error)) {
+    console.log(JSON.stringify({schema:'harn.consumer_observer.read_refusal.v1',reason,retryable:true,
+      retry_after_seconds:error?.diagnostic?.retry_after_seconds ?? 0}));
+    console.error(`${line} retryable=true`);
+    process.exitCode = 75;
+  } else {
+    console.error(`::error::${line}`);
+    process.exitCode = 1;
+  }
 }

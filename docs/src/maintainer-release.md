@@ -218,6 +218,15 @@ publication.
 Read the failing job before choosing a retry. Keep the commit, run ID, and
 candidate manifest attached to the release record.
 
+Transient observer read failures retry against the same consumer run within
+its original budget. Credential renewal keeps the run, start time, deadline,
+and any server-requested backoff. The `consumer-observer-checkpoint-<attempt>-<source>`
+artifact records the last observation and next action. Unknown timing is
+`null`; a checkpoint never supplies a product verdict or publication permission.
+After an observer fails, cleanup preserves a live child unless the parent was
+explicitly cancelled or a fresh authenticated job census proves a timeout.
+An unreadable census refuses cancellation and reports pending or refused work.
+
 Promotion reports a stuck release on its own. When main's stable version is
 still unpublished four hours after its version commit, every later promotion
 run fails and one `[Release] vX.Y.Z is unpublished on main` issue opens. Close

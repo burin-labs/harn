@@ -101,6 +101,7 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
       const fixture = JSON.parse(fs.readFileSync(${JSON.stringify(config)}, 'utf8'));
       const calls = [];
       let cancelled = false;
+      Date.now=()=> (fixture.now ?? 1100)*1000;
       globalThis.fetch = async (url, options = {}) => {
         const p = new URL(url).pathname;
         calls.push({method: options.method ?? 'GET', path: p});
@@ -112,6 +113,12 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
         }
         let record;
         if (p.endsWith('/42/attempts/2')) record=fixture.parent;
+        else if (p.endsWith('/73/attempts/1/jobs')) record={total_count:1,jobs:[{
+          id:91,run_id:73,run_attempt:1,head_sha:fixture.child.head_sha,status:'in_progress',conclusion:null,
+          created_at:new Date(1000*1000).toISOString(),started_at:new Date(1010*1000).toISOString(),
+          completed_at:null,runner_id:1,runner_name:'private-worker',
+          steps:[{status:'in_progress',conclusion:null,started_at:new Date(1010*1000).toISOString()}],
+        }]};
         else if (p.endsWith('/jobs')) record={total_count:1,jobs:[{id:801,run_id:42,run_attempt:2,head_sha:fixture.parent.head_sha,name:fixture.jobName,status:'completed',conclusion:'success',steps:fixture.steps}]};
         else if (p.endsWith('/artifacts')) {
           const index=p.includes('/42/') ? 0 : 1;
@@ -144,11 +151,18 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     const declaration = {name:observerDeclarationStep,number:2,status:'completed',conclusion:'success'};
     const observed = {name:'Observe the first bounded window',number:3,status:'completed',conclusion:'failure'};
     const stoppedObserver = execute({parent:liveParent,steps:[declaration,observed]},true);
-    assert.equal(stoppedObserver.run.status,0,stoppedObserver.run.stderr);
-    assert.deepEqual(stoppedObserver.posts.map(call=>call.path),['/repos/acme/widget-host/actions/runs/73/cancel']);
+    assert.equal(stoppedObserver.run.status,1,stoppedObserver.run.stderr);
+    assert.deepEqual(stoppedObserver.posts,[],'a failed read cannot retire a live measurement');
+    assert.match(stoppedObserver.run.stdout,/cancelled=0 pending=1 refused=0/);
     const failedDispatch = execute({parent:liveParent,steps:[declaration,{...observed,name:observerDispatchStep}]},true);
-    assert.equal(failedDispatch.run.status,0,failedDispatch.run.stderr);
-    assert.deepEqual(failedDispatch.posts.map(call=>call.path),['/repos/acme/widget-host/actions/runs/73/cancel']);
+    assert.equal(failedDispatch.run.status,1,failedDispatch.run.stderr);
+    assert.deepEqual(failedDispatch.posts,[]);
+    const expiredObserver = execute({parent:liveParent,steps:[declaration,observed],now:8210},true);
+    assert.equal(expiredObserver.run.status,0,expiredObserver.run.stderr);
+    assert.deepEqual(expiredObserver.posts.map(call=>call.path),['/repos/acme/widget-host/actions/runs/73/cancel']);
+    const failedParent = execute({parent:{...parent,conclusion:'failure'}});
+    assert.equal(failedParent.run.status,1,failedParent.run.stderr);
+    assert.deepEqual(failedParent.posts,[],'completion cleanup also preserves a measurement after observer failure');
     for(const step of [{...observed,conclusion:'success'}, {...observed,status:'in_progress',conclusion:null},
       {...observed,name:'Unrelated failed step'}, {...observed,number:1}]) {
       const needed = execute({parent:liveParent,steps:[declaration,step]},true);

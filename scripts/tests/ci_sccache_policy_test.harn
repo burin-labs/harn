@@ -308,24 +308,29 @@ pipeline test_consumer_canary_accepts_checkout_mint_and_script(harness: Harness,
 }
 
 @test
-pipeline test_consumer_failure_upload_has_only_the_canonical_descriptor(harness: Harness) {
+pipeline test_consumer_observer_uploads_have_only_the_canonical_descriptors(harness: Harness) {
   const workflow = read_yaml(harness.fs, "../../.github/workflows/consumer-canary.yml", nil)
-  const uploads = workflow.jobs.consumers.steps.filter(
-    fn(step: dict) -> bool { return step?.name == "Preserve the measured observer failure" },
-  )
-  assert_eq(len(uploads), 1)
-  const upload = uploads[0]
-  assert_eq(consumer_canary_errors(consumer_canary_workflow([upload])), [])
-  for invalid in [
-    upload + {with: upload.with + {path: "consumer-private-report"}},
-    upload + {with: upload.with + {name: "consumer-private-report"}},
-    upload + {uses: "actions/upload-artifact@v7"},
-    upload + {env: {PRIVATE_DATA: "consumer-log"}},
-    upload + {run: "cat consumer.log"},
-    upload + {if: "always()"},
-    upload + {with: upload.with + {path: upload.with.path.replace("observe-4", "observe-5")}},
+  for name in [
+    "Preserve the measured observer failure",
+    "Preserve the consumer observation checkpoint",
   ] {
-    assert(len(consumer_canary_errors(consumer_canary_workflow([invalid]))) > 0)
+    const uploads = workflow.jobs.consumers.steps.filter(
+      fn(step: dict) -> bool { return step?.name == name },
+    )
+    assert_eq(len(uploads), 1)
+    const upload = uploads[0]
+    assert_eq(consumer_canary_errors(consumer_canary_workflow([upload])), [])
+    for invalid in [
+      upload + {with: upload.with + {path: "consumer-private-report"}},
+      upload + {with: upload.with + {name: "consumer-private-report"}},
+      upload + {uses: "actions/upload-artifact@v7"},
+      upload + {env: {PRIVATE_DATA: "consumer-log"}},
+      upload + {run: "cat consumer.log"},
+      upload + {if: "always()"},
+      upload + {with: upload.with + {path: upload.with.path.replace("observe-4", "observe-5")}},
+    ] {
+      assert(len(consumer_canary_errors(consumer_canary_workflow([invalid]))) > 0)
+    }
   }
 }
 
