@@ -1,0 +1,11 @@
+fn main(harness: Harness) -> nil {
+  assert_eq(round(decimal("1250"), -2), decimal("1200"))
+  const minimum = -9223372036854775807 - 1
+  for digits in [-29, -400, -4294967296, minimum] {
+    const rounded = round(decimal("12.5"), digits)
+    assert_eq(rounded, decimal("0"))
+    assert_eq(type_of(rounded), "decimal")
+  }
+  assert_eq(round(decimal("12.5"), 4294967296), decimal("12.5"))
+  harness.stdio.println("decimal digit bounds ok")
+}

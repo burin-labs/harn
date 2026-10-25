@@ -197,11 +197,11 @@ fn round_decimal_to_digits(x: rust_decimal::Decimal, digits: i64) -> rust_decima
         let dp = u32::try_from(digits).unwrap_or(u32::MAX).min(28);
         return x.round_dp(dp);
     }
-    let neg = (-digits) as u32;
     // 96-bit decimals top out just under 8e28, so any coarser bucket is zero.
-    if neg > 28 {
+    if digits < -28 {
         return Decimal::ZERO;
     }
+    let neg = (-digits) as u32;
     let factor = Decimal::from_i128_with_scale(10i128.pow(neg), 0);
     match x.checked_div(factor).map(|scaled| scaled.round()) {
         Some(rounded) => rounded.checked_mul(factor).unwrap_or(x),
@@ -329,9 +329,7 @@ fn mean_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if values.is_empty() {
         return Ok(VmValue::Float(0.0));
     }
-    Ok(VmValue::Float(
-        values.iter().sum::<f64>() / values.len() as f64,
-    ))
+    Ok(VmValue::Float(arithmetic_mean(&values)))
 }
 
 #[harn_builtin(
@@ -376,7 +374,12 @@ fn percentile_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let weight = h - lower;
     let lo = values[lower as usize - 1];
     let hi = values[upper as usize - 1];
-    Ok(VmValue::Float(lo + weight * (hi - lo)))
+    let interpolated = if lo.is_sign_negative() == hi.is_sign_negative() {
+        lo + weight * (hi - lo)
+    } else {
+        lo * (1.0 - weight) + hi * weight
+    };
+    Ok(VmValue::Float(interpolated))
 }
 
 #[harn_builtin(
@@ -639,13 +642,26 @@ fn non_empty_numeric_list_arg(args: &[VmValue], label: &str) -> Result<Vec<f64>,
     Ok(values)
 }
 
+fn arithmetic_mean(values: &[f64]) -> f64 {
+    let sum = values.iter().sum::<f64>();
+    if sum.is_finite() {
+        return sum / values.len() as f64;
+    }
+    let scale = values.iter().map(|value| value.abs()).fold(0.0, f64::max);
+    if scale == 0.0 || !scale.is_finite() {
+        return sum / values.len() as f64;
+    }
+    // Normalize before summing so a finite mean does not overflow its sum.
+    (values.iter().map(|value| value / scale).sum::<f64>() / values.len() as f64) * scale
+}
+
 fn variance_for(values: &[f64], sample: bool, label: &str) -> Result<f64, VmError> {
     if sample && values.len() < 2 {
         return Err(VmError::Runtime(format!(
             "sample {label} requires at least 2 values"
         )));
     }
-    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    let mean = arithmetic_mean(values);
     let total = values
         .iter()
         .map(|value| {
