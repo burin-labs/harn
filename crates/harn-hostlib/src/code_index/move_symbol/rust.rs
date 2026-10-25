@@ -13,6 +13,8 @@ use super::{
     TopItem,
 };
 
+mod receiver;
+
 /// A Cargo package: its directory (workspace-relative, `""` at the root)
 /// and the identifier other crates use for its library.
 #[derive(Clone, Debug)]
@@ -439,12 +441,8 @@ impl Workspace {
         Ok(Some(QualifiedRewrite { edit, import: None }))
     }
 
-    /// Private fields and methods of the source module the moved item reads
-    /// and the destination could not see. They are matched by name, so one is
-    /// only placeable for widening when its owning type is named by the moved
-    /// item reaches it through a receiver or literal of the owning type (see
-    /// [`uses_resolve_to`]) and no other member of the module shares its name;
-    /// otherwise it blocks the move without being widened.
+    /// Name matches remain blockers unless the member is unique and every
+    /// use has its owning type, proved by [`receiver::uses_resolve_to`].
     pub(crate) fn private_members_used(
         &self,
         rel: &str,
@@ -518,7 +516,7 @@ impl Workspace {
             blocker.placeable &= unique
                 && owner
                     .as_ref()
-                    .is_some_and(|o| uses_resolve_to(item, source, name, o));
+                    .is_some_and(|o| receiver::uses_resolve_to(item, source, name, o));
             sites.push(blocker);
         }
         sites
@@ -834,7 +832,9 @@ pub(crate) fn field_reads(
                     report(
                         pair[0],
                         None,
-                        format!("builds or matches `{owner}`, whose field `{hidden}` the destination would hide"),
+                        format!(
+                            "builds or matches `{owner}`, whose field `{hidden}` the destination would hide"
+                        ),
                     );
                 }
             }
@@ -852,7 +852,9 @@ pub(crate) fn field_reads(
                 report(
                     path,
                     None,
-                    format!("builds or matches `{owner}`, whose field `{hidden}` the destination would hide"),
+                    format!(
+                        "builds or matches `{owner}`, whose field `{hidden}` the destination would hide"
+                    ),
                 );
             }
         }
@@ -950,92 +952,6 @@ fn visibility_node(node: Node<'_>) -> Option<Node<'_>> {
         .children(&mut cursor)
         .find(|c| c.kind() == "visibility_modifier");
     found
-}
-
-/// Whether every use of the field or method `member` inside the moved `item`
-/// provably reaches the type `owner`: a receiver that is a parameter declared
-/// as `owner` (through references and generics), or a struct literal or
-/// pattern of `owner`. Any other use, a shadowing binding, or a name that never
-/// appears makes the match name-only, so the member is not widened.
-fn uses_resolve_to(item: Node<'_>, source: &str, member: &str, owner: &str) -> bool {
-    fn base_type<'a>(mut ty: Node<'a>, source: &'a str) -> Option<&'a str> {
-        loop {
-            match ty.kind() {
-                "reference_type" | "pointer_type" | "generic_type" => {
-                    ty = ty.child_by_field_name("type")?;
-                }
-                "scoped_type_identifier" => ty = ty.child_by_field_name("name")?,
-                "type_identifier" => return Some(text::text(ty, source)),
-                _ => return None,
-            }
-        }
-    }
-    let mut params: Vec<(&str, &str)> = Vec::new();
-    let mut shadowed: Vec<&str> = Vec::new();
-    text::walk(item, |node| {
-        match node.kind() {
-            "parameter" => {
-                if let (Some(pattern), Some(base)) = (
-                    node.child_by_field_name("pattern"),
-                    node.child_by_field_name("type")
-                        .and_then(|ty| base_type(ty, source)),
-                ) {
-                    if pattern.kind() == "identifier" {
-                        params.push((text::text(pattern, source), base));
-                    }
-                }
-            }
-            "let_declaration" | "closure_parameters" | "for_expression" | "match_arm" => {
-                text::walk(node, |inner| {
-                    if inner.kind() == "identifier" {
-                        shadowed.push(text::text(inner, source));
-                    }
-                    true
-                });
-            }
-            _ => {}
-        }
-        true
-    });
-    let mut seen = false;
-    let mut all = true;
-    text::walk(item, |node| {
-        if !matches!(
-            node.kind(),
-            "field_identifier" | "shorthand_field_identifier"
-        ) || text::text(node, source) != member
-        {
-            return true;
-        }
-        seen = true;
-        let ok = node.parent().is_some_and(|parent| match parent.kind() {
-            "field_expression" => parent
-                .child_by_field_name("value")
-                .filter(|value| value.kind() == "identifier")
-                .map(|value| text::text(value, source))
-                .is_some_and(|recv| !shadowed.contains(&recv) && params.contains(&(recv, owner))),
-            _ => {
-                let mut up = Some(parent);
-                while let Some(current) = up {
-                    if matches!(current.kind(), "struct_expression" | "struct_pattern") {
-                        let field = if current.kind() == "struct_pattern" {
-                            "type"
-                        } else {
-                            "name"
-                        };
-                        return current.child_by_field_name(field).map(|ty| {
-                            base_type(ty, source).unwrap_or_else(|| text::text(ty, source))
-                        }) == Some(owner);
-                    }
-                    up = current.parent();
-                }
-                false
-            }
-        });
-        all &= ok;
-        true
-    });
-    seen && all
 }
 
 /// A declaration whose visibility a move may need to widen. A modifier that

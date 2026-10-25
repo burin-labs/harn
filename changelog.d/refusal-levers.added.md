@@ -14,3 +14,6 @@ that leaves it out of reach of the moved code, or of the modules using the moved
 item, now refuses (or widens, when allowed) instead of applying an unusable import.
 `edit_insert_at_anchor` returns the retry `candidates` of a refused insert, and the
 refusal's `details` names the first few.
+Rust member widening proves each receiver in its lexical scope. A nested
+parameter, local shadow, generic type parameter, or unrelated qualified type
+cannot authorize widening a same-named member of another type.

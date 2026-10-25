@@ -321,7 +321,10 @@ fn widening_levels_must_belong_to_the_language() {
     );
     assert!(unknown.is_err(), "unknown levels are rejected, not ignored");
     let ts = Fixture::new(&[
-        ("src/a.ts", "function helper(): number {\n  return 1\n}\n\nexport function caller(): number {\n  return helper()\n}\n"),
+        (
+            "src/a.ts",
+            "function helper(): number {\n  return 1\n}\n\nexport function caller(): number {\n  return helper()\n}\n",
+        ),
         ("src/b.ts", "export const B = 1\n"),
     ]);
     let crate_level = run(
@@ -339,7 +342,10 @@ fn widening_levels_must_belong_to_the_language() {
 #[test]
 fn ts_widening_exports_exactly_the_blocking_declarations() {
     let fixture = Fixture::new(&[
-        ("src/a.ts", "function helper(): number {\n  return 1\n}\n\nfunction untouched(): number {\n  return 2\n}\n\nexport function caller(): number {\n  return helper()\n}\n"),
+        (
+            "src/a.ts",
+            "function helper(): number {\n  return 1\n}\n\nfunction untouched(): number {\n  return 2\n}\n\nexport function caller(): number {\n  return helper()\n}\n",
+        ),
         ("src/b.ts", "export const B = 1\n"),
     ]);
     fixture.refused(
@@ -374,7 +380,10 @@ fn ts_widening_exports_exactly_the_blocking_declarations() {
 #[test]
 fn ts_widening_exports_a_moved_item_its_source_still_uses() {
     let fixture = Fixture::new(&[
-        ("src/a.ts", "function helper(): number {\n  return 1\n}\n\nexport function caller(): number {\n  return helper()\n}\n"),
+        (
+            "src/a.ts",
+            "function helper(): number {\n  return 1\n}\n\nexport function caller(): number {\n  return helper()\n}\n",
+        ),
         ("src/b.ts", "export const B = 1\n"),
     ]);
     let result = fixture.move_symbol(&widening_args(
@@ -474,12 +483,20 @@ fn rust_widened_item_in_a_new_module_gets_only_the_module_visibility_it_needs() 
 fn rust_restricted_visibility_is_not_crate_wide() {
     let files = |helper: &'static str| -> [(&'static str, String); 6] {
         [
-            ("Cargo.toml", "[package]\nname = \"kit\"\nversion = \"0.1.0\"\n".to_string()),
+            (
+                "Cargo.toml",
+                "[package]\nname = \"kit\"\nversion = \"0.1.0\"\n".to_string(),
+            ),
             ("src/lib.rs", "pub mod a;\npub mod b;\n".to_string()),
-            ("src/a/mod.rs", "pub mod model;\npub mod sibling;\n".to_string()),
+            (
+                "src/a/mod.rs",
+                "pub mod model;\npub mod sibling;\n".to_string(),
+            ),
             (
                 "src/a/model.rs",
-                format!("{helper} fn helper() -> u8 {{\n    1\n}}\n\npub fn caller() -> u8 {{\n    helper()\n}}\n"),
+                format!(
+                    "{helper} fn helper() -> u8 {{\n    1\n}}\n\npub fn caller() -> u8 {{\n    helper()\n}}\n"
+                ),
             ),
             ("src/a/sibling.rs", "pub fn other() {}\n".to_string()),
             ("src/b/mod.rs", "pub mod moved;\n".to_string()),
@@ -591,4 +608,67 @@ fn rust_widening_requires_the_receiver_to_be_the_owning_type() {
         "visibility_required",
         &widening_args("run", "src/a.rs", "src/b.rs", Some("pub")),
     );
+}
+
+#[test]
+fn rust_widening_respects_receiver_lexical_scope() {
+    for body in [
+        "pub fn run(out: &mut std::io::Stdout) {\n    fn helper(out: &Buffer) {}\n    use std::io::Write;\n    out.flush().unwrap();\n}\n",
+        "pub fn run(out: &Buffer) {\n    fn helper(out: &mut std::io::Stdout) {\n        use std::io::Write;\n        out.flush().unwrap();\n    }\n}\n",
+        "pub fn run<Buffer: std::io::Write>(out: &mut Buffer) {\n    out.flush().unwrap();\n}\n",
+        "pub fn run(out: &crate::other::Buffer) {\n    out.flush();\n}\n",
+        "pub fn run() {\n    use crate::other::*;\n    let _ = Buffer { flush: 1 };\n}\n",
+        "pub fn run(out: &Buffer, other: &crate::other::Buffer) {\n    let r#out = other;\n    out.flush();\n}\n",
+        "pub fn run(out: &Buffer, other: &crate::other::Buffer) {\n    macro_rules! bind { ($name:ident, $value:expr) => { let $name = $value; }; }\n    bind!(out, other);\n    out.flush();\n}\n",
+        "pub fn run(out: &Buffer, other: &crate::other::Buffer) {\n    macro_rules! assert { ($name:ident, $value:expr) => { let $name = $value; }; }\n    assert!(out, other);\n    out.flush();\n}\n",
+        "macro_rules! install { ($d:tt) => { macro_rules! assert { ($d name:ident, $d value:expr) => { let $d name = $d value; }; } }; }\ninstall!($);\npub fn run(out: &Buffer, other: &crate::other::Buffer) {\n    assert!(out, other);\n    out.flush();\n}\n",
+    ] {
+        let source =
+            format!("pub struct Buffer;\n\nimpl Buffer {{\n    fn flush(&self) {{}}\n}}\n\n{body}");
+        let fixture = Fixture::new(&[
+            KIT,
+            ("src/lib.rs", "pub mod a;\npub mod b;\npub mod other;\n"),
+            ("src/a.rs", &source),
+            ("src/b.rs", "pub fn other() {}\n"),
+            (
+                "src/other.rs",
+                "pub struct Buffer { pub flush: u8 }\nimpl Buffer { pub fn flush(&self) {} }\n",
+            ),
+        ]);
+        fixture.refused(
+            "visibility_required",
+            &widening_args("run", "src/a.rs", "src/b.rs", Some("pub")),
+        );
+    }
+}
+
+#[test]
+fn rust_widening_keeps_proven_receivers_in_their_own_scope() {
+    for body in [
+        "pub fn run(out: &Buffer) {\n    fn helper(out: &mut std::io::Stdout) {}\n    out.flush();\n}\n",
+        "pub fn run() {\n    fn helper(out: &Buffer) { out.flush(); }\n}\n",
+        "pub fn run(out: &Buffer) {\n    { let out = 3; let _ = out; }\n    out.flush();\n}\n",
+        "pub fn run(out: &Buffer) {\n    assert!(true);\n    out.flush();\n}\n",
+    ] {
+        let source =
+            format!("pub struct Buffer;\n\nimpl Buffer {{\n    fn flush(&self) {{}}\n}}\n\n{body}");
+        let fixture = Fixture::new(&[
+            KIT,
+            ("src/lib.rs", "pub mod a;\npub mod b;\n"),
+            ("src/a.rs", &source),
+            ("src/b.rs", "pub fn other() {}\n"),
+        ]);
+        let result =
+            fixture.move_symbol(&widening_args("run", "src/a.rs", "src/b.rs", Some("pub")));
+        assert_eq!(tag(&result), "applied", "{result:?}");
+        assert_eq!(
+            widened(&result),
+            [(
+                "src/a.rs".to_string(),
+                4,
+                "private".to_string(),
+                "pub(super)".to_string()
+            )],
+        );
+    }
 }

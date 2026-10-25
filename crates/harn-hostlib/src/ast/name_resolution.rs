@@ -153,6 +153,16 @@ pub(super) fn assess(tree: &Tree, source: &str, language: Language) -> Resolutio
 /// Constructs that can supply bindings absent from the parsed source. Reads
 /// demote confidence; mutations must refuse before persisting their plan.
 pub(crate) fn binding_defeaters(tree: &Tree, source: &str, language: Language) -> Vec<Defeater> {
+    binding_defeaters_at(tree.root_node(), source, language)
+}
+
+/// Bindings supplied outside a subtree still affect the names it uses.
+pub(crate) fn binding_defeaters_at(
+    node: Node<'_>,
+    source: &str,
+    language: Language,
+) -> Vec<Defeater> {
+    let root = source_root(node);
     let mut defeaters: Vec<Defeater> = Vec::new();
     let mut note = |d: Defeater| {
         if !defeaters.contains(&d) {
@@ -164,10 +174,12 @@ pub(crate) fn binding_defeaters(tree: &Tree, source: &str, language: Language) -
     // may never have been collected, which turns every name they would have
     // bound into a spurious undefined-name finding. A file that does not parse
     // cleanly cannot support a confident reading.
-    if tree.root_node().has_error() {
+    if root.has_error() {
         note(Defeater::SyntaxError);
     }
-    scan(tree.root_node(), source, language, &mut note);
+    walk_nodes(root, &mut |node| {
+        scan_node(node, source, language, &mut note)
+    });
     defeaters
 }
 
@@ -216,10 +228,17 @@ const RUBY_DYNAMIC_CALLS: &[&str] = &[
     "attr_writer",
 ];
 
-fn scan(root: Node<'_>, source: &str, language: Language, note: &mut impl FnMut(Defeater)) {
+fn source_root(mut node: Node<'_>) -> Node<'_> {
+    while let Some(parent) = node.parent() {
+        node = parent;
+    }
+    node
+}
+
+fn walk_nodes(root: Node<'_>, visit: &mut impl FnMut(Node<'_>)) {
     let mut cursor = root.walk();
     loop {
-        scan_node(cursor.node(), source, language, note);
+        visit(cursor.node());
         if cursor.goto_first_child() {
             continue;
         }
@@ -421,10 +440,49 @@ pub(crate) fn rust_itemless_std_macro(invocation: Node<'_>, source: &str) -> boo
     };
     let path = node_text(path, source);
     let (prefix, name) = path.rsplit_once("::").unwrap_or(("", path));
-    matches!(
-        prefix.trim_start_matches("::"),
-        "" | "std" | "core" | "alloc"
-    ) && RUST_ITEMLESS_STD_MACROS.contains(&name)
+    let prefix = prefix.trim_start_matches("::");
+    matches!(prefix, "" | "std" | "core" | "alloc")
+        && RUST_ITEMLESS_STD_MACROS.contains(&name)
+        && rust_macro_path_is_unshadowed(invocation, source, prefix, name)
+}
+
+fn rust_macro_path_is_unshadowed(
+    invocation: Node<'_>,
+    source: &str,
+    prefix: &str,
+    name: &str,
+) -> bool {
+    let root = source_root(invocation);
+    let binding = if prefix.is_empty() { name } else { prefix };
+    let mut shadowed = false;
+    // Without macro resolution, a competing binding anywhere in the file
+    // defeats the standard-library spelling proof.
+    walk_nodes(root, &mut |node| match node.kind() {
+        "macro_definition" if prefix.is_empty() => {
+            shadowed |= node
+                .child_by_field_name("name")
+                .is_some_and(|name| node_text(name, source) == binding);
+        }
+        "mod_item" | "extern_crate_declaration" if !prefix.is_empty() => {
+            shadowed |= ["name", "alias"].into_iter().any(|field| {
+                node.child_by_field_name(field)
+                    .is_some_and(|name| node_text(name, source) == binding)
+            });
+        }
+        "use_declaration" => walk_nodes(node, &mut |part| {
+            shadowed |= part.kind() == "use_wildcard"
+                || (matches!(part.kind(), "identifier" | "type_identifier")
+                    && node_text(part, source) == binding);
+        }),
+        "attribute_item" | "inner_attribute_item" if prefix.is_empty() => {
+            shadowed |= node
+                .named_child(0)
+                .and_then(|attribute| attribute.named_child(0))
+                .is_some_and(|path| node_text(path, source) == "macro_use");
+        }
+        _ => {}
+    });
+    !shadowed
 }
 
 /// The bare callee name of a call node, or `None` when the callee is anything
@@ -561,6 +619,10 @@ mod tests {
         for source in [
             "fn f() { binding_macro::bind!(); Reading() }\n",
             "#[binding_macro::bind]\nfn f() { Reading() }\n",
+            "fn f() { macro_rules! assert { () => { let Reading = 1; }; } assert!(); Reading }\n",
+            "use other::assert; fn f() { assert!(); Reading() }\n",
+            "mod std {} fn f() { std::assert!(); Reading() }\n",
+            "#[macro_use] extern crate other; fn f() { assert!(); Reading() }\n",
         ] {
             let resolution = assess_source(source, Language::Rust);
             assert!(!resolution.is_complete());
