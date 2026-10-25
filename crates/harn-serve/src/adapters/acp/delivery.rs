@@ -521,7 +521,7 @@ impl AcpServer {
             else {
                 return;
             };
-            let Some((request_id, meta, inserted)) = self
+            let Some((request_id, _meta, inserted)) = self
                 .concurrent_controls
                 .pending_prompts
                 .begin_admission(session_id, &message_id)
@@ -544,7 +544,7 @@ impl AcpServer {
                 &request_id,
                 &params,
                 None,
-                TurnReply::receipt(message.message_id, meta, inserted),
+                TurnReply::receipt(message.message_id, inserted),
             )
             .await;
             self.concurrent_controls
@@ -660,21 +660,15 @@ pub(super) enum TurnReply {
     /// `state_update` notifications report the turn, since no request spans it.
     Receipt {
         message_id: String,
-        meta: serde_json::Value,
         /// Set when the receipt goes out with the message's insertion.
         inserted: Arc<std::sync::atomic::AtomicBool>,
     },
 }
 
 impl TurnReply {
-    fn receipt(
-        message_id: String,
-        meta: serde_json::Value,
-        inserted: Arc<std::sync::atomic::AtomicBool>,
-    ) -> Self {
+    fn receipt(message_id: String, inserted: Arc<std::sync::atomic::AtomicBool>) -> Self {
         Self::Receipt {
             message_id,
-            meta,
             inserted,
         }
     }
