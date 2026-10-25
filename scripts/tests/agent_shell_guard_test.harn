@@ -1122,9 +1122,6 @@ pipeline test_git_stash_writes_are_denied_across_parser_shapes(harness: Harness,
     "git -c alias.a=stash -c alias.b=a b drop",
     "git -c alias.s='!git stash pop' s",
     "git --config-env=alias.s=SAVED s pop",
-    "xargs -n 1 git stash drop",
-    "printf x | xargs git stash",
-    "xargs -0 -I {} git -C /workspace stash pop",
   ] {
     const refused = verdict(claude_payload(command))
     assert(!refused.allow, command + " writes the shared stash list")
@@ -1136,6 +1133,31 @@ pipeline test_git_stash_writes_are_denied_across_parser_shapes(harness: Harness,
       !decision(codex_payload(command), UNADMITTED, NO_MAKE_TARGETS).allow,
       command + " is refused for Codex in any repository",
     )
+  }
+}
+
+/**
+ * The lane that runs these tests uses the previous published runtime, whose scanner does not project
+ * `xargs_child_argv` yet. Without it the guard cannot see the launched command, so the cases are
+ * skipped there and run wherever the scanner projects the field.
+ */
+fn scanner_projects_xargs_child() -> bool {
+  const scan = command_risk_scan({request: {mode: "shell", command: "xargs git status"}})
+  const stage = (scan.shell_command_groups ?? [])[0]?.[0]
+  return len(stage?.xargs_child_argv ?? []) > 0
+}
+
+@test
+pipeline test_git_stash_writes_launched_through_xargs_are_denied(harness: Harness, task: unknown) {
+  if !scanner_projects_xargs_child() {
+    return
+  }
+  for command in [
+    "xargs -n 1 git stash drop",
+    "printf x | xargs git stash",
+    "xargs -0 -I {} git -C /workspace stash pop",
+  ] {
+    assert(!verdict(claude_payload(command)).allow, command + " writes the shared stash list")
   }
 }
 

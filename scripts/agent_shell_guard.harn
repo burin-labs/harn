@@ -63,19 +63,18 @@ pub type ShellGuardDecision = {allow: bool, reason: string}
  */
 pub type WorktreeAdmission = {available: bool, command: string, denial: string}
 
+/**
+ * `xargs_child_argv` is absent from runtimes older than the release that added it, and the
+ * guard must run on the oldest runtime a consumer pins, so it is optional here.
+ */
 type ShellCommandStage = {
   text: string,
   argv: list<string>,
-  xargs_child_argv: list<string>,
+  xargs_child_argv?: list<string>,
   writes_to_file: bool,
 }
 
-const EMPTY_SHELL_STAGE: ShellCommandStage = {
-  text: "",
-  argv: [],
-  xargs_child_argv: [],
-  writes_to_file: false,
-}
+const EMPTY_SHELL_STAGE: ShellCommandStage = {text: "", argv: [], writes_to_file: false}
 
 fn command_groups(command: string) -> list<list<ShellCommandStage>> {
   const scan = command_risk_scan({request: {mode: "shell", command: command}})
@@ -925,8 +924,9 @@ fn git_stash_write_in(command: string, depth: int) -> bool {
   for group in command_groups(command) {
     for stage in group {
       // `xargs` launches its operands, so the stash rule reads the child the scanner resolved.
-      const launched = if len(stage.xargs_child_argv) > 0 {
-        stage.xargs_child_argv
+      const xargs_child = stage.xargs_child_argv ?? []
+      const launched = if len(xargs_child) > 0 {
+        xargs_child
       } else {
         stage.argv
       }
