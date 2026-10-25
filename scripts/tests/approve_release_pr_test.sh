@@ -119,6 +119,7 @@ retired_predecessor() {
 }
 retired_predecessor_unpublished() { retired_predecessor; echo '{"tag_name":"v0.10.173"}' > "$dir/latest.json"; }
 fold_without_heading() { retired_predecessor; edit files.json '.[0][2].patch = "@@ -1,2 +1,1 @@\n-## Unreleased\n+- A change.\n "'; }
+heading_elsewhere() { retired_predecessor; edit files.json '.[0][2].patch = "@@ -1,4 +1,4 @@\n-## Unreleased\n+- A change.\n ## v0.10.177\n+## v0.10.179\n "'; }
 removes_other_heading() { retired_predecessor; edit files.json '.[0][2].patch += "\n-## v0.10.177"'; }
 human_author() { edit pr.json '.user.login = "someone" | .user.type = "User"'; }
 wrong_branch() { edit pr.json '.head.ref = "feature/x"'; }
@@ -140,7 +141,8 @@ expect_approved release
 expect_approved development
 expect_approved retired_predecessor
 expect_refused retired_predecessor_unpublished 'changes more than the version'
-expect_refused fold_without_heading 'without a v0.10.179 heading'
+expect_refused fold_without_heading 'without renaming it in place to v0.10.179'
+expect_refused heading_elsewhere 'without renaming it in place to v0.10.179'
 expect_refused removes_other_heading 'removes lines'
 expect_refused human_author 'not harn-release-bot'
 expect_refused wrong_branch 'not a release or development-bump branch'

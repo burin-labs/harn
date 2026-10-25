@@ -111,7 +111,8 @@ version_only() {
 }
 
 # A release folds the parked or fragment-built `## Unreleased` heading into
-# `## v<new>`: that one removed line is allowed, and only beside its replacement.
+# `## v<new>`: that one removed line is allowed, and only when the very next
+# patch line is its replacement, so the notes under it keep their heading.
 problems=$(jq -r --arg new "$new" '
   .[]
   | if .filename == "CHANGELOG.md" then
@@ -121,8 +122,9 @@ problems=$(jq -r --arg new "$new" '
             | [$l[] | select(test("^-") and . != "-## Unreleased")] | length > 0
          then "CHANGELOG.md: removes lines"
        elif (.patch | split("\n")) as $l
-            | ($l | any(. == "-## Unreleased")) and (($l | any(. == "+## v" + $new)) | not)
-         then "CHANGELOG.md: drops the Unreleased heading without a v\($new) heading"
+            | [range(0; $l | length) | select($l[.] == "-## Unreleased") | select($l[. + 1] != "+## v" + $new)]
+            | length > 0
+         then "CHANGELOG.md: drops the Unreleased heading without renaming it in place to v\($new)"
        else empty end)
     elif (.filename | test("^changelog\\.d/[^/]+\\.md$")) then
       (if .status == "removed" then empty else "\(.filename): not a deletion" end)
