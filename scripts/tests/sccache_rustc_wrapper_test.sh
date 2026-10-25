@@ -8,8 +8,10 @@ trap 'rm -rf "$tmp_root"' EXIT
 wrapper_source="$repo_root/scripts/sccache_rustc_wrapper.rs"
 wrapper_binary="$tmp_root/harn-sccache-wrapper"
 wrapper_tests="$tmp_root/harn-sccache-wrapper-tests"
+native_windows=0
 case "${OS:-$(uname -s)}" in
   Windows_NT | MINGW* | MSYS* | CYGWIN*)
+    native_windows=1
     wrapper_binary="${wrapper_binary}.exe"
     wrapper_tests="${wrapper_tests}.exe"
     ;;
@@ -19,10 +21,7 @@ rustc --edition=2021 --test "$wrapper_source" -o "$wrapper_tests"
 "$wrapper_tests"
 rustc --edition=2021 "$wrapper_source" -o "$wrapper_binary"
 
-if [[ "${OS:-$(uname -s)}" != Windows_NT \
-  && "${OS:-$(uname -s)}" != MINGW* \
-  && "${OS:-$(uname -s)}" != MSYS* \
-  && "${OS:-$(uname -s)}" != CYGWIN* ]]; then
+if [[ "$native_windows" == 0 ]]; then
   lifecycle_bin="$tmp_root/lifecycle-bin"
   lifecycle_ready="$tmp_root/lifecycle-ready"
   lifecycle_release="$tmp_root/lifecycle-release"
@@ -138,6 +137,44 @@ if ! grep -Fq 'harn-sccache-wrapper: route=sccache' "$output"; then
   echo "real Cargo probe did not preserve sccache for ordinary compilation" >&2
   cat "$output" >&2
   exit 1
+fi
+
+if [[ "$native_windows" == 0 ]]; then
+  cat > "$fixture/src/lib.rs" <<'RS'
+pub const WORKSPACE_BOOTSTRAP: &str = env!("RUSTC_BOOTSTRAP");
+
+#[test]
+fn workspace_wrapper_reached_compilation() {
+    assert_eq!(WORKSPACE_BOOTSTRAP, "1");
+}
+RS
+  workspace_output="$tmp_root/workspace-cargo-output.txt"
+  if ! PATH="$probe_path" \
+    CARGO_TARGET_DIR="$tmp_root/workspace-target" \
+    CARGO_INCREMENTAL=0 \
+    RUSTC_WRAPPER="$wrapper_binary" \
+    RUSTC_WORKSPACE_WRAPPER="$repo_root/scripts/rustc_frontend_wrapper.sh" \
+    HARN_RUSTC_FRONTEND_THREADS=2 \
+    HARN_SCCACHE_WRAPPER_TRACE=1 \
+    HARN_ALLOW_RAW_CARGO=1 \
+    cargo test --manifest-path "$fixture/Cargo.toml" --lib --test binary_env -vv \
+    > "$workspace_output" 2>&1; then
+    echo "real Cargo probe failed with the workspace and cache wrappers composed" >&2
+    cat "$workspace_output" >&2
+    exit 1
+  fi
+  if ! grep -Fq 'workspace_wrapper_reached_compilation ... ok' "$workspace_output"; then
+    echo "workspace wrapper did not reach the actual library test" >&2
+    cat "$workspace_output" >&2
+    exit 1
+  fi
+  if ! grep -Fq 'cargo_binary_environment_reached_rustc ... ok' "$workspace_output"; then
+    echo "workspace wrapper lost the direct Cargo binary environment" >&2
+    cat "$workspace_output" >&2
+    exit 1
+  fi
+else
+  echo "sccache_rustc_wrapper_test: workspace shell wrapper is disabled on native Windows"
 fi
 
 echo "sccache_rustc_wrapper_test: ok"
