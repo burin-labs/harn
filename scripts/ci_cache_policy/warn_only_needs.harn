@@ -1,0 +1,104 @@
+/**
+ * A required aggregate waits for every job it needs, including one whose
+ * unmeasured outcome only warns. Such a job can hold a pull request's status
+ * for its whole timeout and then change nothing, so its pull-request wall
+ * must stay short. Each `*_UNMEASURED_BLOCKS: "false"` flag in the aggregate
+ * names the jobs it keeps warn-only here.
+ */
+pub const WARN_ONLY_NEEDS: dict<string, list<string>> = {
+  CONSUMER_UNMEASURED_BLOCKS: [
+    "consumer-check",
+    "consumer-check-retry",
+    "consumer-base-cli",
+    "consumer-base-check",
+    "consumer-base-check-retry",
+  ],
+}
+
+/** One 45-minute observation window plus resolution and settling. */
+pub const WARN_ONLY_MAX_MINUTES = 65
+
+const AGGREGATE_JOB = "ci-status"
+
+const AGGREGATE_STEP = "Verify required CI jobs"
+
+const PULL_REQUEST_TIMEOUT =
+  r"^(?:([1-9][0-9]*)|\$\{\{ inputs\.pull_request_cli_run != '' && ([1-9][0-9]*) \|\| [1-9][0-9]* \}\})$"
+
+/**
+ * A job's timeout on the pull-request path: a literal, or the reusable
+ * workflow's `inputs.pull_request_cli_run != '' && N || M` split, read as N.
+ */
+fn pull_request_minutes(value: any) -> int? {
+  const text = trim(to_string(value ?? ""))
+  const found = regex_captures(PULL_REQUEST_TIMEOUT, text)
+  if len(found) != 1 {
+    return nil
+  }
+  return to_int(found[0].groups[0] ?? found[0].groups[1])
+}
+
+/** Upper bound on a job's wall: its own timeout, or every job of the workflow it calls. */
+fn job_wall_minutes(job: dict, workflows: dict) -> int? {
+  const uses = to_string(job?.uses ?? "")
+  if uses == "" {
+    return pull_request_minutes(job["timeout-minutes"])
+  }
+  guard uses.starts_with("./.github/workflows/") else {
+    return nil
+  }
+  const called = workflows[uses.split("/").last()]?.jobs
+  if called == nil || len(called.keys()) == 0 {
+    return nil
+  }
+  let total = 0
+  for name in called.keys() {
+    const minutes = pull_request_minutes(called[name]?.["timeout-minutes"])
+    if minutes == nil {
+      return nil
+    }
+    total = total + minutes
+  }
+  return total
+}
+
+pub fn warn_only_needs_errors(workflows: dict) -> list<string> {
+  const aggregate = workflows["ci.yml"]?.jobs?.[AGGREGATE_JOB]
+  const step = (aggregate?.steps ?? []).filter({ item -> item?.name == AGGREGATE_STEP }).to_list()
+  if aggregate == nil || len(step) != 1 {
+    return ["ci.yml:${AGGREGATE_JOB} must keep its '${AGGREGATE_STEP}' step"]
+  }
+  const env = step[0]?.env ?? {}
+  const needs = aggregate?.needs ?? []
+  let errors: list<string> = []
+  for flag in env.keys() {
+    if flag.ends_with("_UNMEASURED_BLOCKS") && WARN_ONLY_NEEDS[flag] == nil {
+      errors = errors + ["ci.yml:${AGGREGATE_JOB} flag ${flag} must name its warn-only jobs"]
+    }
+  }
+  for flag in WARN_ONLY_NEEDS.keys() {
+    const value = to_string(env[flag] ?? "")
+    if value == "true" {
+      continue
+    }
+    if value != "false" {
+      errors = errors + ["ci.yml:${AGGREGATE_JOB} must set ${flag} to \"true\" or \"false\""]
+      continue
+    }
+    for name in WARN_ONLY_NEEDS[flag] {
+      const job = workflows["ci.yml"]?.jobs?.[name]
+      if job == nil || !needs.contains(name) {
+        errors = errors + ["ci.yml:${AGGREGATE_JOB} must need warn-only job ${name}"]
+        continue
+      }
+      const minutes = job_wall_minutes(job, workflows)
+      if minutes == nil || minutes > WARN_ONLY_MAX_MINUTES {
+        errors = errors
+          + [
+            "ci.yml:${name} only warns in ${AGGREGATE_JOB} while ${flag} is false, so its pull-request timeout must be at most ${WARN_ONLY_MAX_MINUTES} minutes (found ${minutes ?? "unbounded"})",
+          ]
+      }
+    }
+  }
+  return errors
+}

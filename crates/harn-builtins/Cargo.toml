@@ -30,12 +30,12 @@ croner = "4.0.0"
 csv = "1"
 flate2 = { version = "1.1.9", optional = true }
 futures = "0.3"
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.178" }
-harn-clock = { path = "../harn-clock", version = "=0.10.178" }
-harn-kernel = { path = "../harn-kernel", version = "=0.10.178" }
-harn-languages = { path = "../harn-languages", version = "=0.10.178" }
-harn-vm = { path = "../harn-vm", version = "=0.10.178", default-features = false }
-harn-vm-core = { path = "../harn-vm-core", version = "=0.10.178" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.179-dev" }
+harn-clock = { path = "../harn-clock", version = "=0.10.179-dev" }
+harn-kernel = { path = "../harn-kernel", version = "=0.10.179-dev" }
+harn-languages = { path = "../harn-languages", version = "=0.10.179-dev" }
+harn-vm = { path = "../harn-vm", version = "=0.10.179-dev", default-features = false }
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.179-dev" }
 hex = "0.4"
 hkdf = "0.13"
 ignore = "0.4"
@@ -68,12 +68,12 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2"], 
 zstd = "0.14.0"
 
 [dev-dependencies]
-harn-clock = { path = "../harn-clock", version = "=0.10.178", features = ["test-support"] }
-harn-vm = { path = "../harn-vm", version = "=0.10.178", default-features = false, features = ["vm-test-support"] }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.178" }
-harn-modules = { path = "../harn-modules", version = "=0.10.178", features = ["bundled-stdlib"] }
-harn-parser = { path = "../harn-parser", version = "=0.10.178" }
-harn-vm-core = { path = "../harn-vm-core", version = "=0.10.178", features = ["vm-test-support"] }
+harn-clock = { path = "../harn-clock", version = "=0.10.179-dev", features = ["test-support"] }
+harn-vm = { path = "../harn-vm", version = "=0.10.179-dev", default-features = false, features = ["vm-test-support"] }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.179-dev" }
+harn-modules = { path = "../harn-modules", version = "=0.10.179-dev", features = ["bundled-stdlib"] }
+harn-parser = { path = "../harn-parser", version = "=0.10.179-dev" }
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.179-dev", features = ["vm-test-support"] }
 tempfile = "3"
 
 [lints]

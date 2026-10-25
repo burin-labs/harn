@@ -79,6 +79,92 @@ canary_say() {
   echo "$*"
 }
 
+# Prints one response header's value from a `gh api --include` header block.
+canary_header() {
+  awk -v name="$1" '{ sub(/\r$/, "") } tolower($1) == tolower(name) ":" { print $2; exit }' <<< "$2"
+}
+
+# Reads one GitHub API resource with the step's GH_TOKEN into the variable
+# named by the first argument; the rest are `gh api` arguments after the
+# caller's reason and the repository's printable label. `--optional` returns 1
+# instead of failing; `--detail TEXT` appends the caller's context to a failure.
+# A rate limit, a server error or a dropped connection is retried with bounded
+# backoff; a denial fails at once. A failure names its class, the HTTP status,
+# the token's step label and the repository's label, never a token, a response
+# body or a private name:
+#
+#   api_access_denied  401, 404, or a 403 that is not a rate limit.
+#   api_rate_limited   429, or 403 with an exhausted or secondary rate limit.
+#   api_unavailable    5xx or no HTTP response.
+#   <reason>           any other status, under the caller's own reason.
+#
+# Locals are prefixed because the result is assigned through dynamic scope.
+canary_api() {
+  local _optional=false _context=''
+  while true; do
+    case "$1" in
+      --optional) _optional=true; shift ;;
+      --detail) _context=" $2"; shift 2 ;;
+      *) break ;;
+    esac
+  done
+  local _into=$1 _reason=$2 _repository=$3
+  shift 3
+  local _attempts=${CANARY_API_ATTEMPTS:-4} _backoff=${CANARY_API_BACKOFF_SECONDS:-5}
+  local _cap=${CANARY_API_WAIT_LIMIT_SECONDS:-300} _attempt=1 _final
+  local _response _headers _body _status _class _wait _remaining _retry_after _reset _message _detail
+  while true; do
+    _response=$(gh api --include "$@" 2> /dev/null) || true
+    _headers=$(awk '{ sub(/\r$/, "") } /^$/ { exit } { print }' <<< "$_response")
+    _body=$(awk 'seen { print } /^\r?$/ { seen = 1 }' <<< "$_response")
+    _status=$(sed -nE '1s/^HTTP\/[0-9.]+ ([0-9]{3}).*/\1/p' <<< "$_headers")
+    if [[ "$_status" == 2?? ]]; then
+      printf -v "$_into" '%s' "$_body"
+      return 0
+    fi
+    _remaining=$(canary_header x-ratelimit-remaining "$_headers")
+    _retry_after=$(canary_header retry-after "$_headers")
+    _reset=$(canary_header x-ratelimit-reset "$_headers")
+    _message=$(jq -r '.message // empty' <<< "$_body" 2> /dev/null || true)
+    _wait=$((_backoff * (1 << (_attempt - 1))))
+    _final=false
+    case "$_status" in
+      ""|5??) _class=api_unavailable ;;
+      429) _class=api_rate_limited ;;
+      403)
+        if [[ "$_remaining" == 0 || -n "$_retry_after" || "$_message" == *"rate limit"* ]]; then
+          _class=api_rate_limited
+        else
+          _class=api_access_denied _final=true
+        fi
+        ;;
+      401|404) _class=api_access_denied _final=true ;;
+      *) _class=$_reason _final=true ;;
+    esac
+    if [[ "$_class" == api_rate_limited ]]; then
+      if [[ "$_retry_after" =~ ^[0-9]+$ ]]; then
+        _wait=$_retry_after
+      elif [[ "$_remaining" == 0 && "$_reset" =~ ^[0-9]+$ ]]; then
+        _wait=$((_reset - $(date +%s) + 1))
+        ((_wait > 0)) || _wait=1
+      fi
+    fi
+    if [[ "$_final" == true ]] || ((_attempt >= _attempts || _wait > _cap)); then
+      _detail="read=$_reason status=${_status:-none} token=${CANARY_TOKEN_LABEL:-GH_TOKEN} repository=$_repository attempts=$_attempt"
+      [[ -z "$_remaining" ]] || _detail+=" ratelimit_remaining=$_remaining"
+      _detail+=$_context
+      if [[ "$_optional" == true ]]; then
+        canary_say "CONSUMER_CANARY unread=$_class $_detail"
+        return 1
+      fi
+      canary_fail "$_class" "$_detail"
+    fi
+    canary_say "CONSUMER_CANARY retry=$_class read=$_reason status=${_status:-none} attempt=$_attempt wait_seconds=$_wait"
+    sleep "$_wait"
+    _attempt=$((_attempt + 1))
+  done
+}
+
 canary_fail() {
   if [[ -n "${CANARY_TIMING_RECEIPT:-}" ]]; then
     canary_say "CONSUMER_CANARY timing=$CANARY_TIMING_RECEIPT"
@@ -106,10 +192,15 @@ canary_record() {
   fi
   [[ "$reason" =~ ^[a-z_]*$ ]] || reason=failure_receipt_unreadable
   if [[ "$repo" =~ ^[^/]+/[^/]+$ && "$run_id" =~ ^[1-9][0-9]*$ ]]; then
-    head=$(gh api "repos/$repo/actions/runs/$run_id" --jq .head_sha 2> /dev/null || true)
+    CANARY_SECRET_NAME=${repo#*/}
+    canary_api --optional head consumer_run_head secret:CONSUMER_CANARY_REPOSITORY \
+      "repos/$repo/actions/runs/$run_id" --jq .head_sha || head=''
     [[ "$head" =~ ^[0-9a-f]{40}$ ]] || head=''
-    if jobs=$(gh api --paginate "repos/$repo/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
-        --jq '.jobs[] | select(.conclusion != "skipped") | .name' 2> /dev/null) && [[ -n "$jobs" ]]; then
+    # One page holds every job; a larger run leaves the digest unmeasured.
+    if canary_api --optional jobs consumer_run_jobs secret:CONSUMER_CANARY_REPOSITORY \
+        "repos/$repo/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
+        --jq 'if .total_count <= 100 then .jobs[] | select(.conclusion != "skipped") | .name else empty end' \
+        && [[ -n "$jobs" ]]; then
       digest=$(LC_ALL=C sort <<< "$jobs" | sha256sum | cut -d' ' -f1)
     fi
   fi
@@ -163,15 +254,14 @@ canary_dispatch() {
   if [[ -n "$paired" ]]; then
     local pull state head_repo
     label=pull-$paired
-    pull=$(gh api "repos/$repo/pulls/$paired" \
-      --jq '"\(.state) \(.head.repo.full_name // "none") \(.head.ref)"' 2> /dev/null) \
-      || canary_fail paired_pull_unreadable "pull=$paired"
+    canary_api --detail "pull=$paired" pull paired_pull_unreadable \
+      secret:CONSUMER_CANARY_REPOSITORY "repos/$repo/pulls/$paired" --jq '"\(.state) \(.head.repo.full_name // "none") \(.head.ref)"'
     read -r state head_repo ref <<< "$pull"
     [[ "$state" == open ]] || canary_fail paired_pull_not_open "pull=$paired state=$state"
     [[ "$head_repo" == "$repo" ]] || canary_fail paired_pull_from_fork "pull=$paired"
   else
-    ref=$(gh api "repos/$repo" --jq .default_branch 2> /dev/null) \
-      || canary_fail consumer_unreadable
+    canary_api ref consumer_unreadable secret:CONSUMER_CANARY_REPOSITORY "repos/$repo" --jq .default_branch
+    [[ -n "$ref" ]] || canary_fail consumer_unreadable "read=consumer_default_branch"
   fi
 
   if [[ -n "${REHEARSAL_PROMOTION_RUN_ID:-}" ]]; then
@@ -211,10 +301,22 @@ canary_dispatch() {
       ;;
     *) canary_fail pull_request_identity_invalid ;;
   esac
-  dispatched=$(gh workflow run "$workflow" -R "$repo" --ref "$ref" \
+  # GitHub rejects a rate-limited dispatch before acting on it, so only that
+  # refusal is retried; any other failure may have dispatched and is final.
+  local attempt=1 status wait
+  until dispatched=$(gh workflow run "$workflow" -R "$repo" --ref "$ref" \
     -f target="$target_version" -f source_revision="$revision" -f legs=clean -f observer="$observer" \
-    "${pull_request_inputs[@]}" "${producer_inputs[@]}" 2>&1) \
-    || canary_fail dispatch_refused
+    "${pull_request_inputs[@]}" "${producer_inputs[@]}" 2>&1); do
+    status=$(grep -oE 'HTTP [0-9]{3}' <<< "$dispatched" | head -1 | cut -d' ' -f2 || true)
+    wait=$((${CANARY_API_BACKOFF_SECONDS:-5} * 3 * (1 << (attempt - 1))))
+    if [[ ! ("$status" == 429 || ("$status" == 403 && "$dispatched" == *"rate limit"*)) ]] \
+        || ((attempt >= ${CANARY_API_ATTEMPTS:-4})); then
+      canary_fail dispatch_refused "status=${status:-none} token=${CANARY_TOKEN_LABEL:-GH_TOKEN} repository=secret:CONSUMER_CANARY_REPOSITORY attempts=$attempt"
+    fi
+    canary_say "CONSUMER_CANARY retry=api_rate_limited read=dispatch status=$status attempt=$attempt wait_seconds=$wait"
+    sleep "$wait"
+    attempt=$((attempt + 1))
+  done
   run_id=$(grep -oE "https://github\.com/$repo/actions/runs/[0-9]+" <<< "$dispatched" | head -1 || true)
   run_id=${run_id##*/}
   [[ -n "$run_id" ]] || canary_fail dispatch_returned_no_run
@@ -261,9 +363,8 @@ canary_observe() {
     if [[ "$budget_version" == 1 ]] && ((now - started >= deadline)); then
       canary_fail no_verdict_before_deadline "run=$run_id verdict=unmeasured wall_seconds=$((now - started))"
     fi
-    record=$(gh api "repos/$repo/actions/runs/$run_id" \
-      --jq '"\(.status) \(.conclusion // "none")"' 2> /dev/null) \
-      || canary_fail consumer_read_refused "run=$run_id verdict=unmeasured"
+    canary_api --detail "run=$run_id verdict=unmeasured" record consumer_read_refused \
+      secret:CONSUMER_CANARY_REPOSITORY "repos/$repo/actions/runs/$run_id" --jq '"\(.status) \(.conclusion // "none")"'
     read -r status conclusion <<< "$record"
     case "$status" in
       completed|queued|in_progress|waiting|pending|requested) ;;
@@ -290,9 +391,8 @@ canary_observe() {
     [[ "$status" == completed ]] && break
     if [[ -n "${CANARY_PAIRED_PULL:-}" ]]; then
       local paired_state paired_repository _paired_ref
-      record=$(gh api "repos/$repo/pulls/$CANARY_PAIRED_PULL" \
-        --jq '"\(.state) \(.head.repo.full_name // "none") \(.head.ref)"' 2> /dev/null) \
-        || canary_fail paired_pull_unreadable "verdict=unmeasured"
+      canary_api --detail "verdict=unmeasured" record paired_pull_unreadable \
+        secret:CONSUMER_CANARY_REPOSITORY "repos/$repo/pulls/$CANARY_PAIRED_PULL" --jq '"\(.state) \(.head.repo.full_name // "none") \(.head.ref)"'
       read -r paired_state paired_repository _paired_ref <<< "$record"
       [[ "$paired_state" == open && "$paired_repository" == "$repo" ]] \
         || canary_fail paired_pull_no_longer_needed "verdict=unmeasured"
@@ -342,17 +442,16 @@ canary_decide() {
     return 0
   fi
   local history id head settled last='' last_run=''
-  history=$(gh api "repos/$repo/actions/workflows/consumer-canary.yml/runs?branch=main&status=completed&per_page=20" \
-    --jq '.workflow_runs[] | "\(.id) \(.head_sha)"' 2> /dev/null) \
-    || canary_fail settled_history_unreadable
+  canary_api history settled_history_unreadable "$repo" \
+    "repos/$repo/actions/workflows/consumer-canary.yml/runs?branch=main&status=completed&per_page=20" \
+    --jq '.workflow_runs[] | "\(.id) \(.head_sha)"'
   while read -r id head; do
     [[ -n "$id" && "$id" != "$current" ]] || continue
     # The settled step names the revision it rehearsed; an unnamed one rehearsed the run's head.
-    settled=$(gh api "repos/$repo/actions/runs/$id/jobs" \
+    canary_api --detail "run=$id" settled settled_history_unreadable "$repo" "repos/$repo/actions/runs/$id/jobs" \
       --jq '[.jobs[] | select(.name == "Settled verdict" and .conclusion == "success")
         | ([.steps[]?.name | capture("^Record the settled verdict at (?<sha>[0-9a-f]{40})$").sha] | first) // "head"]
-        | first // ""' \
-      2> /dev/null) || canary_fail settled_history_unreadable "run=$id"
+        | first // ""'
     case "$settled" in
       "") continue ;;
       head) last=$head ;;

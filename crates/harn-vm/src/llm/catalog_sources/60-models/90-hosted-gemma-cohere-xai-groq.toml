@@ -122,6 +122,7 @@ provider = "fireworks"
 # Balanced default from active selectors. Record the notice now; retire the
 # serverless row together with the separately measured default cutover.
 deprecation_note = "Fireworks retires this serverless route 2026-11-07; dedicated deployments and Reserved Throughput are unaffected. The official migration is a dedicated GPT-OSS 120B deployment, not another token-billed model. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
+retires_on = "2026-11-07"
 context_window = 131072
 logical_model = "openai-gpt-oss-120b"
 equivalence_group = "openai-gpt-oss-120b"

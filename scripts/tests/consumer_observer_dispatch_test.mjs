@@ -98,7 +98,7 @@ test('the actual dispatch entrypoint requires issued custody and a fresh live pa
       "const fs=require('node:fs');",
       "const args=process.argv.slice(2);fs.appendFileSync(process.env.GH_CALLS,JSON.stringify(args)+'\\n');",
       "if(args[0]==='workflow'&&args[1]==='run')console.log('https://github.com/acme/widget-host/actions/runs/73');",
-      "else if(args[0]==='api'&&args[1]==='repos/acme/widget-host')console.log('main');",
+      "else if(args[0]==='api'&&args[1]==='--include'&&args[2]==='repos/acme/widget-host')console.log('HTTP/2.0 200 OK\\r\\n\\r\\nmain');",
       "else process.exitCode=1;",
     ].join('\n'),{mode:0o700});
     const bashEntry=fileURLToPath(new URL('../ci/consumer_canary.sh',import.meta.url));

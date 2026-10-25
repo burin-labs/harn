@@ -215,7 +215,7 @@ export interface HarnCatalogModel {
   prompt_cache: boolean
   batch?: HarnModelBatchSupport
   pricing?: HarnModelPricing
-  deprecation: { status: "active" | "deprecated"; note?: string; sunset_date?: string; superseded_by?: string }
+  deprecation: { status: "active" | "deprecated"; note?: string; sunset_date?: string; retires_on?: string; superseded_by?: string }
   availability: "serverless" | "dedicated" | "unknown"
   quality_tags: string[]
   capability_tags: string[]

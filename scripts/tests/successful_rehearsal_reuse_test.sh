@@ -66,6 +66,7 @@ gh() {
       jq -nc --arg sha "$consumer_sha" --arg mode "${mode:-}" '{id:300,repository:{full_name:"burin-labs/fixture-product"},head_repository:{full_name:"burin-labs/fixture-product"},head_sha:$sha,head_branch:"main",path:".github/workflows/harn-repin-rehearsal.yml",event:"workflow_dispatch",status:(if $mode == "pending" then "in_progress" else "completed" end),conclusion:(if $mode == "failed-child" then "failure" else "success" end),run_attempt:1}' ;;
     *'/commits/main --jq .sha')
       if [[ "${mode:-}" == changed-head ]]; then printf '%040d\n' 9; else printf '%s\n' "$consumer_sha"; fi ;;
+    *'--include repos/burin-labs/fixture-product --jq .default_branch') printf 'HTTP/2.0 200 OK\r\n\r\nmain\n' ;;
     *'repos/burin-labs/fixture-product --jq .default_branch') printf 'main\n' ;;
     'workflow run '*) touch "$fixture_root/dispatched"; return 1 ;;
     *) echo "Unexpected fake API: $path" >&2; return 1 ;;

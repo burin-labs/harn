@@ -260,6 +260,21 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 ));
             }
         }
+        if let Some(retires_on) = model.deprecation.retires_on.as_deref() {
+            if chrono::NaiveDate::parse_from_str(retires_on, "%Y-%m-%d").is_err() {
+                result.errors.push(format!(
+                    "model {} deprecation.retires_on must be an ISO 8601 date (YYYY-MM-DD)",
+                    model.id
+                ));
+            }
+            if model.deprecation.status == DeprecationStatus::Deprecated {
+                result.errors.push(format!(
+                    "model {} declares deprecation.retires_on but is already deprecated; \
+                     use deprecation.sunset_date",
+                    model.id
+                ));
+            }
+        }
         if model.provider == "deepseek" && RETIRED_DEEPSEEK_DIRECT_IDS.contains(&model.id.as_str())
         {
             result.errors.push(format!(

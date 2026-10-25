@@ -74,6 +74,7 @@ pub(super) fn test_equivalent_model_with_context(
         deprecated: false,
         deprecation_note: None,
         sunset_date: None,
+        retires_on: None,
         superseded_by: None,
         serving_tiers: Vec::new(),
         quality_tags: Vec::new(),
