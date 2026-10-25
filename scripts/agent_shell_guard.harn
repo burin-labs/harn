@@ -1033,6 +1033,29 @@ const GIT_BUILTIN_COMMANDS: list<string> = [
 ]
 
 /**
+ * Shell builtins and wrappers that change the environment, directory or shell state for what follows.
+ */
+const ENVIRONMENT_CHANGING_WORDS: list<string> = [
+  "env",
+  "unset",
+  "export",
+  "cd",
+  "pushd",
+  "popd",
+  "source",
+  "eval",
+  "exec",
+  "declare",
+  "typeset",
+  "readonly",
+  "set",
+  ".",
+]
+
+const VARIABLE_NAME_CHARACTERS: string =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+
+/**
  * Whether anything in the command line could change git's environment, working directory or
  * configuration sources before git runs: a `NAME=` assignment, `env`, `unset`, `export`, `cd` and
  * the other builtins that change the shell's state, a subshell, or command substitution. The alias
@@ -1040,13 +1063,43 @@ const GIT_BUILTIN_COMMANDS: list<string> = [
  * the lookup cannot read. The rule is structural, not a list of variable names.
  */
 fn command_may_change_git_environment(command: string) -> bool {
-  const start = "(^|[\\s;&|(`{])"
-  const assignment = start + "[A-Za-z_][A-Za-z0-9_]*\\+?="
-  const state_builtin = start
-    + "(env|unset|export|cd|pushd|popd|source|eval|exec|declare|typeset|readonly|set|\\.)(\\s|;|$|\\))"
-  return regex_match(assignment, command) != nil
-    || regex_match(state_builtin, command) != nil
-    || regex_match("[(`]", command) != nil
+  if command.contains("(") || command.contains("`") {
+    return true
+  }
+  let spaced = command
+  for separator in ["\"", "'", ";", "&", "|", ")", "{", "}", "\n", "\t"] {
+    spaced = spaced.replace(separator, " ")
+  }
+  for word in spaced.split(" ") {
+    if word == "" {
+      continue
+    }
+    if ENVIRONMENT_CHANGING_WORDS.contains(word) || is_variable_assignment(word) {
+      return true
+    }
+  }
+  return false
+}
+
+/** Whether a word is a `NAME=value` (or `NAME+=value`) assignment. */
+fn is_variable_assignment(word: string) -> bool {
+  const equals = word.index_of("=")
+  if equals <= 0 {
+    return false
+  }
+  let name = word.substring(0, equals)
+  if name.ends_with("+") {
+    name = name.substring(0, len(name) - 1)
+  }
+  if name == "" || "0123456789".contains(name.substring(0, 1)) {
+    return false
+  }
+  for index in range(0, len(name)) {
+    if !VARIABLE_NAME_CHARACTERS.contains(name.substring(index, index + 1)) {
+      return false
+    }
+  }
+  return true
 }
 
 /** Key a lookup returns when git could not read the configuration the command selects. */
