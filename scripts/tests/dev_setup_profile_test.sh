@@ -47,6 +47,8 @@ trap cleanup EXIT
 # Cases that want one set it explicitly.
 export HARN_DEV_TARGET_WORKTREE_PATH=
 export CODEX_WORKTREE_PATH=
+# The front-end default, whatever the developer running the test opted into.
+export HARN_RUSTC_FRONTEND_THREADS=8
 
 make_fixture_repo() {
   local name="$1"
@@ -59,6 +61,7 @@ make_fixture_repo() {
   cp "$repo_root/scripts/lib/file_time.sh" "$repo/scripts/lib/file_time.sh"
   cp "$repo_root/scripts/lib/cargo_env.sh" "$repo/scripts/lib/cargo_env.sh"
   cp "$repo_root/scripts/lib/rustc_frontend.sh" "$repo/scripts/lib/rustc_frontend.sh"
+  cp "$repo_root/scripts/rustc_frontend_wrapper.sh" "$repo/scripts/rustc_frontend_wrapper.sh"
   chmod +x "$repo/scripts/dev_setup.sh" "$repo/scripts/cargo_target_seed.sh"
   printf '[package]\nname = "setup-fixture"\nversion = "0.1.0"\n' > "$repo/Cargo.toml"
   printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/sign_local_macos.sh"
@@ -438,29 +441,50 @@ if ! grep -Fxq "target-dir = \"$rust_target_dir\" # harn-dev-setup-managed" "$ru
   echo "shared-build migration did not preserve the per-worktree target directory" >&2
   exit 1
 fi
-# The parallel rustc front end is on, written once across repeated setups, and
-# its flags never appear without the bootstrap that lets stable rustc take them.
-frontend_lines='rustflags = ["-Zthreads=8"] # harn-dev-setup-managed
-RUSTC_BOOTSTRAP = { value = "1", force = true } # harn-dev-setup-managed'
-if [[ "$(grep -E '^(rustflags|RUSTC_BOOTSTRAP) =' "$rust_repo/.cargo/config.toml")" != "$frontend_lines" ]]; then
+# The parallel rustc front end is on through this checkout's workspace wrapper,
+# written once across repeated setups.
+frontend_line_re='^rustc-workspace-wrapper = ".*/rustc-frontend/[0-9]+-[0-9]+/rustc_frontend_wrapper\.sh" # harn-dev-setup-managed$'
+if [[ "$(grep -Ec "$frontend_line_re" "$rust_repo/.cargo/config.toml")" != 1 ]] \
+  || [[ "$(grep -Ec '^[[:space:]]*rustc-workspace-wrapper[[:space:]]*=' "$rust_repo/.cargo/config.toml")" != 1 ]]; then
   echo "rust setup did not configure the parallel rustc front end exactly once" >&2
   cat "$rust_repo/.cargo/config.toml" >&2
   exit 1
 fi
 HARN_RUSTC_FRONTEND_THREADS=1 run_setup "$rust_repo" rust "$tmp_root/rust-serial-output.txt" "$rust_cargo"
-if grep -Eq '^(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
+if grep -Eq '^[[:space:]]*rustc-workspace-wrapper[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
   echo "HARN_RUSTC_FRONTEND_THREADS=1 left the parallel front end configured" >&2
   exit 1
 fi
-# A user-owned RUSTC_BOOTSTRAP stays the only one: a duplicate key would make
-# Cargo reject the whole config.
-awk '{ print } /^\[env\][[:space:]]*$/ { print "RUSTC_BOOTSTRAP = \"1\"" }' \
+# Native Windows Cargo cannot launch the shell wrapper, so setup there skips it.
+OS=Windows_NT run_setup "$rust_repo" rust "$tmp_root/rust-windows-output.txt" "$rust_cargo"
+if grep -Eq '^[[:space:]]*rustc-workspace-wrapper[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
+  echo "setup configured the shell wrapper on Windows" >&2
+  exit 1
+fi
+# A checkout configured by the earlier build-wide form loses its managed
+# rustflags and RUSTC_BOOTSTRAP lines, which reached every dependency.
+awk '{ print }
+  /^\[build\][[:space:]]*$/ { print "rustflags = [\"-Zthreads=8\"] # harn-dev-setup-managed" }
+  END { print "\n[env]"; print "RUSTC_BOOTSTRAP = { value = \"1\", force = true } # harn-dev-setup-managed" }' \
   "$rust_repo/.cargo/config.toml" > "$rust_repo/.cargo/config.toml.tmp"
 mv "$rust_repo/.cargo/config.toml.tmp" "$rust_repo/.cargo/config.toml"
-grep -Fxq 'RUSTC_BOOTSTRAP = "1"' "$rust_repo/.cargo/config.toml"
-run_setup "$rust_repo" rust "$tmp_root/rust-user-bootstrap-output.txt" "$rust_cargo"
-if [[ "$(grep -Ec '^(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=' "$rust_repo/.cargo/config.toml")" != 1 ]]; then
-  echo "rust setup wrote a front-end line beside a user-owned RUSTC_BOOTSTRAP" >&2
+[[ "$(grep -Ec '^(rustflags|RUSTC_BOOTSTRAP) = ' "$rust_repo/.cargo/config.toml")" == 2 ]]
+run_setup "$rust_repo" rust "$tmp_root/rust-migrate-output.txt" "$rust_cargo"
+if grep -Eq '^[[:space:]]*(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=' "$rust_repo/.cargo/config.toml" \
+  || ! grep -Eq "$frontend_line_re" "$rust_repo/.cargo/config.toml"; then
+  echo "setup did not migrate the build-wide front-end lines to the workspace wrapper" >&2
+  cat "$rust_repo/.cargo/config.toml" >&2
+  exit 1
+fi
+# A user-owned workspace wrapper stays the only one: a duplicate key would make
+# Cargo reject the whole config.
+awk '{ print } /^\[build\][[:space:]]*$/ { print "rustc-workspace-wrapper = \"clippy-driver\"" }' \
+  "$rust_repo/.cargo/config.toml" > "$rust_repo/.cargo/config.toml.tmp"
+mv "$rust_repo/.cargo/config.toml.tmp" "$rust_repo/.cargo/config.toml"
+grep -Fxq 'rustc-workspace-wrapper = "clippy-driver"' "$rust_repo/.cargo/config.toml"
+run_setup "$rust_repo" rust "$tmp_root/rust-user-wrapper-output.txt" "$rust_cargo"
+if [[ "$(grep -Ec '^[[:space:]]*rustc-workspace-wrapper[[:space:]]*=' "$rust_repo/.cargo/config.toml")" != 1 ]]; then
+  echo "rust setup wrote a front-end line beside a user-owned workspace wrapper" >&2
   cat "$rust_repo/.cargo/config.toml" >&2
   exit 1
 fi

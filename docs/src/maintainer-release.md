@@ -143,7 +143,15 @@ Record the release pull request and the exact commit that lands on main.
 Follow the runs for that commit in
 [Harn Actions](https://github.com/burin-labs/harn/actions).
 
-1. `build-release-binaries.yml` builds the candidate on the version commit's
+1. `build-release-binaries.yml` first requires successful full-suite main CI
+   at the exact candidate source, using promotion's job list in
+   `scripts/lib/full_suite_jobs.sh`. It waits up to 85 minutes for a running
+   suite and refuses missing or failed proof before building, signing, or
+   dispatching the consumer rehearsal. The gate emits
+   `harn.release.full_suite.v1` JSON with the stage, source SHA, verdict,
+   pending and failing job names, and next action. Native qualification starts
+   after this admission and runs beside the artifact builds; publication still
+   requires it. The workflow then builds the candidate on the version commit's
    push to main. The release's merge group builds nothing; its
    `Release candidate verdict` passes only after the exact-source consumer
    rehearsal passes at the commit that lands. A merge group can't build the
@@ -240,7 +248,10 @@ it after the release publishes.
 - Opener failed before publication: fix the cause and dispatch
   `bump-release.yml` again. Its admission checks run again.
 - Candidate failed because of infrastructure: rerun the failed jobs in that
-  exact candidate run. A source defect needs a corrected pull request and
+  exact candidate run. Successful matrix legs stay complete. Candidate AOT
+  payloads, license notices, and archives remain available for 30 days so a
+  later retry can restore successful handoffs. Compiler caches are an
+  acceleration aid and may be evicted independently. A source defect needs a corrected pull request and
   certification of the resulting commit. For an unpublished stable version,
   keep that version, build a signed source candidate on corrected main with
   `source_candidate=true`, then use manual promotion recovery. Recovery proves

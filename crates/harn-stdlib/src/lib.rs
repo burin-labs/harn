@@ -142,6 +142,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "verification_targets" => "stdlib/verification_targets.harn",
     "verification_ladder" => "stdlib/verification_ladder.harn",
     "verification_public" => "stdlib/verification_public.harn",
+    "verification_reuse" => "stdlib/verification_reuse.harn",
     "signal" => "stdlib/stdlib_signal.harn",
     "net_policy" => "stdlib/stdlib_net_policy.harn",
     "review" => "stdlib/stdlib_review.harn",

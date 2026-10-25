@@ -119,6 +119,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  # Published binaries come from the stable compiler with no unstable flags;
+  # the parallel front end (scripts/lib/rustc_frontend.sh) is for iteration.
+  HARN_RUSTC_FRONTEND_THREADS: "1"
 
 jobs:
   setup:
@@ -468,6 +471,38 @@ jobs:
             echo "| Build matrix | \`$BUILD_MATRIX\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  source-ci:
+    name: Qualify candidate source
+    needs: setup
+    if: needs.setup.outputs.should_build_binaries == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.setup.outputs.build_mode == 'candidate'
+        with:
+          persist-credentials: false
+      - name: Require main CI before candidate work
+        if: needs.setup.outputs.build_mode == 'candidate'
+        timeout-minutes: 85
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.setup.outputs.candidate_source_sha }}
+          WAIT_FOR_FULL_SUITE: 'true'
+          FULL_SUITE_STATUS_FILE: ${{ runner.temp }}/source-ci.json
+        # Native qualification runs after this admission, beside the builds.
+        # Publication still requires both proofs through the same gate.
+        run: bash scripts/ci/require_full_suite.sh --main-only
+      - name: Preserve source qualification verdict
+        if: always() && needs.setup.outputs.build_mode == 'candidate'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: source-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/source-ci.json
+          if-no-files-found: error
+          retention-days: 7
+
   # Generate the target-independent CLI AOT payload exactly once before the
   # candidate or benchmark matrix. The generator needs the complete Rust
   # workspace; each target build needs only the resulting package-local
@@ -476,7 +511,7 @@ jobs:
   # intentionally stay source-fallback-only.
   prepare_cli_aot:
     name: Prepare CLI AOT payload
-    needs: setup
+    needs: [setup, source-ci]
     # Match build's top-level condition so a warm-cache build is never skipped
     # merely because this release/benchmark payload job had no work to do.
     if: needs.setup.outputs.should_build_binaries == 'true'
@@ -548,7 +583,7 @@ jobs:
           name: harn-release-license-notices
           path: dist/release-notices/
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30
 
       - name: Upload CLI AOT payload for release and benchmark targets
         if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
@@ -560,9 +595,9 @@ jobs:
             crates/harn-cli/generated/cli-bytecode/
           if-no-files-found: error
           compression-level: 0
-          # Machine handoff: the build jobs download this in the same run, and
-          # nothing reads it afterwards.
-          retention-days: 1
+          # A failed build leg can resume in this run for as long as its
+          # candidate archives remain available. Benchmarks are disposable.
+          retention-days: ${{ needs.setup.outputs.build_mode == 'candidate' && 30 || 1 }}
 
   build:
     name: Build ${{ matrix.target }}
@@ -838,9 +873,9 @@ jobs:
           df -h /mnt "$GITHUB_WORKSPACE"
 
       # Job-scoped so the size gate records the identity that was built. On
-      # ARM64 Linux the fat-LTO link peaked at 15.5 GB RAM plus 15 GB swap,
-      # and the macOS and Windows builds ran past 100 minutes. These targets
-      # keep the pre-fat-LTO thin profile until a fat-LTO build fits.
+      # ARM64 Linux the fat-LTO link peaked at 15.5 GB RAM plus 15 GB swap, and
+      # both macOS fat-LTO builds hit the 135-minute Build timeout (135m13s,
+      # 135m14s). These targets keep the thin profile until a fat-LTO build fits.
       - name: Scope the dist profile to what the runner can link
         shell: bash
         env:
@@ -848,7 +883,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$HARN_RELEASE_TARGET" in
-            aarch64-unknown-linux-gnu | aarch64-apple-darwin | x86_64-apple-darwin | x86_64-pc-windows-msvc)
+            aarch64-unknown-linux-gnu | aarch64-apple-darwin | x86_64-apple-darwin)
               {
                 echo "CARGO_PROFILE_DIST_LTO=thin"
                 echo "CARGO_PROFILE_DIST_CODEGEN_UNITS=16"
@@ -1891,7 +1926,7 @@ jobs:
   # build so the release does not wait on a person to dispatch it.
   native-qualification:
     name: Start native release qualification
-    needs: setup
+    needs: [setup, source-ci]
     if: needs.setup.outputs.build_mode == 'candidate' && github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1916,7 +1951,7 @@ jobs:
   # reads.
   candidate-verdict:
     name: Release candidate verdict
-    needs: [setup, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal]
+    needs: [setup, source-ci, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1949,7 +1984,7 @@ jobs:
             exit 0
           fi
           if ! jq -e '
-            ["setup", "prepare_cli_aot", "build", "collect_candidate_manifest", "release-residual-audit", "release-smoke"] as $required |
+            ["setup", "source-ci", "prepare_cli_aot", "build", "collect_candidate_manifest", "release-residual-audit", "release-smoke"] as $required |
             . as $jobs | all($required[]; $jobs[.].result == "success")
           ' <<<"$RESULTS" >/dev/null; then
             echo "::error::A candidate job did not succeed: $RESULTS"
