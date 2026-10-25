@@ -78,9 +78,7 @@ pub fn plan_invocation(program: &str, args: &[String]) -> Option<CommandPlan> {
 /// Analyze a POSIX command without evaluating expansions or executing it.
 pub fn plan_posix_command(source: &str) -> Option<CommandPlan> {
     let mut parser = tree_sitter::Parser::new();
-    parser
-        .set_language(&tree_sitter_bash::LANGUAGE.into())
-        .ok()?;
+    parser.set_language(&harn_grammars::bash()).ok()?;
     let tree = parser.parse(source, None)?;
     let root = tree.root_node();
     if root.has_error() {

@@ -121,6 +121,12 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 
 ## Catalog and matrix commands
 
+- Update pinned model facts: `harn provider catalog update-source --live`, or
+  `--input <response.json>` for a downloaded Models.dev v2.0 response.
+- Keep imported facts in source-only `models_dev` bindings; don't also author
+  their values locally. Generation reads the committed cache without network.
+- Keep unsupported conditional pricing, provider mechanics, defaults, and
+  measured tool behavior in Harn. Upstream tool flags aren't live-loop proof.
 - Refresh provider observations with fixtures: `harn provider catalog refresh --check`.
 - Refresh provider observations live: `harn provider catalog refresh --live --json`.
 - Regenerate catalog artifacts: `harn provider catalog generate`.

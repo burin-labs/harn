@@ -6,44 +6,35 @@
 # against the provider's live models endpoint on 2026-09-20; rates and
 # context windows below are that read.
 [models."qwen/qwen3-coder"]
-name = "Qwen3 Coder 480B A35B"
 provider = "openrouter"
-context_window = 262144
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 1.00, cache_read_per_mtok = 0.10 }
 availability = "serverless"
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "long_context", "agentic", "tool_use"]
 benchmarks = { swe_bench_verified = 67.0 }
 
 # Qwen3-Coder-Next — 80B/3B MoE non-thinking coder.
+models_dev = {provider = "openrouter", model = "qwen/qwen3-coder", fields = ["name", "context_window", "open_weight", "pricing"]}
 [models."qwen/qwen3-coder-next"]
-name = "Qwen3 Coder Next"
 provider = "openrouter"
-context_window = 262144
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.12, output_per_mtok = 0.80, cache_read_per_mtok = 0.07 }
 availability = "serverless"
 architecture = { parameter_count_b = 80.0, active_parameter_count_b = 3.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3-Coder-Next", last_verified = "2026-07-02" }
 benchmarks = { swe_bench_verified = 70.6, swe_bench_pro = 44.3 }
 tier = "mid"
-open_weight = true
 strengths = ["coding", "cheap", "long_context", "agentic", "tool_use"]
 
 # Qwen3.5-397B-A17B — the open-tier Qwen flagship (native VLM MoE).
 # OpenRouter route rate card re-read from /api/v1/models, 2026-10-15.
+models_dev = {provider = "openrouter", model = "qwen/qwen3-coder-next", fields = ["name", "context_window", "open_weight", "pricing"]}
 [models."qwen/qwen3.5-397b-a17b"]
 name = "Qwen3.5 397B A17B"
 provider = "openrouter"
-context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.50, output_per_mtok = 3.60, cache_read_per_mtok = 0.30 }
 availability = "serverless"
 architecture = { parameter_count_b = 397.0, active_parameter_count_b = 17.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B", last_verified = "2026-07-02" }
 benchmarks = { swe_bench_verified = 76.4 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 
 # Together lists Qwen3-Coder-Next-FP8 in GET /v1/models alongside its
@@ -52,25 +43,21 @@ strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 # endpoint. Carry the catalog row so price/route metadata is preserved,
 # but mark `availability = "dedicated"` so hosts don't surface it as a
 # one-click serverless option.
+models_dev = {provider = "openrouter", model = "qwen/qwen3.5-397b-a17b", fields = ["context_window", "open_weight", "pricing"]}
 [models."Qwen/Qwen3-Coder-Next-FP8"]
 name = "Qwen3 Coder Next FP8 (Together, dedicated)"
 provider = "together"
-context_window = 262144
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.50, output_per_mtok = 1.20 }
 availability = "dedicated"
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "long_context", "agentic"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+models_dev = {provider = "togetherai", model = "Qwen/Qwen3-Coder-Next-FP8", fields = ["context_window", "open_weight", "pricing"]}
 [models."deepseek/deepseek-v3.2"]
-name = "DeepSeek V3.2"
 provider = "openrouter"
-context_window = 163840
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.259, output_per_mtok = 0.80, cache_read_per_mtok = 0.14 }
 tier = "mid"
-open_weight = true
 strengths = ["coding", "tool_use", "cheap"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
 # Kimi K3 on OpenRouter (listed since 2026-07-16; catalogued 2026-10-01, when
@@ -79,44 +66,38 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen",
 # $3 / $15 endpoint and billed at that rate, which is also Moonshot's list
 # price, so the row records it. Capability evidence is on the
 # `moonshotai/kimi-k3` OpenRouter capability rule.
+models_dev = {provider = "openrouter", model = "deepseek/deepseek-v3.2", fields = ["name", "context_window", "open_weight"]}
 [models."moonshotai/kimi-k3"]
 name = "Kimi K3 (via OpenRouter)"
 provider = "openrouter"
 logical_model = "moonshot-kimi-k3"
 equivalence_group = "moonshot-kimi-k3"
 served_variant = "openrouter"
-context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+models_dev = {provider = "openrouter", model = "moonshotai/kimi-k3", fields = ["context_window", "open_weight"]}
 [models."moonshotai/kimi-k2.6"]
-name = "Kimi K2.6"
 provider = "openrouter"
-context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.65, output_per_mtok = 3.41, cache_read_per_mtok = 0.15 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 benchmarks = { swe_bench_pro = 58.6, humanitys_last_exam_with_tools = 54.0 }
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+models_dev = {provider = "openrouter", model = "moonshotai/kimi-k2.6", fields = ["name", "context_window", "open_weight", "pricing"]}
 [models."moonshotai/kimi-k2.7-code"]
-name = "Kimi K2.7 Code"
 provider = "openrouter"
-context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.6712, output_per_mtok = 3.35, cache_read_per_mtok = 0.18 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+models_dev = {provider = "openrouter", model = "moonshotai/kimi-k2.7-code", fields = ["name", "context_window", "open_weight"]}
 [models."openai/gpt-oss-120b"]
 name = "GPT-OSS 120B"
 provider = "openrouter"
-context_window = 131072
 logical_model = "openai-gpt-oss-120b"
 equivalence_group = "openai-gpt-oss-120b"
 served_variant = "openrouter"
@@ -124,7 +105,6 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
 # OpenRouter's 2026-10-15 index lists $0.15/$0.60; the former headline
 # underpriced input even below the route's cached-input rate.
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.075 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
 # Explicit metadata keeps this row self-described across fragment boundaries.
 # GPT-OSS 120B is Apache-2.0 (open weight) and text-only; it is Burin's cheap
@@ -133,5 +113,5 @@ architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe 
 # equivalence group (the validator requires one tier per logical model — the
 # conservative shared baseline is `frontier`).
 tier = "mid"
-open_weight = true
 strengths = ["cheap", "coding", "tool_use", "reasoning"]
+models_dev = {provider = "openrouter", model = "openai/gpt-oss-120b", fields = ["context_window", "open_weight", "pricing"]}

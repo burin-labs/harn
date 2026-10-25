@@ -86,8 +86,8 @@ grep -Fq 'remote.publish_commit(' "$branch_publisher" \
 # One arming path for both automated release-lane pull requests.
 grep -Fq 'gh pr edit "$pr_url" --add-label ship' "$root/scripts/lib/release_ship_enrollment.sh" \
   || fail "the shared release helper does not enroll Smart Ship"
-for armer in "$root/scripts/validate_development_bump.sh" "$release_opener"; do
-  grep -Fq 'release_enroll_ship "$pr_url"' "$armer" \
+for armer in "$root/scripts/validate_development_bump.sh" "$root/scripts/lib/release_attempt_plan.sh"; do
+  grep -Eq 'release_enroll_ship "\$(pr_url|current_url)"' "$armer" \
     || fail "$(basename "$armer") does not enroll through the shared release helper"
   if grep -Fq 'gh pr merge' "$armer"; then
     fail "$(basename "$armer") arms auto-merge outside the shared helper"

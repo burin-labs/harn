@@ -57,6 +57,12 @@ case "$1 $2" in
     if (( lists > 1 )) && [[ -n "${FAKE_GH_PRS_LATER:-}" ]]; then
       prs="$FAKE_GH_PRS_LATER"
     fi
+    if [[ ${FAKE_RESUME_CREATED:-0} == 1 && -f "$OPENER_STATE/created.json" ]]; then
+      prs=$(jq -nc --argjson original "$prs" --slurpfile created "$OPENER_STATE/created.json" '$original + $created')
+    fi
+    if [[ -f "$OPENER_STATE/closed" ]]; then
+      prs=$(jq -c --rawfile closed "$OPENER_STATE/closed" '[.[] | .url as $url | select(($closed|split("\n")|index($url)) == null)]' <<< "$prs")
+    fi
     jq_program=""
     while [[ $# -gt 0 ]]; do
       if [[ "$1" == "--jq" ]]; then
@@ -76,13 +82,31 @@ case "$1 $2" in
     ;;
   "pr create")
     cp "$HARN_RELEASE_ROOT/CHANGELOG.md" "$OPENER_STATE/changelog-at-create.md"
+    head=""
     while [[ $# -gt 0 ]]; do
       if [[ "$1" == "--body-file" ]]; then
         cp "$2" "$OPENER_STATE/body.md"
       fi
+      if [[ "$1" == "--head" ]]; then head="$2"; fi
       shift
     done
+    jq -n --arg head "$head" '{url:"https://github.com/example/harn/pull/9001",title:"Release v1.2.4",headRefName:$head}' > "$OPENER_STATE/created.json"
     printf 'https://github.com/example/harn/pull/9001\n'
+    ;;
+  "pr view")
+    prs="${FAKE_GH_PRS:-[]}"
+    if [[ -f "$OPENER_STATE/created.json" ]]; then
+      prs=$(jq -nc --argjson original "$prs" --slurpfile created "$OPENER_STATE/created.json" '$original + $created')
+    fi
+    pr=$(jq -nc --argjson original "$prs" --arg url "$3" '$original[] | select(.url == $url)')
+    [[ -n "$pr" ]] || exit 1
+    branch=$(jq -r .headRefName <<< "$pr")
+    oid=$(git ls-remote --refs origin "refs/heads/$branch" | cut -f1)
+    jq -n --arg oid "${FAKE_OLD_HEAD:-$oid}" '{state:"OPEN",headRefOid:$oid,isCrossRepository:false}'
+    ;;
+  "pr close")
+    [[ ${FAKE_GH_CLOSE_FAIL:-0} != 1 ]] || exit 1
+    printf '%s\n' "$3" >> "$OPENER_STATE/closed"
     ;;
   "pr edit")
     cp "$HARN_RELEASE_ROOT/CHANGELOG.md" "$OPENER_STATE/changelog-at-edit.md"
@@ -305,7 +329,7 @@ run_opener() {
     action="$(sed -n 's/^action=//p' "$case_outputs" | tail -n 1)"
     jq -e --arg action "$action" \
       '.decision == $action
-        and (if .decision == "opened" or .decision == "existing"
+        and (if .decision == "opened" or .decision == "existing" or .decision == "reconcile"
           then (.pr_url | startswith("https://github.com/"))
             and (.release_source_sha | test("^[0-9a-f]{40}$"))
           else .pr_url == "" and .release_source_sha == "" end)' \
@@ -316,11 +340,12 @@ run_opener() {
 assert_no_side_effects() {
   local label="$1"
   local fixture="$2"
-  if grep -Eq '^(make|gate|publish) |^gh api |^gh pr (create|edit|merge)' "$case_record"; then
+  local expected_branch="${3-main}"
+  if grep -Eq '^(make|gate|publish) |^gh api |^gh pr (create|edit|merge|close)' "$case_record"; then
     cat "$case_record" >&2
     fail "$label: prepared, published, or opened a pull request"
   fi
-  [[ "$(git -C "$fixture" branch --show-current)" == main ]] \
+  [[ "$(git -C "$fixture" branch --show-current)" == "$expected_branch" ]] \
     || fail "$label: left main for $(git -C "$fixture" branch --show-current)"
   [[ -z "$(git -C "$fixture" status --porcelain)" ]] \
     || fail "$label: changed the checkout"
@@ -338,10 +363,11 @@ grep -Fxq "action=opened" "$case_outputs" || fail "opened case did not report ac
 grep -Fxq "version=1.2.4" "$case_outputs" || fail "opened case reported the wrong version"
 grep -Fxq "pr_url=https://github.com/example/harn/pull/9001" "$case_outputs" \
   || fail "opened case did not report the pull request"
-grep -Fq 'gh pr create --base main --head release/v1.2.4 --title Release v1.2.4 --body-file' "$case_record" \
-  || { cat "$case_record" >&2; fail "pull request title or branch is not exactly Release v1.2.4 from release/v1.2.4"; }
+published_oid=$(jq -r .release_source_sha "$case_receipt")
+grep -Fq "gh pr create --base main --head release-attempt/v1.2.4/$published_oid --title Release v1.2.4 --body-file" "$case_record" \
+  || { cat "$case_record" >&2; fail "pull request does not use its immutable attempt ref"; }
 grep -Fxq "publish headline=Release v1.2.4" "$case_record" || fail "signed commit headline is not Release v1.2.4"
-grep -Fxq "publish branch=release/v1.2.4" "$case_record" || fail "signed commit went to the wrong branch"
+grep -Fxq "publish branch=release-staging/v1.2.4/12345-2" "$case_record" || fail "signed commit went to the wrong staging branch"
 grep -Fxq "publish base=$base_oid" "$case_record" || fail "signed commit is not based on main's head"
 grep -Fxq "publish token=fixture-token" "$case_record" || fail "signed commit does not use the App token"
 grep -Fxq 'version = "1.2.4"' "$opens/Cargo.toml" || fail "workspace version was not bumped to 1.2.4"
@@ -370,12 +396,12 @@ merge_line=$(grep -n -Fx 'gh pr edit https://github.com/example/harn/pull/9001 -
 
 # Follow the opener's actual published receipt through remote acquisition and
 # the production fragment guard, with a late fragment merged ahead of release.
-published_oid=$(git --git-dir="$opens.origin.git" rev-parse release/v1.2.4)
 [[ "$(git --git-dir="$opens.origin.git" rev-parse "release-attempt/v1.2.4/$published_oid")" == "$published_oid" ]] \
   || fail "attempt ref does not identify the published candidate"
 git -C "$opens" switch --quiet main
 add_late_fragment "$opens"
-FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--existing-only run_opener "$opens"
+actual_pr=$(jq -nc --arg branch "release-attempt/v1.2.4/$published_oid" '[{url:"https://github.com/example/harn/pull/9001",title:"Release v1.2.4",headRefName:$branch}]')
+FAKE_GH_PRS="$actual_pr" OPENER_ARGS=--existing-only run_opener "$opens"
 [[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "published attempt could not be reused"; }
 assert_no_side_effects "published attempt with late fragment" "$opens"
 git -C "$opens" merge --quiet --no-ff release/v1.2.4 -m 'release after late fragment'
@@ -599,6 +625,113 @@ assert_no_side_effects "frozen attempt" "$frozen"
 [[ "$(git --git-dir="$frozen.origin.git" rev-parse release/v1.2.4)" == "$frozen_oid" ]] \
   || fail "late fragment changed the release head"
 [[ -f "$frozen/changelog.d/8900.fixed.md" ]] || fail "late fragment was consumed"
+
+# A modified folded fragment is refolded from green into another immutable
+# attempt. The old head stays unchanged; only its now-conflicted PR closes.
+refold=$(new_fixture refold 1.2.4-dev)
+add_fragments "$refold"
+open_release_branch_on_origin "$refold"
+old_refold=$(git --git-dir="$refold.origin.git" rev-parse release/v1.2.4)
+printf 'Corrected release note.\n' > "$refold/changelog.d/8012.fixed.md"
+git -C "$refold" commit --quiet -am 'Correct the landed note'
+git -C "$refold" push --quiet origin HEAD:refs/heads/main
+mark_green "$refold"
+FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--plan run_opener "$refold"
+[[ "$case_status" == 0 ]] || { cat "$case_output" >&2; fail 'refold plan failed'; }
+grep -Fxq action=open "$case_outputs" || fail 'a fragment conflict did not request a new attempt'
+assert_no_side_effects 'refold plan' "$refold"
+# Exercise the workflow's default depth-one checkout before recovering the
+# older attempt. The common ancestor is absent until the planner fetches it.
+shallow_refold="$tmp_root/shallow-refold"
+git clone --quiet --depth=1 --branch main "file://$refold.origin.git" "$shallow_refold"
+[[ $(git -C "$shallow_refold" rev-parse --is-shallow-repository) == true ]] || fail 'fixture is not shallow'
+FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--plan run_opener "$shallow_refold"
+[[ "$case_status" == 0 ]] || { cat "$case_output" >&2; fail 'shallow refold plan failed'; }
+grep -Fxq action=open "$case_outputs" || fail 'shallow checkout lost fragment-conflict recovery'
+[[ $(git -C "$shallow_refold" rev-parse --is-shallow-repository) == false ]] || fail 'planner did not acquire merge ancestry'
+assert_no_side_effects 'shallow refold plan' "$shallow_refold"
+FAKE_GH_PRS="$open_release_pr" run_opener "$refold"
+[[ "$case_status" == 0 ]] || { cat "$case_output" >&2; fail 'refold failed'; }
+refold_oid=$(jq -r .release_source_sha "$case_receipt")
+[[ "$refold_oid" != "$old_refold" ]] || fail 'refold kept the old source'
+[[ $(git --git-dir="$refold.origin.git" rev-parse release/v1.2.4) == "$old_refold" ]] || fail 'refold moved the frozen old head'
+git -C "$refold" show "$refold_oid:CHANGELOG.md" | grep -Fq 'Corrected release note.' || fail 'refold lost the edited text'
+grep -Fq 'gh pr close https://github.com/example/harn/pull/77 --comment Superseded by https://github.com/example/harn/pull/9001' "$case_record" || fail 'old conflicted attempt was not superseded'
+grep -Fq -- '--head release-attempt/v1.2.4/' "$case_record" || fail 'replacement did not use its immutable attempt'
+
+# A checkout of green that predates the edit cannot prepare another stale fold.
+lagging=$(new_fixture lagging 1.2.4-dev)
+add_fragments "$lagging"
+old_green=$(git -C "$lagging" rev-parse HEAD)
+open_release_branch_on_origin "$lagging"
+printf 'Not green yet.\n' > "$lagging/changelog.d/8012.fixed.md"
+git -C "$lagging" commit --quiet -am 'Edit after the last checkpoint'
+git -C "$lagging" push --quiet origin HEAD:refs/heads/main
+git -C "$lagging" switch --quiet --detach "$old_green"
+FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--existing-only run_opener "$lagging"
+[[ "$case_status" == 0 ]] || { cat "$case_output" >&2; fail 'waiting for green failed'; }
+grep -Fxq action=blocked "$case_outputs" || fail 'stale green attempted a refold'
+jq -e '.next_action == "wait-for-green" and .recovery.waiting_for_green == ["changelog.d/8012.fixed.md"]' "$case_receipt" >/dev/null
+assert_no_side_effects 'stale green' "$lagging" ''
+
+# Failed cleanup resumes the prepared replacement rather than folding twice.
+resumed=$(new_fixture resumed 1.2.4-dev)
+add_fragments "$resumed"
+open_release_branch_on_origin "$resumed"
+printf 'Resumable correction.\n' > "$resumed/changelog.d/8012.fixed.md"
+git -C "$resumed" commit --quiet -am 'Edit folded note'
+git -C "$resumed" push --quiet origin HEAD:refs/heads/main
+mark_green "$resumed"
+FAKE_GH_PRS="$open_release_pr" FAKE_GH_CLOSE_FAIL=1 run_opener "$resumed"
+[[ "$case_status" != 0 ]] || fail 'failed supersession cleanup reported completion'
+resumed_oid=$(jq -r .release_source_sha "$case_receipt")
+grep -Fq 'gh pr edit https://github.com/example/harn/pull/9001 --add-label ship' "$case_record" || fail 'replacement was left without its delivery grant'
+git -C "$resumed" switch --quiet main
+FAKE_GH_PRS="$open_release_pr" FAKE_RESUME_CREATED=1 OPENER_ARGS=--plan run_opener "$resumed"
+grep -Fxq action=reconcile "$case_outputs" || fail 'prepared replacement was not selected for resumption'
+assert_no_side_effects 'resume plan' "$resumed"
+FAKE_GH_PRS="$open_release_pr" FAKE_RESUME_CREATED=1 run_opener "$resumed"
+[[ "$case_status" == 0 ]] || { cat "$case_output" >&2; fail 'replacement did not resume'; }
+[[ $(jq -r .release_source_sha "$case_receipt") == "$resumed_oid" ]] || fail 'resumption replaced the prepared source'
+grep -Fq 'gh pr close https://github.com/example/harn/pull/77' "$case_record" || fail 'resumption did not finish old-attempt cleanup'
+if grep -Eq '^(make|gate|publish) |^gh pr (create|edit)' "$case_record"; then
+  fail 'resumption rebuilt, opened another PR, or changed an existing delivery grant'
+fi
+
+# A conflict in source code cannot be classified as a release-note correction.
+source_conflict=$(new_fixture source-conflict 1.2.4-dev)
+printf 'base\n' > "$source_conflict/source.txt"
+add_fragments "$source_conflict"
+open_release_branch_on_origin "$source_conflict"
+git -C "$source_conflict" fetch --quiet origin refs/heads/release/v1.2.4
+git -C "$source_conflict" switch --quiet --detach FETCH_HEAD
+printf 'release source\n' > "$source_conflict/source.txt"
+git -C "$source_conflict" commit --quiet -am 'Release source change'
+conflicting_oid=$(git -C "$source_conflict" rev-parse HEAD)
+git -C "$source_conflict" push --quiet origin HEAD:refs/heads/release/v1.2.4 "HEAD:refs/heads/release-attempt/v1.2.4/$conflicting_oid"
+git -C "$source_conflict" switch --quiet main
+printf 'main source\n' > "$source_conflict/source.txt"
+git -C "$source_conflict" commit --quiet -am 'Main source change'
+git -C "$source_conflict" push --quiet origin HEAD:refs/heads/main
+mark_green "$source_conflict"
+FAKE_GH_PRS="$open_release_pr" run_opener "$source_conflict"
+[[ "$case_status" != 0 ]] || fail 'source conflict was automatically superseded'
+grep -Fq 'release conflict is not a modified folded fragment: source.txt' "$case_output" || fail 'source conflict was not named'
+assert_no_side_effects 'source conflict' "$source_conflict"
+
+# Ambiguous or misleading attempt identities cannot choose a delivery target.
+ambiguous=$(jq -nc --argjson first "$open_release_pr" '$first + [($first[0] + {url:"https://github.com/example/harn/pull/78"})]')
+FAKE_GH_PRS="$ambiguous" OPENER_ARGS=--plan run_opener "$frozen"
+[[ "$case_status" != 0 ]] || fail 'multiple mergeable attempts were accepted'
+grep -Fq 'multiple mergeable release attempts' "$case_output" || fail 'ambiguous attempts were not named'
+assert_no_side_effects 'ambiguous attempts' "$frozen"
+wrong_ref="release-attempt/v1.2.4/0000000000000000000000000000000000000000"
+git --git-dir="$frozen.origin.git" update-ref "refs/heads/$wrong_ref" "$frozen_oid"
+misnamed=$(jq -nc --arg branch "$wrong_ref" '[{url:"https://github.com/example/harn/pull/77",title:"Release v1.2.4",headRefName:$branch}]')
+FAKE_GH_PRS="$misnamed" OPENER_ARGS=--plan run_opener "$frozen"
+[[ "$case_status" != 0 ]] || fail 'misnamed immutable ref was accepted'
+grep -Fq 'immutable attempt ref does not name its head' "$case_output" || fail 'misnamed ref was not identified'
+assert_no_side_effects 'misnamed attempt' "$frozen"
 
 # --- A missing immutable record refuses instead of rebuilding ----------------
 git --git-dir="$frozen.origin.git" update-ref -d "refs/heads/release-attempt/v1.2.4/$frozen_oid"

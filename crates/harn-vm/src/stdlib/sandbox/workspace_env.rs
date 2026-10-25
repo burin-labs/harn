@@ -196,6 +196,18 @@ pub(crate) fn toolchain_home_from(
     })
 }
 
+/// `CARGO_HOME` and `RUSTUP_HOME` as a child should see them, by the rule of
+/// [`toolchain_home_from`]. Hosts that start a Rust tool outside the
+/// workspace environment (a language server) read the same answer.
+pub fn rust_toolchain_homes() -> Vec<(&'static str, PathBuf)> {
+    [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")]
+        .into_iter()
+        .filter_map(|(name, suffix)| {
+            toolchain_home(name, suffix).map(|resolved| (name, PathBuf::from(resolved.path)))
+        })
+        .collect()
+}
+
 fn workspace_toolchain_env_with_package_cache(
     policy: &CapabilityPolicy,
     package_cache: Option<PathBuf>,
@@ -326,10 +338,8 @@ fn toolchain_env_at(
     // the child was pointed at a toolchain that does not exist. It is also
     // wrong for anyone whose toolchain simply lives somewhere else, which is
     // ordinary on a shared or containerized machine.
-    for (name, suffix) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
-        if let Some(resolved) = toolchain_home(name, suffix) {
-            env.push((name.to_string(), resolved.path));
-        }
+    for (name, path) in rust_toolchain_homes() {
+        env.push((name.to_string(), path.display().to_string()));
     }
     if let Some(home) = crate::user_dirs::home_dir().filter(|home| home.is_absolute()) {
         for (key, candidate) in [

@@ -1254,7 +1254,147 @@ fn xargs_operands_write_stash(argv: list<string>, alias_lookup: fn(list<string>)
   return operand_text_writes_stash(argv.slice(1, len(argv)).join(" "))
 }
 
+/**
+ * The index of the `)` that closes a `(` already consumed before `start`, or -1 when the text ends
+ * first. Parentheses inside quotes or after a backslash do not count.
+ */
+fn closing_paren(text: string, start: int) -> int {
+  let depth = 1
+  let in_single = false
+  let in_double = false
+  let index = start
+  while index < len(text) {
+    const char = text.substring(index, index + 1)
+    if in_single {
+      in_single = char != "'"
+    } else if char == "\\" {
+      index = index + 1
+    } else if in_double {
+      in_double = char != "\""
+    } else if char == "'" {
+      in_single = true
+    } else if char == "\"" {
+      in_double = true
+    } else if char == "(" {
+      depth = depth + 1
+    } else if char == ")" {
+      depth = depth - 1
+      if depth == 0 {
+        return index
+      }
+    }
+    index = index + 1
+  }
+  return -1
+}
+
+/**
+ * The index of the backtick that closes one opened before `start`, or -1. A backslash escapes the next character.
+ */
+fn closing_backtick(text: string, start: int) -> int {
+  let index = start
+  while index < len(text) {
+    const char = text.substring(index, index + 1)
+    if char == "\\" {
+      index = index + 1
+    } else if char == "`" {
+      return index
+    }
+    index = index + 1
+  }
+  return -1
+}
+
+/**
+ * The bodies of `$(...)`, backtick and process-substitution (`<(...)`, `>(...)`) forms the shell
+ * would run, outermost only (a body is scanned again when it is analyzed). Single quotes make text
+ * literal; double quotes still expand `$(...)` and backticks but not `<(`/`>(`. `ok` is false when a
+ * body never closes, which the caller refuses rather than guesses at.
+ */
+fn substitution_bodies(command: string, quotes_literal: bool) -> dict {
+  let bodies: list<string> = []
+  let in_single = false
+  let in_double = false
+  let index = 0
+  while index < len(command) {
+    const char = command.substring(index, index + 1)
+    const next = command.substring(index + 1, index + 2)
+    if in_single {
+      in_single = char != "'"
+    } else if char == "\\" {
+      index = index + 1
+    } else if char == "'" && !in_double && quotes_literal {
+      in_single = true
+    } else if char == "\"" {
+      in_double = !in_double
+    } else if char == "`" {
+      const end = closing_backtick(command, index + 1)
+      if end < 0 {
+        return {ok: false, bodies: bodies}
+      }
+      bodies = bodies + [command.substring(index + 1, end)]
+      index = end
+    } else if (char == "$" || (!in_double && (char == "<" || char == ">"))) && next == "(" {
+      // `$((` is arithmetic: its text is scanned in place, so a substitution inside it is found.
+      if command.substring(index + 2, index + 3) != "(" || char != "$" {
+        const end = closing_paren(command, index + 2)
+        if end < 0 {
+          return {ok: false, bodies: bodies}
+        }
+        bodies = bodies + [command.substring(index + 2, end)]
+        index = end
+      }
+    }
+    index = index + 1
+  }
+  return {ok: true, bodies: bodies}
+}
+
+/**
+ * Whether a heredoc with an unquoted delimiter is opened anywhere in the text. The shell expands
+ * `$(...)` and backticks in such a body and treats apostrophes there as plain bytes, so quote
+ * tracking cannot decide what runs. Quote context of the `<<` itself is ignored: that only widens
+ * the refusal.
+ */
+fn has_expanding_heredoc(command: string) -> bool {
+  let index = command.index_of("<<")
+  while index >= 0 {
+    let after = index + 2
+    if command.substring(after, after + 1) != "<" {
+      if command.substring(after, after + 1) == "-" {
+        after = after + 1
+      }
+      while command.substring(after, after + 1) == " "
+        || command.substring(after, after + 1) == "\t" {
+        after = after + 1
+      }
+      const first = command.substring(after, after + 1)
+      if first != "'" && first != "\"" && first != "\\" && first != "" {
+        return true
+      }
+    }
+    const rest = command.substring(index + 2)
+    const next = rest.index_of("<<")
+    if next < 0 {
+      return false
+    }
+    index = index + 2 + next
+  }
+  return false
+}
+
 fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>) -> dict) -> bool {
+  // A substitution body is a command line the shell runs, so it gets the same analysis. A body that
+  // never closes, or one nested past the depth cap, cannot be proven harmless and is refused.
+  const substitutions = substitution_bodies(command, !has_expanding_heredoc(command))
+  if !substitutions.ok || (len(substitutions.bodies) > 0 && depth >= 4) {
+    return true
+  }
+  for body in substitutions.bodies {
+    if git_stash_write_in(body, depth + 1, alias_lookup) {
+      return true
+    }
+  }
   for group in command_groups(command) {
     for stage in group {
       // `xargs` launches its operands, so the stash rule reads the child the scanner resolved.

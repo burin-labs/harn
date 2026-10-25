@@ -15,7 +15,7 @@ default = []
 full = ["postgres", "sqlite", "content", "compression"]
 postgres = ["harn-vm/postgres", "dep:sqlx-core", "dep:sqlx-postgres"]
 sqlite = ["harn-vm/sqlite"]
-content = ["harn-vm/content", "dep:lopdf", "dep:scraper", "dep:markdown", "dep:tree-sitter-typescript"]
+content = ["harn-vm/content", "dep:lopdf", "dep:scraper", "dep:markdown", "dep:harn-grammars"]
 compression = ["harn-vm/compression", "dep:brotli", "dep:flate2", "dep:zip"]
 
 [dependencies]
@@ -59,7 +59,7 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "t
 toml = "1.1"
 tracing = "0.1"
 tree-sitter = "0.27"
-tree-sitter-typescript = { version = "0.23", optional = true }
+harn-grammars = { path = "../harn-grammars", version = "=0.10.180", default-features = false, features = ["typescript"], optional = true }
 unicode-width = "0.2"
 url = "2"
 uuid = { version = "1", features = ["serde", "v4", "v5", "v7"] }

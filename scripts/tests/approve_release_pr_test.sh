@@ -101,6 +101,8 @@ expect_refused() {
 }
 
 release() { :; }
+immutable_release() { edit pr.json '.head.ref = ("release-attempt/v0.10.174/" + .head.sha)'; }
+immutable_mismatch() { edit pr.json '.head.ref = ("release-attempt/v0.10.174/" + ("b" * 40))'; }
 development() {
   edit pr.json '.title = "[Release] Start 0.10.174-dev development" | .head.ref = "automation/development-0.10.174-dev"'
   jq -n '[[{filename: "Cargo.toml", status: "modified", patch: "@@ -1 +1 @@\n-version = \"0.10.173\"\n+version = \"0.10.174-dev\"\n"}]]' > "$dir/files.json"
@@ -138,6 +140,8 @@ open_thread() { edit review_state.json '.data.repository.pullRequest.reviewThrea
 not_counted() { edit decision.json '.data.repository.pullRequest.reviewDecision = "REVIEW_REQUIRED"'; }
 
 expect_approved release
+expect_approved immutable_release
+expect_refused immutable_mismatch 'immutable attempt ref does not name its head'
 expect_approved development
 expect_approved retired_predecessor
 expect_refused retired_predecessor_unpublished 'changes more than the version'

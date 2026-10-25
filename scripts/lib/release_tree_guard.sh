@@ -6,6 +6,16 @@
 # branch-tree check from standing in for the immutable tag-tree check.
 
 FINALIZE_TAG=""
+RELEASE_FRAGMENT_CATEGORIES=(breaking added changed deprecated removed fixed security)
+
+release_fragment_path() {
+  local file="${1#changelog.d/}" category
+  [[ "$file" != "$1" && "$file" != */* && "$file" != README* && "$file" != _* ]] || return 1
+  for category in "${RELEASE_FRAGMENT_CATEGORIES[@]}"; do
+    [[ "$file" != *."$category".md ]] || return 0
+  done
+  return 1
+}
 
 require_existing_release_tag_checkout() {
   local base_branch="$1"
@@ -48,7 +58,7 @@ unfolded_fragment_paths() {
   local dir="changelog.d"
   [[ -d "$dir" ]] || return 0
   local category fragment base
-  for category in breaking added changed deprecated removed fixed security; do
+  for category in "${RELEASE_FRAGMENT_CATEGORIES[@]}"; do
     for fragment in "$dir"/*."$category".md; do
       [[ -e "$fragment" ]] || continue
       base="$(basename "$fragment")"

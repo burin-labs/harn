@@ -21,48 +21,44 @@
 [models."glm-4.6"]
 name = "GLM 4.6"
 provider = "zai"
-context_window = 204800
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.60, output_per_mtok = 2.20, cache_read_per_mtok = 0.11 }
 tier = "mid"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "cheap"]
 
 # GLM-4.5 — prior-generation coding flagship; GLM-4.5-Air is the lighter
 # MoE variant. Kept as cheap independent-bucket routes.
+models_dev = {provider = "zai", model = "glm-4.6", fields = ["context_window", "open_weight"]}
 [models."glm-4.5"]
 name = "GLM 4.5"
 provider = "zai"
-context_window = 131072
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.60, output_per_mtok = 2.20, cache_read_per_mtok = 0.11 }
 tier = "mid"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "cheap"]
+models_dev = {provider = "zai", model = "glm-4.5", fields = ["context_window", "open_weight"]}
 [models."glm-4.5-air"]
 name = "GLM 4.5 Air"
 provider = "zai"
-context_window = 131072
 capabilities = ["tools", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.10, cache_read_per_mtok = 0.03 }
 tier = "small"
-open_weight = true
 strengths = ["speed", "cheap", "coding", "tool_use"]
 
 # GLM-4.7 — current GLM-4.x generation coding model.
+models_dev = {provider = "zai", model = "glm-4.5-air", fields = ["context_window", "open_weight"]}
 [models."glm-4.7"]
 name = "GLM 4.7"
 provider = "zai"
-context_window = 204800
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.60, output_per_mtok = 2.20, cache_read_per_mtok = 0.11 }
 tier = "mid"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "cheap"]
 
 # GLM-5 family. GLM-5.2 is the current 1M-context open-weight flagship;
 # GLM-5.1 / GLM-5 are kept for pinned callers. glm-5-turbo is the current
 # accelerated tier. OpenRouter mirrors live below.
+models_dev = {provider = "zai", model = "glm-4.7", fields = ["context_window", "open_weight"]}
 [models."glm-5-turbo"]
 name = "GLM 5 Turbo"
 provider = "zai"
@@ -83,8 +79,8 @@ capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 # hit $0.20). The prior 0.98/3.08 figures matched no published tier.
 pricing = { input_per_mtok = 1.00, output_per_mtok = 3.20, cache_read_per_mtok = 0.20 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use"]
+models_dev = {provider = "zai", model = "glm-5", fields = ["open_weight"]}
 
 [models."glm-5.1"]
 name = "GLM 5.1"
@@ -94,9 +90,9 @@ equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 benchmarks = { swe_bench_pro_lead = 1.0 }
+models_dev = {provider = "zai", model = "glm-5.1", fields = ["open_weight"]}
 [models."glm-5.2"]
 name = "GLM 5.2"
 provider = "zai"
@@ -105,9 +101,9 @@ equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 benchmarks = { swe_bench_pro_lead = 1.0 }
+models_dev = {provider = "zai", model = "glm-5.2", fields = ["open_weight"]}
 [models."glm-5.3"]
 name = "GLM 5.3"
 provider = "zai"
@@ -118,7 +114,6 @@ capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 # is what Z.AI's launch note means by "available at the same price".
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 
 # GLM-5.3-Flash is the natively multimodal, efficiency-focused sibling of
@@ -127,6 +122,7 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 # tools, structured output, streaming, caching, and MIT-licensed weights.
 # The 50% launch promotion expires at 24:00 Singapore time on September 9,
 # which is the exclusive UTC instant 2026-09-09T16:00:00Z.
+models_dev = {provider = "zai", model = "glm-5.3", fields = ["open_weight"]}
 [models."glm-5.3-flash"]
 name = "GLM 5.3 Flash"
 provider = "zai"
@@ -138,50 +134,44 @@ capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_cac
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.50, cache_read_per_mtok = 0.03, promotions = [{ id = "zai-glm-5.3-flash-launch", starts_on = "2026-08-26", ends_at = "2026-09-09T16:00:00Z", source_url = "https://docs.z.ai/guides/overview/pricing", input_per_mtok = 0.075, output_per_mtok = 0.25, cache_read_per_mtok = 0.015 }] }
 architecture = { parameter_count_b = 320.0, active_parameter_count_b = 18.0, moe = true, license = "MIT", source_url = "https://docs.z.ai/guides/vlm/glm-5.3-flash", last_verified = "2026-08-28" }
 tier = "frontier"
-open_weight = true
 strengths = ["cheap", "coding", "agentic", "tool_use", "reasoning", "long_context", "vision", "speed"]
 
 # OpenRouter mirror of GLM-5 family so callers without a Z.AI key still
 # resolve a route. OR doesn't list GLM-4.6/4.7 — the canonical OR slugs
 # are the GLM-5 generation.
+models_dev = {provider = "zai", model = "glm-5.3-flash", fields = ["open_weight"]}
 [models."z-ai/glm-5"]
 name = "GLM 5 (via OpenRouter)"
 provider = "openrouter"
-context_window = 204800
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.60, output_per_mtok = 1.92, cache_read_per_mtok = 0.12 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic"]
+models_dev = {provider = "openrouter", model = "z-ai/glm-5", fields = ["context_window", "open_weight"]}
 [models."z-ai/glm-5.1"]
 name = "GLM 5.1 (via OpenRouter)"
 provider = "openrouter"
-context_window = 204800
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 1.4, output_per_mtok = 4.4, cache_read_per_mtok = 0.26 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+models_dev = {provider = "openrouter", model = "z-ai/glm-5.1", fields = ["context_window", "open_weight", "pricing"]}
 [models."z-ai/glm-5.2"]
 name = "GLM 5.2 (via OpenRouter)"
 provider = "openrouter"
-context_window = 1048576
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.25, output_per_mtok = 3.99, cache_read_per_mtok = 0.2 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+models_dev = {provider = "openrouter", model = "z-ai/glm-5.2", fields = ["context_window", "open_weight"]}
 [models."z-ai/glm-5.3"]
 name = "GLM 5.3 (via OpenRouter)"
 provider = "openrouter"
-context_window = 1048576
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.4, output_per_mtok = 4.4, cache_read_per_mtok = 0.26 }
 tier = "frontier"
-open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 # GLM-5.3 Prime is an OpenRouter-only row: Z.ai publishes no first-party
 # `glm-5.3-prime` id (docs.z.ai pricing, read 2026-10-09), and OpenRouter's
@@ -192,20 +182,18 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 # round trip and a required tool choice returned 200, effort `low` and `high`
 # reasoned, and reasoning off was a 400 "Reasoning is mandatory", which the
 # `z-ai/glm-5.3*` rule already encodes.
+models_dev = {provider = "openrouter", model = "z-ai/glm-5.3", fields = ["context_window", "open_weight"]}
 [models."z-ai/glm-5.3-prime"]
 name = "GLM 5.3 Prime (via OpenRouter)"
 provider = "openrouter"
-context_window = 1000000
-released = "2026-09-23"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 2.80, output_per_mtok = 8.80, cache_read_per_mtok = 0.56 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "speed"]
+models_dev = {provider = "openrouter", model = "z-ai/glm-5.3-prime", fields = ["context_window", "released", "pricing"]}
 [models."z-ai/glm-5.3-flash"]
 name = "GLM 5.3 Flash (via OpenRouter)"
 provider = "openrouter"
-context_window = 1048576
 logical_model = "glm-5.3-flash"
 equivalence_group = "glm-5.3-flash"
 served_variant = "openrouter"
@@ -216,10 +204,8 @@ capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_cac
 # carries (docs.z.ai rate card, re-checked the same day). That is OpenRouter's
 # own rate for this route, not a Z.AI promotion, so it is the base here and the
 # expired promotion is gone.
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.5, cache_read_per_mtok = 0.03 }
 architecture = { parameter_count_b = 320.0, active_parameter_count_b = 18.0, moe = true, license = "MIT", source_url = "https://openrouter.ai/api/v1/models", last_verified = "2026-08-28" }
 tier = "frontier"
-open_weight = true
 strengths = ["cheap", "coding", "agentic", "tool_use", "reasoning", "long_context", "vision", "speed"]
 
 # GLM-5.3-FlashX, added 2026-09-20. Z.AI's higher-throughput FlashX build of
@@ -233,6 +219,7 @@ strengths = ["cheap", "coding", "agentic", "tool_use", "reasoning", "long_contex
 # Capabilities are inherited from the glm-5.3-flash rows, which is a family
 # default, not a verified FlashX fact: Z.AI publishes no separate FlashX model
 # card, so its vision, video and caching support are unverified here.
+models_dev = {provider = "openrouter", model = "z-ai/glm-5.3-flash", fields = ["context_window", "open_weight", "pricing"]}
 [models."glm-5.3-flashx"]
 name = "GLM 5.3 FlashX"
 provider = "zai"
@@ -244,30 +231,28 @@ capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_cac
 pricing = { input_per_mtok = 0.37, output_per_mtok = 1.25, cache_read_per_mtok = 0.075 }
 architecture = { parameter_count_b = 320.0, active_parameter_count_b = 18.0, moe = true, license = "MIT", source_url = "https://docs.z.ai/guides/overview/pricing", last_verified = "2026-09-20" }
 tier = "frontier"
-open_weight = true
 strengths = ["speed", "cheap", "coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
+models_dev = {provider = "zai", model = "glm-5.3-flashx", fields = ["open_weight"]}
 
 [models."z-ai/glm-5.3-flashx"]
 name = "GLM 5.3 FlashX (via OpenRouter)"
 provider = "openrouter"
-context_window = 1048576
 logical_model = "glm-5.3-flashx"
 equivalence_group = "glm-5.3-flashx"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.37, output_per_mtok = 1.25, cache_read_per_mtok = 0.09 }
 architecture = { parameter_count_b = 320.0, active_parameter_count_b = 18.0, moe = true, license = "MIT", source_url = "https://openrouter.ai/api/v1/models", last_verified = "2026-09-20" }
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "cheap", "coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
+models_dev = {provider = "openrouter", model = "z-ai/glm-5.3-flashx", fields = ["context_window", "pricing"]}
 
 [models."z-ai/glm-5v-turbo"]
 name = "GLM 5V Turbo (via OpenRouter)"
 provider = "openrouter"
-context_window = 202752
 capabilities = ["tools", "streaming", "vision"]
-pricing = { input_per_mtok = 1.20, output_per_mtok = 4.00, cache_read_per_mtok = 0.24 }
 # Inline metadata keeps this row independent of fragment-order defaults.
 tier = "frontier"
 open_weight = true
 strengths = ["vision", "coding", "agentic"]
+models_dev = {provider = "openrouter", model = "z-ai/glm-5v-turbo", fields = ["context_window", "pricing"]}

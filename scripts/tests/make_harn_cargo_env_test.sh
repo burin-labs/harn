@@ -888,25 +888,15 @@ make -C "$repo_root" -n \
   gen-provider-matrix check-provider-matrix \
   HARN_BIN="$fake_harn" > "$make_provider_targets"
 
-provider_resolutions=$(grep -Fc './scripts/harn_bin.sh --print' "$make_provider_targets")
-if [ "$provider_resolutions" -ne 4 ]; then
-  echo "provider composed targets should resolve HARN_BIN once per recipe, got $provider_resolutions" >&2
-  cat "$make_provider_targets" >&2
-  exit 1
-fi
-
-for expected in \
-  'env HARN_BIN="'"$fake_harn"'" ./scripts/harn_bin.sh -- provider catalog generate' \
-  'env HARN_BIN="'"$fake_harn"'" ./scripts/harn_bin.sh -- provider catalog generate --check' \
-  '"$harn_bin" provider catalog generate &&' \
-  '"$harn_bin" provider catalog support' \
-  '"$harn_bin" provider catalog generate --check &&' \
-  '"$harn_bin" provider catalog support --check' \
-  '"$harn_bin" provider catalog matrix' \
-  '"$harn_bin" provider catalog matrix --check'
+for operation in \
+  'generate' 'generate --check' \
+  'support' 'support --check' \
+  'matrix' 'matrix --check'
 do
-  if ! grep -Fq "$expected" "$make_provider_targets"; then
-    echo "provider composed target did not reuse the resolved harn binary: $expected" >&2
+  expected='env HARN_BIN="'"$fake_harn"'" ./scripts/harn_bin.sh -- provider catalog '"$operation"
+  occurrences=$(grep -Fxc "$expected" "$make_provider_targets" || true)
+  if [ "$occurrences" -ne 1 ]; then
+    echo "provider targets should run $operation once with HARN_BIN, got $occurrences" >&2
     cat "$make_provider_targets" >&2
     exit 1
   fi

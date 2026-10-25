@@ -158,6 +158,13 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   `crates/harn-provider-catalog/src/capabilities.toml`, which are generated along with
   everything under `spec/provider-catalog/` and the provider docs. Edit the
   source fragments only.
+- Selected model facts use source-only `models_dev` bindings and the pinned
+  `catalog_sources/models-dev.json` cache. Run `harn provider catalog
+  update-source --live` to refresh it, or `--input <response.json>` offline.
+  Generation and checks never fetch upstream data. Imported fields must not
+  also be authored locally. Preserve complete Harn pricing cards for conditions,
+  modalities, or fees the importer rejects; keep runtime behavior and measured
+  capabilities in Harn. See [Update model facts](docs/src/llm/models-dev-source.md).
 - Regenerate with `make gen-provider-catalog`, `make gen-provider-matrix`, and
   `make gen-provider-support`, then verify with the matching `check-` targets.
   All three generators read the current source fragments from the repository

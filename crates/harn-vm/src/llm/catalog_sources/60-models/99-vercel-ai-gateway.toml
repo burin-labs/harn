@@ -18,9 +18,7 @@ logical_model = "openai-gpt-5.4-nano"
 equivalence_group = "openai-gpt-5.4-nano"
 served_variant = "vercel-ai-gateway"
 api_dialect = "openai_chat"
-context_window = 400000
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
 # No `superseded_by`: the gateway lists openai/gpt-6-luna, but the probe key's
 # free-tier team got HTTP 403 "Free tier users do not have access to this
 # model" on 2026-10-01, so there is no probed Vercel route to point at yet.
@@ -28,8 +26,8 @@ deprecated = true
 deprecation_note = "OpenAI shuts down gpt-5.4-nano 2027-04-01 (announced 2026-10-01) and names gpt-6-luna as the replacement; this gateway route ends with it. Vercel lists openai/gpt-6-luna, which Harn has not yet probed on this gateway."
 sunset_date = "2027-04-01"
 tier = "small"
-open_weight = false
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
+models_dev = {provider = "vercel", model = "openai/gpt-5.4-nano", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."vercel/anthropic/claude-haiku-4.5"]
 name = "Claude Haiku 4.5 (Vercel AI Gateway)"
@@ -39,17 +37,15 @@ logical_model = "anthropic-claude-haiku-4.5"
 equivalence_group = "anthropic-claude-haiku-4.5"
 served_variant = "vercel-ai-gateway"
 api_dialect = "openai_chat"
-context_window = 200000
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
 tier = "mid"
-open_weight = false
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "vision"]
 
 # Graduated out of preview: the gateway now serves this as
 # `google/gemini-3.1-flash-lite` and no longer lists the `-preview` slug. Rates
 # and context are unchanged; the record also publishes a cache-read rate the
 # preview row did not carry.
+models_dev = {provider = "vercel", model = "anthropic/claude-haiku-4.5", fields = ["context_window", "open_weight", "pricing"]}
 [models."vercel/google/gemini-3.1-flash-lite"]
 name = "Gemini 3.1 Flash Lite (Vercel AI Gateway)"
 provider = "vercel_ai_gateway"
@@ -58,9 +54,7 @@ logical_model = "google-gemini-3.1-flash-lite"
 equivalence_group = "google-gemini-3.1-flash-lite"
 served_variant = "vercel-ai-gateway"
 api_dialect = "openai_chat"
-context_window = 1000000
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.03 }
 # Follows Google's schedule for the model, as the direct gemini-3.1-flash-lite
 # row does. No `superseded_by`: no Vercel Gemini 3.5 Flash-Lite route has been
 # probed (the probe key's free-tier team gets HTTP 403 on Gemini routes).
@@ -68,5 +62,5 @@ deprecated = true
 deprecation_note = "Google shuts down gemini-3.1-flash-lite 2027-05-07 and names gemini-3.5-flash-lite as the replacement (https://ai.google.dev/gemini-api/docs/deprecations, read 2026-10-01); this gateway route ends with it."
 sunset_date = "2027-05-07"
 tier = "small"
-open_weight = false
 strengths = ["speed", "cheap", "long_context", "tool_use", "reasoning", "vision"]
+models_dev = {provider = "vercel", model = "google/gemini-3.1-flash-lite", fields = ["context_window", "open_weight", "pricing"]}

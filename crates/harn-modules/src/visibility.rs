@@ -53,9 +53,23 @@ impl ModuleGraph {
         target: &Path,
         name: &str,
     ) -> Option<DefKind> {
-        if sibling_module_access(importer, target) {
-            let target = normalize_path(target);
-            if let Some(module) = self.modules.get(&target) {
+        self.exported_kind_for_resolved_import(
+            sibling_module_access(importer, target),
+            &normalize_path(target),
+            name,
+        )
+    }
+
+    /// [`Self::exported_kind_for_import`] for a normalized `target` whose
+    /// sibling access the caller already decided, once per import.
+    pub(crate) fn exported_kind_for_resolved_import(
+        &self,
+        sibling: bool,
+        target: &Path,
+        name: &str,
+    ) -> Option<DefKind> {
+        if sibling {
+            if let Some(module) = self.modules.get(target) {
                 if module.sibling_exports.contains(name) {
                     return module
                         .declarations

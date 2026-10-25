@@ -1,0 +1,34 @@
+import { command_run } from "std/command"
+import { read_yaml } from "std/fs"
+
+pipeline test_approval_workflow_reaches_immutable_attempts_and_refuses_other_authors(
+  harness: Harness,
+) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/approve-release-pr.yml", nil)
+  const result = command_run(
+    harness.tools,
+    [
+      "node",
+      "-e",
+      harness.fs.read_text("./fixtures/approve-release-condition.cjs"),
+      workflow.jobs.approve.if,
+    ],
+  )
+  assert(result.success, result.stderr)
+  const missing_attempt_route = workflow.jobs.approve.if.replace(
+    "|| startsWith(github.event.pull_request.head.ref, 'release-attempt/v')",
+    "",
+  )
+  assert(missing_attempt_route != workflow.jobs.approve.if)
+  const negative = command_run(
+    harness.tools,
+    [
+      "node",
+      "-e",
+      harness.fs.read_text("./fixtures/approve-release-condition.cjs"),
+      missing_attempt_route,
+    ],
+  )
+  assert(!negative.success)
+  assert(negative.stderr.contains("version-only checker was not reached"))
+}

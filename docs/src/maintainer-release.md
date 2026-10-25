@@ -35,10 +35,24 @@ unreleased fragments produces `action=none`, with a notice explaining why.
 An unreadable pull-request list fails instead of opening a duplicate.
 
 The signed commit is recorded at `release-attempt/vX.Y.Z/<commit>` before the
-pull request opens. An existing release stays frozen at that attempt. Later
-fragments remain for the next release, including when their changes merge ahead
-of this release. A push changing `changelog.d` checks the existing attempt
-without rebuilding or opening a release.
+pull request opens from that ref. A mergeable release stays frozen at that
+attempt. New fragments remain for the next release, including when they merge
+ahead of this release. A push changing `changelog.d` checks existing attempts
+before restoring or building Harn.
+
+If a fragment already folded into the attempt is edited on main, Git reports a
+modify/delete conflict. The opener waits until green contains the exact edited
+fragment blobs, then refolds from green into a new signed, immutable attempt.
+It enrolls the replacement in Smart Ship and closes the conflicted PR with a
+link to the replacement. It preserves the earlier commit and attempt ref.
+Other conflicts, missing attempt records, and multiple mergeable attempts fail
+closed instead of choosing a source.
+
+If replacement cleanup fails after the new PR opens, dispatch the same opener
+again. It selects the prepared replacement and finishes closing the superseded
+PR without rebuilding, republishing, or changing the existing PR's `ship`
+grant. The `release-opener-<run>-<attempt>` artifact records the recovery plan,
+selected source, outcome, and next action, including when an invocation fails.
 
 An existing `release/vX.Y.Z` branch without a matching attempt fails closed.
 To replace an unrecorded stale attempt, close its pull request and dispatch the
@@ -173,7 +187,13 @@ Follow the runs for that commit in
 Before promotion, the candidate's exact source needs a successful
 `macos-nightly.yml` run through `workflow_dispatch`. The candidate run starts
 it: `scripts/ci/dispatch_native_qualification.sh` dispatches the main revision of
-the workflow with the candidate's `source_sha`. Before executing candidate code,
+the workflow with the candidate's `source_sha`. The producer waits up to
+85 minutes for the native proof beside the archive builds. Failed, missing,
+or unreadable proof blocks the consumer rehearsal and candidate verdict,
+instead of waiting until promotion. The run preserves
+`harn.release.native_qualification.v1` JSON with the source SHA, verdict,
+pending and failing job names, and next action.
+Before executing candidate code,
 the trusted workflow verifies that this source is a main ancestor and measures
 both allowed execution and a refused write through process confinement on the
 owned Mac. Scheduled source candidates don't start it. Arbitrary branch sources
