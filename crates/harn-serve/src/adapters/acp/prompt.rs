@@ -389,6 +389,9 @@ impl AcpServer {
             .expect("prepared session")
             .concurrent_control
             .clone();
+        if !self.claim_turn_admission(id, &session_id, reply) {
+            return;
+        }
         let owner = match control.admit_and_bind_prompt(
             candidate_task.clone(),
             cancellation.clone(),

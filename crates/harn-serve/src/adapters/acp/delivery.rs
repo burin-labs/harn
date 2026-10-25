@@ -17,6 +17,19 @@ struct PendingPrompt {
     delivery: AcpPromptDelivery,
     /// Rides on the receipt.
     meta: serde_json::Value,
+    /// Its message left the session queue and a turn is being prepared for
+    /// it. The request stays here, cancellable, until the turn claims
+    /// admission; the turn is then the only thing that answers it.
+    admitting: bool,
+    /// A cancel or close reached the prompt while it was admitting.
+    withdrawn: Option<String>,
+}
+
+/// How a turn's claim on its delivery prompt ended.
+pub(super) enum AdmissionClaim {
+    Admitted,
+    /// Withdrawn before admission; the turn must not run.
+    Withdrawn(String),
 }
 
 /// Every unanswered delivery prompt this connection sent, in arrival order.
@@ -72,6 +85,8 @@ impl PendingPrompts {
             message_id: message_id.to_string(),
             delivery,
             meta,
+            admitting: false,
+            withdrawn: None,
         });
     }
 
@@ -94,6 +109,63 @@ impl PendingPrompts {
         Some((prompt.request_id, prompt.meta))
     }
 
+    /// Move a prompt from the session queue into turn preparation. It stays
+    /// listed, so a cancel or close can still reach it.
+    fn begin_admission(
+        &self,
+        session_id: &str,
+        message_id: &str,
+    ) -> Option<(serde_json::Value, serde_json::Value)> {
+        let mut pending = self.lock();
+        let prompt = pending.iter_mut().find(|prompt| {
+            prompt.session_id == session_id && prompt.message_id == message_id && !prompt.admitting
+        })?;
+        prompt.admitting = true;
+        Some((prompt.request_id.clone(), prompt.meta.clone()))
+    }
+
+    /// The turn's one decision point: past it, a cancel no longer withdraws
+    /// the prompt. Atomic with every withdrawal under the list's lock.
+    fn claim_admission(&self, session_id: &str, message_id: &str) -> AdmissionClaim {
+        let mut pending = self.lock();
+        let Some(position) = pending
+            .iter()
+            .position(|prompt| prompt.session_id == session_id && prompt.message_id == message_id)
+        else {
+            return AdmissionClaim::Admitted;
+        };
+        match pending.remove(position).withdrawn {
+            Some(reason) => AdmissionClaim::Withdrawn(reason),
+            None => AdmissionClaim::Admitted,
+        }
+    }
+
+    /// The queued prompts `select` picks. A prompt whose turn is being
+    /// prepared is flagged, not returned: the turn claims admission once and
+    /// is then the only thing that answers it.
+    fn select_for_withdrawal(
+        &self,
+        select: impl Fn(&PendingPrompt) -> bool,
+        reason: &str,
+    ) -> Vec<(String, String)> {
+        let mut pending = self.lock();
+        let mut queued = Vec::new();
+        for prompt in pending.iter_mut().filter(|prompt| select(prompt)) {
+            if prompt.admitting {
+                prompt.withdrawn.get_or_insert_with(|| reason.to_string());
+            } else {
+                queued.push((prompt.session_id.clone(), prompt.message_id.clone()));
+            }
+        }
+        queued
+    }
+
+    /// Forget an admitting prompt whose turn ended without claiming it.
+    fn finish_admission(&self, session_id: &str, message_id: &str) {
+        self.lock()
+            .retain(|prompt| !(prompt.session_id == session_id && prompt.message_id == message_id));
+    }
+
     /// The message the next owed turn starts with: the earliest steer no turn
     /// took, else the earliest queued prompt.
     fn next_owed(&self, session_id: &str) -> Option<String> {
@@ -101,7 +173,11 @@ impl PendingPrompts {
         let first = |wanted: AcpPromptDelivery| {
             pending
                 .iter()
-                .find(|prompt| prompt.session_id == session_id && prompt.delivery == wanted)
+                .find(|prompt| {
+                    prompt.session_id == session_id
+                        && prompt.delivery == wanted
+                        && !prompt.admitting
+                })
                 .map(|prompt| prompt.message_id.clone())
         };
         first(AcpPromptDelivery::Steer).or_else(|| first(AcpPromptDelivery::Queue))
@@ -281,13 +357,7 @@ impl ConcurrentSessionControls {
         reason: &str,
         output: Option<&AcpOutput>,
     ) {
-        let selected: Vec<(String, String)> = self
-            .pending_prompts
-            .lock()
-            .iter()
-            .filter(|prompt| select(prompt))
-            .map(|prompt| (prompt.session_id.clone(), prompt.message_id.clone()))
-            .collect();
+        let selected = self.pending_prompts.select_for_withdrawal(select, reason);
         for (session_id, message_id) in selected {
             let revoked = match self.registered_control(&session_id) {
                 Some(control) => {
@@ -360,11 +430,14 @@ impl AcpServer {
             let Some((request_id, meta)) = self
                 .concurrent_controls
                 .pending_prompts
-                .take(session_id, &message_id)
+                .begin_admission(session_id, &message_id)
             else {
                 continue;
             };
             let Some(message) = inject_state.take_pending_user_message(&message_id).await else {
+                self.concurrent_controls
+                    .pending_prompts
+                    .finish_admission(session_id, &message_id);
                 send_cancelled(&self.output, &request_id, Some(&message_id), "not_pending");
                 continue;
             };
@@ -380,6 +453,35 @@ impl AcpServer {
                 TurnReply::receipt(message.message_id, meta),
             )
             .await;
+            self.concurrent_controls
+                .pending_prompts
+                .finish_admission(session_id, &message_id);
+        }
+    }
+
+    /// Decide, once, whether a delivery prompt's turn is admitted. A cancel
+    /// or close that reached it first has withdrawn it: its request is
+    /// answered here and the turn must not run. A plain prompt always is.
+    pub(super) fn claim_turn_admission(
+        &self,
+        id: &serde_json::Value,
+        session_id: &str,
+        reply: &TurnReply,
+    ) -> bool {
+        let TurnReply::Receipt { message_id, .. } = reply else {
+            return true;
+        };
+        match self
+            .concurrent_controls
+            .pending_prompts
+            .claim_admission(session_id, message_id)
+        {
+            AdmissionClaim::Admitted => true,
+            AdmissionClaim::Withdrawn(reason) => {
+                send_cancelled(&self.output, id, Some(message_id), &reason);
+                emit_withdrawn(&self.concurrent_controls, session_id, message_id, &reason);
+                false
+            }
         }
     }
 
@@ -656,4 +758,55 @@ fn emit_withdrawn(
         reason: Some(reason.to_string()),
         metadata: serde_json::Value::Null,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn registered() -> PendingPrompts {
+        let pending = PendingPrompts::default();
+        pending.register(
+            "s",
+            serde_json::json!(7),
+            "m7",
+            AcpPromptDelivery::Queue,
+            serde_json::Value::Null,
+        );
+        pending
+    }
+
+    /// A cancel that lands after the drain took the prompt off the session
+    /// queue but before its turn is admitted must still stop it.
+    #[test]
+    fn a_cancel_during_admission_withdraws_the_prompt_at_the_claim() {
+        let pending = registered();
+        assert!(pending.begin_admission("s", "m7").is_some());
+        assert_eq!(pending.next_owed("s"), None);
+        let queued = pending.select_for_withdrawal(|_| true, "request_cancelled");
+        assert!(
+            queued.is_empty(),
+            "an admitting prompt is the turn's to answer"
+        );
+        assert!(matches!(
+            pending.claim_admission("s", "m7"),
+            AdmissionClaim::Withdrawn(reason) if reason == "request_cancelled"
+        ));
+        assert!(!pending.contains("s", "m7"));
+    }
+
+    #[test]
+    fn a_claim_with_no_cancel_admits_and_closes_the_window() {
+        let pending = registered();
+        pending.begin_admission("s", "m7").expect("admitting");
+        assert!(matches!(
+            pending.claim_admission("s", "m7"),
+            AdmissionClaim::Admitted
+        ));
+        let queued = pending.select_for_withdrawal(|_| true, "request_cancelled");
+        assert!(
+            queued.is_empty(),
+            "a claimed prompt is no longer withdrawable"
+        );
+    }
 }
