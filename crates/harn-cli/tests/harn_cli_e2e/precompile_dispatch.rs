@@ -26,6 +26,68 @@ use std::path::{Path, PathBuf};
 
 use crate::test_util::process::harn_e2e_command;
 
+#[cfg(unix)]
+#[test]
+fn generated_precompile_driver_uses_user_run_store_in_shared_temp() {
+    let temporary = tempfile::tempdir().expect("isolated shared temp");
+    let project = tempfile::tempdir().expect("project");
+    let legacy = temporary.path().join(".harn-runs");
+    // A file makes the old shared store unusable even when CI runs as root.
+    std::fs::write(&legacy, "another account owns this path\n").expect("block shared store");
+    let source = project.path().join("probe.harn");
+    std::fs::write(&source, "pub fn probe() -> int { return 1 }\n").expect("write source");
+    let output = harn_e2e_command()
+        .current_dir(project.path())
+        .env("TMPDIR", temporary.path())
+        .env("HARN_STATE_DIR", project.path().join("state"))
+        .env("HARN_CACHE_DIR", project.path().join("cache"))
+        .env("HARN_SECRET_PROVIDERS", "env")
+        .env_remove("HARN_RUN_DIR")
+        .env_remove("HARN_PRECOMPILE_INNER")
+        .args(["precompile", "--quiet"])
+        .arg(&source)
+        .output()
+        .expect("run canonical precompile dispatch");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for extension in ["harnmod", "harnifc", "harnbc"] {
+        assert!(
+            std::fs::metadata(source.with_extension(extension))
+                .expect("compiled artifact")
+                .len()
+                > 0
+        );
+    }
+    // SAFETY: geteuid has no arguments or preconditions.
+    let uid = unsafe { libc::geteuid() };
+    let runs = temporary.path().join(format!("harn-user-{uid}/.harn-runs"));
+    let records: Vec<_> = std::fs::read_dir(runs)
+        .expect("user run store")
+        .map(|entry| entry.expect("run entry").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .collect();
+    assert_eq!(
+        records.len(),
+        1,
+        "the generated driver must persist its execution"
+    );
+    let record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&records[0]).expect("run record"))
+            .expect("record JSON");
+    assert_eq!(record["workflow_id"], "harn.execution");
+    assert_eq!(record["status"], "completed");
+    assert_eq!(
+        std::fs::read_to_string(legacy).expect("legacy store untouched"),
+        "another account owns this path\n"
+    );
+}
+
 #[test]
 fn single_file_dispatch_matches_inner_compile() {
     let workdir = tempfile::tempdir().expect("workdir");

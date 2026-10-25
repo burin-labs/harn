@@ -232,6 +232,9 @@ fn run_root_value(
     run_env_value: Option<&str>,
     nextest_root: Option<&Path>,
 ) -> PathBuf {
+    if env_value_is_default(run_env_value) && nextest_root.is_none() {
+        return default_run_root(base_dir);
+    }
     attempt_scoped_root_value(
         base_dir,
         run_env_value,
@@ -248,7 +251,13 @@ fn root_reference_value(
     nextest_root: Option<&Path>,
     nextest_child: Option<&str>,
 ) -> PathBuf {
-    if explicit_value.is_none_or(|value| value.trim().is_empty()) && nextest_root.is_none() {
+    if env_value_is_default(explicit_value) && nextest_root.is_none() {
+        if default_relative == DEFAULT_RUN_DIR_NAME {
+            let root = default_run_root(base_dir);
+            if root != base_dir.join(DEFAULT_RUN_DIR_NAME) {
+                return root;
+            }
+        }
         PathBuf::from(default_relative)
     } else {
         attempt_scoped_root_value(
@@ -259,6 +268,29 @@ fn root_reference_value(
             nextest_child,
         )
     }
+}
+
+fn env_value_is_default(value: Option<&str>) -> bool {
+    value.is_none_or(|value| value.trim().is_empty())
+}
+
+fn default_run_root(base_dir: &Path) -> PathBuf {
+    #[cfg(unix)]
+    {
+        let temporary = std::env::temp_dir();
+        // Generated command drivers can live directly in the shared temp
+        // directory. Root and ordinary users must never share its run store.
+        if let (Ok(base), Ok(temp)) = (base_dir.canonicalize(), temporary.canonicalize()) {
+            if base == temp {
+                // SAFETY: geteuid has no arguments or preconditions.
+                let uid = unsafe { libc::geteuid() };
+                return temp
+                    .join(format!("harn-user-{uid}"))
+                    .join(DEFAULT_RUN_DIR_NAME);
+            }
+        }
+    }
+    base_dir.join(DEFAULT_RUN_DIR_NAME)
 }
 
 fn attempt_scoped_root_value(
