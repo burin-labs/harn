@@ -541,9 +541,11 @@ fn rewake(inbox: &Inbox, session_id: &str, max_wait: StdDuration) -> Result<(), 
                     .iter()
                     .any(|id| !baseline.contains(id) || polls > BASELINE_GRACE_POLLS);
                 if wake {
-                    // Best effort: stderr must stay the fixed notice, and a
-                    // broken inbox fails the next poll anyway.
-                    let _ = inbox.record_wake(session_id, &pending, now);
+                    // An unrecorded wake would not count against the cap, so
+                    // stop without waking; the hook error exit is not a wake.
+                    inbox
+                        .record_wake(session_id, &pending, now)
+                        .map_err(|error| format!("could not record the wake: {error}"))?;
                     eprintln!("{REWAKE_NOTICE}");
                     // `process::exit` skips destructors; release the lock first.
                     drop(watcher);

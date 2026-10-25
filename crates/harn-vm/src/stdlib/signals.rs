@@ -141,17 +141,28 @@ struct FireRequest {
     dir: Option<PathBuf>,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ResolveOptions {
     #[serde(default)]
     event: Option<TriageEvent>,
     /// How the resolving report was checked. An unsigned report claims
-    /// nothing, so it defaults to `unverified`.
+    /// nothing, so it defaults to `unverified`, whether the options are
+    /// omitted, nil, or lack the field.
     #[serde(default = "unverified")]
     signature: SignatureStatus,
     #[serde(default)]
     dir: Option<PathBuf>,
+}
+
+impl Default for ResolveOptions {
+    fn default() -> Self {
+        Self {
+            event: None,
+            signature: unverified(),
+            dir: None,
+        }
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -385,7 +396,8 @@ mod tests {
         TriageEvent,
     };
 
-    use super::{render_reminders, MAX_REMINDERS_PER_DELIVERY};
+    use super::{optional, render_reminders, ResolveOptions, MAX_REMINDERS_PER_DELIVERY};
+    use crate::value::VmValue;
 
     fn reminder(key: &str, text: &str, signature: SignatureStatus) -> Reminder {
         Reminder {
@@ -495,6 +507,19 @@ mod tests {
         );
         assert!(!outside.contains("honeycomb"), "{outside}");
         assert!(!outside.contains("make deploy"), "{outside}");
+    }
+
+    #[test]
+    fn an_unsigned_resolve_is_unverified_however_its_options_are_omitted() {
+        let empty = crate::stdlib::json_to_vm_value(&serde_json::json!({}));
+        for options in [None, Some(&VmValue::Nil), Some(&empty)] {
+            let decoded: ResolveOptions = optional("signal_resolve", options).unwrap();
+            assert_eq!(
+                decoded.signature,
+                SignatureStatus::Unverified,
+                "{options:?}"
+            );
+        }
     }
 
     #[test]
