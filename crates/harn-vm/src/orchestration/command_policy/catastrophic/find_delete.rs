@@ -19,6 +19,9 @@ const NON_FILTERING: &[&str] = &[
     "-nowarn",
     "-print",
     "-print0",
+    "-true",
+    "-a",
+    "-and",
     "-warn",
     "-xdev",
 ];
@@ -43,6 +46,8 @@ pub(super) fn find_delete_catastrophe(args: &[String], roots: &[String]) -> Opti
     let expression = &args[index..];
     let mut deletes = false;
     let mut filtered = false;
+    // Alternation, negation and constant tests leave a delete reaching most or all entries.
+    let mut unselective = false;
     let mut position = 0;
     while position < expression.len() {
         let token = expression[position].as_str();
@@ -61,6 +66,8 @@ pub(super) fn find_delete_catastrophe(args: &[String], roots: &[String]) -> Opti
                     .is_some_and(|word| command_basename(word) == "rm");
             position = end + 1;
             continue;
+        } else if !deletes && matches!(token, "-o" | "-or" | "," | "!" | "-not" | "-false") {
+            unselective = true;
         } else if matches!(token, "-maxdepth" | "-mindepth") {
             position += 2;
             continue;
@@ -78,7 +85,7 @@ pub(super) fn find_delete_catastrophe(args: &[String], roots: &[String]) -> Opti
             "`find {start} … -delete` is blocked: it deletes under an absolute path or outside the project root. Search and delete only inside the workspace."
         ));
     }
-    (!filtered && starts.iter().any(|start| is_project_target(start)))
+    (!(filtered && !unselective) && starts.iter().any(|start| is_project_target(start)))
         .then(|| PROJECT_DELETE_REASON.to_string())
 }
 

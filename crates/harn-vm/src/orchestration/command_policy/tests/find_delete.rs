@@ -20,6 +20,10 @@ fn floor_blocks_find_deleting_outside_the_workspace_or_the_whole_root() {
         "find . -mindepth 1 -delete",
         "find ./ -exec rm -rf {} +",
         "find . -exec rm -rf {} \\; -name '*.tmp'",
+        "find . -false -o -delete",
+        "find . -name keep -o -delete",
+        "find . ! -name keep -delete",
+        "find . -true -delete",
     ] {
         assert!(
             is_cat_root(cmd),
