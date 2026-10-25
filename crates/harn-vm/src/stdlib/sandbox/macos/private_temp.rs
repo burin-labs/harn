@@ -76,7 +76,10 @@ const ALIAS_DIGEST_HEX: usize = 16;
 /// a spawn just found live is never unlinked under it.
 const ALIAS_LOCK: &str = "harn-aliases.lock";
 
-struct AliasLock(std::fs::File);
+struct AliasLock {
+    /// Held open for the lock's life; closing it releases the flock.
+    _file: std::fs::File,
+}
 
 impl AliasLock {
     fn acquire(base: &Path, exclusive: bool) -> io::Result<Self> {
@@ -96,7 +99,7 @@ impl AliasLock {
         loop {
             // SAFETY: the descriptor is open for the life of `file`.
             if unsafe { libc::flock(file.as_raw_fd(), operation) } == 0 {
-                return Ok(Self(file));
+                return Ok(Self { _file: file });
             }
             let error = io::Error::last_os_error();
             if error.kind() != io::ErrorKind::Interrupted {
