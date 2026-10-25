@@ -24,6 +24,9 @@ fn floor_blocks_find_deleting_outside_the_workspace_or_the_whole_root() {
         "find . -name keep -o -delete",
         "find . ! -name keep -delete",
         "find . -true -delete",
+        "find . -printf '%p\\n' -delete",
+        "find . -fprint /dev/null -delete",
+        "find . -prune -delete",
     ] {
         assert!(
             is_cat_root(cmd),

@@ -4,27 +4,53 @@ use super::project_delete::is_project_target;
 use super::shell::{command_basename, unwrapped_command_index};
 use super::{path_escapes_root, PROJECT_DELETE_REASON};
 
-/// Primaries that change traversal or output but select no subset of files.
-const NON_FILTERING: &[&str] = &[
-    "-daystart",
-    "-depth",
-    "-follow",
-    "-ignore_readdir_race",
-    "-ls",
-    "-maxdepth",
-    "-mindepth",
-    "-mount",
-    "-noignore_readdir_race",
-    "-noleaf",
-    "-nowarn",
-    "-print",
-    "-print0",
-    "-true",
-    "-a",
-    "-and",
-    "-warn",
-    "-xdev",
+/// Tests that select a subset of entries. Everything else (output actions,
+/// traversal options, constants) leaves a following delete unfiltered.
+const SELECTING: &[&str] = &[
+    "-amin",
+    "-anewer",
+    "-atime",
+    "-cmin",
+    "-cnewer",
+    "-context",
+    "-ctime",
+    "-empty",
+    "-executable",
+    "-fstype",
+    "-gid",
+    "-group",
+    "-ilname",
+    "-iname",
+    "-inum",
+    "-ipath",
+    "-iregex",
+    "-iwholename",
+    "-links",
+    "-lname",
+    "-mmin",
+    "-mtime",
+    "-name",
+    "-newer",
+    "-nogroup",
+    "-nouser",
+    "-path",
+    "-perm",
+    "-readable",
+    "-regex",
+    "-samefile",
+    "-size",
+    "-type",
+    "-uid",
+    "-used",
+    "-user",
+    "-wholename",
+    "-writable",
+    "-xtype",
 ];
+
+fn is_selecting_test(token: &str) -> bool {
+    SELECTING.contains(&token) || (token.starts_with("-newer") && token.len() == 8)
+}
 
 const EXEC_ACTIONS: &[&str] = &["-exec", "-execdir", "-ok", "-okdir"];
 
@@ -71,7 +97,7 @@ pub(super) fn find_delete_catastrophe(args: &[String], roots: &[String]) -> Opti
         } else if matches!(token, "-maxdepth" | "-mindepth") {
             position += 2;
             continue;
-        } else if !deletes && token.starts_with('-') && !NON_FILTERING.contains(&token) {
+        } else if !deletes && is_selecting_test(token) {
             // find evaluates left to right: a test after the action filters nothing.
             filtered = true;
         }
