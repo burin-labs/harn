@@ -185,7 +185,7 @@ canary_fail() {
 # named reason an unmeasured attempt ended with. Nothing here is printed.
 canary_record() {
   local repo=${CANARY_REPOSITORY:-} run_id=${CANARY_RECORD_RUN:-} receipt=${CANARY_FAILURE_RECEIPT:-}
-  local reason=${CANARY_DISPATCH_REASON:-} head='' jobs digest=''
+  local reason=${CANARY_DISPATCH_REASON:-} head='' jobs digest='' failed failures=''
   [[ -n "${GITHUB_OUTPUT:-}" ]] || { echo '::error::CONSUMER_CANARY reason=record_output_unset'; exit 1; }
   if [[ -z "$reason" && -n "$receipt" && -f "$receipt" ]]; then
     reason=$(jq -r '.reason // empty' "$receipt" 2> /dev/null || true)
@@ -203,9 +203,16 @@ canary_record() {
         && [[ -n "$jobs" ]]; then
       digest=$(LC_ALL=C sort <<< "$jobs" | sha256sum | cut -d' ' -f1)
     fi
+    # Where the run failed, so a base excuses a red only by failing the same way.
+    if canary_api --optional failed consumer_run_failures secret:CONSUMER_CANARY_REPOSITORY \
+        "repos/$repo/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
+        --jq 'if .total_count <= 100 then .jobs[] | select(.conclusion == "failure") | "\(.name)\t\([.steps[]? | select(.conclusion == "failure") | .name][0] // "")" else empty end' \
+        && [[ -n "$failed" ]]; then
+      failures=$(LC_ALL=C sort <<< "$failed" | sha256sum | cut -d' ' -f1)
+    fi
   fi
-  printf 'consumer_head=%s\nconsumer_jobs=%s\nreason=%s\n' "$head" "$digest" "$reason" >> "$GITHUB_OUTPUT"
-  echo "CONSUMER_CANARY recorded run=${run_id:-none} head=${head:+measured} jobs=${digest:+measured} reason=${reason:-none}"
+  printf 'consumer_head=%s\nconsumer_jobs=%s\nconsumer_failures=%s\nreason=%s\n' "$head" "$digest" "$failures" "$reason" >> "$GITHUB_OUTPUT"
+  echo "CONSUMER_CANARY recorded run=${run_id:-none} head=${head:+measured} jobs=${digest:+measured} failures=${failures:+measured} reason=${reason:-none}"
 }
 
 # The shared source selector owns pairing grammar. This legacy dispatcher

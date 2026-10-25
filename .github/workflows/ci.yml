@@ -3095,6 +3095,11 @@ jobs:
         setup-harn-action,
       ]
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci/consumer_verdict.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Verify required CI jobs
         env:
           RELEASE_CONTRACT_EXPECTED: ${{ github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true' }}
@@ -3122,6 +3127,8 @@ jobs:
           CONSUMER_BASE_RUN: ${{ needs.consumer-base-check.outputs.verdict && needs.consumer-base-check.outputs.consumer_run || needs.consumer-base-check-retry.outputs.consumer_run }}
           CONSUMER_IDENTITY: ${{ needs.consumer-check.outputs.verdict && format('{0}/{1}', needs.consumer-check.outputs.consumer_head, needs.consumer-check.outputs.consumer_jobs) || format('{0}/{1}', needs.consumer-check-retry.outputs.consumer_head, needs.consumer-check-retry.outputs.consumer_jobs) }}
           CONSUMER_BASE_IDENTITY: ${{ needs.consumer-base-check.outputs.verdict && format('{0}/{1}', needs.consumer-base-check.outputs.consumer_head, needs.consumer-base-check.outputs.consumer_jobs) || format('{0}/{1}', needs.consumer-base-check-retry.outputs.consumer_head, needs.consumer-base-check-retry.outputs.consumer_jobs) }}
+          CONSUMER_FAILURES: ${{ needs.consumer-check.outputs.verdict && needs.consumer-check.outputs.consumer_failures || needs.consumer-check-retry.outputs.consumer_failures }}
+          CONSUMER_BASE_FAILURES: ${{ needs.consumer-base-check.outputs.verdict && needs.consumer-base-check.outputs.consumer_failures || needs.consumer-base-check-retry.outputs.consumer_failures }}
           CONSUMER_REASONS: first=${{ needs.consumer-check.outputs.reason || 'none' }} retry=${{ needs.consumer-check-retry.outputs.reason || 'none' }}
           CONSUMER_BASE_REASONS: first=${{ needs.consumer-base-check.outputs.reason || 'none' }} retry=${{ needs.consumer-base-check-retry.outputs.reason || 'none' }}
           # Flip to true once the consumer's runner capacity stops saturating;
@@ -3257,49 +3264,9 @@ jobs:
           require_result "$rust_cli_result" \
             "Shared Harn CLI build failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
-          # The downstream consumer, when expected: a fail the base passes, on
-          # the same consumer commit and job set, blocks. A fail the base shares
-          # is inherited. An outcome still unmeasured after one retry, or a pair
-          # whose consumer commit or jobs differ, is unproven: a named warning
-          # until CONSUMER_UNMEASURED_BLOCKS flips it to blocking.
-          consumer_unmeasured() {
-            local message="consumer check UNMEASURED: $1"
-            echo "- $message" >> "$GITHUB_STEP_SUMMARY"
-            if [ "$CONSUMER_UNMEASURED_BLOCKS" = "true" ]; then
-              echo "::error::$message"
-              exit 1
-            fi
-            echo "::warning::$message"
-          }
-          echo "Downstream consumer: result=$CONSUMER_RESULT verdict=${CONSUMER_VERDICT:-none} (expected=$CONSUMER_EXPECTED)"
-          if [ "$CONSUMER_EXPECTED" != "true" ]; then
-            require_result "${CONSUMER_RESULT%%/*}" "Downstream consumer check ran without being expected and did not pass." true
-          else
-            case "$CONSUMER_VERDICT" in
-              pass) ;;
-              fail)
-                echo "Downstream consumer at base $CONSUMER_BASE: base CLI=$CONSUMER_BASE_CLI_RESULT result=$CONSUMER_BASE_RESULT verdict=${CONSUMER_BASE_VERDICT:-none}"
-                same_head=false
-                same_jobs=false
-                [ "${CONSUMER_IDENTITY%%/*}" != "" ] && [ "${CONSUMER_IDENTITY%%/*}" = "${CONSUMER_BASE_IDENTITY%%/*}" ] && same_head=true
-                [ "${CONSUMER_IDENTITY#*/}" != "" ] && [ "${CONSUMER_IDENTITY#*/}" = "${CONSUMER_BASE_IDENTITY#*/}" ] && same_jobs=true
-                case "$CONSUMER_BASE_VERDICT" in
-                  pass|fail)
-                    if [ "$same_head" != "true" ] || [ "$same_jobs" != "true" ]; then
-                      consumer_unmeasured "consumer_identity_mismatch (runs $CONSUMER_RUN and $CONSUMER_BASE_RUN, same commit=$same_head, same jobs=$same_jobs)"
-                    elif [ "$CONSUMER_BASE_VERDICT" = "fail" ]; then
-                      echo "::notice::Downstream consumer red is inherited: consumer run $CONSUMER_RUN fails here and consumer run $CONSUMER_BASE_RUN fails at base $CONSUMER_BASE on the same consumer commit, so it does not block this pull request."
-                    else
-                      echo "::error::Downstream consumer run $CONSUMER_RUN fails with this change and consumer run $CONSUMER_BASE_RUN passes at base $CONSUMER_BASE on the same consumer commit."
-                      exit 1
-                    fi
-                    ;;
-                  *) consumer_unmeasured "base_unmeasured ($CONSUMER_BASE_REASONS, base CLI=$CONSUMER_BASE_CLI_RESULT)" ;;
-                esac
-                ;;
-              *) consumer_unmeasured "consumer_unmeasured ($CONSUMER_REASONS)" ;;
-            esac
-          fi
+          # A measured consumer fail is inherited only when the base measured
+          # the same failure; scripts/ci/consumer_verdict.sh owns the rule.
+          bash scripts/ci/consumer_verdict.sh || exit 1
 
           case "$PROVIDER_CONTRACT_PROBE_EXPECTED" in
             true|false) ;;

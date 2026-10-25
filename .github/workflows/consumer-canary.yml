@@ -43,6 +43,9 @@ on:
       consumer_jobs:
         description: A digest of the consumer run's job names
         value: ${{ jobs.consumers.outputs.consumer_jobs }}
+      consumer_failures:
+        description: A digest of each failed consumer job with its first failed step, empty when none failed or unmeasured
+        value: ${{ jobs.consumers.outputs.consumer_failures }}
       reason:
         description: The named reason an attempt failed or stayed unmeasured
         value: ${{ jobs.consumers.outputs.reason }}
@@ -151,6 +154,7 @@ jobs:
       consumer_run: ${{ steps.canary.outputs.run_id }}
       consumer_head: ${{ steps.record.outputs.consumer_head }}
       consumer_jobs: ${{ steps.record.outputs.consumer_jobs }}
+      consumer_failures: ${{ steps.record.outputs.consumer_failures }}
       reason: ${{ steps.record.outputs.reason }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

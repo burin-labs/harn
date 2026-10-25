@@ -1730,6 +1730,7 @@ check-rust-test-lane-policy:
 	@bash scripts/tests/host_telemetry_test.sh
 	@bash scripts/tests/runner_capacity_test.sh
 	@bash scripts/tests/consumer_canary_test.sh
+	@bash scripts/tests/consumer_verdict_test.sh
 
 check-cargo-lock-contract:
 	@echo "=== Checking CI cargo lock contract ==="
