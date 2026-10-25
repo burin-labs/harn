@@ -987,6 +987,16 @@ fn python_override_family_refuses_unrelated_and_external_members() {
             "from widgets import Frame\nfrom .shapes import Shape\n\n\nclass Panel(Shape, Frame):\n    def area(self, scale):\n        return 2\n",
             "pkg/extra.py:5 supertype",
         ),
+        // A subclass binds the name to a callable in its class body.
+        (
+            "from .shapes import Square\n\n\nclass Lazy(Square):\n    area = lambda self, scale: scale\n",
+            "pkg/extra.py:5 class_attribute",
+        ),
+        // A workspace class shadows the builtin `object`; its subclass inherits.
+        (
+            "from .shapes import Square\nfrom widgets import Frame\n\n\nclass object(Square):\n    pass\n\n\nclass Leaf(Frame, object):\n    pass\n",
+            "pkg/extra.py:9 supertype",
+        ),
         // A subclass that inherits the method beside a package class.
         (
             "from widgets import Frame\nfrom .shapes import Square\n\n\nclass Local(Frame, Square):\n    pass\n",

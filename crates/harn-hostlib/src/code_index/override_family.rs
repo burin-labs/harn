@@ -889,7 +889,11 @@ fn scan_file(
     }
     if family == Family::Python {
         let local: BTreeSet<String> = scan.owners.iter().filter_map(|o| o.name.clone()).collect();
-        let neutral = scan.neutral_names.clone();
+        let mut neutral = scan.neutral_names.clone();
+        // The builtin `object`, unless this file declares or imports its own.
+        if !scan.imports.iter().any(|i| i.local == "object") {
+            neutral.insert("object".to_string());
+        }
         for base in scan.owners.iter_mut().flat_map(|o| o.bases.iter_mut()) {
             if matches!(base, BaseRef::Name(n) if neutral.contains(n) && !local.contains(n)) {
                 *base = BaseRef::Neutral;
@@ -1120,7 +1124,6 @@ fn python_base_ref(node: Node<'_>, bytes: &[u8]) -> BaseRef {
             .any(|(module, base)| t == format!("{module}.{base}"))
     };
     match node.kind() {
-        "identifier" if written == "object" => BaseRef::Neutral,
         "identifier" => BaseRef::Name(written.to_string()),
         "attribute" if neutral_qualified(written) => BaseRef::Neutral,
         "subscript" => match node.child_by_field_name("value") {
@@ -1314,7 +1317,29 @@ fn opaque_declaration(
                     )
                 })
         }
-        Family::Python => None,
+        Family::Python => {
+            let left = node.child_by_field_name("left")?;
+            let in_class_body = node
+                .parent()
+                .filter(|p| p.kind() == "expression_statement")
+                .and_then(|p| p.parent())
+                .filter(|p| p.kind() == "block")
+                .and_then(|p| p.parent())
+                .is_some_and(|p| p.kind() == "class_definition");
+            (node.kind() == "assignment"
+                && in_class_body
+                && left.kind() == "identifier"
+                && text(left, bytes) == name)
+                .then(|| {
+                    (
+                        line,
+                        "class_attribute",
+                        format!(
+                            "class attribute `{name}` may bind a callable that cannot be rewritten"
+                        ),
+                    )
+                })
+        }
     }
 }
 
