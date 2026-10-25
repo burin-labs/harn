@@ -841,7 +841,7 @@ fn main(harness: Harness) -> int {
   const plan = decoded
     + {
       repos: decoded.repos.map(
-        { repo -> repo + {checkout: repo.checkout ?? path_join(corpus_dir, repo.id)} },
+        { repo -> repo + {checkout: resolve_checkout(corpus_dir, repo.checkout)} },
       )
         .to_list(),
     }
