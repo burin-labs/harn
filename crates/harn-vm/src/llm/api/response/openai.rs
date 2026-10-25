@@ -15,10 +15,9 @@ use super::super::result::{LlmResult, RawProviderToolCall};
 use super::super::telemetry::ProviderTelemetry;
 use super::boundary;
 use super::{
-    billed_noncommittal_completion_error, empty_generation_error, extract_cache_read_tokens,
-    extract_cache_write_tokens, is_billed_noncommittal_completion, is_length_stop_reason,
-    openai_message_content_block_types, openai_responses_content_block_types,
-    CompletionContractSignals, ProviderResponseEnvelope,
+    billed_noncommittal_completion_error, empty_generation_error, extract_cache_counts,
+    is_billed_noncommittal_completion, is_length_stop_reason, openai_message_content_block_types,
+    openai_responses_content_block_types, CompletionContractSignals, ProviderResponseEnvelope,
 };
 use item_kinds::{is_openai_responses_hosted_tool_item, openai_responses_tool_kind};
 
@@ -434,8 +433,7 @@ pub(crate) fn parse_openai_responses_response(
         .or_else(|| usage["completion_tokens"].as_i64());
     let input_tokens = reported_input_tokens.unwrap_or(0);
     let output_tokens = reported_output_tokens.unwrap_or(0);
-    let cache_read_tokens = extract_cache_read_tokens(usage)?;
-    let cache_write_tokens = extract_cache_write_tokens(usage)?;
+    let cache = extract_cache_counts(usage)?;
     let request_id = json["id"].as_str().filter(|value| !value.is_empty());
     let telemetry = ProviderTelemetry::from_openai_response(json, request_id);
     let served_fast = crate::llm::serving_tiers::served_fast(model, json);
@@ -446,12 +444,7 @@ pub(crate) fn parse_openai_responses_response(
         served_fast,
     )
     .with_billing(telemetry.billing.clone())
-    .with_cache(
-        cache_read_tokens,
-        cache_write_tokens,
-        telemetry.cache_accounting_declared,
-        true,
-    );
+    .with_cache(cache, telemetry.cache_accounting_declared, true);
     // `status: "incomplete"` says only that generation stopped early. Prefer
     // its nested reason and retain status as the completed-response fallback.
     let stop_reason = json
@@ -483,8 +476,9 @@ pub(crate) fn parse_openai_responses_response(
         raw_tool_calls,
         input_tokens,
         output_tokens,
-        cache_read_tokens,
-        cache_write_tokens,
+        cache_read_tokens: cache.read_tokens,
+        cache_write_tokens: cache.write_tokens,
+        cache_counts_reported: cache.reported,
         model: model.to_string(),
         provider: provider.to_string(),
         thinking_summary: if thinking_summary.is_empty() {
@@ -664,8 +658,7 @@ pub(super) fn parse_chat_completions_response(
     let reported_output_tokens = json["usage"]["completion_tokens"].as_i64();
     let input_tokens = reported_input_tokens.unwrap_or(0);
     let output_tokens = reported_output_tokens.unwrap_or(0);
-    let cache_read_tokens = extract_cache_read_tokens(&json["usage"])?;
-    let cache_write_tokens = extract_cache_write_tokens(&json["usage"])?;
+    let cache = extract_cache_counts(&json["usage"])?;
     let stop_reason = finish_reason.map(|s| s.to_string());
     let request_id = json["id"].as_str().filter(|value| !value.is_empty());
     let telemetry = ProviderTelemetry::from_openai_response(json, request_id);
@@ -678,12 +671,7 @@ pub(super) fn parse_chat_completions_response(
     )
     .with_reported_total(telemetry.server_total_tokens)
     .with_billing(telemetry.billing.clone())
-    .with_cache(
-        cache_read_tokens,
-        cache_write_tokens,
-        telemetry.cache_accounting_declared,
-        true,
-    );
+    .with_cache(cache, telemetry.cache_accounting_declared, true);
     let billed_length_truncation =
         is_length_stop_reason(stop_reason.as_deref()) && output_tokens > 0;
 
@@ -746,8 +734,9 @@ pub(super) fn parse_chat_completions_response(
         raw_tool_calls,
         input_tokens,
         output_tokens,
-        cache_read_tokens,
-        cache_write_tokens,
+        cache_read_tokens: cache.read_tokens,
+        cache_write_tokens: cache.write_tokens,
+        cache_counts_reported: cache.reported,
         model: model.to_string(),
         provider: provider.to_string(),
         thinking: if extracted_thinking.is_empty() {

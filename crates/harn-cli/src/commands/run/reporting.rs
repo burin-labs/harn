@@ -678,6 +678,7 @@ mod trace_summary_pricing_tests {
                 cache_write_tokens: 0,
                 cache_supported: true,
                 cache_accounting_declared: Some(true),
+                cache_counts_present: true,
                 cache_hit_ratio: Some(0.0),
                 cache_savings_usd: 0.0,
                 cache_hit: false,

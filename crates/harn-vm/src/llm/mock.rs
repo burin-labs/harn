@@ -829,6 +829,8 @@ fn build_mock_result(
         output_tokens: mock.output_tokens.unwrap_or(30),
         cache_read_tokens: mock.cache_read_tokens.unwrap_or(0),
         cache_write_tokens: mock.cache_write_tokens.unwrap_or(0),
+        cache_counts_reported: mock.cache_read_tokens.is_some()
+            || mock.cache_write_tokens.is_some(),
         model: mock.model.clone(),
         provider: mock.provider.clone().unwrap_or_else(|| "mock".to_string()),
         thinking: mock.thinking.clone(),
@@ -928,6 +930,7 @@ fn apply_mock_prompt_cache(result: &mut LlmResult, cache_key: &str) {
     } else {
         result.cache_write_tokens = cache_tokens;
     }
+    result.cache_counts_reported = true;
 }
 
 /// Convert a mock's `error` payload into the `VmError` that the
@@ -1070,8 +1073,12 @@ pub(crate) fn record_cli_llm_result(request: &super::api::LlmRequestPayload, res
         sticky: false,
         input_tokens: Some(result.input_tokens),
         output_tokens: Some(result.output_tokens),
-        cache_read_tokens: Some(result.cache_read_tokens),
-        cache_write_tokens: Some(result.cache_write_tokens),
+        cache_read_tokens: result
+            .cache_counts_reported
+            .then_some(result.cache_read_tokens),
+        cache_write_tokens: result
+            .cache_counts_reported
+            .then_some(result.cache_write_tokens),
         simulated_cost_usd: None,
         thinking: result.thinking.clone(),
         thinking_summary: result.thinking_summary.clone(),

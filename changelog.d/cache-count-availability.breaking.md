@@ -1,7 +1,9 @@
 - Run records and `harn.run_view.v1` / `harn.session_view.v1` usage now carry
   `cache_read_tokens` and `cache_write_tokens`, summed only over calls whose
   provider reported cache accounting and null when no call did, so an
-  unsupported or undeclared route no longer reads as a measured zero. Each
+  unsupported or undeclared route no longer reads as a measured zero. A
+  response on a supported route that omits its cache counters is unreported
+  too: every provider parser now records whether a counter was present. Each
   `llm_call` transcript event records `cache_counts_reported`, and calls
   recorded before that flag existed read as unreported. Session-projected run
   records drop the `metadata.cache_tokens` block, which summed unreported zeros,
