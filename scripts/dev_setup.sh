@@ -301,7 +301,10 @@ write_rustc_frontend_config() {
     return 0
   fi
 
-  local wrapper_line="rustc-workspace-wrapper = \"${ROOT_DIR}/scripts/rustc_frontend_wrapper.sh\" # ${MANAGED_CARGO_CONFIG_MARKER}"
+  local wrapper
+  wrapper="$(harn_rustc_frontend_install_wrapper "${ROOT_DIR}/scripts" \
+    "$(derive_storage_root)/rustc-frontend")" || return 1
+  local wrapper_line="rustc-workspace-wrapper = \"${wrapper}\" # ${MANAGED_CARGO_CONFIG_MARKER}"
   tmp_path="$(mktemp)"
   awk -v wrapper_line="${wrapper_line}" '
     { print }

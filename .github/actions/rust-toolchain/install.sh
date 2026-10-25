@@ -72,7 +72,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
 source "${repo_root}/scripts/lib/rustc_frontend.sh"
 frontend_flags="$(harn_rustc_frontend_flags)"
 if [[ -n "$frontend_flags" && "${RUNNER_OS:-}" != "Windows" ]]; then
-  printf 'RUSTC_WORKSPACE_WRAPPER=%s\n' "${repo_root}/scripts/rustc_frontend_wrapper.sh" \
+  wrapper="$(harn_rustc_frontend_install_wrapper "${repo_root}/scripts" \
+    "${RUNNER_TEMP:?the wrapper copy lives in the runner temp directory}/harn-rustc-frontend")"
+  printf 'RUSTC_WORKSPACE_WRAPPER=%s\n' "${wrapper}" \
     >> "${GITHUB_ENV:?the workspace wrapper reaches later steps only through GITHUB_ENV}"
   echo "rustc front end: ${frontend_flags} for workspace crates"
 fi

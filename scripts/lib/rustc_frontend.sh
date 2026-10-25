@@ -32,3 +32,26 @@ harn_rustc_frontend_flags() {
     printf '%s\n' "-Zthreads=$threads"
   fi
 }
+
+# Copy the workspace wrapper and this file under CACHE_ROOT, keyed by their
+# content, and print the copied wrapper's path. Cargo config and CI point at
+# the copy, so a checkout switched to a commit without the wrapper still
+# builds. Each file lands by atomic rename, so concurrent setups are safe.
+harn_rustc_frontend_install_wrapper() {
+  local scripts_dir="$1" cache_root="$2" key dest file
+  # cksum is POSIX, so this needs no git or sha tool; the key only names a
+  # cache directory.
+  key="$(cat "$scripts_dir/rustc_frontend_wrapper.sh" "$scripts_dir/lib/rustc_frontend.sh" \
+    | cksum | awk '{ print $1 "-" $2 }')"
+  [ -n "$key" ] || return 1
+  dest="$cache_root/$key"
+  mkdir -p "$dest/lib" || return 1
+  for file in rustc_frontend_wrapper.sh lib/rustc_frontend.sh; do
+    if [ ! -f "$dest/$file" ]; then
+      cp "$scripts_dir/$file" "$dest/$file.tmp.$$" \
+        && chmod +x "$dest/$file.tmp.$$" \
+        && mv -f "$dest/$file.tmp.$$" "$dest/$file" || return 1
+    fi
+  done
+  printf '%s\n' "$dest/rustc_frontend_wrapper.sh"
+}

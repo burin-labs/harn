@@ -59,6 +59,7 @@ make_fixture_repo() {
   cp "$repo_root/scripts/lib/file_time.sh" "$repo/scripts/lib/file_time.sh"
   cp "$repo_root/scripts/lib/cargo_env.sh" "$repo/scripts/lib/cargo_env.sh"
   cp "$repo_root/scripts/lib/rustc_frontend.sh" "$repo/scripts/lib/rustc_frontend.sh"
+  cp "$repo_root/scripts/rustc_frontend_wrapper.sh" "$repo/scripts/rustc_frontend_wrapper.sh"
   chmod +x "$repo/scripts/dev_setup.sh" "$repo/scripts/cargo_target_seed.sh"
   printf '[package]\nname = "setup-fixture"\nversion = "0.1.0"\n' > "$repo/Cargo.toml"
   printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/sign_local_macos.sh"
@@ -440,7 +441,7 @@ if ! grep -Fxq "target-dir = \"$rust_target_dir\" # harn-dev-setup-managed" "$ru
 fi
 # The parallel rustc front end is on through this checkout's workspace wrapper,
 # written once across repeated setups.
-frontend_line_re='^rustc-workspace-wrapper = ".*/scripts/rustc_frontend_wrapper\.sh" # harn-dev-setup-managed$'
+frontend_line_re='^rustc-workspace-wrapper = ".*/rustc-frontend/[0-9]+-[0-9]+/rustc_frontend_wrapper\.sh" # harn-dev-setup-managed$'
 if [[ "$(grep -Ec "$frontend_line_re" "$rust_repo/.cargo/config.toml")" != 1 ]] \
   || [[ "$(grep -Ec '^[[:space:]]*rustc-workspace-wrapper[[:space:]]*=' "$rust_repo/.cargo/config.toml")" != 1 ]]; then
   echo "rust setup did not configure the parallel rustc front end exactly once" >&2

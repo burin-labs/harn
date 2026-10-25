@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 # Cargo's workspace rustc wrapper: compiles Harn's own crates with rustc's
 # parallel front end. Cargo calls it as `<this script> <rustc> <args...>`, and
@@ -7,6 +7,10 @@
 # switch to nightly-only code when RUSTC_BOOTSTRAP reaches their probes, which
 # grew a debug harn binary by 26%. Why the flag pays off lives in
 # scripts/lib/rustc_frontend.sh.
+#
+# This runs under bash, not sh: Linux's dash drops environment variables whose
+# names are not shell identifiers, such as CARGO_BIN_EXE_harn-test-echo-env,
+# before rustc can read them with env!.
 
 case "$1" in
   -*) rustc=rustc ;;

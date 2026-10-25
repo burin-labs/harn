@@ -67,6 +67,7 @@ run_case() {
   PATH="$tmp_root/bin:$PATH" \
     GITHUB_ENV="$state/github_env" \
     RUNNER_OS="${CASE_RUNNER_OS:-Linux}" \
+    RUNNER_TEMP="$state/runner-temp" \
     RUNNER_ENVIRONMENT="${CASE_RUNNER_ENVIRONMENT:-self-hosted}" \
     TOOLCHAIN_TEST_STATE="$state" \
     TOOLCHAIN_TEST_MODE="$mode" \
@@ -130,7 +131,24 @@ EXPECTED
 
 # Later steps compile workspace crates through the parallel front-end wrapper,
 # and nothing else reaches the job's environment.
-[[ "$(cat "$tmp_root/rustc-transient/github_env")" == "RUSTC_WORKSPACE_WRAPPER=$repo_root/scripts/rustc_frontend_wrapper.sh" ]]
+# The wrapper is a copy outside the checkout, so switching the checkout to a
+# commit without it keeps building.
+wrapper_line="$(cat "$tmp_root/rustc-transient/github_env")"
+[[ "$wrapper_line" =~ ^RUSTC_WORKSPACE_WRAPPER=$tmp_root/rustc-transient/runner-temp/harn-rustc-frontend/[0-9]+-[0-9]+/rustc_frontend_wrapper\.sh$ ]]
+wrapper="${wrapper_line#RUSTC_WORKSPACE_WRAPPER=}"
+# A compilation gets the flags and the bootstrap, and keeps Cargo's
+# CARGO_BIN_EXE_* variables, whose names are not shell identifiers.
+cat > "$tmp_root/fake-rustc" <<'SCRIPT'
+#!/usr/bin/env bash
+env | grep -E '^(RUSTC_BOOTSTRAP|CARGO_BIN_EXE_echo-env)='
+printf 'last-arg %s\n' "${!#}"
+SCRIPT
+chmod +x "$tmp_root/fake-rustc"
+diff -u - <(env 'CARGO_BIN_EXE_echo-env=/bin/echo' "$wrapper" "$tmp_root/fake-rustc" --crate-name t | sort) <<'EXPECTED'
+CARGO_BIN_EXE_echo-env=/bin/echo
+RUSTC_BOOTSTRAP=1
+last-arg -Zthreads=8
+EXPECTED
 # Windows cannot run the shell wrapper, and the opt-out leaves the job serial.
 CASE_RUNNER_OS=Windows run_case frontend-windows cargo-transient 0
 [[ ! -s "$tmp_root/frontend-windows/github_env" ]]
