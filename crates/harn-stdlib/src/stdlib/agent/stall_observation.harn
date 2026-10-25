@@ -4,6 +4,7 @@ import { agent_monologue_actuation_observe } from "std/agent/monologue_actuation
 import {
   __agent_stall_completed_result,
   __agent_stall_delta_signature,
+  __agent_stall_edit_state,
   __agent_stall_gate_input,
   __agent_stall_observation_recurrence,
   __agent_stall_process_call,
@@ -883,6 +884,55 @@ pub fn agent_stall_observe_completed_dispatch(
       && !contains(config.exempt_tools, tool_name)
       && agent_tool_calls_are_read_only([call], registry, policy)
     const result = __agent_stall_completed_result(dispatch, call, index)
+    if config.enabled && config.edit_oscillation && !contains(config.exempt_tools, tool_name) {
+      const edit = __agent_stall_edit_state(
+        next_state,
+        session_id,
+        tool_name,
+        result,
+        iteration,
+        registry,
+        policy,
+      )
+      next_state = edit.state
+      if edit.count > 1 {
+        // Content recurrence is advisory evidence. It neither resets nor
+        // advances another detector's escalation, and can never auto-abort.
+        const warning = __agent_stall_warning_record(
+          {
+            iteration: iteration,
+            tool_name: tool_name,
+            args: __agent_tool_call_args(call),
+            signature: "edit_oscillation:" + sha256(json_stringify([session_id, edit.path])),
+            pattern: "edit_oscillation",
+            count: edit.count,
+            consecutive_trips: next_state.consecutive_trips,
+            hard_stop: false,
+            threshold: 2,
+          },
+          config,
+        )
+          + {
+            kind: "edit_oscillation",
+            path: edit.path,
+            revisit_count: edit.count - 1,
+            iteration_distance: edit.iteration_distance,
+          }
+        const emitted = __agent_stall_maybe_emit(
+          agent,
+          session_id,
+          warning,
+          config + {inject_feedback: false},
+          next_state,
+          defer_feedback,
+        )
+        next_state = emitted.state + {warnings: emitted.state.warnings + [warning]}
+        if emitted_warning == nil {
+          emitted_warning = warning
+        }
+        feedback_was_deferred = feedback_was_deferred || (emitted.feedback_deferred ?? false)
+      }
+    }
     if !read_only || result == nil || !__agent_stall_result_ok(result) {
       all_repeated = false
       continue

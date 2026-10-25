@@ -13,6 +13,7 @@ pub type AgentStallConfig = {
   include_arguments: bool,
   repeat_same_observation: int,
   observation_recurrence_advisory: bool,
+  edit_oscillation: bool,
   repeat_success: int,
   repeat_same_error: int,
   no_progress_messages: int,
@@ -61,7 +62,17 @@ pub type AgentStallWarning = {
   diagnostic_signature?: string,
   diagnostic_snippet?: string,
   remediation_delivered?: bool,
+  kind?: string,
+  path?: string,
+  revisit_count?: int,
+  iteration_distance?: int?,
 }
+
+/** Digest-only visits, in least-recently-visited order; bounded across all paths. */
+pub type AgentEditStateVisit = {key: string, iteration: int?, count: int}
+
+/** Content identity reported by an edit that actually changed the file. */
+pub type AgentEditContentState = {path: string, after_sha256: string, mutation_status: "applied"}
 
 /** Durable in-run detector state across tool and verification observations. */
 pub type AgentStallState = {
@@ -74,6 +85,7 @@ pub type AgentStallState = {
   last_outcome_kind: string,
   same_observation_streak: int,
   observation_recurrence_counts: dict,
+  edit_state_visits: list<AgentEditStateVisit>,
   same_success_streak: int,
   same_error_streak: int,
   context_window_error_streak: int,

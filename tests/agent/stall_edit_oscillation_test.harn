@@ -1,0 +1,361 @@
+import { AgentResult } from "std/agent/contracts"
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import {
+  agent_stall_initial_state,
+  agent_stall_observe_completed_dispatch,
+  detector_action_of,
+} from "std/agent/stall"
+import { STALL_EDIT_STATE_VISIT_LIMIT } from "std/agent/stall_action_observation"
+import {
+  AgentCompletedObservation,
+  AgentStallCheckpoint,
+  AgentStallState,
+} from "std/agent/stall_types"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { llm_tool_call, with_llm_script } from "std/testing"
+import { ToolRegistry } from "std/tools"
+
+const TOOLS = {
+  tools: [
+    {function: {name: "edit"}, annotations: {kind: "edit"}},
+    {function: {name: "search"}, annotations: {kind: "search"}},
+  ],
+}
+
+const CONFIG = {enabled: true, edit_oscillation: true, inject_feedback: false}
+
+fn observe(
+  agent: HarnessAgent,
+  state: AgentStallState,
+  iteration: int,
+  report: dict,
+  options: dict = {},
+) -> AgentCompletedObservation {
+  const call_id = "edit-${iteration}"
+  return agent_stall_observe_completed_dispatch(
+    agent,
+    options?.session_id ?? "oscillation-session",
+    [{id: call_id, name: options?.tool_name ?? "edit", arguments: {}}],
+    [
+      {
+        tool_call_id: call_id,
+        tool_name: options?.tool_name ?? "edit",
+        ok: true,
+        status: "ok",
+        result: agent_tool_handler_result("Edit applied", report),
+      }
+        + (options?.envelope ?? {}),
+    ],
+    iteration,
+    options?.config ?? CONFIG,
+    state,
+    TOOLS,
+  )
+}
+
+fn edit(path: string, content: string) -> dict {
+  return {path: path, after_sha256: sha256(content), mutation_status: "applied"}
+}
+
+pipeline test_revisit_warns_once_at_completed_edit_and_forward_edits_do_not(harness: Harness) {
+  let state = agent_stall_initial_state()
+  for (index, content) in iter(["A", "B", "C"]).enumerate() {
+    const next = observe(harness.agent, state, index + 1, edit("src/a", content))
+    assert(next.warning == nil, "forward-converging hashes are distinct")
+    state = next.state
+  }
+  const revisited = observe(harness.agent, state, 5, edit("src/a", "A"))
+  assert_eq(len(revisited.state.warnings), 1)
+  assert_eq(revisited.warning.kind, "edit_oscillation")
+  assert_eq(revisited.warning.pattern, "edit_oscillation")
+  assert_eq(revisited.warning.path, "src/a")
+  assert_eq(revisited.warning.revisit_count, 1)
+  assert_eq(revisited.warning.iteration_distance, 4)
+  assert_eq(detector_action_of(revisited.warning), "warn")
+  const again = observe(harness.agent, revisited.state, 8, edit("src/a", "A"))
+  assert_eq(again.warning.revisit_count, 2)
+  assert_eq(again.warning.iteration_distance, 3, "distance is since the latest visit")
+}
+
+pipeline test_a_b_a_emits_exactly_one_event_without_escalation(harness: Harness) {
+  const sid = harness.agent.open()
+  try {
+    const captured = agent_capture_events(
+      harness.agent,
+      sid,
+      fn() {
+        let state = agent_stall_initial_state() + {consecutive_trips: 7, hard_stop: true}
+        for (index, content) in iter(["A", "B", "A"]).enumerate() {
+          state = observe(
+            harness.agent,
+            state,
+            index + 1,
+            edit("src/a", content),
+            {session_id: sid},
+          ).state
+        }
+        return state
+      },
+    )
+    const warnings = captured.events.filter({ event -> event.type == "agent_loop_stall_warning" })
+    assert_eq(len(warnings), 1)
+    assert_eq(warnings[0].warning.iteration, 3)
+    assert_eq(warnings[0].warning.iteration_distance, 2)
+    assert(!warnings[0].warning.hard_stop, "oscillation cannot inherit another detector's abort")
+    assert_eq(captured.result.consecutive_trips, 7)
+    assert(captured.result.hard_stop, "another detector's existing state is preserved")
+  } finally {
+    harness.agent.close(sid)
+  }
+}
+
+pipeline test_pristine_preimage_is_not_an_agent_produced_visit(harness: Harness) {
+  const first = observe(
+    harness.agent,
+    agent_stall_initial_state(),
+    1,
+    edit("src/a", "intermediate") + {before_sha256: sha256("original")},
+  )
+  const original = observe(harness.agent, first.state, 2, edit("src/a", "original"))
+  assert(original.warning == nil, "the pristine before hash must never seed a visit")
+  const intermediate = observe(harness.agent, original.state, 3, edit("src/a", "intermediate"))
+  assert_eq(intermediate.warning.revisit_count, 1)
+}
+
+pipeline test_paths_and_sessions_have_independent_content_identity(harness: Harness) {
+  let state = agent_stall_initial_state()
+  for (index, row) in iter(
+    [
+      {path: "src/a", session: "one"},
+      {path: "src/b", session: "one"},
+      {path: "src/a", session: "two"},
+    ],
+  )
+    .enumerate() {
+    const next = observe(
+      harness.agent,
+      state,
+      index + 1,
+      edit(row.path, "A"),
+      {session_id: row.session},
+    )
+    assert(next.warning == nil)
+    state = next.state
+  }
+  const revisit = observe(harness.agent, state, 7, edit("src/a", "A"), {session_id: "one"})
+  assert_eq(revisit.warning.iteration_distance, 6)
+  assert_eq(revisit.warning.revisit_count, 1)
+}
+
+pipeline test_failed_unapplied_preview_and_unmeasured_edits_do_not_seed_visits(harness: Harness) {
+  let state = agent_stall_initial_state()
+  let iteration = 0
+  for options in [
+    {envelope: {ok: false, status: "error"}},
+    {envelope: {status: "running"}},
+    {envelope: {dispatch_receipt: {disposition: "rejected"}}},
+    {tool_name: "search"},
+  ] {
+    iteration += 1
+    state = observe(harness.agent, state, iteration, edit("src/a", "A"), options).state
+  }
+  for report in [
+    edit("src/a", "A") + {mutation_status: "not_applied"},
+    edit("src/a", "A") + {mutation_status: "unchanged"},
+    edit("src/a", "A") + {mutation_status: "unknown"},
+    {path: "src/a"},
+    {path: "src/a", after_sha256: ""},
+    {path: "", after_sha256: sha256("A")},
+  ] {
+    iteration += 1
+    state = observe(harness.agent, state, iteration, report).state
+  }
+  assert_eq(state.edit_state_visits, [], "unavailable and failed observations carry no visits")
+  const first = observe(harness.agent, state, iteration + 1, edit("src/a", "A"))
+  assert(first.warning == nil)
+  const second = observe(harness.agent, first.state, iteration + 2, edit("src/a", "A"))
+  assert_eq(second.warning.revisit_count, 1, "only successful measured agent edits count")
+}
+
+pipeline test_completed_results_join_by_call_id_instead_of_dispatch_order(harness: Harness) {
+  const first = observe(harness.agent, agent_stall_initial_state(), 1, edit("src/a", "A"))
+  const next = agent_stall_observe_completed_dispatch(
+    harness.agent,
+    "oscillation-session",
+    [{id: "a", name: "edit", arguments: {}}, {id: "b", name: "search", arguments: {}}],
+    [
+      {tool_call_id: "b", ok: true, result: agent_tool_handler_result("Read", edit("src/b", "A"))},
+      {
+        tool_call_id: "a",
+        ok: true,
+        result: agent_tool_handler_result("Edited", edit("src/a", "A")),
+      },
+    ],
+    3,
+    CONFIG,
+    first.state,
+    TOOLS,
+  )
+  assert_eq(len(next.state.warnings), 1)
+  assert_eq(next.warning.path, "src/a")
+  assert_eq(next.warning.iteration_distance, 2)
+}
+
+pipeline test_disabled_default_preserves_existing_warning_bytes(harness: Harness) {
+  const first = observe(harness.agent, agent_stall_initial_state(), 1, edit("src/a", "A"))
+  for config in [
+    {},
+    {enabled: true},
+    {enabled: true, edit_oscillation: false},
+    {enabled: false, edit_oscillation: true},
+  ] {
+    const disabled = observe(harness.agent, first.state, 2, edit("src/a", "A"), {config: config})
+    assert(disabled.warning == nil)
+    assert_eq(json_stringify(disabled.state), json_stringify(first.state))
+  }
+  let defaults = agent_stall_initial_state()
+  let explicit = agent_stall_initial_state()
+  for iteration in [1, 2] {
+    const call = [{id: "read", name: "search", arguments: {query: "same"}}]
+    const dispatch = [{tool_call_id: "read", ok: true, result: "unchanged result"}]
+    const left = agent_stall_observe_completed_dispatch(
+      harness.agent,
+      "old-warning",
+      call,
+      dispatch,
+      iteration,
+      {enabled: true, repeat_same_observation: 2, inject_feedback: false},
+      defaults,
+      TOOLS,
+    )
+    const right = agent_stall_observe_completed_dispatch(
+      harness.agent,
+      "old-warning",
+      call,
+      dispatch,
+      iteration,
+      {enabled: true, edit_oscillation: false, repeat_same_observation: 2, inject_feedback: false},
+      explicit,
+      TOOLS,
+    )
+    defaults = left.state
+    explicit = right.state
+  }
+  assert_eq(len(defaults.warnings), 1, "the comparison must contain a real existing advisory")
+  assert_eq(json_stringify(defaults.warnings), json_stringify(explicit.warnings))
+}
+
+pipeline test_visit_retention_is_bounded_and_eviction_is_deterministic(harness: Harness) {
+  let state = agent_stall_initial_state()
+  for iteration in range(0, STALL_EDIT_STATE_VISIT_LIMIT + 1) {
+    state = observe(harness.agent, state, iteration, edit("src/a", to_string(iteration))).state
+  }
+  assert_eq(len(state.edit_state_visits), STALL_EDIT_STATE_VISIT_LIMIT)
+  const forgotten = observe(harness.agent, state, 300, edit("src/a", "0"))
+  assert(forgotten.warning == nil, "the oldest evicted visit is no longer evidence")
+  const retained = observe(harness.agent, forgotten.state, 301, edit("src/a", "2"))
+  assert_eq(retained.warning.revisit_count, 1)
+  assert_eq(retained.warning.iteration_distance, 299)
+  assert_eq(len(retained.state.edit_state_visits), STALL_EDIT_STATE_VISIT_LIMIT)
+}
+
+pipeline test_serialized_replay_preserves_visits(harness: Harness) {
+  let state = agent_stall_initial_state()
+  for (index, content) in iter(["A", "B"]).enumerate() {
+    state = observe(harness.agent, state, index + 1, edit("src/a", content)).state
+  }
+  const saved = json_stringify(state)
+  const live = observe(harness.agent, state, 3, edit("src/a", "A"))
+  const replay = observe(harness.agent, json_parse(saved), 3, edit("src/a", "A"))
+  assert_eq(live.warning.kind, "edit_oscillation")
+  assert_eq(json_stringify(live), json_stringify(replay), "replay depends only on retained facts")
+}
+
+fn run_stage(
+  harness: Harness,
+  sid: string,
+  tools: ToolRegistry,
+  contents: list<string>,
+  checkpoint: AgentStallCheckpoint? = nil,
+) -> AgentResult {
+  return with_llm_script(
+    harness.llm,
+    contents.map({ content -> llm_tool_call("edit", {content: content}) }).to_list(),
+    { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: sid,
+        tools: tools,
+        tool_format: "native",
+        max_iterations: len(contents),
+        stall_checkpoint: checkpoint,
+        stall_diagnostics: CONFIG
+          + {repeat_same_observation: 99, repeat_success: 99, ping_pong_cycles: 99},
+      }
+      return agent_loop(harness, "Edit source", nil, opts)
+    },
+  )
+}
+
+fn assert_checkpoint_resume(harness: Harness) -> nil {
+  const sid = harness.agent.open()
+  let executed = []
+  const tools = tool_define(
+    tool_registry(),
+    "edit",
+    "Apply a source edit",
+    {
+      parameters: {content: {type: "string"}},
+      annotations: {kind: "edit"},
+      handler: { args ->
+        executed = executed + [args.content]
+        return agent_tool_handler_result(
+          "Edit applied",
+          edit("src/a", args.content) + {mutation_status: "applied"},
+        )
+      },
+    },
+  )
+  try {
+    const first = run_stage(harness, sid, tools, ["A", "B"])
+    assert_eq(len(first.stall_checkpoint.state.edit_state_visits), 2)
+    const compacted = harness.agent.transcript_auto_compact(
+      harness.agent.session_messages(sid),
+      {compact_strategy: "truncate", keep_first: 1, keep_last: 1, token_threshold: 1},
+    )
+    assert(compacted.archived > 0, "the actual first-stage transcript must compact")
+    harness.agent.session_replace_messages(sid, compacted.messages, compacted.summary)
+    const checkpoint = first.stall_checkpoint
+    const result = run_stage(
+      harness,
+      sid,
+      tools,
+      ["A", "B", "A"],
+      json_parse(json_stringify(checkpoint)),
+    )
+    assert_eq(executed, ["A", "B", "A", "B", "A"], "both stages must actually execute")
+    const warnings = result.stall_checkpoint.state.warnings.filter(
+      { warning -> warning.pattern == "edit_oscillation" },
+    )
+    assert_eq(len(warnings), 3)
+    assert_eq(warnings[0].iteration, 1, "the second loop restarts iteration numbering")
+    assert_eq(warnings[0].iteration_distance, nil, "cross-stage distance is unavailable")
+    assert_eq(warnings[0].revisit_count, 1, "content identity survives checkpoint resume")
+    assert_eq(warnings[1].iteration_distance, nil)
+    const last = warnings[len(warnings) - 1]
+    assert_eq(last.iteration, 3)
+    assert_eq(last.iteration_distance, 2, "same-stage distance remains measured in iterations")
+    assert_eq(last.revisit_count, 2)
+    assert_eq(len(result.stall_checkpoint.state.edit_state_visits), 2)
+    assert(!result.stall_checkpoint.state.hard_stop)
+  } finally {
+    harness.agent.close(sid)
+  }
+  return nil
+}
+
+pipeline test_checkpoint_resume_and_compaction_preserve_only_measured_distances(harness: Harness) {
+  assert_checkpoint_resume(harness)
+}
