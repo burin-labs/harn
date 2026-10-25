@@ -895,6 +895,10 @@ fn test_entry_and_typed_arrow_signatures_refuse_as_fixed() {
              pub extern \"C\" fn exported() {}\n\
              #[rstest]\n\
              fn cased() {}\n\
+             #[test_case(1)]\n\
+             fn listed(n: u8) {}\n\
+             #[wasm_bindgen(js_name = \"bound\")]\n\
+             pub fn bound() {}\n\
              #[cfg_attr(test, allow(dead_code))]\n\
              fn quiet() {}\n\
              #[cfg(test)]\n\
@@ -917,6 +921,8 @@ fn test_entry_and_typed_arrow_signatures_refuse_as_fixed() {
         ("kv_gated", "tests/macros.rs", "#[cfg_attr(test, test)]"),
         ("exported", "tests/macros.rs", "#[unsafe(no_mangle)]"),
         ("cased", "tests/macros.rs", "#[rstest]"),
+        ("listed", "tests/macros.rs", "#[test_case(1)]"),
+        ("bound", "tests/macros.rs", "#[wasm_bindgen("),
         ("main", "src/main.rs", "entry point"),
     ] {
         let result = ws.refuse("fixed_signature", name, path, extra);

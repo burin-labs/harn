@@ -295,8 +295,10 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         };
         // Prose and data files only mention the name; they hold no binding.
         if !language.is_code() {
-            env.stale
-                .push(format!("{path} ({} file left unchanged)", language.name()));
+            env.stale.push(format!(
+                "{path} ({} file left unchanged; it may still reference `{symbol_name}`, so review it)",
+                language.name()
+            ));
             continue;
         }
         if java_method && language != Language::Java {
