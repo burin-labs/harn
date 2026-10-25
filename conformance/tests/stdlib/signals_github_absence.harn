@@ -50,7 +50,7 @@ pipeline default(harness: Harness) {
   const workflows = api + "/repos/acme/api/actions/workflows?per_page=100&page=1"
   const runs = { id ->
     api + "/repos/acme/api/actions/workflows/" + to_string(id)
-      + "/runs?branch=main&event=push&status=completed&per_page=1"
+      + "/runs?branch=main&event=push&status=completed&per_page=20"
   }
   mock(
     harness.testing,
@@ -69,11 +69,15 @@ pipeline default(harness: Harness) {
     runs(1),
     {workflow_runs: [{workflow_id: 1, name: "Docs", status: "completed", conclusion: "success"}]},
   )
+  // The newest Tests runs were cancelled and skipped, which says nothing
+  // about the branch: the older failure is still the reading.
   mock(
     harness.testing,
     runs(2),
     {
       workflow_runs: [
+        {workflow_id: 2, name: "Tests", status: "completed", conclusion: "cancelled"},
+        {workflow_id: 2, name: "Tests", status: "completed", conclusion: "skipped"},
         {
           workflow_id: 2,
           name: "Tests",
@@ -96,6 +100,23 @@ pipeline default(harness: Harness) {
   mock(harness.testing, runs(1), {workflow_runs: []})
   harness.stdio.println(
     "nothing finished: " + monitor_github_ci(harness, "acme/api", "main", options).outcome,
+  )
+  // Only indecisive runs: no reading, not a recovery.
+  harness.testing.http_mock_clear()
+  mock(harness.testing, workflows, {total_count: 1, workflows: [{id: 1, state: "active"}]})
+  mock(
+    harness.testing,
+    runs(1),
+    {
+      workflow_runs: [
+        {workflow_id: 1, name: "Docs", status: "completed", conclusion: "cancelled"},
+        {workflow_id: 1, name: "Docs", status: "completed", conclusion: "stale"},
+        {workflow_id: 1, name: "Docs", status: "completed", conclusion: "neutral"},
+      ],
+    },
+  )
+  harness.stdio.println(
+    "only indecisive runs: " + monitor_github_ci(harness, "acme/api", "main", options).outcome,
   )
   // A runs page without workflow_runs: not a recovery either.
   harness.testing.http_mock_clear()

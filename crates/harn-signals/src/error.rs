@@ -23,6 +23,12 @@ pub enum SignalsError {
     InvalidInput(String),
     #[error("signals: the inbox already holds {0} fired signals (max_signals); resolve some or raise the cap")]
     Full(usize),
+    #[error("signals: `{key}` was reported with a {stored} signature; a report with a {offered} one cannot change it")]
+    WeakerSignature {
+        key: String,
+        stored: &'static str,
+        offered: &'static str,
+    },
 }
 
 impl SignalsError {

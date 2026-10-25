@@ -28,9 +28,8 @@ pub(crate) enum SignalsCommand {
     Resolve(SignalsResolveArgs),
     /// Ack a leased reminder, so it is not redelivered.
     Ack(SignalsAckArgs),
-    /// Run as an agent-harness hook: check the session in, ack what its last
-    /// hook delivered, and print newly leased reminders in the harness's hook
-    /// format.
+    /// Run as an agent-harness hook: check the session in, print newly leased
+    /// reminders in the harness's hook format, and ack what it printed.
     Hook(SignalsHookArgs),
 }
 
@@ -111,6 +110,10 @@ pub(crate) struct SignalsResolveArgs {
     /// Replace the summary with what recovered.
     #[arg(long)]
     pub summary: Option<String>,
+    /// How the recovery report was checked. It may not be weaker than the
+    /// signal's own signature.
+    #[arg(long, value_enum, default_value_t = SignalSignatureArg::Local)]
+    pub signature: SignalSignatureArg,
     /// Emit a JSON envelope.
     #[arg(long)]
     pub json: bool,

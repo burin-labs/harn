@@ -104,7 +104,7 @@ pipeline default(harness: Harness) {
         harness,
         "bot",
         10.0,
-        {dir: options.dir, token_env: "HARN_SIGNALS_TEST_UNSET_TOKEN"},
+        {dir: options.dir, token_env: "SIGNALS_TEST_UNSET_TOKEN"},
       ).outcome,
   )
   harness.stdio.println(

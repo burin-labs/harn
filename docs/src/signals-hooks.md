@@ -112,8 +112,8 @@ harn signals fire \
   --repo OWNER/NAME
 ```
 
-The session sees the reminder after its next tool call, and the tool call after
-that acks it. List the signal's delivery:
+The session sees the reminder after its next tool call, and the hook that
+delivered it acks it. List the signal's delivery:
 
 ```sh
 harn signals list

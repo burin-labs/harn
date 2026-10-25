@@ -1,7 +1,7 @@
 //! `harn signals`: the ambient-signal inbox from the command line, and the
 //! hook adapter agent harnesses run at their safe points.
 
-use std::io::{IsTerminal, Read};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::time::Duration as StdDuration;
@@ -11,6 +11,12 @@ use harn_signals::{
     Reminder, ReminderId, RoutingHints, SessionAnnouncement, Severity, Signal, SignalInput,
     SignatureStatus, TriageEvent,
 };
+
+/// Polls a reminder may sit pending with no lease out before the watcher
+/// wakes for it even though the `Stop` hook that started the watcher saw it.
+/// That hook leases what was pending when it ran; one routed after it ran but
+/// before the first poll is still unleased a poll or two later.
+const BASELINE_GRACE_POLLS: u32 = 2;
 use harn_vm::stdlib::signals::MAX_REMINDERS_PER_DELIVERY;
 use serde::Deserialize;
 use time::OffsetDateTime;
@@ -119,7 +125,7 @@ fn run_command(args: SignalsArgs) -> Result<(), String> {
                 None => None,
             };
             let transition = inbox
-                .resolve(&resolve.key, event, now)
+                .resolve(&resolve.key, event, signature(resolve.signature), now)
                 .map_err(|error| error.to_string())?;
             report(&transition, resolve.json)
         }
@@ -207,14 +213,18 @@ fn fire_input(args: SignalsFireArgs, now: OffsetDateTime) -> Result<SignalInput,
         },
         provenance: Provenance {
             producer: args.producer,
-            signature: match args.signature {
-                SignalSignatureArg::Local => SignatureStatus::Local,
-                SignalSignatureArg::Verified => SignatureStatus::Verified,
-                SignalSignatureArg::Unverified => SignatureStatus::Unverified,
-            },
+            signature: signature(args.signature),
         },
         expires_at,
     })
+}
+
+fn signature(arg: SignalSignatureArg) -> SignatureStatus {
+    match arg {
+        SignalSignatureArg::Local => SignatureStatus::Local,
+        SignalSignatureArg::Verified => SignatureStatus::Verified,
+        SignalSignatureArg::Unverified => SignatureStatus::Unverified,
+    }
 }
 
 fn read_event(path: &Path) -> Result<TriageEvent, String> {
@@ -319,11 +329,12 @@ struct HookInput {
 /// reason Codex turns into a new user prompt, so a Codex session hears an
 /// urgent signal at its next prompt or tool call instead.
 ///
-/// Each check-in acks the leases the session took at its previous hook, since
-/// running again means the previous output reached the model, and leases at
-/// most [`MAX_REMINDERS_PER_DELIVERY`] reminders so the output stays inside
-/// the harness's hook budget (10,000 characters for Claude Code, about 2,500
-/// tokens for Codex). The rest wait for the next hook.
+/// A hook leases at most [`MAX_REMINDERS_PER_DELIVERY`] reminders, so the
+/// output stays inside the harness's hook budget (10,000 characters for Claude
+/// Code, about 2,500 tokens for Codex), and acks exactly those leases by token
+/// once its output is flushed. A hook killed before that leaves its leases to
+/// lapse and be leased again; a hook running beside it acks nothing of its.
+/// The rest wait for the next hook.
 fn run_hook(inbox: &Inbox, args: SignalsHookArgs, now: OffsetDateTime) -> Result<(), String> {
     let mut stdin = String::new();
     if !std::io::stdin().is_terminal() {
@@ -339,7 +350,11 @@ fn run_hook(inbox: &Inbox, args: SignalsHookArgs, now: OffsetDateTime) -> Result
             .map_err(|error| error.to_string())?;
         // A running watcher sees the session gone at its next poll and removes
         // its own lock; this clears one a killed watcher left behind.
-        drop(claim_watcher(inbox.dir(), &input.session_id)?);
+        drop(
+            inbox
+                .claim_watcher(&input.session_id)
+                .map_err(|error| error.to_string())?,
+        );
         return Ok(());
     }
     let cwd = input
@@ -379,8 +394,8 @@ fn run_hook(inbox: &Inbox, args: SignalsHookArgs, now: OffsetDateTime) -> Result
             return rewake(inbox, &input.session_id, args.max_wait);
         }
         if args.format == SignalsHookFormat::Codex {
-            // Ack what the last turn rendered and lease nothing: Codex's Stop
-            // output cannot carry context without making it a user prompt.
+            // Lease nothing: Codex's Stop output cannot carry context without
+            // making it a user prompt.
             check_in(Activity::Idle, CheckInScope::UrgentOnly, 0)?;
             println!("{{}}");
             return Ok(());
@@ -398,8 +413,7 @@ fn run_hook(inbox: &Inbox, args: SignalsHookArgs, now: OffsetDateTime) -> Result
         inbox
             .register_session(announce(Activity::Busy), now)
             .map_err(|error| error.to_string())?;
-        println!("{}", additional_context("Stop", &render(&result)?));
-        return Ok(());
+        return deliver(inbox, &input.session_id, "Stop", &result);
     }
 
     let result = check_in(
@@ -416,7 +430,31 @@ fn run_hook(inbox: &Inbox, args: SignalsHookArgs, now: OffsetDateTime) -> Result
         SignalsHookEvent::PostToolUse => "PostToolUse",
         SignalsHookEvent::Stop | SignalsHookEvent::SessionEnd => unreachable!(),
     };
-    println!("{}", additional_context(event_name, &render(&result)?));
+    deliver(inbox, &input.session_id, event_name, &result)
+}
+
+/// Print the hook output, then ack the leases it carried. The harness reads
+/// stdout only after the hook exits, so a flushed write is as far as this
+/// process can see the reminder travel.
+fn deliver(
+    inbox: &Inbox,
+    session_id: &str,
+    event_name: &str,
+    result: &CheckIn,
+) -> Result<(), String> {
+    let output = additional_context(event_name, &render(result)?);
+    let mut stdout = std::io::stdout().lock();
+    writeln!(stdout, "{output}")
+        .and_then(|()| stdout.flush())
+        .map_err(|error| format!("writing the hook output: {error}"))?;
+    let tokens: Vec<String> = result
+        .reminders
+        .iter()
+        .map(|reminder| reminder.lease_token.clone())
+        .collect();
+    inbox
+        .ack_leases(session_id, &tokens, harn_vm::stdlib::signals::vm_now())
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -453,35 +491,37 @@ fn render_reminders(reminders: &[Reminder]) -> Result<String, String> {
 /// nothing. One watcher runs per session; a second one for the same session
 /// exits at once, so repeated stops never stack watchers.
 fn rewake(inbox: &Inbox, session_id: &str, max_wait: StdDuration) -> Result<(), String> {
-    let Some(watcher) = claim_watcher(inbox.dir(), session_id)? else {
+    let Some(watcher) = inbox
+        .claim_watcher(session_id)
+        .map_err(|error| error.to_string())?
+    else {
         return Ok(());
     };
     let started = harn_vm::stdlib::signals::vm_now();
-    // The `Stop` hook that started this watcher delivers whatever was already
-    // pending; waking for those too would announce them twice.
-    let mut owned_by_stop: Option<Vec<ReminderId>> = None;
+    // The `Stop` hook that started this watcher runs beside it and leases
+    // what was pending, so the first poll's ids are given that hook's chance
+    // before they wake the session; waking at once would announce them twice.
+    let mut baseline: Option<Vec<ReminderId>> = None;
+    let mut polls: u32 = 0;
     loop {
         let now = harn_vm::stdlib::signals::vm_now();
-        match inbox
+        let poll = inbox
             .poll_idle(session_id, now)
-            .map_err(|error| error.to_string())?
-        {
-            IdlePoll::Pending(pending) if owned_by_stop.is_none() => {
-                owned_by_stop = Some(pending);
+            .map_err(|error| error.to_string())?;
+        polls += 1;
+        match poll {
+            IdlePoll::Pending(pending) => {
+                let baseline = baseline.get_or_insert_with(|| pending.clone());
+                let wake = pending
+                    .iter()
+                    .any(|id| !baseline.contains(id) || polls > BASELINE_GRACE_POLLS);
+                if wake {
+                    eprintln!("{REWAKE_NOTICE}");
+                    // `process::exit` skips destructors; release the lock first.
+                    drop(watcher);
+                    process::exit(REWAKE_EXIT);
+                }
             }
-            IdlePoll::Pending(pending)
-                if pending.iter().any(|id| {
-                    !owned_by_stop
-                        .as_ref()
-                        .is_some_and(|owned| owned.contains(id))
-                }) =>
-            {
-                eprintln!("{REWAKE_NOTICE}");
-                // `process::exit` skips destructors; release the lock first.
-                drop(watcher);
-                process::exit(REWAKE_EXIT);
-            }
-            IdlePoll::Pending(_) => {}
             IdlePoll::Busy | IdlePoll::Gone => return Ok(()),
         }
         if now - started >= max_wait {
@@ -491,75 +531,8 @@ fn rewake(inbox: &Inbox, session_id: &str, max_wait: StdDuration) -> Result<(), 
     }
 }
 
-/// A held watcher lock. Dropping it removes the lock file while the lock is
-/// still held, so no watcher file outlives its watcher.
-struct Watcher {
-    path: PathBuf,
-    _file: std::fs::File,
-}
-
-impl Drop for Watcher {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-/// Take this session's watcher lock without waiting, or `None` when another
-/// watcher holds it.
-fn claim_watcher(dir: &Path, session_id: &str) -> Result<Option<Watcher>, String> {
-    let watchers = dir.join("watchers");
-    std::fs::create_dir_all(&watchers)
-        .map_err(|error| format!("{}: {error}", watchers.display()))?;
-    // Hex keeps any session id a safe file name.
-    let name: String = session_id
-        .bytes()
-        .take(120)
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    let path = watchers.join(format!("{name}.lock"));
-    // A holder removes the file as it exits, so a lock taken on a file that
-    // was removed in between guards nothing: retry on the current file.
-    for _ in 0..3 {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(false)
-            .open(&path)
-            .map_err(|error| format!("{}: {error}", path.display()))?;
-        match file.try_lock() {
-            Ok(()) => {}
-            Err(std::fs::TryLockError::WouldBlock) => return Ok(None),
-            Err(std::fs::TryLockError::Error(error)) => {
-                return Err(format!("{}: {error}", path.display()))
-            }
-        }
-        if same_file(&file, &path) {
-            return Ok(Some(Watcher { path, _file: file }));
-        }
-    }
-    Ok(None)
-}
-
-#[cfg(unix)]
-fn same_file(file: &std::fs::File, path: &Path) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    match (file.metadata(), std::fs::metadata(path)) {
-        (Ok(held), Ok(current)) => held.dev() == current.dev() && held.ino() == current.ino(),
-        _ => false,
-    }
-}
-
-/// Windows refuses to remove a file another process has open, so the file a
-/// lock was taken on is always the one at the path.
-#[cfg(not(unix))]
-fn same_file(_file: &std::fs::File, path: &Path) -> bool {
-    path.exists()
-}
-
 /// Inbox text comes from monitors and webhooks; never let it drive the
 /// terminal.
 fn terminal_safe(text: &str) -> String {
-    text.chars()
-        .map(|ch| if ch.is_control() { ' ' } else { ch })
-        .collect()
+    harn_signals::display_safe(text)
 }

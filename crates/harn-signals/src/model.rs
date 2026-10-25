@@ -99,6 +99,15 @@ pub enum SignatureStatus {
 }
 
 impl SignatureStatus {
+    /// How much the origin claim was checked. An unverified network
+    /// delivery may not override a verified or local one.
+    pub fn strength(self) -> u8 {
+        match self {
+            Self::Unverified => 0,
+            Self::Verified | Self::Local => 1,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Verified => "verified",
@@ -154,10 +163,12 @@ pub struct SignalInput {
     pub expires_at: Option<OffsetDateTime>,
 }
 
-/// One outstanding hand-off of a reminder to its session. A lease that lapses
-/// without an ack is redelivered.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// One outstanding hand-off of a reminder to its session. Only the holder of
+/// `token`, the check-in that leased it, can ack it; a lease that lapses
+/// without that ack is leased again.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lease {
+    pub token: String,
     #[serde(with = "time::serde::rfc3339")]
     pub leased_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
@@ -180,7 +191,9 @@ pub struct Delivery {
 
 impl Delivery {
     pub fn lease_active(&self, now: OffsetDateTime) -> bool {
-        self.lease.is_some_and(|lease| lease.expires_at > now)
+        self.lease
+            .as_ref()
+            .is_some_and(|lease| lease.expires_at > now)
     }
 }
 
@@ -341,6 +354,8 @@ pub struct Reminder {
     pub provenance: Provenance,
     /// 1 on first delivery; higher when a lapsed lease is redelivered.
     pub attempt: u32,
+    /// Ack with this once the reminder has been handed to the model.
+    pub lease_token: String,
     #[serde(with = "time::serde::rfc3339")]
     pub lease_expires_at: OffsetDateTime,
 }
@@ -353,7 +368,7 @@ impl Reminder {
         }
     }
 
-    pub(crate) fn leased(signal: &Signal, lease: Lease) -> Self {
+    pub(crate) fn leased(signal: &Signal, lease: &Lease) -> Self {
         Self {
             key: signal.key.clone(),
             generation: signal.generation,
@@ -363,6 +378,7 @@ impl Reminder {
             routing: signal.routing.clone(),
             provenance: signal.provenance.clone(),
             attempt: signal.attempts,
+            lease_token: lease.token.clone(),
             lease_expires_at: lease.expires_at,
         }
     }
@@ -371,10 +387,8 @@ impl Reminder {
 /// What one check-in did.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CheckIn {
-    /// Leases this session held from earlier check-ins. Checking in again is
-    /// the evidence that those reminders were rendered, so they are acked.
-    pub acked: Vec<ReminderId>,
-    /// Reminders leased now. Render them; the next check-in acks them.
+    /// Reminders leased now. Hand them to the model, then ack their
+    /// `lease_token`s; an unacked lease is leased again when it lapses.
     pub reminders: Vec<Reminder>,
     /// Reminders routed to this session that this check-in did not lease,
     /// because of its scope or limit.

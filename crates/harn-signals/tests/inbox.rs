@@ -3,20 +3,46 @@ use std::sync::{Arc, Barrier};
 
 use harn_signals::{
     Activity, CheckInScope, HarnessKind, Inbox, ManualEvent, Provenance, Reminder, ReminderId,
-    RoutingHints, SessionAnnouncement, Severity, SignalInput, SignalState, Transition, TriageEvent,
+    RoutingHints, SessionAnnouncement, Severity, SignalInput, SignalState, SignalsError,
+    SignatureStatus, Transition, TriageEvent,
 };
 use time::{Duration, OffsetDateTime};
 
 const ALL: CheckInScope = CheckInScope::All;
 
-/// Check in with no limit and return what was leased.
+const LOCAL: SignatureStatus = SignatureStatus::Local;
+
+/// Check in with no limit, deliver what was leased, and ack it, as a hook
+/// does.
 fn take(
     inbox: &Inbox,
     session: SessionAnnouncement,
     scope: CheckInScope,
     now: OffsetDateTime,
 ) -> Vec<Reminder> {
+    let id = session.id.clone();
+    let reminders = lease_only(inbox, session, scope, now);
+    let acked = inbox.ack_leases(&id, &tokens(&reminders), now).unwrap();
+    assert_eq!(acked.len(), reminders.len());
+    reminders
+}
+
+/// Check in with no limit and return what was leased, acking nothing: a hook
+/// killed before its output reached the model.
+fn lease_only(
+    inbox: &Inbox,
+    session: SessionAnnouncement,
+    scope: CheckInScope,
+    now: OffsetDateTime,
+) -> Vec<Reminder> {
     inbox.check_in(session, scope, None, now).unwrap().reminders
+}
+
+fn tokens(reminders: &[Reminder]) -> Vec<String> {
+    reminders
+        .iter()
+        .map(|reminder| reminder.lease_token.clone())
+        .collect()
 }
 
 fn t0() -> OffsetDateTime {
@@ -93,7 +119,7 @@ fn a_condition_that_stays_red_produces_one_reminder_per_state_change() {
     }
     let later = t0() + Duration::minutes(61);
     for _ in 0..3 {
-        inbox.resolve("ci:acme/api", None, later).unwrap();
+        inbox.resolve("ci:acme/api", None, LOCAL, later).unwrap();
         delivered.extend(take(&inbox, a.clone(), ALL, later));
     }
 
@@ -176,7 +202,7 @@ fn routing_prefers_repo_then_fallback_role_and_holds_otherwise() {
     assert_eq!(take(&inbox, web, ALL, t0()).len(), 1);
 
     // The recovery goes to the session that heard the failure.
-    inbox.resolve("ci:acme/web", None, t0()).unwrap();
+    inbox.resolve("ci:acme/web", None, LOCAL, t0()).unwrap();
     let got = take(&inbox, control, ALL, t0());
     assert_eq!(
         keys(&got),
@@ -195,7 +221,7 @@ fn a_recovery_nobody_heard_the_failure_for_is_not_delivered() {
         )
         .unwrap();
     assert_eq!(
-        inbox.resolve("ci:acme/api", None, t0()).unwrap(),
+        inbox.resolve("ci:acme/api", None, LOCAL, t0()).unwrap(),
         Transition::Changed {
             state: SignalState::Resolved,
             generation: 2
@@ -296,7 +322,39 @@ fn the_inbox_refuses_a_document_from_another_schema() {
 }
 
 #[test]
-fn a_turn_slower_than_the_lease_acks_its_reminder_instead_of_rendering_it_twice() {
+fn a_check_in_acks_nothing_another_check_in_leased() {
+    let dir = tempfile::tempdir().unwrap();
+    let inbox = Inbox::open(dir.path()).unwrap();
+    let a = session("a", Some("acme/api"), None);
+    inbox
+        .fire(
+            input("ci:acme/api", Some("acme/api"), Severity::Warning),
+            t0(),
+        )
+        .unwrap();
+    // Two hooks of one session run side by side, as parallel PostToolUse
+    // hooks do. The first leases the reminder; the second must neither ack
+    // it nor lease it again.
+    let first = lease_only(&inbox, a.clone(), ALL, t0());
+    assert_eq!(first.len(), 1);
+    let sibling = inbox.check_in(a, ALL, None, t0()).unwrap();
+    assert!(sibling.reminders.is_empty());
+    let signal = &inbox.snapshot(t0()).unwrap().signals["ci:acme/api"];
+    let delivery = signal.delivery.as_ref().unwrap();
+    assert!(delivery.acked_at.is_none(), "a sibling check-in acked it");
+    // Only the lease's own token acks it.
+    assert!(inbox
+        .ack_leases("a", &["not-the-token".into()], t0())
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        inbox.ack_leases("a", &tokens(&first), t0()).unwrap(),
+        vec![first[0].id()]
+    );
+}
+
+#[test]
+fn an_unacked_lease_is_leased_again_to_its_holder_with_the_next_attempt() {
     let dir = tempfile::tempdir().unwrap();
     let inbox = Inbox::open(dir.path()).unwrap();
     let lease_for = inbox.config().lease_for;
@@ -307,18 +365,25 @@ fn a_turn_slower_than_the_lease_acks_its_reminder_instead_of_rendering_it_twice(
             t0(),
         )
         .unwrap();
-    let first = take(&inbox, a.clone(), ALL, t0());
-    assert_eq!(first.len(), 1);
-    assert_eq!(first[0].attempt, 1);
-
-    // One tool call outlasts the lease. The session's next hook is the
-    // evidence the reminder reached the model, so it acks; it must not lease
-    // the same generation to the same session again.
-    let slow = t0() + lease_for + Duration::minutes(2);
-    let next = inbox.check_in(a.clone(), ALL, None, slow).unwrap();
-    assert_eq!(next.acked, vec![first[0].id()]);
-    assert!(next.reminders.is_empty(), "{:?}", keys(&next.reminders));
-    assert!(take(&inbox, a, ALL, slow + lease_for * 3).is_empty());
+    // The hook leases the reminder and is killed before printing it.
+    let lost = lease_only(&inbox, a.clone(), ALL, t0());
+    assert_eq!(lost[0].attempt, 1);
+    // While the lease is out, nothing is leased again.
+    assert!(lease_only(&inbox, a.clone(), ALL, t0() + lease_for / 2).is_empty());
+    // Once it lapses, the holder's next check-in is leased it again, with the
+    // same id and the next attempt, rather than having it acked unseen.
+    let later = t0() + lease_for + Duration::seconds(1);
+    let again = take(&inbox, a.clone(), ALL, later);
+    assert_eq!(again.len(), 1);
+    assert_eq!(again[0].id(), lost[0].id());
+    assert_eq!(again[0].attempt, 2);
+    assert_ne!(again[0].lease_token, lost[0].lease_token);
+    // The killed hook's token names a lease that no longer exists.
+    assert!(inbox
+        .ack_leases("a", &tokens(&lost), later)
+        .unwrap()
+        .is_empty());
+    assert!(take(&inbox, a, ALL, later + lease_for * 3).is_empty());
 }
 
 #[test]
@@ -336,7 +401,7 @@ fn a_silent_holders_reminder_moves_to_a_responsive_session_without_waiting_out_s
         )
         .unwrap();
     // `a` leases it, then crashes before the reminder reaches the model.
-    let leased = take(&inbox, a.clone(), ALL, t0() + Duration::seconds(1));
+    let leased = lease_only(&inbox, a.clone(), ALL, t0() + Duration::seconds(1));
     assert_eq!(leased.len(), 1);
     // Routed but never leased: `a` is about to go silent with this one too.
     inbox
@@ -367,11 +432,12 @@ fn a_silent_holders_reminder_moves_to_a_responsive_session_without_waiting_out_s
     assert_eq!(moved[0].id(), leased[0].id());
 
     // `a` comes back: both moved, so it neither acks nor renders them.
-    let back = inbox
-        .check_in(a, ALL, None, after + Duration::seconds(1))
-        .unwrap();
-    assert!(back.acked.is_empty());
-    assert!(back.reminders.is_empty());
+    let back = after + Duration::seconds(1);
+    assert!(inbox
+        .ack_leases("a", &tokens(&leased), back)
+        .unwrap()
+        .is_empty());
+    assert!(lease_only(&inbox, a, ALL, back).is_empty());
 }
 
 #[test]
@@ -385,7 +451,7 @@ fn a_lease_held_by_a_session_that_ends_goes_to_another_session() {
         )
         .unwrap();
     let a = session("a", Some("acme/api"), None);
-    assert_eq!(take(&inbox, a, ALL, t0()).len(), 1);
+    assert_eq!(lease_only(&inbox, a, ALL, t0()).len(), 1);
     inbox.end_session("a", t0()).unwrap();
     let b = take(&inbox, session("b", Some("acme/api"), None), ALL, t0());
     assert_eq!(keys(&b), vec![("ci:acme/api".into(), SignalState::Fired)]);
@@ -412,7 +478,7 @@ fn explicit_ack_settles_only_the_named_generation_for_its_recipient() {
         .unwrap()
         .is_empty());
     let a = session("a", Some("acme/api"), None);
-    take(&inbox, a.clone(), ALL, t0());
+    lease_only(&inbox, a.clone(), ALL, t0());
     let stale = ReminderId {
         generation: 7,
         ..id.clone()
@@ -459,7 +525,6 @@ fn a_limit_leases_the_most_severe_first_and_counts_the_rest_as_waiting() {
     let second = inbox
         .check_in(a, ALL, Some(2), t0() + Duration::seconds(1))
         .unwrap();
-    assert_eq!(second.acked.len(), 2);
     assert_eq!(
         keys(&second.reminders),
         vec![("a:info".into(), SignalState::Fired)]
@@ -514,7 +579,6 @@ utc_offset = "-07:00"
     assert_eq!(hold("low:info"), Some("below minimum severity"));
     assert_eq!(hold("ci:warning"), Some("quiet hours"));
 
-    // The next check-in acks the night's lease.
     assert!(take(&inbox, a.clone(), ALL, t0() + Duration::seconds(1)).is_empty());
     // 07:30 local: quiet hours are over, the warning routes; muted and info
     // stay held.
@@ -619,7 +683,7 @@ fn the_inbox_is_capped_pruning_settled_signals_before_refusing_a_new_key() {
         matches!(error, harn_signals::SignalsError::Full(2)),
         "{error}"
     );
-    inbox.resolve("a", None, t0()).unwrap();
+    inbox.resolve("a", None, LOCAL, t0()).unwrap();
     inbox
         .fire(input("c", Some("acme/api"), Severity::Info), t0())
         .unwrap();
@@ -643,4 +707,112 @@ fn a_key_with_a_control_character_is_refused() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("control character"), "{error}");
+}
+
+#[test]
+fn a_weaker_signature_cannot_resolve_or_refire_a_stronger_signal() {
+    let dir = tempfile::tempdir().unwrap();
+    let inbox = Inbox::open(dir.path()).unwrap();
+    let mut verified = input("alert:pay", Some("acme/api"), Severity::Urgent);
+    verified.provenance.signature = SignatureStatus::Verified;
+    inbox.fire(verified, t0()).unwrap();
+
+    // An unverified webhook claiming recovery is refused.
+    let error = inbox
+        .resolve("alert:pay", None, SignatureStatus::Unverified, t0())
+        .unwrap_err();
+    assert!(
+        matches!(error, SignalsError::WeakerSignature { .. }),
+        "{error}"
+    );
+    // So is an unverified re-fire, which would rewrite or extend it.
+    let mut spoof = input("alert:pay", Some("acme/api"), Severity::Urgent);
+    spoof.provenance.signature = SignatureStatus::Unverified;
+    spoof.expires_at = Some(t0() + Duration::days(30));
+    assert!(matches!(
+        inbox.fire(spoof, t0()).unwrap_err(),
+        SignalsError::WeakerSignature { .. }
+    ));
+    let signal = &inbox.snapshot(t0()).unwrap().signals["alert:pay"];
+    assert_eq!(signal.state, SignalState::Fired);
+    assert_eq!(signal.provenance.signature, SignatureStatus::Verified);
+    assert_ne!(signal.expires_at, Some(t0() + Duration::days(30)));
+
+    // An equally strong report resolves it.
+    assert_eq!(
+        inbox
+            .resolve("alert:pay", None, SignatureStatus::Verified, t0())
+            .unwrap(),
+        Transition::Changed {
+            state: SignalState::Resolved,
+            generation: 2
+        }
+    );
+}
+
+#[test]
+fn an_oversized_event_is_refused_at_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let inbox = Inbox::open(dir.path()).unwrap();
+    let mut long_summary = input("alert:long", Some("acme/api"), Severity::Info);
+    long_summary.event.summary = "x".repeat(harn_signals::MAX_SUMMARY_CHARS + 1);
+    let error = inbox.fire(long_summary, t0()).unwrap_err().to_string();
+    assert!(error.contains("summary"), "{error}");
+
+    let mut many_refs = input("alert:refs", Some("acme/api"), Severity::Info);
+    many_refs.event.related_refs = (0..=harn_signals::MAX_LIST_ENTRIES)
+        .map(|_| harn_signals::TriageRelatedRef {
+            kind: "url".into(),
+            label: None,
+            url: "https://example.test/".into(),
+        })
+        .collect();
+    let error = inbox.fire(many_refs, t0()).unwrap_err().to_string();
+    assert!(error.contains("related_refs"), "{error}");
+
+    let mut huge = input("alert:huge", Some("acme/api"), Severity::Info);
+    huge.event.why_it_matters = "y".repeat(harn_signals::MAX_KEPT_BYTES);
+    let error = inbox.fire(huge, t0()).unwrap_err().to_string();
+    assert!(error.contains("bytes"), "{error}");
+
+    // The raw payload is never stored, so it does not count.
+    let mut raw = input("alert:raw", Some("acme/api"), Severity::Info);
+    raw.event.raw_payload =
+        serde_json::json!({"body": "z".repeat(harn_signals::MAX_KEPT_BYTES * 2)});
+    inbox.fire(raw, t0()).unwrap();
+    assert!(inbox.snapshot(t0()).unwrap().signals.len() == 1);
+}
+
+#[test]
+fn the_next_write_sweeps_what_killed_processes_left() {
+    let dir = tempfile::tempdir().unwrap();
+    let inbox = Inbox::open(dir.path()).unwrap();
+    let temp = dir.path().join(".inbox.json.4242.deadbeef.tmp");
+    std::fs::write(&temp, "{").unwrap();
+    let watchers = dir.path().join("watchers");
+    std::fs::create_dir_all(&watchers).unwrap();
+    let orphan = watchers.join("6f727068616e.lock");
+    std::fs::write(&orphan, "").unwrap();
+    let held = inbox.claim_watcher("live").unwrap().expect("lock is free");
+
+    inbox
+        .fire(input("ci:acme/api", Some("acme/api"), Severity::Info), t0())
+        .unwrap();
+    assert!(!temp.exists(), "a stale temporary inbox file survived");
+    assert!(!orphan.exists(), "an orphaned watcher lock survived");
+    // A watcher still holding its lock keeps it.
+    assert!(inbox.claim_watcher("live").unwrap().is_none());
+    drop(held);
+    assert!(std::fs::read_dir(&watchers).unwrap().next().is_none());
+}
+
+#[test]
+fn display_safe_flattens_every_line_breaking_or_hidden_character() {
+    let text = "a\nb\r\u{1b}c\u{85}\u{2028}\u{2029}\u{200E}\u{202E}\u{2066}\u{061C}\u{200B}\u{200D}\u{2060}\u{FEFF}\u{E0001}\u{E007F}d";
+    let safe = harn_signals::display_safe(text);
+    assert_eq!(
+        safe.chars().filter(|ch| *ch != ' ').collect::<String>(),
+        "abcd"
+    );
+    assert_eq!(safe.chars().count(), text.chars().count());
 }

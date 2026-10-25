@@ -12,6 +12,13 @@ use crate::SignalsError;
 
 pub const TRIAGE_EVENT_SCHEMA: &str = "harn.triage_event.v1";
 
+/// Longest summary a stored event may carry.
+pub const MAX_SUMMARY_CHARS: usize = 2_000;
+/// Most actors, related refs, or action intents a stored event may carry.
+pub const MAX_LIST_ENTRIES: usize = 32;
+/// Largest stored event, serialized without its raw payload.
+pub const MAX_KEPT_BYTES: usize = 32 * 1024;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TriageEvent {
@@ -154,6 +161,36 @@ impl TriageEvent {
             if value.trim().is_empty() {
                 return Err(SignalsError::InvalidEvent(format!("{name} is required")));
             }
+        }
+        let summary_chars = self.summary.chars().count();
+        if summary_chars > MAX_SUMMARY_CHARS {
+            return Err(SignalsError::InvalidEvent(format!(
+                "summary is {summary_chars} characters; the limit is {MAX_SUMMARY_CHARS}"
+            )));
+        }
+        for (name, count) in [
+            ("actors", self.actors.len()),
+            ("related_refs", self.related_refs.len()),
+            ("action_intents", self.action_intents.len()),
+        ] {
+            if count > MAX_LIST_ENTRIES {
+                return Err(SignalsError::InvalidEvent(format!(
+                    "{name} has {count} entries; the limit is {MAX_LIST_ENTRIES}"
+                )));
+            }
+        }
+        // Every other field is bounded by the size of what the inbox keeps:
+        // the event without its raw payload, which is never stored.
+        let mut kept = serde_json::to_value(self)
+            .map_err(|error| SignalsError::InvalidEvent(error.to_string()))?;
+        if let Some(fields) = kept.as_object_mut() {
+            fields.remove("raw_payload");
+        }
+        let kept_bytes = kept.to_string().len();
+        if kept_bytes > MAX_KEPT_BYTES {
+            return Err(SignalsError::InvalidEvent(format!(
+                "the event is {kept_bytes} bytes without its raw payload; the limit is {MAX_KEPT_BYTES}"
+            )));
         }
         for intent in &self.action_intents {
             if intent.effect != "navigation" && !intent.requires_approval {

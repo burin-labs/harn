@@ -1835,6 +1835,7 @@ harn signals pending --json
 harn signals pending --session
 harn signals resolve
 harn signals resolve --json
+harn signals resolve --signature
 harn signals resolve --summary
 harn signals resolve <positional 1>
 harn signals sessions

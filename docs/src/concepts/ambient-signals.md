@@ -39,7 +39,9 @@ Claude Code's idle wake needs care here: Claude Code shows an `asyncRewake`
 hook's output as a user-role turn labeled `Stop hook feedback`. The watcher
 therefore prints one fixed sentence saying a signal is pending, never any
 signal text, and the alert arrives through the `Stop` hook's
-`additionalContext` when the woken turn ends.
+`additionalContext` when the woken turn ends. A live run of Claude Code
+2.1.310 confirmed that a `Stop` hook's `additionalContext` continues the turn
+and that the model acts on it.
 
 **Monitors** are Harn scripts that poll a source on a schedule and fire or
 resolve signals. Webhook payloads from alerting tools enter the same way,
@@ -57,20 +59,24 @@ every minute while CI stays red therefore produces one reminder when CI breaks
 and one when it recovers, not sixty an hour.
 
 Delivery is at least once. When a session checks in, the inbox **leases** it
-the reminders routed to it; it does not mark them delivered. The session's next
-check-in acks those leases, lapsed or not, because a session that runs
-another hook or turn evidently received the previous output. A turn slower than
-the lease therefore never sees its reminder twice. A session that has been
-silent for a lease window (ten minutes by default), because it crashed or is
-deep in one long tool call, loses its unacked reminders, leased or not, to a
-responsive session the router picks. The silent session's next check-in sees
-them reassigned and neither acks nor renders them. A harness that crashes
-between leasing and rendering therefore loses nothing while another session
-can take the reminder; two sessions may both see it. Rendering is keyed by the
+the reminders routed to it; it does not mark them delivered. Each lease
+carries a token, and only that token acks it: a hook acks the leases it
+printed once its output is flushed, and an in-process delivery acks each lease
+once the reminder is injected. Nothing else acks a lease, so a hook running
+beside another one of the same session, as parallel tool hooks do, never acks
+what its sibling leased. A lease nobody acks lapses after ten minutes by
+default and is leased again with the next attempt number: to its holder while
+that session is responsive, otherwise to a responsive session the router picks.
+A session that has been silent for a lease window, because it crashed or is
+deep in one long tool call, loses a reminder with no lease out to such a
+session. A hook killed after leasing but before printing therefore loses
+nothing; two deliveries may reach the model. Rendering is keyed by the
 reminder's id, `key#generation`, so a redelivery reads the same, says it was
 sent again, and replaces rather than repeats an in-process reminder for the
 same signal. A design that marked reminders delivered when they were taken
-would lose every reminder taken just before a crash.
+would lose every reminder taken just before a crash, and one that acked on the
+next check-in would let a sibling hook ack output that never reached the
+model.
 
 Expiry exists for conditions that may never be explicitly resolved, such as a
 one-off production alert. A fired signal that nothing fires again within a day
@@ -130,7 +136,7 @@ signal is a cost and a latency the deterministic rules usually do not need.
 ## Why the inbox is one file under a lock
 
 Many sessions on one machine run hooks concurrently, and every hook may write:
-it records a heartbeat, acks its previous leases, and leases reminders. The inbox
+it records a heartbeat, leases reminders, and acks what it delivered. The inbox
 is a single JSON document, `inbox.json`, that carries a schema version. Every
 transaction takes an exclusive advisory lock on a sibling lock file, reads the
 document, applies the change, writes a temporary file, and renames it into
@@ -155,7 +161,9 @@ A busy session heartbeats on every hook. An idle session would look dead, so
 the idle watcher that can wake it also heartbeats while it waits. When a
 harness reports that a session ended, its registry entry is removed and every
 reminder assigned to it and not yet acked, leased or not, returns to the
-router.
+router. Each transaction holds the lock for milliseconds and gives up after two
+seconds, well inside a hook's timeout, so a wedged holder fails one hook
+instead of hanging it.
 
 ## Delivery at safe points
 
@@ -174,9 +182,13 @@ stop.
 - An idle Claude Code session can be woken only for urgent reminders, through
   an `asyncRewake` watcher that waits in the background and wakes the session
   with a fixed notice when one is routed to it; the reminder follows as
-  `Stop` context when the woken turn ends. One watcher runs per session: a second one exits
-  at once, so repeated stops never stack watchers. A watcher removes its lock
-  file as it exits, and session end removes one a killed watcher left.
+  `Stop` context when the woken turn ends. The watcher starts beside the
+  `Stop` hook that leases what is already pending, so it gives a reminder
+  pending at its first poll two more polls to be leased before it wakes for
+  it; one routed after that hook ran is not missed. One watcher runs per
+  session: a second one exits at once, so repeated stops never stack watchers.
+  A watcher removes its lock file as it exits; session end, and the next write
+  to the inbox, remove one a killed watcher left.
 
 Codex differs at two points. Its `Stop` hook can keep a session going only by
 turning its reason into a new user prompt, so the Codex adapter never delivers
@@ -196,13 +208,17 @@ or a webhook body can contain text written to look like an instruction. The
 renderer places every source-derived field, the signal id and producer
 included, inside a `signal-data` block. It substitutes `&`, `<`, `>`, and `"`
 with their entities and turns line breaks, other control characters, Unicode
-line separators, and bidirectional overrides into spaces, so no content can
+line separators, bidirectional marks and overrides, zero-width characters,
+and tag characters into spaces, so no content can
 close the block, impersonate harness markup, or start a line of its own; the
 agent still reads what the source said. Every field is capped in length. The
 lines outside the block carry only values Harn chose: state, severity,
 signature status, and whether this is a redelivery. The inbox also refuses a
-signal key that contains a control character, and the command line never
-prints one to a terminal. The model sees exactly one frame, written by Harn,
+signal key that contains a control character, and the command line prints
+source text to a terminal through the same character filter as the renderer.
+The inbox refuses an event whose summary exceeds 2,000 characters, that lists
+more than 32 actors, related references, or action intents, or that exceeds
+32 KiB without its raw payload, which is never stored. The model sees exactly one frame, written by Harn,
 around data it should read but not obey.
 
 **Provenance is mandatory.** Every signal names its producer, such as
@@ -210,7 +226,9 @@ around data it should read but not obey.
 webhook whose signature the receiving trigger checked, `unverified` for one it
 did not, and `local` for a condition observed on the machine. The reminder
 shows both beside the envelope's `source_url`, so an agent can weigh the claim
-and check it at its source.
+and check it at its source. A report about an existing signal may not be
+weaker than the signal's own: an unverified webhook cannot resolve, re-fire, or
+extend a verified or local signal, and the inbox refuses it with an error.
 
 **The proposed action is Harn's.** The monitor pack and the alert normalizers
 write why a signal matters and what to do next themselves; they copy only the

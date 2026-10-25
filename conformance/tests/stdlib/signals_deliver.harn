@@ -24,7 +24,9 @@ pipeline default(harness: Harness) {
   ]
   signal_apply(harness.runtime, ci_branch_decision("acme/api", "main", red), options)
   const first = signal_deliver(harness, agent_session, me, options)
-  harness.stdio.println("delivered: " + to_string(len(first.reminder_ids)))
+  harness.stdio.println(
+    "delivered: " + to_string(len(first.reminder_ids)) + ", acked " + to_string(len(first.acked)),
+  )
   const pending = transcript_events_by_kind(
     harness.agent.snapshot(agent_session),
     "system_reminder",
@@ -35,9 +37,8 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(pending[0]?.reminder?.authority)
   harness.stdio.println(contains(pending[0]?.reminder?.body ?? "", "github.ci:acme/api@main#1"))
-  // The signal recovered before the next turn: generation 1 is superseded, so
-  // there is nothing left to ack, and the recovery replaces the pending
-  // reminder for the same signal instead of stacking a second one.
+  // The signal recovered before the next turn. The recovery replaces the
+  // pending reminder for the same signal instead of stacking a second one.
   signal_apply(harness.runtime, ci_branch_decision("acme/api", "main", []), options)
   harness.testing.clock_advance(1000)
   const again = signal_deliver(harness, agent_session, me, options)
@@ -46,17 +47,18 @@ pipeline default(harness: Harness) {
     "system_reminder",
   )
   harness.stdio.println(
-    "acked " + to_string(len(again.check_in.acked)) + ", delivered "
+    "acked " + to_string(len(again.acked)) + ", delivered "
       + to_string(len(again.reminder_ids))
       + ", pending "
       + to_string(len(replaced)),
   )
   harness.stdio.println(contains(replaced[0]?.reminder?.body ?? "", "github.ci:acme/api@main#2"))
-  // A turn slower than the lease still acks rather than repeats.
+  // Every lease was acked as it was injected, so a turn slower than the
+  // lease repeats nothing.
   harness.testing.clock_advance(12 * 60 * 1000)
   const next = signal_deliver(harness, agent_session, me, options)
   harness.stdio.println(
-    "acked " + to_string(len(next.check_in.acked)) + ", delivered "
+    "acked " + to_string(len(next.acked)) + ", delivered "
       + to_string(len(next.reminder_ids)),
   )
   harness.agent.close(agent_session)

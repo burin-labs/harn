@@ -18,7 +18,9 @@ pipeline default(harness: Harness) {
   }
   const passing_run = {workflow_id: 7, name: "CI", status: "completed", conclusion: "success"}
   const queued_run = {workflow_id: 7, name: "CI", status: "queued", conclusion: nil}
-  const red = [queued_run, failing_run, passing_run]
+  const cancelled_run = {workflow_id: 7, name: "CI", status: "completed", conclusion: "cancelled"}
+  // A cancelled newest run neither hides the failure nor reads as recovered.
+  const red = [queued_run, cancelled_run, failing_run, passing_run]
   const green = [passing_run, failing_run]
   // Polling an unchanged condition owes nothing; each change owes one reminder.
   for runs in [red, red, green, green, red] {

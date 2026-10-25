@@ -13,10 +13,12 @@ import { triage_normalize } from "std/triage"
  * at least once.
  *
  * A session receives reminders by checking in with
- * `harness.runtime.signal_check_in`, which acks what the session's previous
- * check-in leased and leases what is pending now. `signal_deliver` does that
- * for an in-process agent session and renders the leases as advisory system
- * reminders. Alert text never travels as a user message.
+ * `harness.runtime.signal_check_in`, which leases what is pending now, and
+ * acks each lease with `harness.runtime.signal_ack` and its `lease_token`
+ * once the reminder reached the model. A lease nobody acks is leased again.
+ * `signal_deliver` does both for an in-process agent session and renders the
+ * leases as advisory system reminders. Alert text never travels as a user
+ * message.
  *
  * Evaluators (`*_decision`) are pure so thresholds and wording can be tested
  * without a network. Monitors (`monitor_*`) fetch, evaluate, and apply. A
@@ -67,8 +69,6 @@ type SignalSession = {
 
 type SignalCheckInOptions = {scope?: "all" | "urgent_only", limit?: int, dir?: string}
 
-type SignalReminderId = {key: string, generation: int}
-
 /** One generation of one signal leased to the session. */
 type SignalReminder = {
   key: string,
@@ -79,12 +79,19 @@ type SignalReminder = {
   event: dict,
   routing: SignalRouting,
   provenance: SignalProvenance,
+  lease_token: string,
   lease_expires_at: string,
 }
 
-type SignalCheckIn = {acked: list<SignalReminderId>, reminders: list<SignalReminder>, waiting: int}
+type SignalCheckIn = {reminders: list<SignalReminder>, waiting: int}
 
-type SignalDelivery = {check_in: SignalCheckIn, reminder_ids: list<string>}
+type SignalReminderId = {key: string, generation: int}
+
+type SignalDelivery = {
+  check_in: SignalCheckIn,
+  reminder_ids: list<string>,
+  acked: list<SignalReminderId>,
+}
 
 /**
  * GitHub App credentials. Each poll mints a fresh installation token through
@@ -131,6 +138,21 @@ type GitHubRunnerPool = {
 const GITHUB_API = "https://api.github.com"
 
 const CI_FAILED_CONCLUSIONS = ["failure", "timed_out", "startup_failure", "action_required"]
+
+/**
+ * A run that ended `cancelled`, `skipped`, `stale`, or `neutral` says nothing
+ * about the branch; only these conclusions are a reading.
+ */
+const CI_DECISIVE_CONCLUSIONS = [
+  "success",
+  "failure",
+  "timed_out",
+  "startup_failure",
+  "action_required",
+]
+
+/** How many recent completed runs per workflow to search for a decisive one. */
+const CI_RUNS_PER_WORKFLOW = 20
 
 /**
  * Installation tokens live an hour; a refresh skew past that makes the connector mint every time.
@@ -219,7 +241,7 @@ pub fn signal_apply(
   }
   const resolved = runtime.signal_resolve(
     decision.key,
-    filter_nil({event: decision.event, dir: options.dir}),
+    filter_nil({event: decision.event, signature: decision.provenance.signature, dir: options.dir}),
   )
   return schema_expect(resolved, schema_of(SignalTransition))
 }
@@ -228,7 +250,8 @@ pub fn signal_apply(
  * Check `session` in and deliver its leased reminders to the running agent
  * session `agent_session_id` as advisory system reminders, one per signal,
  * deduplicated by signal key so a redelivery replaces rather than repeats.
- * Call it once per turn; the next call acks this one's leases.
+ * Each lease is acked once its reminder is injected; a lease left unacked
+ * because injection failed is leased again when it lapses.
  *
  * @effects: [state.write, host]
  * @errors: []
@@ -244,6 +267,7 @@ pub fn signal_deliver(
     schema_of(SignalCheckIn),
   )
   let reminder_ids = []
+  let tokens = []
   for reminder in check_in.reminders {
     reminder_ids.push(
       agent_session_inject_reminder(
@@ -258,13 +282,21 @@ pub fn signal_deliver(
         },
       ),
     )
+    tokens.push(reminder.lease_token)
   }
-  return {check_in: check_in, reminder_ids: reminder_ids}
+  const acked = len(tokens) == 0 ? [] : harness.runtime.signal_ack(
+    session.id,
+    tokens,
+    filter_nil({dir: options.dir}),
+  )
+  return {check_in: check_in, reminder_ids: reminder_ids, acked: acked}
 }
 
 /**
- * Default-branch CI: firing while the latest completed run of any workflow on
- * `branch` failed. `runs` is the GitHub `workflow_runs` list, newest first.
+ * Default-branch CI: firing while the newest decisive run of any workflow on
+ * `branch` failed. `runs` is the GitHub `workflow_runs` list, newest first; a
+ * run that was cancelled, skipped, stale, or neutral is passed over, so it
+ * neither hides a failure nor reads as a recovery.
  *
  * @effects: []
  * @errors: []
@@ -279,7 +311,8 @@ pub fn ci_branch_decision(
   let failing = []
   for run in runs {
     const workflow = to_string(run?.workflow_id ?? run?.name ?? "")
-    if run?.status != "completed" || seen[workflow] != nil {
+    if run?.status != "completed" || seen[workflow] != nil
+      || !contains(CI_DECISIVE_CONCLUSIONS, run?.conclusion ?? "") {
       continue
     }
     seen[workflow] = true
@@ -736,11 +769,12 @@ fn __observe(
 }
 
 /**
- * The latest completed push run of every active workflow on `branch`. One
- * query per workflow, so a busy workflow cannot push another's last
- * completed run out of a shared page.
+ * The newest decisive push run of every active workflow on `branch`, searched
+ * among its recent completed runs. One query per workflow, so a busy workflow
+ * cannot push another's runs out of a shared page. A workflow whose recent
+ * runs are all indecisive contributes no reading.
  */
-fn __latest_completed_runs(
+fn __latest_decisive_runs(
   net: HarnessNet,
   token: string,
   repo: string,
@@ -767,7 +801,8 @@ fn __latest_completed_runs(
       token,
       "/repos/" + repo + "/actions/workflows/" + to_string(workflow.id) + "/runs?branch="
         + branch
-        + "&event=push&status=completed&per_page=1",
+        + "&event=push&status=completed&per_page="
+        + to_string(CI_RUNS_PER_WORKFLOW),
       options,
     )
     const runs = page?.workflow_runs
@@ -775,8 +810,11 @@ fn __latest_completed_runs(
       throw "std/signals: the runs of workflow " + to_string(workflow.id)
         + " came back without `workflow_runs`"
     }
-    if len(runs) > 0 {
-      latest.push(runs[0])
+    for run in runs {
+      if contains(CI_DECISIVE_CONCLUSIONS, run?.conclusion ?? "") {
+        latest.push(run)
+        break
+      }
     }
   }
   return latest
@@ -784,7 +822,7 @@ fn __latest_completed_runs(
 
 /**
  * Poll default-branch CI for `repo` and fire or resolve its signal. A branch
- * where no workflow has a completed run yet is unmeasured, not recovered.
+ * where no workflow has a decisive recent run is unmeasured, not recovered.
  *
  * @effects: [net, env, state.write]
  * @errors: []
@@ -799,7 +837,7 @@ pub fn monitor_github_ci(
     harness.runtime,
     options,
     { ->
-      const runs = __latest_completed_runs(
+      const runs = __latest_decisive_runs(
         harness.net,
         __github_token(pick(harness, ["env", "net"]), options),
         repo,
@@ -807,7 +845,8 @@ pub fn monitor_github_ci(
         options,
       )
       if len(runs) == 0 {
-        throw "std/signals: no workflow has a completed push run on " + branch + " of " + repo
+        throw "std/signals: no workflow has a decisive recent push run on " + branch + " of "
+          + repo
       }
       ci_branch_decision(repo, branch, runs, options.severity ?? "warning")
     },

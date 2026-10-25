@@ -14,9 +14,10 @@ use crate::config::Config;
 use crate::event::TriageEvent;
 use crate::model::{
     Activity, CheckIn, CheckInScope, Delivery, Lease, Reminder, ReminderId, Session,
-    SessionAnnouncement, Signal, SignalInput, SignalState,
+    SessionAnnouncement, Signal, SignalInput, SignalState, SignatureStatus,
 };
 use crate::router::{Router, RuleRouter};
+use crate::watcher::{self, WatcherLock};
 use crate::SignalsError;
 
 pub const INBOX_SCHEMA: &str = "harn.signals.inbox.v1";
@@ -24,8 +25,9 @@ pub const SIGNALS_DIR_ENV: &str = "HARN_EXT_SIGNALS_DIR";
 
 const INBOX_FILE: &str = "inbox.json";
 const LOCK_FILE: &str = "inbox.lock";
-/// Transactions are milliseconds; a wait this long means a wedged holder.
-const LOCK_DEADLINE: Duration = Duration::from_secs(10);
+/// Transactions are milliseconds; a wait this long means a wedged holder. It
+/// stays well under a harness's hook timeout, so a hook fails on its own terms.
+const LOCK_DEADLINE: Duration = Duration::from_secs(2);
 /// A check-in inside this window only refreshes `last_seen` in memory, so a
 /// burst of tool calls does not rewrite the file on every hook.
 const HEARTBEAT_GRANULARITY: time::Duration = time::Duration::seconds(10);
@@ -59,8 +61,8 @@ pub enum Transition {
 /// What an idle watcher's poll found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IdlePoll {
-    /// The urgent reminders waiting for this session, unleased; possibly
-    /// none yet. The watcher only wakes the session: the session's own next
+    /// The urgent reminders waiting for this session with no lease out;
+    /// possibly none yet. The watcher only wakes the session: the session's own next
     /// check-in leases and renders them.
     Pending(Vec<ReminderId>),
     /// The session is working again; its foreground hooks deliver now.
@@ -153,6 +155,9 @@ impl Inbox {
         let expires_at = Some(expires_at.unwrap_or(now + self.config.fired_ttl));
         let max_signals = self.config.max_signals;
         self.transact(now, |state| {
+            if let Some(signal) = state.signals.get(&key) {
+                refuse_weaker(signal, provenance.signature)?;
+            }
             let signal = match state.signals.get_mut(&key) {
                 Some(signal) => signal,
                 None => {
@@ -202,11 +207,14 @@ impl Inbox {
     }
 
     /// Resolve a fired signal, optionally replacing its content with the
-    /// recovery event. Resolving anything else changes nothing.
+    /// recovery event. Resolving anything else changes nothing. `signature`
+    /// is how the resolving report was checked; it may not be weaker than the
+    /// signal's own.
     pub fn resolve(
         &self,
         key: &str,
         event: Option<TriageEvent>,
+        signature: SignatureStatus,
         now: OffsetDateTime,
     ) -> Result<Transition, SignalsError> {
         let event = match event {
@@ -219,19 +227,20 @@ impl Inbox {
         };
         self.transact(now, |state| {
             let Some(signal) = state.signals.get_mut(key) else {
-                return Transition::Unknown;
+                return Ok(Transition::Unknown);
             };
+            refuse_weaker(signal, signature)?;
             if signal.state != SignalState::Fired {
-                return Transition::Unchanged {
+                return Ok(Transition::Unchanged {
                     state: signal.state,
                     generation: signal.generation,
-                };
+                });
             }
             if let Some(event) = event {
                 signal.event = event;
             }
-            advance(signal, SignalState::Resolved, now)
-        })
+            Ok(advance(signal, SignalState::Resolved, now))
+        })?
     }
 
     /// Record a session's presence without leasing or acking anything.
@@ -251,13 +260,15 @@ impl Inbox {
         })
     }
 
-    /// Check in: ack the leases this session still holds from earlier
-    /// check-ins, then lease up to `limit` pending reminders in `scope`.
+    /// Check in: record the session's presence and lease up to `limit`
+    /// pending reminders in `scope`.
     ///
-    /// Delivery is at least once. A leased reminder is acked by the session's
-    /// next check-in, or explicitly with [`Inbox::ack`]; one whose lease lapses
-    /// first is leased again, to this session if it is still live or to
-    /// another one. Callers render each leased reminder by its
+    /// Delivery is at least once. The caller hands each leased reminder to
+    /// the model, then acks it with [`Inbox::ack_leases`] and the lease's
+    /// token; nothing else acks a lease, so one caller never acks what another
+    /// caller leased. A lease that lapses unacked is leased again with the
+    /// next attempt number: to its holder while that session is responsive,
+    /// otherwise to another one. Callers render each leased reminder by its
     /// [`crate::ReminderId`], so a redelivery reads the same.
     pub fn check_in(
         &self,
@@ -270,15 +281,52 @@ impl Inbox {
         let lease_for = self.config.lease_for;
         self.transact_routed(now, |state, router, config| {
             upsert_session(state, announcement, now);
-            let acked = ack_held(state, &session_id, now);
             route_pending(state, router, config, now);
             let (reminders, waiting) = lease(state, &session_id, scope, limit, lease_for, now);
-            CheckIn {
-                acked,
-                reminders,
-                waiting,
-            }
+            CheckIn { reminders, waiting }
         })
+    }
+
+    /// Ack the leases a check-in handed out, by token, once their reminders
+    /// reached the model. A token that no longer names the reminder's current
+    /// lease (it lapsed and was leased again, moved to another session, or
+    /// the signal changed generation) acks nothing. Returns the ids acked.
+    pub fn ack_leases(
+        &self,
+        session_id: &str,
+        tokens: &[String],
+        now: OffsetDateTime,
+    ) -> Result<Vec<ReminderId>, SignalsError> {
+        if tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.transact(now, |state| {
+            let mut acked = Vec::new();
+            for signal in state.signals.values_mut() {
+                let id = signal.id();
+                let Some(delivery) = signal.delivery.as_mut() else {
+                    continue;
+                };
+                let owned = delivery.session_id == session_id
+                    && delivery.acked_at.is_none()
+                    && delivery
+                        .lease
+                        .as_ref()
+                        .is_some_and(|lease| tokens.contains(&lease.token));
+                if owned {
+                    delivery.acked_at = Some(now);
+                    delivery.lease = None;
+                    acked.push(id);
+                }
+            }
+            acked
+        })
+    }
+
+    /// Take `session_id`'s idle-watcher lock without waiting, or `None` when
+    /// another watcher holds it. Dropping the lock removes its file.
+    pub fn claim_watcher(&self, session_id: &str) -> Result<Option<WatcherLock>, SignalsError> {
+        watcher::claim(&self.dir, session_id)
     }
 
     /// One poll of an idle session's background watcher: refresh its
@@ -307,7 +355,7 @@ impl Inbox {
                     signal.is_pending()
                         && CheckInScope::UrgentOnly.admits(signal.severity)
                         && signal.delivery.as_ref().is_some_and(|delivery| {
-                            delivery.session_id == session_id && delivery.lease.is_none()
+                            delivery.session_id == session_id && !delivery.lease_active(now)
                         })
                 })
                 .map(Signal::id)
@@ -382,6 +430,9 @@ impl Inbox {
         route_pending(&mut state, self.router.as_ref(), &self.config, now);
         if state != before {
             write_document(&path, state)?;
+            // Still under the lock: no write or watcher claim is in flight
+            // that this could race, so what it finds is debris.
+            sweep_debris(&self.dir);
         }
         Ok(result)
     }
@@ -454,8 +505,7 @@ fn upsert_session(
 }
 
 /// Expire lapsed signals, prune settled ones past retention, and drop stale
-/// sessions. A lapsed lease keeps its record: the holder's next check-in still
-/// acks it, so a slow turn never sees the same reminder twice.
+/// sessions.
 fn maintain(state: &mut InboxSnapshot, config: &Config, now: OffsetDateTime) {
     for signal in state.signals.values_mut() {
         if signal.state == SignalState::Fired
@@ -476,13 +526,12 @@ fn maintain(state: &mut InboxSnapshot, config: &Config, now: OffsetDateTime) {
 
 /// Give every pending generation a live recipient the policy allows.
 ///
-/// An assignment stays put while its holder is responsive, so a reminder does
-/// not bounce between sessions. A holder that has been silent for a lease
-/// length (crashed, or deep in one long tool call) loses the reminder to a
-/// responsive session when the router finds one; the silent holder's next
-/// check-in then sees it reassigned and neither acks nor renders it. An
-/// unleased assignment the policy now holds is withdrawn; an outstanding lease
-/// is left to be acked.
+/// An assignment stays put while its lease is out or its holder is
+/// responsive, so a reminder does not bounce between sessions; a responsive
+/// holder whose lease lapsed is leased it again at its next check-in. A holder
+/// silent for a lease length (crashed, or deep in one long tool call) loses
+/// a reminder with no lease out to a responsive session when the router finds
+/// one. An assignment the policy now holds is withdrawn once no lease is out.
 fn route_pending(
     state: &mut InboxSnapshot,
     router: &dyn Router,
@@ -505,28 +554,20 @@ fn route_pending(
                 .iter()
                 .find(|session| session.id == delivery.session_id)
             {
-                let leased = delivery.lease.is_some();
-                if delivery.lease_active(now) || responsive(holder) {
-                    if leased || !held {
-                        continue;
-                    }
-                } else if !held {
-                    let others: Vec<&Session> = live
-                        .iter()
-                        .copied()
-                        .filter(|session| session.id != holder.id && responsive(session))
-                        .collect();
-                    if let Some(session_id) = router.route(signal, &others) {
-                        signal.delivery = Some(Delivery {
-                            generation: signal.generation,
-                            session_id,
-                            assigned_at: now,
-                            lease: None,
-                            acked_at: None,
-                        });
-                    }
+                if delivery.lease_active(now) {
                     continue;
-                } else if leased {
+                }
+                if !held {
+                    if !responsive(holder) {
+                        let others: Vec<&Session> = live
+                            .iter()
+                            .copied()
+                            .filter(|session| session.id != holder.id && responsive(session))
+                            .collect();
+                        if let Some(session_id) = router.route(signal, &others) {
+                            signal.delivery = Some(assign(signal.generation, session_id, now));
+                        }
+                    }
                     continue;
                 }
             }
@@ -534,42 +575,42 @@ fn route_pending(
         signal.delivery = if held {
             None
         } else {
-            router.route(signal, &live).map(|session_id| Delivery {
-                generation: signal.generation,
-                session_id,
-                assigned_at: now,
-                lease: None,
-                acked_at: None,
-            })
+            router
+                .route(signal, &live)
+                .map(|session_id| assign(signal.generation, session_id, now))
         };
     }
 }
 
-/// Ack every lease this session took at an earlier check-in, lapsed or not,
-/// unless the reminder has since moved to another session: checking in again
-/// is the evidence its last output reached the model.
-fn ack_held(state: &mut InboxSnapshot, session_id: &str, now: OffsetDateTime) -> Vec<ReminderId> {
-    let mut acked = Vec::new();
-    for signal in state.signals.values_mut() {
-        let id = signal.id();
-        let Some(delivery) = signal.delivery.as_mut() else {
-            continue;
-        };
-        if delivery.session_id == session_id
-            && delivery.acked_at.is_none()
-            && delivery.lease.is_some()
-        {
-            delivery.acked_at = Some(now);
-            delivery.lease = None;
-            acked.push(id);
-        }
+fn assign(generation: u64, session_id: String, now: OffsetDateTime) -> Delivery {
+    Delivery {
+        generation,
+        session_id,
+        assigned_at: now,
+        lease: None,
+        acked_at: None,
     }
-    acked
 }
 
-/// Lease this session's pending, unleased reminders in `scope`, most severe
-/// and oldest first, up to `limit`. Returns the leased reminders and how many
-/// routed to the session were left waiting.
+/// A report about an existing signal may not come from a weaker check of its
+/// origin than the signal's own: an unverified webhook cannot resolve, refresh,
+/// or re-fire a verified or locally observed alert.
+fn refuse_weaker(signal: &Signal, offered: SignatureStatus) -> Result<(), SignalsError> {
+    let stored = signal.provenance.signature;
+    if offered.strength() < stored.strength() {
+        return Err(SignalsError::WeakerSignature {
+            key: signal.key.clone(),
+            stored: stored.as_str(),
+            offered: offered.as_str(),
+        });
+    }
+    Ok(())
+}
+
+/// Lease this session's pending reminders in `scope` that have no lease out,
+/// most severe and oldest first, up to `limit`. A lapsed lease is replaced
+/// with a fresh one and the next attempt number. Returns the leased reminders
+/// and how many routed to the session were left waiting.
 fn lease(
     state: &mut InboxSnapshot,
     session_id: &str,
@@ -584,7 +625,7 @@ fn lease(
         .filter(|signal| {
             signal.is_pending()
                 && signal.delivery.as_ref().is_some_and(|delivery| {
-                    delivery.session_id == session_id && delivery.lease.is_none()
+                    delivery.session_id == session_id && !delivery.lease_active(now)
                 })
         })
         .collect();
@@ -607,15 +648,15 @@ fn lease(
             signal.fired_recipient = Some(session_id.to_string());
         }
         let lease = Lease {
+            token: uuid::Uuid::new_v4().simple().to_string(),
             leased_at: now,
             expires_at: now + lease_for,
         };
-        let Some(delivery) = signal.delivery.as_mut() else {
-            continue;
-        };
-        delivery.lease = Some(lease);
         signal.attempts += 1;
-        reminders.push(Reminder::leased(signal, lease));
+        reminders.push(Reminder::leased(signal, &lease));
+        if let Some(delivery) = signal.delivery.as_mut() {
+            delivery.lease = Some(lease);
+        }
     }
     (reminders, waiting)
 }
@@ -693,7 +734,24 @@ fn write_document(path: &Path, state: InboxSnapshot) -> Result<(), SignalsError>
     written
 }
 
-fn open_private(path: &Path) -> Result<File, SignalsError> {
+/// Remove what a killed process left: a temporary inbox file whose rename
+/// never ran, and a watcher lock no watcher holds. Best effort; debris is
+/// harmless, only untidy.
+fn sweep_debris(dir: &Path) {
+    let prefix = format!(".{INBOX_FILE}.");
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with(&prefix) && name.ends_with(".tmp") {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+    watcher::sweep_orphans(dir);
+}
+
+pub(crate) fn open_private(path: &Path) -> Result<File, SignalsError> {
     let mut options = OpenOptions::new();
     options.create(true).write(true).truncate(false);
     #[cfg(unix)]
@@ -706,7 +764,7 @@ fn open_private(path: &Path) -> Result<File, SignalsError> {
         .map_err(|source| SignalsError::io(path, source))
 }
 
-fn create_private_dir(dir: &Path) -> Result<(), SignalsError> {
+pub(crate) fn create_private_dir(dir: &Path) -> Result<(), SignalsError> {
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]
