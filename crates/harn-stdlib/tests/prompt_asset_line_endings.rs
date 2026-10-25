@@ -1,4 +1,4 @@
-use harn_stdlib::{StdlibPromptAsset, STDLIB_CLI_SCRIPTS, STDLIB_PROMPT_ASSETS, STDLIB_SOURCES};
+use harn_stdlib::{StdlibPromptAsset, CATALOG};
 
 fn assets_with_carriage_returns(assets: &[StdlibPromptAsset]) -> Vec<&str> {
     sources_with_carriage_returns(assets.iter().map(|asset| (asset.path, asset.source)))
@@ -15,13 +15,15 @@ fn sources_with_carriage_returns<'a>(
 
 #[test]
 fn embedded_harn_sources_use_lf_line_endings() {
-    assert!(!STDLIB_SOURCES.is_empty() && !STDLIB_CLI_SCRIPTS.is_empty());
+    assert!(!CATALOG.sources.is_empty() && !CATALOG.cli_scripts.is_empty());
     let offenders = sources_with_carriage_returns(
-        STDLIB_SOURCES
+        CATALOG
+            .sources
             .iter()
             .map(|entry| (entry.module, entry.source))
             .chain(
-                STDLIB_CLI_SCRIPTS
+                CATALOG
+                    .cli_scripts
                     .iter()
                     .map(|entry| (entry.name, entry.source)),
             ),
@@ -35,11 +37,11 @@ fn embedded_harn_sources_use_lf_line_endings() {
 #[test]
 fn embedded_prompt_assets_use_lf_line_endings() {
     assert!(
-        !STDLIB_PROMPT_ASSETS.is_empty(),
+        !CATALOG.prompt_assets.is_empty(),
         "the embedded prompt catalog must be non-empty before its line endings can pass"
     );
 
-    let offenders = assets_with_carriage_returns(STDLIB_PROMPT_ASSETS);
+    let offenders = assets_with_carriage_returns(CATALOG.prompt_assets);
     assert!(
         offenders.is_empty(),
         "embedded prompt assets must use LF line endings: {}",

@@ -613,7 +613,7 @@ fn runtime_stdlib_import_surface_resolves_to_embedded_sources() {
     let tmp = tempfile::tempdir().unwrap();
     let entry_path = write_file(tmp.path(), "entry.harn", "");
 
-    for source in harn_stdlib::STDLIB_SOURCES {
+    for source in harn_stdlib::CATALOG.sources {
         let import_path = format!("std/{}", source.module);
         assert!(
             resolve_import_path(&entry_path, &import_path).is_some(),

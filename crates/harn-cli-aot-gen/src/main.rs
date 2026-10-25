@@ -219,7 +219,7 @@ fn build_expected(
 
     let mut scripts = Vec::new();
     let mut artifacts = BTreeMap::new();
-    for script in harn_stdlib::STDLIB_CLI_SCRIPTS {
+    for script in harn_stdlib::CATALOG.cli_scripts {
         let source_path = format!("../harn-stdlib/src/stdlib/cli/{}.harn", script.name);
         let source_disk_path = contract.manifest_dir.join(&source_path);
         let source = fs::read_to_string(&source_disk_path)

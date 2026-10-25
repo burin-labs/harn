@@ -257,7 +257,7 @@ impl std::error::Error for RuntimeInitError {}
 /// an operator who set `HARN_CACHE_DIR` gets a hard failure rather than a
 /// silent downgrade to no caching.
 pub fn initialize_runtime() -> Result<Option<&'static str>, RuntimeInitError> {
-    harn_modules::try_stdlib_catalog().map_err(RuntimeInitError::StdlibCatalog)?;
+    harn_modules::ensure_stdlib_installed().map_err(RuntimeInitError::StdlibCatalog)?;
     environment_registry::validate_startup_environment().map_err(RuntimeInitError::Environment)?;
     let warning = bytecode_cache::check_cache_config().map_err(RuntimeInitError::CacheDir)?;
     initialize_runtime_assets();
