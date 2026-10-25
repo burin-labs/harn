@@ -109,7 +109,9 @@ test('the closed candidate entrypoint cancels exact live parents and preserves u
       assert.equal(noop.posts.length,0);
       assert.match(noop.result.stdout,/retirement=none reason=\w+ nothing retired/);
     }
-    for(const changes of [{pull:{}},{pull:{...pull,base:{repo:{full_name:'acme/fork'}}}},
+    for(const changes of [{pull:{}},{pull:{...pull,state:undefined}},{pull:{...pull,state:'merged'}},
+      {pull:{...pull,head:{sha,ref:'candidate'}}},{pull:{...pull,head:{...pull.head,repo:{}}}},
+      {pull:{...pull,base:{repo:{full_name:'acme/fork'}}}},
       {pull:{...pull,head:{...pull.head,sha:'xyz'}}},{finalPull:{...pull,state:'open'}},
       {census:{total_count:1,workflow_runs:[]}}]) {
       const unknown=execute(changes);

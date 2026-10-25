@@ -18,8 +18,15 @@ export async function retireCandidateObservers(token, number, fetchRecord = fetc
   }
   // Observers are same-repository PR runs of a closed candidate: a reopened PR or a fork/deleted
   // head has nothing to retire, so it is a no-op rather than a failure.
-  if (pull.state !== 'closed') return {noop:'pull_request_not_closed'};
-  if (pull.head?.repo?.full_name !== repository) return {noop:'head_not_same_repository'};
+  // Only an explicit open state, a null (deleted) head, or a named foreign head proves a no-op.
+  if (pull.state === 'open') return {noop:'pull_request_not_closed'};
+  if (pull.state !== 'closed') throw new Error('CONSUMER_OBSERVER reason=candidate_identity_unproven');
+  if (pull.head?.repo === null) return {noop:'head_repository_deleted'};
+  const headRepository = pull.head?.repo?.full_name;
+  if (typeof headRepository !== 'string' || !headRepository) {
+    throw new Error('CONSUMER_OBSERVER reason=candidate_identity_unproven');
+  }
+  if (headRepository !== repository) return {noop:'head_not_same_repository'};
   if (!/^[0-9a-f]{40}$/.test(pull.head?.sha ?? '')
     || typeof pull.head?.ref !== 'string' || !pull.head.ref) {
     throw new Error('CONSUMER_OBSERVER reason=candidate_identity_unproven');
