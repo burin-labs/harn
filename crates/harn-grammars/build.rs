@@ -137,11 +137,16 @@ fn main() {
         write_bindings(&out, &[]);
         return;
     }
-    let little_endian = env::var("CARGO_CFG_TARGET_ENDIAN").as_deref() == Ok("little");
-    let sources = match (little_endian, locate_sources(&enabled)) {
-        (true, Ok(sources)) => sources,
-        (false, _) => return fallback("the target is not little-endian"),
-        (_, Err(why)) => return fallback(&why),
+    // The upstream crates carry the libc shims a wasm32 build needs.
+    if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
+        return fallback("the target is wasm32");
+    }
+    if env::var("CARGO_CFG_TARGET_ENDIAN").as_deref() != Ok("little") {
+        return fallback("the target is not little-endian");
+    }
+    let sources = match locate_sources(&enabled) {
+        Ok(sources) => sources,
+        Err(why) => return fallback(&why),
     };
 
     let queue = Mutex::new(enabled.iter().zip(sources).collect::<Vec<_>>());
@@ -331,8 +336,8 @@ fn find_tables(lines: &[&str]) -> Vec<Table> {
             .and_then(|rest| rest.strip_suffix(" = {"))
             .and_then(|decl| decl.split_once(' '))
             .and_then(|(ty, rest)| {
-                let open = rest.find('[')?;
-                Some((ty, &rest[..open], &rest[open..]))
+                let (name, dims) = rest.split_at(rest.find('[')?);
+                Some((ty, name, dims))
             });
         if let Some((ty, name, dims)) = parsed {
             if PLAIN_TYPES.contains(&ty) && name.starts_with("ts_") && dims.ends_with(']') {
@@ -400,6 +405,7 @@ fn dump_tables(
     if compiler.is_like_msvc() {
         cmd.arg("/nologo")
             .arg("/w")
+            .arg("/std:c11")
             .arg("/utf-8")
             .arg(format!("/I{}", src.display()))
             .arg(format!("/Fo{}\\", dir.display()))

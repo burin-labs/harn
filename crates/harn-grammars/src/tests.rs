@@ -56,10 +56,10 @@ same_as_upstream! {
     "zig" => zig, tree_sitter_zig::LANGUAGE, "pub fn f(comptime T: type, x: ?T) !T { return x orelse error.None; }\n";
 }
 
+/// The comparisons above pass vacuously when the build falls back to the
+/// upstream grammars, so a fallback fails here instead.
 #[test]
+#[cfg(not(harn_grammars_packed))]
 fn this_workspace_builds_packed_grammars() {
-    assert!(
-        cfg!(harn_grammars_packed),
-        "the build script fell back to unpacked grammars; see its warning"
-    );
+    panic!("the build script fell back to unpacked grammars; see its warning");
 }
