@@ -196,6 +196,7 @@ mod tests {
         install(&ONE).expect("first install");
         install(&ONE).expect("same catalog again");
         assert_eq!(install(&OTHER), Err(CatalogAlreadyInstalled));
-        assert!(std::ptr::eq(installed().expect("installed"), &*ONE));
+        let one: &StdlibCatalog = &ONE;
+        assert!(std::ptr::eq(installed().expect("installed"), one));
     }
 }
