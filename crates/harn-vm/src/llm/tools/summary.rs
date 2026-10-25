@@ -262,10 +262,11 @@ mod tests {
             );
         }
         let summary = tool_summary(
-            "Read the line range named by `start. end` from the file and return it. Done.",
+            "Return every line of the requested range together with its number, or fall back \
+             to `Range. Full` when no range is given. Done.",
         );
         assert!(
-            summary.ends_with("return it."),
+            summary.ends_with("no range is given."),
             "a period inside backticks is not a boundary, got {summary:?}"
         );
     }
