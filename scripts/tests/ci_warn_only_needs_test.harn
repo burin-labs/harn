@@ -8,7 +8,7 @@ fn workflows(fs: HarnessFs) -> dict {
   }
 }
 
-fn with_canary_timeout(all: dict, timeout) -> dict {
+fn with_canary_timeout(all: dict, timeout: any) -> dict {
   const canary = all["consumer-canary.yml"]
   const consumers = {...canary.jobs.consumers, "timeout-minutes": timeout}
   return {...all, "consumer-canary.yml": {...canary, jobs: {...canary.jobs, consumers: consumers}}}

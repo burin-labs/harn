@@ -29,7 +29,7 @@ const PULL_REQUEST_TIMEOUT =
  * A job's timeout on the pull-request path: a literal, or the reusable
  * workflow's `inputs.pull_request_cli_run != '' && N || M` split, read as N.
  */
-fn pull_request_minutes(value) -> int? {
+fn pull_request_minutes(value: any) -> int? {
   const text = trim(to_string(value ?? ""))
   const found = regex_captures(PULL_REQUEST_TIMEOUT, text)
   if len(found) != 1 {
