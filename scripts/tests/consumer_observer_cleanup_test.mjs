@@ -6,13 +6,34 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
+import { load } from 'js-yaml';
 import { observerRunName, observerDeclarationName, observerDispatchActor, observerDeclarationStep, observerDispatchStep } from '../lib/consumer-observer.mjs';
+
+test('manual cleanup rejects feature refs and checks out trusted code before credentials', () => {
+  const workflow = load(fs.readFileSync(new URL('../../.github/workflows/consumer-observer-cleanup.yml', import.meta.url), 'utf8'));
+  const job = workflow.jobs.reconcile;
+  const permitted = (event, ref, repository = 'burin-labs/harn') => runInNewContext(job.if, {
+    github: { event_name: event, ref, repository: 'burin-labs/harn',
+      event: { workflow_run: { head_repository: { full_name: repository },
+        status: 'completed', name: 'Consumer canary', event: 'workflow_dispatch' } } },
+  });
+  assert.equal(permitted('workflow_dispatch', 'refs/heads/main'), true);
+  assert.equal(permitted('workflow_dispatch', 'refs/heads/feature'), false);
+  assert.equal(permitted('schedule', 'refs/heads/main'), true);
+  assert.equal(permitted('workflow_run', 'refs/heads/main'), true);
+  assert.equal(permitted('workflow_run', 'refs/heads/main', 'unrelated/repository'), false);
+  const checkout = job.steps.findIndex(step => step.uses?.startsWith('actions/checkout@'));
+  const token = job.steps.findIndex(step => step.uses?.startsWith('actions/create-github-app-token@'));
+  assert.ok(checkout >= 0 && token > checkout);
+  assert.equal(job.steps[checkout].with.ref, 'refs/heads/main');
+  assert.equal(job.steps[checkout].with['persist-credentials'], false);
+});
 
 test('the inert declaration action projects the owning publication step identity', () => {
   const action = fs.readFileSync(new URL('../../.github/actions/consumer-observer-declare/action.yml', import.meta.url), 'utf8');
   assert.equal(/^name: (.+)$/m.exec(action)?.[1], observerDeclarationStep);
   const listener = fs.readFileSync(new URL('../../.github/workflows/consumer-observer-cleanup.yml', import.meta.url), 'utf8');
-  assert.match(listener, /if: github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch' \|\| \(github\.event_name == 'workflow_run' && github\.event\.workflow_run\.head_repository\.full_name == github\.repository && github\.event\.workflow_run\.status == 'completed'/);
   assert.match(listener, /cron: '8,23,38,53 \* \* \* \*'/);
   assert.match(listener, /workflows: \[Consumer canary, Build release binaries, Promote release, CI\]/);
   assert.doesNotMatch(listener, /ref:.*workflow_run|download-artifact|checkout.*workflow_run/);
