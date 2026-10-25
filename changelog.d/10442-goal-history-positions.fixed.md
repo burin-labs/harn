@@ -1,2 +1,3 @@
 A goal read, set, or clear on a session no longer adds fork and rewind history positions.
-Only message, tool call, and tool result rows count as positions.
+Run and goal bookkeeping rows carry no source identity; only messages, tool calls and results,
+and published answers count as positions.

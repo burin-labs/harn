@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{SessionEventKind, StoreError, StoreResult, StoredEvent};
+use crate::{StoreError, StoreResult, StoredEvent};
 
 pub const CANONICAL_SESSION_BOUNDARY_SCHEMA: &str = "harn.canonical_session_boundary.v1";
 pub const CANONICAL_HISTORY_BOUNDARIES_SCHEMA: &str = "harn.canonical_history_boundaries.v1";
@@ -36,17 +36,6 @@ impl CanonicalHistoryBoundaries {
                 .iter()
                 .enumerate()
                 .filter_map(|(index, event)| {
-                    // Only conversation rows are positions. Run, goal and other
-                    // bookkeeping rows carry producer ids too, but a fork or rewind
-                    // boundary must never land on them.
-                    if !matches!(
-                        event.kind,
-                        SessionEventKind::Message
-                            | SessionEventKind::ToolCall
-                            | SessionEventKind::ToolResult
-                    ) {
-                        return None;
-                    }
                     event
                         .headers
                         .get("source_event_id")
