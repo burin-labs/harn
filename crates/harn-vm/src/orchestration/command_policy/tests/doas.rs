@@ -33,6 +33,8 @@ fn the_privilege_label_matches_the_doas_word_not_a_prefix() {
         "true && doas ls",
         "echo x; doas ls",
         "/usr/bin/doas ls",
+        "d\\oas ls",
+        "env doas ls",
     ] {
         let scan = command_risk_scan_json(&shell_ctx(command), None);
         assert!(labels(&scan).contains(&"sudo".to_string()), "{command}");

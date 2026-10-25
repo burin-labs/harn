@@ -416,20 +416,21 @@ pub(super) fn analysis_runs_doas(analysis: &ShellAnalysis, depth: usize) -> bool
         return false;
     }
     analysis.stages.iter().any(|stage| {
-        let tokens = &stage.argv;
-        let command_index = unwrapped_command_index(tokens, 0, tokens.len());
-        if tokens[..command_index.min(tokens.len())]
+        let source = &stage.source_argv;
+        let wrapped = unwrapped_command_index(source, 0, source.len()).min(source.len());
+        if source[..wrapped]
             .iter()
             .any(|word| command_basename(word) == "doas")
         {
             return true;
         }
-        let Some(command) = tokens.get(command_index) else {
+        let tokens = &stage.argv;
+        let Some(command) = tokens.first() else {
             return false;
         };
         match command_basename(command) {
             "doas" => true,
-            "bash" | "sh" | "zsh" => shell_c_script(&tokens[command_index + 1..])
+            "bash" | "sh" | "zsh" => shell_c_script(&tokens[1..])
                 .is_some_and(|script| analysis_runs_doas(&analyze_shell(script), depth + 1)),
             _ => false,
         }

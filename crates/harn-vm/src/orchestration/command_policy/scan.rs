@@ -1125,7 +1125,6 @@ const SECRET_WORDS: &[&str] = &["credentials", "secret", "token", "api_key", "ap
 
 pub(super) fn contains_secret_like_text(lower: &str) -> bool {
     SECRET_WORDS.iter().any(|word| lower.contains(word))
-        || super::catastrophic::analysis_runs_doas(&command_analysis, 0)
         || lower
             .split_whitespace()
             .any(crate::known_paths::is_credential_path)
