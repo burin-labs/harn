@@ -813,12 +813,21 @@ fn refresh_metadata_hashes(st: &mut MetadataState) -> Result<(), VmError> {
         .into_iter()
         .map(|dir| {
             let full_dir = metadata_full_dir(&base, &dir);
-            let hash = compute_structure_hash(&full_dir)
-                .map_err(|error| fingerprint_error(&full_dir, error))?;
-            Ok((dir, hash))
+            match compute_structure_hash(&full_dir) {
+                Ok(hash) => Ok(Some((dir, hash))),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                    ) =>
+                {
+                    Ok(None)
+                }
+                Err(error) => Err(fingerprint_error(&full_dir, error)),
+            }
         })
         .collect::<Result<Vec<_>, VmError>>()?;
-    for (dir, hash) in hashes {
+    for (dir, hash) in hashes.into_iter().flatten() {
         let entry = st.entries.entry(dir).or_default();
         let ns = entry
             .namespaces

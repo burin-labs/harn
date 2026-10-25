@@ -35,6 +35,10 @@ pipeline test(harness: Harness, task: unknown) {
   assert_eq(type_of(stale.tier1), "list")
   assert_eq(type_of(stale.tier2), "list")
   harness.project.metadata_refresh_hashes({dir: "zig"})
+  const refreshed = harness.project.metadata_inspect({dir: "zig", namespace: "build_gotchas"})
+  assert_eq(refreshed.missing_structure_hash, true)
+  const preserved = harness.project.metadata_get({dir: "zig", namespace: "build_gotchas"})
+  assert_eq(preserved.gotchas[0], "use .map.count() on ArrayHashMap")
   harness.project.metadata_save({})
   harness.stdio.log("host project metadata fallback ok")
 }
