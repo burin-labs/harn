@@ -692,21 +692,26 @@ for (const suffix of ['run_id', 'run_attempt']) {
   assert.equal(dispatch[0].env[`CANARY_${name.toUpperCase()}`], '${{ inputs.' + name + ' }}');
 }
 const archiveCall = producer.jobs['consumer-rehearsal'];
-assert.deepEqual(archiveCall.needs, ['setup', 'build', 'collect_candidate_manifest']);
+assert.deepEqual(archiveCall.needs, ['setup', 'build', 'collect_candidate_manifest', 'native-qualification']);
 assert.equal(archiveCall.with.release_producer_run_id,
   "${{ needs.setup.outputs.build_mode == 'candidate' && github.run_id || '' }}");
 assert.equal(archiveCall.with.release_producer_run_attempt,
   "${{ needs.setup.outputs.build_mode == 'candidate' && github.run_attempt || '' }}");
-const admitted = (mode, build, manifest, setup='success', source='a'.repeat(40), cancelled=false) =>
-  require('node:vm').runInNewContext(archiveCall.if, {
+const admitted = (mode, build, manifest, setup='success', source='a'.repeat(40), cancelled=false,
+  native={result:'success'}, event='push') =>
+  require('node:vm').runInNewContext(archiveCall.if.replaceAll('needs.native-qualification', 'needs["native-qualification"]'), {
     cancelled: () => cancelled,
+    github: {event_name: event},
     needs: {setup: {result: setup, outputs: {build_mode: mode, rehearsal_source_sha: source}},
-      build: {result: build}, collect_candidate_manifest: {result: manifest}},
+      build: {result: build}, collect_candidate_manifest: {result: manifest},
+      'native-qualification': native},
   });
 assert.equal(admitted('candidate', 'success', 'success'), true);
 for (const incomplete of ['failure', 'cancelled', 'skipped', 'pending', undefined]) {
   assert.equal(admitted('candidate', incomplete, 'success'), false);
   assert.equal(admitted('candidate', 'success', incomplete), false);
+  assert.equal(admitted('candidate', 'success', 'success', 'success', 'a'.repeat(40), false, {result:incomplete}), false);
+  assert.equal(admitted('candidate', 'success', 'success', 'success', 'a'.repeat(40), false, {result:incomplete}, 'schedule'), true);
 }
 assert.equal(admitted('none', 'skipped', 'skipped'), true);
 assert.equal(admitted('none', 'skipped', 'skipped', 'failure'), false);
