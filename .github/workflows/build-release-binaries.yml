@@ -834,6 +834,13 @@ jobs:
         run: |
           set -euo pipefail
           start=$SECONDS
+          # A runner killed mid-link leaves no output; this line every minute
+          # shows whether memory ran out first.
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            (while true; do echo "memory: $(free -m | awk '/^Mem:/ {print "used=" $3 "MiB available=" $7 "MiB of " $2 "MiB"}')"; sleep 60; done) &
+            memory_logger=$!
+            trap 'kill "$memory_logger" 2>/dev/null || true' EXIT
+          fi
           # One binary. harn-lsp / harn-dap are linked into `harn` and reached
           # via argv[0] dispatch; we ship them as symlinks/copies at package
           # time. Building only `harn` runs the expensive final LTO link once
