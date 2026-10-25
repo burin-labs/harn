@@ -853,6 +853,27 @@ pub fn disposable_trash_violation(command: string) -> string {
   return ""
 }
 
+/**
+ * The aliases git's effective configuration defines, from the output of
+ * `git config --get-regexp '^alias\.'` (one `alias.NAME EXPANSION` per line).
+ * Repository, user and system files and `GIT_CONFIG_*` variables all land
+ * there, which the command text alone never shows.
+ */
+pub fn git_config_aliases(listing: string) -> dict {
+  let aliases = {}
+  for line in listing.split("\n") {
+    if !line.starts_with("alias.") {
+      continue
+    }
+    const body = line.replace("alias.", "")
+    const space = body.index_of(" ")
+    if space > 0 {
+      aliases[body.substring(0, space)] = body.substring(space + 1, len(body)).trim()
+    }
+  }
+  return aliases
+}
+
 /** Marks an inline alias whose value git reads from the environment, which the guard cannot see. */
 const GIT_ALIAS_UNRESOLVED: string = "<unresolved>"
 
@@ -897,12 +918,17 @@ fn git_inline_aliases(argv: list<string>) -> dict {
  * Git reads the verb only from the token right after `stash`; an option there
  * (`-u`, `-m list`) means push. Anything but a read-only verb writes.
  */
-fn git_args_write_stash(argv: list<string>, args: list<string>, depth: int) -> bool {
+fn git_args_write_stash(
+  argv: list<string>,
+  args: list<string>,
+  depth: int,
+  config_aliases: dict,
+) -> bool {
   const verb = args[0] ?? ""
   if verb == "stash" {
     return !GIT_STASH_READ_ONLY.contains(args[1] ?? "")
   }
-  const expansion = git_inline_aliases(argv)[verb] ?? ""
+  const expansion = git_inline_aliases(argv)[verb] ?? config_aliases[verb] ?? ""
   if expansion == "" || depth >= 4 {
     return false
   }
@@ -913,11 +939,12 @@ fn git_args_write_stash(argv: list<string>, args: list<string>, depth: int) -> b
     return git_stash_write_in(
       expansion.replace("!", "") + " " + args.slice(1, len(args)).join(" "),
       depth + 1,
+      config_aliases,
     )
   }
   const words = expansion.split(" ").filter({ word -> word != "" })
   const expanded = ["git"] + words + args.slice(1, len(args))
-  return git_args_write_stash(argv, git_subcommand_args(expanded), depth + 1)
+  return git_args_write_stash(argv, git_subcommand_args(expanded), depth + 1, config_aliases)
 }
 
 /**
@@ -953,26 +980,26 @@ fn operand_text_writes_stash(text: string) -> bool {
  * cost is that an unresolved `xargs` whose operands mention a non-read-only `stash`, even as
  * `xargs -a f grep stash`, is refused.
  */
-fn xargs_operands_write_stash(argv: list<string>) -> bool {
+fn xargs_operands_write_stash(argv: list<string>, config_aliases: dict) -> bool {
   if argv_program(argv) != "xargs" {
     return false
   }
   for index in range(1, len(argv)) {
     const launched = argv.slice(index, len(argv))
     if argv_program(launched) == "git"
-      && git_args_write_stash(launched, git_subcommand_args(launched), 0) {
+      && git_args_write_stash(launched, git_subcommand_args(launched), 0, config_aliases) {
       return true
     }
   }
   return operand_text_writes_stash(argv.slice(1, len(argv)).join(" "))
 }
 
-fn git_stash_write_in(command: string, depth: int) -> bool {
+fn git_stash_write_in(command: string, depth: int, config_aliases: dict) -> bool {
   for group in command_groups(command) {
     for stage in group {
       // `xargs` launches its operands, so the stash rule reads the child the scanner resolved.
       const xargs_child = stage.xargs_child_argv ?? []
-      if len(xargs_child) == 0 && xargs_operands_write_stash(stage.argv) {
+      if len(xargs_child) == 0 && xargs_operands_write_stash(stage.argv, config_aliases) {
         return true
       }
       const launched = if len(xargs_child) > 0 {
@@ -982,13 +1009,13 @@ fn git_stash_write_in(command: string, depth: int) -> bool {
       }
       const argv = launched_argv(launched, 0)
       if argv_program(argv) == "git" {
-        if git_args_write_stash(argv, git_subcommand_args(argv), depth) {
+        if git_args_write_stash(argv, git_subcommand_args(argv), depth, config_aliases) {
           return true
         }
       }
       if depth < 4 {
         const nested = nested_shell_payload(argv)
-        if nested != "" && git_stash_write_in(nested, depth + 1) {
+        if nested != "" && git_stash_write_in(nested, depth + 1, config_aliases) {
           return true
         }
       }
@@ -1005,8 +1032,8 @@ fn git_stash_write_in(command: string, depth: int) -> bool {
  * push applies that agent's changes and loses its own. A work-in-progress commit
  * is private to a branch and has no such collision.
  */
-pub fn git_stash_violation(command: string) -> string {
-  if !git_stash_write_in(command, 0) {
+pub fn git_stash_violation(command: string, config_aliases: dict = {}) -> string {
+  if !git_stash_write_in(command, 0, config_aliases) {
     return ""
   }
   return "`git stash` is refused: the stash list is shared by every linked worktree, so a pop can apply "
@@ -1299,6 +1326,7 @@ pub fn decision(
   payload: string,
   census: WorktreeAdmissionCensus,
   make_targets: MakeTargetCensus,
+  config_aliases: dict = {},
 ) -> ShellGuardDecision {
   let parsed = nil
   try {
@@ -1389,7 +1417,7 @@ pub fn decision(
   if make_owned != "" {
     return {allow: false, reason: make_owned}
   }
-  const stash = git_stash_violation(command)
+  const stash = git_stash_violation(command, config_aliases)
   if stash != "" {
     return {allow: false, reason: stash}
   }
@@ -1413,6 +1441,9 @@ fn main(harness: Harness) {
     payload,
     worktree_admission_census_from_env(harness.env),
     make_target_census_from_env(harness.env),
+    git_config_aliases(
+      harness.process.run({program: "git", args: ["config", "--get-regexp", "^alias\\."]}).stdout,
+    ),
   )
   if verdict.allow {
     return nil

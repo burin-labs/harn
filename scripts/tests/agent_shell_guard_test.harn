@@ -1196,6 +1196,49 @@ pipeline test_unresolved_xargs_forms_still_refuse_stash_writes(harness: Harness,
   }
 }
 
+/**
+ * An alias defined in repository or user git configuration is invisible in the command text. The
+ * guard reads it from the listing `git config --get-regexp '^alias\.'` produces, so `git s` with a
+ * configured `s=stash pop` is refused, while an alias that only reads the stash list is not.
+ */
+@test
+pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
+  harness: Harness,
+  task: unknown,
+) {
+  const aliases = git_config_aliases(
+    "alias.s stash pop\nalias.l stash list\nalias.sh !git stash drop\nalias.st status\nalias.broken\n",
+  )
+  assert_eq(aliases["s"], "stash pop")
+  assert_eq(aliases["sh"], "!git stash drop")
+  for command in [
+    "git s",
+    "git sh",
+    "git -C /workspace s",
+    "sudo git s",
+    "sh -c 'git s'",
+    "xargs -a input git s",
+  ] {
+    assert(
+      !decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, aliases).allow,
+      command + " expands to a stash write through configured aliases",
+    )
+    // Falsifier: the same command with no configured aliases is what the guard allowed before.
+    if command == "git s" {
+      assert(
+        verdict(claude_payload(command)).allow,
+        "without the alias listing, git s is not a stash",
+      )
+    }
+  }
+  for command in ["git l", "git st", "git broken"] {
+    assert(
+      decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, aliases).allow,
+      command + " does not write the stash list",
+    )
+  }
+}
+
 @test
 pipeline test_git_stash_reads_and_lookalikes_are_allowed(harness: Harness, task: unknown) {
   // THE CONTROL. Refusing every command that mentions `stash` would pass the
