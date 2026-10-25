@@ -6,7 +6,7 @@ use super::TriggerRegistry;
 
 /// Trigger bindings and background lifecycle tasks owned by one VM tree.
 #[derive(Default)]
-pub(crate) struct TriggerRegistryRuntime {
+pub struct TriggerRegistryRuntime {
     registry: parking_lot::Mutex<TriggerRegistry>,
     aggregation: parking_lot::Mutex<crate::triggers::aggregation::AggregationRegistry>,
     background_tasks: parking_lot::Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>,
@@ -79,11 +79,11 @@ pub(crate) fn fresh_trigger_registry() -> Arc<TriggerRegistryRuntime> {
     Arc::new(TriggerRegistryRuntime::default())
 }
 
-pub(crate) fn active_trigger_registry() -> Arc<TriggerRegistryRuntime> {
+pub fn active_trigger_registry() -> Arc<TriggerRegistryRuntime> {
     ACTIVE_TRIGGER_REGISTRY.with(|slot| Arc::clone(&slot.borrow()))
 }
 
-pub(crate) fn swap_active_trigger_registry(
+pub fn swap_active_trigger_registry(
     next: Arc<TriggerRegistryRuntime>,
 ) -> Arc<TriggerRegistryRuntime> {
     ACTIVE_TRIGGER_REGISTRY.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))

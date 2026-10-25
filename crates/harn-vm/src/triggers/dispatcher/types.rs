@@ -17,7 +17,7 @@ use super::flow_control::{ConcurrencyPermit, FlowControlManager};
 pub(super) const DEFAULT_AUTONOMY_BUDGET_REVIEWER: &str = "operator";
 
 #[derive(Clone, Debug)]
-pub(crate) struct DispatchContext {
+pub struct DispatchContext {
     pub trigger_event: TriggerEvent,
     pub replay_of_event_id: Option<String>,
     pub binding_id: String,
@@ -129,7 +129,7 @@ pub struct InboxEnvelope {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TriggerInboxTopicScope {
+pub enum TriggerInboxTopicScope {
     Shared,
     Tenant,
 }
@@ -272,7 +272,7 @@ pub(super) struct AcquiredFlowControl {
 }
 
 #[derive(Clone)]
-pub(crate) struct DispatchWaitLease {
+pub struct DispatchWaitLease {
     state: Arc<DispatcherRuntimeState>,
     acquired: Arc<AsyncMutex<AcquiredFlowControl>>,
     suspended: Arc<AtomicBool>,
@@ -290,7 +290,7 @@ impl DispatchWaitLease {
         }
     }
 
-    pub(crate) async fn suspend(&self) -> Result<(), DispatchError> {
+    pub async fn suspend(&self) -> Result<(), DispatchError> {
         if self.suspended.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
@@ -328,7 +328,7 @@ impl DispatchWaitLease {
         Ok(())
     }
 
-    pub(crate) async fn resume(&self) -> Result<(), DispatchError> {
+    pub async fn resume(&self) -> Result<(), DispatchError> {
         if !self.suspended.swap(false, Ordering::SeqCst) {
             return Ok(());
         }

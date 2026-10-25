@@ -7,7 +7,7 @@ use std::{future::Future, pin::Pin};
 
 mod bridge;
 mod context;
-pub(crate) use context::NativeBuiltinCtxExt;
+pub use context::NativeBuiltinCtxExt;
 mod execution_evidence;
 mod lifecycle;
 use lifecycle::NativeVmLifecycle;
@@ -23,7 +23,7 @@ mod timed_execution;
 mod tracing;
 
 #[derive(Clone)]
-pub(crate) struct NativeExecutionState {
+pub struct NativeExecutionState {
     pub bridge: Option<Arc<crate::bridge::HostBridge>>,
     pub worker_registry: Arc<crate::stdlib::agents::agents_workers::WorkerRegistry>,
     pub daemon_registry: Arc<crate::stdlib::agents_daemon::DaemonRegistry>,
@@ -471,7 +471,7 @@ impl VmRuntimeBaseline for NativeExecutionBaseline {
     }
 }
 
-pub(crate) trait NativeVmState {
+pub trait NativeVmState {
     fn native(&self) -> &NativeExecutionState;
     fn native_mut(&mut self) -> &mut NativeExecutionState;
 }

@@ -12,7 +12,7 @@ mod bridge;
 pub(crate) mod fixtured_operations;
 mod operation_registry;
 pub mod process_admission;
-pub(crate) mod process_dispatch;
+pub mod process_dispatch;
 mod process_exec;
 pub mod trace;
 // Public so tests and embedders can share the per-turn memo allowlist even
@@ -26,7 +26,7 @@ pub use bridge::{
 };
 
 use process_dispatch::dispatch_process_exec_with_policy;
-pub(crate) use process_dispatch::{dispatch_process_exec, dispatch_reviewed_git_push_with_lease};
+pub use process_dispatch::{dispatch_process_exec, dispatch_reviewed_git_push_with_lease};
 pub(crate) use process_exec::build_sandboxed_command;
 use process_exec::dispatch_process_spawn_with_policy;
 
@@ -76,7 +76,7 @@ thread_local! {
         const { RefCell::new(Vec::new()) };
 }
 
-pub(crate) fn reset_host_state() {
+pub fn reset_host_state() {
     HOST_MOCKS.with(|mocks| mocks.borrow_mut().clear());
     HOST_MOCK_CALLS.with(|calls| calls.borrow_mut().clear());
     HOST_MOCK_SCOPES.with(|scopes| scopes.borrow_mut().clear());
@@ -983,7 +983,7 @@ pub(crate) fn register_missing_host_builtins(vm: &mut Vm) {
     sig = "host_mock(capability: string, op: string, response_or_config?: any, params?: dict) -> nil",
     category = "host"
 )]
-pub(crate) fn host_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+pub fn host_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let host_mock = parse_host_mock(args)?;
     validate_host_mock_registration(&host_mock)?;
     push_host_mock(host_mock);

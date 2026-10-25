@@ -23,13 +23,14 @@ pub fn register_core_stdlib(vm: &mut harn_vm::Vm) {
 /// Link every builtin family into the calling binary.
 pub fn force_link() {
     harn_vm::stdlib::force_link();
+    harn_builtins::force_link();
     harn_flow::force_link();
 }
 
 #[cfg(test)]
 mod tests {
     /// One builtin from each family crate outside `harn-vm`.
-    const OWNED_ELSEWHERE: &[&str] = &["flow_invariant_allow"];
+    const OWNED_ELSEWHERE: &[&str] = &["url_parse", "flow_invariant_allow"];
 
     #[test]
     fn every_family_crate_contributes_its_builtins() {

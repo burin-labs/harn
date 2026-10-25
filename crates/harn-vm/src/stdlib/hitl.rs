@@ -61,7 +61,7 @@ pub enum HitlRequestKind {
 }
 
 impl HitlRequestKind {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Question => "question",
             Self::Approval => "approval",
@@ -88,7 +88,7 @@ impl HitlRequestKind {
         }
     }
 
-    pub(crate) fn from_request_id(request_id: &str) -> Option<Self> {
+    pub fn from_request_id(request_id: &str) -> Option<Self> {
         if request_id.starts_with("hitl_question_") {
             Some(Self::Question)
         } else if request_id.starts_with("hitl_approval_") {
@@ -187,7 +187,7 @@ impl ApprovalRequest {
     }
 }
 
-pub(crate) fn approval_request_for_host_permission(
+pub fn approval_request_for_host_permission(
     id: impl Into<String>,
     action: impl Into<String>,
     args: JsonValue,

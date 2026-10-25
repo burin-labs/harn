@@ -598,7 +598,7 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/personas/mod.rs",
   "crates/harn-vm/src/provenance/mod.rs",
   "crates/harn-vm/src/sessions/mod.rs",
-  "crates/harn-vm/src/stdlib/agent_state.rs",
+  "crates/harn-builtins/src/agent_state.rs",
   // stdlib/clock.rs is itself the canonical wall-clock reader for Harn
   // scripts; the SystemTime::now reads are the fallback when no mock is
   // active. Routing through Clock would create a cycle.
@@ -607,17 +607,17 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // `latency_ms` field of the result dict — the #2505 spec lists
   // compaction latency as required telemetry, so the host wall clock is
   // the source of truth (same shape as the allowlisted routing.rs).
-  "crates/harn-vm/src/stdlib/compaction.rs",
+  "crates/harn-builtins/src/compaction.rs",
   // testbench/wasi_process.rs's #[cfg(test)] module compares real wall
   // time vs virtual time to prove that WASM-side `poll_oneoff` sleeps
   // don't actually block the host thread — the wall-clock read is the
   // signal under test, not a flake source.
   "crates/harn-vm/src/testbench/wasi_process.rs",
-  "crates/harn-vm/src/stdlib/agent_state/backend.rs",
+  "crates/harn-builtins/src/agent_state/backend.rs",
   "crates/harn-vm/src/stdlib/agents_daemon.rs",
   "crates/harn-vm/src/stdlib/agents_workers/execution.rs",
   "crates/harn-vm/src/stdlib/concurrency.rs",
-  "crates/harn-vm/src/stdlib/cookies.rs",
+  "crates/harn-builtins/src/cookies.rs",
   "crates/harn-vm/src/stdlib/fs.rs",
   "crates/harn-vm/src/stdlib/hitl.rs",
   "crates/harn-vm/src/stdlib/host.rs",
@@ -638,25 +638,25 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // truth here — the same shape as the `date_now` builtin. The cutoff/window
   // math lives in pure helpers that take an injected `now` and are unit-tested
   // deterministically; only the thin builtin boundary reads the real clock.
-  "crates/harn-vm/src/stdlib/postgres/introspect.rs",
+  "crates/harn-builtins/src/postgres/introspect.rs",
   // `pg_execute` and `pg_migrate` time the host wall-clock duration of the
   // Postgres round-trip and surface it as `duration_ms` in the result dict
   // (issue #2500). The measurement IS the observability source of truth
   // — same shape as the existing `process.rs` allowlist entry.
-  "crates/harn-vm/src/stdlib/postgres/migrate.rs",
-  "crates/harn-vm/src/stdlib/postgres/mod.rs",
+  "crates/harn-builtins/src/postgres/migrate.rs",
+  "crates/harn-builtins/src/postgres/mod.rs",
   // `pg_pool`'s circuit breaker (#2512) stamps the open-at instant + tests
   // cooldown elapsed against the host wall clock. The "is the cooldown
   // over yet" decision IS the observability source of truth — same shape
   // as supervisor/triggers entries above.
-  "crates/harn-vm/src/stdlib/postgres/circuit.rs",
+  "crates/harn-builtins/src/postgres/circuit.rs",
   "crates/harn-vm/src/stdlib/process.rs",
   "crates/harn-vm/src/stdlib/supervisor.rs",
   "crates/harn-vm/src/stdlib/tracing.rs",
   "crates/harn-vm/src/stdlib/triggers_stdlib.rs",
   "crates/harn-vm/src/stdlib/waitpoint.rs",
   "crates/harn-vm/src/stdlib/waitpoints.rs",
-  "crates/harn-vm/src/stdlib/workflow_messages.rs",
+  "crates/harn-builtins/src/workflow_messages.rs",
   "crates/harn-vm/src/synchronization.rs",
   "crates/harn-vm/src/tenant.rs",
   "crates/harn-vm/src/tracing.rs",
@@ -1380,8 +1380,8 @@ pipeline main(harness: Harness, task: unknown) {
         // External database availability is explicit: these cases fail without
         // a URL and run through the required-input test-postgres-live/cloud targets.
         rel.starts_with("crates/harn-cli/tests/")
-          || rel == "crates/harn-vm/src/stdlib/postgres/tests.rs"
-          || rel == "crates/harn-vm/src/stdlib/postgres/describe_tests.rs"
+          || rel == "crates/harn-builtins/src/postgres/tests.rs"
+          || rel == "crates/harn-builtins/src/postgres/describe_tests.rs"
       },
       ignore_attr_pattern(),
       [

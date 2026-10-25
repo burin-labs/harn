@@ -37,6 +37,7 @@ members = [
     "crates/harn-stdlib-artifacts",
     "crates/harn-vm",
     "crates/harn-vm-core",
+    "crates/harn-builtins",
     "crates/harn-flow",
     "crates/harn-llm",
     "crates/harn-runtime",

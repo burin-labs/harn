@@ -214,7 +214,7 @@ description = "Names of every `harness.<capability>.<method>` declared by `#[har
 gen = "gen-vm-exposures"
 check = "check-vm-exposures"
 outputs = ["crates/harn-capability-contracts/src/vm_declared.rs"]
-sources = ["crates/harn-vm/src/"]
+sources = ["crates/harn-vm/src/", "crates/harn-builtins/src/", "crates/harn-flow/src/"]
 ci = true
 make_all = true
 

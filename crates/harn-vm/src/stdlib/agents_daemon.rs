@@ -95,7 +95,7 @@ type DaemonStateRef = Arc<parking_lot::Mutex<DaemonState>>;
 
 /// The managed-daemon owner for one VM execution tree.
 #[derive(Default)]
-pub(crate) struct DaemonRegistry {
+pub struct DaemonRegistry {
     states: parking_lot::Mutex<BTreeMap<String, DaemonStateRef>>,
 }
 

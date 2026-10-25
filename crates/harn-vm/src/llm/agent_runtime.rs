@@ -46,9 +46,7 @@ thread_local! {
         const { RefCell::new(Vec::new()) };
 }
 
-pub(crate) fn swap_current_loop_sinks(
-    next: Vec<Arc<dyn AgentEventSink>>,
-) -> Vec<Arc<dyn AgentEventSink>> {
+pub fn swap_current_loop_sinks(next: Vec<Arc<dyn AgentEventSink>>) -> Vec<Arc<dyn AgentEventSink>> {
     CURRENT_LOOP_SINKS.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
 }
 
@@ -84,7 +82,7 @@ impl Drop for SessionEndHookRegistration {
 /// Owns one hook for resources that must survive suspension but be released
 /// when the logical session is permanently closed.
 #[must_use = "dropping the registration unregisters the session-close hook"]
-pub(crate) struct SessionCloseHookRegistration {
+pub struct SessionCloseHookRegistration {
     id: u64,
 }
 
@@ -285,7 +283,7 @@ impl Drop for LoopSinkGuard {
 /// InProgress → Completed/Failed`) emitted later by the dispatch path
 /// via `emit_agent_event` — this sync path is for the streaming-args
 /// observation surface only.
-pub(crate) fn emit_agent_event_sync(event: &AgentEvent) {
+pub fn emit_agent_event_sync(event: &AgentEvent) {
     let (health, _) = agent_events::observe_event(event, false);
     for event in std::iter::once(event).chain(health.as_deref()) {
         publish_observed_event(event);
@@ -328,7 +326,7 @@ where
 /// which is a `thread_local!` owned by the agent loop. The loop runs on
 /// a tokio `LocalSet`-pinned task, and `agent_subscribe` appends on that
 /// same task, so subscriber ordering stays deterministic.
-pub(crate) async fn emit_agent_event_with_ctx(
+pub async fn emit_agent_event_with_ctx(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     event: &AgentEvent,
 ) {
@@ -391,7 +389,7 @@ pub fn register_session_end_hook(hook: SessionEndHook) -> SessionEndHookRegistra
     SessionEndHookRegistration { id }
 }
 
-pub(crate) fn register_session_close_hook(hook: SessionCloseHook) -> SessionCloseHookRegistration {
+pub fn register_session_close_hook(hook: SessionCloseHook) -> SessionCloseHookRegistration {
     let id = NEXT_SESSION_CLOSE_HOOK_ID.fetch_add(1, Ordering::Relaxed);
     SESSION_CLOSE_HOOKS
         .lock()
@@ -505,13 +503,13 @@ pub(crate) fn clear_current_host_bridge() {
     });
 }
 
-pub(crate) fn swap_current_host_bridge(
+pub fn swap_current_host_bridge(
     bridge: Option<Arc<crate::bridge::HostBridge>>,
 ) -> Option<Arc<crate::bridge::HostBridge>> {
     CURRENT_HOST_BRIDGE.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), bridge))
 }
 
-pub(crate) fn current_host_bridge() -> Option<Arc<crate::bridge::HostBridge>> {
+pub fn current_host_bridge() -> Option<Arc<crate::bridge::HostBridge>> {
     CURRENT_HOST_BRIDGE.with(|slot| slot.borrow().clone())
 }
 

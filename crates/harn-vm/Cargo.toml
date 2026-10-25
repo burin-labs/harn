@@ -42,13 +42,13 @@ default = ["full"]
 # families are sliced out of the VM.
 full = ["postgres", "sqlite", "content", "compression", "http-compression", "cloud-aws", "native-keyring"]
 llm-bench-internals = []
+vm-test-support = ["harn-vm-core/vm-test-support", "dep:tempfile"]
 vm-bench-internals = ["harn-vm-core/vm-bench-internals", "harn-orchestration/vm-bench-internals"]
-# Document extraction and HTML querying builtins. Kept in the default product
-# surface; lean embedders and the test engine can omit their parser/PDF graph.
-content = ["dep:lopdf", "dep:scraper", "dep:markdown", "dep:tree-sitter-typescript"]
-# User-facing archive/compression builtins. Workflow bundle persistence still
-# owns its zstd/tar codecs independently of this scripting surface.
-compression = ["dep:brotli", "dep:flate2", "dep:zip"]
+# The `content`, `compression`, `postgres`, and `sqlite` families compile in
+# `harn-builtins`. harn-runtime forwards each selection here too, so the
+# runtime content fingerprint records which families the product linked.
+content = []
+compression = []
 # Transparent HTTP response decompression. Kept separate from the transport so
 # focused compiler/runner builds can retain protocol types without compiling
 # four codecs they never exercise.
@@ -68,15 +68,7 @@ native-keyring = [
     "dep:zbus",
     "dep:zbus-secret-service-keyring-store",
 ]
-# PostgreSQL client builtins (the `pg.*` namespace + `stdlib/postgres`).
-# Pulls `sqlx-postgres` and its ~130 transitive crates (TLS, decimal,
-# connection pool). Enabled by default for full CLI parity; in-process
-# embedding clients that never issue Postgres queries drop it with
-# `default-features = false` to shed the entire sqlx dependency tree.
-postgres = ["dep:sqlx-core", "dep:sqlx-postgres"]
-# SQLite client builtins (`sqlite_*` + `stdlib/sqlite`). `rusqlite` is
-# already used by VM internals; this flag gates the public Harn scripting
-# surface so lean embedders can keep it unavailable.
+postgres = []
 sqlite = []
 otel = [
     "dep:opentelemetry",
@@ -98,7 +90,6 @@ harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.178" }
 harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.178" }
 harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.178" }
 harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.178" }
-lopdf = { version = "0.45", default-features = false, features = ["wasm_js"], optional = true }
 parking_lot = "0.12"
 pin-project-lite = "0.2"
 harn-clock = { path = "../harn-clock", version = "=0.10.178" }
@@ -146,9 +137,6 @@ chrono = "0.4"
 chrono-tz = "0.10.4"
 croner = "4.0.0"
 regex = "1"
-scraper = { version = "0.27", optional = true }
-markdown = { version = "1.0", optional = true }
-tree-sitter-typescript = { version = "0.23", optional = true }
 serde_json = { version = "1", features = ["unbounded_depth"] }
 semver = "1"
 rand = "0.10"
@@ -168,7 +156,6 @@ rcgen.workspace = true
 libc = "0.2"
 tokio-stream = "0.1"
 base64 = "0.23"
-cookie = { version = "0.18.1", features = ["signed", "key-expansion"] }
 bytes = "1"
 data-encoding = "2"
 ed25519-dalek = { version = "3", features = ["pem", "pkcs8", "rand_core"] }
@@ -193,9 +180,6 @@ strsim = "0.11"
 # thread stack and aborting the process. See `value::recursion`.
 blake3 = "1.8.7"
 md-5 = "0.11"
-aes-gcm = "0.11"
-hkdf = "0.13"
-csv = "1"
 url = "2"
 globset = "0.4"
 grep-matcher = "0.1"
@@ -211,8 +195,6 @@ serde_ignored = "0.1"
 subtle = "2.6"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 uuid = { version = "1", features = ["serde", "v4", "v5", "v7"] }
-sqlx-core = { version = "0.9", default-features = false, features = ["_rt-tokio", "_tls-rustls-aws-lc-rs", "json"], optional = true }
-sqlx-postgres = { version = "0.9", default-features = false, features = ["json", "time", "uuid", "rust_decimal"], optional = true }
 rust_decimal = { version = "1" }
 tokio-util = { version = "0.7", features = ["io"] }
 futures = "0.3"
@@ -234,11 +216,8 @@ opentelemetry_sdk = { version = "0.33", optional = true, features = ["rt-tokio",
 opentelemetry-otlp = { version = "0.33", default-features = false, features = ["http-json", "reqwest-client", "reqwest-rustls"], optional = true }
 tracing-opentelemetry = { version = "0.34", optional = true }
 zeroize = "1"
-flate2 = { version = "1.1.9", optional = true }
 zstd = "0.14.0"
-brotli = { version = "9.0.0", optional = true }
 tar = { version = "0.4.46", default-features = false }
-zip = { version = "9", default-features = false, features = ["deflate-flate2"], optional = true }
 x509-parser = "0.18.1"
 wasmtime = { version = "48", optional = true, default-features = false, features = ["cranelift", "runtime"] }
 wasmtime-wasi = { version = "48", optional = true, default-features = false, features = ["p1"] }
@@ -281,6 +260,10 @@ async-io = { version = "2.6", optional = true }
 zbus = { version = "5.17", default-features = false, features = ["async-io"], optional = true }
 
 [dev-dependencies]
+# Integration tests and benches run scripts against every builtin family, so
+# they link the assembled runtime. Path-only: publishing strips it, which keeps
+# the harn-runtime -> harn-vm edge acyclic for crates.io.
+harn-runtime = { path = "../harn-runtime", features = ["full"] }
 rstest.workspace = true
 harn-orchestration = { path = "../harn-orchestration", version = "=0.10.178", features = ["test-support"] }
 harn-llm = { path = "../harn-llm", version = "=0.10.178", features = ["test-support"] }

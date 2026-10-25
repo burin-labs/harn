@@ -396,7 +396,7 @@ Package-script entries have no default commands: a context-free catalog cannot
 know whether a manifest declares those scripts. Use config-tier scan commands.
 
 The catalog lives in
-`crates/harn-vm/src/stdlib/project_catalog.rs`. Adding a new language should be
+`crates/harn-builtins/src/project_catalog.rs`. Adding a new language should be
 a table entry plus a test, not a new custom code path.
 
 ## Existing helper

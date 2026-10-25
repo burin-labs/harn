@@ -61,7 +61,7 @@ pub use hmac::{
 };
 pub use registry::ConnectorRegistry;
 pub use secret_injection::{declared_secret_ids, DeclaredConnectorSecrets};
-pub(crate) use shared::outbound_http_client;
+pub use shared::outbound_http_client;
 pub use shared::{
     paginate_cursor, resolve_jwks, verify_hmac_signature, verify_jwt_claims, verify_jwt_json,
     ConnectorBase, CursorPage, HmacSignatureAlgorithm, JwtKeySource, JwtVerificationOptions,
@@ -196,7 +196,6 @@ pub trait ConnectorClient: Send + Sync {
 
 /// Minimal outbound client errors shared by connector implementations.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum ClientError {
     MethodNotFound(String),
     InvalidArgs(String),

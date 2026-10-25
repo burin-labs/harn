@@ -22,7 +22,7 @@ pub fn capability_snapshot_id(snapshot: &serde_json::Value) -> String {
     format!("blake3:{}", blake3::hash(&retained).to_hex())
 }
 
-pub(crate) mod acp_permission;
+pub mod acp_permission;
 mod agent_config;
 pub(crate) mod agent_host_primitives;
 mod agent_host_tool_dispatch;
@@ -85,20 +85,20 @@ pub(crate) mod first_token;
 mod hash_replay;
 pub mod inference_speed;
 pub use hash_replay::{scope_replay_mode, ReplayModeScope};
-pub(crate) mod helpers;
+pub mod helpers;
 pub use helpers::admit_reasoning_literals;
 pub mod introspection;
 pub mod jsonl;
 pub mod local_profiles;
 pub mod managed_supply;
 pub(crate) use harn_llm::message_lineage;
-pub(crate) mod mock;
+pub mod mock;
 mod mock_builtins;
 mod mock_error;
 pub(crate) mod mock_store;
 mod model_test;
 mod permission_preview;
-pub(crate) mod permissions;
+pub mod permissions;
 pub mod plan;
 mod predicate;
 pub mod prompt;
@@ -159,7 +159,7 @@ pub use reasoning_receipt::{
     dropped_reasoning_receipts, peek_reasoning_receipts, reset_reasoning_receipts, ReasoningReceipt,
 };
 pub(crate) mod reminder_iteration;
-pub(crate) mod reminder_providers;
+pub mod reminder_providers;
 mod rerank;
 pub mod resolved_dispatch;
 pub mod response_tool_calls;
@@ -365,11 +365,11 @@ pub(crate) mod trigger_predicate;
 /// See [`test_env`]: there used to be three locks and eight copies of the
 /// scoped setter, so cases in different modules serialized against different
 /// mutexes and clobbered each other's variables (harn#7960).
-#[cfg(test)]
-pub(crate) mod test_env;
+#[cfg(any(test, feature = "vm-test-support"))]
+pub mod test_env;
 
-#[cfg(test)]
-pub(crate) use test_env::{env_guard, env_lock};
+#[cfg(any(test, feature = "vm-test-support"))]
+pub use test_env::{env_guard, env_lock};
 
 pub const LLM_CALLS_DISABLED_ENV: &str = "HARN_LLM_CALLS_DISABLED";
 
@@ -460,7 +460,7 @@ pub(crate) use self::agent_observe::{pop_llm_transcript_dir, push_llm_transcript
 pub use self::agent_runtime::{
     current_agent_session_id, register_session_end_hook, SessionEndHookRegistration,
 };
-pub(crate) use self::agent_runtime::{
+pub use self::agent_runtime::{
     current_host_bridge, emit_agent_event_sync as emit_live_agent_event_sync,
     emit_agent_event_with_ctx as emit_live_agent_event_with_ctx, register_session_close_hook,
     swap_current_host_bridge, swap_current_loop_sinks, SessionCloseHookRegistration,
@@ -470,7 +470,7 @@ pub(crate) use self::agent_runtime::{fire_session_close_hooks, fire_session_end_
 pub(crate) use self::agent_session_host::active_run_id as active_agent_run_id;
 pub use self::api::fetch_provider_max_context;
 pub(crate) use self::api::vm_call_llm_full;
-pub(crate) use self::call::{
+pub use self::call::{
     execute_llm_call, execute_schema_retry_loop, extract_structured_data, llm_error_message,
     rewrite_structured_args, structured_output_errors, structured_safe_envelope_err,
     structured_safe_envelope_ok, SchemaLoopOutcome,
@@ -486,7 +486,7 @@ pub use self::healthcheck::{
     build_healthcheck_url, run_provider_healthcheck, run_provider_healthcheck_with_options,
     ProviderHealthcheckOptions, ProviderHealthcheckResult,
 };
-pub(crate) use self::helpers::extract_llm_options;
+pub use self::helpers::extract_llm_options;
 pub use self::helpers::{vm_value_to_export_json, vm_value_to_json, vm_value_to_json_strict};
 pub use self::jsonl::{
     load_llm_mocks_jsonl, parse_llm_mock_value, parse_llm_mock_value_versioned,

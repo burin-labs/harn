@@ -75,7 +75,7 @@ pub(crate) fn current_agent_run_ref() -> Option<crate::agent_events::AgentRunRef
     Some(crate::agent_events::AgentRunRef { session_id, run_id })
 }
 
-pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
+pub fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     let overlay = current_overlay();
     let mutation = crate::orchestration::current_mutation_session();
     let dispatch = crate::triggers::dispatcher::current_dispatch_context();

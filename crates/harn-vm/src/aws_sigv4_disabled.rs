@@ -2,13 +2,13 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 
-pub(crate) struct AwsSigV4Credentials {
+pub struct AwsSigV4Credentials {
     pub access_key_id: String,
     pub secret_access_key: String,
     pub session_token: Option<String>,
 }
 
-pub(crate) struct AwsSigV4Input<'a> {
+pub struct AwsSigV4Input<'a> {
     pub credentials: &'a AwsSigV4Credentials,
     pub method: &'a str,
     pub url: &'a str,
@@ -20,7 +20,7 @@ pub(crate) struct AwsSigV4Input<'a> {
 }
 
 #[allow(dead_code)] // Same carrier shape as the enabled signer; disabled calls always return Err.
-pub(crate) struct AwsSigV4SignedRequest {
+pub struct AwsSigV4SignedRequest {
     pub headers: BTreeMap<String, String>,
     pub authorization: String,
     pub amz_date: String,
@@ -29,7 +29,7 @@ pub(crate) struct AwsSigV4SignedRequest {
     pub signed_headers: String,
 }
 
-pub(crate) fn sign(input: AwsSigV4Input<'_>) -> Result<AwsSigV4SignedRequest, String> {
+pub fn sign(input: AwsSigV4Input<'_>) -> Result<AwsSigV4SignedRequest, String> {
     let _ = (
         &input.credentials.access_key_id,
         &input.credentials.secret_access_key,

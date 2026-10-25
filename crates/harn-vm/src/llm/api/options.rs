@@ -6,9 +6,9 @@ use crate::llm_config::DataPosture;
 use crate::value::VmValue;
 
 /// Sender for streaming text deltas from an in-flight LLM call.
-pub(crate) type DeltaSender = tokio::sync::mpsc::UnboundedSender<String>;
+pub type DeltaSender = tokio::sync::mpsc::UnboundedSender<String>;
 
-pub(crate) use harn_llm::request::{
+pub use harn_llm::request::{
     LlmApiMode, LlmRequestPayload, LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy,
     LlmRoutingDecision, LogprobsConfig, MirostatConfig, OutputFormat, PromptCacheTtl,
     ReasoningEffort, ReminderLifecycleEmission, ThinkingConfig, TokenBias, ToolSearchConfig,
@@ -61,8 +61,8 @@ fn emit_reminder(reminder: &ReminderLifecycleEmission) {
 /// author did not look (a catalog default, a steer away from the requested
 /// tool channel, an ambient reasoning policy). Every call records these rows
 /// on its `provider_call_request` transcript event under `resolution`.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
-pub(crate) struct ResolvedSetting {
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct ResolvedSetting {
     pub setting: &'static str,
     /// The caller's raw value, when the caller set one.
     pub requested: Option<String>,
@@ -76,7 +76,7 @@ pub(crate) struct ResolvedSetting {
 
 /// All options for an LLM API call, extracted once from user-facing args.
 #[derive(Clone, Debug)]
-pub(crate) struct LlmCallOptions {
+pub struct LlmCallOptions {
     // --- Routing ---
     pub provider: String,
     pub model: String,
@@ -529,13 +529,13 @@ impl LlmCallOptions {
     }
 }
 
-pub(crate) fn push_unique_anthropic_beta_feature(features: &mut Vec<String>, feature: &str) {
+pub fn push_unique_anthropic_beta_feature(features: &mut Vec<String>, feature: &str) {
     if !features.iter().any(|existing| existing == feature) {
         features.push(feature.to_string());
     }
 }
 
-pub(crate) trait LlmRequestPayloadExt {
+pub trait LlmRequestPayloadExt {
     fn aligned_message_lineage<'a>(
         &self,
         opts: &'a LlmCallOptions,

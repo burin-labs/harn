@@ -1384,7 +1384,7 @@ fn vm_error(message: impl Into<String>) -> VmError {
 }
 
 impl EgressBlocked {
-    pub(crate) fn to_vm_error(&self) -> VmError {
+    pub fn to_vm_error(&self) -> VmError {
         let mut dict = BTreeMap::new();
         dict.put_str("type", "EgressBlocked");
         dict.put_str("category", "egress_blocked");

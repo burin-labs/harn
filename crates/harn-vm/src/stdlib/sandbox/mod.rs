@@ -265,7 +265,7 @@ impl SandboxViolation {
     }
 }
 
-pub(crate) fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> Result<(), VmError> {
+pub fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> Result<(), VmError> {
     check_fs_path_scope(path, access)
         .map_err(|violation| sandbox_rejection(violation.message(builtin)))
 }

@@ -303,7 +303,7 @@ pub fn reset_channel_state() {
     crate::channel_guardrails::clear();
 }
 
-pub(crate) async fn emit_channel_from_vm(
+pub async fn emit_channel_from_vm(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
@@ -473,7 +473,7 @@ pub(crate) async fn emit_channel_from_vm(
     Ok(crate::stdlib::json_to_vm_value(&receipt))
 }
 
-pub(crate) async fn channel_events_from_vm(
+pub async fn channel_events_from_vm(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
@@ -498,7 +498,7 @@ pub(crate) async fn channel_events_from_vm(
     )))
 }
 
-pub(crate) async fn channel_subscribe_from_vm(
+pub async fn channel_subscribe_from_vm(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
@@ -531,7 +531,7 @@ pub(crate) async fn channel_subscribe_from_vm(
     }))
 }
 
-pub(crate) async fn channel_consumer_cursor_from_vm(
+pub async fn channel_consumer_cursor_from_vm(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
@@ -553,7 +553,7 @@ pub(crate) async fn channel_consumer_cursor_from_vm(
     }
 }
 
-pub(crate) async fn channel_ack_from_vm(
+pub async fn channel_ack_from_vm(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
@@ -1882,7 +1882,7 @@ async fn fire_channel_match(
 /// the `flush_trigger_aggregations()` builtin so Harn scripts (and the
 /// production runtime) can deterministically advance window-expire
 /// processing.
-pub(crate) async fn flush_expired_aggregations_inner(ctx: Option<&crate::vm::AsyncBuiltinCtx>) {
+pub async fn flush_expired_aggregations_inner(ctx: Option<&crate::vm::AsyncBuiltinCtx>) {
     let expirations = crate::triggers::aggregation::drain_expired_aggregations();
     if expirations.is_empty() {
         return;

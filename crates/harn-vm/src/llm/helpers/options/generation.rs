@@ -461,7 +461,7 @@ pub(super) fn normalize_generation_stream(
 }
 
 /// Reject caller-selected controls that the final route cannot represent.
-pub(crate) fn validate_options(opts: &crate::llm::api::LlmCallOptions) -> Result<(), VmError> {
+pub fn validate_options(opts: &crate::llm::api::LlmCallOptions) -> Result<(), VmError> {
     if let Some(model) = crate::llm_config::model_catalog_id_for_route(&opts.provider, &opts.model)
         .and_then(|id| crate::llm_config::model_catalog_entry(&id))
     {

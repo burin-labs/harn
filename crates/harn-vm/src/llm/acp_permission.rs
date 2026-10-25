@@ -29,7 +29,7 @@ use crate::orchestration::{
 use crate::workspace_path::is_absolute_path_syntax;
 
 /// Canonical ACP method for asking the client to decide a tool permission.
-pub(crate) const METHOD_REQUEST_PERMISSION: &str = "session/request_permission";
+pub const METHOD_REQUEST_PERMISSION: &str = "session/request_permission";
 /// Stable `optionId` for the canonical "allow this call" option. The
 /// agent maps a `selected` response on this id to a grant.
 pub(crate) const OPTION_ALLOW: &str = "allow";
@@ -75,7 +75,7 @@ pub(crate) fn reject_response(reason: Option<String>) -> JsonValue {
 /// `policyDecision` receipt — ride along under `toolCall._meta.harn` so
 /// the canonical fields stay clean while harn-aware hosts (an IDE,
 /// the REST surface) can still read them.
-pub(crate) fn request_params(
+pub fn request_params(
     session_id: Option<&str>,
     tool_call_id: &str,
     tool_name: &str,
@@ -216,7 +216,7 @@ fn permission_content(approval_request: &JsonValue) -> Vec<JsonValue> {
 
 /// The agent's interpretation of a canonical permission response.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum WireOutcome {
+pub enum WireOutcome {
     /// The selected canonical `allow_once` option.
     Allowed {
         resolution: ToolPermissionResolution,
@@ -316,7 +316,7 @@ fn terminal_resolution(
 /// `{ outcome: "cancelled" }`. A `selected` outcome whose `optionId` is
 /// not the offered allow option (including a missing id) is treated as a rejection
 /// — fail closed.
-pub(crate) fn parse_response(response: &JsonValue) -> WireOutcome {
+pub fn parse_response(response: &JsonValue) -> WireOutcome {
     let outcome = response.get("outcome");
     let kind = outcome
         .and_then(|outcome| outcome.get("outcome"))
