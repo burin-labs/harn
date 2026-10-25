@@ -4,8 +4,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Component, Path, PathBuf};
 
 use super::{
-    MemoryEvent, MemoryRecord, NamespaceConfig, UpdateEvent, DEFAULT_EMBED_MODEL_HINT,
-    EVENT_LOG_FILE, VECTOR_CACHE_DIR,
+    sha256_hex, MemoryEvent, MemoryRecord, NamespaceConfig, UpdateEvent, EVENT_LOG_FILE,
+    VECTOR_CACHE_DIR,
 };
 use crate::value::VmError;
 
@@ -23,37 +23,10 @@ pub(super) fn vector_cache_path(
     model_hint: &str,
     content_hash: &str,
 ) -> Result<PathBuf, VmError> {
-    let sanitized = sanitize_model_hint(model_hint);
     Ok(namespace_dir(root, namespace)?
         .join(VECTOR_CACHE_DIR)
-        .join(sanitized)
+        .join(sha256_hex(model_hint.as_bytes()))
         .join(format!("{content_hash}.json")))
-}
-
-pub(super) fn sanitize_model_hint(hint: &str) -> String {
-    let trimmed = hint.trim();
-    if trimmed.is_empty() {
-        return DEFAULT_EMBED_MODEL_HINT.to_string();
-    }
-    // Path traversal hardening: replace every character that is not
-    // alphanumeric, dash, or underscore with `_`. Dots are excluded so that
-    // a maliciously crafted hint like `../escape` cannot resolve a parent
-    // directory once joined into the cache path.
-    let sanitized: String = trimmed
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if sanitized.is_empty() {
-        DEFAULT_EMBED_MODEL_HINT.to_string()
-    } else {
-        sanitized
-    }
 }
 
 fn normalize_relative_component(raw: &str, label: &str) -> Result<PathBuf, VmError> {

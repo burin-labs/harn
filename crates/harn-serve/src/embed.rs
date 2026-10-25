@@ -27,10 +27,10 @@ use tokio::sync::mpsc;
 use crate::adapters::acp::{
     run_acp_channel_server_with_existing_handle, AcpChannelHandle, AcpJsonRpcError,
     AcpJsonRpcErrorResponse, AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpServerConfig,
-    AcpSessionEnvironmentConfig, AcpSessionIdParams, AcpSessionInjectParams, AcpSessionLoadParams,
-    AcpSessionNewParams, AcpSessionPromptParams, AcpSessionPromptResult, AcpSessionRestoreResult,
-    ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CLOSE,
-    ACP_METHOD_SESSION_INJECT, ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW,
+    AcpSessionEnvironmentConfig, AcpSessionIdParams, AcpSessionLoadParams, AcpSessionNewParams,
+    AcpSessionPromptParams, AcpSessionPromptReceipt, AcpSessionPromptResult,
+    AcpSessionRestoreResult, ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL,
+    ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW,
     ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_RESUME, HARN_AGENT_EVENT_METHOD,
 };
 
@@ -577,12 +577,13 @@ impl EmbeddedAgentClient {
         self.begin_request(ACP_METHOD_SESSION_PROMPT, params)
     }
 
-    /// ACP `session/inject`.
-    pub async fn inject_user_input(
+    /// ACP `session/prompt` with a `delivery`; resolves once the message is
+    /// inserted into the session.
+    pub async fn deliver_user_input(
         &mut self,
-        params: AcpSessionInjectParams,
-    ) -> EmbeddedAgentResult<Value> {
-        self.request_value(ACP_METHOD_SESSION_INJECT, params).await
+        params: AcpSessionPromptParams,
+    ) -> EmbeddedAgentResult<AcpSessionPromptReceipt> {
+        self.request_typed(ACP_METHOD_SESSION_PROMPT, params).await
     }
 
     /// ACP `session/cancel`.

@@ -28,7 +28,12 @@ fn acp_does_not_advertise_capabilities_from_another_providers_default() {
     assert!(configured_llm_route_for_capabilities().is_err());
     assert_eq!(
         acp_agent_capabilities()["promptCapabilities"],
-        serde_json::json!({"image": false, "audio": false, "embeddedContext": false})
+        serde_json::json!({
+            "image": false,
+            "audio": false,
+            "embeddedContext": false,
+            "delivery": {"steer": {}, "queue": {}},
+        })
     );
     harn_vm::llm_config::clear_user_overrides();
 }

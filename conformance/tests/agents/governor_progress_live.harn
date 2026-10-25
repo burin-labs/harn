@@ -1,0 +1,63 @@
+// A live agent_loop past its governor checkpoint: re-reading the same thing is
+// not progress, so the governor cuts it; reading something new is progress, so
+// the run continues to a natural finish. Both runs make a successful tool call
+// every turn, so "any successful tool" could not tell them apart.
+import { governor_post_turn } from "std/agent/governors"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn read_tools() {
+  const tools = tool_registry()
+  return tool_define(
+    tools,
+    "look",
+    "Read a file",
+    {
+      annotations: {kind: "read"},
+      handler: { args -> return "contents of " + to_string(args?.path ?? "") },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+}
+
+fn look(id: string, path: string) -> dict {
+  return {text: "", tool_calls: [{arguments: {path: path}, id: id, name: "look"}]}
+}
+
+fn run(harness: Harness, label: string, script: list) {
+  with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const result = agent_loop(
+        harness,
+        "Review the change.",
+        nil,
+        {
+          loop_until_done: true,
+          max_iterations: 6,
+          post_turn_callback: governor_post_turn(
+            harness.agent,
+            {budget: 2.0, checkpoint: 1.0, hard: 10.0, over_estimate: 10.0, signal: "iterations"},
+          ),
+          provider: "mock",
+          session_id: label + "-" + harness.random.uuid(),
+          tool_format: "native",
+          tools: read_tools(),
+        },
+      )
+      harness.stdio.println(label + " " + result.status + " " + result.stop_reason)
+      harness.stdio.println(label + " calls " + to_string(len(harness.llm.mock_calls())))
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  run(harness, "repeat", [look("r1", "a.rs"), look("r2", "a.rs"), look("r3", "a.rs")])
+  run(
+    harness,
+    "novel",
+    [look("n1", "a.rs"), look("n2", "b.rs"), look("n3", "c.rs"), llm_text("All done.")],
+  )
+}

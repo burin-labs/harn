@@ -1,0 +1,4 @@
+repeat done budget_governor:no_progress_at_checkpoint
+repeat calls 2
+novel done natural
+novel calls 4

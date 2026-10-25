@@ -97,6 +97,7 @@ harn-provider-catalog = { path = "../harn-provider-catalog", version = "=0.10.17
 harn-execution-policy = { path = "../harn-execution-policy", version = "=0.10.179" }
 harn-prompt-syntax = { path = "../harn-prompt-syntax", version = "=0.10.179" }
 harn-flock = { path = "../harn-flock", version = "=0.10.179" }
+harn-signals = { path = "../harn-signals", version = "=0.10.179" }
 harn-glob = { path = "../harn-glob", version = "=0.10.179" }
 harn-languages = { path = "../harn-languages", version = "=0.10.179" }
 harn-session-store = { path = "../harn-session-store", version = "=0.10.179" }

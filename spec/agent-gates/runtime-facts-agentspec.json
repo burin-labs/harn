@@ -408,6 +408,13 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "opts?._turn_progressing",
+    "owner": "agent_compute_post_turn",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "opts?._turn_tool_call_feedback",
     "owner": "__native_tool_text_completion",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."

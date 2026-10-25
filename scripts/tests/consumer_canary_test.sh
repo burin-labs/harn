@@ -323,19 +323,26 @@ if OBSERVER_CONTEXT="$OBSERVER_CONTEXT" GITHUB_REF=refs/heads/main \
 fi
 grep -q 'reason=release_producer_identity_invalid' "$scratch/out"
 [[ ! -e "$scratch/dispatched" ]]
-CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb canary
-grep -q -- '-f harn_cli_run=123 -f harn_base=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' "$scratch/dispatched"
+pin=cccccccccccccccccccccccccccccccccccccccc
+CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb CANARY_CONSUMER_REVISION=$pin canary
+grep -q -- "-f harn_cli_run=123 -f harn_base=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb -f consumer_revision=$pin" "$scratch/dispatched"
 ! grep -q -- 'release_producer_run_' "$scratch/dispatched"
 ! grep -q -- 'harn_cli_artifact' "$scratch/dispatched"
-# The base CLI is rehearsed only at the base itself.
+# A pull request check never rehearses whatever the consumer's branch holds.
+rm -f "$scratch/dispatched"
+CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+  refuses consumer_revision_invalid
+[[ ! -e "$scratch/dispatched" ]]
+# The base CLI is rehearsed only at the base itself, on the same pinned consumer.
 pr_base=0123456789abcdef0123456789abcdef01234567
-CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=$pr_base CANARY_PULL_REQUEST_CLI_ARTIFACT=harn-base-cli.tar.zst canary
-grep -q -- "-f harn_base=$pr_base -f harn_cli_artifact=harn-base-cli.tar.zst" "$scratch/dispatched"
+CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=$pr_base CANARY_CONSUMER_REVISION=$pin \
+  CANARY_PULL_REQUEST_CLI_ARTIFACT=harn-base-cli.tar.zst canary
+grep -q -- "-f harn_base=$pr_base -f consumer_revision=$pin -f harn_cli_artifact=harn-base-cli.tar.zst" "$scratch/dispatched"
 for mismatch in "harn-base-cli.tar.zst bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "harn-cli.tar.zst $pr_base"; do
   read -r artifact base <<< "$mismatch"
   rm -f "$scratch/dispatched"
-  CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=$base CANARY_PULL_REQUEST_CLI_ARTIFACT=$artifact \
-    refuses pull_request_identity_invalid
+  CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=$base CANARY_CONSUMER_REVISION=$pin \
+    CANARY_PULL_REQUEST_CLI_ARTIFACT=$artifact refuses pull_request_identity_invalid
   [[ ! -e "$scratch/dispatched" ]]
 done
 

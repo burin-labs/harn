@@ -48,7 +48,7 @@ citing internal usage numbers as an argument is not.
 | Thread | Filed | Maintainer engaged? | Third-party support | Ball is with |
 |---|---|---|---|---|
 | [ACP #1220](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1220) `session/inject` | 2026-05-17 | Yes — invited the RFD | 3 independent | Maintainers (review of `#1261`) |
-| [ACP #1261](https://github.com/agentclientprotocol/agent-client-protocol/pull/1261) inject RFD | 2026-05-19 | Not since 2026-06-27 rebase | 3 independent | Maintainers |
+| [ACP #1261](https://github.com/agentclientprotocol/agent-client-protocol/pull/1261) prompt delivery RFD (revised from `session/inject`) | 2026-05-19 | Not since 2026-06-27 rebase | 3 independent | Maintainers |
 | [ACP #1224](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1224) `session/remind` | 2026-05-17 | Yes — soft-parked 2026-07-06 | none | Maintainers (by their own request) |
 | [ACP #1233](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1233) `session/suspend` | 2026-05-17 | No | 1 (peer implementer) | Peer + maintainers — replied 2026-07-25 |
 | [A2A #1857](https://github.com/a2aproject/A2A/discussions/1857) idempotency | 2026-05-17 | No | 1 | **Us** — posture decision |
@@ -396,7 +396,9 @@ Ordered by whether they depend on someone else moving first.
 **Blocked on maintainers — hold:**
 
 - **ACP `#1261`**: keep conflict-free against upstream `main`, keep the
-  public framing anchored in existing editor/agent behavior. Three
+  public framing anchored in existing editor/agent behavior. The RFD is now
+  `delivery: "steer" | "queue"` on `session/prompt` plus `$/cancel_request`;
+  Harn implements that revision and no longer serves `session/inject`. Three
   unprompted third-party adoption reports now sit in the thread; that is
   the argument, and it does not need restating by us.
 - **ACP `#1224`**: the maintainer asked for time on 2026-07-06. Do not

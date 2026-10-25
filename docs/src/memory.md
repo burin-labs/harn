@@ -217,7 +217,7 @@ harness with `harness.testing.respond("memory", "embed",
 {vector: [...], dim: N, model: "..."})`.
 
 Embeddings are cached on disk at
-`.harn/memory/<namespace>/vectors/<sanitized_model_hint>/<sha256(text)>.json`.
+`.harn/memory/<namespace>/vectors/<sha256(model_hint)>/<sha256(text)>.json`.
 The cache key is `(model_hint, content_hash)`, so swapping models invalidates
 the cache without rewriting any records, and identical inputs always reuse the
 same bytes.

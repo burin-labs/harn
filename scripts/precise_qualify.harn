@@ -1,7 +1,12 @@
 /**
  * Precise-edit qualification probe.
  *
- *   harn run --no-sandbox scripts/precise_qualify.harn -- <plan.json> <out-dir>
+ *   harn run --no-sandbox scripts/precise_qualify.harn -- <plan.json> <out-dir> [corpus-dir]
+ *
+ * Run from the repository root. The checked-in plan is
+ * `scripts/precise_qualify/plan.json`; each relative plan `checkout` is a directory under
+ * `[corpus-dir]` (or the working directory when omitted) holding the repository at its pinned commit, with
+ * `typescript-language-server` and `rust-analyzer` on PATH.
  *
  * For each pinned repository in the plan, samples symbols from the code index
  * in a seeded order, runs each precise tool's preview and then its apply in a
@@ -12,7 +17,10 @@
  *
  * The plan names a seed, how many functions and types to sample per
  * repository, a time budget, and per repository its URL, commit, a local
- * checkout at that commit, setup commands and oracle commands. Arms:
+ * checkout at that commit, setup commands, optional `setup_files` (path to
+ * text, written into the scratch clone before setup, for example a tsconfig
+ * that makes the oracle cover files the repository's own configs skip) and
+ * oracle commands. Arms:
  * `rename_symbol` on each backend, `change_signature` (one appended
  * parameter), `move_symbol` (top-level declarations into a sibling file),
  * `insert_method` (`ast.insert_at_anchor` as the last member of a class or
@@ -38,6 +46,17 @@ import {
   totals,
 } from "./precise_qualify_report.harn"
 
+const USAGE = "usage: precise_qualify.harn -- <plan.json> <out-dir> [corpus-dir]"
+
+/** A relative `checkout` names a directory under the corpus directory, when one is given. */
+fn resolve_checkout(corpus_dir: string, checkout: string) -> string {
+  return if checkout.starts_with("/") || corpus_dir == "" {
+    checkout
+  } else {
+    path_join(corpus_dir, checkout)
+  }
+}
+
 pub type RepoPlan = {
   id: string,
   language: "rust" | "typescript" | "java",
@@ -45,6 +64,7 @@ pub type RepoPlan = {
   commit: string,
   checkout: string,
   setup: list<list<string>>,
+  setup_files?: dict<string, string>,
   oracle: list<list<string>>,
   exclude_prefixes?: list<string>,
 }
@@ -691,6 +711,10 @@ pub fn prepare_repo(harness: Harness, repo: RepoPlan, work_dir: string) -> dict 
     return {ok: false, reason: "clone_failed", detail: head_of(clone.output)}
   }
   run_cmd(harness, ["git", "checkout", "-q", repo.commit], root, 60000)
+  const setup_files = repo.setup_files ?? {}
+  for path in setup_files.keys().sorted() {
+    harness.fs.write_text(path_join(root, path), setup_files[path])
+  }
   for argv in repo.setup {
     const res = run_cmd(harness, argv, root, 1800000)
     if !res.success {
@@ -799,12 +823,24 @@ fn wrong_detail(attempt: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
-  if len(argv) != 2 {
-    harness.stdio.eprintln("usage: precise_qualify.harn -- <plan.json> <out-dir>")
+  if len(argv) < 2 || len(argv) > 3 {
+    harness.stdio.eprintln(USAGE)
     return 2
   }
-  const plan = json_decode(harness.fs.read_text(argv[0]), schema_of(Plan))?
   const out_dir = argv[1]
+  const corpus_dir = if len(argv) == 3 {
+    argv[2]
+  } else {
+    ""
+  }
+  const decoded = json_decode(harness.fs.read_text(argv[0]), schema_of(Plan))?
+  const plan = decoded
+    + {
+      repos: decoded.repos.map(
+        { repo -> repo + {checkout: resolve_checkout(corpus_dir, repo.checkout)} },
+      )
+        .to_list(),
+    }
   if harness.fs.exists(path_join(out_dir, "receipt.json")) {
     harness.stdio.eprintln("refusing to overwrite an existing receipt in " + out_dir)
     return 2

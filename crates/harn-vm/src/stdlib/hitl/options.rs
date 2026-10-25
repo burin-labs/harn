@@ -79,6 +79,11 @@ pub(super) fn parse_approval_options(
             "{builtin}: quorum must be positive"
         )));
     }
+    let quorum = u32::try_from(quorum).map_err(|_| {
+        VmError::Runtime(format!(
+            "{builtin}: quorum must fit an unsigned 32-bit integer"
+        ))
+    })?;
     let reviewers = optional_string_list(dict.and_then(|dict| dict.get("reviewers")), builtin)?;
     let capabilities_requested = optional_string_list(
         dict.and_then(|dict| dict.get("capabilities_requested")),
@@ -105,7 +110,7 @@ pub(super) fn parse_approval_options(
     Ok(ApprovalOptions {
         detail: dict.and_then(|dict| dict.get("detail")).cloned(),
         args: dict.and_then(|dict| dict.get("args")).cloned(),
-        quorum: quorum as u32,
+        quorum,
         reviewers,
         deadline,
         principal: dict

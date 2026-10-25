@@ -103,6 +103,10 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
         "reader": "__agent_loop_contract_prompt"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "reader": "agent_build_turn_system_fragments"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

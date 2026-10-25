@@ -165,7 +165,7 @@ mod tests {
         let outcome = record_control_event(
             session_id,
             &ControlEvent::injection(
-                "session/inject",
+                "session/prompt",
                 "ctl-steer-1",
                 "accepted",
                 "steer",

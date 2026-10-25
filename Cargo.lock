@@ -3571,6 +3571,7 @@ dependencies = [
  "harn-rules-hostlib",
  "harn-runtime",
  "harn-serve",
+ "harn-signals",
  "harn-skills",
  "harn-source-fingerprint",
  "harn-source-fingerprint-build",
@@ -4255,6 +4256,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-signals"
+version = "0.10.179"
+dependencies = [
+ "harn-flock",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "toml",
+ "uuid",
+]
+
+[[package]]
 name = "harn-skills"
 version = "0.10.179"
 dependencies = [
@@ -4379,6 +4394,7 @@ dependencies = [
  "harn-provider-catalog",
  "harn-runtime",
  "harn-session-store",
+ "harn-signals",
  "harn-sqlite",
  "harn-stdlib",
  "harn-stdlib-catalog",

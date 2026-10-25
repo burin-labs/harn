@@ -76,6 +76,7 @@ public enum HarnProtocolConstants {
         "skill_narrow",
         "skill_scope_tools",
         "stance_transition",
+        "state_update",
         "tool_search_query",
         "tool_search_result",
         "transcript_compacted",
@@ -1046,20 +1047,18 @@ public struct HarnConnectorSetupEvent: Codable, Sendable, Equatable {
 
 public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     case initialize = "initialize"
-    case sessionInject = "session/inject"
+    case cancelRequest = "$/cancel_request"
     case sessionInjectHostEvent = "session/inject_host_event"
     case sessionNew = "session/new"
     case sessionInputs = "session/inputs"
     case sessionLoad = "session/load"
-    case sessionReplaceInject = "session/replace_inject"
     case sessionResume = "session/resume"
     case sessionPrompt = "session/prompt"
-    case sessionRevokeInject = "session/revoke_inject"
+    case sessionPendingPrompts = "session/pending_prompts"
     case sessionTruncate = "session/truncate"
     case sessionRollback = "session/rollback"
     case sessionRedo = "session/redo"
     case sessionRemind = "session/remind"
-    case sessionPendingInjections = "session/pending_injections"
     case sessionRevokeReminder = "session/revoke_reminder"
     case sessionCancelToolCall = "session/cancel_tool_call"
     case sessionClose = "session/close"
@@ -1068,20 +1067,18 @@ public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
 
     public static let allCases: [Self] = [
         "initialize",
-        "session/inject",
+        "$/cancel_request",
         "session/inject_host_event",
         "session/new",
         "session/inputs",
         "session/load",
-        "session/replace_inject",
         "session/resume",
         "session/prompt",
-        "session/revoke_inject",
+        "session/pending_prompts",
         "session/truncate",
         "session/rollback",
         "session/redo",
         "session/remind",
-        "session/pending_injections",
         "session/revoke_reminder",
         "session/cancel_tool_call",
         "session/close",
@@ -1125,12 +1122,9 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
     case sessionCancelToolCall = "session/cancel_tool_call"
     case sessionClose = "session/close"
     case sessionStop = "session/stop"
-    case sessionInject = "session/inject"
     case sessionInjectHostEvent = "session/inject_host_event"
-    case sessionRevokeInject = "session/revoke_inject"
-    case sessionReplaceInject = "session/replace_inject"
     case sessionRemind = "session/remind"
-    case sessionPendingInjections = "session/pending_injections"
+    case sessionPendingPrompts = "session/pending_prompts"
     case sessionRevokeReminder = "session/revoke_reminder"
     case sessionList = "session/list"
     case harnSessionWorkspaceRoots = "harn.session_workspace_roots"
@@ -1199,12 +1193,9 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
         "session/cancel_tool_call",
         "session/close",
         "session/stop",
-        "session/inject",
         "session/inject_host_event",
-        "session/revoke_inject",
-        "session/replace_inject",
         "session/remind",
-        "session/pending_injections",
+        "session/pending_prompts",
         "session/revoke_reminder",
         "session/list",
         "harn.session_workspace_roots",
@@ -1284,12 +1275,9 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
     case sessionCancelToolCall = "session/cancel_tool_call"
     case sessionClose = "session/close"
     case sessionStop = "session/stop"
-    case sessionInject = "session/inject"
     case sessionInjectHostEvent = "session/inject_host_event"
-    case sessionRevokeInject = "session/revoke_inject"
-    case sessionReplaceInject = "session/replace_inject"
     case sessionRemind = "session/remind"
-    case sessionPendingInjections = "session/pending_injections"
+    case sessionPendingPrompts = "session/pending_prompts"
     case sessionRevokeReminder = "session/revoke_reminder"
     case sessionList = "session/list"
     case harnSessionWorkspaceRoots = "harn.session_workspace_roots"
@@ -1359,12 +1347,9 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
         "session/cancel_tool_call",
         "session/close",
         "session/stop",
-        "session/inject",
         "session/inject_host_event",
-        "session/revoke_inject",
-        "session/replace_inject",
         "session/remind",
-        "session/pending_injections",
+        "session/pending_prompts",
         "session/revoke_reminder",
         "session/list",
         "harn.session_workspace_roots",
@@ -1457,6 +1442,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case skillNarrow = "skill_narrow"
     case skillScopeTools = "skill_scope_tools"
     case stanceTransition = "stance_transition"
+    case stateUpdate = "state_update"
     case toolSearchQuery = "tool_search_query"
     case toolSearchResult = "tool_search_result"
     case transcriptCompacted = "transcript_compacted"
@@ -1493,6 +1479,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
         "skill_narrow",
         "skill_scope_tools",
         "stance_transition",
+        "state_update",
         "tool_search_query",
         "tool_search_result",
         "transcript_compacted",
@@ -3759,6 +3746,39 @@ public struct HarnACPStanceTransitionUpdate: Codable, Sendable, Equatable {
     }
 }
 
+public struct HarnACPStateUpdateMetaHarn: Codable, Sendable, Equatable {
+    public var replayed: Bool?
+}
+
+public struct HarnACPStateUpdateMeta: Codable, Sendable, Equatable {
+    public var harn: HarnACPStateUpdateMetaHarn?
+}
+
+public struct HarnACPStateUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: String
+    public var state: String
+    public var meta: HarnACPStateUpdateMeta?
+    public var error: HarnACPValue?
+    public var stopReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case state
+        case meta = "_meta"
+        case error
+        case stopReason
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sessionUpdate = try values.decode(String.self, forKey: .sessionUpdate)
+        state = try values.decode(String.self, forKey: .state)
+        meta = try values.decodeIfPresent(HarnACPStateUpdateMeta.self, forKey: .meta)
+        error = values.contains(.error) ? try values.decode(HarnACPValue.self, forKey: .error) : nil
+        stopReason = try values.decodeIfPresent(String.self, forKey: .stopReason)
+    }
+}
+
 public struct HarnACPToolSearchQueryUpdateMetaHarn: Codable, Sendable, Equatable {
     public var toolUseId: String
     public var name: String
@@ -4015,6 +4035,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
     case skill_narrow(HarnACPSkillNarrowUpdate)
     case skill_scope_tools(HarnACPSkillScopeToolsUpdate)
     case stance_transition(HarnACPStanceTransitionUpdate)
+    case state_update(HarnACPStateUpdate)
     case tool_search_query(HarnACPToolSearchQueryUpdate)
     case tool_search_result(HarnACPToolSearchResultUpdate)
     case transcript_compacted(HarnACPTranscriptCompactedUpdate)
@@ -4249,6 +4270,11 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             }
             if value["sessionUpdate"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update sessionUpdate is required") }
             self = .stance_transition(try container.decode(HarnACPStanceTransitionUpdate.self))
+        case "state_update":
+            if value["sessionUpdate"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update sessionUpdate is required") }
+            if value["state"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update state is required") }
+            if value["state"]?.stringValue.map({ !["running", "idle"].contains($0) }) == true { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update state has an unknown value") }
+            self = .state_update(try container.decode(HarnACPStateUpdate.self))
         case "tool_search_query":
             if value["_meta"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta is required") }
             if value["_meta"] != nil {
@@ -4367,6 +4393,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
         case .skill_narrow(let update): try update.encode(to: encoder)
         case .skill_scope_tools(let update): try update.encode(to: encoder)
         case .stance_transition(let update): try update.encode(to: encoder)
+        case .state_update(let update): try update.encode(to: encoder)
         case .tool_search_query(let update): try update.encode(to: encoder)
         case .tool_search_result(let update): try update.encode(to: encoder)
         case .transcript_compacted(let update): try update.encode(to: encoder)

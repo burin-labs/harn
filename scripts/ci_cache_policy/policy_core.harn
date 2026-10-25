@@ -306,15 +306,33 @@ pub const LIVE_ARTIFACT_CONSUMERS = [
  *
  * `fast-policy-gates` carries the three source-only refusals that were
  * stranded in `audit-scripts`: they cost 24 seconds together. The rest of
- * that job is fourteen minutes and stays where it is, which is a cost
- * argument and not a claim that it should not be able to refuse.
+ * that job is about five minutes on top of the shared CLI, runs beside the
+ * Rust proof lanes that take longer, and costs hosted minutes only. It runs
+ * before the merge too: six of nine red-main episodes in one week were this
+ * job failing on main for a change that never ran it.
  *
  * `shell-gates` carries the hermetic shell gates from the same lane: about
  * four and a half minutes of shell tests over fakes, no build and no Harn
  * binary, so it starts with the run on a free hosted runner and finishes
  * inside the merge group's wall.
  */
-pub const CHEAP_PR_REFUSAL_JOBS = ["fast-policy-gates", "shell-gates", "source-length-ratchet"]
+pub const CHEAP_PR_REFUSAL_JOBS = [
+  "audit-scripts",
+  "fast-policy-gates",
+  "shell-gates",
+  "source-length-ratchet",
+]
+
+/**
+ * What a cheap refusal that reads the shared CLI must be gated on, and only
+ * that: a change that is not purely docs (`rust`, the `changes` job's paths
+ * filter, which excludes docs, website, the VS Code extension and `*.md`) and
+ * a CLI this run built. Every input of `audit-scripts` (scripts, Makefile,
+ * spec, crates, workflows, changelog fragments) sits inside that filter, so
+ * the job runs exactly when one of its inputs changes.
+ */
+pub const SHARED_CLI_REFUSAL_IF = "$"
+  + "{{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}"
 
 /**
  * Event terms that put a job behind the merge.
@@ -389,12 +407,12 @@ pub const E2E_WORKFLOW_CANCEL_POLICY = "$"
 pub const MAIN_ONLY_RUST_PATHS_IF =
   "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true'"
 
-/** ci-status reads the same paths decision the main-only policy lane runs on. */
-pub const MAIN_ONLY_POLICY_SELECTED_ENV = "$" + "{{ needs.changes.outputs.rust_paths }}"
-
-/** ci-status's skip allowance for repository policies, spelled once. */
-pub const MAIN_ONLY_POLICY_SKIP_TEST = "test \"$" + "{EVENT_NAME}:$" + "{GIT_REF}:$"
-  + "{RUST_PATHS_SELECTED}\" != \"push:refs/heads/main:true\""
+/**
+ * ci-status's skip allowance for repository policies, spelled once. It excuses
+ * a skip only when the change selected no Rust proof, the condition the job
+ * itself runs under on every event.
+ */
+pub const POLICY_SKIP_ALLOWANCE = "[ \"$" + "{{ needs.changes.outputs.rust }}\" != \"true\" ]"
 
 /**
  * On a proven push the artifact barrier names the merge-group run whose CLI
@@ -418,10 +436,6 @@ pub const WINDOWS_CROSS_CHECK_IF =
 pub const WINDOWS_CROSS_REQUIRED_ENV = "$" + "{{ " + WINDOWS_CROSS_CHECK_IF + " }}"
 
 // A status function admits the producer when its capacity ancestors skip.
-pub const MAIN_ONLY_POLICY_IF = "$" + "{{ !cancelled() && "
-  + MAIN_ONLY_RUST_PATHS_IF
-  + " && needs.rust-cli.result == 'success' }}"
-
 pub const CI_CACHE_REFRESH_CONCURRENCY_GROUP = "$"
   + "{{ github.ref == 'refs/heads/main' && 'harn-ci-rust-cache-refresh' || 'harn-ci-rust-cache-qualification' }}"
 
@@ -2256,10 +2270,19 @@ pub fn producer_tier_expression(owned_rung: bool = true) -> string {
   )
 }
 
+/** The text of ci-status's requirement for one result variable, up to the next blank line. */
+fn status_requirement_text(command: string, result_var: string) -> string {
+  const parts = command.split(result_var + "=\"")
+  if len(parts) != 2 {
+    return ""
+  }
+  return (parts[1] ?? "").split("\n\n")[0] ?? ""
+}
+
 /**
- * Main-only lanes on a push the merge group already proved for its exact
- * commit: they still run, gated on `rust_paths`, and read the proving run's
- * shared CLI, and ci-status still requires repository policies there.
+ * Every consumer of the shared CLI downloads the one this run built, and
+ * `binary-size-signal`, a main-only lane, is gated on `rust_paths`. ci-status
+ * requires repository policies wherever the change selects Rust proof.
  */
 fn proven_push_main_only_errors(jobs: dict) -> list<string> {
   let errors: list<string> = []
@@ -2292,12 +2315,10 @@ fn proven_push_main_only_errors(jobs: dict) -> list<string> {
   }
   const status_step = step_by_name(jobs["ci-status"]?.steps ?? [], "Verify required CI jobs")
   const status_run = status_step?.run ?? ""
-  if trim(to_string(status_step?.env?.RUST_PATHS_SELECTED ?? "")) != MAIN_ONLY_POLICY_SELECTED_ENV
-    || !contains(status_run, MAIN_ONLY_POLICY_SKIP_TEST) {
+  const policy_call = status_requirement_text(status_run, "audit_scripts_result")
+  if !contains(policy_call, POLICY_SKIP_ALLOWANCE) {
     errors = errors
-      + [
-        "ci.yml:ci-status must require repository policies on every Rust-changing main push, proven or not",
-      ]
+      + ["ci.yml:ci-status must require repository policies on every run that selects Rust proof"]
   }
   return errors
 }
@@ -2327,12 +2348,14 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
         "ci.yml:rust-check-inputs must ladder the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
       ]
   }
-  // Stays behind the merge on COST, not on principle: fourteen minutes, most
-  // of it one aggregate and two integration sweeps. It is a candidate to move
-  // the day it gets cheaper, and the cheap refusals it used to strand now sit
-  // in `fast-policy-gates`.
-  if trim(jobs["audit-scripts"]?.if ?? "") != MAIN_ONLY_POLICY_IF {
-    errors = errors + ["ci.yml:audit-scripts must run on Rust-changing main pushes only"]
+  // `audit-scripts` is a cheap refusal now (about five minutes on the shared
+  // CLI): the loop below refuses any event term, and this pins the one gate
+  // it does carry. A docs-only change selects no Rust proof, so it skips.
+  if trim(jobs["audit-scripts"]?.if ?? "") != SHARED_CLI_REFUSAL_IF {
+    errors = errors
+      + [
+        "ci.yml:audit-scripts must run on every change that selects Rust proof, gated on rust and the shared CLI only",
+      ]
   }
   errors = errors + proven_push_main_only_errors(jobs)
   // Asserted PRESENT on pull requests, not merely permitted there. Without
@@ -2400,7 +2423,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
       ]
   }
   for message in [
-    "Repository policy checks failed or skipped on a Rust-changing main push.",
+    "Repository policy checks failed or skipped while Rust proof was required.",
     "Fast repository policy gates failed or skipped while Rust proof was required.",
     "Windows cross-compile check failed or skipped on a merge-group candidate or a Rust-changing main push.",
   ] {

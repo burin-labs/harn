@@ -13,7 +13,7 @@ Three orthogonal channels feed into the loop:
 
 | Channel | Producer | Drained from | Renders as |
 |---|---|---|---|
-| **Bridge injections** | `session/inject` and `session/remind` over ACP; `agent_session_push_bridge_injection` for Harn-driven hosts | `agent_stage` at every bridge seam (see below) | New user message or system reminder in the transcript |
+| **Bridge injections** | `session/prompt` with `delivery` and `session/remind` over ACP; `agent_session_push_bridge_injection` for Harn-driven hosts | `agent_stage` at every bridge seam (see below) | New user message or system reminder in the transcript |
 | **Inbox feedback** | In-pipeline `agent_session_inject_feedback`, `agent_session_post_event`, command policy, MCP server hooks, stall diagnostics | `agent_stage` at `pre_compact` / `post_compact` | User-role messages |
 | **Direct transcript inject** | `transcript.inject_reminder`, internal `agent_session_inject` | Appended directly when called | Whatever shape the caller built |
 

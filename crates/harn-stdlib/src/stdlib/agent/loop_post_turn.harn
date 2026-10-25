@@ -303,6 +303,13 @@ pub fn agent_loop_post_turn_transition(
     context.dispatch,
     context.turn_opts,
   )
+  // Outcome facts as of this callback; the later snapshot re-reads them after
+  // the callback may have settled a reverify.
+  const callback_no_net_progress = agent_stall_no_net_progress(
+    context.turn_opts?.stall_diagnostics,
+    next.stall_state,
+  )
+    || agent_stall_repeated_verified_pass(context.turn_opts?.stall_diagnostics, next.stall_state)
   const cadence_loop_state = agent_loop_snapshot_state(
     {
       iteration: context.iteration,
@@ -319,6 +326,8 @@ pub fn agent_loop_post_turn_transition(
       missing_required_tools: missing_required_for_loop,
       completion_proposed: false,
       verdict: nil,
+      progress_no_net_advance: callback_no_net_progress,
+      progress_no_information_gain: context.completed_no_information_gain,
       progress_turns_since_progressing: next.turns_since_loop_progress,
     }
       + __agent_loop_state_budget_fields(
@@ -339,6 +348,7 @@ pub fn agent_loop_post_turn_transition(
       _consecutive_text_only: next.consecutive_text_only,
       _turn_end_judge_invocations: next.turn_end_judge_invocations,
       _turn_end_judge_loop_state: cadence_loop_state,
+      _turn_progressing: cadence_loop_state.progress.turns_since_progressing == 0,
       _turn_tool_call_feedback: (context.fallback_triggered && !context.fallback_accepted)
         || context.had_parse_errors,
     }

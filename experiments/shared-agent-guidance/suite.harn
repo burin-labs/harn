@@ -1,0 +1,135 @@
+type SuiteConfig = {
+  binary: string,
+  python: string,
+  output: string,
+  cells: list<string>,
+  trials: list<int>,
+  live: bool,
+}
+
+type Grade = {
+  cell: string,
+  measured: int,
+  expected: int,
+  passed: bool,
+  failed: int,
+  errors: int,
+  skipped: int,
+  details: string,
+}
+
+fn grade(
+  fs: HarnessFs,
+  process: HarnessProcess,
+  config: SuiteConfig,
+  cell: string,
+  root: string,
+) -> Grade {
+  const checked = process.run(
+    {
+      program: config.python,
+      args: [path_join(fs.source_dir(), "fixtures", "oracle.py"), cell, root],
+      cwd: root,
+      env_mode: "replace",
+      env: {PATH: "/usr/bin:/bin", PYTHONDONTWRITEBYTECODE: "1"},
+      timeout_ms: 15000,
+    },
+  )
+  const parsed = json_decode(checked.stdout, schema_of(Grade))
+  require is_ok(parsed), "oracle returned no readable measurement: ${checked.stderr}"
+  const result = unwrap(parsed)
+  require result.cell == cell && result.measured == result.expected && result.measured > 0
+    && result.skipped == 0,
+    "oracle must reach every case without skips"
+  require checked.success == result.passed, "oracle process and verdict disagree"
+  return result
+}
+
+fn main(harness: Harness) -> nil {
+  require len(argv) == 1, "usage: harn run suite.harn -- CONFIG.json"
+  const config = unwrap(json_decode(harness.fs.read_text(argv[0]), schema_of(SuiteConfig)))
+  require len(config.cells) > 0, "at least one cell is required"
+  require !harness.fs.exists(config.output), "refusing to reuse an experiment output directory"
+  harness.fs.mkdir(config.output)
+  const here = harness.fs.source_dir()
+  let controls = []
+  for cell in config.cells {
+    for arm in ["broken", "reference", "empty"] {
+      const source = if arm == "empty" {
+        path_join(here, "fixtures", arm)
+      } else {
+        path_join(here, "fixtures", arm, cell)
+      }
+      const result = grade(harness.fs, harness.process, config, cell, source)
+      require result.passed == (arm == "reference"), "calibration failed for ${cell}/${arm}"
+      controls.push({cell: cell, arm: arm, grade: result})
+    }
+  }
+  harness.fs.write_text(path_join(config.output, "calibration.json"), json_stringify(controls))
+  if !config.live {
+    harness.stdio.println("${len(controls)} calibration controls reached and passed")
+    return
+  }
+  require len(config.trials) > 0, "live experiments require repeated trials"
+  require harness.env.get_or("OPENAI_API_KEY", "") != "", "OPENAI_API_KEY is required"
+  for trial in config.trials {
+    for cell in config.cells {
+      const arms = if trial % 2 == 0 {
+        ["baseline", "candidate"]
+      } else {
+        ["candidate", "baseline"]
+      }
+      for arm in arms {
+        const output = path_join(config.output, "${cell}-${trial}-${arm}")
+        const workspace = path_join(output, "workspace")
+        harness.fs.mkdir(workspace)
+        for {source, destination} in [
+          {source: "TASK.txt", destination: "README.md"},
+          {source: "${cell}.py", destination: "${cell}.py"},
+        ] {
+          harness.fs.copy(
+            path_join(here, "fixtures", "broken", cell, source),
+            path_join(workspace, destination),
+          )
+        }
+        const command = harness.process.run(
+          {
+            program: config.binary,
+            args: [
+              "run",
+              "--standalone",
+              "--timeout",
+              "15m",
+              "--read-only-root",
+              here,
+              "--write-root",
+              output,
+              path_join(here, "run.harn"),
+            ],
+            cwd: here,
+            env: {
+              EVAL_ROOT: here,
+              EVAL_WORKSPACE: workspace,
+              EVAL_CELL: cell,
+              EVAL_ARM: arm,
+              EVAL_OUTPUT: output,
+              EVAL_PYTHON: config.python,
+              OPENAI_API_KEY: harness.env.get_or("OPENAI_API_KEY", ""),
+            },
+            timeout_ms: 930000,
+          },
+        )
+        harness.fs.write_text(
+          path_join(output, "command.log"),
+          "${command.stdout}\n${command.stderr}",
+        )
+        const result = grade(harness.fs, harness.process, config, cell, workspace)
+        harness.fs.write_text(path_join(output, "grade.json"), json_stringify(result))
+        require command.success, "agent command failed for ${cell}/${trial}/${arm}"
+        harness.stdio.println(
+          "${cell}/${trial}/${arm}: ${result.measured} tests reached, passed=${result.passed}",
+        )
+      }
+    }
+  }
+}

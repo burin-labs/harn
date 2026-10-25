@@ -1,0 +1,80 @@
+import { ci_branch_decision, signal_apply } from "std/signals"
+
+/**
+ * A session's leases: acked by token, leased again when lost, moved when the holder goes silent.
+ */
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(1800000000000)
+  const options = {dir: harness.fs.mkdtemp_in_workspace("signals-")}
+  const a = {id: "a", harness: "claude-code", cwd: "/work/api", repo: "acme/api", activity: "busy"}
+  const red = [
+    {
+      workflow_id: 7,
+      name: "CI",
+      status: "completed",
+      conclusion: "failure",
+      html_url: "https://github.com/acme/api/actions/runs/2",
+    },
+  ]
+  harness.runtime.signal_register(a, options)
+  signal_apply(harness.runtime, ci_branch_decision("acme/api", "main", red), options)
+  const first = harness.runtime.signal_check_in(a, options)
+  const reminder = first.reminders[0]
+  harness.stdio.println(
+    "leased " + reminder.key + "#" + to_string(reminder.generation) + " attempt "
+      + to_string(reminder.attempt),
+  )
+  const text = harness.runtime.signal_render(first.reminders)
+  harness.stdio.println(contains(text, "github.ci:acme/api@main#1"))
+  harness.stdio.println(contains(text, "Reported by: std/signals.monitor_github_ci"))
+  harness.stdio.println(contains(text, "observed on this machine"))
+  // The delivery was lost before anything acked it. Once the ten-minute
+  // lease lapses, the session's next check-in is leased the same generation
+  // again with the next attempt, and acking its token settles it.
+  harness.testing.clock_advance(12 * 60 * 1000)
+  const released = harness.runtime.signal_check_in(a, options)
+  harness.stdio.println(
+    "lost delivery: leased " + to_string(released.reminders[0]?.generation) + " attempt "
+      + to_string(released.reminders[0]?.attempt),
+  )
+  const stale_acks = harness.runtime.signal_ack("a", [reminder.lease_token], options)
+  harness.stdio.println("stale token acks " + to_string(len(stale_acks)))
+  const released_acks = harness.runtime.signal_ack(
+    "a",
+    [released.reminders[0].lease_token],
+    options,
+  )
+  harness.stdio.println("retry token acks " + to_string(len(released_acks)))
+  // Recovery goes to the session that heard the failure. `a` then goes
+  // silent past the lease while `b` keeps working on the repo, so the
+  // unacked recovery moves to `b` without waiting for `a` to go stale.
+  signal_apply(harness.runtime, ci_branch_decision("acme/api", "main", []), options)
+  const recovery = harness.runtime.signal_check_in(a, options)
+  harness.stdio.println(recovery.reminders[0]?.state)
+  const b = {id: "b", harness: "codex", cwd: "/work/api2", repo: "acme/api", activity: "busy"}
+  harness.testing.clock_advance(11 * 60 * 1000)
+  const moved = harness.runtime.signal_check_in(b, options)
+  harness.stdio.println(
+    "b leased " + to_string(moved.reminders[0]?.state) + " attempt "
+      + to_string(moved.reminders[0]?.attempt),
+  )
+  // `a` comes back: the reminder moved, so `a` neither acks nor renders it.
+  harness.testing.clock_advance(1000)
+  const a_acked = harness.runtime.signal_ack("a", [recovery.reminders[0].lease_token], options)
+  const back = harness.runtime.signal_check_in(a, options)
+  harness.stdio.println(
+    "a acked " + to_string(len(a_acked)) + ", leased " + to_string(len(back.reminders)),
+  )
+  const acked = harness.runtime.signal_ack("b", [moved.reminders[0].lease_token], options)
+  harness.stdio.println(len(acked))
+  // A lease held by a session that ends moves to another live session.
+  signal_apply(harness.runtime, ci_branch_decision("acme/api", "main", red), options)
+  harness.stdio.println(len(harness.runtime.signal_check_in(a, options).reminders))
+  harness.runtime.signal_end_session("a", options)
+  const handed = harness.runtime.signal_check_in(b, options)
+  harness.stdio.println(
+    "b leased " + to_string(handed.reminders[0]?.generation) + " attempt "
+      + to_string(handed.reminders[0]?.attempt),
+  )
+  harness.testing.clock_reset()
+}

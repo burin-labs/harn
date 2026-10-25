@@ -24,15 +24,16 @@ list, read [MCP, ACP, and A2A integration](./mcp-and-acp.md).
 | Start | `session/new` | `message/send`, task state `submitted` | Create a session and run the first turn |
 | Status | `session/list`, `harn.session_view.query` | `tasks/get`, task state `working` | Report whether a turn is running and what it is doing |
 | Stop | `session/cancel` | `tasks/cancel`, task state `cancelled` | End the running turn now |
-| Steer | `session/inject` mode `steer` | none | Add an instruction the turn picks up after the current tool batch |
-| Queue | `session/inject` mode `queue` | none | Record a message that lands only after the loop ends |
-| Interrupt | `session/inject` mode `interrupt_immediate` | none | Skip the pending tool batch and let the model read the message first |
+| Steer | `session/prompt` with `delivery: "steer"` | none | Add an instruction the turn picks up after the current tool batch |
+| Queue | `session/prompt` with `delivery: "queue"` | none | Start a new turn with the message once the running turn ends |
 | Resume | `session/load`, `session/resume` | `tasks/resubscribe` | Reattach to a session that is already on disk |
 
 Two of these words have no A2A equivalent at all. A2A can send a message to a
 task and it can cancel a task, but it has no way to say *when* during a running
-turn that message should land. Steer, queue, and interrupt are the three answers
-to that question, and they are Harn extensions to ACP. A peer harness that
+turn that message should land. Steer and queue are the two answers to that
+question, and ACP carries them as the `delivery` field of the
+[prompt delivery RFD](https://github.com/agentclientprotocol/agent-client-protocol/pull/1261).
+A peer harness that
 speaks only A2A can start, watch, stop, and resume a session; it cannot steer
 one.
 
@@ -146,25 +147,19 @@ Steering adds an instruction to a turn that is already running, without changing
 what the session was asked to do.
 
 ```json
-{"jsonrpc":"2.0","id":7,"method":"session/inject",
- "params":{"sessionId":"…","mode":"steer",
-           "content":[{"type":"text","text":"prefer the smaller fix"}]}}
+{"jsonrpc":"2.0","id":7,"method":"session/prompt",
+ "params":{"sessionId":"…","delivery":"steer",
+           "prompt":[{"type":"text","text":"prefer the smaller fix"}]}}
 ```
 
-The result is `{"messageId": "…", "status": "accepted"}`. Accepted means queued
-for delivery, not delivered; the `messageId` is what you would pass to
-`session/revoke_inject` or `session/replace_inject` to pull it back before it
-lands.
+The request stays open until the message is inserted into the turn, then
+answers `{"messageId": "…"}`, the same id as the `user_message` update that
+announced it. Until then, `$/cancel_request` with `{"requestId": 7}` withdraws
+it: the request fails with `-32800` and the message never lands.
 
-**All three inject modes require a turn to be running.** A session that exists
-but is idle answers `-32004 "Session has no active prompt"`, and it answers that
-*before* it validates the mode, so an idle session and a misspelled mode produce
-the same error. There is no way to leave an instruction for a session's next
-turn; a control client that wants that holds the message itself and sends it as
-the next `session/prompt`.
-
-This is the timing constraint remote control has to design around. Steer is a
-control you apply *during* work, not between pieces of work.
+A steer sent to an idle session starts a turn with it. A steer that the running
+turn ends without taking opens the next turn, together with any other waiting
+steers, before any queued prompt runs.
 
 A steered message is drained at three seams: the start of an iteration, just
 after a tool batch finishes, and the end of an iteration. It is deliberately
@@ -178,18 +173,18 @@ sees, and never in the middle of a tool batch.
 **A plain steer does not change the objective.** The session's goal is what it
 was asked for at `session/prompt`, and every acceptance item frozen under it
 still stands. A steer adjusts how the agent pursues that goal. To change the
-goal itself, send the steer with a `goal`, described next.
+goal itself, send the steer with `_meta.harn.goal`, described next.
 
 ### Retarget
 
-A steer or interrupt may carry a `goal`. It replaces the run's objective as the
-steer lands:
+A steer may carry a goal in `_meta.harn.goal`. It replaces the run's objective
+as the steer lands:
 
 ```json
-{"jsonrpc":"2.0","id":8,"method":"session/inject",
- "params":{"sessionId":"…","mode":"steer",
-           "content":"Change of plan: skip the listing and reply BRAVO.",
-           "goal":{"objective":"Reply with exactly the single word BRAVO."}}}
+{"jsonrpc":"2.0","id":8,"method":"session/prompt",
+ "params":{"sessionId":"…","delivery":"steer",
+           "prompt":[{"type":"text","text":"Change of plan: skip the listing and reply BRAVO."}],
+           "_meta":{"harn":{"goal":{"objective":"Reply with exactly the single word BRAVO."}}}}}
 ```
 
 What changes when it is accepted:
@@ -223,8 +218,8 @@ criterion ids and descriptions. These records distinguish retirement from
 satisfaction even when a criterion had a machine-checkable callback.
 
 `goal` is `{"objective": string}` with a non-blank objective and no other
-fields. A `queue` note may not carry one, because it lands after the last model
-call: the server answers `-32602` and publishes a rejected outcome with
+fields. A queued prompt may not carry one, because it opens a turn of its own:
+the server answers `-32602` and publishes a rejected outcome with
 `reason: "invalid_goal"`.
 
 ### Authority
@@ -261,39 +256,30 @@ with.
 
 ## Queue
 
-Mode `queue` records a message that is drained at exactly one seam: the end of
-the loop.
+`delivery: "queue"` holds the message until the running turn ends, then starts
+a new turn with it. Queued prompts run one turn each, in arrival order, after
+any steer the previous turn missed. The request answers `{"messageId": "…"}`
+when its turn starts.
 
-A queued message lands in the transcript and is never rendered into a model
-prompt, because no further model call runs after the loop exits. Queue is for
-the audit trail, not for changing behavior. Its internal name is `audit_only`,
-and you will see that word in the bridge and in the `session/remind` capability
-list; over ACP the mode is spelled `queue`.
+A turn started this way has no request open for its whole length, so Harn
+reports it with `state_update` session updates: `running` when it starts, and
+`idle` with the `stopReason` and `_meta.harn.terminal` when it ends.
 
-If you want the model to read a message before the agent terminates, use `steer`,
-not `queue`.
-
-A control client that means "after this turn, start a new one" is describing a
-*second turn*, which is a decision the client owns. Hold the message and send it
-as its own `session/prompt` once the running turn reaches its terminal.
+`session/cancel` stops only the running turn. Prompts still pending survive
+it: the waiting steers open the next turn together, then each queued prompt
+gets a turn. Withdraw a specific pending prompt with `$/cancel_request`.
 
 ## Interrupt
 
-Mode `interrupt_immediate` is the only mode that can stop a tool batch from
-running. It is drained at every seam steer is drained at, plus the seam just
-before a tool batch dispatches, plus the daemon idle seams.
+To deliver a message now, send it with `delivery: "steer"`, then send
+`session/cancel`. The cancelled turn ends and the steer opens the next one at
+once.
 
-When one arrives at the pre-dispatch seam, the whole pending batch is skipped.
-Each skipped call is recorded with a synthetic result marked `interrupted` and
-the reason "a user interrupt arrived before this tool call was dispatched", the
-loop checkpoint carries `dispatch_skipped: true` and
-`skip_reason: "interrupt_immediate"`, and the loop continues so the model reads
-the message where the tool results would have been.
-
-Interrupt is not stop. The session keeps running; only the batch is dropped. Use
-`session/cancel` to end the turn.
-
-The mode also accepts the shorter spelling `interrupt` on the wire.
+`interrupt_immediate` is not on the ACP wire. It stays available to in-VM hosts
+through `agent_session_push_user_message`, and is the only mode that can stop a
+tool batch from running: when it arrives just before a batch dispatches, every
+call in the batch is recorded as `interrupted` and the model reads the message
+in place of the results.
 
 ## Resume
 
@@ -377,11 +363,13 @@ An accepted stop is `method: "session/cancel"`, `status: "accepted"`,
 arbitration, not the effect. A stop naming an unregistered session is
 `status: "rejected"`, `outcome: "unknown_session"`.
 
-An accepted steer is `method: "session/inject"`, `outcome: "accepted"`, with the
-assigned `messageId` in `target`. A steer with a mode the server does not know is
-rejected with `reason: "invalid_mode"`; one with empty content is rejected with
-`reason: "invalid_content"`; one with a malformed `goal`, or a `goal` on a
-`queue` note, is rejected with `reason: "invalid_goal"`. An accepted retarget
+An accepted steer or queued prompt is `method: "session/prompt"`,
+`outcome: "accepted"`, with the assigned `messageId` in `target`. A `delivery`
+value the server does not support is refused with `-32602` before anything is
+recorded; empty content is rejected with `reason: "invalid_content"`; a
+malformed goal, or a goal on a queued prompt, is rejected with
+`reason: "invalid_goal"`. A withdrawn prompt is `outcome: "withdrawn"` with the
+reason it was withdrawn. An accepted retarget
 carries its goal as `metadata.goal`.
 
 The turn's own ending is separate. It is sealed on the prompt result as ACP
@@ -426,8 +414,10 @@ reader knows which parts of the page are observed and which are inferred.
 - `session/cancel` on a session the server does not hold returns `-32004`.
 - `session/cancel` twice returns `status: "cancelled"` then
   `status: "already_cancelled"`.
-- `session/inject` on an idle session returns `-32004 "Session has no active
-  prompt"` for every mode, including an invalid one.
+- A `session/prompt` steer sent while a real model's tool call ran was answered
+  only when its `user_message` update appeared, after the tool batch finished
+  and before the turn ended. The model's next reply followed the steer and no
+  further tool call ran.
 
 Everything else on this page is a reading of the adapter and stdlib source. In
 particular, the claim that a pending tool batch is skipped at cancel is read

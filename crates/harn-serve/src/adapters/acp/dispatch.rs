@@ -1,3 +1,4 @@
+use super::delivery::TurnReply;
 use super::*;
 
 impl AcpServer {
@@ -11,6 +12,10 @@ impl AcpServer {
         mut msg: serde_json::Value,
         preparation: PreparedSessionRequest,
     ) {
+        if let PreparedSessionRequest::DrainPendingPrompts { session_id } = &preparation {
+            Box::pin(self.drain_pending_prompts(session_id)).await;
+            return;
+        }
         if msg.get("method").is_none() && msg.get("id").is_some() {
             if let Some(id) = msg["id"].as_u64() {
                 let mut pending = self.pending.lock().await;
@@ -184,7 +189,17 @@ impl AcpServer {
                     PreparedSessionRequest::Prompt(cancellation) => Some(cancellation),
                     _ => None,
                 };
-                self.handle_session_prompt(&id, &params, cancellation).await;
+                if params.get("delivery").is_some_and(|value| !value.is_null()) {
+                    Box::pin(self.handle_delivery_prompt(&id, &params)).await;
+                } else {
+                    Box::pin(self.handle_session_prompt(
+                        &id,
+                        &params,
+                        cancellation,
+                        TurnReply::Response,
+                    ))
+                    .await;
+                }
             }
             "session/cancel" => {
                 // `reject_unauthenticated` only answers when `id` is non-null,
@@ -256,29 +271,11 @@ impl AcpServer {
                     .await;
                 drop(preparation);
             }
-            "session/inject" => {
-                if self.reject_unauthenticated(&id) {
-                    return;
-                }
-                self.handle_session_inject(&id, &params).await;
-            }
             "session/inject_host_event" => {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
                 self.handle_session_inject_host_event(&id, params);
-            }
-            "session/revoke_inject" => {
-                if self.reject_unauthenticated(&id) {
-                    return;
-                }
-                self.handle_session_revoke_inject(&id, &params).await;
-            }
-            "session/replace_inject" => {
-                if self.reject_unauthenticated(&id) {
-                    return;
-                }
-                self.handle_session_replace_inject(&id, &params).await;
             }
             "session/remind" => {
                 if self.reject_unauthenticated(&id) {
@@ -286,11 +283,11 @@ impl AcpServer {
                 }
                 self.handle_session_remind(&id, &params).await;
             }
-            "session/pending_injections" => {
+            "session/pending_prompts" => {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_session_pending_injections(&id, &params).await;
+                self.handle_session_pending_prompts(&id, &params).await;
             }
             "session/revoke_reminder" => {
                 if self.reject_unauthenticated(&id) {

@@ -1108,6 +1108,7 @@ default_provider = "openai"
             "image": true,
             "audio": false,
             "embeddedContext": false,
+            "delivery": {"steer": {}, "queue": {}},
         })
     );
 

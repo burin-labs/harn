@@ -17,11 +17,11 @@ pub const ACP_METHOD_SESSION_PROMPT: &str = "session/prompt";
 pub const ACP_METHOD_SESSION_CANCEL: &str = "session/cancel";
 pub const ACP_METHOD_SESSION_CANCEL_TOOL_CALL: &str = "session/cancel_tool_call";
 pub const ACP_METHOD_SESSION_CLOSE: &str = "session/close";
-pub const ACP_METHOD_SESSION_INJECT: &str = "session/inject";
 pub const ACP_METHOD_SESSION_INJECT_HOST_EVENT: &str = "session/inject_host_event";
-pub const ACP_METHOD_SESSION_REPLACE_INJECT: &str = "session/replace_inject";
-pub const ACP_METHOD_SESSION_REVOKE_INJECT: &str = "session/revoke_inject";
-pub const ACP_METHOD_SESSION_PENDING_INJECTIONS: &str = "session/pending_injections";
+pub const ACP_METHOD_SESSION_PENDING_PROMPTS: &str = "session/pending_prompts";
+pub const ACP_METHOD_CANCEL_REQUEST: &str = "$/cancel_request";
+/// JSON-RPC code for a request cancelled before it took effect.
+pub const ACP_REQUEST_CANCELLED_CODE: i64 = -32800;
 pub const ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE: &str = "session/plan_document/mutate";
 pub const ACP_PLAN_REVISION_CONFLICT_CODE: i64 = -32009;
 pub const ACP_PLAN_MUTATION_BUSY_CODE: i64 = -32010;
@@ -180,17 +180,11 @@ impl AcpJsonRpcRequest<AcpSessionIdParams> {
         Self::new(id, ACP_METHOD_SESSION_CLOSE, params)
     }
 
-    pub fn session_pending_injections(
+    pub fn session_pending_prompts(
         id: impl Into<AcpJsonRpcId>,
         params: AcpSessionIdParams,
     ) -> Self {
-        Self::new(id, ACP_METHOD_SESSION_PENDING_INJECTIONS, params)
-    }
-}
-
-impl AcpJsonRpcRequest<AcpSessionInjectParams> {
-    pub fn session_inject(id: impl Into<AcpJsonRpcId>, params: AcpSessionInjectParams) -> Self {
-        Self::new(id, ACP_METHOD_SESSION_INJECT, params)
+        Self::new(id, ACP_METHOD_SESSION_PENDING_PROMPTS, params)
     }
 }
 
@@ -200,24 +194,6 @@ impl AcpJsonRpcRequest<AcpSessionInjectHostEventParams> {
         params: AcpSessionInjectHostEventParams,
     ) -> Self {
         Self::new(id, ACP_METHOD_SESSION_INJECT_HOST_EVENT, params)
-    }
-}
-
-impl AcpJsonRpcRequest<AcpSessionReplaceInjectParams> {
-    pub fn session_replace_inject(
-        id: impl Into<AcpJsonRpcId>,
-        params: AcpSessionReplaceInjectParams,
-    ) -> Self {
-        Self::new(id, ACP_METHOD_SESSION_REPLACE_INJECT, params)
-    }
-}
-
-impl AcpJsonRpcRequest<AcpSessionMessageIdParams> {
-    pub fn session_revoke_inject(
-        id: impl Into<AcpJsonRpcId>,
-        params: AcpSessionMessageIdParams,
-    ) -> Self {
-        Self::new(id, ACP_METHOD_SESSION_REVOKE_INJECT, params)
     }
 }
 
@@ -629,6 +605,9 @@ pub struct AcpSessionPromptParams {
     #[serde(rename = "sessionId")]
     pub session_id: String,
     pub prompt: Vec<AcpContentBlock>,
+    /// How a prompt sent while the agent is working reaches the session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<AcpPromptDelivery>,
     #[serde(flatten)]
     pub correlation: AcpPromptCorrelation,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
@@ -640,6 +619,7 @@ impl AcpSessionPromptParams {
         Self {
             session_id: session_id.into(),
             prompt,
+            delivery: None,
             correlation: AcpPromptCorrelation::default(),
             extra: BTreeMap::new(),
         }
@@ -648,6 +628,39 @@ impl AcpSessionPromptParams {
     pub fn text(session_id: impl Into<String>, text: impl Into<String>) -> Self {
         Self::new(session_id, vec![AcpContentBlock::text(text)])
     }
+
+    pub fn with_delivery(mut self, delivery: AcpPromptDelivery) -> Self {
+        self.delivery = Some(delivery);
+        self
+    }
+}
+
+/// `session/prompt` `delivery`: `steer` joins the running turn at its next
+/// safe point; `queue` starts a new turn once the current one ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpPromptDelivery {
+    Steer,
+    Queue,
+}
+
+impl AcpPromptDelivery {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Steer => "steer",
+            Self::Queue => "queue",
+        }
+    }
+}
+
+/// Result of a `session/prompt` that carries `delivery`: sent once the
+/// message is inserted, not when the turn ends.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcpSessionPromptReceipt {
+    #[serde(rename = "messageId")]
+    pub message_id: String,
+    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
 }
 
 /// `session/prompt` result.
@@ -797,44 +810,6 @@ pub struct AcpEmbeddedResource {
     pub blob: Option<String>,
 }
 
-/// Delivery mode for `session/inject` queued user messages.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum AcpSessionInjectMode {
-    Queue,
-    Steer,
-    #[serde(alias = "interrupt")]
-    InterruptImmediate,
-}
-
-/// `session/inject` content accepts either a plain string or ACP content blocks.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
-#[non_exhaustive]
-pub enum AcpSessionInjectContent {
-    Text(String),
-    Blocks(Vec<AcpContentBlock>),
-}
-
-impl From<String> for AcpSessionInjectContent {
-    fn from(value: String) -> Self {
-        Self::Text(value)
-    }
-}
-
-impl From<&str> for AcpSessionInjectContent {
-    fn from(value: &str) -> Self {
-        Self::Text(value.to_string())
-    }
-}
-
-impl From<Vec<AcpContentBlock>> for AcpSessionInjectContent {
-    fn from(value: Vec<AcpContentBlock>) -> Self {
-        Self::Blocks(value)
-    }
-}
-
 /// Standard ACP `_meta` wrapper for Harn-owned extension fields.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcpMeta {
@@ -878,24 +853,6 @@ pub struct AcpHarnMeta {
     pub extra: BTreeMap<String, serde_json::Value>,
 }
 
-/// `session/inject` params.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AcpSessionInjectParams {
-    #[serde(rename = "sessionId")]
-    pub session_id: String,
-    pub mode: AcpSessionInjectMode,
-    pub content: AcpSessionInjectContent,
-    /// Retarget the run: the steer replaces the objective, and every
-    /// acceptance item declared under the previous one is retired. Only a
-    /// `steer` or `interrupt_immediate` may carry it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal: Option<harn_session_store::ControlGoal>,
-    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<AcpMeta>,
-    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
-    pub extra: BTreeMap<String, serde_json::Value>,
-}
-
 /// Harn ACP extension params for injecting a typed, provenance-bearing host event.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -913,79 +870,6 @@ impl AcpSessionInjectHostEventParams {
         Self {
             session_id: session_id.into(),
             event,
-        }
-    }
-}
-
-impl AcpSessionInjectParams {
-    pub fn new(
-        session_id: impl Into<String>,
-        mode: AcpSessionInjectMode,
-        content: impl Into<AcpSessionInjectContent>,
-    ) -> Self {
-        Self {
-            session_id: session_id.into(),
-            mode,
-            content: content.into(),
-            goal: None,
-            meta: None,
-            extra: BTreeMap::new(),
-        }
-    }
-
-    /// Replace the run's objective with `objective` as this steer lands.
-    pub fn with_goal(mut self, objective: impl Into<String>) -> Self {
-        self.goal = Some(harn_session_store::ControlGoal {
-            objective: objective.into(),
-        });
-        self
-    }
-}
-
-/// `session/replace_inject` params.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AcpSessionReplaceInjectParams {
-    #[serde(rename = "sessionId")]
-    pub session_id: String,
-    #[serde(rename = "messageId")]
-    pub message_id: String,
-    pub content: AcpSessionInjectContent,
-    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<AcpMeta>,
-    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
-    pub extra: BTreeMap<String, serde_json::Value>,
-}
-
-impl AcpSessionReplaceInjectParams {
-    pub fn new(
-        session_id: impl Into<String>,
-        message_id: impl Into<String>,
-        content: impl Into<AcpSessionInjectContent>,
-    ) -> Self {
-        Self {
-            session_id: session_id.into(),
-            message_id: message_id.into(),
-            content: content.into(),
-            meta: None,
-            extra: BTreeMap::new(),
-        }
-    }
-}
-
-/// Params for pending-message operations such as `session/revoke_inject`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AcpSessionMessageIdParams {
-    #[serde(rename = "sessionId")]
-    pub session_id: String,
-    #[serde(rename = "messageId")]
-    pub message_id: String,
-}
-
-impl AcpSessionMessageIdParams {
-    pub fn new(session_id: impl Into<String>, message_id: impl Into<String>) -> Self {
-        Self {
-            session_id: session_id.into(),
-            message_id: message_id.into(),
         }
     }
 }
@@ -1192,54 +1076,6 @@ mod tests {
             serde_json::from_value(serde_json::json!({"stopReason": "end_turn"}))
                 .expect("deserialize legacy prompt result");
         assert!(legacy.meta.is_none());
-    }
-
-    #[test]
-    fn session_inject_request_serializes_mode_and_content() {
-        let value = AcpJsonRpcRequest::session_inject(
-            "inject-1",
-            AcpSessionInjectParams::new(
-                "sess-1",
-                AcpSessionInjectMode::Steer,
-                vec![AcpContentBlock::text("interrupt after this step")],
-            ),
-        )
-        .into_json_value()
-        .expect("request serializes");
-
-        assert_eq!(
-            value,
-            serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": "inject-1",
-                "method": "session/inject",
-                "params": {
-                    "sessionId": "sess-1",
-                    "mode": "steer",
-                    "content": [{"type": "text", "text": "interrupt after this step"}],
-                },
-            })
-        );
-    }
-
-    #[test]
-    fn session_inject_interrupt_mode_accepts_the_bridge_alias() {
-        let params: AcpSessionInjectParams = serde_json::from_value(serde_json::json!({
-            "sessionId": "sess-1",
-            "mode": "interrupt",
-            "content": "stop before dispatch",
-        }))
-        .expect("interrupt alias deserializes");
-
-        assert_eq!(params.mode, AcpSessionInjectMode::InterruptImmediate);
-        assert_eq!(
-            serde_json::to_value(params.mode).expect("mode serializes"),
-            serde_json::json!("interrupt_immediate")
-        );
-        assert_eq!(
-            super::super::bridge_mode_for_session_inject(&serde_json::json!({"mode": "interrupt"})),
-            Ok("interrupt_immediate")
-        );
     }
 
     #[test]

@@ -272,11 +272,15 @@ impl InProcessHost {
 /// Hosts that want the model to react to the reminder on its final
 /// iteration should use `FinishStep` instead, which drains at every
 /// `iteration_start` / `post_tool_dispatch` / `iteration_end` checkpoint.
+/// `NextTurn` messages are never drained by the loop: the host takes them
+/// with [`HostBridgeInjectionState::take_pending_user_message`] once the
+/// turn ends and starts a new turn with each.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QueuedUserMessageMode {
     InterruptImmediate,
     FinishStep,
     AuditOnly,
+    NextTurn,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -290,13 +294,10 @@ impl QueuedUserMessageMode {
     pub(crate) fn from_str(value: &str) -> Self {
         match value {
             "interrupt_immediate" | "interrupt" => Self::InterruptImmediate,
-            // `steer` is the ACP `session/inject` alias for mid-turn
-            // user-message delivery at the next tool boundary; it maps to
-            // the same `FinishStep` checkpoint as `finish_step`.
             "finish_step" | "after_current_operation" | "steer" => Self::FinishStep,
-            // `queue` is the explicit ACP alias for the audit-only path.
-            "queue" => Self::AuditOnly,
-            // Unknown / missing modes fall through to the safest option:
+            // `NextTurn` is never parsed: only a host that starts the next
+            // turn itself may queue one. Unknown / missing modes fall
+            // through to the safest option:
             // record for audit, do not preempt the loop. Pre-#2212 hosts
             // that send `wait_for_completion` are caught by this arm —
             // the canonical name is `audit_only` going forward.
@@ -309,6 +310,7 @@ impl QueuedUserMessageMode {
             Self::InterruptImmediate => "interrupt_immediate",
             Self::FinishStep => "finish_step",
             Self::AuditOnly => "audit_only",
+            Self::NextTurn => "next_turn",
         }
     }
 }
@@ -418,23 +420,29 @@ impl HostBridgeInjectionState {
         transcript_content: serde_json::Value,
         mode: &str,
     ) -> String {
-        self.push_pending_user_message_admitted(content, transcript_content, mode, |_| {
-            Ok::<_, std::convert::Infallible>(UserMessageDeliveryOwner::Session)
-        })
+        self.push_pending_user_message_admitted(
+            None,
+            content,
+            transcript_content,
+            QueuedUserMessageMode::from_str(mode),
+            |_| Ok::<_, std::convert::Infallible>(UserMessageDeliveryOwner::Session),
+        )
         .await
         .unwrap()
     }
 
-    /// Allocate one identity and admit its control before exposing it to a reader.
-    /// The callback runs under the queue lock; rejection leaves the queue untouched.
+    /// Take the caller's identity or allocate one, and admit its control before
+    /// exposing it to a reader. The callback runs under the queue lock;
+    /// rejection leaves the queue untouched.
     pub async fn push_pending_user_message_admitted<E>(
         &self,
+        message_id: Option<String>,
         content: String,
         transcript_content: serde_json::Value,
-        mode: &str,
+        mode: QueuedUserMessageMode,
         admit: impl FnOnce(&str) -> Result<UserMessageDeliveryOwner, E>,
     ) -> Result<String, E> {
-        let message_id = new_inject_message_id();
+        let message_id = message_id.unwrap_or_else(new_inject_message_id);
         let mut state = self.inner.lock().await;
         let delivery_owner = admit(&message_id)?;
         state
@@ -443,7 +451,7 @@ impl HostBridgeInjectionState {
                 message_id: message_id.clone(),
                 content,
                 transcript_content,
-                mode: QueuedUserMessageMode::from_str(mode),
+                mode,
                 delivery_owner,
             }));
         Ok(message_id)
@@ -511,29 +519,21 @@ impl HostBridgeInjectionState {
         }
     }
 
-    pub async fn replace_pending_user_message(
-        &self,
-        message_id: &str,
-        content: String,
-        transcript_content: serde_json::Value,
-    ) -> PendingUserMessageMutationResult {
+    /// Take one pending user message out of the queue, marking it delivered.
+    /// A host that inserts the message itself, rather than through a loop
+    /// checkpoint, takes it here.
+    pub async fn take_pending_user_message(&self, message_id: &str) -> Option<QueuedUserMessage> {
         let mut state = self.inner.lock().await;
-        for injection in &mut state.queue {
-            if let QueuedTranscriptInjection::User(message) = injection {
-                if message.message_id == message_id {
-                    message.content = content;
-                    message.transcript_content = transcript_content;
-                    return PendingUserMessageMutationResult::Mutated;
-                }
-            }
-        }
-        if state.revoked_user_message_ids.contains(message_id) {
-            PendingUserMessageMutationResult::AlreadyRevoked
-        } else if state.delivered_user_message_ids.contains(message_id) {
-            PendingUserMessageMutationResult::AlreadyDelivered
-        } else {
-            PendingUserMessageMutationResult::UnknownMessageId
-        }
+        let position = state.queue.iter().position(|injection| {
+            matches!(injection, QueuedTranscriptInjection::User(message) if message.message_id == message_id)
+        })?;
+        let Some(QueuedTranscriptInjection::User(message)) = state.queue.remove(position) else {
+            unreachable!("position matched a user message");
+        };
+        state
+            .delivered_user_message_ids
+            .insert(message.message_id.clone());
+        Some(message)
     }
 
     async fn push_session_reminder(&self, reminder: QueuedReminder) {
@@ -1044,17 +1044,6 @@ impl HostBridge {
             .await
     }
 
-    pub async fn replace_pending_user_message(
-        &self,
-        message_id: &str,
-        content: String,
-        transcript_content: serde_json::Value,
-    ) -> PendingUserMessageMutationResult {
-        self.queued_transcript_injections
-            .replace_pending_user_message(message_id, content, transcript_content)
-            .await
-    }
-
     pub async fn push_queued_session_remind_from_params(
         &self,
         params: &serde_json::Value,
@@ -1081,6 +1070,7 @@ impl HostBridge {
                 QueuedUserMessageMode::InterruptImmediate => include_interrupt_immediate,
                 QueuedUserMessageMode::FinishStep => include_finish_step,
                 QueuedUserMessageMode::AuditOnly => include_audit_only,
+                QueuedUserMessageMode::NextTurn => false,
             };
             match (should_take, injection) {
                 (true, QueuedTranscriptInjection::User(message)) => {
@@ -1110,6 +1100,7 @@ impl HostBridge {
                 QueuedUserMessageMode::InterruptImmediate => include_interrupt_immediate,
                 QueuedUserMessageMode::FinishStep => include_finish_step,
                 QueuedUserMessageMode::AuditOnly => include_audit_only,
+                QueuedUserMessageMode::NextTurn => false,
             };
             if should_take {
                 match &injection {

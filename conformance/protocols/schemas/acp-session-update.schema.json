@@ -1029,6 +1029,16 @@
         }
       }
     },
+    "State": {
+      "type": "object", "required": ["sessionUpdate", "state"], "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "state_update" },
+        "state": { "type": "string", "enum": ["running", "idle"] },
+        "stopReason": { "type": "string" },
+        "error": {},
+        "_meta": { "type": "object", "additionalProperties": true, "properties": {} }
+      }
+    },
     "Progress": {
       "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
       "properties": {
@@ -1124,6 +1134,7 @@
         { "$ref": "#/$defs/SkillNarrow" },
         { "$ref": "#/$defs/SkillScopeTools" },
         { "$ref": "#/$defs/StanceTransition" },
+        { "$ref": "#/$defs/State" },
         { "$ref": "#/$defs/ToolSearchQuery" },
         { "$ref": "#/$defs/ToolSearchResult" },
         { "$ref": "#/$defs/TranscriptCompacted" },

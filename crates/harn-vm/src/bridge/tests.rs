@@ -546,7 +546,7 @@ fn queued_messages_are_filtered_by_delivery_mode() {
 }
 
 #[test]
-fn pending_user_messages_support_revoke_replace_and_delivery_states() {
+fn pending_user_messages_support_revoke_and_delivery_states() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -568,16 +568,6 @@ fn pending_user_messages_support_revoke_replace_and_delivery_states() {
             )
             .await;
 
-        assert_eq!(
-            bridge
-                .replace_pending_user_message(
-                    &second_id,
-                    "second edited".to_string(),
-                    serde_json::json!("second edited"),
-                )
-                .await,
-            PendingUserMessageMutationResult::Mutated
-        );
         assert_eq!(
             bridge.revoke_pending_user_message(&first_id).await,
             PendingUserMessageMutationResult::Mutated
@@ -592,74 +582,14 @@ fn pending_user_messages_support_revoke_replace_and_delivery_states() {
             .await;
         assert_eq!(delivered.len(), 1);
         assert_eq!(delivered[0].message_id, second_id);
-        assert_eq!(delivered[0].content, "second edited");
 
         assert_eq!(
             bridge.revoke_pending_user_message(&second_id).await,
             PendingUserMessageMutationResult::AlreadyDelivered
         );
         assert_eq!(
-            bridge
-                .replace_pending_user_message(
-                    &second_id,
-                    "too late".to_string(),
-                    serde_json::json!("too late"),
-                )
-                .await,
-            PendingUserMessageMutationResult::AlreadyDelivered
-        );
-        assert_eq!(
             bridge.revoke_pending_user_message("missing").await,
             PendingUserMessageMutationResult::UnknownMessageId
-        );
-    });
-}
-
-#[test]
-fn pending_user_message_replace_preserves_fifo_position_and_mode() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    runtime.block_on(async {
-        let bridge = test_bridge();
-        let first_id = bridge
-            .push_pending_user_message(
-                "first".to_string(),
-                serde_json::json!("first"),
-                "finish_step",
-            )
-            .await;
-        let second_id = bridge
-            .push_pending_user_message(
-                "second".to_string(),
-                serde_json::json!("second"),
-                "finish_step",
-            )
-            .await;
-        assert_eq!(
-            bridge
-                .replace_pending_user_message(
-                    &first_id,
-                    "first edited".to_string(),
-                    serde_json::json!("first edited"),
-                )
-                .await,
-            PendingUserMessageMutationResult::Mutated
-        );
-
-        let delivered = bridge
-            .take_queued_user_messages_for(DeliveryCheckpoint::AfterCurrentOperation)
-            .await;
-        assert_eq!(
-            delivered
-                .iter()
-                .map(|message| (&message.message_id, message.content.as_str(), message.mode))
-                .collect::<Vec<_>>(),
-            vec![
-                (&first_id, "first edited", QueuedUserMessageMode::FinishStep,),
-                (&second_id, "second", QueuedUserMessageMode::FinishStep),
-            ]
         );
     });
 }

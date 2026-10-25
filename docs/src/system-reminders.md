@@ -246,8 +246,8 @@ unless disabled with reminder options.
 ### From a host bridge
 
 Bridge and ACP-style hosts inject ambient context with the `session/remind`
-JSON-RPC notification. This is distinct from `session/inject`, which is always
-user-role input.
+JSON-RPC notification. This is distinct from a `session/prompt` steer, which is
+always user-role input.
 
 ```json
 {
@@ -285,9 +285,8 @@ Host-specific extension fields belong under `_meta`. Invalid reminder
 payloads fail with `HARN-RMD-002`; unknown top-level reminder options
 fail with `HARN-RMD-001`.
 
-Hosts can inspect the bridge queue with `session/pending_injections`. The
-response is `{pendingCount, injections}` in FIFO order and includes both
-pending user-message injects and pending reminders. Reminder rows carry the
+Hosts can inspect the bridge queue with `session/pending_prompts`. The
+response is `{prompts, reminders}`, each in delivery order. Reminder rows carry the
 stable `reminderId`, `mode`, `body`, `tags`, `dedupeKey`, `ttlTurns`,
 `roleHint`, and `source` fields.
 
@@ -630,7 +629,7 @@ const cleared = transcript.clear_reminders(current_transcript, {
 
 ### Host-injected idle workspace nudge
 
-Bridge hosts should use `session/remind`, not `session/inject`, when the
+Bridge hosts should use `session/remind`, not a `session/prompt` steer, when the
 content is ambient context rather than user text.
 
 ```json

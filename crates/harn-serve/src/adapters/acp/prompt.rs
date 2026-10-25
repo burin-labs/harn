@@ -1,3 +1,4 @@
+use super::delivery::TurnReply;
 use super::*;
 
 impl AcpServer {
@@ -78,6 +79,7 @@ impl AcpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
         cancellation: Option<Arc<PromptCancellation>>,
+        reply: TurnReply,
     ) {
         let admission = match params.get("sessionId").and_then(|value| value.as_str()) {
             Some(session_id) => match self.prompt_admission(session_id) {
@@ -91,7 +93,8 @@ impl AcpServer {
         };
         let quota = self.machine_spend_quota.clone();
         let inner = Box::pin(async {
-            let prompt = Box::pin(self.handle_session_prompt_scoped(id, params, cancellation));
+            let prompt =
+                Box::pin(self.handle_session_prompt_scoped(id, params, cancellation, &reply));
             match quota {
                 Some(quota) => quota.scope(prompt).await.map_err(|error| error.to_string()),
                 None => {
@@ -110,7 +113,15 @@ impl AcpServer {
             None => inner.await.err(),
         };
         if let Some(error) = scope_error {
-            self.send_prompt_error(id, &error);
+            let session_id = session_id_param(params).unwrap_or_default();
+            self.turn_failed(
+                id,
+                &session_id,
+                &reply,
+                &error,
+                harn_vm::llm::AgentTerminalClass::GenericThrow,
+                super::types::AcpPromptFailureFacts::default(),
+            );
         }
     }
 
@@ -119,6 +130,7 @@ impl AcpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
         prepared_cancellation: Option<Arc<PromptCancellation>>,
+        reply: &TurnReply,
     ) {
         let session_id = match params.get("sessionId").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
@@ -377,6 +389,9 @@ impl AcpServer {
             .expect("prepared session")
             .concurrent_control
             .clone();
+        if !self.claim_turn_admission(id, &session_id, reply) {
+            return;
+        }
         let owner = match control.admit_and_bind_prompt(
             candidate_task.clone(),
             cancellation.clone(),
@@ -391,6 +406,7 @@ impl AcpServer {
                 return;
             }
         };
+        self.turn_started(&session_id, reply);
         let output = self
             .output
             .for_prompt(prompt.correlation.clone(), owner.task().cloned());
@@ -401,7 +417,14 @@ impl AcpServer {
             sink.register(&session_id);
         }
         let event_transport = harn_vm::agent_events::AgentEventTransport::new(Arc::new(
-            AcpAgentEventSink::for_prompt(output.clone(), owner),
+            AcpAgentEventSink::for_prompt(
+                output.clone(),
+                owner,
+                super::delivery::PromptReceipts::new(
+                    self.concurrent_controls.pending_prompts.clone(),
+                    self.output.clone(),
+                ),
+            ),
         ));
         let bridge = Arc::new(AcpBridge {
             session_id: session_id.clone(),
@@ -438,7 +461,12 @@ impl AcpServer {
         }
         if cancellation.cancelled.load(Ordering::SeqCst) {
             let error = self.clear_active_prompt_transport(&session_id).await.err();
-            self.send_response(id, cancelled_prompt_result(error.as_ref()));
+            self.turn_ended(
+                id,
+                &session_id,
+                reply,
+                cancelled_prompt_result(error.as_ref()),
+            );
             return;
         }
         bridge.send_log("info", &format!("ACP_BOOT: compile_ms={compile_ms} cache={}", if cache_hit { "hit" } else { "miss" }), Some(serde_json::json!({
@@ -446,8 +474,6 @@ impl AcpServer {
             "pipeline":source_path.as_ref().map(|path|path.display().to_string()).unwrap_or_else(||"<inline>".into()),
         })));
         let profile_turn = self.begin_profile_turn(&session_id);
-        let id_owned = id.clone();
-        let send_output = self.output.clone();
         let host_bridge_for_response = host_bridge.clone();
         let runtime_configurator = self.runtime_configurator.clone();
         let execution = runtime_configurator.run_prompt(
@@ -523,19 +549,24 @@ impl AcpServer {
         match result {
             Ok(output) => {
                 if cancellation.cancelled.load(Ordering::SeqCst) {
-                    send_json_response(
-                        &send_output,
-                        &id_owned,
+                    self.turn_ended(
+                        id,
+                        &session_id,
+                        reply,
                         cancelled_prompt_result(sink_flush_error.as_ref()),
                     );
                     return;
                 }
                 if let Some(error) = sink_flush_error {
-                    self.send_prompt_error(
-                        &id_owned,
+                    self.turn_failed(
+                        id,
+                        &session_id,
+                        reply,
                         &format!(
                             "Failed to persist agent events before prompt completion: {error}"
                         ),
+                        harn_vm::llm::AgentTerminalClass::GenericThrow,
+                        super::types::AcpPromptFailureFacts::default(),
                     );
                     return;
                 }
@@ -568,9 +599,10 @@ impl AcpServer {
                         fs_snapshot_ids,
                     );
                 }
-                send_json_response(
-                    &send_output,
-                    &id_owned,
+                self.turn_ended(
+                    id,
+                    &session_id,
+                    reply,
                     serde_json::to_value(AcpSessionPromptResult {
                         stop_reason,
                         meta: terminal.map(AcpMeta::terminal),
@@ -580,9 +612,10 @@ impl AcpServer {
             }
             Err(e) => {
                 if cancellation.cancelled.load(Ordering::SeqCst) {
-                    send_json_response(
-                        &send_output,
-                        &id_owned,
+                    self.turn_ended(
+                        id,
+                        &session_id,
+                        reply,
                         cancelled_prompt_result(sink_flush_error.as_ref()),
                     );
                     return;
@@ -595,7 +628,7 @@ impl AcpServer {
                     }
                     None => e.message,
                 };
-                self.send_prompt_failure(&id_owned, &message, terminal_class, facts);
+                self.turn_failed(id, &session_id, reply, &message, terminal_class, facts);
             }
         }
     }

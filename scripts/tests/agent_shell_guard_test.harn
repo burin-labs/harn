@@ -1116,6 +1116,12 @@ pipeline test_git_stash_writes_are_denied_across_parser_shapes(harness: Harness,
     "git add -A && git stash && make test",
     "bash -lc 'git stash pop'",
     "sh -c \"git -C /workspace stash push\"",
+    "git -c alias.s=stash s pop",
+    "git -c alias.s=stash s",
+    "git -c alias.s='stash push' s",
+    "git -c alias.a=stash -c alias.b=a b drop",
+    "git -c alias.s='!git stash pop' s",
+    "git --config-env=alias.s=SAVED s pop",
   ] {
     const refused = verdict(claude_payload(command))
     assert(!refused.allow, command + " writes the shared stash list")
@@ -1127,6 +1133,66 @@ pipeline test_git_stash_writes_are_denied_across_parser_shapes(harness: Harness,
       !decision(codex_payload(command), UNADMITTED, NO_MAKE_TARGETS).allow,
       command + " is refused for Codex in any repository",
     )
+  }
+}
+
+/**
+ * The lane that runs these tests uses the previous published runtime, whose scanner does not project
+ * `xargs_child_argv` yet. Without it the guard cannot see the launched command, so the cases are
+ * skipped there and run wherever the scanner projects the field.
+ */
+fn scanner_projects_xargs_child() -> bool {
+  const scan = command_risk_scan({request: {mode: "shell", command: "xargs git status"}})
+  const stage = (scan.shell_command_groups ?? [])[0]?.[0]
+  return len(stage?.xargs_child_argv ?? []) > 0
+}
+
+@test
+pipeline test_git_stash_writes_launched_through_xargs_are_denied(harness: Harness, task: unknown) {
+  if !scanner_projects_xargs_child() {
+    return
+  }
+  for command in [
+    "xargs -n 1 git stash drop",
+    "printf x | xargs git stash",
+    "xargs -0 -I {} git -C /workspace stash pop",
+  ] {
+    assert(!verdict(claude_payload(command)).allow, command + " writes the shared stash list")
+  }
+}
+
+/**
+ * An `xargs` form the scanner cannot place a child for fails closed, on every runtime: the guard
+ * reads each `git` operand as a launch. `-a` is outside the scanner's option boundary.
+ */
+@test
+pipeline test_unresolved_xargs_forms_still_refuse_stash_writes(harness: Harness, task: unknown) {
+  for command in [
+    "xargs -a input git stash drop",
+    "xargs -a input -n 1 git stash pop",
+    "xargs --arg-file=input git stash",
+    "xargs -a input git -C /workspace stash clear",
+    "xargs -a input sh -c 'git stash drop'",
+    "xargs -a input bash -lc \"git -C /workspace stash pop\"",
+    "xargs -a input env GIT_DIR=/x git stash",
+    "xargs -a input -I{} sh -c 'git stash drop {}'",
+    "xargs -a f python3 -c 'import os; os.system(\"git stash drop\")'",
+    "xargs -a f perl -e 'system \"git stash clear\"'",
+    "xargs -a f node -e 'require(\"child_process\").execSync(\"git stash pop\")'",
+    "xargs -a f sh -c 'eval \"git stash\"'",
+    "xargs -a f git --config-env=alias.s=SAVED s pop",
+    "xargs -a f grep stash",
+  ] {
+    assert(!verdict(claude_payload(command)).allow, command + " writes the shared stash list")
+  }
+  for command in [
+    "xargs -a input git status",
+    "xargs -a input git stash list",
+    "xargs -a input rm",
+    "xargs -a input sh -c 'git status'",
+  ] {
+    const allowed = verdict(claude_payload(command))
+    assert(allowed.allow, command + " does not write the stash list: " + allowed.reason)
   }
 }
 
@@ -1145,6 +1211,11 @@ pipeline test_git_stash_reads_and_lookalikes_are_allowed(harness: Harness, task:
     "git commit -am 'stash the cache'",
     "echo git stash",
     "grep stash docs/notes.md",
+    "git -c alias.s=stash s list",
+    "git -c alias.l=log l --oneline",
+    "git -c alias.s=stash status",
+    "xargs git stash list",
+    "xargs -n 1 git log",
     "git reset --soft HEAD~1",
   ] {
     const allowed = verdict(claude_payload(command))

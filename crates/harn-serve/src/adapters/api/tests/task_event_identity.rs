@@ -160,7 +160,10 @@ async fn queued_task_does_not_steal_running_approval(
         let message = read_json(response).await;
         let pending = first_inputs.pending_injections_json().await;
         assert_eq!(pending["pendingCount"], 1);
-        assert_eq!(pending["injections"][0]["content"], "running-task-canary");
+        assert_eq!(
+            pending["injections"][0]["content"][0]["text"],
+            "running-task-canary"
+        );
         assert_eq!(pending["injections"][0]["messageId"], message["id"]);
         let audit = store.task_events(Some(&first_id), None).unwrap();
         assert!(audit

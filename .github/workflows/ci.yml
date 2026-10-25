@@ -122,6 +122,7 @@ jobs:
       release_residual: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.release_residual == 'true' }}
       post_merge_tier: ${{ steps.post_merge_tier.outputs.active }}
       consumer: ${{ steps.surface_filter.outputs.consumer }}
+      pull_request_base: ${{ steps.merged_base.outputs.sha }}
       provider_contract_probe: ${{ steps.surface_filter.outputs.provider_contract_probe }}
       swift_protocol_binding: ${{ steps.surface_filter.outputs.swift_protocol_binding }}
     steps:
@@ -150,6 +151,21 @@ jobs:
             exit 1
           fi
 
+      - name: Resolve the merge commit's base
+        id: merged_base
+        if: github.event_name == 'pull_request'
+        env:
+          MERGE_SHA: ${{ github.sha }}
+        run: |
+          # The base this run's CLI is built on. `pull_request.base.sha` records
+          # the base tip when the event fired and lags main, so a base rehearsal
+          # built there blames the pull request for whatever landed since.
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$MERGE_SHA" ]] || { echo "::error::checkout is not the merge commit $MERGE_SHA"; exit 1; }
+          read -r -a parents <<< "$(git rev-list --parents -n 1 HEAD)"
+          [[ "${#parents[@]}" -eq 3 ]] || { echo "::error::$MERGE_SHA is not a two-parent merge commit"; exit 1; }
+          echo "sha=${parents[1]}" >> "$GITHUB_OUTPUT"
+
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
@@ -165,6 +181,14 @@ jobs:
         id: surface_filter
         with:
           filters: |
+            # Markdown the repository policy checks read. The `rust` filter
+            # excludes `*.md`, so these inputs select the proofs through the
+            # heavy-lane gate below instead.
+            policy_markdown:
+              - 'AGENTS.md'
+              - '.codex/**/*.md'
+              - 'crates/harn-skills/src/corpus/**/*.md'
+              - 'docs/src/maintainer-release.md'
             portal:
               - '.github/workflows/ci.yml'
               - 'crates/harn-cli/portal/**'
@@ -385,6 +409,7 @@ jobs:
         id: force
         env:
           F_RUST: ${{ steps.filter.outputs.rust }}
+          F_POLICY_MARKDOWN: ${{ steps.surface_filter.outputs.policy_markdown }}
           F_PACKAGE_AUDIT: ${{ steps.surface_filter.outputs.package_audit }}
           POST_MERGE_TIER_ACTIVE: ${{ steps.post_merge_tier.outputs.active }}
         #
@@ -397,6 +422,9 @@ jobs:
           else
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — heavy Linux Rust lanes gated by paths filter (rust=${F_RUST})"
             rust="${F_RUST}"
+            if [ "${F_POLICY_MARKDOWN}" = "true" ]; then
+              rust=true
+            fi
             package_audit="${F_PACKAGE_AUDIT}"
           fi
           {
@@ -2276,13 +2304,13 @@ jobs:
     # Consumes only the small portable CLI bundle through the same live
     # artifact barrier as harn-audit.
     needs: [changes, rust-cli]
-    # `rust_paths`, not `rust`: no merge group runs this lane, so a push the
-    # merge group already proved still runs it, on that run's CLI.
-    if: >-
-      ${{ !cancelled() && github.event_name == 'push'
-      && github.ref == 'refs/heads/main'
-      && needs.changes.outputs.rust_paths == 'true'
-      && needs.rust-cli.result == 'success' }}
+    # No event condition, deliberately. This sweep reds main when a change
+    # breaks a policy, and while it ran only on main pushes six of nine red-main
+    # episodes in one week were this job failing for a change that never ran it.
+    # It needs the shared CLI, so it runs whenever `rust` selects a proof: the
+    # `changes` filter that excludes docs, website, the VS Code extension and
+    # `*.md`, and that holds every script, Makefile, spec and crate it reads.
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}
     # Keep this execution-only lane on elastic capacity. It gains no compiler
     # cache benefit from a persistent worker, and merge-queue bursts otherwise
     # leave it waiting behind compile-bearing jobs on the scarce stable pool.
@@ -2839,8 +2867,11 @@ jobs:
   # `CONSUMER_UNMEASURED_BLOCKS` in `ci-status` flips.
   # Fork and Dependabot pull requests never run it; it needs the release app
   # credential, which neither receives.
-  consumer-check:
-    name: Consumer check
+  #
+  # The consumer commit is read once here, so the pull request's rehearsal and
+  # its base rehearsal measure the same consumer even when its main moves.
+  consumer-pin:
+    name: Pin the consumer commit
     needs: [changes, rust-cli]
     if: >-
       github.event_name == 'pull_request'
@@ -2848,6 +2879,44 @@ jobs:
       && github.actor != 'dependabot[bot]'
       && needs.changes.outputs.consumer == 'true'
       && needs.rust-cli.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.read.outputs.sha }}
+    steps:
+      - name: Mint the consumer read credential
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          permission-contents: read
+      - name: Read the consumer's default-branch head
+        id: read
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          CONSUMER: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          branch="$(gh api "repos/$CONSUMER" --jq .default_branch)"
+          sha="$(gh api "repos/$CONSUMER/commits/$branch" --jq .sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::the consumer's head is not a 40-hex commit"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  consumer-check:
+    name: Consumer check
+    needs: [changes, rust-cli, consumer-pin]
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]'
+      && needs.changes.outputs.consumer == 'true'
+      && needs.rust-cli.result == 'success'
+      && needs.consumer-pin.result == 'success'
     uses: ./.github/workflows/consumer-canary.yml
     permissions:
       actions: read
@@ -2855,7 +2924,8 @@ jobs:
     with:
       source_revision: ${{ github.sha }}
       pull_request_cli_run: ${{ github.run_id }}
-      pull_request_base: ${{ github.event.pull_request.base.sha }}
+      pull_request_base: ${{ needs.changes.outputs.pull_request_base }}
+      consumer_revision: ${{ needs.consumer-pin.outputs.sha }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -2866,7 +2936,7 @@ jobs:
   # names its own reason; a measured fail is never retried.
   consumer-check-retry:
     name: Consumer check retry
-    needs: [consumer-check]
+    needs: [changes, consumer-pin, consumer-check]
     if: >-
       !cancelled()
       && (needs.consumer-check.result == 'failure' || needs.consumer-check.result == 'cancelled')
@@ -2878,7 +2948,8 @@ jobs:
     with:
       source_revision: ${{ github.sha }}
       pull_request_cli_run: ${{ github.run_id }}
-      pull_request_base: ${{ github.event.pull_request.base.sha }}
+      pull_request_base: ${{ needs.changes.outputs.pull_request_base }}
+      consumer_revision: ${{ needs.consumer-pin.outputs.sha }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -2899,14 +2970,16 @@ jobs:
       actions: read
       contents: read
     env:
-      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      BASE_SHA: ${{ needs.changes.outputs.pull_request_base }}
+      # The CLI's embedded source revision; the workflow default names this run's merge commit.
+      HARN_BUILD_REVISION: ${{ needs.changes.outputs.pull_request_base }}
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: github-hosted
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ needs.changes.outputs.pull_request_base }}
           fetch-depth: 1
           persist-credentials: false
       - name: Find the merge group's CLI for the base
@@ -2964,11 +3037,16 @@ jobs:
           ./scripts/ci/rust_artifact.sh build-cli
           "$RUNNER_TEMP/harn-cli.tar.zst"
           "$BASE_SHA"
+      # With `archive: false` the artifact takes the file's name and ignores
+      # `name`, so a file left as harn-cli.tar.zst duplicates the pull
+      # request's CLI artifact and the consumer can select neither.
+      - name: Name the base's Harn CLI
+        run: mv "$RUNNER_TEMP/harn-cli.tar.zst" "$RUNNER_TEMP/harn-base-cli.tar.zst"
       - name: Upload the base's Harn CLI
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-base-cli.tar.zst
-          path: ${{ runner.temp }}/harn-cli.tar.zst
+          path: ${{ runner.temp }}/harn-base-cli.tar.zst
           archive: false
           if-no-files-found: error
           retention-days: 1
@@ -2977,16 +3055,17 @@ jobs:
   # either caused by this change (base passes) or inherited (base fails too).
   consumer-base-check:
     name: Consumer base check
-    needs: [consumer-check, consumer-base-cli]
+    needs: [changes, consumer-pin, consumer-check, consumer-base-cli]
     if: ${{ !cancelled() && needs.consumer-base-cli.result == 'success' }}
     uses: ./.github/workflows/consumer-canary.yml
     permissions:
       actions: read
       contents: read
     with:
-      source_revision: ${{ github.event.pull_request.base.sha }}
+      source_revision: ${{ needs.changes.outputs.pull_request_base }}
       pull_request_cli_run: ${{ github.run_id }}
-      pull_request_base: ${{ github.event.pull_request.base.sha }}
+      pull_request_base: ${{ needs.changes.outputs.pull_request_base }}
+      consumer_revision: ${{ needs.consumer-pin.outputs.sha }}
       pull_request_cli_artifact: harn-base-cli.tar.zst
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
@@ -2995,7 +3074,7 @@ jobs:
 
   consumer-base-check-retry:
     name: Consumer base check retry
-    needs: [consumer-base-check]
+    needs: [changes, consumer-pin, consumer-base-check]
     if: >-
       !cancelled()
       && (needs.consumer-base-check.result == 'failure' || needs.consumer-base-check.result == 'cancelled')
@@ -3005,9 +3084,10 @@ jobs:
       actions: read
       contents: read
     with:
-      source_revision: ${{ github.event.pull_request.base.sha }}
+      source_revision: ${{ needs.changes.outputs.pull_request_base }}
       pull_request_cli_run: ${{ github.run_id }}
-      pull_request_base: ${{ github.event.pull_request.base.sha }}
+      pull_request_base: ${{ needs.changes.outputs.pull_request_base }}
+      consumer_revision: ${{ needs.consumer-pin.outputs.sha }}
       pull_request_cli_artifact: harn-base-cli.tar.zst
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
@@ -3094,6 +3174,11 @@ jobs:
         setup-harn-action,
       ]
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci/consumer_verdict.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Verify required CI jobs
         env:
           RELEASE_CONTRACT_EXPECTED: ${{ github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true' }}
@@ -3116,11 +3201,13 @@ jobs:
           CONSUMER_BASE_CLI_RESULT: ${{ needs.consumer-base-cli.result }}
           CONSUMER_BASE_RESULT: ${{ needs.consumer-base-check.result }}/${{ needs.consumer-base-check-retry.result }}
           CONSUMER_BASE_VERDICT: ${{ needs.consumer-base-check.outputs.verdict || needs.consumer-base-check-retry.outputs.verdict }}
-          CONSUMER_BASE: ${{ github.event.pull_request.base.sha }}
+          CONSUMER_BASE: ${{ needs.changes.outputs.pull_request_base }}
           CONSUMER_RUN: ${{ needs.consumer-check.outputs.verdict && needs.consumer-check.outputs.consumer_run || needs.consumer-check-retry.outputs.consumer_run }}
           CONSUMER_BASE_RUN: ${{ needs.consumer-base-check.outputs.verdict && needs.consumer-base-check.outputs.consumer_run || needs.consumer-base-check-retry.outputs.consumer_run }}
           CONSUMER_IDENTITY: ${{ needs.consumer-check.outputs.verdict && format('{0}/{1}', needs.consumer-check.outputs.consumer_head, needs.consumer-check.outputs.consumer_jobs) || format('{0}/{1}', needs.consumer-check-retry.outputs.consumer_head, needs.consumer-check-retry.outputs.consumer_jobs) }}
           CONSUMER_BASE_IDENTITY: ${{ needs.consumer-base-check.outputs.verdict && format('{0}/{1}', needs.consumer-base-check.outputs.consumer_head, needs.consumer-base-check.outputs.consumer_jobs) || format('{0}/{1}', needs.consumer-base-check-retry.outputs.consumer_head, needs.consumer-base-check-retry.outputs.consumer_jobs) }}
+          CONSUMER_FAILURES: ${{ needs.consumer-check.outputs.verdict && needs.consumer-check.outputs.consumer_failures || needs.consumer-check-retry.outputs.consumer_failures }}
+          CONSUMER_BASE_FAILURES: ${{ needs.consumer-base-check.outputs.verdict && needs.consumer-base-check.outputs.consumer_failures || needs.consumer-base-check-retry.outputs.consumer_failures }}
           CONSUMER_REASONS: first=${{ needs.consumer-check.outputs.reason || 'none' }} retry=${{ needs.consumer-check-retry.outputs.reason || 'none' }}
           CONSUMER_BASE_REASONS: first=${{ needs.consumer-base-check.outputs.reason || 'none' }} retry=${{ needs.consumer-base-check-retry.outputs.reason || 'none' }}
           # Flip to true once the consumer's runner capacity stops saturating;
@@ -3256,49 +3343,9 @@ jobs:
           require_result "$rust_cli_result" \
             "Shared Harn CLI build failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
-          # The downstream consumer, when expected: a fail the base passes, on
-          # the same consumer commit and job set, blocks. A fail the base shares
-          # is inherited. An outcome still unmeasured after one retry, or a pair
-          # whose consumer commit or jobs differ, is unproven: a named warning
-          # until CONSUMER_UNMEASURED_BLOCKS flips it to blocking.
-          consumer_unmeasured() {
-            local message="consumer check UNMEASURED: $1"
-            echo "- $message" >> "$GITHUB_STEP_SUMMARY"
-            if [ "$CONSUMER_UNMEASURED_BLOCKS" = "true" ]; then
-              echo "::error::$message"
-              exit 1
-            fi
-            echo "::warning::$message"
-          }
-          echo "Downstream consumer: result=$CONSUMER_RESULT verdict=${CONSUMER_VERDICT:-none} (expected=$CONSUMER_EXPECTED)"
-          if [ "$CONSUMER_EXPECTED" != "true" ]; then
-            require_result "${CONSUMER_RESULT%%/*}" "Downstream consumer check ran without being expected and did not pass." true
-          else
-            case "$CONSUMER_VERDICT" in
-              pass) ;;
-              fail)
-                echo "Downstream consumer at base $CONSUMER_BASE: base CLI=$CONSUMER_BASE_CLI_RESULT result=$CONSUMER_BASE_RESULT verdict=${CONSUMER_BASE_VERDICT:-none}"
-                same_head=false
-                same_jobs=false
-                [ "${CONSUMER_IDENTITY%%/*}" != "" ] && [ "${CONSUMER_IDENTITY%%/*}" = "${CONSUMER_BASE_IDENTITY%%/*}" ] && same_head=true
-                [ "${CONSUMER_IDENTITY#*/}" != "" ] && [ "${CONSUMER_IDENTITY#*/}" = "${CONSUMER_BASE_IDENTITY#*/}" ] && same_jobs=true
-                case "$CONSUMER_BASE_VERDICT" in
-                  pass|fail)
-                    if [ "$same_head" != "true" ] || [ "$same_jobs" != "true" ]; then
-                      consumer_unmeasured "consumer_identity_mismatch (runs $CONSUMER_RUN and $CONSUMER_BASE_RUN, same commit=$same_head, same jobs=$same_jobs)"
-                    elif [ "$CONSUMER_BASE_VERDICT" = "fail" ]; then
-                      echo "::notice::Downstream consumer red is inherited: consumer run $CONSUMER_RUN fails here and consumer run $CONSUMER_BASE_RUN fails at base $CONSUMER_BASE on the same consumer commit, so it does not block this pull request."
-                    else
-                      echo "::error::Downstream consumer run $CONSUMER_RUN fails with this change and consumer run $CONSUMER_BASE_RUN passes at base $CONSUMER_BASE on the same consumer commit."
-                      exit 1
-                    fi
-                    ;;
-                  *) consumer_unmeasured "base_unmeasured ($CONSUMER_BASE_REASONS, base CLI=$CONSUMER_BASE_CLI_RESULT)" ;;
-                esac
-                ;;
-              *) consumer_unmeasured "consumer_unmeasured ($CONSUMER_REASONS)" ;;
-            esac
-          fi
+          # A measured consumer fail is inherited only when the base measured
+          # the same failure; scripts/ci/consumer_verdict.sh owns the rule.
+          bash scripts/ci/consumer_verdict.sh || exit 1
 
           case "$PROVIDER_CONTRACT_PROBE_EXPECTED" in
             true|false) ;;
@@ -3370,8 +3417,8 @@ jobs:
           audit_scripts_result="${{ needs['audit-scripts'].result }}"
           echo "Repository policy checks: $audit_scripts_result"
           require_result "$audit_scripts_result" \
-            "Repository policy checks failed or skipped on a Rust-changing main push." \
-            test "${EVENT_NAME}:${GIT_REF}:${RUST_PATHS_SELECTED}" != "push:refs/heads/main:true"
+            "Repository policy checks failed or skipped while Rust proof was required." \
+            [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           # The one Windows admission check. A merge-group candidate must
           # produce a success; a skip there is a failure. On a Rust-changing

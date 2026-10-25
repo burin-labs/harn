@@ -159,7 +159,17 @@ impl AcpServer {
             return;
         };
 
+        // Stop admitting delivery prompts before sweeping the pending ones, so
+        // a prompt racing this close is refused with an error. Held until the
+        // close ends: on failure the session stays open and admits again.
+        let _closed = self
+            .concurrent_controls
+            .pending_prompts
+            .close_delivery(session_id);
         session.cancellation.cancel();
+        self.concurrent_controls
+            .cancel_pending_prompts(session_id, "session_closed", &self.output)
+            .await;
         if let Err(error) = self.clear_active_prompt_transport(session_id).await {
             self.send_error(
                 id,
@@ -208,98 +218,6 @@ impl AcpServer {
         self.send_response(id, serde_json::json!({}));
     }
 
-    pub(super) async fn handle_session_inject(
-        &mut self,
-        id: &serde_json::Value,
-        params: &serde_json::Value,
-    ) {
-        let Some(session_id) = session_id_param(params) else {
-            self.send_error(id, -32602, "session/inject requires sessionId");
-            return;
-        };
-        let Some(inject_state) = self.session_inject_state(id, params, "session/inject", true)
-        else {
-            return;
-        };
-        let actor = control_actor_from_params(params);
-        let mode = match bridge_mode_for_session_inject(params) {
-            Ok(mode) => mode,
-            Err(message) => {
-                self.send_error(id, -32602, &message);
-                self.emit_control_outcome(
-                    &session_id,
-                    "session/inject",
-                    "rejected",
-                    "rejected",
-                    actor,
-                    serde_json::json!({"sessionId": session_id}),
-                    Some("invalid_mode"),
-                );
-                return;
-            }
-        };
-        let (content, transcript_content) =
-            match normalize_session_inject_content("session/inject", params) {
-                Ok(content) => content,
-                Err(message) => {
-                    self.send_error(id, -32602, &message);
-                    self.emit_control_outcome(
-                        &session_id,
-                        "session/inject",
-                        "rejected",
-                        "rejected",
-                        actor,
-                        serde_json::json!({"sessionId": session_id}),
-                        Some("invalid_content"),
-                    );
-                    return;
-                }
-            };
-        let goal = match session_inject_goal(params, mode) {
-            Ok(goal) => goal,
-            Err(message) => {
-                self.send_error(id, -32602, &message);
-                self.emit_control_outcome(
-                    &session_id,
-                    "session/inject",
-                    "rejected",
-                    "rejected",
-                    actor,
-                    serde_json::json!({"sessionId": session_id}),
-                    Some("invalid_goal"),
-                );
-                return;
-            }
-        };
-        // The caller's word, before `bridge_mode_for_session_inject`
-        // normalized it onto a delivery checkpoint.
-        let requested_mode = params
-            .get("mode")
-            .and_then(|value| value.as_str())
-            .unwrap_or(mode)
-            .to_string();
-        match self
-            .concurrent_controls
-            .enqueue_injection(
-                &session_id,
-                &inject_state,
-                params,
-                InjectionCommand {
-                    content,
-                    transcript_content,
-                    mode: mode.to_owned(),
-                    requested_mode,
-                    goal,
-                    actor,
-                },
-            )
-            .await
-        {
-            Ok(result) => self.send_response(id, result),
-            Err(error) => self.send_error(id, error.rpc_code(), error.message()),
-        }
-    }
-
     pub(super) async fn clear_active_prompt_transport(
         &mut self,
         session_id: &str,
@@ -315,18 +233,11 @@ impl AcpServer {
         if let Some((owner, inject_state)) = closing {
             if let Some(task) = owner.task() {
                 for message in inject_state.revoke_task_user_messages(&task.task_id).await {
-                    let actor = self
-                        .concurrent_controls
-                        .inject_owner(session_id, &message.message_id)
-                        .unwrap_or(serde_json::Value::Null);
-                    self.emit_control_outcome(
+                    self.concurrent_controls.fail_pending_prompt(
                         session_id,
-                        "session/revoke_inject",
-                        "revoked",
-                        "accepted",
-                        actor,
-                        serde_json::json!({"sessionId":session_id,"messageId":message.message_id}),
-                        Some("task_prompt_ended"),
+                        &message.message_id,
+                        "task_prompt_ended",
+                        &self.output,
                     );
                 }
             }
@@ -342,264 +253,11 @@ impl AcpServer {
         flush_result
     }
 
-    pub(super) async fn handle_session_revoke_inject(
-        &mut self,
-        id: &serde_json::Value,
-        params: &serde_json::Value,
-    ) {
-        let Some(session_id) = session_id_param(params) else {
-            self.send_error(id, -32602, "session/revoke_inject requires sessionId");
-            return;
-        };
-        let Some(inject_state) =
-            self.session_inject_state(id, params, "session/revoke_inject", false)
-        else {
-            return;
-        };
-        let Some(message_id) =
-            self.pending_inject_message_id_param(id, params, "session/revoke_inject")
-        else {
-            return;
-        };
-        let actor = control_actor_from_params(params);
-        if let Some(owner) = self
-            .concurrent_controls
-            .inject_owner(&session_id, message_id)
-        {
-            if owner != actor && !actor_is_host_owner(&actor) {
-                self.send_pending_inject_error_with_data(
-                    id,
-                    message_id,
-                    "not_owner_or_not_authorized",
-                    "pending inject is owned by another ACP actor",
-                    serde_json::json!({
-                        "actor": actor,
-                        "owner": owner,
-                    }),
-                );
-                self.emit_control_outcome(
-                    &session_id,
-                    "session/revoke_inject",
-                    "rejected",
-                    "rejected",
-                    control_actor_from_params(params),
-                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
-                    Some("not_owner_or_not_authorized"),
-                );
-                return;
-            }
-        }
-        match inject_state.revoke_pending_user_message(message_id).await {
-            harn_vm::bridge::PendingUserMessageMutationResult::Mutated => {
-                self.emit_control_outcome(
-                    &session_id,
-                    "session/revoke_inject",
-                    "revoked",
-                    "accepted",
-                    actor.clone(),
-                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
-                    None,
-                );
-                self.send_response(
-                    id,
-                    serde_json::json!({"messageId": message_id, "status": "revoked"}),
-                );
-            }
-            harn_vm::bridge::PendingUserMessageMutationResult::AlreadyRevoked => {
-                self.emit_control_outcome(
-                    &session_id,
-                    "session/revoke_inject",
-                    "already_revoked",
-                    "idempotent",
-                    actor.clone(),
-                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
-                    None,
-                );
-                self.send_response(
-                    id,
-                    serde_json::json!({"messageId": message_id, "status": "already_revoked"}),
-                );
-            }
-            harn_vm::bridge::PendingUserMessageMutationResult::AlreadyDelivered => {
-                self.emit_control_outcome(
-                    &session_id,
-                    "session/revoke_inject",
-                    "already_delivered",
-                    "rejected",
-                    actor,
-                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
-                    Some("already_delivered"),
-                );
-                self.send_pending_inject_error(
-                    id,
-                    message_id,
-                    "already_delivered",
-                    "pending inject already delivered",
-                );
-            }
-            harn_vm::bridge::PendingUserMessageMutationResult::UnknownMessageId => {
-                self.emit_control_outcome(
-                    &session_id,
-                    "session/revoke_inject",
-                    "unknown_message_id",
-                    "rejected",
-                    actor,
-                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
-                    Some("unknown_message_id"),
-                );
-                self.send_pending_inject_error(
-                    id,
-                    message_id,
-                    "unknown_message_id",
-                    "unknown pending inject messageId",
-                );
-            }
-        }
-    }
-
-    pub(super) async fn handle_session_replace_inject(
-        &mut self,
-        id: &serde_json::Value,
-        params: &serde_json::Value,
-    ) {
-        let Some(session_id) = session_id_param(params) else {
-            self.send_error(id, -32602, "session/replace_inject requires sessionId");
-            return;
-        };
-        let Some(inject_state) =
-            self.session_inject_state(id, params, "session/replace_inject", false)
-        else {
-            return;
-        };
-        let Some(message_id) =
-            self.pending_inject_message_id_param(id, params, "session/replace_inject")
-        else {
-            return;
-        };
-        let actor = control_actor_from_params(params);
-        if let Some(owner) = self
-            .concurrent_controls
-            .inject_owner(&session_id, message_id)
-        {
-            if owner != actor && !actor_is_host_owner(&actor) {
-                self.send_pending_inject_error_with_data(
-                    id,
-                    message_id,
-                    "not_owner_or_not_authorized",
-                    "pending inject is owned by another ACP actor",
-                    serde_json::json!({
-                        "actor": actor,
-                        "owner": owner,
-                    }),
-                );
-                self.emit_control_outcome(
-                    &session_id,
-                    "session/replace_inject",
-                    "rejected",
-                    "rejected",
-                    control_actor_from_params(params),
-                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
-                    Some("not_owner_or_not_authorized"),
-                );
-                return;
-            }
-        }
-        let (content, transcript_content) =
-            match normalize_session_inject_content("session/replace_inject", params) {
-                Ok(content) => content,
-                Err(message) => {
-                    self.send_error(id, -32602, &message);
-                    self.emit_control_outcome(
-                        &session_id,
-                        "session/replace_inject",
-                        "rejected",
-                        "rejected",
-                        actor,
-                        serde_json::json!({"sessionId": session_id, "messageId": message_id}),
-                        Some("invalid_content"),
-                    );
-                    return;
-                }
-            };
-        match inject_state
-            .replace_pending_user_message(message_id, content, transcript_content)
-            .await
-        {
-            harn_vm::bridge::PendingUserMessageMutationResult::Mutated => {
-                self.emit_control_outcome(
-                    &session_id,
-                    "session/replace_inject",
-                    "replaced",
-                    "accepted",
-                    actor.clone(),
-                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
-                    None,
-                );
-                self.send_response(
-                    id,
-                    serde_json::json!({ "messageId": message_id, "status": "replaced" }),
-                );
-            }
-            harn_vm::bridge::PendingUserMessageMutationResult::AlreadyRevoked => {
-                self.emit_control_outcome(
-                    &session_id,
-                    "session/replace_inject",
-                    "already_revoked",
-                    "rejected",
-                    actor,
-                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
-                    Some("already_revoked"),
-                );
-                self.send_pending_inject_error(
-                    id,
-                    message_id,
-                    "already_revoked",
-                    "pending inject already revoked",
-                );
-            }
-            harn_vm::bridge::PendingUserMessageMutationResult::AlreadyDelivered => {
-                self.emit_control_outcome(
-                    &session_id,
-                    "session/replace_inject",
-                    "already_delivered",
-                    "rejected",
-                    actor,
-                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
-                    Some("already_delivered"),
-                );
-                self.send_pending_inject_error(
-                    id,
-                    message_id,
-                    "already_delivered",
-                    "pending inject already delivered",
-                );
-            }
-            harn_vm::bridge::PendingUserMessageMutationResult::UnknownMessageId => {
-                self.emit_control_outcome(
-                    &session_id,
-                    "session/replace_inject",
-                    "unknown_message_id",
-                    "rejected",
-                    actor,
-                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
-                    Some("unknown_message_id"),
-                );
-                self.send_pending_inject_error(
-                    id,
-                    message_id,
-                    "unknown_message_id",
-                    "unknown pending inject messageId",
-                );
-            }
-        }
-    }
-
     pub(super) fn session_inject_state(
         &self,
         id: &serde_json::Value,
         params: &serde_json::Value,
         method: &str,
-        require_active_prompt: bool,
     ) -> Option<harn_vm::bridge::HostBridgeInjectionState> {
         let Some(session_id) = params.get("sessionId").and_then(|v| v.as_str()) else {
             self.send_error(id, -32602, &format!("{method} requires sessionId"));
@@ -609,36 +267,7 @@ impl AcpServer {
             self.send_error(id, -32004, &format!("Session not found: {session_id}"));
             return None;
         };
-        if require_active_prompt && session.host_bridge.is_none() {
-            self.send_error(
-                id,
-                -32004,
-                &format!("Session has no active prompt: {session_id}"),
-            );
-            return None;
-        }
         Some(session.inject_state.clone())
-    }
-
-    pub(super) fn pending_inject_message_id_param<'a>(
-        &self,
-        id: &serde_json::Value,
-        params: &'a serde_json::Value,
-        method: &str,
-    ) -> Option<&'a str> {
-        let Some(message_id) = params.get("messageId").and_then(|v| v.as_str()) else {
-            self.send_error(id, -32602, &format!("{method} requires messageId"));
-            return None;
-        };
-        if message_id.trim().is_empty() {
-            self.send_error(
-                id,
-                -32602,
-                &format!("{method} requires non-empty messageId"),
-            );
-            return None;
-        }
-        Some(message_id)
     }
 
     pub(super) fn pending_reminder_id_param<'a>(
@@ -664,41 +293,6 @@ impl AcpServer {
             return None;
         }
         Some(reminder_id)
-    }
-
-    pub(super) fn send_pending_inject_error(
-        &self,
-        id: &serde_json::Value,
-        message_id: &str,
-        reason: &str,
-        message: &str,
-    ) {
-        self.send_pending_inject_error_with_data(
-            id,
-            message_id,
-            reason,
-            message,
-            serde_json::Value::Null,
-        );
-    }
-
-    pub(super) fn send_pending_inject_error_with_data(
-        &self,
-        id: &serde_json::Value,
-        message_id: &str,
-        reason: &str,
-        message: &str,
-        extra: serde_json::Value,
-    ) {
-        let mut data = serde_json::Map::new();
-        data.insert("reason".to_string(), serde_json::json!(reason));
-        data.insert("messageId".to_string(), serde_json::json!(message_id));
-        if let Some(extra) = extra.as_object() {
-            for (key, value) in extra {
-                data.insert(key.clone(), value.clone());
-            }
-        }
-        self.send_error_with_data(id, -32602, message, serde_json::Value::Object(data));
     }
 
     pub(super) fn send_pending_reminder_error(
@@ -764,26 +358,12 @@ impl AcpServer {
         }
     }
 
-    pub(super) async fn handle_session_pending_injections(
-        &self,
-        id: &serde_json::Value,
-        params: &serde_json::Value,
-    ) {
-        let Some(inject_state) =
-            self.session_inject_state(id, params, "session/pending_injections", false)
-        else {
-            return;
-        };
-        self.send_response(id, inject_state.pending_injections_json().await);
-    }
-
     pub(super) async fn handle_session_revoke_reminder(
         &self,
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) {
-        let Some(inject_state) =
-            self.session_inject_state(id, params, "session/revoke_reminder", false)
+        let Some(inject_state) = self.session_inject_state(id, params, "session/revoke_reminder")
         else {
             return;
         };

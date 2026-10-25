@@ -80,10 +80,26 @@ struct StopOnHeartbeat {
     cancelled_at: Mutex<Option<Instant>>,
     /// When the loop reported the stopped call's terminal update.
     call_ended_at: Mutex<Option<Instant>>,
+    /// Every terminal output of the call, so a failure says what it returned.
+    call_outputs: Mutex<Vec<String>>,
 }
 
 impl AgentEventSink for StopOnHeartbeat {
     fn handle_event(&self, event: &AgentEvent) {
+        if let AgentEvent::ToolCallUpdate {
+            tool_call_id,
+            error,
+            raw_output: Some(raw_output),
+            ..
+        } = event
+        {
+            if tool_call_id == CALL {
+                self.call_outputs
+                    .lock()
+                    .unwrap()
+                    .push(format!("{raw_output:?} error={error:?}"));
+            }
+        }
         if let AgentEvent::ToolCallUpdate {
             tool_call_id,
             error: Some(_),
@@ -131,16 +147,22 @@ fn script(root: &str) -> String {
             r#"harness.code_index.rename_symbol({{symbol_ref: {{name: "Reading", path: "src/reading.rs", kind: "Type"}}, new_name: "Measurement", scope: "workspace", {extra}}})"#
         )
     };
-    let in_tool = rename(r#"backend: "auto""#);
+    // Both calls name the language server, so a server that cannot start
+    // reports why instead of falling back and writing.
+    let in_tool = rename(r#"backend: "language_server""#);
     let refused = rename(r#"backend: "language_server", deadline_ms: 300"#);
     format!(
         r#"import {{ agent_loop }} from "std/agent/loop"
+import {{ agent_tool_handler_result }} from "std/agent/tool_lifecycle"
 pipeline main(harness: Harness, _: unknown) {{
   harness.code_index.rebuild({{root: "{root}"}})
   harness.tools.clear_hooks()
   const tools = tool_define(tool_registry(), "rename_tool", "Rename Reading to Measurement.", {{
     parameters: {{}},
-    handler: {{ _args -> return {in_tool} }},
+    handler: {{ _args ->
+      const renamed = {in_tool}
+      return agent_tool_handler_result(json_stringify(renamed), renamed)
+    }},
   }})
   const counter = harness.runtime.shared_cell({{scope: "task_group", key: "rename-interrupt", initial: 0}})
   const mock_llm = {{ _call ->
@@ -182,15 +204,18 @@ fn stopping_one_tool_call_stops_a_waiting_rename_without_writes() {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     }
-    // The process sandbox lets a tool start programs from installed toolchain
-    // paths or the workspace, not from an unrelated temporary directory, so
-    // the stand-in server lives in a hidden directory inside the workspace.
+    // A hidden directory keeps the stand-in server out of the snapshot.
     let program = workspace.path().join(".fake-server/rust-analyzer");
     fs::create_dir_all(program.parent().unwrap()).unwrap();
     fs::write(&program, NEVER_QUIESCENT).unwrap();
     fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
     // SAFETY: set before any thread of this test binary reads the variable.
     unsafe { std::env::set_var("HARN_LSP_SERVER_RUST_ANALYZER", &program) };
+    // This test proves that a stop reaches the rename through the agent loop,
+    // not how OS confinement treats a language server, so a host without a
+    // process sandbox must still start the stand-in.
+    // SAFETY: as above.
+    unsafe { std::env::set_var("HARN_HANDLER_SANDBOX", "off") };
     // The agent loop confines tools to the working directory's workspace.
     std::env::set_current_dir(workspace.path()).unwrap();
     let before = snapshot(workspace.path());
@@ -214,11 +239,21 @@ fn stopping_one_tool_call_stops_a_waiting_rename_without_writes() {
             harn_vm::stdlib::process::set_session_environment(Some(
                 harn_vm::security::SessionEnvironment::inherited(),
             ));
+            // A host installs its policy before the loop runs. Without one, a
+            // top-level loop requires OS confinement, which refuses to start
+            // any program on a host without a process sandbox.
+            harn_vm::orchestration::push_execution_policy(
+                harn_vm::orchestration::CapabilityPolicy {
+                    sandbox_profile: harn_vm::orchestration::SandboxProfile::Worktree,
+                    ..Default::default()
+                },
+            );
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             let _ = harn_hostlib::install_default(&mut vm);
             vm.set_harness(harn_vm::Harness::real());
             let result = vm.execute(&chunk).await;
+            harn_vm::orchestration::pop_execution_policy();
             harn_vm::stdlib::process::set_session_environment(None);
             harn_vm::llm::clear_current_host_bridge();
             result.expect("script runs");
@@ -232,6 +267,11 @@ fn stopping_one_tool_call_stops_a_waiting_rename_without_writes() {
         .lines()
         .filter_map(|line| line.strip_prefix("[harn] "))
         .collect();
+    eprintln!(
+        "lines {lines:?}\nphases {:?}\ncall outputs {:?}",
+        sink.phases.lock().unwrap(),
+        sink.call_outputs.lock().unwrap()
+    );
     let cancelled_at = sink
         .cancelled_at
         .lock()

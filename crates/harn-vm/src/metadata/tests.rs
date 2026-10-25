@@ -1,6 +1,104 @@
 use super::*;
 
 #[test]
+fn failed_hash_refresh_preserves_all_previous_classifications() {
+    let base = temp_path("failed-refresh");
+    std::fs::create_dir(base.path().join("a-valid")).unwrap();
+    let stored = compute_structure_hash(&base.path().join("a-valid")).unwrap();
+    let mut state = MetadataState::new(base.path());
+    for dir in ["a-valid", "z\0unreadable"] {
+        state.set_namespace(
+            dir,
+            "classification",
+            BTreeMap::from([("structureHash".into(), serde_json::json!(stored))]),
+        );
+    }
+    assert_eq!(
+        metadata_inspect_stale_flags(base.path(), "a-valid", &state.entries["a-valid"]),
+        (false, false)
+    );
+    std::fs::write(base.path().join("a-valid/new.txt"), b"changed").unwrap();
+    assert_ne!(
+        compute_structure_hash(&base.path().join("a-valid")).unwrap(),
+        stored
+    );
+    state.dirty = false;
+    assert!(refresh_metadata_hashes(&mut state).is_err());
+    assert!(!state.dirty);
+    for dir in ["a-valid", "z\0unreadable"] {
+        assert_eq!(
+            classification_string(&state.entries[dir], "structureHash").as_deref(),
+            Some(stored.as_str())
+        );
+    }
+    let stale = metadata_stale_value(&state, base.path());
+    assert!(matches!(
+        stale.as_dict().unwrap()["any_stale"],
+        VmValue::Bool(true)
+    ));
+    let VmValue::List(directories) = &stale.as_dict().unwrap()["tier1"] else {
+        panic!("stale directory inventory must be a list");
+    };
+    assert_eq!(
+        directories.iter().map(VmValue::display).collect::<Vec<_>>(),
+        ["a-valid", "z\0unreadable"]
+    );
+    let flags = metadata_inspect_stale_flags(
+        base.path(),
+        "z\0unreadable",
+        &state.entries["z\0unreadable"],
+    );
+    assert_eq!(flags, (true, true));
+}
+
+#[test]
+fn retired_directories_stay_stale_without_blocking_live_refreshes() {
+    for replaced_by_file in [false, true] {
+        let base = temp_path("retired-refresh");
+        for dir in ["gone", "live"] {
+            std::fs::create_dir(base.path().join(dir)).unwrap();
+        }
+        let stored = compute_structure_hash(&base.path().join("live")).unwrap();
+        let mut state = MetadataState::new(base.path());
+        for dir in ["gone", "live"] {
+            state.set_namespace(
+                dir,
+                "classification",
+                BTreeMap::from([("structureHash".into(), serde_json::json!(stored))]),
+            );
+        }
+        assert!(matches!(
+            metadata_stale_value(&state, base.path()).as_dict().unwrap()["any_stale"],
+            VmValue::Bool(false)
+        ));
+        std::fs::remove_dir(base.path().join("gone")).unwrap();
+        if replaced_by_file {
+            std::fs::write(base.path().join("gone"), b"replacement").unwrap();
+        }
+        std::fs::write(base.path().join("live/new.txt"), b"changed").unwrap();
+        let updated = compute_structure_hash(&base.path().join("live")).unwrap();
+        assert_ne!(updated, stored);
+        refresh_metadata_hashes(&mut state).unwrap();
+        assert_eq!(
+            classification_string(&state.entries["live"], "structureHash").as_deref(),
+            Some(updated.as_str())
+        );
+        assert_eq!(
+            classification_string(&state.entries["gone"], "structureHash").as_deref(),
+            Some(stored.as_str())
+        );
+        let stale = metadata_stale_value(&state, base.path());
+        let VmValue::List(directories) = &stale.as_dict().unwrap()["tier1"] else {
+            panic!("stale directory inventory must be a list");
+        };
+        assert_eq!(
+            directories.iter().map(VmValue::display).collect::<Vec<_>>(),
+            ["gone"]
+        );
+    }
+}
+
+#[test]
 fn scan_pattern_matching_globs_and_substrings() {
     // Historical recursive-scan form: `*` crosses directory separators.
     assert!(glob_match("*.rs", "src/nested/main.rs"));

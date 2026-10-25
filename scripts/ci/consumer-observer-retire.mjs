@@ -10,6 +10,10 @@ async function main() {
     throw new Error('CONSUMER_OBSERVER reason=candidate_event_unproven');
   }
   const result = await retireCandidateObservers(env.GH_TOKEN, event.number);
+  if (result.noop) {
+    console.log(`CONSUMER_OBSERVER retirement=none reason=${result.noop} nothing retired for pull request ${event.number}`);
+    return;
+  }
   console.log(`CONSUMER_OBSERVER retirement=measured ${Object.entries(result).map(([key,value])=>`${key}=${value}`).join(' ')}`);
   if (result.pending > 0 || result.refused > 0) process.exitCode = 1;
 }

@@ -49,20 +49,18 @@ type ACPAgentMethod string
 // ACPAgentMethods enumerates every wire value Harn currently emits for ACPAgentMethod.
 var ACPAgentMethods = []ACPAgentMethod{
 	"initialize",
-	"session/inject",
+	"$/cancel_request",
 	"session/inject_host_event",
 	"session/new",
 	"session/inputs",
 	"session/load",
-	"session/replace_inject",
 	"session/resume",
 	"session/prompt",
-	"session/revoke_inject",
+	"session/pending_prompts",
 	"session/truncate",
 	"session/rollback",
 	"session/redo",
 	"session/remind",
-	"session/pending_injections",
 	"session/revoke_reminder",
 	"session/cancel_tool_call",
 	"session/close",
@@ -125,6 +123,7 @@ var ACPSessionUpdates = []ACPSessionUpdate{
 	"skill_narrow",
 	"skill_scope_tools",
 	"stance_transition",
+	"state_update",
 	"tool_search_query",
 	"tool_search_result",
 	"transcript_compacted",
@@ -153,6 +152,7 @@ var HarnACPSessionUpdateExtensions = []HarnACPSessionUpdateExtension{
 	"skill_narrow",
 	"skill_scope_tools",
 	"stance_transition",
+	"state_update",
 	"tool_search_query",
 	"tool_search_result",
 	"transcript_compacted",
@@ -1493,6 +1493,22 @@ type ACPStanceTransitionUpdateMeta struct {
 type ACPStanceTransitionUpdate struct {
 	SessionUpdate string                        `json:"sessionUpdate"`
 	Meta          ACPStanceTransitionUpdateMeta `json:"_meta"`
+}
+
+type ACPStateUpdateMetaHarn struct {
+	Replayed *bool `json:"replayed,omitempty"`
+}
+
+type ACPStateUpdateMeta struct {
+	Harn *ACPStateUpdateMetaHarn `json:"harn,omitempty"`
+}
+
+type ACPStateUpdate struct {
+	SessionUpdate string              `json:"sessionUpdate"`
+	State         string              `json:"state"`
+	Meta          *ACPStateUpdateMeta `json:"_meta,omitempty"`
+	Error         json.RawMessage     `json:"error,omitempty"`
+	StopReason    *string             `json:"stopReason,omitempty"`
 }
 
 type ACPToolSearchQueryUpdateMetaHarn struct {

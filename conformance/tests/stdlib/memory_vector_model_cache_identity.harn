@@ -1,0 +1,15 @@
+fn main(harness: Harness) -> nil {
+  const root = path_join(harness.fs.workspace_temp_dir(), "model-cache-${harness.random.uuid()}")
+  defer {
+    harness.fs.delete(root)
+  }
+  harness.testing.respond("embed", "text_response", {vector: [1.0, 0.0], model: "ns/model"})
+  const first = harness.embed.text("same text", {root: root, model_hint: "ns/model"})
+  harness.testing.respond("embed", "text_response", {vector: [0.0, 1.0], model: "ns_model"})
+  const second = harness.embed.text("same text", {root: root, model_hint: "ns_model"})
+  require first.vector != second.vector, "distinct model hints must not share vectors"
+  require second.model == "ns_model", "the second embedding provider response must be reached"
+  const replay = harness.embed.text("same text", {root: root, model_hint: "ns/model"})
+  require replay.vector == first.vector, "the exact model/text pair remains cached"
+  harness.stdio.println("model hints retain distinct cached vectors")
+}

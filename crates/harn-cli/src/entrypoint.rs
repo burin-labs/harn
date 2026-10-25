@@ -310,6 +310,11 @@ async fn dispatch(subcommand: Command) {
                 command_error(&error);
             }
         }
+        Command::Signals(args) => {
+            if let Err(error) = commands::signals::run(args) {
+                command_error(&error);
+            }
+        }
         Command::Explain(args) => {
             let code = commands::explain::run_explain(&args).await;
             if code != 0 {

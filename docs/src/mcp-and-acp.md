@@ -679,12 +679,10 @@ The ACP server supports these JSON-RPC methods:
 | `session/resume` | Resume a live or loaded session without replay notifications |
 | `session/fork` | Fork an existing session into an independent branch |
 | `session/list` | List active sessions known to the ACP adapter |
-| `session/prompt` | Send a prompt to the agent for execution |
-| `session/inject` | Accept a pending user message for a running turn and return its `messageId` |
-| `session/revoke_inject` | Revoke a pending injected user message before delivery |
-| `session/replace_inject` | Replace pending injected content without changing its queue position |
+| `session/prompt` | Send a prompt to the agent for execution; with `delivery`, steer or queue it into a busy session |
+| `$/cancel_request` | Withdraw a delivery prompt that has not been inserted yet |
 | `session/remind` | Queue a typed system reminder for the active agent loop |
-| `session/pending_injections` | Inspect pending bridge user-message and reminder injections |
+| `session/pending_prompts` | List pending delivery prompts and reminders |
 | `session/revoke_reminder` | Revoke a pending bridge reminder before delivery |
 | `session/cancel` | Cancel the currently running prompt |
 | `session/cancel_tool_call` | Cancel one in-flight tool call without tearing down the session |
@@ -755,11 +753,10 @@ use.
 
 During `initialize`, Harn mirrors the public `agentCapabilities` object from
 upstream ACP: `loadSession`, `promptCapabilities`, `mcpCapabilities`,
-`session.inject`, and the canonical `sessionCapabilities.close` and
+and the canonical `sessionCapabilities.close` and
 `sessionCapabilities.list` flags are advertised in their upstream locations.
-Harn advertises
-`session.inject.modes = ["queue", "steer", "interrupt_immediate"]` and
-`session.inject.pending.replace = true`. Harn also advertises
+Harn advertises `promptCapabilities.delivery = {"steer": {}, "queue": {}}`
+and `session.pendingPrompts = {}`. Harn also advertises
 `session.remind.modes = ["interrupt_immediate", "finish_step", "audit_only"]`
 and `session.remind.pending = {list: true, revoke: true}` for host-side
 system-reminder queue controls. Harn advertises
@@ -1390,51 +1387,58 @@ host would otherwise render identically:
 A stop with a large `headroomUsd` means an estimate for the next call crossed
 the ceiling, not that the session spent it.
 
-### Queued user messages and reminders during agent execution
+### Steering and queueing prompts during agent execution
 
-ACP hosts can inject user follow-up messages while an agent is running.
-Harn owns the delivery semantics inside the runtime so product apps do
-not need to reimplement queue/orchestration logic. Clients call
-`session/inject`, which responds as soon as Harn accepts the pending message
-and returns an agent-owned `messageId`. Delivery is later echoed as a
-`session/update` notification with `sessionUpdate: "user_message"` and the
-same `messageId`. User-message methods remain user-role only; ambient or
-system-style context uses `session/remind`.
+Harn implements the ACP prompt delivery RFD. A `session/prompt` that carries
+`delivery` does not wait for the session to go idle:
 
-Relevant methods and notifications:
-
-- `session/inject`
-- `session/revoke_inject`
-- `session/replace_inject`
-- `session/remind`
-- `session/pending_injections`
-- `session/revoke_reminder`
-- `session/update` with `worker_update` content for delegated worker lifecycle events
-
-Pending inject payload shape:
+- `steer` joins the running turn at its next safe point, after the current
+  tool batch.
+- `queue` starts a new turn after the running turn ends.
 
 ```json
-{
-  "sessionId": "sess_abc",
-  "mode": "steer",
-  "content": [
-    {
-      "type": "text",
-      "text": "Please stop editing that file and explain first."
-    }
-  ]
-}
+{"jsonrpc": "2.0", "id": 7, "method": "session/prompt",
+ "params": {"sessionId": "sess_abc", "delivery": "steer", "messageId": "m-7",
+            "prompt": [{"type": "text", "text": "Stop editing that file and explain first."}]}}
 ```
 
-`mode: "interrupt_immediate"` delivers at the next eligible checkpoint. If it
-arrives before tool dispatch, Harn skips the pending tool batch. `mode: "steer"`
-delivers at the next safe operation boundary. `mode: "queue"` delivers at
-end-of-interaction. While the message is pending, callers can revoke it with
-`session/revoke_inject` or replace only its content with
-`session/replace_inject`; replacement preserves the original `messageId`, mode,
-and queue position. Revoke is idempotent for known revoked ids. Revoke or
-replace after delivery returns an `already_delivered` error, and unknown ids
-return `unknown_message_id`.
+The response arrives when the message is inserted into the session, not when
+a turn ends. Its `messageId` matches the `user_message` session update that
+announced the insertion:
+
+```json
+{"jsonrpc": "2.0", "id": 7, "result": {"messageId": "m-7"}}
+```
+
+Rules:
+
+- An unknown `delivery` value is refused with `-32602` before anything is
+  queued.
+- A delivery prompt to an idle session starts a turn at once. A steer that no
+  turn takes before the running turn ends opens the next turn; every other
+  waiting steer joins that turn at its first checkpoint, in arrival order.
+  Queued prompts then each start their own turn.
+- A turn started by a delivery prompt has no request that spans it. Harn
+  reports it with `state_update` session updates: `{"state": "running"}` when
+  it starts and `{"state": "idle", "stopReason": ...}` when it ends. A failed
+  turn ends with `stopReason: "error"` and an `error` object.
+- `$/cancel_request` with `{"requestId": 7}` withdraws the prompt if it has
+  not been inserted: the request fails with `-32800` and no user message is
+  added. After insertion the request has already succeeded and the
+  cancellation has no effect.
+- `session/cancel` ends only the running turn. Pending steers then open the
+  next turn together and queued prompts follow, so a steer followed by
+  `session/cancel` delivers a message now.
+- `session/close` and a closed connection fail the connection's pending
+  delivery prompts with `-32800`; none is inserted.
+- `_meta.harn.goal` retargets the run as a steer lands. A queued prompt with a
+  goal is refused with `-32602`.
+- `session/pending_prompts` returns `{prompts, reminders}`: pending delivery
+  prompts with `messageId`, `delivery`, `prompt`, and `position`, then pending
+  reminders.
+
+User-role input goes through `session/prompt`; ambient or system-style
+context uses `session/remind`.
 
 Reminder payload shape:
 
@@ -1460,24 +1464,11 @@ Reminder `mode` values:
 - `finish_step`
 - `audit_only`
 
-Pending inject runtime behavior:
-
-- `interrupt_immediate`: drain at the next immediate checkpoint. If the message
-  arrives before tool dispatch, skip the pending tool batch and deliver the text
-  as a user message on the next model turn.
-- `steer`: deliver after the current operation finishes.
-- `queue`: deliver at the end of the current interaction.
-- Pending injects are session-scoped and survive `session/cancel` and
-  suspend/resume bridge replacement; clients that want to clear them should
-  revoke them before cancelling.
-- Pending, revoked, and pre-replacement content never enter transcript replay.
-  Replay shows only delivered `user_message` updates.
-
 Reminder runtime behavior:
 
 - `session/remind`: queues a typed system reminder instead of a user-role
   message. Malformed reminder payloads are rejected with `HARN-RMD-002`.
-  `session/inject` never creates reminders.
+  A delivery prompt never creates a reminder.
 - `interrupt_immediate`: drain at the next eligible bridge checkpoint,
   including `pre_tool_dispatch` when the reminder arrives between LLM output
   and tool dispatch.
@@ -1485,9 +1476,8 @@ Reminder runtime behavior:
   reminder on the next prompt build.
 - `audit_only`: drain at `loop_exit` for transcript audit only; no later model
   call sees it.
-- `session/pending_injections`: returns `{pendingCount, injections}` for the
-  bridge queue. Rows are FIFO ordered and include `kind: "user"` or
-  `kind: "reminder"` plus stable `messageId` / `reminderId` identifiers.
+- `session/pending_prompts`: lists pending reminders under `reminders`, in
+  delivery order, with stable `reminderId` identifiers.
 - `session/revoke_reminder`: removes a queued reminder by `reminderId` before
   a checkpoint drains it. Revoke is idempotent for known revoked ids; races
   after delivery return `already_delivered`, and unknown ids return
