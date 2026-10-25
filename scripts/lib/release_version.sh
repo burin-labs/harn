@@ -224,15 +224,17 @@ release_validate_retirement_request() {
 # green full-suite main-push CI run at the exact source, so the source CI run
 # decides and the producer's conclusion does not:
 #   source CI                              producer         verdict
-#   failure with a failed owning job       any terminal     retire (source_ci_failed)
+#   failure on a retried attempt (>= 2)    any terminal     retire (source_ci_failed)
+#   failure on attempt 1                   any              refuse: recovery still retries it
 #   success missing a full-suite job       any terminal     retire (source_ci_not_full_suite)
 #   success with every full-suite job      any terminal     refuse: promotable
 #   failure only in derived aggregates     any terminal     refuse: unmeasured
 #   not completed, or cancelled/skipped    any              refuse: unmeasured
 #   any                                    not completed    refuse: unmeasured
 # A failed producer under a green full suite stays refused: rerunning it can
-# still promote the source. A consumer rehearsal failure is the separate
-# promotion-run path. Publication absence is checked by the caller, including
+# still promote the source. Main CI recovery retries a first-attempt failure
+# once, so only a failure that survived that retry is persistent. A consumer
+# rehearsal failure is the separate promotion-run path. Publication absence is checked by the caller, including
 # again at the action boundary.
 release_unpromotable_source_observation() (
   set -euo pipefail
@@ -277,9 +279,9 @@ release_unpromotable_source_observation() (
     [$jobs[] | select(.conclusion == "failure" and
       .name != "CI status" and .name != "Release candidate verdict") | {id,name}] as $failed |
     [$full_suite[] as $name | select(any($jobs[]; .name == $name and .conclusion == "success") | not) | $name] as $missing |
-    (if $run.conclusion == "failure" and ($failed | length) > 0 then "source_ci_failed"
+    (if $run.conclusion == "failure" and ($failed | length) > 0 and $run.run_attempt >= 2 then "source_ci_failed"
      elif $run.conclusion == "success" and ($missing | length) > 0 then "source_ci_not_full_suite"
-     else error("source can still promote, or its CI failure is unmeasured") end) as $reason |
+     else error("source can still promote: green full suite, unretried failure, or unmeasured CI") end) as $reason |
     {run_id:$run.id,run_attempt:$run.run_attempt,observed:($jobs|length),pending:0,
       reason:$reason,failed_jobs:$failed,missing_full_suite_jobs:$missing}
   ' <<< "$pages")"

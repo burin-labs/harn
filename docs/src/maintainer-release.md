@@ -101,7 +101,8 @@ is refused. The planner decides from the source CI run's complete job census:
 
 | Source CI run | Candidate build | Decision |
 | --- | --- | --- |
-| Failed, with a failed owning job | Any terminal conclusion | Retire |
+| Failed with a failed owning job on attempt 2 or later | Any terminal conclusion | Retire |
+| Failed on attempt 1 | Any | Refuse: main CI recovery still retries it |
 | Succeeded without every full-suite job succeeding | Any terminal conclusion | Retire |
 | Succeeded with every full-suite job | Any terminal conclusion | Refuse: the source can still promote |
 | Failed only in derived aggregate jobs | Any | Refuse: unmeasured |
@@ -109,7 +110,8 @@ is refused. The planner decides from the source CI run's complete job census:
 | Any | Not completed | Refuse: unmeasured |
 
 A failed candidate build under a green full suite is refused because rerunning
-the build can still promote the source. The full-suite job list lives in
+the build can still promote the source. Main CI recovery reruns a first-attempt
+failure once, so only a failure that survives that retry is persistent. The full-suite job list lives in
 `scripts/lib/full_suite_jobs.sh`, shared with the promotion gate.
 
 The planner also requires exact source identity, main ancestry and the merged

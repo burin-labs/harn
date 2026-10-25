@@ -77,6 +77,9 @@ if [[ "$1 $2" == 'pr create' ]]; then
 fi
 if [[ "$1 $2" == 'pr edit' ]]; then exit 0; fi
 [[ "$1" == api ]] || exit 2
+# Main CI retries a first-attempt failure once, so the persistent failure is attempt 2.
+CI_ATTEMPT=2; [[ "${MUTATION:-}" != ci_first_attempt_failure ]] || CI_ATTEMPT=1
+export CI_ATTEMPT
 for arg in "$@"; do [[ "$arg" != repos/* ]] || endpoint="$arg"; done
 case "${endpoint:?}" in
   */pulls\?state=closed\&head=example:release/v1.2.4\&*)
@@ -118,7 +121,7 @@ case "${endpoint:?}" in
     jq -n --arg sha "$RETIRE_SOURCE_SHA" --arg mutation "${MUTATION:-}" '
       {id:11,repository:{full_name:"example/harn"},head_repository:{full_name:"example/harn"},
        path:".github/workflows/ci.yml",event:"push",head_branch:"main",status:"completed",
-       conclusion:"failure",head_sha:$sha,run_attempt:1} |
+       conclusion:"failure",head_sha:$sha,run_attempt:($ENV.CI_ATTEMPT|tonumber)} |
       if $mutation == "ci_success" or $mutation == "ci_success_producer_failed" or
         $mutation == "ci_success_missing_family" then .conclusion="success"
       elif $mutation == "ci_cancelled" then .conclusion="cancelled"
@@ -131,21 +134,21 @@ case "${endpoint:?}" in
   */actions/runs/3/jobs\?*|*/actions/runs/11/jobs\?*)
     id="${endpoint#*/actions/runs/}"; id="${id%%/*}"
     jq -n --argjson id "$id" --arg mutation "${MUTATION:-}" '
-      [{total_count:2,jobs:[{id:($id*100),run_id:$id,run_attempt:1,name:"Owning check",
-        status:"completed",conclusion:"failure"},{id:($id*100+1),run_id:$id,run_attempt:1,
+      [{total_count:2,jobs:[{id:($id*100),run_id:$id,run_attempt:(if $id == 11 then ($ENV.CI_ATTEMPT|tonumber) else 1 end),name:"Owning check",
+        status:"completed",conclusion:"failure"},{id:($id*100+1),run_id:$id,run_attempt:(if $id == 11 then ($ENV.CI_ATTEMPT|tonumber) else 1 end),
         name:"Derived verdict",status:"completed",conclusion:"failure"}]}] |
       if $mutation == "empty_jobs" then .[0]={total_count:0,jobs:[]}
       elif $mutation == "partial_jobs" then .[0].total_count=3
       elif $mutation == "pending_jobs" then .[0].jobs[0].status="queued" | .[0].jobs[0].conclusion=null
       elif $mutation == "zero_failures" then .[0].jobs[].conclusion="success"
       elif $mutation == "foreign_job_run" then .[0].jobs[0].run_id=99
-      elif $mutation == "replaced_job_attempt" then .[0].jobs[0].run_attempt=2
+      elif $mutation == "replaced_job_attempt" then .[0].jobs[0].run_attempt=3
       elif $mutation == "duplicate_jobs" then .[0].jobs[1].id=.[0].jobs[0].id
       elif $mutation == "aggregate_only_failure" then .[0].jobs[0].name="CI status" | .[0].jobs[1].name="Release candidate verdict"
       elif $id == 11 and ($mutation == "ci_success" or $mutation == "ci_success_producer_failed" or
         $mutation == "ci_success_missing_family") then
         ($ENV.FULL_SUITE_JOBS | split("\n") | map(select(length > 0))) as $names |
-        [{total_count:($names|length),jobs:[$names | to_entries[] | {id:(1100+.key),run_id:11,run_attempt:1,
+        [{total_count:($names|length),jobs:[$names | to_entries[] | {id:(1100+.key),run_id:11,run_attempt:($ENV.CI_ATTEMPT|tonumber),
           name:.value,status:"completed",conclusion:"success"}]}] |
         if $mutation == "ci_success_missing_family" then
           .[0].jobs |= map(if .name == "Windows cross-compile check" then .conclusion="skipped" else . end)
@@ -287,7 +290,7 @@ grep -Fq '"reason":"source_ci_not_full_suite"' "$fixture/producer-valid-ci_succe
 grep -Fq '"missing_full_suite_jobs":["Windows cross-compile check"]' "$fixture/producer-valid-ci_success_missing_family.log"
 # A promotable source (green full suite, with any producer outcome) and every
 # unmeasured observation refuse.
-for mutation in ci_success ci_success_producer_failed ci_cancelled producer_pending \
+for mutation in ci_success ci_success_producer_failed ci_cancelled ci_first_attempt_failure producer_pending \
   producer_wrong_source ci_wrong_source ci_foreign_workflow \
   ci_foreign_repo ci_pending ci_pr_event empty_jobs partial_jobs pending_jobs zero_failures \
   foreign_job_run replaced_job_attempt duplicate_jobs aggregate_only_failure \
