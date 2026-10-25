@@ -122,6 +122,7 @@ jobs:
       release_residual: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.release_residual == 'true' }}
       post_merge_tier: ${{ steps.post_merge_tier.outputs.active }}
       consumer: ${{ steps.surface_filter.outputs.consumer }}
+      pull_request_base: ${{ steps.merged_base.outputs.sha }}
       provider_contract_probe: ${{ steps.surface_filter.outputs.provider_contract_probe }}
       swift_protocol_binding: ${{ steps.surface_filter.outputs.swift_protocol_binding }}
     steps:
@@ -129,6 +130,21 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      # The base this run's CLI is built on. `pull_request.base.sha` records
+      # the base tip when the event fired and lags main, so a base rehearsal
+      # built there blames the pull request for whatever landed since.
+      - name: Resolve the merge commit's base
+        id: merged_base
+        if: github.event_name == 'pull_request'
+        env:
+          MERGE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$MERGE_SHA" ]] || { echo "::error::checkout is not the merge commit $MERGE_SHA"; exit 1; }
+          read -r -a parents <<< "$(git rev-list --parents -n 1 HEAD)"
+          [[ "${#parents[@]}" -eq 3 ]] || { echo "::error::$MERGE_SHA is not a two-parent merge commit"; exit 1; }
+          echo "sha=${parents[1]}" >> "$GITHUB_OUTPUT"
 
       # Refuse a group that would bury a release before admitting expensive
       # proofs. The group's base is the previous queue entry, so compare with
@@ -2835,7 +2851,7 @@ jobs:
     with:
       source_revision: ${{ github.sha }}
       pull_request_cli_run: ${{ github.run_id }}
-      pull_request_base: ${{ github.event.pull_request.base.sha }}
+      pull_request_base: ${{ needs.changes.outputs.pull_request_base }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -2846,7 +2862,7 @@ jobs:
   # names its own reason; a measured fail is never retried.
   consumer-check-retry:
     name: Consumer check retry
-    needs: [consumer-check]
+    needs: [changes, consumer-check]
     if: >-
       !cancelled()
       && (needs.consumer-check.result == 'failure' || needs.consumer-check.result == 'cancelled')
@@ -2858,7 +2874,7 @@ jobs:
     with:
       source_revision: ${{ github.sha }}
       pull_request_cli_run: ${{ github.run_id }}
-      pull_request_base: ${{ github.event.pull_request.base.sha }}
+      pull_request_base: ${{ needs.changes.outputs.pull_request_base }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -2879,14 +2895,14 @@ jobs:
       actions: read
       contents: read
     env:
-      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      BASE_SHA: ${{ needs.changes.outputs.pull_request_base }}
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: github-hosted
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ needs.changes.outputs.pull_request_base }}
           fetch-depth: 1
           persist-credentials: false
       - name: Find the merge group's CLI for the base
@@ -2957,16 +2973,16 @@ jobs:
   # either caused by this change (base passes) or inherited (base fails too).
   consumer-base-check:
     name: Consumer base check
-    needs: [consumer-check, consumer-base-cli]
+    needs: [changes, consumer-check, consumer-base-cli]
     if: ${{ !cancelled() && needs.consumer-base-cli.result == 'success' }}
     uses: ./.github/workflows/consumer-canary.yml
     permissions:
       actions: read
       contents: read
     with:
-      source_revision: ${{ github.event.pull_request.base.sha }}
+      source_revision: ${{ needs.changes.outputs.pull_request_base }}
       pull_request_cli_run: ${{ github.run_id }}
-      pull_request_base: ${{ github.event.pull_request.base.sha }}
+      pull_request_base: ${{ needs.changes.outputs.pull_request_base }}
       pull_request_cli_artifact: harn-base-cli.tar.zst
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
@@ -2975,7 +2991,7 @@ jobs:
 
   consumer-base-check-retry:
     name: Consumer base check retry
-    needs: [consumer-base-check]
+    needs: [changes, consumer-base-check]
     if: >-
       !cancelled()
       && (needs.consumer-base-check.result == 'failure' || needs.consumer-base-check.result == 'cancelled')
@@ -2985,9 +3001,9 @@ jobs:
       actions: read
       contents: read
     with:
-      source_revision: ${{ github.event.pull_request.base.sha }}
+      source_revision: ${{ needs.changes.outputs.pull_request_base }}
       pull_request_cli_run: ${{ github.run_id }}
-      pull_request_base: ${{ github.event.pull_request.base.sha }}
+      pull_request_base: ${{ needs.changes.outputs.pull_request_base }}
       pull_request_cli_artifact: harn-base-cli.tar.zst
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
@@ -3096,7 +3112,7 @@ jobs:
           CONSUMER_BASE_CLI_RESULT: ${{ needs.consumer-base-cli.result }}
           CONSUMER_BASE_RESULT: ${{ needs.consumer-base-check.result }}/${{ needs.consumer-base-check-retry.result }}
           CONSUMER_BASE_VERDICT: ${{ needs.consumer-base-check.outputs.verdict || needs.consumer-base-check-retry.outputs.verdict }}
-          CONSUMER_BASE: ${{ github.event.pull_request.base.sha }}
+          CONSUMER_BASE: ${{ needs.changes.outputs.pull_request_base }}
           CONSUMER_RUN: ${{ needs.consumer-check.outputs.verdict && needs.consumer-check.outputs.consumer_run || needs.consumer-check-retry.outputs.consumer_run }}
           CONSUMER_BASE_RUN: ${{ needs.consumer-base-check.outputs.verdict && needs.consumer-base-check.outputs.consumer_run || needs.consumer-base-check-retry.outputs.consumer_run }}
           CONSUMER_IDENTITY: ${{ needs.consumer-check.outputs.verdict && format('{0}/{1}', needs.consumer-check.outputs.consumer_head, needs.consumer-check.outputs.consumer_jobs) || format('{0}/{1}', needs.consumer-check-retry.outputs.consumer_head, needs.consumer-check-retry.outputs.consumer_jobs) }}
