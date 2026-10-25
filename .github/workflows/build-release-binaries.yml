@@ -593,7 +593,8 @@ jobs:
     # Avoid GitHub's multi-hour default timeout for release artifacts. Native
     # macOS is the slowest surface; if it cannot finish inside this budget,
     # fail loudly so the release queue does not burn hours silently.
-    timeout-minutes: 150
+    # 135 (build) + 45 (sign and notarize) + setup, packaging and upload.
+    timeout-minutes: 195
     # Every Cargo consumer in this job builds `--profile dist` (Cargo.toml owns
     # its LTO, codegen-unit, and strip settings) and must resolve the same
     # artifact, so diagnostics such as cargo-bloat never pay for a second LTO
@@ -821,7 +822,7 @@ jobs:
       - name: Build
         id: build
         # Fat LTO with one codegen unit (the dist profile) makes a cold macOS
-        # build outrun 90 minutes; the job's 150-minute cap stays the backstop.
+        # build outrun 90 minutes; the job cap covers this plus signing.
         timeout-minutes: 135
         shell: bash
         env:
