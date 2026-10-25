@@ -745,6 +745,34 @@
   },
   {
     "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_maybe_emit(\n          agent,\n          session_id,\n          warning,\n          config + {inject_feedback: false},\n          next_state,\n          defer_feedback,\n        )",
+    "owner": "__agent_stall_maybe_emit",
+    "evidence": "The existing emitter owns config reads; content recurrence forwards the config with prompt feedback disabled.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_maybe_emit",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_warning_record(\n          {\n            iteration: iteration,\n            tool_name: tool_name,\n            args: __agent_tool_call_args(call),\n            signature: \"edit_oscillation:\" + sha256(json_stringify([session_id, edit.path])),\n            pattern: \"edit_oscillation\",\n            count: edit.count,\n            consecutive_trips: next_state.consecutive_trips,\n            hard_stop: false,\n            threshold: 2,\n          },\n          config,\n        )",
+    "owner": "__agent_stall_warning_record",
+    "evidence": "The shared warning constructor owns include_arguments; content recurrence forwards the normalized config without a parallel field read.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_warning_record",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
     "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
     "expression": "__agent_stall_config(raw_config)",
     "owner": "__agent_stall_config",
