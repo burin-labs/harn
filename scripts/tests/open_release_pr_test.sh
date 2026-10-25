@@ -640,6 +640,16 @@ FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--plan run_opener "$refold"
 [[ "$case_status" == 0 ]] || { cat "$case_output" >&2; fail 'refold plan failed'; }
 grep -Fxq action=open "$case_outputs" || fail 'a fragment conflict did not request a new attempt'
 assert_no_side_effects 'refold plan' "$refold"
+# Exercise the workflow's default depth-one checkout before recovering the
+# older attempt. The common ancestor is absent until the planner fetches it.
+shallow_refold="$tmp_root/shallow-refold"
+git clone --quiet --depth=1 --branch main "file://$refold.origin.git" "$shallow_refold"
+[[ $(git -C "$shallow_refold" rev-parse --is-shallow-repository) == true ]] || fail 'fixture is not shallow'
+FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--plan run_opener "$shallow_refold"
+[[ "$case_status" == 0 ]] || { cat "$case_output" >&2; fail 'shallow refold plan failed'; }
+grep -Fxq action=open "$case_outputs" || fail 'shallow checkout lost fragment-conflict recovery'
+[[ $(git -C "$shallow_refold" rev-parse --is-shallow-repository) == false ]] || fail 'planner did not acquire merge ancestry'
+assert_no_side_effects 'shallow refold plan' "$shallow_refold"
 FAKE_GH_PRS="$open_release_pr" run_opener "$refold"
 [[ "$case_status" == 0 ]] || { cat "$case_output" >&2; fail 'refold failed'; }
 refold_oid=$(jq -r .release_source_sha "$case_receipt")

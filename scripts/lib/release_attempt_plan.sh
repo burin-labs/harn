@@ -5,7 +5,13 @@ release_attempt_plan() {
   local version=$1 green=$2 prs=$3 main_oid pr url branch oid record base output status tree path main_blob green_blob
   local clean='[]' superseded='[]' waiting='[]' conflicts=()
   jq -e 'type == "array" and all(.[]; (.url|type)=="string" and (.headRefName|type)=="string")' <<< "$prs" >/dev/null || return 1
-  git fetch --quiet origin main || return 1
+  # Actions checks out green at depth one. Merge classification needs the real
+  # common ancestor, including an attempt cut from an earlier green checkpoint.
+  if [[ $(git rev-parse --is-shallow-repository) == true ]]; then
+    git fetch --quiet --unshallow origin main || return 1
+  else
+    git fetch --quiet origin main || return 1
+  fi
   main_oid=$(git rev-parse --verify FETCH_HEAD) || return 1
   while IFS= read -r pr; do
     url=$(jq -r .url <<< "$pr")
