@@ -335,8 +335,17 @@ fn a_confined_child_keeps_the_installed_pnpm_home_read_only() {
     let read = read.unwrap();
     assert!(read.status.success(), "{read:?}");
     assert_eq!(read.stdout, b"INSTALLED-PNPM");
-    let write = run("printf poisoned > \"$PNPM_HOME/installed-manager\"").unwrap();
-    assert!(!write.status.success(), "{write:?}");
+    let write = run("printf poisoned > \"$PNPM_HOME/installed-manager\"");
+    assert!(
+        matches!(
+            &write,
+            Err(crate::VmError::CategorizedError {
+                category: crate::value::ErrorCategory::ToolRejected,
+                ..
+            })
+        ),
+        "{write:?}"
+    );
     assert_eq!(std::fs::read_to_string(marker).unwrap(), "INSTALLED-PNPM");
 }
 
