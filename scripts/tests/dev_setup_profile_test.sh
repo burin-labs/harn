@@ -455,6 +455,27 @@ if grep -Eq '^[[:space:]]*rustc-workspace-wrapper[[:space:]]*=' "$rust_repo/.car
   echo "HARN_RUSTC_FRONTEND_THREADS=1 left the parallel front end configured" >&2
   exit 1
 fi
+# Native Windows Cargo cannot launch the shell wrapper, so setup there skips it.
+OS=Windows_NT run_setup "$rust_repo" rust "$tmp_root/rust-windows-output.txt" "$rust_cargo"
+if grep -Eq '^[[:space:]]*rustc-workspace-wrapper[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
+  echo "setup configured the shell wrapper on Windows" >&2
+  exit 1
+fi
+# A checkout configured by the earlier build-wide form loses its managed
+# rustflags and RUSTC_BOOTSTRAP lines, which reached every dependency.
+awk '{ print }
+  /^\[build\][[:space:]]*$/ { print "rustflags = [\"-Zthreads=8\"] # harn-dev-setup-managed" }
+  END { print "\n[env]"; print "RUSTC_BOOTSTRAP = { value = \"1\", force = true } # harn-dev-setup-managed" }' \
+  "$rust_repo/.cargo/config.toml" > "$rust_repo/.cargo/config.toml.tmp"
+mv "$rust_repo/.cargo/config.toml.tmp" "$rust_repo/.cargo/config.toml"
+[[ "$(grep -Ec '^(rustflags|RUSTC_BOOTSTRAP) = ' "$rust_repo/.cargo/config.toml")" == 2 ]]
+run_setup "$rust_repo" rust "$tmp_root/rust-migrate-output.txt" "$rust_cargo"
+if grep -Eq '^[[:space:]]*(rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=' "$rust_repo/.cargo/config.toml" \
+  || ! grep -Eq "$frontend_line_re" "$rust_repo/.cargo/config.toml"; then
+  echo "setup did not migrate the build-wide front-end lines to the workspace wrapper" >&2
+  cat "$rust_repo/.cargo/config.toml" >&2
+  exit 1
+fi
 # A user-owned workspace wrapper stays the only one: a duplicate key would make
 # Cargo reject the whole config.
 awk '{ print } /^\[build\][[:space:]]*$/ { print "rustc-workspace-wrapper = \"clippy-driver\"" }' \

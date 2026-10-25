@@ -289,8 +289,10 @@ write_rustc_frontend_config() {
 
   [[ -f "${config_path}" ]] || return 0
   tmp_path="$(mktemp)"
+  # The managed `rustflags` and `RUSTC_BOOTSTRAP` lines are an earlier
+  # build-wide form of this setting; dropping them migrates such checkouts.
   awk -v managed_marker="${MANAGED_CARGO_CONFIG_MARKER}" '
-    $0 ~ /^[[:space:]]*rustc-workspace-wrapper[[:space:]]*=/ &&
+    $0 ~ /^[[:space:]]*(rustc-workspace-wrapper|rustflags|RUSTC_BOOTSTRAP)[[:space:]]*=/ &&
       $0 ~ "#[[:space:]]*" managed_marker "[[:space:]]*$" { next }
     { print }
   ' "${config_path}" > "${tmp_path}"

@@ -66,7 +66,7 @@ run_case() {
   : > "$state/github_env"
   PATH="$tmp_root/bin:$PATH" \
     GITHUB_ENV="$state/github_env" \
-    RUNNER_OS="${CASE_RUNNER_OS:-Linux}" \
+    OS="${CASE_OS:-}" \
     RUNNER_TEMP="$state/runner-temp" \
     HARN_RUSTC_FRONTEND_THREADS="${CASE_FRONTEND_THREADS:-8}" \
     RUNNER_ENVIRONMENT="${CASE_RUNNER_ENVIRONMENT:-self-hosted}" \
@@ -151,7 +151,7 @@ RUSTC_BOOTSTRAP=1
 last-arg -Zthreads=8
 EXPECTED
 # Windows cannot run the shell wrapper, and the opt-out leaves the job serial.
-CASE_RUNNER_OS=Windows run_case frontend-windows cargo-transient 0
+CASE_OS=Windows_NT run_case frontend-windows cargo-transient 0
 [[ ! -s "$tmp_root/frontend-windows/github_env" ]]
 CASE_FRONTEND_THREADS=1 run_case frontend-off cargo-transient 0
 [[ ! -s "$tmp_root/frontend-off/github_env" ]]

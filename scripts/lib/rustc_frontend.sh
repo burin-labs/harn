@@ -25,9 +25,16 @@ harn_rustc_frontend_threads() {
   printf '%s\n' "$threads"
 }
 
-# The rustc flags to add, empty when the front end stays serial.
+# The rustc flags to add, empty when the front end stays serial. Native
+# Windows Cargo cannot launch the shell wrapper, so Windows stays serial.
 harn_rustc_frontend_flags() {
   threads="$(harn_rustc_frontend_threads)" || return $?
+  if [ "${OS:-}" = "Windows_NT" ]; then
+    return 0
+  fi
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) return 0 ;;
+  esac
   if [ "$threads" -gt 1 ]; then
     printf '%s\n' "-Zthreads=$threads"
   fi
