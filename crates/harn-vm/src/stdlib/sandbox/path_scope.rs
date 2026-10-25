@@ -108,7 +108,7 @@ fn check_fs_path_scope_with_roots(
     if let Some(depth) = writable_depth {
         // A read-only session mount nested inside a writable root wins over it.
         if access != FsAccess::Read
-            && crate::agent_sessions::read_only_mount_overriding(&candidate, depth).is_some()
+            && crate::orchestration::read_only_mount_overriding(&candidate, depth).is_some()
         {
             return Err(SandboxViolation {
                 attempted: candidate,

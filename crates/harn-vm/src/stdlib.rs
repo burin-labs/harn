@@ -21,6 +21,7 @@ pub mod macros;
 pub(crate) use crate::value::args;
 
 mod agent_sessions;
+pub use agent_sessions::add_workspace_root;
 pub mod agent_state;
 pub(crate) mod agents;
 pub(crate) mod agents_daemon;

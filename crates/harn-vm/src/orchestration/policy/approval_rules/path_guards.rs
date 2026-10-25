@@ -165,8 +165,8 @@ pub(super) fn default_guard(
                         return None;
                     }
                     let host_path = std::path::Path::new(host);
-                    crate::agent_sessions::read_only_mount_overriding_writable(
-                        &crate::stdlib::sandbox::paths::normalize_for_policy(host_path),
+                    super::super::external_roots::read_only_mount_overriding_writable(
+                        host_path,
                         workspace_root_of(host_path, entry.workspace_path.as_deref()).as_deref(),
                     )
                 }) {

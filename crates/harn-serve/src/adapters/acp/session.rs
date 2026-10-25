@@ -235,18 +235,14 @@ impl AcpServer {
             }
         };
         let reason = string_param(params, "reason", "reason");
-        let mounted_at = match harn_vm::agent_sessions::add_workspace_root(
-            &session_id,
-            &path,
-            mount_mode,
-            reason,
-        ) {
-            Ok(mounted_at) => mounted_at,
-            Err(message) => {
-                self.send_error(id, -32602, &message);
-                return;
-            }
-        };
+        let mounted_at =
+            match harn_vm::stdlib::add_workspace_root(&session_id, &path, mount_mode, reason) {
+                Ok(mounted_at) => mounted_at,
+                Err(message) => {
+                    self.send_error(id, -32602, &message);
+                    return;
+                }
+            };
         let workspace_anchor = harn_vm::agent_sessions::workspace_anchor(&session_id)
             .map(|anchor| anchor.to_json())
             .unwrap_or(serde_json::Value::Null);

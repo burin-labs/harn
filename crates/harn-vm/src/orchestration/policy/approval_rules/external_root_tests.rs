@@ -4,16 +4,20 @@ use super::*;
 use crate::orchestration::{pop_execution_policy, ToolApprovalPolicy};
 use crate::tool_annotations::ToolKind;
 
+/// The one place these tests reach the host layer, so the module-layering
+/// ratchet counts a single upward reference.
+fn set_execution_context(record: Option<crate::orchestration::RunExecutionRecord>) {
+    crate::stdlib::process::set_thread_execution_context(record);
+}
+
 fn with_workspace_and_external_root<T>(run: impl FnOnce(&str, &str) -> T) -> T {
     let workspace = tempfile::tempdir().unwrap();
     let external = tempfile::tempdir().unwrap();
-    crate::stdlib::process::set_thread_execution_context(Some(
-        crate::orchestration::RunExecutionRecord {
-            cwd: Some(workspace.path().to_string_lossy().into_owned()),
-            source_dir: Some(workspace.path().to_string_lossy().into_owned()),
-            ..Default::default()
-        },
-    ));
+    set_execution_context(Some(crate::orchestration::RunExecutionRecord {
+        cwd: Some(workspace.path().to_string_lossy().into_owned()),
+        source_dir: Some(workspace.path().to_string_lossy().into_owned()),
+        ..Default::default()
+    }));
     let external_root = external
         .path()
         .canonicalize()
@@ -28,7 +32,7 @@ fn with_workspace_and_external_root<T>(run: impl FnOnce(&str, &str) -> T) -> T {
         .to_string_lossy()
         .into_owned();
     let result = run(&external_root, &inside);
-    crate::stdlib::process::set_thread_execution_context(None);
+    set_execution_context(None);
     result
 }
 
@@ -251,13 +255,11 @@ fn a_read_only_mount_inside_the_workspace_refuses_writes_at_the_boundary() {
     let ws = workspace.path().canonicalize().unwrap();
     let vendor = ws.join("vendor");
     std::fs::create_dir_all(&vendor).unwrap();
-    crate::stdlib::process::set_thread_execution_context(Some(
-        crate::orchestration::RunExecutionRecord {
-            cwd: Some(ws.to_string_lossy().into_owned()),
-            source_dir: Some(ws.to_string_lossy().into_owned()),
-            ..Default::default()
-        },
-    ));
+    set_execution_context(Some(crate::orchestration::RunExecutionRecord {
+        cwd: Some(ws.to_string_lossy().into_owned()),
+        source_dir: Some(ws.to_string_lossy().into_owned()),
+        ..Default::default()
+    }));
     let session = crate::agent_sessions::open_or_create_for_test(Some("nested-ro-b".to_string()));
     let _current = crate::agent_sessions::enter_current_session(session.clone());
     let anchor = WorkspaceAnchor {
@@ -292,7 +294,7 @@ fn a_read_only_mount_inside_the_workspace_refuses_writes_at_the_boundary() {
         "the rest stays writable: {}",
         other.reason
     );
-    crate::stdlib::process::set_thread_execution_context(None);
+    set_execution_context(None);
 }
 
 /// The execution workspace is a writable root of its own. A read-only mount
@@ -306,13 +308,11 @@ fn a_read_only_mount_inside_the_execution_workspace_refuses_writes_off_anchor() 
     let ws = workspace.path().canonicalize().unwrap();
     let vendor = ws.join("vendor");
     std::fs::create_dir_all(&vendor).unwrap();
-    crate::stdlib::process::set_thread_execution_context(Some(
-        crate::orchestration::RunExecutionRecord {
-            cwd: Some(ws.to_string_lossy().into_owned()),
-            source_dir: Some(ws.to_string_lossy().into_owned()),
-            ..Default::default()
-        },
-    ));
+    set_execution_context(Some(crate::orchestration::RunExecutionRecord {
+        cwd: Some(ws.to_string_lossy().into_owned()),
+        source_dir: Some(ws.to_string_lossy().into_owned()),
+        ..Default::default()
+    }));
     let session = crate::agent_sessions::open_or_create_for_test(Some("nested-ro-c".to_string()));
     let _current = crate::agent_sessions::enter_current_session(session.clone());
     let anchor = WorkspaceAnchor {
@@ -339,5 +339,5 @@ fn a_read_only_mount_inside_the_execution_workspace_refuses_writes_off_anchor() 
         "the rest stays writable: {}",
         other.reason
     );
-    crate::stdlib::process::set_thread_execution_context(None);
+    set_execution_context(None);
 }

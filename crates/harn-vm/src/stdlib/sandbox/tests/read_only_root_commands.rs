@@ -307,7 +307,7 @@ fn a_session_mount_reaches_the_child_profile_by_its_mode() {
     let session = crate::agent_sessions::open_or_create_for_test(Some("mount-child".to_string()));
     let _current = crate::agent_sessions::enter_current_session(session.clone());
     let anchor = WorkspaceAnchor {
-        primary: ws.clone(),
+        primary: ws,
         additional_roots: Vec::new(),
         anchored_at: "0".to_string(),
     };
@@ -318,13 +318,8 @@ fn a_session_mount_reaches_the_child_profile_by_its_mode() {
     assert!(!shell_succeeds(&policy, &read), "unmounted: not readable");
 
     let root_text = root.display().to_string();
-    crate::agent_sessions::add_workspace_root(
-        &session,
-        &root_text,
-        Some(MountMode::ReadOnly),
-        None,
-    )
-    .unwrap();
+    crate::stdlib::add_workspace_root(&session, &root_text, Some(MountMode::ReadOnly), None)
+        .unwrap();
     assert!(shell_succeeds(&policy, &read), "read_only mount reads");
     assert!(
         !shell_succeeds(&policy, &write),
@@ -339,8 +334,7 @@ fn a_session_mount_reaches_the_child_profile_by_its_mode() {
         "a different outside path stays unreadable"
     );
 
-    crate::agent_sessions::add_workspace_root(&session, &root_text, Some(MountMode::Extend), None)
-        .unwrap();
+    crate::stdlib::add_workspace_root(&session, &root_text, Some(MountMode::Extend), None).unwrap();
     assert!(shell_succeeds(&policy, &write), "extend mount writes");
     assert!(root.join("f").exists());
     assert!(
@@ -394,7 +388,7 @@ fn a_read_only_mount_nested_in_the_workspace_matches_its_backend() {
     );
     std::fs::remove_file(nested.join("f")).unwrap();
     push_execution_policy(policy.clone());
-    let mounted = crate::agent_sessions::add_workspace_root(
+    let mounted = crate::stdlib::add_workspace_root(
         &session,
         &nested.to_string_lossy(),
         Some(MountMode::ReadOnly),
