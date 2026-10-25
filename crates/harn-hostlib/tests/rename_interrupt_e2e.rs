@@ -241,10 +241,13 @@ fn stopping_one_tool_call_stops_a_waiting_rename_without_writes() {
             ));
             // A host installs its policy before the loop runs. Without one, a
             // top-level loop requires OS confinement, which refuses to start
-            // any program on a host without a process sandbox.
+            // any program on a host without a process sandbox. This test is not
+            // about confinement, so it asks for path enforcement only: a cold
+            // macOS runner that cannot run sandbox-exec must still start the
+            // stand-in server and reach the wait the test stops.
             harn_vm::orchestration::push_execution_policy(
                 harn_vm::orchestration::CapabilityPolicy {
-                    sandbox_profile: harn_vm::orchestration::SandboxProfile::Worktree,
+                    sandbox_profile: harn_vm::orchestration::SandboxProfile::WorkspacePaths,
                     ..Default::default()
                 },
             );
@@ -272,11 +275,13 @@ fn stopping_one_tool_call_stops_a_waiting_rename_without_writes() {
         sink.phases.lock().unwrap(),
         sink.call_outputs.lock().unwrap()
     );
-    let cancelled_at = sink
-        .cancelled_at
-        .lock()
-        .unwrap()
-        .expect("the rename reported a heartbeat while it waited");
+    let cancelled_at = sink.cancelled_at.lock().unwrap().unwrap_or_else(|| {
+        panic!(
+            "the rename never reported a heartbeat while it waited, so the stop was never \
+             exercised; it returned {:?}",
+            sink.call_outputs.lock().unwrap()
+        )
+    });
     let call_ended_at = sink
         .call_ended_at
         .lock()
