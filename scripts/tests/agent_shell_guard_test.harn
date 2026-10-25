@@ -1161,6 +1161,26 @@ pipeline test_git_stash_writes_launched_through_xargs_are_denied(harness: Harnes
   }
 }
 
+/**
+ * An `xargs` form the scanner cannot place a child for fails closed, on every runtime: the guard
+ * reads each `git` operand as a launch. `-a` is outside the scanner's option boundary.
+ */
+@test
+pipeline test_unresolved_xargs_forms_still_refuse_stash_writes(harness: Harness, task: unknown) {
+  for command in [
+    "xargs -a input git stash drop",
+    "xargs -a input -n 1 git stash pop",
+    "xargs --arg-file=input git stash",
+    "xargs -a input git -C /workspace stash clear",
+  ] {
+    assert(!verdict(claude_payload(command)).allow, command + " writes the shared stash list")
+  }
+  for command in ["xargs -a input git status", "xargs -a input git stash list", "xargs -a input rm"] {
+    const allowed = verdict(claude_payload(command))
+    assert(allowed.allow, command + " does not write the stash list: " + allowed.reason)
+  }
+}
+
 @test
 pipeline test_git_stash_reads_and_lookalikes_are_allowed(harness: Harness, task: unknown) {
   // THE CONTROL. Refusing every command that mentions `stash` would pass the

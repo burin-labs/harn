@@ -920,11 +920,34 @@ fn git_args_write_stash(argv: list<string>, args: list<string>, depth: int) -> b
   return git_args_write_stash(argv, git_subcommand_args(expanded), depth + 1)
 }
 
+/**
+ * Fails closed for an `xargs` stage whose launched command the scanner could not place, such as
+ * `xargs -a input git stash drop` (`-a` is outside the scanner's option boundary) or any `xargs`
+ * under a runtime that predates `xargs_child_argv`. Every `git` operand is read as a launch.
+ */
+fn xargs_operands_write_stash(argv: list<string>) -> bool {
+  if argv_program(argv) != "xargs" {
+    return false
+  }
+  for index in range(1, len(argv)) {
+    if argv_program([argv[index] ?? ""]) == "git" {
+      const launched = argv.slice(index, len(argv))
+      if git_args_write_stash(launched, git_subcommand_args(launched), 0) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
 fn git_stash_write_in(command: string, depth: int) -> bool {
   for group in command_groups(command) {
     for stage in group {
       // `xargs` launches its operands, so the stash rule reads the child the scanner resolved.
       const xargs_child = stage.xargs_child_argv ?? []
+      if len(xargs_child) == 0 && xargs_operands_write_stash(stage.argv) {
+        return true
+      }
       const launched = if len(xargs_child) > 0 {
         xargs_child
       } else {
