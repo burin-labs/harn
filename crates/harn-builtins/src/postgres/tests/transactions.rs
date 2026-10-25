@@ -41,6 +41,7 @@ pg_close(db)
 
 #[test]
 #[ignore = "requires an isolated database; make test-postgres-live"]
+/// Exercise savepoints on a real connection so transaction state cannot be mocked away.
 fn savepoint_rollback_preserves_outer_writes_when_env_url_is_set() {
     live_postgres_url();
     reset_postgres_state();
@@ -75,6 +76,7 @@ pg_close(db)
 
 #[test]
 #[ignore = "requires an isolated database; make test-postgres-live"]
+/// Privileged GUCs must fail before SQL runs, while application RLS settings remain usable.
 fn transaction_settings_reject_privileged_gucs_when_env_url_is_set() {
     live_postgres_url();
     reset_postgres_state();
@@ -129,6 +131,7 @@ pg_close(db)
 
 #[test]
 #[ignore = "requires an isolated database; make test-postgres-live"]
+/// SQLSTATE 23505 must expose the stable category rather than the constraint name.
 fn constraint_violation_surfaces_stable_category_when_env_url_is_set() {
     live_postgres_url();
     reset_postgres_state();
@@ -175,6 +178,7 @@ pg_close(db)
 
 #[test]
 #[ignore = "requires an isolated database; make test-postgres-live"]
+/// Describe on the transaction connection and preserve NULL alongside non-null binds.
 fn nil_in_transaction_when_env_url_is_set() {
     live_postgres_url();
     reset_postgres_state();

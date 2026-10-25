@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 #[ignore = "requires an isolated database; make test-postgres-live"]
+/// Unique scratch schemas keep concurrent runs independent; down files must be ignored.
 fn migrate_applies_synthetic_dir_and_is_idempotent_when_env_url_is_set() {
     live_postgres_url();
     reset_postgres_state();
@@ -63,6 +64,7 @@ pg_close(db)
 
 #[test]
 #[ignore = "requires an isolated database; make test-postgres-live"]
+/// Rehash an already applied file so an edited migration cannot silently become a no-op.
 fn migrate_harn_detects_checksum_drift_when_env_url_is_set() {
     live_postgres_url();
     reset_postgres_state();
@@ -193,6 +195,7 @@ pg_close(db)
 
 #[test]
 #[ignore = "requires an isolated database; make test-postgres-live"]
+/// Warm a plan before DDL and reuse the pool to expose stale prepared statement types.
 fn migrate_recycles_statement_cache_after_ddl_when_env_url_is_set() {
     live_postgres_url();
     reset_postgres_state();
@@ -268,6 +271,7 @@ pg_close(db)
 
 #[test]
 #[ignore = "requires an isolated database; make test-postgres-live"]
+/// A third run proves the advisory lock was released as well as acquired.
 fn concurrent_migrate_serializes_on_advisory_lock_when_env_url_is_set() {
     live_postgres_url();
     reset_postgres_state();
@@ -486,6 +490,7 @@ pg_close(db)
 
 #[test]
 #[ignore = "requires an isolated database; make test-postgres-live"]
+/// Preseed SQLx-compatible SHA-384 rows so a second ledger cannot pass as integration.
 fn migrate_sqlx_no_fork_against_preseeded_ledger_when_env_url_is_set() {
     live_postgres_url();
     reset_postgres_state();

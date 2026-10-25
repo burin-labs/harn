@@ -506,32 +506,6 @@ async fn open_pool_does_not_share_when_registry_absent() {
     );
 }
 
-/// Drives `pg_savepoint` / `pg_rollback_to_savepoint` /
-/// `pg_release_savepoint` against a real Postgres so we cover the
-/// transaction-state-machine path the mocks can't exercise.
-
-/// `pg_migrate` applies a synthetic two-file directory exactly once
-/// then no-ops on a second run. `.down.sql` siblings must be ignored.
-/// Requires `HARN_TEST_POSTGRES_URL`; runs against a unique scratch
-/// schema so concurrent invocations don't conflict.
-
-/// Harn-ledger drift detection (C-2): apply a migration, then edit the
-/// file body on disk and re-run. The runner must re-hash the on-disk file,
-/// see it no longer matches the recorded SHA-256, and error naming the
-/// migration — never silently skip an edited (already-applied) file.
-
-/// `pg_migrate` against the canonical cloud-store `migrations/`
-/// directory. Opt-in via `HARN_TEST_CLOUD_MIGRATIONS_DIR`; verifies
-/// that the runner consumes the full ledger without errors.
-
-/// M-4 (live): `pg_transaction(settings)` rejects a privileged GUC
-/// (`role`) and a nil value (M-3), and accepts the legitimate
-/// `app.current_tenant_id` / `app.bypass_rls` / timeout settings. This is
-/// the RLS-escape guard exercised end-to-end through the VM.
-
-/// M-2 (live): a unique-constraint violation surfaces a *stable category*
-/// (`unique_violation` + SQLSTATE 23505), never the raw constraint name.
-
 /// H-2 (live): an in-range `Int` binds and round-trips correctly through an
 /// `int4` column, and an out-of-range value surfaces a clear, stable
 /// `numeric_out_of_range` (SQLSTATE 22003) diagnostic rather than a raw or
@@ -598,17 +572,6 @@ pg_close(db)
     run_harn_source(&cleanup);
 }
 
-/// M-5 (live): after `pg_migrate` runs DDL, a query whose result type the
-/// DDL changed must NOT fail with `cached plan must not change result type`
-/// (SQLSTATE 0A000) on a pooled connection. We warm a plan, migrate an
-/// `ALTER TABLE` that changes the column type, then re-query on the same
-/// pool — it must succeed because the migrate recycled the statement caches.
-
-/// C-1 (live): two concurrent `pg_migrate` calls against the same database
-/// serialize on the advisory lock — they do not interleave, exactly one
-/// applies each migration, and the lock is released afterward (a third run
-/// can immediately acquire it and is a clean no-op).
-
 /// Build a synthetic SQLx-style migrations directory (with `.up.sql`
 /// and ignorable `.down.sql` siblings) and return (tmpdir, dir-string).
 /// Keep the `TempDir` alive for the duration of the test.
@@ -669,30 +632,6 @@ fn run_harn_source_expect_err(source: &str) -> String {
         run_harn_source_result(source).expect_err("expected source to error")
     )
 }
-
-/// SQLx ledger mode applies all forward files into `_sqlx_migrations`
-/// with the exact 6-column schema, 48-byte SHA-384 checksums, and
-/// `success = true`.
-
-/// SQLx ledger mode is idempotent: a second run applies 0, skips all,
-/// and leaves the row count unchanged.
-
-/// No-fork against a "real" SQLx ledger: pre-seed `_sqlx_migrations`
-/// with rows whose checksums are computed the SAME way SQLx does
-/// (SHA-384 of the file body) — exactly what `sqlx migrate run` would
-/// have written — then run `pg_migrate(ledger: "sqlx")`. It must apply
-/// 0 and the checksums stay byte-identical.
-
-/// Checksum-mismatch detection: corrupt one recorded checksum then run;
-/// the runner must error and name the offending version.
-
-/// Dirty-ledger detection: a `success = false` row blocks the run.
-
-/// SQLx ledger mode against the canonical cloud-platform `migrations/`
-/// directory: applies the full forward history, then a second run is a
-/// no-op (every version skipped, no checksum drift). This is the
-/// retire-`migrations.rs` acceptance test. Opt-in via
-/// `HARN_TEST_CLOUD_MIGRATIONS_DIR`.
 
 /// Confirms `duration_ms` lives on every real execute result. The
 /// synthetic `Instant` path is covered by
@@ -1352,11 +1291,6 @@ async fn all_non_null_uses_cache_and_interops_with_nil_when_env_url_is_set() {
     .expect("non-null again after nil");
     assert!(matches!(one_cell(again, "v"), VmValue::Int(123)));
 }
-
-/// describe-then-bind inside a managed transaction: a `nil` bound through
-/// the `HANDLE_TX` path (which describes on the tx connection rather than a
-/// detached pool connection) must store SQL NULL and coexist with non-null
-/// binds in the same transaction.
 
 /// Micro-benchmark proving the performant path: after warmup, a
 /// nil-containing query (OID-cache hit + normal prepared-statement cache)
