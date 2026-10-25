@@ -854,6 +854,73 @@ pub fn disposable_trash_violation(command: string) -> string {
   return ""
 }
 
+/** Marks an inline alias whose value git reads from the environment, which the guard cannot see. */
+const GIT_ALIAS_UNRESOLVED: string = "<unresolved>"
+
+/**
+ * The aliases a command defines before its subcommand with `git -c alias.NAME=VALUE`.
+ * `--config-env=alias.NAME=VAR` reads its value from the environment, so it is refused.
+ */
+fn git_inline_aliases(argv: list<string>) -> dict {
+  let aliases = {}
+  let pending = ""
+  for token in argv.slice(1, len(argv)) {
+    if pending != "" {
+      const parts = token.split("=")
+      const head = parts[0] ?? ""
+      if head.starts_with("alias.") && len(parts) > 1 {
+        const name = head.replace("alias.", "")
+        aliases[name] = if pending == "-c" {
+          parts.slice(1, len(parts)).join("=")
+        } else {
+          GIT_ALIAS_UNRESOLVED
+        }
+      }
+      pending = ""
+    } else if token == "-c" || token == "--config-env" {
+      pending = token
+    } else if token.starts_with("--config-env=") {
+      const head = token.replace("--config-env=", "").split("=")[0] ?? ""
+      if head.starts_with("alias.") {
+        aliases[head.replace("alias.", "")] = GIT_ALIAS_UNRESOLVED
+      }
+    } else if GIT_VALUE_TAKING_OPTIONS.contains(token) {
+      pending = "skip"
+    } else if !token.starts_with("-") {
+      break
+    }
+  }
+  return aliases
+}
+
+/**
+ * Whether a git invocation writes the stash list, directly or through an inline alias.
+ * Git reads the verb only from the token right after `stash`; an option there
+ * (`-u`, `-m list`) means push. Anything but a read-only verb writes.
+ */
+fn git_args_write_stash(argv: list<string>, args: list<string>, depth: int) -> bool {
+  const verb = args[0] ?? ""
+  if verb == "stash" {
+    return !GIT_STASH_READ_ONLY.contains(args[1] ?? "")
+  }
+  const expansion = git_inline_aliases(argv)[verb] ?? ""
+  if expansion == "" || depth >= 4 {
+    return false
+  }
+  if expansion == GIT_ALIAS_UNRESOLVED {
+    return true
+  }
+  if expansion.starts_with("!") {
+    return git_stash_write_in(
+      expansion.replace("!", "") + " " + args.slice(1, len(args)).join(" "),
+      depth + 1,
+    )
+  }
+  const words = expansion.split(" ").filter({ word -> word != "" })
+  const expanded = ["git"] + words + args.slice(1, len(args))
+  return git_args_write_stash(argv, git_subcommand_args(expanded), depth + 1)
+}
+
 fn git_stash_write_in(command: string, depth: int) -> bool {
   for group in command_groups(command) {
     for stage in group {
@@ -865,10 +932,7 @@ fn git_stash_write_in(command: string, depth: int) -> bool {
       }
       const argv = launched_argv(launched, 0)
       if argv_program(argv) == "git" {
-        const args = git_subcommand_args(argv)
-        // Git reads the verb only from the token right after `stash`; an option
-        // there (`-u`, `-m list`) means push. Anything but a read-only verb writes.
-        if (args[0] ?? "") == "stash" && !GIT_STASH_READ_ONLY.contains(args[1] ?? "") {
+        if git_args_write_stash(argv, git_subcommand_args(argv), depth) {
           return true
         }
       }
