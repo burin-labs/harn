@@ -2939,6 +2939,8 @@ jobs:
       contents: read
     env:
       BASE_SHA: ${{ needs.changes.outputs.pull_request_base }}
+      # The CLI's embedded source revision; the workflow default names this run's merge commit.
+      HARN_BUILD_REVISION: ${{ needs.changes.outputs.pull_request_base }}
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: github-hosted
