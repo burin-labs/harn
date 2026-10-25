@@ -1,2 +1,2 @@
-ARM64 Linux release builds use thin LTO with 16 codegen units again, because its fat-LTO link needs about 30 GB
-and only finishes by swapping. Other targets keep fat LTO.
+ARM64 Linux, macOS and Windows release builds use thin LTO with 16 codegen units again, because their fat-LTO
+builds ran out of memory or past 100 minutes. x86_64 Linux keeps fat LTO.
