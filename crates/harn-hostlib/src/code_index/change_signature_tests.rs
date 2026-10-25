@@ -915,3 +915,31 @@ fn test_entry_and_typed_arrow_signatures_refuse_as_fixed() {
     assert_applied(&ws.change("plain", "src/check.ts", ts_extra), 1);
     assert_applied(&ws.change("helper", "tests/macros.rs", extra), 1);
 }
+
+/// `symbol_ref` selects as for `rename_symbol`, so the column the index
+/// reports is accepted and must match.
+#[test]
+fn symbol_ref_column_selects_the_declaration() {
+    let ws = Workspace::new(&[(
+        "src/lib.rs",
+        "pub fn helper(a: u8) -> u8 {\n    a\n}\n\npub fn caller() -> u8 {\n    helper(1)\n}\n",
+    )]);
+    let params: &[&[(&str, &str)]] = &[
+        &[("name", "a")],
+        &[("name", "b"), ("type", "u8"), ("call_value", "0")],
+    ];
+    let at = |col: i64| {
+        [(
+            "symbol_ref",
+            dict(&[
+                ("name", string("helper")),
+                ("path", string("src/lib.rs")),
+                ("line", VmValue::Int(1)),
+                ("col", VmValue::Int(col)),
+            ]),
+        )]
+    };
+    let missed = ws.change_with("helper", "src/lib.rs", params, &at(3));
+    assert_eq!(text(field(&missed, "result")), "no_match");
+    assert_applied(&ws.change_with("helper", "src/lib.rs", params, &at(8)), 1);
+}
