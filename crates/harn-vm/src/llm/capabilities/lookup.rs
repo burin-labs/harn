@@ -411,6 +411,26 @@ mod tests {
         assert!(previous.reasoning_disable_supported);
     }
 
+    /// Probed 2026-10-25: this route returned a parsed native tool call. The
+    /// neighbouring `-fast` route was not probed and stays without tools.
+    #[test]
+    fn vercel_deepseek_flash_declares_tools_only_for_the_probed_route() {
+        reset();
+        for model in [
+            "vercel/deepseek/deepseek-v4.1-flash-1017",
+            "deepseek/deepseek-v4.1-flash-1017",
+        ] {
+            assert!(lookup("vercel_ai_gateway", model).native_tools, "{model}");
+        }
+        assert!(
+            !lookup(
+                "vercel_ai_gateway",
+                "vercel/deepseek/deepseek-v4.1-flash-1017-fast"
+            )
+            .native_tools
+        );
+    }
+
     /// Every claim here was measured against Google's live endpoint on
     /// 2026-09-03, with an unknown-model negative control returning 404 first
     /// so a 200 means the route actually ran.
