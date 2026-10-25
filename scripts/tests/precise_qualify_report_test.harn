@@ -106,11 +106,11 @@ pipeline test_a_compiling_rename_outside_find_references_is_wrong() {
 }
 
 pipeline test_find_references_missing_a_verified_rename_file_is_wrong() {
-  const missed = classify_references(nil, ["a.rs"], ["a.rs", "b.rs"])
+  const missed = classify_references(nil, ["a.rs"], ["a.rs", "b.rs"], [])
   assert_eq(missed.outcome, "applied_wrong")
   assert_eq(missed.reason, "missed_reference_file")
   assert_eq(
-    classify_references(nil, ["a.rs", "b.rs", "c.rs"], ["a.rs", "b.rs"]).outcome,
+    classify_references(nil, ["a.rs", "b.rs", "c.rs"], ["a.rs", "b.rs"], []).outcome,
     "applied_correct",
   )
 }
@@ -125,7 +125,11 @@ pipeline test_an_empty_or_unjudged_sample_never_reads_as_a_pass() {
     },
   )
   assert_eq(unjudged.outcome, "pending")
-  assert_eq(classify_references(nil, ["a.rs"], nil).outcome, "pending")
+  assert_eq(classify_references(nil, ["a.rs"], nil, []).outcome, "pending")
+  // A query that wrote is wrong even when it also threw.
+  const wrote = classify_references("boom", [], nil, ["src/lib.rs"])
+  assert_eq(wrote.outcome, "applied_wrong")
+  assert_eq(wrote.reason, "query_wrote")
   const empty = summarize([])
   assert_eq(totals(empty).planned, 0)
   assert(render_markdown("t", empty, [], []).contains("This run measured nothing."))

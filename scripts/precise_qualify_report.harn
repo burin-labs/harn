@@ -106,7 +106,8 @@ pub fn classify_edit(obs: EditObservation) -> Verdict {
 }
 
 /**
- * find_references is read-only, so its oracle is the file set of a verified
+ * find_references is read-only: any file it `wrote` is `applied_wrong`. Its
+ * oracle is the file set of a verified
  * rename of the same symbol. Missing any file that rename had to change is
  * `applied_wrong`; reporting extra files is over-approximation, counted
  * separately by the caller. Without a verified rename there is no verdict.
@@ -115,7 +116,11 @@ pub fn classify_references(
   error: string?,
   files: list<string>,
   oracle_files: list<string>?,
+  wrote: list<string>,
 ) -> Verdict {
+  if len(wrote) > 0 {
+    return verdict("applied_wrong", "query_wrote")
+  }
   if error != nil {
     return verdict("crashed", "query_error")
   }

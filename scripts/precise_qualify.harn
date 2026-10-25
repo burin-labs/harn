@@ -558,6 +558,13 @@ pub fn run_symbol(
       } else {
         reference_error = error_text(unwrap_err(res))
       }
+      // A read-only query must not write; a write would also be charged to
+      // the next arm's preview.
+      const wrote = changed_files(harness.process, root)
+      if len(wrote) > 0 {
+        reset_clone(harness, root)
+        harness.code_index.rebuild({root: root})
+      }
       attempts = attempts
         + [
           {
@@ -565,6 +572,7 @@ pub fn run_symbol(
             wall_ms: harness.clock.monotonic_ms() - started,
             files: reference_files ?? [],
             error: reference_error,
+            wrote: wrote,
           },
         ]
       continue
@@ -643,7 +651,7 @@ pub fn run_symbol(
       } else {
         nil
       }
-      const verdict = classify_references(attempt.error, attempt.files, oracle_files)
+      const verdict = classify_references(attempt.error, attempt.files, oracle_files, attempt.wrote)
       const extra = if oracle_files != nil {
         attempt.files.filter({ path -> !oracle_files.contains(path) }).to_list()
       } else {
