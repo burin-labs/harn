@@ -33,6 +33,7 @@ import {
   classify_edit,
   classify_references,
   render_markdown,
+  run_passed,
   summarize,
   totals,
 } from "./precise_qualify_report.harn"
@@ -825,10 +826,11 @@ fn main(harness: Harness) -> int {
       const types = sample(harness, repo, plan, "Type", plan.types)
       symbols = functions.picked + types.picked
       candidates = {functions: functions.candidates, types: types.candidates}
-      if len(symbols) == 0 {
+      const first = symbols[0]
+      if first == nil {
         prepared = prepared + {ok: false, reason: "no_candidates"}
       } else {
-        const control = oracle_control(harness, repo, prepared.root, symbols[0].path)
+        const control = oracle_control(harness, repo, prepared.root, first.path)
         if !control.ok {
           prepared = prepared + {ok: false, reason: control.reason, detail: control.detail}
         }
@@ -954,10 +956,10 @@ fn main(harness: Harness) -> int {
   )
   const t = totals(rows)
   harness.stdio.println(json_stringify(t))
-  // Nothing judged, or anything judged wrong, fails the run.
   const unmeasured = state.repos.filter({ repo -> !repo.prepared.ok }).to_list()
-  if t.applied_wrong + t.crashed > 0 || t.planned == 0 || len(unmeasured) > 0 {
-    return 1
+  return if run_passed(t, len(unmeasured)) {
+    0
+  } else {
+    1
   }
-  return 0
 }
