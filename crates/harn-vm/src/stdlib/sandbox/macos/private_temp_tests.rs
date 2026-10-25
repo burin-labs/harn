@@ -115,23 +115,23 @@ fn reaping_rechecks_under_the_lock_and_spares_an_alias_that_went_live() {
 }
 
 #[test]
-fn reaping_waits_for_a_spawn_that_is_preparing_an_alias() {
+fn a_preparing_spawn_excludes_reapers_until_it_releases_the_alias_lock() {
+    use std::os::unix::io::AsRawFd;
     let base = tempfile::tempdir().unwrap();
-    let gone = tempfile::tempdir().unwrap();
-    let suffix = prepare_in(base.path(), gone.path()).unwrap();
-    drop(gone);
-    let preparing = AliasLock::acquire(base.path(), false).unwrap();
-    let reaper = {
-        let base = base.path().to_path_buf();
-        let suffix = suffix.clone();
-        std::thread::spawn(move || reap_if_dangling(&base, OsStr::new(&suffix)))
+    let exclusive_now = |base: &Path| {
+        let file = std::fs::File::options()
+            .create(true)
+            .append(true)
+            .open(base.join(ALIAS_LOCK))
+            .unwrap();
+        // SAFETY: the descriptor is open for the life of `file`.
+        unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) == 0 }
     };
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let preparing = AliasLock::acquire(base.path(), false).unwrap();
     assert!(
-        base.path().join(&suffix).is_symlink(),
-        "the reaper unlinked while a spawn held the alias lock"
+        !exclusive_now(base.path()),
+        "a reaper could lock while a spawn was preparing"
     );
     drop(preparing);
-    reaper.join().unwrap();
-    assert!(!base.path().join(&suffix).is_symlink());
+    assert!(exclusive_now(base.path()));
 }
