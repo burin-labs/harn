@@ -302,8 +302,9 @@ fn rust_method_calls_keep_the_receiver_and_rename_body_uses() {
              }\n",
         ),
     ]);
+    // The index's qualified name selects the method too.
     let result = ws.change(
-        "area",
+        "Widget.area",
         "src/shapes.rs",
         &[
             &[("name", "factor"), ("from", "scale")],
@@ -871,4 +872,96 @@ fn a_file_that_does_not_parse_refuses_before_planning() {
         details.contains("`broken.py` does not parse before the edit"),
         "{details}"
     );
+}
+
+// Probe regressions: each applied edit below failed the crate's compiler or
+// tsc. A harness calls a test with no arguments, and a declared function type
+// keeps the old arity, so these must refuse instead.
+#[test]
+fn test_entry_and_typed_arrow_signatures_refuse_as_fixed() {
+    let ws = Workspace::new(&[
+        (
+            "tests/macros.rs",
+            "#[test]\n\
+             fn kv_error() {\n\
+             \x20   helper();\n\
+             }\n\
+             // runs on the async runtime\n\
+             #[tokio::test]\n\
+             async fn kv_async() {}\n\
+             #[cfg_attr(test, test)]\n\
+             fn kv_gated() {}\n\
+             #[unsafe(no_mangle)]\n\
+             pub extern \"C\" fn exported() {}\n\
+             #[rstest]\n\
+             fn cased() {}\n\
+             #[test_case(1)]\n\
+             fn listed(n: u8) {}\n\
+             #[wasm_bindgen(js_name = \"bound\")]\n\
+             pub fn bound() {}\n\
+             #[cfg_attr(test, allow(dead_code))]\n\
+             fn quiet() {}\n\
+             #[cfg(test)]\n\
+             #[doc = \"a test helper\"]\n\
+             fn helper() {}\n",
+        ),
+        ("src/main.rs", "fn main() {\n    run();\n}\nfn run() {}\n"),
+        (
+            "src/check.ts",
+            "type Res = { ok: boolean }\n\
+             export const fallible: () => Res = () => ({ ok: true })\n\
+             export const plain = () => ({ ok: true })\n\
+             export const val = fallible() && plain()\n",
+        ),
+    ]);
+    let extra: &[&[(&str, &str)]] = &[&[("name", "extra"), ("type", "u8"), ("call_value", "0")]];
+    for (name, path, reason) in [
+        ("kv_error", "tests/macros.rs", "#[test]"),
+        ("kv_async", "tests/macros.rs", "#[tokio::test]"),
+        ("kv_gated", "tests/macros.rs", "#[cfg_attr(test, test)]"),
+        ("exported", "tests/macros.rs", "#[unsafe(no_mangle)]"),
+        ("cased", "tests/macros.rs", "#[rstest]"),
+        ("listed", "tests/macros.rs", "#[test_case(1)]"),
+        ("bound", "tests/macros.rs", "#[wasm_bindgen("),
+        ("main", "src/main.rs", "entry point"),
+    ] {
+        let result = ws.refuse("fixed_signature", name, path, extra);
+        assert!(text(field(&result, "details")).contains(reason), "{name}");
+    }
+    let ts_extra: &[&[(&str, &str)]] =
+        &[&[("name", "extra"), ("type", "number"), ("call_value", "0")]];
+    let result = ws.refuse("fixed_signature", "fallible", "src/check.ts", ts_extra);
+    assert!(text(field(&result, "details")).contains("() => Res"));
+    assert_applied(&ws.change("plain", "src/check.ts", ts_extra), 1);
+    assert_applied(&ws.change("helper", "tests/macros.rs", extra), 1);
+    // The `cfg_attr` condition is not an attribute it applies.
+    assert_applied(&ws.change("quiet", "tests/macros.rs", extra), 0);
+}
+
+/// `symbol_ref` selects as for `rename_symbol`, so the column the index
+/// reports is accepted and must match.
+#[test]
+fn symbol_ref_column_selects_the_declaration() {
+    let ws = Workspace::new(&[(
+        "src/lib.rs",
+        "pub fn helper(a: u8) -> u8 {\n    a\n}\n\npub fn caller() -> u8 {\n    helper(1)\n}\n",
+    )]);
+    let params: &[&[(&str, &str)]] = &[
+        &[("name", "a")],
+        &[("name", "b"), ("type", "u8"), ("call_value", "0")],
+    ];
+    let at = |col: i64| {
+        [(
+            "symbol_ref",
+            dict(&[
+                ("name", string("helper")),
+                ("path", string("src/lib.rs")),
+                ("line", VmValue::Int(1)),
+                ("col", VmValue::Int(col)),
+            ]),
+        )]
+    };
+    let missed = ws.change_with("helper", "src/lib.rs", params, &at(3));
+    assert_eq!(text(field(&missed, "result")), "no_match");
+    assert_applied(&ws.change_with("helper", "src/lib.rs", params, &at(8)), 1);
 }

@@ -92,6 +92,64 @@ jobs:
           FIREWORKS_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.FIREWORKS_API_KEY || '' }}
           OPENROUTER_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.OPENROUTER_API_KEY || '' }}
 
+  # An announced retirement (`retires_on`) or a sunset must not outlive its
+  # date. The check takes today as RETIREMENT_SWEEP_DATE, runs here weekly, files or
+  # updates an issue and stays green, so a lapse never reddens main health or
+  # gates a pull request, where it would fail unrelated changes the day it lapses.
+  retirement-sweep:
+    if: github.repository == 'burin-labs/harn' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.live))
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/rust-toolchain
+      - name: Check for lapsed provider retirements
+        id: sweep
+        shell: bash
+        env:
+          RUST_MIN_STACK: "16777216"
+        run: |
+          set -uo pipefail
+          status=0
+          RETIREMENT_SWEEP_DATE="$(date -u +%F)" cargo test --locked -p harn-provider-catalog --lib -- lapsed_retirements_are_not_left_routable >"$RUNNER_TEMP/sweep.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/sweep.log"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          # Only the named assertion is a lapse; a compile or harness failure is not.
+          if [ "$status" -ne 0 ] && grep -q "retirements past their date:" "$RUNNER_TEMP/sweep.log"; then
+            echo "lapsed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "lapsed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: File or update the lapsed-retirement issue
+        if: steps.sweep.outputs.lapsed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="[Models] Provider retirement lapsed"
+          run_url="https://github.com/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
+          problems="$(sed -n '/retirements past their date:/,/^$/p' "$RUNNER_TEMP/sweep.log" | head -40)"
+          body="The weekly retirement sweep found catalog rows whose provider retirement date has passed. Deprecate each with a sunset_date and superseded_by, remove its aliases, or remove the row. The sweep reads only structured \`retires_on\` and \`sunset_date\` fields. Run: $run_url"$'\n\n'"$problems"
+          existing="$(gh issue list --repo "$GH_REPO" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
+          if [[ -n "$existing" ]]; then
+            gh issue comment "$existing" --repo "$GH_REPO" --body "$body"
+          else
+            gh issue create --repo "$GH_REPO" --title "$title" --body "$body" --assignee ksinder
+          fi
+
+      - name: Fail when the sweep could not run
+        if: steps.sweep.outputs.status != '0' && steps.sweep.outputs.lapsed != 'true'
+        run: |
+          echo "::error::The retirement sweep failed for a reason other than a lapsed retirement, so it checked nothing."
+          exit 1
+
   notify-live-failure:
     needs: probe
     if: ${{ always() && needs.probe.result == 'failure' && needs.probe.outputs.live == 'true' }}

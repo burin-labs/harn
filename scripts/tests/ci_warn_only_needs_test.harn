@@ -1,0 +1,53 @@
+import { read_yaml } from "std/fs"
+import { warn_only_needs_errors } from "../ci_cache_policy/warn_only_needs"
+
+fn workflows(fs: HarnessFs) -> dict {
+  return {
+    "ci.yml": read_yaml(fs, "../../.github/workflows/ci.yml"),
+    "consumer-canary.yml": read_yaml(fs, "../../.github/workflows/consumer-canary.yml"),
+  }
+}
+
+fn with_canary_timeout(all: dict, timeout: any) -> dict {
+  const canary = all["consumer-canary.yml"]
+  const consumers = {...canary.jobs.consumers, "timeout-minutes": timeout}
+  return {...all, "consumer-canary.yml": {...canary, jobs: {...canary.jobs, consumers: consumers}}}
+}
+
+fn with_status_env(all: dict, env: dict) -> dict {
+  const ci = all["ci.yml"]
+  const status = ci.jobs["ci-status"]
+  const steps = status.steps.map(
+    { step ->
+      if step?.name == "Verify required CI jobs" {
+        return {...step, env: {...step.env, ...env}}
+      }
+      return step
+    },
+  )
+    .to_list()
+  return {...all, "ci.yml": {...ci, jobs: {...ci.jobs, "ci-status": {...status, steps: steps}}}}
+}
+
+@test
+pipeline test_the_warn_only_consumer_wait_is_bounded_on_pull_requests(harness: Harness) {
+  assert_eq(warn_only_needs_errors(workflows(harness.fs)), [])
+}
+
+@test
+pipeline test_a_three_hour_warn_only_wait_is_refused(harness: Harness) {
+  const all = workflows(harness.fs)
+  // The four-window job that held pull requests for up to 175 minutes.
+  assert(len(warn_only_needs_errors(with_canary_timeout(all, 175))) > 0)
+  assert(len(warn_only_needs_errors(with_canary_timeout(all, nil))) > 0)
+  const unsplit = "$" + "{{ inputs.source_revision != '' && 55 || 175 }}"
+  assert(len(warn_only_needs_errors(with_canary_timeout(all, unsplit))) > 0)
+}
+
+@test
+pipeline test_a_blocking_flag_lifts_the_bound_and_new_flags_must_register(harness: Harness) {
+  const all = with_canary_timeout(workflows(harness.fs), 175)
+  assert_eq(warn_only_needs_errors(with_status_env(all, {CONSUMER_UNMEASURED_BLOCKS: "true"})), [])
+  const fresh = with_status_env(workflows(harness.fs), {E2E_UNMEASURED_BLOCKS: "false"})
+  assert(len(warn_only_needs_errors(fresh)) > 0)
+}

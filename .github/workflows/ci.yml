@@ -123,6 +123,7 @@ jobs:
       post_merge_tier: ${{ steps.post_merge_tier.outputs.active }}
       consumer: ${{ steps.surface_filter.outputs.consumer }}
       provider_contract_probe: ${{ steps.surface_filter.outputs.provider_contract_probe }}
+      swift_protocol_binding: ${{ steps.surface_filter.outputs.swift_protocol_binding }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -248,6 +249,16 @@ jobs:
               - 'scripts/provider_tool_probe_campaign/**'
               - 'scripts/tests/provider_option_probe_test.harn'
               - 'scripts/tests/provider_tool_probe_campaign_test.harn'
+            # Every file `make check-swift-protocol-binding` reads; the CI
+            # cache policy refuses a recipe path this list does not cover.
+            swift_protocol_binding:
+              - '.github/workflows/ci.yml'
+              - 'Makefile'
+              - 'crates/harn-serve/tests/fixtures/acp/**'
+              - 'scripts/tests/protocol_binding_session_recap.swift'
+              - 'scripts/tests/run_session_view_binding.swift'
+              - 'spec/protocol-artifacts/**'
+              - 'spec/run-view-fixtures/**'
             prompt_prose:
               - '.github/workflows/ci.yml'
               - 'crates/harn-vm/src/llm/**'
@@ -492,6 +503,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -520,11 +532,30 @@ jobs:
         # A merge group or push that lands several pull requests puts the
         # baseline past the shallow checkout; the script deepens to it.
         run: ./.github/scripts/resolve-public-api-baseline.sh
+      - name: Restore exact main public API documentation
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BASE_SHA: ${{ steps.api-baseline.outputs.base_sha }}
+        run: >-
+          ./scripts/ci/fetch_latest_main_artifact.sh public-rustdoc-v1-
+          "$RUNNER_TEMP/public-api-baseline" "$(git merge-base "$BASE_SHA" HEAD)"
       - name: Check public Rust API for an undeclared break
         env:
           BASE_SHA: ${{ steps.api-baseline.outputs.base_sha }}
           HEAD_SHA: HEAD
+          PUBLIC_API_RUSTDOC_BASELINE: ${{ runner.temp }}/public-api-baseline
+          PUBLIC_API_RUSTDOC_OUTPUT: ${{ runner.temp }}/public-api-current
         run: ./.github/scripts/breaking-surface-check.sh rust-api
+      - name: Publish main public API documentation
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: public-rustdoc-v1-${{ github.sha }}
+          path: ${{ runner.temp }}/public-api-current/
+          if-no-files-found: error
+          retention-days: 7
 
   lint-md:
     name: Markdown lint
@@ -2512,9 +2543,20 @@ jobs:
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo test --locked -p harn-modules canonical_content_hash_projection_is_platform_independent
+
+  # Swift toolchain only, no Rust build, so unlike macos-lint it also runs on
+  # pull requests that touch the probe's inputs.
+  swift-protocol-binding:
+    name: Swift protocol binding probe
+    runs-on: macos-latest
+    timeout-minutes: 15
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.swift_protocol_binding == 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Verify generated Swift protocol bindings
-        if: matrix.kind == 'workspace'
-        shell: bash
         run: make check-swift-protocol-binding
 
   macos:
@@ -2791,9 +2833,10 @@ jobs:
   # non-Dependabot pull request that touches the consumer's surfaces. A fail
   # verdict blocks when the consumer passes at the pull request's base on the
   # same consumer commit (`consumer-base-check`); a red the base shares is
-  # inherited and reported, not blocking. A run that reaches no verdict is
-  # retried once; still unmeasured, it is a named warning, not a success, and
-  # becomes blocking when `CONSUMER_UNMEASURED_BLOCKS` in `ci-status` flips.
+  # inherited and reported, not blocking. Each attempt observes one 45-minute
+  # window. A run that reaches no verdict is retried once; still unmeasured, it
+  # is a named warning, not a success, and becomes blocking when
+  # `CONSUMER_UNMEASURED_BLOCKS` in `ci-status` flips.
   # Fork and Dependabot pull requests never run it; it needs the release app
   # credential, which neither receives.
   consumer-check:
@@ -3026,6 +3069,7 @@ jobs:
         consumer-base-check,
         consumer-base-check-retry,
         provider-contract-probe,
+        swift-protocol-binding,
         rust-check-inputs,
         rust-test-partitions,
         rust-test-status,
@@ -3063,6 +3107,8 @@ jobs:
           # Only a skip is excused by it.
           POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
           PROVIDER_CONTRACT_PROBE_EXPECTED: ${{ needs.changes.outputs.provider_contract_probe }}
+          # Exactly `swift-protocol-binding`'s own condition.
+          SWIFT_PROTOCOL_BINDING_EXPECTED: ${{ github.event_name != 'pull_request' || needs.changes.outputs.swift_protocol_binding == 'true' }}
           # Exactly `consumer-check`'s own condition.
           CONSUMER_EXPECTED: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && needs.changes.outputs.consumer == 'true' && needs.rust-cli.result == 'success' }}
           CONSUMER_RESULT: ${{ needs.consumer-check.result }}/${{ needs.consumer-check-retry.result }}
@@ -3263,6 +3309,12 @@ jobs:
           require_result "$provider_contract_probe_result" \
             "Offline provider contract probe failed or skipped while its paths were touched." \
             test "$PROVIDER_CONTRACT_PROBE_EXPECTED" = "false"
+
+          swift_protocol_binding_result="${{ needs['swift-protocol-binding'].result }}"
+          echo "Swift protocol binding probe: $swift_protocol_binding_result (expected=$SWIFT_PROTOCOL_BINDING_EXPECTED)"
+          require_result "$swift_protocol_binding_result" \
+            "Swift protocol binding probe failed or skipped while its inputs were touched." \
+            test "$SWIFT_PROTOCOL_BINDING_EXPECTED" = "false"
 
           rust_check_inputs_result="${{ needs['rust-check-inputs'].result }}"
           echo "Rust producer: $rust_check_inputs_result"

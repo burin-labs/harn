@@ -219,11 +219,20 @@ const TYPESCRIPT: ServerSpec = ServerSpec {
     // An agent's rename means the new name everywhere in the workspace, so
     // shorthand properties and re-exports are renamed rather than aliased
     // to their old spelling (`export { TextSpan as Span }`).
+    //
+    // With its default syntax server, typescript-language-server routes
+    // definition, references and rename to a syntax-only tsserver while the
+    // project loads, which answers without types (`map.get` resolves to
+    // nothing). Reopening documents starts a load, so answers raced it. The
+    // semantic server alone blocks until the project is loaded.
     initialization: || {
-        json!({"preferences": {
-            "providePrefixAndSuffixTextForRename": false,
-            "allowRenameOfImportPath": false,
-        }})
+        json!({
+            "preferences": {
+                "providePrefixAndSuffixTextForRename": false,
+                "allowRenameOfImportPath": false,
+            },
+            "tsserver": {"useSyntaxServer": "never"},
+        })
     },
     // The native TypeScript 7 server reads VS Code-style settings.
     settings: |section| match section {

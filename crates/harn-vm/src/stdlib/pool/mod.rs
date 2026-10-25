@@ -374,7 +374,7 @@ impl QueueStrategy {
 }
 
 #[derive(Default)]
-pub(crate) struct PoolRegistry {
+pub struct PoolRegistry {
     inner: parking_lot::Mutex<PoolRegistryState>,
 }
 

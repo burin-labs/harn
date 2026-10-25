@@ -526,6 +526,10 @@ pub struct ModelDeprecation {
     /// ISO 8601 date (`YYYY-MM-DD`) when the provider stops serving the route.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sunset_date: Option<String>,
+    /// ISO 8601 date (`YYYY-MM-DD`) a provider has announced it will stop
+    /// serving a route that is still active and selectable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retires_on: Option<String>,
     /// Catalog id of the model that supersedes this one, when declared.
     /// Surfaces `ModelDef::superseded_by` as a machine-readable migration
     /// target so downstream consumers don't have to parse `note` prose.

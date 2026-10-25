@@ -22,13 +22,18 @@
 # of reading as absence.
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-  echo "usage: $0 <artifact-name-prefix> <destination-directory>" >&2
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+  echo "usage: $0 <artifact-name-prefix> <destination-directory> [exact-main-commit]" >&2
   exit 2
 fi
 
 prefix=$1
 destination=$2
+exact_commit=${3:-}
+if [[ -n "$exact_commit" && ! "$exact_commit" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "::error::Exact artifact lookup requires a full commit SHA." >&2
+  exit 2
+fi
 
 : "${GH_REPO:?GH_REPO must be set}"
 : "${GH_TOKEN:?GH_TOKEN must be set}"
@@ -52,6 +57,7 @@ gh_read_to() {
       case "$kind" in
         json-array) jq -e 'type == "array"' "$output" > /dev/null 2>&1 && return 0 ;;
         json-artifacts) jq -e '.artifacts | type == "array"' "$output" > /dev/null 2>&1 && return 0 ;;
+        json-run) jq -e '.id | type == "number"' "$output" > /dev/null 2>&1 && return 0 ;;
         bytes) return 0 ;;
       esac
       echo "GitHub API read of ${path} returned an unexpected body." >&2
@@ -67,11 +73,15 @@ gh_read_to() {
 read_file="$(mktemp)"
 trap 'rm -f "$read_file"' EXIT
 
-gh_read_to json-array "$read_file" "repos/${GH_REPO}/commits?sha=main&per_page=${MAX_COMMITS}"
 main_shas=()
-while IFS= read -r sha; do
-  main_shas+=("$sha")
-done < <(jq -r '.[].sha' "$read_file")
+if [[ -n "$exact_commit" ]]; then
+  main_shas+=("$exact_commit")
+else
+  gh_read_to json-array "$read_file" "repos/${GH_REPO}/commits?sha=main&per_page=${MAX_COMMITS}"
+  while IFS= read -r sha; do
+    main_shas+=("$sha")
+  done < <(jq -r '.[].sha' "$read_file")
+fi
 if ((${#main_shas[@]} == 0)); then
   echo "::error::GitHub listed no commits on main." >&2
   exit 1
@@ -82,11 +92,26 @@ for sha in "${main_shas[@]}"; do
   gh_read_to json-artifacts "$read_file" \
     "repos/${GH_REPO}/actions/artifacts?name=${prefix}${sha}&per_page=10"
   artifact_id="$(jq -r \
+    --arg exact "$exact_commit" \
     '[.artifacts[]
       | select(.expired == false)
-      | select(.workflow_run.head_branch == "main")]
+      | select(.workflow_run.head_branch == "main")
+      | select($exact == "" or .workflow_run.head_sha == $exact)]
       | .[0].id // empty' "$read_file")"
   if [[ -n "$artifact_id" ]]; then
+    if [[ -n "$exact_commit" ]]; then
+      run_id=$(jq -r --argjson id "$artifact_id" '.artifacts[] | select(.id == $id) | .workflow_run.id' "$read_file")
+      gh_read_to json-run "$read_file" "repos/${GH_REPO}/actions/runs/${run_id}"
+      if ! jq -e --arg sha "$exact_commit" --arg repo "$GH_REPO" \
+        '.event == "push" and .head_branch == "main" and .head_sha == $sha
+          and .path == ".github/workflows/ci.yml"
+          and (.repository.id | type == "number") and .repository.id > 0
+          and .repository.full_name == $repo
+          and .repository.id == .head_repository.id' "$read_file" >/dev/null; then
+        echo "::error::Artifact $artifact_id was not produced by CI on this repository main commit." >&2
+        exit 1
+      fi
+    fi
     break
   fi
 done

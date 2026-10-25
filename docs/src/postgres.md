@@ -508,6 +508,10 @@ or `{class: int, instance: int}`. Pass `{tenant_namespace: true}` to XOR
 the key with a tenant-id-derived salt so two tenants colliding on the
 same caller-supplied key resolve to *different* server-side keys.
 
+Each dictionary component must fit a signed 32-bit integer (`-2147483648` through `2147483647`), matching
+[PostgreSQL's two-key lock functions](https://www.postgresql.org/docs/16/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS).
+Larger values throw before contacting PostgreSQL. Use a scalar `int` for a signed 64-bit key.
+
 ## LISTEN/NOTIFY
 
 `pg_listen` opens a [`PgListener`][sqlx-listener] (sqlx's auto-reconnect

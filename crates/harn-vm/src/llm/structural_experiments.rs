@@ -3,13 +3,13 @@ use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 
 #[derive(Clone, Debug)]
-pub(crate) enum StructuralExperimentHandler {
+pub enum StructuralExperimentHandler {
     BuiltIn(BuiltInStructuralExperiment),
     Closure(VmValue),
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum BuiltInStructuralExperiment {
+pub enum BuiltInStructuralExperiment {
     PromptOrderPermutation { seed: i64 },
     DoubledPrompt,
     ChainOfDraft,
@@ -17,7 +17,7 @@ pub(crate) enum BuiltInStructuralExperiment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct StructuralExperimentConfig {
+pub struct StructuralExperimentConfig {
     pub label: String,
     pub name: String,
     pub args: serde_json::Value,
@@ -25,7 +25,7 @@ pub(crate) struct StructuralExperimentConfig {
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
-pub(crate) struct AppliedStructuralExperiment {
+pub struct AppliedStructuralExperiment {
     pub label: String,
     pub name: String,
     pub args: serde_json::Value,

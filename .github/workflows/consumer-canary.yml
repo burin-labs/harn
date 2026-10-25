@@ -127,6 +127,7 @@ jobs:
         id: decide
         env:
           GH_TOKEN: ${{ github.token }}
+          CANARY_TOKEN_LABEL: github-token
           EVENT_NAME: ${{ github.event_name }}
           SOURCE_REVISION: ${{ inputs.source_revision }}
           CURRENT_RUN_ID: ${{ github.run_id }}
@@ -139,7 +140,9 @@ jobs:
     runs-on: ubuntu-24.04
     # Bound queue wait separately from each job's execution, with cleanup time.
     # scripts/ci/consumer_observation_budget.json owns this checked projection.
-    timeout-minutes: 175
+    # A pull request's status waits on this job and only warns on an
+    # unmeasured result, so the pull-request path gets one window.
+    timeout-minutes: ${{ inputs.pull_request_cli_run != '' && 55 || 175 }}
     permissions:
       actions: read
       contents: read
@@ -198,6 +201,7 @@ jobs:
         id: canary
         env:
           GH_TOKEN: ${{ steps.consumer-token.outputs.token }}
+          CANARY_TOKEN_LABEL: consumer-dispatch-app-token
           PARENT_READ_TOKEN: ${{ github.token }}
           OBSERVER_CONTEXT: ${{ steps.observer.outputs.context }}
           CANARY_OWNER: ${{ github.repository_owner }}
@@ -233,6 +237,7 @@ jobs:
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
           observer-context: ${{ steps.observer.outputs.context }}
           rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
+          single-window: ${{ inputs.pull_request_cli_run != '' }}
       - name: Observe the second bounded window
         if: steps.observe-1.outputs.verdict == ''
         id: observe-2
@@ -248,6 +253,7 @@ jobs:
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
           observer-context: ${{ steps.observer.outputs.context }}
           rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
+          single-window: ${{ inputs.pull_request_cli_run != '' }}
       - name: Observe the third bounded window
         if: steps.observe-2.outcome == 'success' && steps.observe-2.outputs.verdict == ''
         id: observe-3
@@ -263,6 +269,7 @@ jobs:
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
           observer-context: ${{ steps.observer.outputs.context }}
           rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
+          single-window: ${{ inputs.pull_request_cli_run != '' }}
       - name: Observe the final bounded window
         if: steps.observe-3.outcome == 'success' && steps.observe-3.outputs.verdict == ''
         id: observe-4
@@ -278,6 +285,7 @@ jobs:
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
           observer-context: ${{ steps.observer.outputs.context }}
           rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
+          single-window: ${{ inputs.pull_request_cli_run != '' }}
 
       - name: Renew exact observer cleanup authority
         id: cleanup-token
@@ -315,6 +323,7 @@ jobs:
         if: always() && steps.cleanup-token.outcome == 'success'
         env:
           GH_TOKEN: ${{ steps.cleanup-token.outputs.token }}
+          CANARY_TOKEN_LABEL: cleanup-app-token
           CANARY_OWNER: ${{ github.repository_owner }}
           CANARY_NAME: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           CANARY_RECORD_RUN: ${{ steps.canary.outputs.run_id }}

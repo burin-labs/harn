@@ -63,7 +63,7 @@ impl HostlibCapability for FsCapability {
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
         registry.register_fn("fs", SET_MODE_BUILTIN, "set_mode", set_mode_builtin);
         registry.register_fn("fs", STATUS_BUILTIN, "staged_status", staged_status_builtin);
-        registry.register_fn("fs", COMMIT_BUILTIN, "commit_staged", commit_staged_builtin);
+        registry.register_writer_fn("fs", COMMIT_BUILTIN, "commit_staged", commit_staged_builtin);
         registry.register_fn(
             "fs",
             DISCARD_BUILTIN,
@@ -72,7 +72,7 @@ impl HostlibCapability for FsCapability {
         );
         // `safe_text_patch` and `read_text` touch arbitrary host paths, so
         // they share the deterministic-tools gate with `tools::*` file I/O.
-        registry.register_fn(
+        registry.register_writer_fn(
             "fs",
             SAFE_TEXT_PATCH_BUILTIN,
             "safe_text_patch",

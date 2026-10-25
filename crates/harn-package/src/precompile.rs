@@ -383,14 +383,11 @@ fn output_path(
     out_root: Option<&Path>,
     extension: &str,
 ) -> Result<PathBuf, String> {
-    let stem = source_path
+    source_path
         .file_stem()
         .ok_or_else(|| format!("source has no file stem: {}", source_path.display()))?;
     let Some(out_root) = out_root else {
-        let parent = source_path.parent().unwrap_or_else(|| Path::new(""));
-        let mut adjacent = parent.join(stem);
-        adjacent.set_extension(extension);
-        return Ok(adjacent);
+        return Ok(source_path.with_extension(extension));
     };
     let relative = match source_root {
         Some(root) => {

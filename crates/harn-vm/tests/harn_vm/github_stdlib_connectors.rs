@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::{json, Value as JsonValue};
 
+use harn_runtime::register_vm_stdlib;
 use harn_vm::{
-    compile_source, install_active_connector_clients, register_vm_stdlib, reset_thread_local_state,
-    ClientError, ConnectorClient, ProviderId, VmError,
+    compile_source, install_active_connector_clients, reset_thread_local_state, ClientError,
+    ConnectorClient, ProviderId, VmError,
 };
 
 #[derive(Default)]

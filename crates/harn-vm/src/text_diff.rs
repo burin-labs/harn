@@ -19,7 +19,7 @@ use similar::{Algorithm, ChangeTag, TextDiff};
 const ALGORITHM: Algorithm = Algorithm::Histogram;
 
 /// Unchanged lines kept on each side of a hunk. Matches `git diff`'s default.
-pub(crate) const DEFAULT_CONTEXT: usize = 3;
+pub const DEFAULT_CONTEXT: usize = 3;
 
 /// A rendered line diff: the unified-diff hunk body plus raw `+`/`-` counts.
 ///

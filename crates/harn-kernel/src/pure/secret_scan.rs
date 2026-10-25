@@ -1,7 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::OnceLock;
 
-use harn_secret_catalog::{SecretPatternSpec, DEFAULT_SECRET_PATTERN_SPECS, PRECISION_HEURISTIC};
+use harn_secret_catalog::{
+    SecretPatternSpec, DEFAULT_SECRET_PATTERN_SPECS, PRECISION_HEURISTIC, PRECISION_HIGH,
+};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
@@ -65,6 +67,70 @@ impl CompiledSecretPattern {
 
 static DEFAULT_PATTERNS: OnceLock<Vec<CompiledSecretPattern>> = OnceLock::new();
 static HIGH_ENTROPY_ASSIGNMENT: OnceLock<Regex> = OnceLock::new();
+static HASHED_TOKEN: OnceLock<Regex> = OnceLock::new();
+
+pub fn scan_secret_hashes(content: &str, hashes: &[String]) -> Result<Vec<SecretFinding>, String> {
+    if hashes.is_empty()
+        || hashes.iter().any(|hash| {
+            hash.len() != 64
+                || !hash
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+    {
+        return Err(
+            "secret_scan: hashes must be a nonempty list of lowercase SHA-256 digests".into(),
+        );
+    }
+    let denied: BTreeSet<&str> = hashes.iter().map(String::as_str).collect();
+    let pattern = HASHED_TOKEN
+        .get_or_init(|| Regex::new(r"[A-Za-z0-9._-]+").expect("hashed token pattern is valid"));
+    let mut verdicts = HashMap::<String, Option<String>>::new();
+    let mut findings = Vec::new();
+    let mut scanned = 0;
+    let mut line = 1;
+    let mut column = 1;
+    for token in pattern.find_iter(content) {
+        let digest = verdicts
+            .entry(token.as_str().to_ascii_lowercase())
+            .or_insert_with_key(|normalized| {
+                let digest = super::sha256_hex(normalized.as_bytes());
+                denied.contains(digest.as_str()).then_some(digest)
+            });
+        let Some(digest) = digest else {
+            continue;
+        };
+        for character in content
+            .get(scanned..token.start())
+            .expect("regex boundaries are UTF-8 boundaries")
+            .chars()
+        {
+            if character == '\n' {
+                line += 1;
+                column = 1;
+            } else {
+                column += 1;
+            }
+        }
+        let column_start = column;
+        column += token.len();
+        scanned = token.end();
+        findings.push(SecretFinding {
+            detector: "sha256-denylist".into(),
+            source: "custom".into(),
+            title: "Denied token".into(),
+            precision: PRECISION_HIGH.into(),
+            line,
+            column_start,
+            column_end: column,
+            start_offset: token.start(),
+            end_offset: token.end(),
+            redacted: "[hash match]".into(),
+            fingerprint: digest.clone(),
+        });
+    }
+    Ok(findings)
+}
 
 /// The shared catalog, compiled on first use.
 pub fn compiled_secret_patterns() -> &'static [CompiledSecretPattern] {

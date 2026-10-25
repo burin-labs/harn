@@ -7,7 +7,7 @@ use serde_json::{Map, Value};
 
 /// The package manager that owns one manifest's scripts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum PackageManager {
+pub enum PackageManager {
     Npm,
     Pnpm,
     Yarn,
@@ -60,7 +60,7 @@ pub enum Discovery {
 }
 
 impl Discovery {
-    pub(crate) fn state(&self) -> &'static str {
+    pub fn state(&self) -> &'static str {
         match self {
             Self::NotRequested => "not_requested",
             Self::Absent => "absent",
@@ -71,7 +71,7 @@ impl Discovery {
 }
 
 impl SelectionError {
-    pub(crate) fn code(&self) -> &'static str {
+    pub fn code(&self) -> &'static str {
         match self {
             Self::OutsideProject => "outside_project",
             Self::InvalidDeclaration => "invalid_declaration",
@@ -110,7 +110,7 @@ pub fn discover(project_root: &Path, manifest_dir: &Path) -> Discovery {
 }
 
 /// Manager metadata does not authorize scripts when no manifest exists.
-pub(crate) fn manager_facts(
+pub fn manager_facts(
     project_root: &Path,
     directory: &Path,
 ) -> Result<Option<String>, SelectionError> {
@@ -222,7 +222,7 @@ fn resolve_scripts(
     })
 }
 
-pub(crate) const LOCKFILES: &[(&str, PackageManager)] = &[
+pub const LOCKFILES: &[(&str, PackageManager)] = &[
     ("package-lock.json", PackageManager::Npm),
     ("npm-shrinkwrap.json", PackageManager::Npm),
     ("pnpm-lock.yaml", PackageManager::Pnpm),
@@ -231,7 +231,7 @@ pub(crate) const LOCKFILES: &[(&str, PackageManager)] = &[
     ("bun.lockb", PackageManager::Bun),
 ];
 
-pub(crate) const LOCKFILE_NAMES: [&str; LOCKFILES.len()] = {
+pub const LOCKFILE_NAMES: [&str; LOCKFILES.len()] = {
     let mut names = [""; LOCKFILES.len()];
     let mut index = 0;
     while index < LOCKFILES.len() {

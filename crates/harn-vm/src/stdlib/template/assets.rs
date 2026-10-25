@@ -11,9 +11,9 @@ use crate::runtime_limits::RuntimeLimits;
 const TEMPLATE_CACHE_CAP: usize = RuntimeLimits::DEFAULT.max_template_parse_cache_entries;
 
 #[derive(Debug, Clone)]
-pub(crate) struct TemplateAsset {
+pub struct TemplateAsset {
     pub(crate) id: String,
-    pub(crate) uri: String,
+    pub uri: String,
     pub(crate) source: Rc<str>,
     pub(crate) location: TemplateLocation,
 }
@@ -80,7 +80,7 @@ impl TemplateAsset {
         }
     }
 
-    pub(crate) fn render_target(path: &str) -> Result<Self, String> {
+    pub fn render_target(path: &str) -> Result<Self, String> {
         if let Some(asset) = Self::stdlib(path) {
             return Ok(asset);
         }

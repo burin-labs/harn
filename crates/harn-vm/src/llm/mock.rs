@@ -355,7 +355,7 @@ impl LlmMockState {
 /// handle on every future poll, so builtin calls always resolve through the
 /// logical VM even when the executor moves that future to another thread.
 #[derive(Clone, Default)]
-pub(crate) struct LlmMockContext(Arc<Mutex<LlmMockState>>);
+pub struct LlmMockContext(Arc<Mutex<LlmMockState>>);
 
 impl LlmMockContext {
     pub(crate) fn for_new_vm() -> Self {
@@ -546,7 +546,7 @@ pub(crate) fn builtin_llm_mock_snapshot() -> serde_json::Value {
     })
 }
 
-pub(crate) fn builtin_llm_mock_active() -> bool {
+pub fn builtin_llm_mock_active() -> bool {
     with_mock_state(|state| state.builtin_queue.is_active())
 }
 
@@ -563,7 +563,7 @@ pub(crate) fn builtin_llm_mock_strict_scopes() -> bool {
     with_mock_state(|state| state.builtin_queue.strict_scopes())
 }
 
-pub(crate) fn reset_llm_mock_state() {
+pub fn reset_llm_mock_state() {
     with_mock_state_mut(LlmMockState::reset);
 }
 

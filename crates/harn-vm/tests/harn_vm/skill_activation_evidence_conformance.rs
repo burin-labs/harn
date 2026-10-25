@@ -98,7 +98,7 @@ fn evidence(registry: VmValue, options_src: &str) -> DictMap {
     let rt = harn_clock::test_support::current_thread_runtime();
     let value = rt.block_on(harn_clock::test_support::with_local_tasks(async {
         let mut vm = harn_vm::new_vm();
-        harn_vm::register_vm_stdlib(&mut vm);
+        harn_runtime::register_vm_stdlib(&mut vm);
         vm.set_global("skills", registry);
         vm.execute(&chunk).await.expect("execute")
     }));

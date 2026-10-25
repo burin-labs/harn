@@ -53,6 +53,7 @@ pub type SiblingDependencyLineRequest = {
   section: string,
   unpublished_sibling_names: list<string>,
   manifest_is_publishable: bool,
+  dependent_sibling_names?: list<string>,
   manifest?: unknown,
 }
 
@@ -78,6 +79,18 @@ pub fn sibling_dep_errors_from_line_with_context(
     if manifest_is_publishable && !is_dev_dependency_section(section) {
       return [
         "${path}:${line_no}: ${name} is publish = false; publishable manifests may only use it as a dev-dependency",
+      ]
+    }
+    return []
+  }
+  // A dev-dependency on a sibling that itself depends on this crate closes a
+  // cycle. It must stay path-only: publishing strips it, while a version
+  // requirement would make this crate's publish wait on the sibling it feeds.
+  if is_dev_dependency_section(section)
+    && (request.dependent_sibling_names ?? []).contains(name) {
+    if dependency.version != nil {
+      return [
+        "${path}:${line_no}: ${name} depends on this crate; its dev-dependency must stay path-only",
       ]
     }
     return []
@@ -121,6 +134,7 @@ pub fn sibling_dep_errors_from_text_with_context(
   workspace_version: string,
   unpublished_sibling_names: list<string>,
   manifest_is_publishable: bool,
+  dependent_sibling_names: list<string>,
 ) -> list<string> {
   const expected = expected_dependency_version(workspace_version)
   const manifest = toml_parse(text)
@@ -142,6 +156,7 @@ pub fn sibling_dep_errors_from_text_with_context(
           section: section,
           unpublished_sibling_names: unpublished_sibling_names,
           manifest_is_publishable: manifest_is_publishable,
+          dependent_sibling_names: dependent_sibling_names,
           manifest: manifest,
         },
       )
@@ -155,7 +170,7 @@ pub fn sibling_dep_errors_from_text(
   text: string,
   workspace_version: string,
 ) -> list<string> {
-  return sibling_dep_errors_from_text_with_context(path, text, workspace_version, [], true)
+  return sibling_dep_errors_from_text_with_context(path, text, workspace_version, [], true, [])
 }
 
 pub fn manifest_globs() -> list<string> {
@@ -187,10 +202,43 @@ fn unpublished_workspace_package_names(fs: HarnessFs, paths: list<string>) -> li
   return names.sorted()
 }
 
+/** Package names whose regular or build dependencies name a sibling path crate. */
+pub fn regular_sibling_dependency_names_from_text(text: string) -> list<string> {
+  const doc = toml_parse(text)
+  let names: list<string> = []
+  for table_name in ["dependencies", "build-dependencies"] {
+    const table = doc.get(table_name)
+    if type_of(table) != "dict" {
+      continue
+    }
+    for entry in table.entries() {
+      const spec = entry.value
+      if type_of(spec) == "dict" && spec.get("path") != nil {
+        names = names + [spec.get("package") ?? entry.key]
+      }
+    }
+  }
+  return names.sorted()
+}
+
+/** Map each package to the siblings that depend on it, from every manifest. */
+fn dependents_by_package(fs: HarnessFs, paths: list<string>) -> dict<string, list<string>> {
+  let dependents: dict<string, list<string>> = {}
+  for path in paths {
+    const text = fs.read_text(path)
+    const dependent = manifest_package_name_from_text(text)
+    for name in regular_sibling_dependency_names_from_text(text) {
+      dependents = dependents + {[name]: (dependents.get(name) ?? []) + [dependent]}
+    }
+  }
+  return dependents
+}
+
 pipeline main(harness: Harness, task: unknown) {
   const workspace_version = workspace_version_from_text(harness.fs.read_text("Cargo.toml"))
   const paths = checked_manifest_paths(harness.fs)
   const unpublished_sibling_names = unpublished_workspace_package_names(harness.fs, paths)
+  const dependents = dependents_by_package(harness.fs, paths)
   let errors: list<string> = []
   for path in paths {
     const text = harness.fs.read_text(path)
@@ -201,6 +249,7 @@ pipeline main(harness: Harness, task: unknown) {
         workspace_version,
         unpublished_sibling_names,
         manifest_is_publishable_from_text(text),
+        dependents.get(manifest_package_name_from_text(text)) ?? [],
       )
   }
   if errors.count > 0 {

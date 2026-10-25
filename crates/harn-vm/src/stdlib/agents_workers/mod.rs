@@ -230,7 +230,7 @@ pub(super) type WorkerStateRef = Arc<parking_lot::Mutex<WorkerState>>;
 /// be registered on one Tokio thread and awaited, resumed, or stopped on
 /// another without falling through to an unrelated empty map.
 #[derive(Default)]
-pub(crate) struct WorkerRegistry {
+pub struct WorkerRegistry {
     states: parking_lot::Mutex<BTreeMap<String, WorkerStateRef>>,
 }
 

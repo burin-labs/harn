@@ -17,6 +17,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::host_call::{HostCallContext, Interrupt, Phase, INTERRUPT_POLL};
 use crate::process::{
     spawn_process, EnvMode, OutputCapture, OwnerDeathPolicy, ProcessKiller, SpawnSpec,
 };
@@ -39,6 +40,8 @@ pub(crate) enum RpcError {
         message: String,
     },
     Protocol(String),
+    /// The caller stopped the call before the server answered.
+    Interrupted(Interrupt),
 }
 
 impl RpcError {
@@ -55,6 +58,8 @@ impl std::fmt::Display for RpcError {
             Self::Exited(tail) => write!(f, "server exited: {tail}"),
             Self::Server { code, message } => write!(f, "server error {code}: {message}"),
             Self::Protocol(detail) => write!(f, "protocol error: {detail}"),
+            Self::Interrupted(Interrupt::Cancelled) => f.write_str("cancelled"),
+            Self::Interrupted(Interrupt::DeadlineExceeded) => f.write_str("deadline exceeded"),
         }
     }
 }
@@ -88,7 +93,9 @@ impl Shared {
     }
 }
 
-type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
+/// Frames bound for the server's stdin. One thread owns the pipe, so a server
+/// that stops reading blocks that thread, never a caller watching for a stop.
+type Writer = Sender<Vec<u8>>;
 
 pub(crate) struct Connection {
     writer: Writer,
@@ -136,7 +143,11 @@ impl Connection {
             status: Mutex::new(Status::default()),
             changed: Condvar::new(),
         });
-        let writer: Writer = Arc::new(Mutex::new(stdin));
+        let (writer, frames) = channel::<Vec<u8>>();
+        harn_parser::runtime_stack::builder()
+            .name(format!("lsp-writer-{}", launch.id))
+            .spawn(move || write_loop(stdin, frames))
+            .map_err(|err| format!("spawn writer: {err}"))?;
         let connection = Self {
             writer: writer.clone(),
             shared: shared.clone(),
@@ -168,6 +179,7 @@ impl Connection {
         method: &str,
         params: P,
         timeout: Duration,
+        call: &HostCallContext,
     ) -> Result<R, RpcError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = channel();
@@ -181,15 +193,23 @@ impl Connection {
             return Err(RpcError::Exited(self.shared.stderr_tail()));
         }
         self.write(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))?;
-        let value = match rx.recv_timeout(timeout) {
-            Ok(reply) => reply?,
-            Err(RecvTimeoutError::Timeout) => {
-                self.forget(id);
-                let _ = self.notify("$/cancelRequest", json!({"id": id}));
+        let deadline = Instant::now() + timeout;
+        let value = loop {
+            if let Some(interrupt) = call.interrupted() {
+                self.abandon(id);
+                return Err(RpcError::Interrupted(interrupt));
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                self.abandon(id);
                 return Err(RpcError::Timeout);
             }
-            Err(RecvTimeoutError::Disconnected) => {
-                return Err(RpcError::Exited(self.shared.stderr_tail()))
+            match rx.recv_timeout(INTERRUPT_POLL.min(deadline - now)) {
+                Ok(reply) => break reply?,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(RpcError::Exited(self.shared.stderr_tail()))
+                }
             }
         };
         serde_json::from_value(value).map_err(|err| RpcError::Protocol(format!("{method}: {err}")))
@@ -197,6 +217,12 @@ impl Connection {
 
     pub(crate) fn notify<P: Serialize>(&self, method: &str, params: P) -> Result<(), RpcError> {
         self.write(&json!({"jsonrpc": "2.0", "method": method, "params": params}))
+    }
+
+    /// Stop waiting for request `id` and tell the server to drop it.
+    fn abandon(&self, id: i64) {
+        self.forget(id);
+        let _ = self.notify("$/cancelRequest", json!({"id": id}));
     }
 
     fn forget(&self, id: i64) {
@@ -228,6 +254,8 @@ impl Connection {
         ends_before: Option<u64>,
         grace: Duration,
         deadline: Instant,
+        call: &HostCallContext,
+        server: &str,
     ) -> Result<bool, RpcError> {
         let grace_until = Instant::now() + grace;
         let mut status = self.shared.status.lock().expect("lsp status poisoned");
@@ -246,6 +274,10 @@ impl Connection {
             if now >= deadline {
                 return Ok(false);
             }
+            if let Some(interrupt) = call.interrupted() {
+                return Err(RpcError::Interrupted(interrupt));
+            }
+            call.heartbeat(Phase::Indexing, server);
             let until = if status.active_progress.is_empty() {
                 grace_until.min(deadline)
             } else {
@@ -254,7 +286,10 @@ impl Connection {
             status = self
                 .shared
                 .changed
-                .wait_timeout(status, until.saturating_duration_since(now))
+                .wait_timeout(
+                    status,
+                    INTERRUPT_POLL.min(until.saturating_duration_since(now)),
+                )
                 .expect("lsp status poisoned")
                 .0;
         }
@@ -274,6 +309,8 @@ impl Connection {
         &self,
         readiness: Readiness,
         deadline: Instant,
+        call: &HostCallContext,
+        server: &str,
     ) -> Result<bool, RpcError> {
         if readiness != Readiness::Quiescent {
             return Ok(true);
@@ -291,10 +328,14 @@ impl Connection {
             if now >= deadline {
                 return Ok(false);
             }
+            if let Some(interrupt) = call.interrupted() {
+                return Err(RpcError::Interrupted(interrupt));
+            }
+            call.heartbeat(Phase::ServerStart, server);
             status = self
                 .shared
                 .changed
-                .wait_timeout(status, deadline - now)
+                .wait_timeout(status, INTERRUPT_POLL.min(deadline - now))
                 .expect("lsp status poisoned")
                 .0;
         }
@@ -311,10 +352,24 @@ impl Drop for Connection {
 
 fn write_frame(writer: &Writer, message: &Value) -> std::io::Result<()> {
     let body = serde_json::to_vec(message)?;
-    let mut writer = writer.lock().expect("lsp writer poisoned");
-    write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
-    writer.write_all(&body)?;
-    writer.flush()
+    let mut frame = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
+    frame.extend_from_slice(&body);
+    writer
+        .send(frame)
+        .map_err(|_| std::io::ErrorKind::BrokenPipe.into())
+}
+
+/// Write queued frames in order until the pipe breaks or every sender drops.
+fn write_loop(mut stdin: Box<dyn Write + Send>, frames: std::sync::mpsc::Receiver<Vec<u8>>) {
+    for frame in frames {
+        if stdin
+            .write_all(&frame)
+            .and_then(|()| stdin.flush())
+            .is_err()
+        {
+            break;
+        }
+    }
 }
 
 fn drain_stderr(mut stderr: Box<dyn Read + Send>, shared: &Shared) {

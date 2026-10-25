@@ -282,7 +282,7 @@ pub(super) fn system_prompt_fingerprint(system: &str) -> String {
     format!("sha256:{}", hex::encode(digest))
 }
 
-pub(crate) fn system_prompt_metadata(system: &str) -> serde_json::Value {
+pub fn system_prompt_metadata(system: &str) -> serde_json::Value {
     let fingerprint = system_prompt_fingerprint(system);
     serde_json::json!({
         "content": system,
@@ -292,7 +292,7 @@ pub(crate) fn system_prompt_metadata(system: &str) -> serde_json::Value {
     })
 }
 
-pub(crate) fn system_prompt_event_metadata(system: &str) -> serde_json::Value {
+pub fn system_prompt_event_metadata(system: &str) -> serde_json::Value {
     let fingerprint = system_prompt_fingerprint(system);
     serde_json::json!({
         "hash": fingerprint,
@@ -301,7 +301,7 @@ pub(crate) fn system_prompt_event_metadata(system: &str) -> serde_json::Value {
     })
 }
 
-pub(crate) fn compose_system_prompt(
+pub fn compose_system_prompt(
     system: Option<String>,
     options: Option<&crate::value::DictMap>,
 ) -> Result<Option<String>, VmError> {
@@ -323,7 +323,7 @@ pub(super) fn compose_system_prompt_with_reminders(
 /// text, capability-gated tool guidance, and rendered system reminders all
 /// flow through the same [`crate::llm::prompt::assemble`] reducer.
 /// [`compose_system_prompt_with_reminders`] is the thin string-only wrapper.
-pub(crate) fn assemble_system_prompt(
+pub fn assemble_system_prompt(
     system: Option<String>,
     options: Option<&crate::value::DictMap>,
     rendered_reminders: &[RenderedReminder],

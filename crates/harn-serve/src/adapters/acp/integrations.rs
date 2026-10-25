@@ -448,7 +448,12 @@ impl AcpServer {
             .get("payload")
             .cloned()
             .unwrap_or(serde_json::Value::Null);
-        match harn_vm::workflow_signal_for_base(base_dir, workflow_id, name, payload) {
+        match harn_builtins::workflow_messages::workflow_signal_for_base(
+            base_dir,
+            workflow_id,
+            name,
+            payload,
+        ) {
             Ok(result) => self.send_response(id, result),
             Err(error) => self.send_error(id, -32000, &error),
         }
@@ -467,7 +472,8 @@ impl AcpServer {
             self.send_error(id, -32602, "workflow/query: no session cwd available");
             return;
         };
-        match harn_vm::workflow_query_for_base(base_dir, workflow_id, name) {
+        match harn_builtins::workflow_messages::workflow_query_for_base(base_dir, workflow_id, name)
+        {
             Ok(result) => self.send_response(id, result),
             Err(error) => self.send_error(id, -32000, &error),
         }
@@ -498,7 +504,7 @@ impl AcpServer {
             .get("timeoutMs")
             .and_then(|value| value.as_u64())
             .unwrap_or(30_000);
-        match harn_vm::workflow_update_for_base(
+        match harn_builtins::workflow_messages::workflow_update_for_base(
             base_dir,
             workflow_id,
             name,
@@ -521,7 +527,7 @@ impl AcpServer {
             self.send_error(id, -32602, "workflow/pause: no session cwd available");
             return;
         };
-        match harn_vm::workflow_pause_for_base(base_dir, workflow_id) {
+        match harn_builtins::workflow_messages::workflow_pause_for_base(base_dir, workflow_id) {
             Ok(result) => self.send_response(id, result),
             Err(error) => self.send_error(id, -32000, &error),
         }
@@ -540,7 +546,7 @@ impl AcpServer {
             self.send_error(id, -32602, "workflow/resume: no session cwd available");
             return;
         };
-        match harn_vm::workflow_resume_for_base(base_dir, workflow_id) {
+        match harn_builtins::workflow_messages::workflow_resume_for_base(base_dir, workflow_id) {
             Ok(result) => self.send_response(id, result),
             Err(error) => self.send_error(id, -32000, &error),
         }

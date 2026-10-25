@@ -79,7 +79,7 @@ impl std::error::Error for SessionLeaseError {
 #[derive(Debug)]
 pub struct SessionWriteLease {
     _project: SessionMutationLease,
-    _session: File,
+    _session: HeldLock,
 }
 
 /// A live executor's claim on one task, distinct from its transcript writer.
@@ -92,7 +92,7 @@ pub struct TaskExecutionLease {
 enum TaskExecutionLeaseInner {
     File {
         _project: SessionMutationLease,
-        _task: File,
+        _task: HeldLock,
     },
     Memory {
         claims: std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
@@ -108,8 +108,7 @@ impl TaskExecutionLease {
         let project = SessionMutationLease::try_acquire(store_dir)?;
         let identity = blake3::hash(task_id.as_bytes()).to_hex();
         let path = session_lease_directory(store_dir).join(format!("task-{identity}.lock"));
-        let task = open_lease_file(&path)?;
-        try_lock(&task, &path, LockMode::Exclusive)?;
+        let task = try_lock(open_lease_file(&path)?, &path, LockMode::Exclusive)?;
         Ok(Self {
             inner: TaskExecutionLeaseInner::File {
                 _project: project,
@@ -159,8 +158,11 @@ impl SessionWriteLease {
         let project = SessionMutationLease::try_acquire(store_dir)?;
 
         let session_path = session_write_lease_path(store_dir, session_id);
-        let session = open_lease_file(&session_path)?;
-        try_lock(&session, &session_path, LockMode::Exclusive)?;
+        let session = try_lock(
+            open_lease_file(&session_path)?,
+            &session_path,
+            LockMode::Exclusive,
+        )?;
         Ok(Self {
             _project: project,
             _session: session,
@@ -175,14 +177,17 @@ impl SessionWriteLease {
 /// the project half of their longer-lived lease.
 #[derive(Debug)]
 pub(crate) struct SessionMutationLease {
-    _project: File,
+    _project: HeldLock,
 }
 
 impl SessionMutationLease {
     pub(crate) fn try_acquire(store_dir: &Path) -> Result<Self, SessionLeaseError> {
         let project_path = project_lease_path(store_dir);
-        let project = open_lease_file(&project_path)?;
-        try_lock(&project, &project_path, LockMode::Shared)?;
+        let project = try_lock(
+            open_lease_file(&project_path)?,
+            &project_path,
+            LockMode::Shared,
+        )?;
         Ok(Self { _project: project })
     }
 }
@@ -190,7 +195,7 @@ impl SessionMutationLease {
 /// Exclusive proof that no participating process can write the project store.
 #[derive(Debug)]
 pub struct SessionMaintenanceLease {
-    _project: File,
+    _project: HeldLock,
 }
 
 impl SessionMaintenanceLease {
@@ -200,8 +205,11 @@ impl SessionMaintenanceLease {
     /// mutation, including any sidecars whose lifecycle follows the sessions.
     pub fn try_acquire(store_dir: &Path) -> Result<Self, SessionLeaseError> {
         let project_path = project_lease_path(store_dir);
-        let project = open_lease_file(&project_path)?;
-        try_lock(&project, &project_path, LockMode::Exclusive)?;
+        let project = try_lock(
+            open_lease_file(&project_path)?,
+            &project_path,
+            LockMode::Exclusive,
+        )?;
         Ok(Self { _project: project })
     }
 }
@@ -246,9 +254,24 @@ fn open_lease_file(path: &Path) -> Result<File, SessionLeaseError> {
         })
 }
 
-fn try_lock(file: &File, path: &Path, mode: LockMode) -> Result<(), SessionLeaseError> {
-    match harn_flock::lock_with_deadline(file, path, mode, Duration::ZERO) {
-        Ok(()) => Ok(()),
+/// A claimed lock file that unlocks before it closes.
+///
+/// A child forked by another thread holds a copy of every descriptor until it
+/// execs, and a lock belongs to the open file description, so closing ours
+/// alone leaves the lock held by that child. Unlocking releases it for every
+/// copy.
+#[derive(Debug)]
+struct HeldLock(File);
+
+impl Drop for HeldLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
+fn try_lock(file: File, path: &Path, mode: LockMode) -> Result<HeldLock, SessionLeaseError> {
+    match harn_flock::lock_with_deadline(&file, path, mode, Duration::ZERO) {
+        Ok(()) => Ok(HeldLock(file)),
         Err(LockError::Timeout { path, .. }) => Err(SessionLeaseError::Contended { path }),
         Err(LockError::Io { path, source, .. }) => Err(SessionLeaseError::Io { path, source }),
         Err(error) => Err(SessionLeaseError::Lock(error)),
@@ -271,6 +294,19 @@ mod tests {
         drop((first, second));
         SessionWriteLease::try_acquire(root.path(), "session-a")
             .expect("released writer lease can be reclaimed");
+    }
+
+    #[test]
+    fn a_dropped_writer_lease_is_free_while_a_child_holds_its_descriptor() {
+        let root = tempfile::tempdir().expect("lease root");
+        let first = SessionWriteLease::try_acquire(root.path(), "session-a").expect("first writer");
+        // A child forked by another thread shares this open file description,
+        // and so the lock, until it execs.
+        let inherited = first._session.0.try_clone().expect("inherited descriptor");
+        drop(first);
+        SessionWriteLease::try_acquire(root.path(), "session-a")
+            .expect("a dropped writer releases its lock despite the inherited copy");
+        drop(inherited);
     }
 
     #[test]

@@ -100,7 +100,7 @@ setup-wasm:
 	fi
 
 setup-wasm-tools:
-	@if [ ! -x "$(HARN_WASM_TOOLS)" ] || [ "$$($(HARN_WASM_TOOLS) --version)" != "wasm-tools $(HARN_WASM_TOOLS_VERSION)" ]; then \
+	@if [ ! -x "$(HARN_WASM_TOOLS)" ] || [ "$$($(HARN_WASM_TOOLS) --version | awk '{print $$1, $$2}')" != "wasm-tools $(HARN_WASM_TOOLS_VERSION)" ]; then \
 		cargo install --locked --root "$(HARN_WASM_COMPONENT_TOOLS_DIR)" --version "=$(HARN_WASM_TOOLS_VERSION)" wasm-tools; \
 	fi
 
@@ -144,7 +144,12 @@ wasm-audit-imports: wasm-build
 
 # Browser tests are intentionally a real dedicated-worker path, not Node.
 wasm-test-browser: setup-wasm
-	@driver="$${HARN_CHROMEDRIVER:-$$(./scripts/resolve_chromedriver.sh)}"; \
+	@set -eu; driver="$${HARN_CHROMEDRIVER:-$$(./scripts/resolve_chromedriver.sh)}"; \
+	if [ -z "$${WASM_BINDGEN_TEST_WEBDRIVER_JSON:-}" ] && [ -n "$${HARN_CHROME_BIN:-}" ]; then \
+		capabilities="$$(mktemp)"; trap 'rm -f "$$capabilities"' EXIT; \
+		node -e 'process.stdout.write(JSON.stringify({"goog:chromeOptions": {binary: process.env.HARN_CHROME_BIN}}))' > "$$capabilities"; \
+		export WASM_BINDGEN_TEST_WEBDRIVER_JSON="$$capabilities"; \
+	fi; \
 	cd crates/harn-wasm && "$(HARN_WASM_PACK)" test --headless --chrome --chromedriver "$$driver"
 
 wasm-check: check-wasm-wit wasm-build check-app-runtime wasm-audit-imports wasm-test-browser
@@ -747,6 +752,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/breaking_surface_check_test.sh
 	bash ./scripts/tests/pr_gate_range_test.sh
 	./scripts/tests/public_api_baseline_test.sh
+	bash ./scripts/tests/public_api_rustdoc_test.sh
 	./scripts/tests/release_pr_drift_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_ship_root_harn_bin_test.sh

@@ -237,7 +237,7 @@ fn resolve_tier_model_for_route(
     requested
 }
 
-pub(crate) fn vm_resolve_provider(options: &Option<crate::value::DictMap>) -> String {
+pub fn vm_resolve_provider(options: &Option<crate::value::DictMap>) -> String {
     use crate::llm_config;
 
     // Explicit option wins, except "auto" which means "run the normal
@@ -336,7 +336,7 @@ pub(crate) fn vm_resolve_provider(options: &Option<crate::value::DictMap>) -> St
     default
 }
 
-pub(crate) fn vm_resolve_model(
+pub fn vm_resolve_model(
     options: &Option<crate::value::DictMap>,
     provider: &str,
 ) -> Result<String, crate::llm_config::ModelResolutionError> {
@@ -346,7 +346,7 @@ pub(crate) fn vm_resolve_model(
     }
 }
 
-pub(crate) enum ModelSelector {
+pub enum ModelSelector {
     SessionPin(crate::llm_config::ModelResolution),
     Other(String),
 }
@@ -368,7 +368,7 @@ impl ModelSelector {
 /// Return the selector that won model precedence before alias normalization.
 /// Resolution receipts use this form so environment and session aliases do
 /// not disappear before the one typed model-selection decision is recorded.
-pub(crate) fn vm_resolve_model_selector(
+pub fn vm_resolve_model_selector(
     options: &Option<crate::value::DictMap>,
     provider: &str,
 ) -> Result<ModelSelector, crate::llm_config::ModelResolutionError> {
@@ -413,7 +413,7 @@ pub(crate) fn vm_resolve_model_selector(
     llm_config::default_model_for_provider(provider).map(ModelSelector::Other)
 }
 
-pub(crate) struct ResolvedProvider {
+pub struct ResolvedProvider {
     // Catalog growth must not enlarge every nested provider-probe future.
     pub pdef: Option<Box<crate::llm_config::ProviderDef>>,
     pub base_url: String,
