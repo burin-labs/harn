@@ -107,19 +107,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/rust-toolchain
-      - uses: ./.github/actions/rust-cache
-        continue-on-error: true
-        with:
-          shared-key: workspace-tests
-          cache-bin: false
-
       - name: Check for lapsed provider retirements
         id: sweep
         shell: bash
+        env:
+          RUST_MIN_STACK: "16777216"
         run: |
           set -uo pipefail
           status=0
-          RETIREMENT_SWEEP_DATE="$(date -u +%F)" cargo test --locked -p harn-provider-catalog --lib -- --ignored lapsed_retirements_are_not_left_routable >"$RUNNER_TEMP/sweep.log" 2>&1 || status=$?
+          RETIREMENT_SWEEP_DATE="$(date -u +%F)" cargo test --locked -p harn-provider-catalog --lib -- lapsed_retirements_are_not_left_routable >"$RUNNER_TEMP/sweep.log" 2>&1 || status=$?
           cat "$RUNNER_TEMP/sweep.log"
           echo "status=$status" >> "$GITHUB_OUTPUT"
           # Only the named assertion is a lapse; a compile or harness failure is not.

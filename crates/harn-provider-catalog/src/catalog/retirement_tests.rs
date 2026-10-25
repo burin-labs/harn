@@ -41,15 +41,16 @@ fn lapsed_retirements(catalog: &ProviderCatalogArtifact, cutoff: NaiveDate) -> V
     problems
 }
 
-/// The sweep date is injected by the weekly `retirement-sweep` job in
-/// provider-contract-probe.yml, which files an issue on failure; a date-based
-/// check must never gate a merge, since main would redden on a calendar day.
+/// The weekly `retirement-sweep` job in provider-contract-probe.yml injects
+/// today's date as `RETIREMENT_SWEEP_DATE` and files an issue when this fails.
+/// Everywhere else the variable is unset and the test does nothing, because a
+/// date-based check must never gate a merge: main would redden on a calendar day.
 #[test]
-#[ignore = "needs RETIREMENT_SWEEP_DATE; runs weekly from provider-contract-probe.yml"]
 fn lapsed_retirements_are_not_left_routable() {
-    let today = std::env::var("RETIREMENT_SWEEP_DATE")
-        .ok()
-        .and_then(|date| NaiveDate::parse_from_str(&date, "%Y-%m-%d").ok())
+    let Ok(today) = std::env::var("RETIREMENT_SWEEP_DATE") else {
+        return;
+    };
+    let today = NaiveDate::parse_from_str(&today, "%Y-%m-%d")
         .expect("RETIREMENT_SWEEP_DATE must be a YYYY-MM-DD date");
     let cutoff = today - Duration::days(GRACE_DAYS);
     let problems = lapsed_retirements(&artifact_embedded(None, None), cutoff);
