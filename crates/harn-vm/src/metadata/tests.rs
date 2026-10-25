@@ -23,6 +23,11 @@ fn failed_hash_refresh_preserves_all_previous_classifications() {
         (false, false)
     );
     std::fs::remove_dir(base.path().join("z-missing")).unwrap();
+    std::fs::write(base.path().join("a-valid/new.txt"), b"changed").unwrap();
+    assert_ne!(
+        compute_structure_hash(&base.path().join("a-valid")).unwrap(),
+        stored
+    );
     state.dirty = false;
     assert!(refresh_metadata_hashes(&mut state).is_err());
     assert!(!state.dirty);
@@ -37,6 +42,13 @@ fn failed_hash_refresh_preserves_all_previous_classifications() {
         stale.as_dict().unwrap()["any_stale"],
         VmValue::Bool(true)
     ));
+    let VmValue::List(directories) = &stale.as_dict().unwrap()["tier1"] else {
+        panic!("stale directory inventory must be a list");
+    };
+    assert_eq!(
+        directories.iter().map(VmValue::display).collect::<Vec<_>>(),
+        ["a-valid", "z-missing"]
+    );
     let flags = metadata_inspect_stale_flags(base.path(), "z-missing", &state.entries["z-missing"]);
     assert_eq!(flags, (true, true));
 }
