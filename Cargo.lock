@@ -4333,6 +4333,7 @@ dependencies = [
  "harn-vm",
  "tempfile",
  "tokio",
+ "zstd",
 ]
 
 [[package]]
@@ -4549,6 +4550,7 @@ dependencies = [
  "uuid",
  "walkdir",
  "windows-sys 0.61.2",
+ "zstd",
 ]
 
 [[package]]
