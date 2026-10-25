@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 # The one owner of how Harn runs rustc's front end, for local setup and CI.
 #
