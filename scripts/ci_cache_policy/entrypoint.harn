@@ -4,6 +4,7 @@ import { scan_glob } from "../path_visibility.harn"
 import "./generation_projection.harn"
 import "./harn_check_cache.harn"
 import "./linux_checks.harn"
+import "./make_target_paths.harn"
 import "./native_checks.harn"
 import "./policy_core.harn"
 import "./post_merge_tier.harn"
@@ -129,6 +130,7 @@ pub fn run_ci_cache_policy(harness: Harness) {
     linux_confinement_errors(workflows, release_runner_policy),
     public_repository_runner_errors(workflows, release_runner_policy),
     post_merge_tier_errors(workflows),
+    make_target_path_gate_errors(workflows["ci.yml"], harness.fs.read_text("Makefile")),
     cache_refresh_workflow_errors(workflows["rust-cache-refresh.yml"]),
     windows_shared_cache_errors(workflows["windows-nightly.yml"]),
     windows_native_admission_errors(policy, workflows["ci.yml"], workflows["windows-nightly.yml"]),

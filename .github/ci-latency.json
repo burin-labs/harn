@@ -106,6 +106,7 @@
       "consumer-base-check": { "budget_ms": 30000 },
       "consumer-base-check-retry": { "budget_ms": 30000 },
       "provider-contract-probe": { "budget_ms": 120000 },
+      "swift-protocol-binding": { "budget_ms": 300000 },
       "rust-check-inputs": { "budget_ms": 600000 },
       "rust-test-partitions": { "budget_ms": 600000 },
       "rust-test-status": { "budget_ms": 30000 },
