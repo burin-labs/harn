@@ -874,6 +874,30 @@ pub fn git_config_aliases(listing: string) -> dict {
   return aliases
 }
 
+/** Key a lookup returns when git could not read the configuration the command selects. */
+pub const GIT_ALIASES_UNREADABLE: string = "<unreadable>"
+
+/** The lookup for callers that read no configuration. */
+pub const NO_CONFIG_ALIASES: fn(list<string>) -> dict = { options -> {} }
+
+/**
+ * Aliases git defines for the configuration that `options` (a command's own
+ * global options such as `-C dir` or `--git-dir=...`) select. A listing git
+ * cannot produce is unreadable, so the caller refuses rather than guesses.
+ */
+pub fn git_config_aliases_for(process: HarnessProcess, options: list<string>) -> dict {
+  const listed = process.run(
+    {program: "git", args: options + ["config", "--get-regexp", "^alias\\."]},
+  )
+  if listed.exit_code == 0 {
+    return git_config_aliases(listed.stdout)
+  }
+  if listed.exit_code == 1 {
+    return {}
+  }
+  return {"<unreadable>": ""}
+}
+
 /** Marks an inline alias whose value git reads from the environment, which the guard cannot see. */
 const GIT_ALIAS_UNRESOLVED: string = "<unresolved>"
 
@@ -922,13 +946,21 @@ fn git_args_write_stash(
   argv: list<string>,
   args: list<string>,
   depth: int,
-  config_aliases: dict,
+  alias_lookup: fn(list<string>) -> dict,
 ) -> bool {
   const verb = args[0] ?? ""
   if verb == "stash" {
     return !GIT_STASH_READ_ONLY.contains(args[1] ?? "")
   }
-  const expansion = git_inline_aliases(argv)[verb] ?? config_aliases[verb] ?? ""
+  let expansion = git_inline_aliases(argv)[verb] ?? ""
+  if expansion == "" {
+    // The configuration that applies is the one the command's own global options select.
+    const configured = alias_lookup(argv.slice(1, len(argv) - len(git_subcommand_args(argv))))
+    if configured.has(GIT_ALIASES_UNREADABLE) {
+      return true
+    }
+    expansion = configured[verb] ?? ""
+  }
   if expansion == "" || depth >= 4 {
     return false
   }
@@ -939,12 +971,12 @@ fn git_args_write_stash(
     return git_stash_write_in(
       expansion.replace("!", "") + " " + args.slice(1, len(args)).join(" "),
       depth + 1,
-      config_aliases,
+      alias_lookup,
     )
   }
   const words = expansion.split(" ").filter({ word -> word != "" })
   const expanded = ["git"] + words + args.slice(1, len(args))
-  return git_args_write_stash(argv, git_subcommand_args(expanded), depth + 1, config_aliases)
+  return git_args_write_stash(argv, git_subcommand_args(expanded), depth + 1, alias_lookup)
 }
 
 /**
@@ -980,26 +1012,26 @@ fn operand_text_writes_stash(text: string) -> bool {
  * cost is that an unresolved `xargs` whose operands mention a non-read-only `stash`, even as
  * `xargs -a f grep stash`, is refused.
  */
-fn xargs_operands_write_stash(argv: list<string>, config_aliases: dict) -> bool {
+fn xargs_operands_write_stash(argv: list<string>, alias_lookup: fn(list<string>) -> dict) -> bool {
   if argv_program(argv) != "xargs" {
     return false
   }
   for index in range(1, len(argv)) {
     const launched = argv.slice(index, len(argv))
     if argv_program(launched) == "git"
-      && git_args_write_stash(launched, git_subcommand_args(launched), 0, config_aliases) {
+      && git_args_write_stash(launched, git_subcommand_args(launched), 0, alias_lookup) {
       return true
     }
   }
   return operand_text_writes_stash(argv.slice(1, len(argv)).join(" "))
 }
 
-fn git_stash_write_in(command: string, depth: int, config_aliases: dict) -> bool {
+fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>) -> dict) -> bool {
   for group in command_groups(command) {
     for stage in group {
       // `xargs` launches its operands, so the stash rule reads the child the scanner resolved.
       const xargs_child = stage.xargs_child_argv ?? []
-      if len(xargs_child) == 0 && xargs_operands_write_stash(stage.argv, config_aliases) {
+      if len(xargs_child) == 0 && xargs_operands_write_stash(stage.argv, alias_lookup) {
         return true
       }
       const launched = if len(xargs_child) > 0 {
@@ -1009,13 +1041,13 @@ fn git_stash_write_in(command: string, depth: int, config_aliases: dict) -> bool
       }
       const argv = launched_argv(launched, 0)
       if argv_program(argv) == "git" {
-        if git_args_write_stash(argv, git_subcommand_args(argv), depth, config_aliases) {
+        if git_args_write_stash(argv, git_subcommand_args(argv), depth, alias_lookup) {
           return true
         }
       }
       if depth < 4 {
         const nested = nested_shell_payload(argv)
-        if nested != "" && git_stash_write_in(nested, depth + 1, config_aliases) {
+        if nested != "" && git_stash_write_in(nested, depth + 1, alias_lookup) {
           return true
         }
       }
@@ -1032,8 +1064,11 @@ fn git_stash_write_in(command: string, depth: int, config_aliases: dict) -> bool
  * push applies that agent's changes and loses its own. A work-in-progress commit
  * is private to a branch and has no such collision.
  */
-pub fn git_stash_violation(command: string, config_aliases: dict = {}) -> string {
-  if !git_stash_write_in(command, 0, config_aliases) {
+pub fn git_stash_violation(
+  command: string,
+  alias_lookup: fn(list<string>) -> dict = NO_CONFIG_ALIASES,
+) -> string {
+  if !git_stash_write_in(command, 0, alias_lookup) {
     return ""
   }
   return "`git stash` is refused: the stash list is shared by every linked worktree, so a pop can apply "
@@ -1326,7 +1361,7 @@ pub fn decision(
   payload: string,
   census: WorktreeAdmissionCensus,
   make_targets: MakeTargetCensus,
-  config_aliases: dict = {},
+  alias_lookup: fn(list<string>) -> dict = NO_CONFIG_ALIASES,
 ) -> ShellGuardDecision {
   let parsed = nil
   try {
@@ -1417,7 +1452,7 @@ pub fn decision(
   if make_owned != "" {
     return {allow: false, reason: make_owned}
   }
-  const stash = git_stash_violation(command, config_aliases)
+  const stash = git_stash_violation(command, alias_lookup)
   if stash != "" {
     return {allow: false, reason: stash}
   }
@@ -1441,9 +1476,7 @@ fn main(harness: Harness) {
     payload,
     worktree_admission_census_from_env(harness.env),
     make_target_census_from_env(harness.env),
-    git_config_aliases(
-      harness.process.run({program: "git", args: ["config", "--get-regexp", "^alias\\."]}).stdout,
-    ),
+    { options -> git_config_aliases_for(harness.process, options) },
   )
   if verdict.allow {
     return nil

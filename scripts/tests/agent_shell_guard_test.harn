@@ -1198,45 +1198,56 @@ pipeline test_unresolved_xargs_forms_still_refuse_stash_writes(harness: Harness,
 
 /**
  * An alias defined in repository or user git configuration is invisible in the command text. The
- * guard reads it from the listing `git config --get-regexp '^alias\.'` produces, so `git s` with a
- * configured `s=stash pop` is refused, while an alias that only reads the stash list is not.
+ * guard reads it with the command's own global options, so `git -C B s` is judged by repo B's
+ * configuration, not the repository the hook runs in.
  */
 @test
 pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
   harness: Harness,
   task: unknown,
 ) {
-  const aliases = git_config_aliases(
+  const listing = git_config_aliases(
     "alias.s stash pop\nalias.l stash list\nalias.sh !git stash drop\nalias.st status\nalias.broken\n",
   )
-  assert_eq(aliases["s"], "stash pop")
-  assert_eq(aliases["sh"], "!git stash drop")
-  for command in [
-    "git s",
-    "git sh",
-    "git -C /workspace s",
-    "sudo git s",
-    "sh -c 'git s'",
-    "xargs -a input git s",
-  ] {
-    assert(
-      !decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, aliases).allow,
-      command + " expands to a stash write through configured aliases",
-    )
-    // Falsifier: the same command with no configured aliases is what the guard allowed before.
-    if command == "git s" {
-      assert(
-        verdict(claude_payload(command)).allow,
-        "without the alias listing, git s is not a stash",
-      )
+  assert_eq(listing["s"], "stash pop")
+  assert_eq(listing["sh"], "!git stash drop")
+  // Repo A (the hook's directory) defines nothing; repo B, reached through -C, defines the listing.
+  const lookup = { options ->
+    if options.contains("/repo/b") {
+      listing
+    } else {
+      {}
     }
   }
-  for command in ["git l", "git st", "git broken"] {
+  const refused = [
+    "git -C /repo/b s",
+    "git -C /repo/b sh",
+    "sudo git -C /repo/b s",
+    "sh -c 'git -C /repo/b s'",
+    "xargs -a input git -C /repo/b s",
+  ]
+  for command in refused {
     assert(
-      decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, aliases).allow,
+      !decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, lookup).allow,
+      command + " expands to a stash write through repo B's configured aliases",
+    )
+  }
+  // Falsifiers: the same alias name from repo A (no alias there) is allowed, as is a lookup that
+  // reads nothing, so the denial above comes from the option-scoped configuration.
+  assert(decision(claude_payload("git s"), ADMITTED, NO_MAKE_TARGETS, lookup).allow)
+  assert(verdict(claude_payload("git -C /repo/b s")).allow)
+  for command in ["git -C /repo/b l", "git -C /repo/b st", "git -C /repo/b broken"] {
+    assert(
+      decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, lookup).allow,
       command + " does not write the stash list",
     )
   }
+  // A configuration git could not read is refused rather than read as having no aliases.
+  const unreadable = { options -> {"<unreadable>": ""} }
+  assert(
+    !decision(claude_payload("git -C /missing s"), ADMITTED, NO_MAKE_TARGETS, unreadable).allow,
+  )
+  assert_eq(GIT_ALIASES_UNREADABLE, "<unreadable>")
 }
 
 @test
