@@ -131,21 +131,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # The base this run's CLI is built on. `pull_request.base.sha` records
-      # the base tip when the event fired and lags main, so a base rehearsal
-      # built there blames the pull request for whatever landed since.
-      - name: Resolve the merge commit's base
-        id: merged_base
-        if: github.event_name == 'pull_request'
-        env:
-          MERGE_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          [[ "$(git rev-parse HEAD)" == "$MERGE_SHA" ]] || { echo "::error::checkout is not the merge commit $MERGE_SHA"; exit 1; }
-          read -r -a parents <<< "$(git rev-list --parents -n 1 HEAD)"
-          [[ "${#parents[@]}" -eq 3 ]] || { echo "::error::$MERGE_SHA is not a two-parent merge commit"; exit 1; }
-          echo "sha=${parents[1]}" >> "$GITHUB_OUTPUT"
-
       # Refuse a group that would bury a release before admitting expensive
       # proofs. The group's base is the previous queue entry, so compare with
       # fetched main rather than that base. All product proofs need changes;
@@ -165,6 +150,21 @@ jobs:
             echo "::error::This entry is queued behind release commit(s) ${releases//$'\n'/, }. A release must be the last entry of its merge group; re-queue this entry after the release merges."
             exit 1
           fi
+
+      # The base this run's CLI is built on. `pull_request.base.sha` records
+      # the base tip when the event fired and lags main, so a base rehearsal
+      # built there blames the pull request for whatever landed since.
+      - name: Resolve the merge commit's base
+        id: merged_base
+        if: github.event_name == 'pull_request'
+        env:
+          MERGE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$MERGE_SHA" ]] || { echo "::error::checkout is not the merge commit $MERGE_SHA"; exit 1; }
+          read -r -a parents <<< "$(git rev-list --parents -n 1 HEAD)"
+          [[ "${#parents[@]}" -eq 3 ]] || { echo "::error::$MERGE_SHA is not a two-parent merge commit"; exit 1; }
+          echo "sha=${parents[1]}" >> "$GITHUB_OUTPUT"
 
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
