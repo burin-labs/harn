@@ -31,6 +31,8 @@ use crate::test_util::process::harn_e2e_command;
 fn generated_precompile_driver_uses_user_run_store_in_shared_temp() {
     use std::os::unix::fs::PermissionsExt;
     let temporary = tempfile::tempdir().expect("isolated shared temp");
+    std::fs::set_permissions(temporary.path(), std::fs::Permissions::from_mode(0o700))
+        .expect("safe temporary parent independent of host umask");
     let project = tempfile::tempdir().expect("project");
     let legacy = temporary.path().join(".harn-runs");
     // A file makes the old shared store unusable even when CI runs as root.
@@ -104,6 +106,8 @@ fn generated_precompile_driver_refuses_unsafe_user_run_store() {
 
     for unsafe_kind in ["public", "symlink", "parent"] {
         let temporary = tempfile::tempdir().expect("isolated shared temp");
+        std::fs::set_permissions(temporary.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("safe parent before introducing one unsafe condition");
         let project = tempfile::tempdir().expect("project");
         let outside = tempfile::tempdir().expect("other account's directory");
         std::fs::write(outside.path().join("marker"), "untouched").unwrap();
@@ -138,8 +142,13 @@ fn generated_precompile_driver_refuses_unsafe_user_run_store() {
             !output.status.success(),
             "unsafe namespace accepted: {stderr}"
         );
+        let expected_diagnostic = if unsafe_kind == "parent" {
+            "shared-temp run directory has an unsafe parent"
+        } else {
+            "shared-temp run directory must be private, owned by the effective user, and not a symlink"
+        };
         assert!(
-            stderr.contains("shared-temp run directory"),
+            stderr.contains(expected_diagnostic),
             "the persistence boundary did not refuse the unsafe namespace: {stderr}"
         );
         assert!(!private.join(".harn-runs").exists());

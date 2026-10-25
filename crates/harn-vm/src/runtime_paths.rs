@@ -77,7 +77,12 @@ pub(crate) fn prepare_run_record_parent(path: &Path) -> std::io::Result<()> {
                     {
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::PermissionDenied,
-                            "shared-temp run directory has an unsafe parent",
+                            format!(
+                                "shared-temp run directory has an unsafe parent: {} (owner {}, mode {:o})",
+                                ancestor.display(),
+                                metadata.uid(),
+                                metadata.mode() & 0o7777,
+                            ),
                         ));
                     }
                 }
