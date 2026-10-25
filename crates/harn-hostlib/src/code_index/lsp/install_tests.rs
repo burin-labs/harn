@@ -117,6 +117,42 @@ fn a_rustup_proxy_without_the_component_does_not_resolve() {
         .expect("the pinned toolchain has rust-analyzer");
 }
 
+#[cfg(unix)]
+#[test]
+fn a_rustup_directory_override_decides_the_proxy() {
+    let home = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    rustup_home(home.path(), true);
+    executable(
+        &home
+            .path()
+            .join(".rustup/toolchains/beta-aarch64-apple-darwin/bin/cargo"),
+    );
+    // `rustup override set beta` in the workspace: beta lacks the component.
+    std::fs::write(
+        home.path().join(".rustup/settings.toml"),
+        format!(
+            "default_toolchain = \"1.95.0-aarch64-apple-darwin\"\n[overrides]\n{:?} = \"beta\"\n",
+            workspace.path().display().to_string()
+        ),
+    )
+    .unwrap();
+    let reason = rust_launch()
+        .resolve_with(&FakeProbe::new(home.path()), workspace.path())
+        .expect_err("the override selects beta, which has no rust-analyzer");
+    assert!(reason.contains("beta toolchain"), "{reason}");
+
+    // With no override and no default, rustup selects nothing to run.
+    std::fs::write(home.path().join(".rustup/settings.toml"), "").unwrap();
+    let reason = rust_launch()
+        .resolve_with(&FakeProbe::new(home.path()), workspace.path())
+        .expect_err("a proxy with no selected toolchain cannot start");
+    assert!(
+        reason.contains("selects no installed toolchain"),
+        "{reason}"
+    );
+}
+
 #[test]
 fn an_override_naming_no_file_does_not_resolve() {
     let home = tempfile::tempdir().unwrap();

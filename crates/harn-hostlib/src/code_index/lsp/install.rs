@@ -70,6 +70,14 @@ pub(crate) fn install_dirs(probe: &dyn Probe, root: &Path) -> Vec<PathBuf> {
             .map(PathBuf::from)
             .filter(|dir| dir.is_absolute())
     };
+    // npm installs global shims in the prefix itself on Windows, in `bin` elsewhere.
+    let npm_bin = |prefix: PathBuf| {
+        if cfg!(windows) {
+            prefix
+        } else {
+            prefix.join("bin")
+        }
+    };
     let (cargo_home, _) = probe.rust_homes();
     let mut dirs: Vec<Option<PathBuf>> = vec![
         cargo_home.map(|cargo| cargo.join("bin")),
@@ -81,9 +89,9 @@ pub(crate) fn install_dirs(probe: &dyn Probe, root: &Path) -> Vec<PathBuf> {
             .filter(|dir| dir.is_absolute())
             .map(|dir| dir.join("bin")),
         in_home("go/bin"),
-        var_dir("NPM_CONFIG_PREFIX").map(|prefix| prefix.join("bin")),
-        var_dir("npm_config_prefix").map(|prefix| prefix.join("bin")),
-        in_home(".npm-global/bin"),
+        var_dir("NPM_CONFIG_PREFIX").map(npm_bin),
+        var_dir("npm_config_prefix").map(npm_bin),
+        in_home(".npm-global").map(npm_bin),
         var_dir("PNPM_HOME"),
         in_home(".volta/bin"),
         in_home(".bun/bin"),
@@ -91,6 +99,8 @@ pub(crate) fn install_dirs(probe: &dyn Probe, root: &Path) -> Vec<PathBuf> {
         in_home(".local/bin"),
     ];
     if cfg!(windows) {
+        // npm's default global prefix, then Scoop.
+        dirs.push(var_dir("APPDATA").map(|appdata| appdata.join("npm")));
         dirs.push(in_home("scoop/shims"));
     }
     dirs.extend(probe.system_dirs().into_iter().map(Some));
@@ -109,17 +119,30 @@ pub(crate) struct RustupToolchain {
     pub bin: PathBuf,
 }
 
-/// The installed toolchain rustup selects for `root`: `RUSTUP_TOOLCHAIN`, then
-/// a `rust-toolchain(.toml)` at or above `root`, then the default. `None` when
-/// rustup is absent or the selected toolchain is not installed.
+/// The installed toolchain rustup selects for `root`, in rustup's order:
+/// `RUSTUP_TOOLCHAIN`; then, from `root` upward, a `rustup override set`
+/// directory override or a `rust-toolchain(.toml)` file; then the default.
+/// `None` when rustup is absent, selects nothing, or the selection is not
+/// installed.
 pub(crate) fn rustup_toolchain(probe: &dyn Probe, root: &Path) -> Option<RustupToolchain> {
     let (_, rustup_home) = probe.rust_homes();
     let rustup_home = rustup_home?;
+    let settings = rustup_settings(&rustup_home);
     let name = probe
         .var("RUSTUP_TOOLCHAIN")
         .map(|name| name.to_string_lossy().into_owned())
-        .or_else(|| pinned_toolchain(root))
-        .or_else(|| default_toolchain(&rustup_home))?;
+        .or_else(|| {
+            root.ancestors().find_map(|dir| {
+                directory_override(settings.as_ref(), dir).or_else(|| pinned_toolchain(dir))
+            })
+        })
+        .or_else(|| {
+            settings
+                .as_ref()?
+                .get("default_toolchain")?
+                .as_str()
+                .map(str::to_string)
+        })?;
     let toolchains = rustup_home.join("toolchains");
     // `stable` and `1.95.0` name the host's `<name>-<target-triple>` directory.
     let dir = if toolchains.join(&name).is_dir() {
@@ -141,31 +164,38 @@ pub(crate) fn rustup_toolchain(probe: &dyn Probe, root: &Path) -> Option<RustupT
     })
 }
 
-fn pinned_toolchain(root: &Path) -> Option<String> {
-    root.ancestors().find_map(|dir| {
-        let toml = std::fs::read_to_string(dir.join("rust-toolchain.toml")).ok();
-        let legacy = || std::fs::read_to_string(dir.join("rust-toolchain")).ok();
-        let text = toml.or_else(legacy)?;
-        match text.parse::<toml::Table>() {
-            Ok(table) => table
-                .get("toolchain")
-                .and_then(|toolchain| toolchain.get("channel"))
-                .and_then(toml::Value::as_str)
-                .map(str::to_string),
-            // The legacy file may hold a bare channel name.
-            Err(_) => Some(text.trim().to_string()).filter(|name| !name.is_empty()),
-        }
-    })
+fn rustup_settings(rustup_home: &Path) -> Option<toml::Table> {
+    std::fs::read_to_string(rustup_home.join("settings.toml"))
+        .ok()?
+        .parse()
+        .ok()
 }
 
-fn default_toolchain(rustup_home: &Path) -> Option<String> {
-    let settings = std::fs::read_to_string(rustup_home.join("settings.toml")).ok()?;
-    settings
-        .parse::<toml::Table>()
-        .ok()?
-        .get("default_toolchain")?
-        .as_str()
+/// The toolchain `rustup override set` recorded for exactly `dir`.
+fn directory_override(settings: Option<&toml::Table>, dir: &Path) -> Option<String> {
+    let overrides = settings?.get("overrides")?.as_table()?;
+    let canonical = std::fs::canonicalize(dir).ok();
+    [Some(dir.to_path_buf()), canonical]
+        .into_iter()
+        .flatten()
+        .find_map(|dir| overrides.get(dir.to_string_lossy().as_ref())?.as_str())
         .map(str::to_string)
+}
+
+/// The channel a `rust-toolchain(.toml)` file in `dir` pins.
+fn pinned_toolchain(dir: &Path) -> Option<String> {
+    let toml = std::fs::read_to_string(dir.join("rust-toolchain.toml")).ok();
+    let legacy = || std::fs::read_to_string(dir.join("rust-toolchain")).ok();
+    let text = toml.or_else(legacy)?;
+    match text.parse::<toml::Table>() {
+        Ok(table) => table
+            .get("toolchain")
+            .and_then(|toolchain| toolchain.get("channel"))
+            .and_then(toml::Value::as_str)
+            .map(str::to_string),
+        // The legacy file may hold a bare channel name.
+        Err(_) => Some(text.trim().to_string()).filter(|name| !name.is_empty()),
+    }
 }
 
 /// Whether `candidate` is a rustup proxy: a link to, or a copy of the inode of,

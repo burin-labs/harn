@@ -187,7 +187,13 @@ impl Launch {
         program: &str,
     ) -> Option<String> {
         if install::is_rustup_proxy(found) {
-            let toolchain = install::rustup_toolchain(probe, root)?;
+            let Some(toolchain) = install::rustup_toolchain(probe, root) else {
+                return Some(format!(
+                    "`{}` is a rustup proxy, and rustup selects no installed toolchain for {}",
+                    found.display(),
+                    root.display()
+                ));
+            };
             return find_in(&toolchain.bin, program).is_none().then(|| {
                 format!(
                     "{program} is not installed for the {} toolchain (rustup component add {program})",
@@ -226,9 +232,20 @@ fn typescript_major(tsc: &Path) -> Option<u64> {
         .ok()
 }
 
+/// The executable `program` names in `dir`. Windows launches by extension, and
+/// npm installs its global shims there as `.cmd` files.
 fn find_in(dir: &Path, program: &str) -> Option<PathBuf> {
-    [dir.join(program), dir.join(format!("{program}.exe"))]
+    let names: Vec<String> = if cfg!(windows) {
+        ["exe", "cmd", "bat"]
+            .iter()
+            .map(|extension| format!("{program}.{extension}"))
+            .collect()
+    } else {
+        vec![program.to_string()]
+    };
+    names
         .into_iter()
+        .map(|name| dir.join(name))
         .find(|candidate| candidate.is_file())
 }
 
