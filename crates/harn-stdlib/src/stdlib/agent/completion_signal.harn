@@ -4,6 +4,9 @@ pub type AgentCompletionSignal = {
   source: "disabled" | "parsed_done_marker" | "raw_text",
 }
 
+/** Response facts preserved together across a completion boundary. */
+pub type AgentCompletionTurn = {raw_text: string, completion_signal: AgentCompletionSignal}
+
 /**
  * Read the configured sentinel from the parser's marker when one exists,
  * otherwise from the unprojected response. Display text carries no authority.
