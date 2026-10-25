@@ -138,49 +138,51 @@ pipeline test_setup_files_widen_the_oracle(harness: Harness) {
   assert_eq(harness.fs.read_text(prepared.root + "/extra.cfg"), "pub fn\n")
 }
 
+type InsertCase = {name: string, shape: string, content: string}
+
+/**
+ * An insert of `item` into `path` through the probe's query; the response is the raw builtin result.
+ */
+fn dry_insert(ast: HarnessAst, path: string, language: string, item: InsertCase) -> dict {
+  return ast.insert_at_anchor(
+    {
+      path: path,
+      query: insert_query(language, item.name, item.shape),
+      position: "last_child",
+      content: item.content,
+      dry_run: true,
+    },
+  )
+}
+
 /** The insert query must pick one container; the old shape matched every class in the file. */
 pipeline test_insert_query_names_exactly_one_container(harness: Harness) {
   const root = harness.fs.mkdtemp_in_workspace("precise-qualify-insert-")
   const source = "class A {}\nclass B {}\nabstract class C {}\ninterface D {}\ninterface E {}\n"
   harness.fs.write_text(root + "/a.ts", source)
-  for target in [
-    ["A", "body", "m(): number {}"],
-    ["C", "body", "m(): number {}"],
-    ["D", "definition", "m(): number"],
-  ] {
-    const res = harness.ast.insert_at_anchor(
-      {
-        path: root + "/a.ts",
-        query: insert_query("typescript", target[0], target[1]),
-        position: "last_child",
-        content: target[2],
-        dry_run: true,
-      },
-    )
-    assert_eq(res.result, "applied", target[0] + ": " + to_string(res.details))
+  const ts_cases: list<InsertCase> = [
+    {name: "A", shape: "body", content: "m(): number {}"},
+    {name: "C", shape: "body", content: "m(): number {}"},
+    {name: "D", shape: "definition", content: "m(): number"},
+  ]
+  for item in ts_cases {
+    const res = dry_insert(harness.ast, root + "/a.ts", "typescript", item)
+    assert_eq(res.result, "applied", item.name + ": " + to_string(res.details ?? ""))
     // Everything else is byte-for-byte what it was.
-    const others = ["A", "B", "C", "D", "E"].filter({ name -> name != target[0] }).to_list()
-    for name in others {
-      assert(res.preview.contains(name + " {}"), target[0] + " insert touched " + name)
+    for other in ["A", "B", "C", "D", "E"].filter({ name -> name != item.name }) {
+      assert(to_string(res.preview).contains(other + " {}"), item.name + " insert touched " + other)
     }
   }
   const java = harness.fs.mkdtemp_in_workspace("precise-qualify-insert-")
   harness.fs.write_text(java + "/A.java", "class A {}\nclass B {}\ninterface I {}\nenum E { X; }\n")
-  for target in [
-    ["A", "body", "int m() { return 0; }"],
-    ["E", "body", "int m() { return 0; }"],
-    ["I", "definition", "default int m() { return 0; }"],
-  ] {
-    const res = harness.ast.insert_at_anchor(
-      {
-        path: java + "/A.java",
-        query: insert_query("java", target[0], target[1]),
-        position: "last_child",
-        content: target[2],
-        dry_run: true,
-      },
-    )
-    assert_eq(res.result, "applied", target[0] + ": " + to_string(res.details))
+  const java_cases: list<InsertCase> = [
+    {name: "A", shape: "body", content: "int m() { return 0; }"},
+    {name: "E", shape: "body", content: "int m() { return 0; }"},
+    {name: "I", shape: "definition", content: "default int m() { return 0; }"},
+  ]
+  for item in java_cases {
+    const res = dry_insert(harness.ast, java + "/A.java", "java", item)
+    assert_eq(res.result, "applied", item.name + ": " + to_string(res.details ?? ""))
   }
 }
 

@@ -81,7 +81,7 @@
     "sites": { "$ref": "#/$defs/sites", "description": "Locations that block a `destination_conflict`, `visibility_required`, `import_cycle`, or `nested_import` refusal." },
     "widened": {
       "type": "array",
-      "description": "Declarations the move widened under `allow_visibility_widening`, with the line in the file before the edit. Empty otherwise.",
+      "description": "Declarations the move widened under `allow_visibility_widening`, with the line in the file before the edit. A new Rust module whose `mod` line needs more than private visibility for a widened item is listed too (`from: \"private\"`). Empty otherwise.",
       "items": {
         "type": "object",
         "properties": {

@@ -1122,7 +1122,10 @@ pub fn edit_apply_node(ast: HarnessAst, params: dict?) {
  *
  * The query MUST match exactly one node — multi-match returns
  * `result == "ambiguous"`. Tighten queries with `(#eq? @name "…")`
- * predicates to disambiguate.
+ * predicates to disambiguate. A `no_match` or `ambiguous` result lists the
+ * containers a retry can target in `candidates` (`path`, `line`, `kind`,
+ * `name`; `candidates_truncated` when more exist), and names the first few in
+ * `details`.
  *
  * Each line of `content` is re-indented to the target depth unless
  * `reindent: false` is supplied. The indent unit is detected from the
@@ -1168,6 +1171,8 @@ pub fn edit_insert_at_anchor(ast: HarnessAst, params: dict?) {
     inserted_text: payload?.inserted_text,
     anchor: payload?.anchor,
     anchors: payload?.anchors ?? [],
+    candidates: payload?.candidates ?? [],
+    candidates_truncated: payload?.candidates_truncated ?? false,
     match_count: payload?.match_count ?? 0,
     preview: payload?.preview,
     before_sha256: payload?.before_sha256,

@@ -86,20 +86,34 @@ fn value(path: &str, container: &Container) -> VmValue {
     ])
 }
 
-/// Candidates and whether the list was cut at [`MAX_CANDIDATES`].
+/// Candidates, whether the list was cut at [`MAX_CANDIDATES`], and a one-line
+/// reading of the first few for callers that only forward `details`.
 pub(super) struct Candidates {
     pub values: Vec<VmValue>,
     pub truncated: bool,
+    pub summary: String,
 }
+
+/// Candidates named in `details`; the structured list carries the rest.
+const SUMMARY_CANDIDATES: usize = 8;
 
 fn finish(path: &str, mut found: Vec<Container>) -> Candidates {
     found.sort_by_key(|c| c.start_byte);
     found.dedup_by_key(|c| c.start_byte);
     let truncated = found.len() > MAX_CANDIDATES;
     found.truncate(MAX_CANDIDATES);
+    let mut summary: Vec<String> = found
+        .iter()
+        .take(SUMMARY_CANDIDATES)
+        .map(|c| format!("{} {} (line {})", c.kind, c.name, c.line))
+        .collect();
+    if found.len() > SUMMARY_CANDIDATES {
+        summary.push(format!("{} more", found.len() - SUMMARY_CANDIDATES));
+    }
     Candidates {
         values: found.iter().map(|c| value(path, c)).collect(),
         truncated,
+        summary: summary.join(", "),
     }
 }
 
@@ -222,6 +236,11 @@ mod tests {
                 (7, "impl".into(), "Square".into()),
                 (13, "trait_impl".into(), "Square".into()),
             ]
+        );
+        // Callers that forward only `details` still see the retry targets.
+        assert_eq!(
+            s(field(&result, "details")),
+            "query produced zero anchors; containers: trait Shape (line 1), impl Square (line 7), trait_impl Square (line 13)"
         );
     }
 

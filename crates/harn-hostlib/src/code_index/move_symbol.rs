@@ -6,9 +6,9 @@
 //! See `schemas/code_index/move_symbol.{request,response}.json`. The request
 //! is `{symbol, path, to_path, line?, kind?, dry_run?, session_id?,
 //! allow_visibility_widening?}` (aliases: `name`, `file`, `target_file`,
-//! `destination`). The response is
-//! refactor_core's shared edit envelope (`scope`, `conflicts`, `match_count`,
-//! `warnings`, ...) plus move fields, so one parser reads every refactor.
+//! `destination`). The response is refactor_core's shared edit envelope
+//! (`scope`, `conflicts`, `match_count`, `warnings`, ...) plus move fields, so
+//! one parser reads every refactor.
 //! Tags, all-or-nothing:
 //!
 //! - `applied`: every planned file re-parsed cleanly. With `dry_run` nothing
@@ -26,12 +26,9 @@
 //! - `visibility_required`: a private (Rust) or unexported (TS/JS) item would
 //!   become unreachable: the moved item has users outside it, or it uses a
 //!   private item, field, or method of the source module. `required_visibility`
-//!   names the narrowest level that would unblock it. With
-//!   `allow_visibility_widening` the move instead widens exactly the blocking
-//!   declarations, each to the narrowest level that reaches its users, when
-//!   that level is within the allowance; `widened` lists every change. A
-//!   blocker with no exact fix (a constructor or pattern of a struct with
-//!   hidden fields, `pub(in ...)`, a decorated TS declaration) still refuses.
+//!   names the narrowest fix. With `allow_visibility_widening` the move widens
+//!   exactly the blockers it can place, each to the narrowest level within the
+//!   allowance, and lists them in `widened` (see the `widen` module).
 //! - `import_cycle`: the move would add a module-level import between the
 //!   source and destination Python modules that closes a cycle.
 //! - `error`: anything else that stops the move; `details` says why.
@@ -64,6 +61,7 @@
 //! package name outside `src/`), relative specifiers for TS/JS, and dotted
 //! package paths for Python.
 
+mod fields;
 mod model;
 mod python;
 mod response;
@@ -162,15 +160,7 @@ impl Request {
         let kind = optional_string(BUILTIN, dict, "kind")?
             .map(|raw| parse_kind(BUILTIN, &raw))
             .transpose()?;
-        let allow_widening = optional_string(BUILTIN, dict, "allow_visibility_widening")?
-            .map(|raw| {
-                Level::parse(&raw).ok_or_else(|| HostlibError::InvalidParameter {
-                    builtin: BUILTIN,
-                    param: "allow_visibility_widening",
-                    message: format!("expected {}, got `{raw}`", Level::ACCEPTED),
-                })
-            })
-            .transpose()?;
+        let allow_widening = Level::from_request(BUILTIN, dict)?;
         Ok(Self {
             symbol,
             path,
@@ -338,21 +328,8 @@ fn plan(
         ));
     }
     let dest_language = dest_language.expect("checked above");
-    if let Some(level) = request.allow_widening.filter(|level| !level.fits(family)) {
-        return Err(HostlibError::InvalidParameter {
-            builtin: BUILTIN,
-            param: "allow_visibility_widening",
-            message: format!(
-                "`{}` does not apply to {} (it has {})",
-                level.as_str(),
-                language.name(),
-                match family {
-                    Family::Rust => "`pub(super)`, `pub(crate)` and `pub`",
-                    Family::Script => "`export`",
-                    Family::Python => "no visibility levels",
-                }
-            ),
-        });
+    if let Some(level) = request.allow_widening {
+        level.require_for(BUILTIN, family, language.name())?;
     }
     let mut widener = Widener::new(request.allow_widening);
 
@@ -582,45 +559,26 @@ fn plan(
     // 4. Names the item needs at the destination.
     let (free, members) = lang.free_names(item_node, &src.source, name);
     let mut blocked: Vec<widen::Declared> = Vec::new();
-    // Who must see a source declaration the moved item uses: the destination.
-    let blocked_reach = match family {
-        Family::Rust => Reach::Rust {
-            home: source_module.clone(),
-            viewers: vec![dest_module.clone()],
-        },
-        _ => Reach::Export,
+    let origin = widen::Origin {
+        rel: source_path,
+        source: &src.source,
+        tree: &src.tree,
     };
+    let blocked_reach = Reach::of_blocked(family, &source_module, &dest_module);
     let mut dest_needs: Vec<ImportRequest> = Vec::new();
     let mut unresolved = false;
     for free_name in &free {
         let request = if let Some(decl) = src.model.item(free_name) {
-            if family != Family::Python && !decl.exported {
+            if family != Family::Python
+                && !decl.exported
+                && !decl
+                    .restricted
+                    .as_deref()
+                    .is_some_and(|path| widen::sees(path, &source_module, &dest_module))
+            {
                 let reason =
                     format!("`{free_name}` is private to the source but the moved item uses it");
-                let declared = match &lang {
-                    Lang::Rust(_) => rust::declared_item(
-                        source_path,
-                        &src.source,
-                        &src.tree,
-                        &decl.range,
-                        reason.clone(),
-                    ),
-                    _ => Some(widen::unexported(
-                        source_path,
-                        &src.source,
-                        &decl.range,
-                        reason.clone(),
-                    )),
-                };
-                blocked.push(declared.unwrap_or_else(|| {
-                    widen::unplaceable(Site::at(
-                        source_path,
-                        &src.source,
-                        decl.range.start,
-                        "declaration",
-                        reason,
-                    ))
-                }));
+                blocked.push(widen::blocker(&lang, &origin, &decl.range, reason));
                 // With widening allowed, the item imports as if exported.
                 if !widener.allowed() {
                     continue;
@@ -708,7 +666,14 @@ fn plan(
         }
     }
     if let Lang::Rust(ws) = &lang {
-        blocked.extend(ws.private_members_used(source_path, &src.source, &src.tree, &members));
+        blocked.extend(ws.private_members_used(
+            source_path,
+            &src.source,
+            &src.tree,
+            &members,
+            &free,
+            (&source_module, &dest_module),
+        ));
     }
     if !blocked.is_empty() {
         let sites = blocked.iter().map(|d| d.site.clone()).collect();
@@ -726,143 +691,20 @@ fn plan(
             return Ok(outcome);
         }
     }
-    // Code that reads a restricted field of the moved struct and would not
-    // see it from the destination. Only modules that saw the field before are
-    // scanned; elsewhere a same-named field belongs to another type.
-    if let (
-        Lang::Rust(ws),
-        ModuleRef::Rust {
-            crate_dir: source_crate,
-            path: from,
-        },
-        ModuleRef::Rust { path: to, .. },
-    ) = (&mut lang, &source_module, &dest_module)
-    {
-        let mut regions = Vec::new();
-        let hidden_fields = rust::hidden_fields(item_node, &src.source);
-        for hidden in &hidden_fields {
-            let (field, path) = (hidden.name.clone(), &hidden.path);
-            let before = rust::visible_from(from, path).unwrap_or_default();
-            match rust::visible_from(to, path) {
-                Some(after) if to.starts_with(&after) => regions.push((field, before, after)),
-                _ => {
-                    return Ok(refuse(
-                        "visibility_required",
-                        format!("field `{field}` of `{name}` is visible in `{path}`, which does not contain the destination; widen it first"),
-                    ));
-                }
-            }
-        }
-        let fields: Vec<String> = regions.iter().map(|(field, ..)| field.clone()).collect();
-        let mut paths: Vec<&str> = state
-            .files
-            .values()
-            .map(|file| file.relative_path.as_str())
-            .filter(|path| Language::detect(Path::new(path), None) == Some(Language::Rust))
-            .collect();
-        paths.sort_unstable();
-        let mut readers = Vec::new();
-        for path in paths {
-            let Some(ModuleRef::Rust {
-                crate_dir,
-                path: module,
-            }) = ws.module_of(path)
-            else {
-                continue;
-            };
-            let breaks = |field: &str| {
-                regions.iter().any(|(f, before, after)| {
-                    f == field && module.starts_with(before) && !module.starts_with(after)
-                })
-            };
-            if crate_dir != *source_crate || !fields.iter().any(|field| breaks(field)) {
-                continue;
-            }
-            if path == source_path {
-                readers.extend(rust::field_reads(
-                    path,
-                    &src.source,
-                    &src.tree,
-                    name,
-                    &fields,
-                    &breaks,
-                    Some(&moved),
-                ));
-                continue;
-            }
-            let text = read_source(BUILTIN, &state.root, path, session)?;
-            let mentions = text.contains(name)
-                || fields.iter().any(|field| {
-                    breaks(field)
-                        && if field.parse::<usize>().is_ok() {
-                            text.contains(&format!(".{field}"))
-                        } else {
-                            text.contains(field.as_str())
-                        }
-                });
-            if mentions {
-                let tree = parse(&text, Language::Rust)?;
-                readers.extend(rust::field_reads(
-                    path, &text, &tree, name, &fields, &breaks, None,
-                ));
-            }
-        }
-        if !readers.is_empty() {
-            // Each plainly read field is widened for the modules that read
-            // it, keeping the modules that saw it before. A constructor or
-            // pattern needs every field, so those readers only refuse.
-            let fixes = (|| {
-                let mut fixes = Vec::new();
-                let mut names: Vec<&str> = Vec::new();
-                for (_, field) in &readers {
-                    let field = field.as_deref()?;
-                    if !names.contains(&field) {
-                        names.push(field);
-                    }
-                }
-                for field in names {
-                    let hidden = hidden_fields.iter().find(|h| h.name == field)?;
-                    let (_, _, after) = regions.iter().find(|(f, ..)| f.as_str() == field)?;
-                    let mut viewers = vec![ModuleRef::Rust {
-                        crate_dir: source_crate.clone(),
-                        path: after.clone(),
-                    }];
-                    for (site, read) in &readers {
-                        if read.as_deref() == Some(field) {
-                            viewers.push(ws.module_of(&site.path)?);
-                        }
-                    }
-                    let from = hidden.modifier.as_ref().map_or("private".to_string(), |m| {
-                        text::slice(&src.source, m.clone()).replace(' ', "")
-                    });
-                    if from.starts_with("pub(in") {
-                        return None;
-                    }
-                    let at = hidden.modifier.clone().unwrap_or(hidden.at..hidden.at);
-                    fixes.push(Fix {
-                        path: source_path.to_string(),
-                        line: text::line_of(&src.source, at.start),
-                        at,
-                        from,
-                        reach: Reach::Rust {
-                            home: dest_module.clone(),
-                            viewers,
-                        },
-                        in_moved: true,
-                        item: false,
-                    });
-                }
-                Some(fixes)
-            })();
-            let sites = readers.iter().map(|(site, _)| site.clone()).collect();
-            if let Some(outcome) = widener.settle(
-                format!("code outside the destination reads fields of `{name}` it would no longer see; make them `pub(crate)` first"),
-                sites,
-                fixes,
-            ) {
-                return Ok(outcome);
-            }
-        }
+    let fields = fields::Context {
+        state,
+        session,
+        name,
+        source_path,
+        source: &src.source,
+        tree: &src.tree,
+        item_node,
+        moved: &moved,
+        source_module: &source_module,
+        dest_module: &dest_module,
+    };
+    if let Some(outcome) = fields::settle(&fields, &mut lang, &mut widener)? {
+        return Ok(outcome);
     }
 
     // 5. Every referencing file.
@@ -981,40 +823,27 @@ fn plan(
         response.call_sites_updated += calls;
     }
 
-    if family != Family::Python && !item.exported && !outside_users.is_empty() {
+    if family != Family::Python
+        && !item.exported
+        && !outside_users.is_empty()
+        && !widen::users_see(
+            &mut lang,
+            item.restricted.as_deref(),
+            &dest_module,
+            &outside_users,
+        )
+    {
         // The moved item itself must stay reachable from every module that
-        // uses it. A user outside the library's module tree has no module
-        // to reason about, so that case only refuses.
+        // uses it.
         let reason = format!("`{name}` is private but is used outside the moved item");
-        let declared = match &lang {
-            Lang::Rust(_) => {
-                rust::declared_item(source_path, &src.source, &src.tree, &item.range, reason)
-            }
-            _ => Some(widen::unexported(
-                source_path,
-                &src.source,
-                &item.range,
-                reason,
-            )),
-        };
-        let fixes = declared.and_then(|declared| {
-            let reach = match family {
-                Family::Rust => {
-                    let mut viewers = Vec::new();
-                    for site in &outside_users {
-                        viewers.push(lang.module_of(&site.path)?);
-                    }
-                    Reach::Rust {
-                        home: dest_module.clone(),
-                        viewers,
-                    }
-                }
-                _ => Reach::Export,
-            };
-            declared
-                .fix(&src.source, reach, true, true)
-                .map(|fix| vec![fix])
-        });
+        let declared = widen::blocker(&lang, &origin, &item.range, reason);
+        let fixes = widen::item_fix(
+            &mut lang,
+            declared,
+            &outside_users,
+            &dest_module,
+            &src.source,
+        );
         let sites = outside_users.clone();
         if let Some(outcome) = widener.settle(
             format!("`{name}` is private but is used outside the moved item; make it public first"),
@@ -1091,7 +920,8 @@ fn plan(
     }
     if !dest_existed {
         if let Lang::Rust(ws) = &mut lang {
-            match ws.module_declaration(dest_path, item.exported || widener.widened_item()) {
+            let visibility = widener.module_visibility(item.exported);
+            match ws.module_declaration(dest_path, visibility) {
                 Ok((parent, line)) => {
                     if !works.contains_key(&parent) {
                         let parent_source = read_source(BUILTIN, &state.root, &parent, session)?;
@@ -1112,11 +942,17 @@ fn plan(
                         );
                     }
                     let parent_work = works.get_mut(&parent).expect("parent work");
-                    parent_work.edits.push(rust::module_declaration_edit(
+                    let edit = rust::module_declaration_edit(
                         &parent_work.source,
                         &parent_work.tree,
                         &line,
+                    );
+                    response.widened.extend(widener.module_widening(
+                        item.exported,
+                        &parent,
+                        text::line_of(&parent_work.source, edit.range.start),
                     ));
+                    parent_work.edits.push(edit);
                 }
                 Err(message) => return Ok(refuse("error", message)),
             }
@@ -1192,17 +1028,12 @@ fn plan(
             }
         }
     }
-    response.widened = widener.applied.clone();
+    response.widened.extend(widener.applied.iter().cloned());
     response.details = format!(
-        "moved `{name}` from `{source_path}` to `{dest_path}`; {} file(s) changed",
-        response.plans.len()
+        "moved `{name}` from `{source_path}` to `{dest_path}`; {} file(s) changed{}",
+        response.plans.len(),
+        widen::summary(&response.widened)
     );
-    if !response.widened.is_empty() {
-        response.details.push_str(&format!(
-            "; widened {} declaration(s), see `widened`",
-            response.widened.len()
-        ));
-    }
     Ok(Outcome {
         tag: "applied",
         response,

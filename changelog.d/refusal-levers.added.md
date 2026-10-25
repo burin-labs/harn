@@ -9,3 +9,8 @@ probe's `insert_method` arm targets traits and interfaces, and its class query
 no longer matches unrelated classes.
 A Rust move no longer skips the source's own import of the moved item when only a
 nested module, such as `mod tests`, already imported it.
+A Rust `pub(super)` or `pub(in ...)` item is no longer treated as crate-wide: a move
+that leaves it out of reach of the moved code, or of the modules using the moved
+item, now refuses (or widens, when allowed) instead of applying an unusable import.
+`edit_insert_at_anchor` returns the retry `candidates` of a refused insert, and the
+refusal's `details` names the first few.

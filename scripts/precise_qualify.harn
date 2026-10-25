@@ -408,9 +408,9 @@ fn inserted_method(language: string, shape: string) -> string {
 }
 
 /** The text of the line the symbol is declared on; empty when it cannot be read. */
-fn declaration_line(harness: Harness, root: string, symbol: Symbol) -> string {
+fn declaration_line(fs: HarnessFs, root: string, symbol: Symbol) -> string {
   const text = try {
-    harness.fs.read_text(root + "/" + symbol.path)
+    fs.read_text(root + "/" + symbol.path)
   }
   if is_err(text) {
     return ""
@@ -483,7 +483,7 @@ fn edit_call(
       )
     }
   }
-  const shape = container_shape(language, declaration_line(harness, root, symbol), symbol.name)
+  const shape = container_shape(language, declaration_line(harness.fs, root, symbol), symbol.name)
   return { dry_run ->
     harness.ast.insert_at_anchor(
       {

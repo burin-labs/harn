@@ -96,7 +96,9 @@ the narrowest level that reaches the modules using it, and lists every change
 in `widened` (`path`, `line`, `from`, `to`). A required level above your
 allowance still refuses, and so does a blocker the move cannot place exactly:
 a constructor or pattern of a struct with hidden fields, a `pub(in ...)` path,
-or a decorated TypeScript declaration.
+a decorated TypeScript declaration, or a private field or method the move
+matches by name alone (it is widened only when its owning type appears in the
+moved code and no other member in the module shares its name).
 
 ## Recipe — extract a function
 

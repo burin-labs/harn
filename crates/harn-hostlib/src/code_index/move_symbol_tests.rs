@@ -1322,3 +1322,180 @@ fn ts_widening_exports_a_moved_item_its_source_still_uses() {
         .read("src/b.ts")
         .contains("export function helper(): number {"));
 }
+
+#[test]
+fn rust_widened_item_in_a_new_module_gets_only_the_module_visibility_it_needs() {
+    // Users in the item's former sibling: `pub(super)` reaches them, and the
+    // private `mod` line the new module gets is already visible there.
+    let near = sibling_modules_fixture();
+    let result = near.move_symbol(&widening_args(
+        "helper",
+        "src/a.rs",
+        "src/c.rs",
+        Some("pub(crate)"),
+    ));
+    assert_eq!(tag(&result), "applied", "{result:?}");
+    assert_eq!(
+        widened(&result),
+        [(
+            "src/a.rs".to_string(),
+            1,
+            "private".to_string(),
+            "pub(super)".to_string()
+        )]
+    );
+    assert_eq!(near.read("src/lib.rs"), "pub mod a;\npub mod b;\nmod c;\n");
+
+    // Users two levels away need `pub(crate)`, and the module line carries it
+    // and is reported.
+    let far = Fixture::new(&[
+        KIT,
+        ("src/lib.rs", "pub mod a;\npub mod b;\n"),
+        ("src/a/mod.rs", "pub mod model;\n"),
+        (
+            "src/a/model.rs",
+            "fn helper() -> u8 {\n    1\n}\n\npub fn caller() -> u8 {\n    helper()\n}\n",
+        ),
+        ("src/b/mod.rs", "pub fn other() {}\n"),
+    ]);
+    let refused = far.refused(
+        "visibility_required",
+        &widening_args(
+            "helper",
+            "src/a/model.rs",
+            "src/b/moved.rs",
+            Some("pub(super)"),
+        ),
+    );
+    assert_eq!(s(field(&refused, "required_visibility")), "pub(crate)");
+    let result = far.move_symbol(&widening_args(
+        "helper",
+        "src/a/model.rs",
+        "src/b/moved.rs",
+        Some("pub(crate)"),
+    ));
+    assert_eq!(tag(&result), "applied", "{result:?}");
+    assert_eq!(
+        widened(&result),
+        [
+            (
+                "src/b/mod.rs".to_string(),
+                1,
+                "private".to_string(),
+                "pub(crate)".to_string()
+            ),
+            (
+                "src/a/model.rs".to_string(),
+                1,
+                "private".to_string(),
+                "pub(crate)".to_string()
+            ),
+        ]
+    );
+    assert!(far.read("src/b/mod.rs").contains("pub(crate) mod moved;"));
+}
+
+#[test]
+fn rust_restricted_visibility_is_not_crate_wide() {
+    let files = |helper: &'static str| -> [(&'static str, String); 6] {
+        [
+            ("Cargo.toml", "[package]\nname = \"kit\"\nversion = \"0.1.0\"\n".to_string()),
+            ("src/lib.rs", "pub mod a;\npub mod b;\n".to_string()),
+            ("src/a/mod.rs", "pub mod model;\npub mod sibling;\n".to_string()),
+            (
+                "src/a/model.rs",
+                format!("{helper} fn helper() -> u8 {{\n    1\n}}\n\npub fn caller() -> u8 {{\n    helper()\n}}\n"),
+            ),
+            ("src/a/sibling.rs", "pub fn other() {}\n".to_string()),
+            ("src/b/mod.rs", "pub mod moved;\n".to_string()),
+        ]
+    };
+    let fixture = |helper: &'static str| {
+        let mut all: Vec<(String, String)> = files(helper)
+            .into_iter()
+            .map(|(p, b)| (p.to_string(), b))
+            .collect();
+        all.push((
+            "src/b/moved.rs".to_string(),
+            "pub fn other() {}\n".to_string(),
+        ));
+        let refs: Vec<(&str, &str)> = all.iter().map(|(p, b)| (p.as_str(), b.as_str())).collect();
+        Fixture::new(&refs)
+    };
+
+    // `pub(super)` reaches `a` and its children, not `b::moved`.
+    let hidden = fixture("pub(super)");
+    let refused = hidden.refused(
+        "visibility_required",
+        &widening_args("caller", "src/a/model.rs", "src/b/moved.rs", None),
+    );
+    assert_eq!(s(field(&refused, "required_visibility")), "pub(crate)");
+    let result = hidden.move_symbol(&widening_args(
+        "caller",
+        "src/a/model.rs",
+        "src/b/moved.rs",
+        Some("pub(crate)"),
+    ));
+    assert_eq!(tag(&result), "applied", "{result:?}");
+    assert_eq!(
+        widened(&result),
+        [(
+            "src/a/model.rs".to_string(),
+            1,
+            "pub(super)".to_string(),
+            "pub(crate)".to_string()
+        )]
+    );
+    assert!(hidden
+        .read("src/a/model.rs")
+        .starts_with("pub(crate) fn helper()"));
+
+    // The destination inside the region sees it already: no refusal, no change.
+    let inside = fixture("pub(super)");
+    let result = inside.mv("caller", "src/a/model.rs", "src/a/sibling.rs");
+    assert_eq!(tag(&result), "applied", "{result:?}");
+    assert!(inside
+        .read("src/a/model.rs")
+        .starts_with("pub(super) fn helper()"));
+
+    // A path-restricted modifier is never rewritten, whatever the allowance.
+    let pathed = fixture("pub(in crate::a)");
+    pathed.refused(
+        "visibility_required",
+        &widening_args("caller", "src/a/model.rs", "src/b/moved.rs", Some("pub")),
+    );
+}
+
+#[test]
+fn rust_widening_leaves_a_same_named_member_of_another_type_alone() {
+    // The moved function flushes a `Stdout`; the private `flush` belongs to
+    // `Buffer`, which the function never names.
+    let unrelated = Fixture::new(&[
+        KIT,
+        ("src/lib.rs", "pub mod a;\npub mod b;\n"),
+        (
+            "src/a.rs",
+            "pub struct Buffer;\n\nimpl Buffer {\n    fn flush(&self) {}\n}\n\npub fn run(out: &mut std::io::Stdout) {\n    use std::io::Write;\n    out.flush().unwrap();\n}\n",
+        ),
+        ("src/b.rs", "pub fn other() {}\n"),
+    ]);
+    unrelated.refused(
+        "visibility_required",
+        &widening_args("run", "src/a.rs", "src/b.rs", Some("pub")),
+    );
+
+    // Two owners declare a private `flush`: the name does not pick one.
+    let twins = Fixture::new(&[
+        KIT,
+        ("src/lib.rs", "pub mod a;\npub mod b;\n"),
+        (
+            "src/a.rs",
+            "pub struct One;\npub struct Two;\n\nimpl One {\n    fn flush(&self) {}\n}\n\nimpl Two {\n    fn flush(&self) {}\n}\n\npub fn run(one: &One) {\n    one.flush();\n}\n",
+        ),
+        ("src/b.rs", "pub fn other() {}\n"),
+    ]);
+    twins.refused(
+        "visibility_required",
+        &widening_args("run", "src/a.rs", "src/b.rs", Some("pub")),
+    );
+}

@@ -516,6 +516,7 @@ fn push_items(
                     name: text::text(name, source).to_string(),
                     range: range.clone(),
                     exported,
+                    restricted: None,
                     type_like: false,
                     movable: movable && single,
                 });
@@ -528,6 +529,7 @@ fn push_items(
             name: text::text(name, source).to_string(),
             range,
             exported,
+            restricted: None,
             type_like,
             movable,
         });

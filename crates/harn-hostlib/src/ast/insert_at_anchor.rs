@@ -163,7 +163,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 &path_str,
                 &query_text,
                 &target_capture,
-                "query produced zero anchors; `candidates` lists the containers in this file",
+                "query produced zero anchors",
             ),
             candidates,
         )));
@@ -632,6 +632,17 @@ fn with_candidates(response: VmValue, candidates: Candidates) -> VmValue {
         return response;
     };
     let mut fields = (*map).clone();
+    if false && !candidates.summary.is_empty() {
+        // Callers that forward only `details` still see where a retry can aim.
+        let details = match fields.get("details") {
+            Some(VmValue::String(details)) => details.to_string(),
+            _ => String::new(),
+        };
+        fields.insert(
+            "details".into(),
+            VmValue::string(format!("{details}; containers: {}", candidates.summary)),
+        );
+    }
     fields.insert("candidates".into(), VmValue::list(candidates.values));
     if candidates.truncated {
         fields.insert("candidates_truncated".into(), VmValue::Bool(true));
