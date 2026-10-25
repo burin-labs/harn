@@ -165,8 +165,10 @@ pipeline main(harness: Harness, _: unknown) {{
   harness.stdio.log("cancelled=" + to_string(cancelled))
   const refused = {refused}
   harness.stdio.log("refused=" + refused.result)
-  harness.stdio.log("retry_after_ms=" + to_string(refused.retry_after_ms))
-  harness.stdio.log("alternative=" + refused.alternative.backend)
+  harness.stdio.log("refused_details=" + refused.details)
+  harness.stdio.log("refused_backend=" + to_string(refused.backend))
+  harness.stdio.log("retry_after_ms=" + to_string(refused?.retry_after_ms))
+  harness.stdio.log("alternative=" + to_string(refused?.alternative?.backend))
 }}
 "#
     )
@@ -174,18 +176,21 @@ pipeline main(harness: Harness, _: unknown) {{
 
 #[test]
 fn stopping_one_tool_call_stops_a_waiting_rename_without_writes() {
-    let server = tempfile::tempdir().unwrap();
-    let program = server.path().join("rust-analyzer");
-    fs::write(&program, NEVER_QUIESCENT).unwrap();
-    fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
-    // SAFETY: set before any thread of this test binary reads the variable.
-    unsafe { std::env::set_var("HARN_LSP_SERVER_RUST_ANALYZER", &program) };
     let workspace = tempfile::tempdir().unwrap();
     for (path, text) in CRATE {
         let path = workspace.path().join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     }
+    // The process sandbox lets a tool start programs from installed toolchain
+    // paths or the workspace, not from an unrelated temporary directory, so
+    // the stand-in server lives in a hidden directory inside the workspace.
+    let program = workspace.path().join(".fake-server/rust-analyzer");
+    fs::create_dir_all(program.parent().unwrap()).unwrap();
+    fs::write(&program, NEVER_QUIESCENT).unwrap();
+    fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+    // SAFETY: set before any thread of this test binary reads the variable.
+    unsafe { std::env::set_var("HARN_LSP_SERVER_RUST_ANALYZER", &program) };
     // The agent loop confines tools to the working directory's workspace.
     std::env::set_current_dir(workspace.path()).unwrap();
     let before = snapshot(workspace.path());
