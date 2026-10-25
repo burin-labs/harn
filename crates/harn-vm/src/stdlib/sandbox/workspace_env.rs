@@ -286,7 +286,6 @@ fn toolchain_env_at(
             "YARN_CACHE_FOLDER".to_string(),
             path("YARN_CACHE_FOLDER", "yarn"),
         ),
-        ("PNPM_HOME".to_string(), path("PNPM_HOME", "pnpm/home")),
         (
             "COMPOSER_CACHE_DIR".to_string(),
             path("COMPOSER_CACHE_DIR", "composer"),
@@ -780,7 +779,6 @@ mod tests {
             "UV_CACHE_DIR",
             "NPM_CONFIG_CACHE",
             "YARN_CACHE_FOLDER",
-            "PNPM_HOME",
             "CCACHE_DIR",
             "CCACHE_TEMPDIR",
         ] {
@@ -794,7 +792,7 @@ mod tests {
         // for a pytest that worked in the user's own terminal. Nothing was
         // refused; the interpreter never looked. The agent should see what the
         // user's terminal sees.
-        for key in ["HOME", "PYTHONUSERBASE"] {
+        for key in ["HOME", "PYTHONUSERBASE", "PNPM_HOME"] {
             assert!(
                 !env.contains_key(key),
                 "{key} must NOT be relocated; the child inherits the real one"

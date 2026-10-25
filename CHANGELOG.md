@@ -9,7 +9,7 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.10.180
 
 ### Breaking
 
@@ -124,6 +124,66 @@ keeps condensed series summaries instead of full per-patch history.
   LlmTelemetry { client_first_frame_ms, inference_speed: None, ..LlmTelemetry::default() };
   ```
 
+- **`harn_signals::Delivery` and `harn_signals::Lease` are `#[non_exhaustive]`,
+  and `Delivery` gains `wakes` (#10526).** Only the inbox creates these
+  records; marking them non-exhaustive lets them gain fields without breaking
+  code that reads them.
+
+  Migration: read `Delivery` and `Lease` fields instead of building the
+  structs with a literal, and match them with `..`:
+
+  ```rust
+  // before
+  let Delivery { session_id, lease, .. } = delivery;
+  // after: unchanged; a literal `Delivery { ... }` no longer compiles
+  let Delivery { session_id, lease, .. } = delivery;
+  ```
+- **ACP mid-turn user input now follows the prompt delivery RFD.** A
+  `session/prompt` with `delivery: "steer"` joins the running turn at its next
+  safe point; `delivery: "queue"` starts a new turn after it. The response is
+  `{messageId}` once the message is inserted. A delivery prompt to an idle
+  session starts a turn, reported by `state_update` session updates.
+  `$/cancel_request` withdraws a prompt that has not been inserted, and
+  `session/close` or a closed connection fail every pending one with
+  `-32800`. `session/cancel` stops only the running turn; pending steers then
+  open the next turn. Agents advertise
+  `promptCapabilities.delivery = {"steer": {}, "queue": {}}`.
+
+  Removed: `session/inject`, `session/revoke_inject`, `session/replace_inject`,
+  the `session.inject` capability, and `EmbeddedAgent::inject_user_input`.
+  `session/pending_injections` is renamed `session/pending_prompts` and returns
+  `{prompts, reminders}`. `interrupt_immediate` is no longer reachable over ACP.
+
+  Migration: send `session/prompt` with `delivery` and a `prompt` content-block
+  array in place of `session/inject` with `mode` and `content`. Move `goal` to
+  `_meta.harn.goal`. Withdraw with `$/cancel_request` instead of
+  `session/revoke_inject`; there is no replacement for `session/replace_inject`.
+  To deliver now, send a steer and then `session/cancel`. A never-delivered
+  audit note belongs on `session/remind` with `audit_only`.
+  Use `EmbeddedAgent::deliver_user_input`.
+- Run records and `harn.run_view.v1` / `harn.session_view.v1` usage now carry
+  `cache_read_tokens` and `cache_write_tokens`, summed only over calls whose
+  provider reported cache accounting and null when no call did, so an
+  unsupported or undeclared route no longer reads as a measured zero. A
+  response on a supported route that omits its cache counters is unreported
+  too: every provider parser now records whether a counter was present. Each
+  `llm_call` transcript event records `cache_counts_reported`, and calls
+  recorded before that flag existed read as unreported. Session-projected run
+  records drop the `metadata.cache_tokens` block, which summed unreported zeros,
+  and their per-call `llm_call` spans omit cache counts the call did not report.
+
+  Migration: `LlmUsageRecord` and `RunViewUsage` gain two public fields, so a
+  struct literal must set them. Use `None` when the record has no cache
+  accounting, and read a count as unreported when it is `None`.
+
+  ```rust
+  LlmUsageRecord {
+      cache_read_tokens: None,
+      cache_write_tokens: None,
+      ..existing_fields
+  }
+  ```
+
 ### Added
 
 - `harness.fs.stat` accepts `{follow_symlinks: false}` to inspect symbolic links
@@ -148,6 +208,47 @@ keeps condensed series summaries instead of full per-patch history.
   wrongly, refused with its typed reason, or crashed. The versioned
   receipt and summary table list wrong edits first and report pending
   attempts, so an empty sample never reads as a pass.
+
+- Ambient signals: `harn signals` fires and resolves alert conditions into a
+  per-machine inbox, routes each one to the running agent session working on
+  it, and delivers it as a system reminder through `harn signals hook` for
+  Claude Code (including `asyncRewake` wake of idle sessions, one watcher per
+  session) and Codex. Delivery is at least once: a check-in leases reminders,
+  the consumer acks each lease by token once it reached the model, and an
+  unacked lease is leased again when it lapses. Muting, minimum severity, quiet
+  hours, a default fired-signal expiry, and a signal cap live in the inbox's
+  `config.toml`. Source text is escaped, flattened to one line per field, and
+  fenced as untrusted data, and every reminder shows its producer and
+  signature status.
+- `std/signals` adds `signal_apply`, `signal_deliver` for in-process agent
+  sessions over the `harness.runtime.signal_*` session lifecycle builtins
+  (register, check in, ack, end session, render), monitor evaluators and
+  pollers for default-branch CI, open pull request backlog, self-hosted runner
+  groups, and GitHub rate limits, plus Sentry, Grafana, and Honeycomb alert
+  webhook normalizers. A failed monitor read is `unmeasured` and changes no
+  signal. `examples/triggers/ambient-signals` wires them to cron and webhook
+  triggers.
+- `code_index.change_signature` (and `edit_change_signature`,
+  `edit_add_parameter`, `edit_reorder_parameters`) now changes a trait,
+  interface, or overridden method together with its whole override family:
+  the root declaration, every implementation and override in the workspace,
+  and every call. It covers Rust trait methods, TypeScript interface, abstract
+  and class methods, and Python methods. It still refuses with
+  `overrides_present` when a member implements a supertype outside the
+  workspace, is written in a macro, a class field or a generated file, or
+  belongs to a type no single supertype relates; `sites` names each blocker.
+- A Rust macro body that declares `fn name(..)` is no longer rewritten as a
+  call of `name`.
+- `code_index.rename_symbol` can be stopped while it waits on a language server.
+  It runs off the VM's thread, so cancelling the tool call returns at once and the
+  rename writes nothing. A new `deadline_ms` bounds the call and returns `refused`
+  with `retry_after_ms` and an `alternative` instead of a silent fallback, and the
+  rename reports typed progress phases on its tool call's update while it waits.
+  Stopping one command tool call no longer cancels the VM that dispatched it.
+  Hostlib builtins that write files hold one write lease while they write, so a
+  rename finishing off the VM's thread never interleaves its writes with another
+  tool's, and a file another tool changed since the rename read it refuses the
+  rename instead of being overwritten.
 
 ### Changed
 
@@ -182,6 +283,43 @@ keeps condensed series summaries instead of full per-patch history.
   outruns the former 90-minute limit on a cold macOS runner.
 - The Linux ARM64 release binary now builds natively on a free `ubuntu-22.04-arm` runner instead of
   cross-compiling on an x86 runner. The glibc 2.35 floor is unchanged.
+
+- Separate runtime implementation and regression suites into focused modules, reducing the legacy inventory of source
+  files over 1,500 lines from 32 to 15 while preserving their public interfaces and behavioral cases.
+- Module graph builds now parse each module once per process instead of once per
+  graph, and graphs share each remembered module instead of copying it. A batch
+  run such as `harn precompile --warm-cache` built several graphs for every entry
+  and re-parsed every imported module each time, so a large tree lexed hundreds
+  of times more source than it holds. Cold `--warm-cache` precompiles now use
+  about a quarter of the CPU time and finish about a third sooner. A remembered
+  module is reused only when its source text is unchanged and every import it
+  names still resolves to the same file, so edits, new import targets, and
+  reinstalled packages are seen as before.
+- Local setup and CI now compile with rustc's parallel front end
+  (`-Zthreads=8`). Rebuilding `harn` after a `harn-vm` edit dropped from 90s to
+  55s, because `harn-vm`'s own compile went from 58s to 32s. The flag is
+  unstable, so the pinned stable compiler accepts it through `RUSTC_BOOTSTRAP=1`.
+  Set `HARN_RUSTC_FRONTEND_THREADS=1` and rerun `make setup` to turn it off.
+- Public API checks reuse documentation from the exact baseline commit when trusted main CI produced it with the same
+  compiler and flags. Missing or invalid documentation falls back to rebuilding the baseline. The check also refuses an
+  incomplete crate census when a comparator fails before reporting its result.
+- `scripts/precise_qualify.harn` now takes `-- <plan.json> <out-dir> [corpus-dir]`: an optional corpus directory
+  resolves relative plan checkouts. Plans accept `setup_files`, text written into the scratch clone before setup,
+  so a generated tsconfig can make the oracle cover sampled files that a repository's own configs skip.
+- ARM64 Linux, macOS and Windows release builds use thin LTO with 16 codegen units again, because their fat-LTO
+  builds ran out of memory or past 100 minutes. x86_64 Linux keeps fat LTO.
+- A root mounted on the active session with `agent_session_add_root` now reaches every gate on the
+  next call: the workspace boundary admits it by mode, the file builtins and the confined child
+  profile read a `read_only` mount, and an `extend` mount is writable. Before, a mount was visible
+  only to the path-scope hook, so the boundary and the child sandbox still refused it.
+- The session-update kinds the adapter emits outside AgentEvent now carry example payloads in the
+  owning schema, and the Swift and Rust binding checks read them from there instead of hand-kept lists.
+- Agent loops render inspection, authorization, and delegation guidance once in a shared system fragment.
+  Override it with the `agent.operating_guidance` prompt id or the typed `operating_guidance` entry.
+- `harn precompile --warm-cache` now proves each imported module's interface
+  record once per run instead of once for every entry that reaches it, and type
+  checks each entry against the module graph it already built. On a large
+  multi-module tree the warm-cache run finishes in about half the time.
 
 ### Fixed
 
@@ -265,6 +403,95 @@ keeps condensed series summaries instead of full per-patch history.
   instead of refusing the whole rename as `unsupported_language`.
 - Session writer, task and maintenance leases unlock explicitly on drop, so a process spawned by another
   thread can no longer keep a released session lease locked and refuse the next run.
+
+- `scripts/precise_qualify.harn` leaves a repository unmeasured when its
+  oracle cannot judge an edit: the plan gives no oracle command, the oracle
+  still passes with any sampled file broken, or sampling found no
+  candidates. The run exits 1 on any wrong, crashed, or pending attempt,
+  any unmeasured repository, or an empty plan.
+- The downstream consumer check now blocks a pull request whose consumer rehearsal fails,
+  unless the base fails the same steps against the same consumer commit. The base CLI is
+  built at the merge commit's first parent, uploaded under its own artifact name, and
+  stamped with its own revision. Both rehearsals run at one consumer commit pinned once
+  per CI run. A base check that fails before measuring anything no longer excuses a pull
+  request's failure.
+- Ambient signals: a verbose alert is trimmed to fit the inbox instead of
+  refused; a hook whose ack fails after delivery still exits 0 so the harness
+  keeps the reminder; a runtime resolve or fire without a signature counts as
+  unverified and cannot override a verified signal; the CI monitor reads
+  `unmeasured` when a workflow has recent runs but none decisive; and an idle
+  watcher wakes a session at most three times per reminder.
+- A goal read, set, or clear on a session no longer adds fork and rewind history positions.
+  Run and goal bookkeeping rows carry no source identity; only messages, tool calls and results,
+  and published answers count as positions.
+- The Mistral Medium 3.5 route no longer sends `reasoning_effort: "medium"`, which Mistral rejects.
+  The catalog now declares `high` as the only rung, so the first agent turn no longer fails with HTTP 400.
+- The Vercel AI Gateway route for DeepSeek V4.1 Flash 1017 now declares native tool support, so the
+  first agent turn no longer fails with a tools-not-supported error. A live tool call on 2026-10-25
+  confirmed it.
+- The agent shell guard now refuses `git stash` writes launched through `xargs`, such as
+  `xargs -n 1 git stash drop`, and through an inline git alias such as
+  `git -c alias.s=stash s pop`. The `xargs` form is read from the command scanner
+  instead of a second option table.
+- The shell guard now reads git aliases from the effective git configuration, so `git s` with a
+  repository-configured `s=stash pop` is refused like `git stash pop`.
+- Directory metadata now detects same-second edits and distinguishes filenames
+  containing separators or invalid Unicode. Unreadable directories raise errors
+  instead of receiving an empty-directory fingerprint. Refresh preserves hashes for
+  removed directories so they stay stale while live directories can refresh; other
+  read failures preserve all previous hashes. Existing stored fingerprints become
+  stale once on upgrade. (#10528)
+- The command policy's catastrophic floor now looks through `doas` the way it does `sudo`,
+  so `doas rm -rf /` is refused and `doas` carries the privilege label.
+- Precompiled artifacts preserve every part of a dotted source filename. A module such as
+  `catalog.generated.harn` now loads its shipped artifacts without colliding with `catalog.harn` or compiling into the
+  shared cache.
+- The command policy's catastrophic floor now covers `find ... -delete` and `find ... -exec rm`
+  that start outside the workspace or wipe the whole project root.
+- The budget governor now counts progress the way the agent loop does.
+  Re-reading the same thing no longer keeps a run alive past its
+  checkpoint, and a turn that only reports no longer cuts it. The post-turn
+  payload carries this as `progressing`.
+- The lean hostlib build compiles again on Windows: host call progress code now builds only with the
+  `ast` feature that uses it.
+- A language server that the code index stops is now reaped when its session
+  ends. Before, a server evicted from the session cache stayed a zombie child
+  until the host process exited, so a long-running host gathered one per
+  evicted workspace.
+- Prevent integer wraparound in decimal precision and two-part PostgreSQL advisory lock keys. Finite averages and
+  percentiles avoid intermediate arithmetic overflow. AWS signing shares the checked timestamp parser and rejects
+  out-of-range floating timestamps without a debug-runtime panic. Partial JSON recovery discards candidates deeper
+  than the parser supports before copying their stacks, bounding memory use for deeply incomplete streams.
+- Closing a pull request that was reopened, or whose head is a fork, no longer fails the
+  consumer observer cleanup job. It logs that nothing was retired. Retirement still needs a
+  proven closed same-repository candidate, and a contradictory read stays a red failure.
+- **Repository policy checks on pull requests.** The "Check repository policies" job now runs on every
+  pull request and merge group that changes more than docs, instead of only after a merge to main,
+  so a change that breaks a policy is refused before it lands.
+- `change_signature` refuses with `fixed_signature` when a test, bench or entry
+  attribute, `fn main`, or a declared function type fixes the parameter list.
+  Rust `move_symbol` refuses with `visibility_required` when the source reads the
+  moved struct's private fields, refuses with `nested_import` when a nested import
+  list names the item, and keeps source imports the remaining code still uses. A
+  declaration that is not top level refuses with `not_top_level`. Symbols declared
+  in a function body, a callback, or an inline Rust module now carry a container.
+  `change_signature` accepts `symbol_ref.col` and selects as `rename_symbol` does.
+- Retire an unpublished release whose changelog already carries an earlier never-published identity above its published predecessor.
+- Retire an unpublished release whose exact source can never pass the full-suite promotion gate, even when its
+  candidate build succeeded, and ignore release attempts whose release pull request closed without merging.
+- The rename interrupt end-to-end test no longer depends on sandbox-exec being runnable, so it
+  reaches the wait it stops on a cold macOS runner.
+- A language-server `rename_symbol` no longer refuses over leftover mentions the declaration cannot reach.
+  For a TypeScript or JavaScript binding local to a function, or never exported from its ES module,
+  mentions in other files and member names such as `args.length` no longer need the server's answer.
+  For a Rust inherent method, a macro-body path through an unconditional module (`$crate::m::name`)
+  names the module's item. The 200-mention limit on the post-edit check is gone; the check's time
+  budget bounds it instead.
+- Fix the standalone agent shell guard rejecting ordinary arguments containing `=` with an interpreter error.
+  Variable assignments and configured Git aliases still reach the intended stash policy.
+- Embedding caches distinguish model names containing different punctuation instead of returning another model's vector.
+  Approval requests reject quorums above the unsigned 32-bit range before dispatch. The live PostgreSQL test commands select
+  the owning builtins crate again.
 
 ### Security
 

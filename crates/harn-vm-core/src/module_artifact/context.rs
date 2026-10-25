@@ -92,6 +92,27 @@ impl ModuleCompilationContext {
         Ok(Self::for_program_in_graph(graph, source_path, &program))
     }
 
+    /// [`Self::for_source_in_graph`] over a remembered source, or `None` when it
+    /// does not parse.
+    pub(crate) fn for_module_source_in_graph(
+        graph: &harn_modules::ModuleGraph,
+        source_path: &Path,
+        source: &crate::module_source::ModuleSource,
+    ) -> Option<Self> {
+        let needs_imported_symbols = source.needs_imported_symbols(source_path)?;
+        Some(
+            ModuleCompilationContextProjection {
+                needs_imported_symbols,
+            }
+            .in_graph(graph, source_path),
+        )
+    }
+
+    pub(crate) fn source_needs_imported_symbols(source_path: &Path, source: &str) -> Option<bool> {
+        let program = parse_module_source(source_path, source).ok()?;
+        Some(needs_imported_symbol_projection(&program))
+    }
+
     /// Project the graph's parsed program without reading or parsing it again.
     /// The program and graph must come from the same source snapshot.
     pub fn for_program_in_graph(

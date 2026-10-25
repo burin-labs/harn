@@ -97,6 +97,7 @@ mod module_index;
 mod move_symbol;
 mod name_index;
 mod overlay;
+mod override_family;
 mod parallel;
 mod postings;
 mod readonly;
