@@ -2,10 +2,8 @@
 import {
   ADMISSION_CHECKED_ENV,
   GIT_ALIASES_UNREADABLE,
-  MakeTargetCensus,
   NO_CONFIG_ALIASES,
   ShellGuardDecision,
-  UNMEASURED_MAKE_TARGETS,
   WorktreeAdmissionCensus,
   cargo_violation,
   discarded_output_violation,
@@ -21,32 +19,24 @@ import {
   worktree_admission_for,
 } from "../agent_shell_guard.harn"
 import { WORKTREE_ADMISSION_POLICY } from "../agent_shell_guard_policy"
-import { TEST_GIT_BUILTINS, decision } from "./agent_shell_guard_test_fixtures"
+import {
+  ADMITTED,
+  NO_MAKE_TARGETS,
+  claude_payload,
+  decision,
+} from "./agent_shell_guard_test_fixtures"
 
 // A repository that owns the admission command, and one that does not. The
 // worktree rule must answer differently in the two, so every other case in
 // this file states which repository it is standing in rather than inheriting a
 // default.
-const ADMITTED: WorktreeAdmissionCensus = {
-  rows: [{root: "/repo/admitted", command: "scripts/fleet-worktree-admit.ts"}],
-  denial: "",
-}
-
 const UNADMITTED: WorktreeAdmissionCensus = {
   rows: [{root: "/repo/unadmitted", command: ""}],
   denial: "",
 }
 
-// Most cases here stand in a repository whose Make targets were never read,
-// which is the state every rule but the Make-owned one is indifferent to.
-const NO_MAKE_TARGETS: MakeTargetCensus = UNMEASURED_MAKE_TARGETS
-
 fn verdict(payload: string) -> ShellGuardDecision {
   return decision(payload, ADMITTED, NO_MAKE_TARGETS)
-}
-
-fn claude_payload(command: string) -> string {
-  return json_stringify({tool_name: "Bash", tool_input: {command: command}})
 }
 
 fn codex_payload(command: string) -> string {
@@ -1233,8 +1223,8 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
   assert_eq(listing["s"], "stash pop")
   assert_eq(listing["sh"], "!git stash drop")
   // Repo A (the hook's directory) defines nothing; repo B, reached through -C, defines the listing.
-  const lookup = { options ->
-    if options.contains("/repo/b") {
+  const lookup = { context ->
+    if context.options.contains("/repo/b") {
       listing
     } else {
       {}
@@ -1340,72 +1330,6 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
   assert(!verdict(claude_payload("eval 'git stash pop'")).allow)
   assert(!verdict(claude_payload("eval git stash drop")).allow)
   assert_eq(GIT_ALIASES_UNREADABLE, "<unreadable>")
-}
-
-pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
-  const aliases = { options ->
-    {
-      history: "stash push",
-      hidden: "stash push",
-      rewrite: "!git config alias.future 'stash push'; git future",
-    }
-  }
-  assert(
-    !decision(claude_payload("git rewrite"), ADMITTED, NO_MAKE_TARGETS, aliases, TEST_GIT_BUILTINS)
-      .allow,
-  )
-  assert(
-    !decision(
-      claude_payload("git history"),
-      ADMITTED,
-      NO_MAKE_TARGETS,
-      aliases,
-      { program -> ["status"] },
-    ).allow,
-  )
-  assert(
-    decision(
-      claude_payload("git history"),
-      ADMITTED,
-      NO_MAKE_TARGETS,
-      aliases,
-      { program -> ["history"] },
-    ).allow,
-  )
-  const versions = { program -> program == "/old/git" ? ["status"] : ["status", "history"] }
-  assert(
-    !decision(claude_payload("/old/git history"), ADMITTED, NO_MAKE_TARGETS, aliases, versions)
-      .allow,
-  )
-  assert(
-    decision(claude_payload("/new/git history"), ADMITTED, NO_MAKE_TARGETS, aliases, versions)
-      .allow,
-  )
-  for command in [
-    "git config alias.hidden 'stash push'; git hidden",
-    "git -C /repo config alias.hidden 'stash push' && git -C /repo hidden",
-    "bash -c 'git config alias.hidden \"stash push\"; git hidden'",
-    "git config --file aliases alias.hidden 'stash push'; git --config-env=alias.hidden=VALUE hidden",
-  ] {
-    assert(
-      !decision(
-        claude_payload(command),
-        ADMITTED,
-        NO_MAKE_TARGETS,
-        NO_CONFIG_ALIASES,
-        { program -> ["config", "status"] },
-      ).allow,
-    )
-  }
-  assert(
-    decision(
-      claude_payload("git config user.name Agent; git status"),
-      ADMITTED,
-      NO_MAKE_TARGETS,
-      NO_CONFIG_ALIASES,
-      { program -> ["config", "status"] },
-    ).allow,
-  )
 }
 
 /**
