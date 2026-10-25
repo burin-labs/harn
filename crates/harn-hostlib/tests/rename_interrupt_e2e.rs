@@ -147,16 +147,22 @@ fn script(root: &str) -> String {
             r#"harness.code_index.rename_symbol({{symbol_ref: {{name: "Reading", path: "src/reading.rs", kind: "Type"}}, new_name: "Measurement", scope: "workspace", {extra}}})"#
         )
     };
-    let in_tool = rename(r#"backend: "auto""#);
+    // Both calls name the language server, so a server that cannot start
+    // reports why instead of falling back and writing.
+    let in_tool = rename(r#"backend: "language_server""#);
     let refused = rename(r#"backend: "language_server", deadline_ms: 300"#);
     format!(
         r#"import {{ agent_loop }} from "std/agent/loop"
+import {{ agent_tool_handler_result }} from "std/agent/tool_lifecycle"
 pipeline main(harness: Harness, _: unknown) {{
   harness.code_index.rebuild({{root: "{root}"}})
   harness.tools.clear_hooks()
   const tools = tool_define(tool_registry(), "rename_tool", "Rename Reading to Measurement.", {{
     parameters: {{}},
-    handler: {{ _args -> return {in_tool} }},
+    handler: {{ _args ->
+      const renamed = {in_tool}
+      return agent_tool_handler_result(json_stringify(renamed), renamed)
+    }},
   }})
   const counter = harness.runtime.shared_cell({{scope: "task_group", key: "rename-interrupt", initial: 0}})
   const mock_llm = {{ _call ->
