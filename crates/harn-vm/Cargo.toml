@@ -168,12 +168,12 @@ sha2 = "0.11"
 sha3 = "0.12"
 # POSIX-correct argv quoting; see the note in harn-cli's manifest.
 shell-words = "1.1"
-# Full POSIX/bash syntax ownership for command-policy semantics. These versions
-# match harn-hostlib's existing AST family, so policy adds no parallel parser or
-# dependency graph. Kernel child confinement remains the security boundary.
+# Full POSIX/bash syntax ownership for command-policy semantics. The grammars
+# come from harn-grammars, the same owner as harn-hostlib's AST family, so
+# policy adds no parallel parser. Kernel child confinement remains the
+# security boundary.
 tree-sitter = "0.27"
-tree-sitter-bash = "0.25"
-tree-sitter-powershell = "0.26.4"
+harn-grammars = { path = "../harn-grammars", version = "=0.10.180", default-features = false, features = ["bash", "powershell"] }
 strsim = "0.11"
 # On-demand native stack growth for recursive walks over arbitrarily deep
 # `VmValue` trees (display, equality, ordering, hashing, JSON). Same approach
