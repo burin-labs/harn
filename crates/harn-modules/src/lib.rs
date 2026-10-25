@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::{package_imports::acquire_package_snapshots, package_snapshot::PackageSnapshot};
 use harn_lexer::Span;
@@ -82,7 +83,7 @@ pub enum WildcardResolution {
 /// Parsed information for a set of module files.
 #[derive(Debug, Default)]
 pub struct ModuleGraph {
-    modules: HashMap<PathBuf, ModuleInfo>,
+    modules: HashMap<PathBuf, Arc<ModuleInfo>>,
     // Resolved definition/import paths remain valid for the graph lifetime.
     _package_snapshots: Vec<PackageSnapshot>,
 }
@@ -243,7 +244,7 @@ fn build_inner(
         PackageContext::Project => acquire_package_snapshots(files),
         PackageContext::Standalone => Vec::new(),
     };
-    let mut modules: HashMap<PathBuf, ModuleInfo> = HashMap::new();
+    let mut modules: HashMap<PathBuf, Arc<ModuleInfo>> = HashMap::new();
     let mut parsed_sources: HashMap<PathBuf, ParsedModuleSource> = HashMap::new();
     let mut seen: HashSet<PathBuf> = HashSet::new();
     let mut wave: Vec<PathBuf> = Vec::new();
@@ -325,7 +326,7 @@ fn load_wave(
     parsed_source_retention: ParsedSourceRetention<'_>,
     source_overrides: Option<&HashMap<PathBuf, String>>,
     observer: Option<&ModuleObserver<'_>>,
-) -> Vec<(ModuleInfo, Option<ParsedModuleSource>)> {
+) -> Vec<(Arc<ModuleInfo>, Option<ParsedModuleSource>)> {
     const MIN_PARALLEL_WAVE: usize = 8;
     let configured = std::env::var(MODULE_GRAPH_JOBS_ENV)
         .ok()
@@ -353,7 +354,7 @@ fn load_wave(
             .collect();
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let mut produced: Vec<(usize, (ModuleInfo, Option<ParsedModuleSource>))> =
+    let mut produced: Vec<(usize, (Arc<ModuleInfo>, Option<ParsedModuleSource>))> =
         harn_parser::runtime_stack::scope(|scope| {
             let handles: Vec<_> = (0..workers)
                 .map(|_| {
@@ -397,7 +398,7 @@ fn load_wave(
 /// public surface of its `pub import "..."` re-export targets. Cycles are
 /// safe because the loop only adds names — once no module's set grows in a
 /// pass, the fixpoint is reached.
-fn resolve_re_exports(modules: &mut HashMap<PathBuf, ModuleInfo>) {
+fn resolve_re_exports(modules: &mut HashMap<PathBuf, Arc<ModuleInfo>>) {
     let keys: Vec<PathBuf> = modules.keys().cloned().collect();
     loop {
         let mut changed = false;
@@ -418,12 +419,15 @@ fn resolve_re_exports(modules: &mut HashMap<PathBuf, ModuleInfo>) {
                     additions.extend(src_module.exports.iter().cloned());
                 }
             }
-            if let Some(module) = modules.get_mut(path) {
-                for name in additions {
-                    if module.exports.insert(name) {
-                        changed = true;
-                    }
-                }
+            // Graphs share each module's memoized projection; copy one only
+            // when this graph's re-exports actually grow its export set.
+            let Some(module) = modules.get_mut(path) else {
+                continue;
+            };
+            additions.retain(|name| !module.exports.contains(name));
+            if !additions.is_empty() {
+                Arc::make_mut(module).exports.extend(additions);
+                changed = true;
             }
         }
         if !changed {
@@ -1312,7 +1316,7 @@ fn load_module(
     source_overrides: Option<&HashMap<PathBuf, String>>,
     retain_parsed_source: bool,
     observer: Option<&ModuleObserver<'_>>,
-) -> (ModuleInfo, Option<ParsedModuleSource>) {
+) -> (Arc<ModuleInfo>, Option<ParsedModuleSource>) {
     let source = match source_overrides
         .and_then(|overrides| overrides.get(&normalize_path(path)).cloned())
     {
@@ -1327,12 +1331,12 @@ fn load_module(
                     }),
                     ..ModuleInfo::default()
                 };
-                return (module, None);
+                return (Arc::new(module), None);
             }
         },
     };
     let Some(source) = source else {
-        return (ModuleInfo::default(), None);
+        return (Arc::default(), None);
     };
     // A retained program or an observer needs this load's own syntax tree.
     let memoized = !retain_parsed_source && observer.is_none();
@@ -1342,6 +1346,7 @@ fn load_module(
         }
     }
     let (module, program) = project_module(path, &source, package_snapshots, observer);
+    let module = Arc::new(module);
     if memoized {
         load_memo::remember(path, source, &module);
         return (module, None);

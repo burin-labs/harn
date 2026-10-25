@@ -22,7 +22,7 @@ use crate::ModuleInfo;
 
 struct Remembered {
     source: String,
-    module: ModuleInfo,
+    module: Arc<ModuleInfo>,
 }
 
 /// One entry per module path: a new source text replaces the old one, so a
@@ -38,7 +38,7 @@ pub(crate) fn recall(
     path: &Path,
     source: &str,
     package_snapshots: &[PackageSnapshot],
-) -> Option<ModuleInfo> {
+) -> Option<Arc<ModuleInfo>> {
     let remembered = memo()
         .lock()
         .expect("module load memo poisoned")
@@ -50,15 +50,15 @@ pub(crate) fn recall(
     let resolutions_hold = remembered.module.imports.iter().all(|import| {
         resolve_import_path_with_snapshots(path, &import.raw_path, package_snapshots) == import.path
     });
-    resolutions_hold.then(|| remembered.module.clone())
+    resolutions_hold.then(|| Arc::clone(&remembered.module))
 }
 
-pub(crate) fn remember(path: &Path, source: String, module: &ModuleInfo) {
+pub(crate) fn remember(path: &Path, source: String, module: &Arc<ModuleInfo>) {
     memo().lock().expect("module load memo poisoned").insert(
         path.to_path_buf(),
         Arc::new(Remembered {
             source,
-            module: module.clone(),
+            module: Arc::clone(module),
         }),
     );
 }
