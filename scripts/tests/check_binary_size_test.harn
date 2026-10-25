@@ -720,7 +720,10 @@ pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness
   )
   // The one exception scopes targets whose fat-LTO build does not fit a
   // hosted runner; it never touches the size-measured target.
-  const profile_scope = release_workflow_step(steps, "Scope the dist profile to what the runner can link").run
+  const profile_scope = release_workflow_step(
+    steps,
+    "Scope the dist profile to what the runner can link",
+  ).run
     ?? ""
   assert(profile_scope.contains("CARGO_PROFILE_DIST_LTO=thin"))
   assert(!profile_scope.contains("x86_64-unknown-linux-gnu"))
