@@ -196,6 +196,20 @@ canary_record() {
     canary_api --optional head consumer_run_head secret:CONSUMER_CANARY_REPOSITORY \
       "repos/$repo/actions/runs/$run_id" --jq .head_sha || head=''
     [[ "$head" =~ ^[0-9a-f]{40}$ ]] || head=''
+    # A pinned rehearsal measured its pin only if every leg that checked out
+    # source proved the pin; the dispatched ref's head is not what it measured.
+    if [[ -n "${CANARY_CONSUMER_REVISION:-}" ]]; then
+      local pinned=''
+      canary_api --optional pinned consumer_run_pin secret:CONSUMER_CANARY_REPOSITORY \
+        "repos/$repo/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
+        --jq 'if .total_count <= 100 then [.jobs[] | .steps[]? | select(.name == "Verify the pinned consumer revision") | .conclusion] else [] end
+          | if length > 0 and all(. == "success") then "proven" else "" end' || pinned=''
+      if [[ "$pinned" == proven && "$CANARY_CONSUMER_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+        head=$CANARY_CONSUMER_REVISION
+      else
+        head=''
+      fi
+    fi
     # One page holds every job; a larger run leaves the digest unmeasured.
     if canary_api --optional jobs consumer_run_jobs secret:CONSUMER_CANARY_REPOSITORY \
         "repos/$repo/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
@@ -297,6 +311,9 @@ canary_dispatch() {
     [[ "$CANARY_PULL_REQUEST_CLI_RUN" =~ ^[1-9][0-9]*$ && "${CANARY_PULL_REQUEST_BASE:-}" =~ ^[0-9a-f]{40}$ ]] \
       || canary_fail pull_request_identity_invalid
     pull_request_inputs=(-f harn_cli_run="$CANARY_PULL_REQUEST_CLI_RUN" -f harn_base="$CANARY_PULL_REQUEST_BASE")
+    # Both rehearsals of one pull request measure the one consumer commit its run pinned.
+    [[ "${CANARY_CONSUMER_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] || canary_fail consumer_revision_invalid
+    pull_request_inputs+=(-f consumer_revision="$CANARY_CONSUMER_REVISION")
   fi
   # The base rehearsal installs the CLI the same run built at the base.
   case "${CANARY_PULL_REQUEST_CLI_ARTIFACT:-}" in
