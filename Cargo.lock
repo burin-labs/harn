@@ -3484,6 +3484,7 @@ dependencies = [
  "harn-kernel",
  "harn-languages",
  "harn-lexer",
+ "harn-makefile",
  "harn-modules",
  "harn-parser",
  "harn-vm",
@@ -3823,6 +3824,7 @@ dependencies = [
  "harn-grammars",
  "harn-languages",
  "harn-lexer",
+ "harn-makefile",
  "harn-modules",
  "harn-parser",
  "harn-runtime",
@@ -3978,6 +3980,14 @@ dependencies = [
  "tokio",
  "toml",
  "tower-lsp",
+]
+
+[[package]]
+name = "harn-makefile"
+version = "0.10.180"
+dependencies = [
+ "serde",
+ "shell-words",
 ]
 
 [[package]]

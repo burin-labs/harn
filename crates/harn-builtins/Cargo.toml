@@ -34,6 +34,7 @@ harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.180" }
 harn-clock = { path = "../harn-clock", version = "=0.10.180" }
 harn-kernel = { path = "../harn-kernel", version = "=0.10.180" }
 harn-languages = { path = "../harn-languages", version = "=0.10.180" }
+harn-makefile = { path = "../harn-makefile", version = "=0.10.180" }
 harn-vm = { path = "../harn-vm", version = "=0.10.180", default-features = false }
 harn-vm-core = { path = "../harn-vm-core", version = "=0.10.180" }
 hex = "0.4"

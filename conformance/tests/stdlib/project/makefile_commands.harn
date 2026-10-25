@@ -1,0 +1,70 @@
+type MakeCase = {name: string, files: dict<string, string>, valid: bool}
+
+pipeline test(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("makefile-commands-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const recipe = "test:\n\t@echo QUALITY_MAKE_REACHED\n"
+  const cases: list<MakeCase> = [
+    {name: "ordinary", files: {Makefile: recipe}, valid: true},
+    {
+      name: "multiple-targets",
+      files: {Makefile: "unit test:\n\t@echo QUALITY_MAKE_REACHED\n"},
+      valid: true,
+    },
+    {
+      name: "variable-only",
+      files: {Makefile: "test := ignored\nall:\n\t@echo OTHER\n"},
+      valid: false,
+    },
+    {name: "gnu-makefile", files: {GNUmakefile: recipe}, valid: true},
+    {name: "lowercase-makefile", files: {makefile: recipe}, valid: true},
+    {
+      name: "precedence",
+      files: {GNUmakefile: "all:\n\t@echo OTHER\n", Makefile: recipe},
+      valid: false,
+    },
+    {
+      name: "double-colon-variable",
+      files: {Makefile: "test::=ignored\nall:\n\t@echo OTHER\n"},
+      valid: false,
+    },
+    {name: "target-variable", files: {Makefile: "test: VALUE = ignored\n"}, valid: false},
+    {
+      name: "define-body",
+      files: {
+        Makefile:
+          "define hidden\ntest:\n\t@echo QUALITY_MAKE_REACHED\nendef\nall:\n\t@echo OTHER\n",
+      },
+      valid: false,
+    },
+  ]
+  assert_eq(makefile_filenames(), ["GNUmakefile", "makefile", "Makefile"])
+  for item in cases {
+    const dir = path_join(root, item.name)
+    harness.fs.mkdir(dir)
+    harness.fs.write_text(path_join(dir, "index.js"), "export const KNOWN_SCANNER_INPUT = true;\n")
+    for file in keys(item.files) {
+      harness.fs.write_text(path_join(dir, file), item.files[file])
+    }
+    const scanned = harness.scanner.scan_project({root: dir, include_git_history: false})
+    assert(len(scanned.files) > 0, "each scanner call must reach the known source file")
+    const executed = harness.process.exec("make", "--no-print-directory", "-C", dir, "test")
+    assert_eq(executed.success, item.valid, "GNU make must confirm the fixture's target semantics")
+    assert_eq(contains(executed.stdout, "QUALITY_MAKE_REACHED"), item.valid)
+    const commands = keys(scanned.project.test_commands)
+    assert_eq(commands, item.valid ? ["make test"] : [], "scanner must agree with actual Make")
+  }
+  const parsed = makefile_parse(
+    "unit test:\n\t@echo one\n\t-echo two\n\t+echo three\n\techo four\n",
+  )
+  assert_eq(parsed.map({ target -> target.name }).to_list(), ["unit", "test"])
+  for target in parsed {
+    assert_eq(target.command, "make ${target.name}")
+    assert_eq(target.recipe_preview, ["echo one", "echo two", "echo three"])
+    assert_eq(target.recipe_line_count, 4)
+  }
+  assert_eq(makefile_parse("test\\ target:\n\t@echo marker\n")[0].command, "make 'test target'")
+  harness.stdio.println("Make discovery agrees with actual recipes and typed target facts")
+}

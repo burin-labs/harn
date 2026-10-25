@@ -33,6 +33,7 @@ pub mod hitl_read;
 pub mod http_response;
 pub mod jsonrpc;
 pub mod lifecycle_receipts;
+pub mod makefile;
 #[cfg(feature = "content")]
 pub mod markup;
 pub mod multipart;
