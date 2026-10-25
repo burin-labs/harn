@@ -115,9 +115,10 @@ pub(super) fn scan_command_risk_scan_json(
     }
     if lower.contains("sudo ")
         || lower.starts_with("sudo")
+        || super::catastrophic::analysis_runs_doas(&command_analysis, 0)
         || lower
-            .split(|c: char| c.is_whitespace() || ";&|()`$".contains(c))
-            .any(|word| word == "doas")
+            .split(|c: char| c.is_whitespace() || ";&|()`$'\"".contains(c))
+            .any(|word| word.rsplit('/').next() == Some("doas"))
     {
         labels.insert("sudo".to_string());
         rationale.push("privilege escalation via sudo or doas detected");
@@ -1124,6 +1125,7 @@ const SECRET_WORDS: &[&str] = &["credentials", "secret", "token", "api_key", "ap
 
 pub(super) fn contains_secret_like_text(lower: &str) -> bool {
     SECRET_WORDS.iter().any(|word| lower.contains(word))
+        || super::catastrophic::analysis_runs_doas(&command_analysis, 0)
         || lower
             .split_whitespace()
             .any(crate::known_paths::is_credential_path)

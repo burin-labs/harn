@@ -409,6 +409,33 @@ fn analysis_runs_git(
     })
 }
 
+/// Whether any stage, including one in a `bash -c` payload, runs through a
+/// `doas` wrapper. Reads parsed words, so shell escapes and quoting are resolved.
+pub(super) fn analysis_runs_doas(analysis: &ShellAnalysis, depth: usize) -> bool {
+    if depth > MAX_DEPTH {
+        return false;
+    }
+    analysis.stages.iter().any(|stage| {
+        let tokens = &stage.argv;
+        let command_index = unwrapped_command_index(tokens, 0, tokens.len());
+        if tokens[..command_index.min(tokens.len())]
+            .iter()
+            .any(|word| command_basename(word) == "doas")
+        {
+            return true;
+        }
+        let Some(command) = tokens.get(command_index) else {
+            return false;
+        };
+        match command_basename(command) {
+            "doas" => true,
+            "bash" | "sh" | "zsh" => shell_c_script(&tokens[command_index + 1..])
+                .is_some_and(|script| analysis_runs_doas(&analyze_shell(script), depth + 1)),
+            _ => false,
+        }
+    })
+}
+
 /// Classify `git <subcommand> <args>` as discarding uncommitted work in the
 /// working tree. This is an approvable label, not the floor: a scoped
 /// `git checkout -- file` is a routine way to drop one's own edit, while
