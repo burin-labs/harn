@@ -1269,6 +1269,10 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
     "env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.s GIT_CONFIG_VALUE_0='stash pop' git s",
     "export GIT_CONFIG_GLOBAL=/tmp/aliases; git s",
     "HOME=/tmp/h sh -c 'git s'",
+    "env -u HOME git s",
+    "env -i git s",
+    "unset HOME; git s",
+    "env --unset=HOME git s",
   ] {
     assert(
       !decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, lookup).allow,

@@ -1028,14 +1028,21 @@ const GIT_BUILTIN_COMMANDS: list<string> = [
   "write-tree",
 ]
 
-/** Environment variables that change which configuration git reads. */
+/**
+ * Variables, and the `env`/`unset` forms that clear them, that change which configuration git reads.
+ */
 const GIT_CONFIG_SOURCE_VARIABLES: list<string> = [
   "GIT_CONFIG",
   "GIT_DIR",
   "GIT_WORK_TREE",
   "GIT_COMMON_DIR",
   "XDG_CONFIG_HOME",
-  "HOME=",
+  "HOME",
+  "env -i",
+  "env -u",
+  "env --ignore-environment",
+  "env --unset",
+  "unset ",
 ]
 
 /** Whether the command text names a variable that redirects git's configuration. */
