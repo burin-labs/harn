@@ -9,7 +9,269 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## v0.10.179
+## Unreleased
+
+### Breaking
+
+- **GitHub Actions result contracts now match the released connector (#10370).**
+  Runs expose `display_title` and `run_started_at`; jobs expose `head_sha`
+  and typed `GitHubActionsStep` values. Dispatch receipts expose `created_at`.
+  The types no longer promise `api_url`, job labels or runner groups, or
+  dispatch status and conclusion, which the connector does not return.
+  Read a dispatched run with `workflow_run` to obtain its status and conclusion.
+
+  Migration: rename a run's `started_at` field to `run_started_at`, use `url`
+  for links, and read dispatch status through `workflow_run`. Remove references
+  to job labels and runner groups from these normalized result records.
+- **Harn Flow moved out of `harn-vm` into the `harn-flow` crate.** Atoms,
+  intents, slices, the Flow store, invariant predicates, and the `flow_*`
+  builtins now compile in their own crate beside the VM, which shortens the
+  serial `harn-vm` build. The new `harn-runtime` crate assembles the VM with
+  every builtin family crate.
+
+  Migration: replace `harn_vm::flow::` paths with `harn_flow::`. An embedder
+  that runs Harn code registers the standard library through
+  `harn_runtime::register_vm_stdlib` or `harn_runtime::register_core_stdlib`
+  instead of the `harn_vm` functions of the same name, so the linker keeps
+  every family's builtins.
+- Rename selectors now use exact defining paths, indexed qualified aliases and
+  1-based UTF-16 declaration-name columns across supported languages. Decorated
+  and exported graph declarations report the name line, and language-server rename
+  uses that same selected position instead of the first matching name on a line.
+
+  Migration: use the defining path and declaration coordinates returned by the
+  index rather than a suffix path or an outline wrapper line. Pass `path: "."`
+  for an intentional workspace-wide seed search. Wrong supplied constraints now
+  return no match. Ambiguous-rename `warnings[*].symbol` now carries the
+  qualified name in every language, matching `qualified_name`. Move and
+  signature-change path rules are unchanged.
+- **Builtin families register their own installers.** Each standard-library
+  family declares its installer beside its `register_*_builtins` function
+  with `harn_vm_core::stdlib_installer!`, and `register_vm_stdlib` runs every
+  linked installer. A family's owning crate can therefore sit outside
+  `harn-vm`. Installers may not register a name another installer registers,
+  which a test now enforces, so installation order no longer matters.
+  Families that keep thread-local state declare their reset the same way,
+  and `reset_stdlib_state` runs every linked reset.
+
+  Migration: replace `harn_vm::register_io_stdlib` and
+  `harn_vm::register_agent_stdlib` with `harn_vm::register_vm_stdlib`, which
+  installs the complete library. `harn_vm::register_core_stdlib` still
+  installs only the deterministic builtins.
+
+- **`with_redaction` now redacts only the recorded copy of a tool call (#10310).** The handler always receives the
+  original arguments. The event sink, session transcript and approval display carry the masked arguments, output and
+  streamed argument fragments. The tool result the model reads is not rewritten by this middleware.
+
+  Migration: a handler that relied on `with_redaction` to change the arguments it receives must use a custom
+  middleware.
+
+  ```harn
+  // before: with_redaction(redactor) rewrote the arguments passed to the handler
+  // after: change the arguments explicitly
+  { call, next -> next(call + {tool_args: new_args}) }
+  ```
+- **Provider catalog rows gain a `retires_on` field (#10440).** `ModelDef` and `ModelDeprecation` carry an optional
+  `retires_on` ISO date for a retirement a provider has announced while the route is still served, and the catalog JSON
+  schema and TypeScript, Swift and Harn bindings expose it.
+
+  Migration: Rust code that builds a `ModelDef` or `ModelDeprecation` with a struct literal must add
+  `retires_on: None`. Code that reads the catalog needs no change.
+- **49 standard-library builtin families moved out of `harn-vm` into the new
+  `harn-builtins` crate.** Git, cookies, web, Postgres, SQLite, CSV, cron,
+  and the other families that `harn-vm` never calls into now compile beside
+  the VM instead of inside it, removing about 44,000 lines from the serial
+  `harn-vm` build. The language prelude (types, strings, bytes, collections,
+  iteration, math, sets, regex, crypto, and assertions), the families the
+  embedded agent stdlib calls, and the connector and monitor builtins the
+  trigger dispatcher drives stay in `harn-vm`. Script behavior is unchanged.
+
+  Migration: replace `harn_vm::stdlib::<family>::` paths with
+  `harn_builtins::<family>::` for the moved families, and
+  `harn_vm::install_shared_pool_registry` with
+  `harn_builtins::postgres::install_shared_pool_registry`. Select the optional
+  families through `harn-runtime`'s `postgres`, `sqlite`, `content`, and
+  `compression` features, or `full`. Crates whose tests need `harn-vm`'s test
+  helpers enable its new `vm-test-support` feature.
+- `harn-hostlib` and `harn-package` no longer depend on `harn-runtime`. They
+  register builtins through `harn-vm`'s registry, so an embedder that wants every
+  builtin family must link `harn-runtime` itself, as the `harn` binary does. Both
+  crates now start compiling before the builtin families finish, which shortens
+  the rebuild after a `harn-vm` change. The JUnit parser moves back from
+  `harn-builtins` to `harn-vm`, because `harn-hostlib` calls it directly.
+
+  Migration: replace `harn_builtins::junit::` paths with
+  `harn_vm::stdlib::junit::`, and add a `harn-runtime` dependency to any embedder
+  that linked only `harn-hostlib` and expects every builtin family.
+- **`AgentEvent` gains an `InferenceSpeed` variant and `LlmTelemetry` gains
+  an `inference_speed` field.** Rust embedders that match `AgentEvent`
+  exhaustively, or build `LlmTelemetry` with a struct literal, no longer
+  compile until they handle the new variant and field.
+
+  Migration: add an arm for the new variant (or a wildcard) and fill the new
+  field (or spread a default).
+
+  ```rust
+  // Before
+  match event { AgentEvent::IterationEnd { .. } => {} /* ... */ }
+  LlmTelemetry { client_first_frame_ms, ..LlmTelemetry::default() };
+  // After
+  match event {
+      AgentEvent::InferenceSpeed { speed, .. } => show(speed),
+      AgentEvent::IterationEnd { .. } => {}
+      /* ... */
+  }
+  LlmTelemetry { client_first_frame_ms, inference_speed: None, ..LlmTelemetry::default() };
+  ```
+
+### Added
+
+- `harness.fs.stat` accepts `{follow_symlinks: false}` to inspect symbolic links
+  without following them. Its typed result includes `is_symlink` and Unix
+  permission bits in `mode` and file identity in `identity`, so Harn utilities can
+  inspect build artifacts and recognize hard links before removing them.
+- `secret_scan(content, hashes)` checks complete, case-insensitive tokens against
+  a nonempty SHA-256 denylist. It returns typed findings with source locations and
+  digest-only redaction. Native and portable execution share the scanner. The
+  one-argument credential-pattern scan keeps its existing behavior.
+- **Live inference speed.** Every streamed model call now reports its time to
+  first token and output tokens per second as an `inference_speed` session
+  update: calibrated estimates while it streams (reasoning and tool-call
+  arguments included), then the provider's or inference server's settled
+  numbers when it ends. The settled measurement is also recorded on the call's
+  `provider_telemetry.inference_speed`, and `std/llm/speed` prefers it over
+  the wall clock.
+- `scripts/precise_qualify.harn` measures the precise edit tools on pinned
+  repositories. It samples symbols in a seeded order, previews and applies
+  each tool in a scratch clone, and runs the repository's compiler or
+  typecheck. Each attempt is classified as applied correctly, applied
+  wrongly, refused with its typed reason, or crashed. The versioned
+  receipt and summary table list wrong edits first and report pending
+  attempts, so an empty sample never reads as a pass.
+
+### Changed
+
+- The missing-tool-call decision study uses Harn drivers and analysis tools.
+  They preserve the recorded statistics, refuse incomplete or duplicate cells,
+  and share literal environment parsing and native source migration.
+- Run diagnostics timing sweeps and calibration through Harn. Pin the checked
+  server through the selected provider's endpoint setting, require exact model
+  IDs and complete trial results, and preserve earlier output and transcripts.
+- Release binaries now build with fat LTO and one codegen unit on every target.
+  The x86_64 Linux `harn` binary is about 15% smaller (277.8 MB to 234.7 MB in
+  a paired local build), with no change to commands or startup latency.
+
+- **Provider catalog.** Together's Inkling route records its announced 2026-11-06 retirement in a
+  new structured `retires_on` field. Catalog validation rejects a malformed `retires_on` or one on
+  an already deprecated row. A weekly provider contract probe job files an issue when an
+  announced retirement has passed or a row still selectable by alias is past its sunset;
+  no pull request or main check depends on today's date (#10430).
+- The agent shell guard refuses `git stash` forms that write the repository-wide stash list and
+  suggests a work-in-progress commit instead, because every linked worktree shares that list.
+  `git stash list` and `git stash show` stay allowed.
+- Release archives for macOS and Linux are now `.tar.xz`, about 42% smaller than `.tar.gz`.
+  `install.sh`, `harn upgrade`, the runtime installer, and the container image read them.
+  `install.sh` needs `xz` on Linux; macOS `tar` unpacks it natively.
+  Each release also carries a `.tar.gz` copy of the four macOS and Linux archives, used only
+  by the ACP registry manifest because the registry cannot unpack `.tar.xz`.
+- Linux release builds add a 16 GB swap file before building when the runner has less than 12 GB of swap,
+  so the fat-LTO link of `harn` survives its memory peak on the 16 GB ARM64 runner.
+- Linux release builds log memory use every minute so a runner killed during the final link shows whether
+  memory ran out first.
+- Release candidate builds now allow 135 minutes for the compile step, since the fat-LTO distributed profile
+  outruns the former 90-minute limit on a cold macOS runner.
+- The Linux ARM64 release binary now builds natively on a free `ubuntu-22.04-arm` runner instead of
+  cross-compiling on an x86 runner. The glibc 2.35 floor is unchanged.
+
+### Fixed
+
+- A consumer canary that cannot read a GitHub census now reports the HTTP status and
+  rate-limit fields in its failure line, and retries one exhausted rate limit that
+  resets within a minute. An unmeasured observer stays a red failure.
+- **Stack-frame banking.** The weekly banking job now banks while main is over budget, the one
+  time a bank is needed, instead of exiting on the gate's own refusal before it writes.
+- A budget stop raised when a finished call settles past the ceiling now names
+  the spend the ceiling judged in its `budget_exhausted` event. It used to
+  carry no session spend, so a report could say `$0.0000` for a stop that had
+  spent past the cap.
+- The Harn bump runtime's base adoption now restores a refreshed file the
+  refresh deleted and staged, instead of refusing on a dirty tree and never
+  converging. Untracked files that predate the refresh are no longer counted as
+  refresh output, so adoption never deletes them.
+- The Harn bump runtime skips a base-sync merge on the bump branch only when
+  skipping it loses nothing: every path where the merge departs from a
+  mechanical merge of its parents must match the refresh output or the base.
+  A merge that keeps any other content, such as a hand edit, is refused with
+  `repair_conflict`, naming those paths, instead of being silently dropped.
+- Structural Harn queries accept `gen` as a variable name while preserving `gen fn` declarations.
+- The provider catalog now marks the Fireworks DeepSeek V4 Flash 0731, DeepSeek
+  V4 Pro 0813, Kimi K2.6, Kimi K2.7 Code, and GLM 5.2 routes deprecated with
+  their 2026-09-25 serverless removal date, so selection and pickers stop
+  offering them. DeepSeek V4 Flash 0731 points at DeepSeek V4.1 Flash.
+- **Test stability.** The remaining lease-release assertions in the language server, the serve
+  prompt catalog and the hostlib artifact guard wait out descriptors a concurrent child spawn still
+  holds, instead of failing the test on the first try.
+- A call the budget ceiling refuses when it settles is now counted as the
+  completed, paid call it was. The agent loop's `cost_usd`, token counts and
+  run ledger (`physical_usage`, `provider_call_count`) include it, and its
+  thrown error carries the call as `settled_call`. Before, every cost report
+  read after such a stop omitted the call that crossed the ceiling.
+- Sorting (`sort`, `sorted`, `sort_by`, `sorted_by`) no longer panics on lists that
+  mix NaN or values of different types: the sort comparator is now a total order
+  that places numbers first, then NaN, then other types grouped by kind.
+  `pascal_to_camel("HTTPServer")` returns `httpServer` instead of `hTTPServer`.
+  `iter.sum()` shares `list.sum()` and so sums decimals. `round(x, -n)` returns
+  exact power-of-ten buckets for floats (`round(123456.0, -5)` is `100000.0`) and
+  no longer zeroes ints of 5e18 and beyond at `-19`. Set `union`, `intersection`,
+  `difference`, and `symmetric_difference` methods throw on a non-set argument
+  like their `set_*` builtins. Local JSON repair of structured LLM output keeps
+  non-ASCII text intact instead of mojibaking it. `zip_create` refuses `..` and
+  absolute entry paths, matching `tar_create`. `harn fmt` keeps the parentheses
+  around a `try*` operand, so `(try* fetch()).body` no longer reformats into
+  `try* fetch().body`.
+- Keep native Windows workspace tests buildable and make the shipped-interface
+  cache fixture use distinct file timestamps for dependency changes and restoration.
+
+- Browser verification accepts the pinned wasm-tools release binary's build details
+  and the documented ChromeDriver override when Cargo runs under a Harn host lease.
+  The browser test also uses the Chrome binary selected by `HARN_CHROME_BIN`.
+- Portable programs can catch invalid hash policies, hexadecimal input, and
+  regular expressions through Harn's normal error channel. Resource limits still
+  stop execution, and unhandled errors keep their diagnostic codes.
+- `run_command` no longer re-sweeps the shared command-artifact directory on every
+  call when other live sessions hold enough directories to keep it over its cap.
+  A sweep that ends over the cap waits for the normal interval, and each sweep
+  checks an owner's session lease once instead of once per directory.
+- The consumer canary now waits out a GitHub rate limit, a server error or a dropped
+  connection, within a bounded retry, instead of ending the check unmeasured. Each read
+  that fails names its class (`api_access_denied`, `api_rate_limited` or
+  `api_unavailable`), the HTTP status, the token's step and the repository's label.
+- Reading an environment variable inside a confined session no longer creates
+  files. Each read used to build the whole child-process environment, which on
+  macOS rewrote the SwiftPM launchers and toolset under `.harn-toolchain-cache`.
+  A provider catalog reads the environment once per provider, so agent steps
+  spent most of their time in that disk work. Reads now compute the same
+  workspace values without touching disk; spawns still create what a child needs.
+- Language-server renames through typescript-language-server no longer give
+  different answers on identical runs. Harn starts it without the syntax-only
+  server, which answered definition lookups without types while a project was
+  reloading, so a mention such as `map.get` sometimes resolved to nothing and
+  the rename refused.
+- ACP `module_preparation` progress now reports `completed` when the pipeline starts running, not when the
+  turn ends, so clients stop showing "Preparing modules" for the whole turn. Later child-VM module loads no
+  longer reopen it.
+- Syntax-tree `rename_symbol` with workspace scope leaves Markdown, data and
+  style files that mention the name unchanged and lists them in `warnings`,
+  instead of refusing the whole rename as `unsupported_language`.
+- Session writer, task and maintenance leases unlock explicitly on drop, so a process spawned by another
+  thread can no longer keep a released session lease locked and refuse the next run.
+
+### Security
+
+- **Dependency audit.** `cargo deny` no longer ignores RUSTSEC-2026-0387 now that the
+  build resolves crypto-bigint 0.7.6 (#10421).
+
+## v0.10.179 (never published)
 
 ### Breaking
 
