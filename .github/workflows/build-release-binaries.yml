@@ -468,6 +468,38 @@ jobs:
             echo "| Build matrix | \`$BUILD_MATRIX\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  source-ci:
+    name: Qualify candidate source
+    needs: setup
+    if: needs.setup.outputs.should_build_binaries == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.setup.outputs.build_mode == 'candidate'
+        with:
+          persist-credentials: false
+      - name: Require main CI before candidate work
+        if: needs.setup.outputs.build_mode == 'candidate'
+        timeout-minutes: 85
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.setup.outputs.candidate_source_sha }}
+          WAIT_FOR_FULL_SUITE: 'true'
+          FULL_SUITE_STATUS_FILE: ${{ runner.temp }}/source-ci.json
+        # Native qualification runs after this admission, beside the builds.
+        # Publication still requires both proofs through the same gate.
+        run: bash scripts/ci/require_full_suite.sh --main-only
+      - name: Preserve source qualification verdict
+        if: always() && needs.setup.outputs.build_mode == 'candidate'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: source-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/source-ci.json
+          if-no-files-found: error
+          retention-days: 7
+
   # Generate the target-independent CLI AOT payload exactly once before the
   # candidate or benchmark matrix. The generator needs the complete Rust
   # workspace; each target build needs only the resulting package-local
@@ -476,7 +508,7 @@ jobs:
   # intentionally stay source-fallback-only.
   prepare_cli_aot:
     name: Prepare CLI AOT payload
-    needs: setup
+    needs: [setup, source-ci]
     # Match build's top-level condition so a warm-cache build is never skipped
     # merely because this release/benchmark payload job had no work to do.
     if: needs.setup.outputs.should_build_binaries == 'true'
@@ -1891,7 +1923,7 @@ jobs:
   # build so the release does not wait on a person to dispatch it.
   native-qualification:
     name: Start native release qualification
-    needs: setup
+    needs: [setup, source-ci]
     if: needs.setup.outputs.build_mode == 'candidate' && github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1916,7 +1948,7 @@ jobs:
   # reads.
   candidate-verdict:
     name: Release candidate verdict
-    needs: [setup, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal]
+    needs: [setup, source-ci, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1949,7 +1981,7 @@ jobs:
             exit 0
           fi
           if ! jq -e '
-            ["setup", "prepare_cli_aot", "build", "collect_candidate_manifest", "release-residual-audit", "release-smoke"] as $required |
+            ["setup", "source-ci", "prepare_cli_aot", "build", "collect_candidate_manifest", "release-residual-audit", "release-smoke"] as $required |
             . as $jobs | all($required[]; $jobs[.].result == "success")
           ' <<<"$RESULTS" >/dev/null; then
             echo "::error::A candidate job did not succeed: $RESULTS"

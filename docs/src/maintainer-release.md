@@ -129,7 +129,15 @@ Record the release pull request and the exact commit that lands on main.
 Follow the runs for that commit in
 [Harn Actions](https://github.com/burin-labs/harn/actions).
 
-1. `build-release-binaries.yml` builds the candidate on the version commit's
+1. `build-release-binaries.yml` first requires successful full-suite main CI
+   at the exact candidate source, using promotion's job list in
+   `scripts/lib/full_suite_jobs.sh`. It waits up to 85 minutes for a running
+   suite and refuses missing or failed proof before building, signing, or
+   dispatching the consumer rehearsal. The gate emits
+   `harn.release.full_suite.v1` JSON with the stage, source SHA, verdict,
+   pending and failing job names, and next action. Native qualification starts
+   after this admission and runs beside the artifact builds; publication still
+   requires it. The workflow then builds the candidate on the version commit's
    push to main. The release's merge group builds nothing; its
    `Release candidate verdict` passes only after the exact-source consumer
    rehearsal passes at the commit that lands. A merge group can't build the

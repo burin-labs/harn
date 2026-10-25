@@ -7,6 +7,7 @@ mkdir "$scratch/bin"
 cat > "$scratch/bin/gh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+[[ "${FAKE_GH_FAILURE:-false}" != true ]] || exit 1
 case "$*" in
   *workflows/ci.yml/runs*) cat "$FIXTURE/runs" ;;
   *workflows/macos-nightly.yml/runs*) cat "$FIXTURE/native-runs" ;;
@@ -25,6 +26,7 @@ SH
 chmod +x "$scratch/bin/gh"
 export PATH="$scratch/bin:$PATH" FIXTURE="$scratch" GH_REPO=fixture/repo
 export SOURCE_SHA=1111111111111111111111111111111111111111
+export FULL_SUITE_STATUS_FILE="$scratch/source-ci.json"
 jq -nc '{id:64,path:".github/workflows/macos-nightly.yml",state:"active"}' > "$scratch/native-workflow"
 jq -nc --arg source "$SOURCE_SHA" '{id:81,run_attempt:1,workflow_id:64,path:".github/workflows/macos-nightly.yml",
   head_sha:"2222222222222222222222222222222222222222",head_branch:"main",display_title:("Native qualification " + $source),event:"workflow_dispatch",status:"completed",conclusion:"success",
@@ -47,14 +49,40 @@ for name in "${names[@]}"; do printf '%s\tcompleted\tsuccess\n' "$name"; done > 
 bash "$root/scripts/ci/require_full_suite.sh" > "$scratch/log"
 grep -q 'Full-suite CI succeeded' "$scratch/log"
 grep -q '"status":"complete"' "$scratch/log"
+head -n 1 "$scratch/log" | jq -e \
+  '.kind == "harn.release.full_suite.v1" and .verdict == "success" and .pending_count == 0 and .failed_count == 0 and .next_action == "continue"' >/dev/null
+jq -e '.verdict == "success" and .next_action == "continue"' "$FULL_SUITE_STATUS_FILE" >/dev/null
 for name in "${names[@]}"; do
   cp "$scratch/jobs" "$scratch/good"
   awk -F '\t' -v name="$name" '$1 != name' "$scratch/good" > "$scratch/jobs"
   if bash "$root/scripts/ci/require_full_suite.sh" > "$scratch/log" 2>&1; then
     echo "Missing proof accepted: $name" >&2; exit 1
   fi
+  if bash "$root/scripts/ci/require_full_suite.sh" --main-only > "$scratch/main-only-log" 2>&1; then
+    echo "Missing source proof accepted before building: $name" >&2; exit 1
+  fi
+  head -n 1 "$scratch/main-only-log" | jq -e --arg name "$name" \
+    '.verdict == "failure" and .pending_count == 1 and .missing_jobs == [$name] and .next_action == "repair-source"' >/dev/null
   mv "$scratch/good" "$scratch/jobs"
 done
+cp "$scratch/jobs" "$scratch/good-jobs"
+printf 'CI status\tcompleted\tsuccess\n' >> "$scratch/jobs"
+if bash "$root/scripts/ci/require_full_suite.sh" --main-only > "$scratch/log" 2>&1; then
+  echo 'Duplicate required job accepted as source proof' >&2; exit 1
+fi
+cp "$scratch/good-jobs" "$scratch/jobs"
+awk -F '\t' 'BEGIN { OFS="\t" } $1 == "CI status" { $3="failure" } { print }' "$scratch/good-jobs" > "$scratch/jobs"
+printf '71\t%s\tcompleted\tfailure\n' "$SOURCE_SHA" > "$scratch/runs"
+if bash "$root/scripts/ci/require_full_suite.sh" --main-only > "$scratch/log" 2>&1; then
+  echo 'Failed source admitted before building' >&2; exit 1
+fi
+head -n 1 "$scratch/log" | jq -e '.verdict == "failure" and .failing_jobs == ["CI status"] and .failed_count == 1' >/dev/null
+cp "$scratch/good-jobs" "$scratch/jobs"
+if FAKE_GH_FAILURE=true bash "$root/scripts/ci/require_full_suite.sh" --main-only > "$scratch/log" 2>&1; then
+  echo 'Unreadable CI admitted before building' >&2; exit 1
+fi
+jq -e '.verdict == "unmeasured" and .pending_count == null and .next_action == "retry-read"' "$scratch/log" >/dev/null
+jq -e '.verdict == "unmeasured" and .pending_count == null' "$FULL_SUITE_STATUS_FILE" >/dev/null
 for outcome in failure cancelled ''; do
   printf '71\t%s\tcompleted\t%s\n' "$SOURCE_SHA" "$outcome" > "$scratch/runs"
   if bash "$root/scripts/ci/require_full_suite.sh" > "$scratch/log" 2>&1; then
@@ -81,6 +109,10 @@ native_refused() {
   cp "$scratch/good-native/"* "$scratch/"
 }
 jq '.[0].workflow_runs=[] | .[0].total_count=0' "$scratch/good-native/native-runs" > "$scratch/native-runs"
+# Admission proves main CI without waiting for the native run it will start.
+# The same source still cannot publish without native qualification.
+bash "$root/scripts/ci/require_full_suite.sh" --main-only > "$scratch/main-only-log"
+grep -q 'Full-suite CI succeeded' "$scratch/main-only-log"
 native_refused missing-run
 jq '.[0].total_count=2' "$scratch/good-native/native-runs" > "$scratch/native-runs"
 native_refused partial-runs
