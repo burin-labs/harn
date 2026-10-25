@@ -194,9 +194,11 @@ impl AcpServer {
             );
             return;
         }
-        self.sessions
+        let closed = self
+            .sessions
             .remove(session_id)
             .expect("validated session should still exist after sink flush");
+        self.release_session_workspace_warm(&closed);
         self.session_cancellations
             .lock()
             .unwrap_or_else(|error| error.into_inner())

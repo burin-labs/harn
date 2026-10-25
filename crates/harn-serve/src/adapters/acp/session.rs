@@ -735,8 +735,10 @@ impl AcpServer {
                     admission_unavailable,
                     profile_turn: 0,
                     environment_policy: child_environment,
+                    workspace_warm_requested: false,
                 },
             );
+            self.request_session_workspace_warm(&new_session_id);
             self.emit_session_info_update(&new_session_id, &info);
             self.emit_available_commands(&new_session_id);
             self.send_response(

@@ -22,26 +22,69 @@ fn code_index_warm_disabled(value: Option<&str>) -> bool {
 /// code index, and holds the single-flight gate, that every later VM over
 /// that workspace installs.
 ///
-/// Kept for the server's life, as its sessions are. Replacing one root's
-/// handles when another opens would strand an in-flight warm behind a gate
-/// the next VM no longer shares, and that VM would walk the tree again.
+/// A root's handles stay while a session over it is open or its index has
+/// work in flight, so a second workspace opening never strands the first
+/// one's warm. Once neither holds, the next session event releases them.
 #[cfg(feature = "hostlib")]
 #[derive(Default)]
 struct WorkspaceHostlib {
-    by_root: std::sync::Mutex<
-        std::collections::HashMap<std::path::PathBuf, harn_hostlib::DefaultHostlibHandles>,
-    >,
+    by_root: std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, WorkspaceEntry>>,
+}
+
+#[cfg(feature = "hostlib")]
+struct WorkspaceEntry {
+    handles: harn_hostlib::DefaultHostlibHandles,
+    open_sessions: usize,
 }
 
 #[cfg(feature = "hostlib")]
 impl WorkspaceHostlib {
-    fn handles_for(&self, project_root: &Path) -> harn_hostlib::DefaultHostlibHandles {
+    fn lock(
+        &self,
+    ) -> std::sync::MutexGuard<'_, std::collections::HashMap<std::path::PathBuf, WorkspaceEntry>>
+    {
         self.by_root
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn entry<'a>(
+        by_root: &'a mut std::collections::HashMap<std::path::PathBuf, WorkspaceEntry>,
+        project_root: &Path,
+    ) -> &'a mut WorkspaceEntry {
+        by_root
             .entry(project_root.to_path_buf())
-            .or_insert_with(crate::default_hostlib_handles)
-            .clone()
+            .or_insert_with(|| WorkspaceEntry {
+                handles: crate::default_hostlib_handles(),
+                open_sessions: 0,
+            })
+    }
+
+    /// Drop every root no open session needs and no index work holds.
+    fn release_unused(by_root: &mut std::collections::HashMap<std::path::PathBuf, WorkspaceEntry>) {
+        by_root.retain(|_, entry| entry.open_sessions > 0 || !entry.handles.code_index.is_idle());
+    }
+
+    /// The handles a VM over `project_root` installs.
+    fn handles_for(&self, project_root: &Path) -> harn_hostlib::DefaultHostlibHandles {
+        Self::entry(&mut self.lock(), project_root).handles.clone()
+    }
+
+    /// Count a session opening over `project_root` and return its handles.
+    fn open_session(&self, project_root: &Path) -> harn_hostlib::DefaultHostlibHandles {
+        let mut by_root = self.lock();
+        Self::release_unused(&mut by_root);
+        let entry = Self::entry(&mut by_root, project_root);
+        entry.open_sessions += 1;
+        entry.handles.clone()
+    }
+
+    fn close_session(&self, project_root: &Path) {
+        let mut by_root = self.lock();
+        if let Some(entry) = by_root.get_mut(project_root) {
+            entry.open_sessions = entry.open_sessions.saturating_sub(1);
+        }
+        Self::release_unused(&mut by_root);
     }
 }
 
@@ -124,16 +167,13 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
     }
 
     fn warm_session_workspace(&self, project_root: &Path) {
-        if !self.warm_code_index {
-            return;
-        }
         #[cfg(feature = "hostlib")]
         {
-            let outcome = self
-                .hostlib
-                .handles_for(project_root)
-                .code_index
-                .warm_session(project_root);
+            let handles = self.hostlib.open_session(project_root);
+            if !self.warm_code_index {
+                return;
+            }
+            let outcome = handles.code_index.warm_session(project_root);
             tracing::debug!(
                 target: "harn_cli::acp",
                 root = %project_root.display(),
@@ -141,6 +181,13 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
                 "code-index session warm requested",
             );
         }
+        #[cfg(not(feature = "hostlib"))]
+        let _ = project_root;
+    }
+
+    fn release_session_workspace(&self, project_root: &Path) {
+        #[cfg(feature = "hostlib")]
+        self.hostlib.close_session(project_root);
         #[cfg(not(feature = "hostlib"))]
         let _ = project_root;
     }
@@ -315,6 +362,39 @@ pub fn on_tick(_event) -> nil {
             let expected = warm.then(|| root.clone());
             assert_eq!(live_root, expected, "warm={warm}");
         }
+    }
+
+    /// A workspace's index lives while a session over it is open, and is
+    /// released once its last session closes and no work is in flight.
+    #[test]
+    fn closing_the_last_session_over_a_workspace_releases_its_index() {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("lib.rs"), "pub fn f() {}\n").unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        let configurator = CliAcpRuntimeConfigurator::new(true);
+        configurator.warm_session_workspace(&root);
+        configurator.warm_session_workspace(&root);
+        let warmed = configurator.hostlib.handles_for(&root).code_index.shared();
+        configurator
+            .hostlib
+            .handles_for(&root)
+            .code_index
+            .wait_until_idle();
+
+        configurator.release_session_workspace(&root);
+        let while_open = configurator.hostlib.handles_for(&root).code_index.shared();
+        assert!(
+            Arc::ptr_eq(&warmed, &while_open),
+            "a session is still open over the workspace"
+        );
+
+        configurator.release_session_workspace(&root);
+        let after_close = configurator.hostlib.handles_for(&root).code_index.shared();
+        assert!(
+            !Arc::ptr_eq(&warmed, &after_close),
+            "the last close must release the warmed index"
+        );
+        assert!(after_close.lock().unwrap().is_none());
     }
 
     /// A second workspace opening must not strand the first one's warm: the

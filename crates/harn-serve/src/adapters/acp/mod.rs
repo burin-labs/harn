@@ -659,6 +659,11 @@ pub trait AcpRuntimeConfigurator: Send + Sync {
     /// process confinement covers `project_root`. It must return without
     /// waiting on the warm and must not change capability or sandbox policy.
     fn warm_session_workspace(&self, _project_root: &std::path::Path) {}
+
+    /// A session that [`Self::warm_session_workspace`] was called for has
+    /// closed. Called once per such session, so a host can release what it
+    /// keeps for `project_root` once no open session needs it.
+    fn release_session_workspace(&self, _project_root: &std::path::Path) {}
 }
 
 #[derive(Clone, Default)]
@@ -703,6 +708,10 @@ impl AcpRuntimeConfigurator for EndpointOverrideRuntimeConfigurator {
 
     fn warm_session_workspace(&self, project_root: &std::path::Path) {
         self.inner.warm_session_workspace(project_root);
+    }
+
+    fn release_session_workspace(&self, project_root: &std::path::Path) {
+        self.inner.release_session_workspace(project_root);
     }
 }
 

@@ -273,6 +273,13 @@ impl CodeIndexCapability {
         self.warm.take_and_join_builder();
         self.warm.wait_until_idle();
     }
+
+    /// True when no background warm, rebuild, restore, or snapshot write is
+    /// in flight for this capability, so a host can release it without
+    /// stranding work that later callers would otherwise join.
+    pub fn is_idle(&self) -> bool {
+        self.warm.is_idle()
+    }
 }
 
 /// What [`restore_shared`] did.

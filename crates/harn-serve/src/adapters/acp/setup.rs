@@ -530,21 +530,40 @@ impl AcpServer {
                 profile_turn: 0,
                 environment_policy: harn_vm::security::SessionEnvironment::inherited()
                     .with_host_inference_boundary(self.host_inference_boundary),
+                workspace_warm_requested: false,
             },
         );
         #[cfg(feature = "hostlib")]
         if let Some(session) = self.sessions.get(&session_id) {
             harn_hostlib::fs::configure_session_root(&session_id, &session.project_root);
         }
-        if let Some(session) = self.sessions.get(&session_id) {
-            // A root the process cannot read would only warm an empty index.
-            let readable = harn_vm::process_sandbox::current_process_confinement()
-                .is_none_or(|confinement| confinement.covers(&session.project_root));
-            if readable {
-                self.runtime_configurator
-                    .warm_session_workspace(&session.project_root);
-            }
-        }
+        self.request_session_workspace_warm(&session_id);
         Ok(())
+    }
+
+    /// Ask the runtime configurator to warm an admitted session's project
+    /// root, once per session. [`Self::release_session_workspace_warm`] is
+    /// its counterpart when the session closes.
+    pub(super) fn request_session_workspace_warm(&mut self, session_id: &str) {
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return;
+        };
+        // A root the process cannot read would only warm an empty index.
+        let readable = harn_vm::process_sandbox::current_process_confinement()
+            .is_none_or(|confinement| confinement.covers(&session.project_root));
+        if readable && !session.workspace_warm_requested {
+            session.workspace_warm_requested = true;
+            self.runtime_configurator
+                .warm_session_workspace(&session.project_root);
+        }
+    }
+
+    /// Release what [`Self::request_session_workspace_warm`] asked for, for a
+    /// session that has left the session table.
+    pub(super) fn release_session_workspace_warm(&self, session: &Session) {
+        if session.workspace_warm_requested {
+            self.runtime_configurator
+                .release_session_workspace(&session.project_root);
+        }
     }
 }

@@ -119,6 +119,13 @@ impl WarmCoordinator {
         drop(guard);
     }
 
+    pub(super) fn is_idle(&self) -> bool {
+        self.state
+            .lock()
+            .expect("warm coordinator poisoned")
+            .is_idle()
+    }
+
     pub(super) fn wait_until_idle(&self) {
         let mut guard = self.state.lock().expect("warm coordinator poisoned");
         let root = guard
