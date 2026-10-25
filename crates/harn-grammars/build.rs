@@ -141,8 +141,13 @@ fn main() {
     if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
         return fallback("the target is wasm32");
     }
+    // The dump program writes the build host's byte order; `cfg!` here
+    // describes the host this script runs on.
     if env::var("CARGO_CFG_TARGET_ENDIAN").as_deref() != Ok("little") {
         return fallback("the target is not little-endian");
+    }
+    if cfg!(target_endian = "big") {
+        return fallback("the build host is not little-endian");
     }
     let sources = match locate_sources(&enabled) {
         Ok(sources) => sources,
