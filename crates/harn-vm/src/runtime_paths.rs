@@ -66,26 +66,9 @@ pub(crate) fn prepare_run_record_parent(path: &Path) -> std::io::Result<()> {
             let uid = unsafe { libc::geteuid() };
             let private = temporary.join(format!("harn-user-{uid}"));
             if path.starts_with(&private) {
-                // A private child is insufficient when another account can
-                // rename an ancestor after validation. A shared writable
-                // parent needs the sticky bit, as the system /tmp has.
-                for ancestor in temporary.ancestors() {
-                    let metadata = std::fs::symlink_metadata(ancestor)?;
-                    if !metadata.is_dir()
-                        || (metadata.uid() != uid && metadata.uid() != 0)
-                        || (metadata.mode() & 0o022 != 0 && metadata.mode() & 0o1000 == 0)
-                    {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::PermissionDenied,
-                            format!(
-                                "shared-temp run directory has an unsafe parent: {} (owner {}, mode {:o})",
-                                ancestor.display(),
-                                metadata.uid(),
-                                metadata.mode() & 0o7777,
-                            ),
-                        ));
-                    }
-                }
+                // TMPDIR is a launcher-selected root, including Harn's
+                // workspace-local temp directory. Validate the namespace we
+                // own without reclassifying the launcher's workspace policy.
                 match std::fs::DirBuilder::new().mode(0o700).create(&private) {
                     Ok(()) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
