@@ -54,6 +54,11 @@ on:
         required: false
         default: false
         type: boolean
+      inspect_publication_only:
+        description: Inspect an existing draft through the normal release App without publication or downstream work; requires standalone_harn.
+        required: false
+        default: false
+        type: boolean
   # Privileged `workflow_run` is intentional: the resolver executes trusted
   # main code and validates the producer before candidate source is read.
   workflow_run: # zizmor: ignore[dangerous-triggers] promotes only main push runs of this repository
@@ -92,6 +97,12 @@ jobs:
       producer_attempt: ${{ steps.source.outputs.producer_attempt }}
       standalone_harn: ${{ steps.source.outputs.standalone_harn }}
     steps:
+      - name: Require standalone inspection scope
+        if: inputs.inspect_publication_only && !inputs.standalone_harn
+        shell: bash
+        run: |
+          echo "::error::Publication inspection requires standalone_harn."
+          exit 2
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
@@ -427,7 +438,7 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@415e316a8c4606e01de702559a24831b87132cd4
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@8f70b7c856dec371c1f7342c1616b912fa017a80
     with:
       sha: ${{ needs.plan.outputs.source_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}
@@ -435,6 +446,7 @@ jobs:
       original-consumer-context: ${{ needs.authorize.outputs.original_context }}
       consumer-repair: ${{ needs.authorize.outputs.consumer_repair }}
       standalone-harn: ${{ needs.plan.outputs.standalone_harn == 'true' }}
+      inspect-only: ${{ inputs.inspect_publication_only || false }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -445,7 +457,7 @@ jobs:
   repin:
     name: Repin consumers
     needs: [plan, promote]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' && needs.plan.outputs.standalone_harn != 'true' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' && needs.plan.outputs.standalone_harn != 'true' && !inputs.inspect_publication_only }}
     permissions:
       contents: read
     uses: burin-labs/.github/.github/workflows/repin.yml@39720fce0707c8852cfe8787c028db393f0ce6ae
@@ -459,7 +471,7 @@ jobs:
   container:
     name: Publish container
     needs: [plan, promote]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' && !inputs.inspect_publication_only }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -568,7 +580,7 @@ jobs:
   open-development-bump:
     name: Open post-publication development bump
     needs: [plan, promote]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' && !inputs.inspect_publication_only }}
     permissions:
       contents: read
       pull-requests: read
