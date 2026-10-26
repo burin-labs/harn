@@ -1,0 +1,27 @@
+import {
+  publish_plan_order,
+  publish_plan_packages_from_metadata,
+  publish_plan_version,
+} from "./publish_plan.harn"
+
+fn main(harness: Harness) {
+  require len(argv) == 2,
+    "usage: verify_publish_workspace_plan.harn <cargo-metadata.json> <version>"
+  const packages = publish_plan_packages_from_metadata(json_parse(harness.fs.read_text(argv[0])))
+  require publish_plan_version(packages) == argv[1], "publication plan selected a different version"
+  const order = publish_plan_order(packages)
+  require len(order) == len(packages) && len(order) > 0, "publication plan is incomplete"
+  let seen: list<string> = []
+  for name in order {
+    require !seen.contains(name), "publication plan repeats " + name
+    const package = packages.filter({ candidate -> candidate.name == name }).to_list()[0]
+    for dep in package.deps {
+      require seen.contains(dep), "publication plan orders " + name + " before " + dep
+    }
+    seen = seen + [name]
+  }
+  harness.stdio.println(
+    "PASS: publication plan orders all " + to_string(len(order)) + " workspace crates at "
+      + argv[1],
+  )
+}

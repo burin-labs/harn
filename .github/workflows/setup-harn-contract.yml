@@ -85,3 +85,29 @@ jobs:
           # Match bootstrap-harn.sh's existing installer execution profile.
           "$RUNTIME_PATH" run --standalone --no-sandbox \
             scripts/verify_release_runtime_environment.harn -- "$RUNTIME_VERSION"
+
+      - name: Plan the frozen published workspace with the actual registry runtime
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        shell: bash
+        env:
+          RUNTIME_PATH: ${{ steps.published-runtime.outputs.path }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse 'v0.10.180^{commit}')" = 36b0c000132756a91c7c11f1533d97d9db9ea2db
+          source_root=$(mktemp -d "$RUNNER_TEMP/publish-plan-source.XXXXXX")
+          git archive v0.10.180 -- Cargo.toml Cargo.lock rust-toolchain.toml crates tree-sitter-harn bench |
+            tar -x -C "$source_root"
+          (cd "$source_root" && cargo metadata --format-version 1 --no-deps --locked --offline) > "$RUNNER_TEMP/publish-plan-metadata.json"
+          "$RUNTIME_PATH" test scripts/tests/publish_plan_test.harn
+          baseline=$(mktemp -d "$RUNNER_TEMP/publish-plan-baseline.XXXXXX")
+          git show v0.10.180:scripts/publish_plan.harn > "$baseline/publish_plan.harn"
+          cp scripts/verify_publish_workspace_plan.harn "$baseline/"
+          if "$RUNTIME_PATH" run --standalone --no-sandbox "$baseline/verify_publish_workspace_plan.harn" -- \
+            "$RUNNER_TEMP/publish-plan-metadata.json" 0.10.180 > "$baseline/result.log" 2>&1; then
+            echo "error: original planner did not reproduce the frozen workspace failure" >&2
+            exit 1
+          fi
+          grep -F 'workspace publish dependency cycle includes: harn-builtins' "$baseline/result.log"
+          "$RUNTIME_PATH" run --standalone --no-sandbox scripts/verify_publish_workspace_plan.harn -- \
+            "$RUNNER_TEMP/publish-plan-metadata.json" 0.10.180
