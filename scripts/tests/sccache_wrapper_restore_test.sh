@@ -101,4 +101,24 @@ if ! (cd "$checkout" && HARN_CARGO_LEASE_MODE=off ./scripts/cargo_with_worktree_
 fi
 echo "sccache wrapper refresh: real producer and Cargo path reached"
 
+# Setup's explicit storage root may be relative to the checkout.
+relative_storage=relative-refresh-storage
+relative_current=$(harn_sccache_wrapper_path "$checkout" "$relative_storage")
+relative_old="$relative_storage/sccache-wrapper/$stale_key/$(basename "$relative_current")"
+write_config "$relative_current"
+cp "$checkout/.cargo/config.toml" "$tmp_root/relative-expected"
+write_config "$relative_old"
+(cd "$checkout" && make refresh-cargo-wrapper) > "$tmp_root/relative-refresh.log" 2>&1 || {
+  cat "$tmp_root/relative-refresh.log" >&2
+  fail "relative wrapper refresh failed"
+}
+cmp -s "$checkout/.cargo/config.toml" "$tmp_root/relative-expected" || fail "relative config changed"
+[[ -x "$checkout/$relative_current" ]] || fail "relative wrapper built outside checkout"
+if ! (cd "$checkout" && HARN_CARGO_LEASE_MODE=off ./scripts/cargo_with_worktree_build_dir.sh build --quiet) \
+  > "$tmp_root/relative-build.log" 2>&1; then
+  cat "$tmp_root/relative-build.log" >&2
+  fail "real Cargo could not use the relative wrapper"
+fi
+echo "sccache wrapper refresh: relative storage and real Cargo path reached"
+
 echo "sccache wrapper restore: ok"

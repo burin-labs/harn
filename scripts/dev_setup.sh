@@ -417,7 +417,7 @@ refresh_configured_cargo_wrapper() (
     return 1
   }
   case "$configured" in
-    /*/sccache-wrapper/*/harn-sccache-wrapper | /*/sccache-wrapper/*/harn-sccache-wrapper.exe) ;;
+    */sccache-wrapper/*/harn-sccache-wrapper | */sccache-wrapper/*/harn-sccache-wrapper.exe) ;;
     *) echo "error: wrapper refresh does not manage $configured" >&2; return 1 ;;
   esac
   local key

@@ -165,6 +165,24 @@ cp "$checkout/.cargo/config.toml" "$tmp_root/commented-expected"
 commented_config "$old"
 run_refresh > "$tmp_root/commented.log" 2>&1 || fail 'commented table refresh failed'
 cmp -s "$checkout/.cargo/config.toml" "$tmp_root/commented-expected" || fail 'commented table alias changed'
+
+# Setup accepts a relative storage root, resolved from this checkout.
+relative_storage='relative cache'
+relative_current=$(harn_sccache_wrapper_path "$checkout" "$relative_storage")
+relative_old="$relative_storage/sccache-wrapper/fixture-target-$(printf '%064d' 0)/harn-sccache-wrapper"
+mkdir -p "$checkout/$(dirname "$relative_old")"
+printf 'relative old artifact\n' > "$checkout/$relative_old"
+chmod +x "$checkout/$relative_old"
+write_config "$relative_current"
+cp "$checkout/.cargo/config.toml" "$tmp_root/relative-expected"
+write_config "$relative_old"
+run_refresh > "$tmp_root/relative.log" 2>&1 || {
+  cat "$tmp_root/relative.log" >&2
+  fail 'relative config refresh failed'
+}
+cmp -s "$checkout/.cargo/config.toml" "$tmp_root/relative-expected" || fail 'relative config changed'
+[[ -x "$checkout/$relative_current" ]] || fail 'relative wrapper not produced in checkout'
+[[ "$(cat "$checkout/$relative_old")" == 'relative old artifact' ]] || fail 'relative old artifact changed'
 if grep -q FORBIDDEN "$REFRESH_CALLS"; then fail 'full setup or native build was reached'; fi
-[[ "$(wc -l < "$REFRESH_CALLS")" -eq 5 ]] || fail 'refusals reached the compiler'
+[[ "$(wc -l < "$REFRESH_CALLS")" -eq 6 ]] || fail 'refusals reached the compiler'
 echo 'cargo wrapper refresh: source-only controls passed'
