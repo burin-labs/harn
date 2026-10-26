@@ -1280,6 +1280,9 @@ Multipart parts accept `headers` alongside `name`, `value`/`value_base64`/`path`
 `filename`, and `content_type`. `Content-Type` and `Content-Disposition` use
 those dedicated fields; duplicate or invalid part headers fail before sending.
 Named-input output filtering applies to both text and byte responses.
+HTTP mock call records retain the text preview in `body` and the exact request
+bytes in `body_bytes` when a body was provided. Private-input filtering applies
+before either view is recorded; the Rust mock-call snapshot exposes both views.
 
 `connector_http_request` carries byte bodies through successful and failed
 responses. `redact_error_body: true` also removes bytes from failures.

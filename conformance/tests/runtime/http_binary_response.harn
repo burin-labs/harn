@@ -1,6 +1,17 @@
 import { connector_http_json, connector_http_request } from "std/connectors/shared"
 
 fn main(harness: Harness) {
+  const recorder_url = "https://example.test/binary-recording"
+  harness.testing.http_mock("POST", recorder_url, {status: 200, body: "ok"})
+  for encoded in ["ff", "fe"] {
+    const response = harness.net.post(recorder_url, bytes_from_hex(encoded))
+    assert(response.status == 200)
+  }
+  const recorded = harness.testing.http_mock_calls()
+  assert(len(recorded) == 2 && recorded[0].body == recorded[1].body)
+  assert(recorded[0].body_bytes != nil && recorded[1].body_bytes != nil)
+  assert(bytes_to_hex(recorded[0].body_bytes) == "ff")
+  assert(bytes_to_hex(recorded[1].body_bytes) == "fe")
   for path in ["text", "bytes"] {
     harness.testing.http_mock(
       "GET",

@@ -100,7 +100,7 @@ pub(in crate::http) async fn vm_execute_http_request_with_mocks(
         .await
 }
 
-pub(super) fn consume_http_mock(
+pub(in crate::http) fn consume_http_mock(
     harness_mocks: Option<&crate::http::HttpMockRegistry>,
     method: &str,
     final_url: &str,
@@ -112,10 +112,8 @@ pub(super) fn consume_http_mock(
                 method,
                 final_url,
                 parts.recorded_headers.clone(),
-                parts
-                    .body
-                    .as_ref()
-                    .map(|body| String::from_utf8_lossy(body).into_owned()),
+                parts.body.clone(),
+                &parts.private_filter,
             )
         })
         .or_else(|| {
@@ -123,10 +121,8 @@ pub(super) fn consume_http_mock(
                 method,
                 final_url,
                 parts.recorded_headers.clone(),
-                parts
-                    .body
-                    .as_ref()
-                    .map(|body| String::from_utf8_lossy(body).into_owned()),
+                parts.body.clone(),
+                &parts.private_filter,
             )
         })
 }

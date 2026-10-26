@@ -2,6 +2,53 @@ use super::*;
 use crate::value::VmDictExt;
 use std::io::{BufRead, BufReader};
 
+#[tokio::test]
+async fn both_mock_registries_record_distinct_invalid_utf8_request_bytes() {
+    reset_http_state();
+    let url = "https://example.test/binary-recordings";
+    let registry = HttpMockRegistry::default();
+    registry.register("POST", url, vec![HttpMockResponse::new(200, "ok").into()]);
+    push_http_mock("POST", url, vec![HttpMockResponse::new(200, "ok")]);
+    for byte in [255, 254] {
+        let body = VmValue::Bytes(Arc::new(vec![byte]));
+        let mut options = crate::value::DictMap::new();
+        options.put("body", body.clone());
+        vm_execute_http_request("POST", url, &options)
+            .await
+            .unwrap();
+        super::super::execute_harness_http_verb(
+            &registry,
+            "POST",
+            true,
+            vec![VmValue::string(url), body],
+        )
+        .await
+        .unwrap();
+    }
+    for calls in [
+        super::super::mock::http_mock_calls_value(false),
+        registry.calls_value(false),
+    ] {
+        assert_eq!(calls.len(), 2);
+        assert_eq!(
+            calls[0].as_dict().unwrap()["body"].display(),
+            calls[1].as_dict().unwrap()["body"].display()
+        );
+        for (call, expected) in calls.iter().zip([255, 254]) {
+            assert_eq!(
+                call.as_dict().unwrap()["body_bytes"].as_bytes(),
+                Some([expected].as_slice())
+            );
+        }
+    }
+    let snapshots = super::super::http_mock_calls_snapshot();
+    assert_eq!(snapshots.len(), 2);
+    assert_eq!(snapshots[0].body, snapshots[1].body);
+    assert_eq!(snapshots[0].body_bytes.as_deref(), Some([255].as_slice()));
+    assert_eq!(snapshots[1].body_bytes.as_deref(), Some([254].as_slice()));
+    reset_http_state();
+}
+
 fn binary_server(
     requests: usize,
     content_length: bool,

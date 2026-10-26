@@ -84,7 +84,8 @@ fn harness_http_mocks_follow_the_harness_across_threads_without_leaking() {
             "POST",
             "https://api.example.test/jobs",
             crate::value::DictMap::new(),
-            Some("{}".to_string()),
+            Some(b"{}".to_vec()),
+            &crate::session_inputs::OutputFilter::capture(),
         )
     })
     .join()

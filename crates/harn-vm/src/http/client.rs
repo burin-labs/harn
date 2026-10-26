@@ -91,6 +91,7 @@ pub(super) struct HttpRequestParts {
     pub(super) headers: reqwest::header::HeaderMap,
     pub(super) recorded_headers: crate::value::DictMap,
     pub(super) body: Option<Vec<u8>>,
+    private_filter: crate::session_inputs::OutputFilter,
     multipart: Option<MultipartRequest>,
 }
 
@@ -658,6 +659,7 @@ pub(super) fn parse_http_request_parts(
         } else {
             options.get("body").map(value_to_bytes)
         },
+        private_filter: crate::session_inputs::OutputFilter::capture(),
         multipart,
     })
 }
@@ -829,9 +831,9 @@ pub(super) async fn vm_execute_http_request_with_client(
     if options.contains_key("secret_headers") && config.retry.max > 0 {
         return Err(vm_error("Named secret requests do not retry automatically. Repeat the request to check the current grant."));
     }
-    let private_filter = crate::session_inputs::OutputFilter::capture();
     apply_session_secret_headers(options, &final_url, &mut parts)?;
     super::sigv4::apply(options, &final_url, &mut parts).await?;
+    let private_filter = &parts.private_filter;
     if !final_url.starts_with("http://") && !final_url.starts_with("https://") {
         return Err(vm_error(format!(
             "http: URL must start with http:// or https://, got '{url}'"
@@ -864,7 +866,7 @@ pub(super) async fn vm_execute_http_request_with_client(
                 mock_response.headers,
                 response_mode.decode(mock_response.body.into_bytes())?,
                 &final_url,
-                &private_filter,
+                private_filter,
             ));
         }
         crate::egress::enforce_url_allowed("http_request", &final_url).await?;
@@ -908,7 +910,7 @@ pub(super) async fn vm_execute_http_request_with_client(
                     resp_headers,
                     body,
                     &response_url,
-                    &private_filter,
+                    private_filter,
                 ));
             }
             Err(e) => {

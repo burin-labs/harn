@@ -3588,6 +3588,8 @@ query_stringify([{key: "name", value: "ali ce"}])
 - Request bodies preserve raw `bytes` or UTF-8 strings. `response_type: "bytes"`
   adds `body_bytes` and leaves `body` empty; the default `"text"` mode decodes
   UTF-8. Both modes enforce `max_response_bytes` while buffering.
+- Mock call records expose the text preview as `body` and exact provided request
+  bytes as `body_bytes`; private-input filtering applies before recording.
 - `harness.net.download(url, dst_path, options?)` streams a response body to disk and
   returns `{bytes_written, status, headers, ok}`.
 - `http_stream_open/read/info/close` expose pull-based response streaming;

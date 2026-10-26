@@ -61,7 +61,28 @@ struct HttpMockCall {
     method: String,
     url: String,
     headers: crate::value::DictMap,
-    body: Option<String>,
+    body: Option<Vec<u8>>,
+}
+
+impl HttpMockCall {
+    fn new(
+        method: &str,
+        url: &str,
+        headers: crate::value::DictMap,
+        body: Option<Vec<u8>>,
+        private_filter: &crate::session_inputs::OutputFilter,
+    ) -> Self {
+        let body = body.map(|body| match private_filter.redact_bytes(&body) {
+            std::borrow::Cow::Borrowed(_) => body,
+            std::borrow::Cow::Owned(redacted) => redacted,
+        });
+        Self {
+            method: method.to_string(),
+            url: url.to_string(),
+            headers,
+            body,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,6 +91,7 @@ pub struct HttpMockCallSnapshot {
     pub url: String,
     pub headers: BTreeMap<String, String>,
     pub body: Option<String>,
+    pub body_bytes: Option<Vec<u8>>,
 }
 
 thread_local! {
@@ -138,7 +160,8 @@ impl HttpMockRegistry {
         method: &str,
         url: &str,
         headers: crate::value::DictMap,
-        body: Option<String>,
+        body: Option<Vec<u8>>,
+        private_filter: &crate::session_inputs::OutputFilter,
     ) -> Option<MockResponse> {
         let mut inner = self.inner.lock().expect("harness HTTP mocks poisoned");
         let response = inner.mocks.iter_mut().find_map(|mock| {
@@ -156,12 +179,13 @@ impl HttpMockRegistry {
                 None
             }
         })?;
-        inner.calls.push(HttpMockCall {
-            method: method.to_string(),
-            url: url.to_string(),
+        inner.calls.push(HttpMockCall::new(
+            method,
+            url,
             headers,
             body,
-        });
+            private_filter,
+        ));
         Some(response)
     }
 
@@ -229,7 +253,11 @@ pub fn http_mock_calls_snapshot() -> Vec<HttpMockCallSnapshot> {
                     .iter()
                     .map(|(key, value)| (key.to_string(), value.display()))
                     .collect(),
-                body: call.body.clone(),
+                body: call
+                    .body
+                    .as_ref()
+                    .map(|body| String::from_utf8_lossy(body).into_owned()),
+                body_bytes: call.body.clone(),
             })
             .collect()
     })
@@ -253,10 +281,16 @@ fn http_mock_calls_from(calls: &[HttpMockCall], redact_sensitive: bool) -> Vec<V
             dict.insert(
                 "body".to_string(),
                 match &call.body {
-                    Some(body) => VmValue::string(body.as_str()),
+                    Some(body) => VmValue::string(String::from_utf8_lossy(body).as_ref()),
                     None => VmValue::Nil,
                 },
             );
+            if let Some(body) = &call.body {
+                dict.put(
+                    "body_bytes",
+                    VmValue::Bytes(std::sync::Arc::new(body.clone())),
+                );
+            }
             VmValue::dict(dict)
         })
         .collect()
@@ -308,7 +342,8 @@ pub(super) fn consume_http_mock(
     method: &str,
     url: &str,
     headers: crate::value::DictMap,
-    body: Option<String>,
+    body: Option<Vec<u8>>,
+    private_filter: &crate::session_inputs::OutputFilter,
 ) -> Option<MockResponse> {
     let response = HTTP_MOCKS.with(|mocks| {
         let mut mocks = mocks.borrow_mut();
@@ -331,12 +366,13 @@ pub(super) fn consume_http_mock(
     })?;
 
     HTTP_MOCK_CALLS.with(|calls| {
-        calls.borrow_mut().push(HttpMockCall {
-            method: method.to_string(),
-            url: url.to_string(),
+        calls.borrow_mut().push(HttpMockCall::new(
+            method,
+            url,
             headers,
             body,
-        });
+            private_filter,
+        ));
     });
 
     Some(response)
