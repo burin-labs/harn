@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  attestations: read
 
 jobs:
   install:
@@ -45,3 +46,29 @@ jobs:
           harn --version
           harn-lsp --version
           harn-dap --version
+
+      - name: Install the published registry orchestration runtime
+        if: runner.os == 'Linux'
+        id: published-runtime
+        timeout-minutes: 10
+        uses: burin-labs/harn/.github/actions/setup-harn@0dfd494224bbeb87592fbcf8a67ea4de0b3434f3
+        with:
+          version: 0.10.180
+          cache-dir: ${{ runner.temp }}/published-runtime-cache
+          install-dir: ${{ runner.temp }}/published-runtime-bin
+
+      - name: Verify actual published runtime provenance
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUNTIME_RECEIPT: ${{ steps.published-runtime.outputs.receipt }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin refs/tags/v0.10.180:refs/tags/v0.10.180
+          printf '%s\n' "$RUNTIME_RECEIPT" > "$RUNNER_TEMP/published-runtime-receipt.json"
+          bash scripts/verify_published_harn_runtime.sh \
+            "$RUNNER_TEMP/published-runtime-receipt.json" "$RUNNER_TEMP/published-runtime-cache" \
+            36b0c000132756a91c7c11f1533d97d9db9ea2db 0.10.180

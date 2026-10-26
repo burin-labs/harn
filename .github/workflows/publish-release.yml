@@ -418,6 +418,31 @@ jobs:
           WAIT_FOR_FULL_SUITE: 'true'
         run: SOURCE_SHA=$(git rev-parse HEAD) bash "$RUNNER_TEMP/release-tools/require_full_suite.sh"
 
+      - name: Install the published orchestration runtime
+        id: published-runtime
+        timeout-minutes: 10
+        # Immutable compatible bootstrap policy, independent of the frozen tag's seed.
+        uses: burin-labs/harn/.github/actions/setup-harn@0dfd494224bbeb87592fbcf8a67ea4de0b3434f3
+        with:
+          version: ${{ needs.detect-drift.outputs.cargo_version }}
+          cache-dir: ${{ runner.temp }}/published-runtime-cache
+          install-dir: ${{ runner.temp }}/published-runtime-bin
+
+      - name: Authenticate the source-bound orchestration runtime
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUNTIME_RECEIPT: ${{ steps.published-runtime.outputs.receipt }}
+          RELEASE_VERSION: ${{ needs.detect-drift.outputs.cargo_version }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$RUNTIME_RECEIPT" > "$RUNNER_TEMP/published-runtime-receipt.json"
+          bash "$RUNNER_TEMP/release-tools/verify_published_harn_runtime.sh" \
+            "$RUNNER_TEMP/published-runtime-receipt.json" "$RUNNER_TEMP/published-runtime-cache" \
+            "$(git rev-parse HEAD)" "$RELEASE_VERSION" \
+            > "$RUNNER_TEMP/published-runtime-proof.json"
+
       - uses: ./.github/actions/rust-toolchain
         with:
           components: clippy, rustfmt
@@ -479,6 +504,9 @@ jobs:
 
       - name: Publish release
         env:
+          # This is an authenticated orchestration tool, never a fabricated
+          # source-build freshness receipt. Package/source gates still run.
+          HARN_BIN: ${{ steps.published-runtime.outputs.path }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           # Finalization is read-only on GitHub because the trusted tag already
           # exists and --skip-github-release leaves assets to the binary path.

@@ -304,6 +304,10 @@ jobs:
               - 'scripts/bootstrap-harn.*'
               - 'scripts/tests/bootstrap_harn_seed_test.sh'
               - 'scripts/tests/runtime_install_test.harn'
+              - 'scripts/verify_published_harn_runtime.sh'
+              - 'scripts/lib/published_release_correction.sh'
+              - 'scripts/lib/candidate_archive_contract.sh'
+              - 'scripts/lib/sha256.sh'
               - 'crates/harn-stdlib/src/stdlib/runtime/**'
               - '.harn-bootstrap-version'
             # Everything that can move release semantics out of agreement with
