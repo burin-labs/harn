@@ -1,4 +1,9 @@
-type MakeCase = {name: string, files: dict<string, string>, valid: bool}
+type MakeCase = {
+  name: string,
+  files: dict<string, string>,
+  valid: bool,
+  unreadable_directory?: string,
+}
 
 pipeline test(harness: Harness) {
   const root = harness.fs.mkdtemp_in_workspace("makefile-commands-")
@@ -22,6 +27,18 @@ pipeline test(harness: Harness) {
     },
     {name: "gnu-makefile", files: {GNUmakefile: recipe}, valid: true},
     {name: "lowercase-makefile", files: {makefile: recipe}, valid: true},
+    {
+      name: "unreadable-gnu-makefile",
+      files: {Makefile: recipe},
+      valid: false,
+      unreadable_directory: "GNUmakefile",
+    },
+    {
+      name: "unreadable-lowercase-makefile",
+      files: {Makefile: recipe},
+      valid: false,
+      unreadable_directory: "makefile",
+    },
     {
       name: "precedence",
       files: {GNUmakefile: "all:\n\t@echo OTHER\n", Makefile: recipe},
@@ -54,6 +71,19 @@ pipeline test(harness: Harness) {
     harness.fs.write_text(path_join(dir, "index.js"), "export const KNOWN_SCANNER_INPUT = true;\n")
     for (file, content) in item.files.iter() {
       harness.fs.write_text(path_join(dir, file), content)
+    }
+    if item.unreadable_directory != nil {
+      const unreadable = path_join(dir, item.unreadable_directory!)
+      harness.fs.mkdir(unreadable)
+      assert(harness.fs.stat(unreadable).is_dir)
+      assert(
+        is_err(
+          try {
+            harness.fs.read_text(unreadable)
+          },
+        ),
+        "the preferred Makefile must exist and fail a content read",
+      )
     }
     const scanned = harness.scanner.scan_project({root: dir, include_git_history: false})
     assert(len(scanned.files) > 0, "each scanner call must reach the known source file")

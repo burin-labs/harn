@@ -830,7 +830,7 @@ fn apply_config_tier(
         evidence.dockerfile_commands = parse_dockerfile_commands(&dockerfile);
     }
 
-    if let Some(makefile) = read_first_existing_text(dir, &harn_makefile::FILENAMES) {
+    if let Ok(Some((_, makefile))) = harn_makefile::read_default(dir) {
         for target in harn_makefile::parse(&makefile) {
             if matches!(target.name.as_str(), "build" | "test") {
                 push_unique(build_commands, target.command);

@@ -1,6 +1,9 @@
 //! Static Make declarations shared by native and source-facing projections.
 
 use std::collections::BTreeMap;
+use std::fs;
+use std::io;
+use std::path::Path;
 
 use serde::Serialize;
 
@@ -14,6 +17,18 @@ pub struct MakefileTarget {
     pub command: String,
     pub recipe_preview: Vec<String>,
     pub recipe_line_count: usize,
+}
+
+/// Read the first default Makefile, falling back only when a file is missing.
+pub fn read_default(root: &Path) -> io::Result<Option<(&'static str, String)>> {
+    for filename in FILENAMES {
+        match fs::read_to_string(root.join(filename)) {
+            Ok(source) => return Ok(Some((filename, source))),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(None)
 }
 
 /// Read literal target declarations without expanding variables or executing Make.

@@ -193,18 +193,13 @@ fn detect_php_test_command(root: &Path, commands: &mut BTreeMap<String, String>)
 }
 
 fn detect_makefile_targets(root: &Path, commands: &mut BTreeMap<String, String>) {
-    for filename in harn_makefile::FILENAMES {
-        let content = match fs::read_to_string(root.join(filename)) {
-            Ok(content) => content,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(_) => return,
-        };
-        for target in harn_makefile::parse(&content) {
-            if target.name.starts_with("test") {
-                commands.insert(target.command, format!("{filename} target"));
-            }
-        }
+    let Ok(Some((filename, content))) = harn_makefile::read_default(root) else {
         return;
+    };
+    for target in harn_makefile::parse(&content) {
+        if target.name.starts_with("test") {
+            commands.insert(target.command, format!("{filename} target"));
+        }
     }
 }
 
