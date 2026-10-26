@@ -188,4 +188,33 @@ else
   echo "sccache_rustc_wrapper_test: workspace shell wrapper is disabled on native Windows"
 fi
 
+for case_name in clean lint; do
+  clippy_fixture="$tmp_root/clippy-$case_name"
+  mkdir -p "$clippy_fixture/src"
+  printf '[package]\nname = "clippy-wrapper-%s"\nversion = "0.0.0"\nedition = "2021"\n' "$case_name" > "$clippy_fixture/Cargo.toml"
+  if [[ "$case_name" == clean ]]; then
+    printf 'pub fn ready() -> bool { true }\n' > "$clippy_fixture/src/lib.rs"
+  else
+    printf 'pub fn ready() -> bool { 1 == 1 }\n' > "$clippy_fixture/src/lib.rs"
+  fi
+  clippy_output="$tmp_root/clippy-$case_name-output.txt"
+  clippy_status=0
+  PATH="$probe_path" CARGO_TARGET_DIR="$tmp_root/clippy-$case_name-target" \
+    RUSTC_WRAPPER="$wrapper_binary" HARN_SCCACHE_WRAPPER_TRACE=1 HARN_ALLOW_RAW_CARGO=1 \
+    cargo clippy --offline --manifest-path "$clippy_fixture/Cargo.toml" --lib -- -D warnings \
+    > "$clippy_output" 2>&1 || clippy_status=$?
+  if [[ "$case_name" == clean && "$clippy_status" != 0 ]] \
+    || [[ "$case_name" == lint && "$clippy_status" == 0 ]]; then
+    echo "real Cargo Clippy returned the wrong verdict for $case_name: $clippy_status" >&2
+    cat "$clippy_output" >&2
+    exit 1
+  fi
+  if [[ "$case_name" == lint ]] && ! grep -Fq 'clippy::eq_op' "$clippy_output"; then
+    echo "Clippy failed before reaching the intentional source lint" >&2
+    cat "$clippy_output" >&2
+    exit 1
+  fi
+done
+echo "sccache_rustc_wrapper_test: real Cargo Clippy accepted clean source and rejected clippy::eq_op"
+
 echo "sccache_rustc_wrapper_test: ok"
