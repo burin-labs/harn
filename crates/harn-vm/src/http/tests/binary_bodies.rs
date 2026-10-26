@@ -44,8 +44,15 @@ async fn both_mock_registries_record_distinct_invalid_utf8_request_bytes() {
     let snapshots = super::super::http_mock_calls_snapshot();
     assert_eq!(snapshots.len(), 2);
     assert_eq!(snapshots[0].body, snapshots[1].body);
-    assert_eq!(snapshots[0].body_bytes.as_deref(), Some([255].as_slice()));
-    assert_eq!(snapshots[1].body_bytes.as_deref(), Some([254].as_slice()));
+    assert_eq!(
+        snapshots[0],
+        super::super::HttpMockCallSnapshot {
+            method: "POST".to_string(),
+            url: url.to_string(),
+            headers: std::collections::BTreeMap::new(),
+            body: Some("\u{fffd}".to_string()),
+        }
+    );
     reset_http_state();
 }
 

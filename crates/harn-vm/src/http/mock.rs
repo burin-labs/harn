@@ -91,7 +91,6 @@ pub struct HttpMockCallSnapshot {
     pub url: String,
     pub headers: BTreeMap<String, String>,
     pub body: Option<String>,
-    pub body_bytes: Option<Vec<u8>>,
 }
 
 thread_local! {
@@ -257,7 +256,6 @@ pub fn http_mock_calls_snapshot() -> Vec<HttpMockCallSnapshot> {
                     .body
                     .as_ref()
                     .map(|body| String::from_utf8_lossy(body).into_owned()),
-                body_bytes: call.body.clone(),
             })
             .collect()
     })

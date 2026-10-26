@@ -112,7 +112,15 @@ async fn explicit_binary_responses_apply_the_current_private_input_filter() {
         .unwrap();
     let snapshots = super::super::http_mock_calls_snapshot();
     assert_eq!(snapshots.len(), 2);
-    let recorded = snapshots[1].body_bytes.as_ref().unwrap();
+    assert!(!snapshots[1]
+        .body
+        .as_ref()
+        .unwrap()
+        .contains("private-byte-fixture"));
+    let calls = super::super::mock::http_mock_calls_value(false);
+    let recorded = calls[1].as_dict().unwrap()["body_bytes"]
+        .as_bytes()
+        .unwrap();
     assert!(recorded.starts_with(&[0, 255]) && recorded.ends_with(&[254]));
     assert!(!recorded
         .windows(b"private-byte-fixture".len())
@@ -122,7 +130,7 @@ async fn explicit_binary_responses_apply_the_current_private_input_filter() {
         assert_eq!(calls.len(), 2);
         assert_eq!(
             calls[1].as_dict().unwrap()["body_bytes"].as_bytes(),
-            Some(recorded.as_slice())
+            Some(recorded)
         );
         assert!(!calls[1].display().contains("private-byte-fixture"));
     }
