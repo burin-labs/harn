@@ -314,6 +314,21 @@ tuples aren't recovery entry points for these workflows.
 
 ## Check downstream convergence
 
+For standalone Harn publication, dispatch the existing promoter with
+`candidate_run_id`, `candidate_sha`, and `standalone_harn=true`. This explicit
+manual mode requires the same exact-source full-suite CI, native qualification,
+successful build/smoke/audit stages, retained archives, signatures and
+attestations. It independently authenticates the original producing attempt
+and manifest ID/digest before verification and again before publication.
+Missing, failed, expired or mismatched Harn proof refuses publication.
+
+Standalone publication does not dispatch a consumer repair or consumer repins,
+and cannot combine with either consumer recovery selector. It creates the
+normal stable tag and latest GitHub release, which start crate publication;
+the existing container and development-bump jobs also follow publication.
+It does not claim consumer compatibility or adoption. Record and complete those
+separate obligations through the owning consumer workflows.
+
 Promotion's `repin` job dispatches the registered consumers' own update
 workflows. For the fleet-owned bump adapters that is one dispatch: the
 harn-bump-fleet `promote-released-orchestration.yml` workflow moves the
