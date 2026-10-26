@@ -432,7 +432,7 @@ fi
 # sccache post-job flake documented in ci.yml, and a real two-gate failure has
 # been misread as that flake. The tail is where a reader looks, so the tail must
 # not lie by omission.
-tail_out="$(tail -8 "$tmp_root/audit-fail.out")"
+tail_out="$(sed -n '/^=== FAILED: audit gates ===/,$p' "$tmp_root/audit-fail.out")"
 if ! grep -Fq "=== FAILED: audit gates ===" <<<"$tail_out"; then
   echo "the tail does not say the job failed; it ends on 'ok: conformance' and an exit code" >&2
   cat "$tmp_root/audit-fail.out" >&2
@@ -445,7 +445,7 @@ for gate in fmt-harn check-source-file-lengths; do
     exit 1
   fi
 done
-if ! grep -Fq "does NOT mean this job passed" <<<"$tail_out"; then
+if ! grep -Fq "Other passing gates do not change this failure" <<<"$tail_out"; then
   echo "the tail does not warn that a passing conformance line is not a passing job" >&2
   exit 1
 fi
@@ -502,6 +502,14 @@ for expected in 'ERR_MODULE_NOT_FOUND' '@harn-fixture/uninstalled-dependency' 'l
     exit 1
   fi
 done
+if ! grep -Fq 'Cause unknown:' "$tmp_root/audit-fail.out"; then
+  echo "failure summary invented a diagnosis for an unrecognized failure" >&2
+  exit 1
+fi
+if ! grep -Fq 'fake conformance runner failed' "$tmp_root/conformance-fail.out"; then
+  echo "conformance failure lost its complete output" >&2
+  exit 1
+fi
 
 # If the ordinary fanout fails before the conformance-side barrier is opened,
 # the runner must cancel and reap the Harn child. This is the exact shape that
