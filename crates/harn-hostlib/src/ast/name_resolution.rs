@@ -441,6 +441,12 @@ fn rust_attribute_is_inert(
     path: &str,
     arguments: Option<Node<'_>>,
 ) -> bool {
+    // An imported procedural attribute can replace even `derive` or `test`.
+    // Prove the binding before trusting either its spelling or arguments.
+    let (prefix, name) = path.split_once("::").unwrap_or(("", path));
+    if !rust_macro_path_is_unshadowed(site, source, prefix, name) {
+        return false;
+    }
     match path {
         "derive" => {
             // Custom derives may append arbitrary items, including a local
@@ -513,7 +519,6 @@ fn rust_attribute_is_inert(
             RUST_INERT_ATTRIBUTES.contains(&path)
                 || path.split_once("::").is_some_and(|(prefix, _)| {
                     matches!(prefix, "clippy" | "rustfmt" | "diagnostic")
-                        && rust_macro_path_is_unshadowed(site, source, prefix, "")
                 })
         }
     }
