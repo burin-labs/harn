@@ -116,19 +116,22 @@ const __AGENT_LOOP_AUDITED_NATURAL_REASONS: list<string> = [
 pub fn __agent_loop_terminal_verification_from_assessment(
   receipt: CompletionDirectiveReceipt?,
 ) -> dict? {
-  if receipt?.action != "accept" && receipt?.action != "stop_verified" {
+  guard receipt != nil else {
     return nil
   }
-  const verification = receipt?.verification
-  const requirements = receipt?.requirements
+  if receipt.action != "accept" && receipt.action != "stop_verified" {
+    return nil
+  }
+  const verification = receipt.verification
+  const requirements = receipt.requirements
   if verification?.oracle_expected != true
     || verification?.observed != "passed"
     || trim(to_string(verification?.command ?? "")) == ""
-    || trim(to_string(receipt?.evidence_id ?? "")) == ""
+    || trim(receipt.evidence_id) == ""
     || requirements == nil
     || requirements.pending_count != 0
-    || receipt?.pending_tool_batch_effect_count != 0
-    || receipt?.gap_count != 0 {
+    || receipt.pending_tool_batch_effect_count != 0
+    || receipt.gap_count != 0 {
     return nil
   }
   return {evidence_id: receipt.evidence_id, command: verification.command, observed: "passed"}
