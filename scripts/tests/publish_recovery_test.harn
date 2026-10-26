@@ -8,6 +8,193 @@ const PACKAGES: list<PublishPlanPackage> = [
 ]
 
 @test
+pipeline test_publish_recovery_refuses_registry_read_error_before_writes(
+  harness: Harness,
+  task: unknown,
+) {
+  const calls = harness.runtime.atomic(0)
+  const receipt = publish_recover(
+    PACKAGES,
+    {
+      probe: { _name, _version -> return {status: "error", detail: "crates.io returned HTTP 403"} },
+      publish: { _package ->
+        harness.runtime.atomic_add(calls, 1)
+        return {success: true}
+      },
+      wait: { _delay ->
+        harness.runtime.atomic_add(calls, 1)
+        return nil
+      },
+    },
+    {backoff_ms: []},
+  )
+  assert(!receipt.ok)
+  assert_eq(harness.runtime.atomic_get(calls), 0)
+  assert_eq(receipt.published, [])
+  const failure = receipt.failed[0]
+  assert(failure != nil, "read refusal must produce a failure")
+  assert_eq(failure.name, "alpha")
+  assert_eq(failure.category, "permanent")
+  assert(failure.detail.contains("HTTP 403"))
+  assert_eq(receipt.remaining, ["beta", "gamma"])
+}
+
+@test
+pipeline test_publish_recovery_requires_visibility_for_final_leaf_and_already_uploaded_text(
+  harness: Harness,
+) {
+  for uploaded in [true, false] {
+    const calls = harness.runtime.atomic(0)
+    const receipt = publish_recover(
+      [{deps: [], name: "alpha", version: "1.2.3"}],
+      {
+        probe: { _name, _version -> return {status: "missing"} },
+        publish: { _package ->
+          harness.runtime.atomic_add(calls, 1)
+          return {success: uploaded, output: "crate version 1.2.3 is already uploaded"}
+        },
+        wait: { _delay ->
+          throw "empty visibility budget must not wait"
+        },
+      },
+      {backoff_ms: []},
+    )
+    assert(!receipt.ok)
+    assert_eq(harness.runtime.atomic_get(calls), 1)
+    assert_eq(
+      receipt.published,
+      if uploaded {
+        ["alpha"]
+      } else {
+        []
+      },
+    )
+    assert_eq(receipt.already_present, [])
+    assert_eq(receipt.failed[0]?.category, "propagation")
+    assert_eq(receipt.failed[0]?.name, "alpha")
+    assert_eq(receipt.remaining, [])
+  }
+}
+
+@test
+pipeline test_publish_recovery_keeps_upload_checkpoint_and_resumes_without_duplicate_writes(
+  harness: Harness,
+) {
+  const writes = harness.runtime.atomic(0)
+  const refused = harness.runtime.atomic(1)
+  const adapters: PublishAdapters = {
+    probe: { name, _version ->
+      const written = harness.runtime.atomic_get(writes)
+      if name == "alpha" && written >= 1 && harness.runtime.atomic_get(refused) == 1 {
+        return {status: "error", detail: "crates.io returned HTTP 403"}
+      }
+      const visible = (name == "alpha" && written >= 1) || (name == "beta" && written >= 2)
+        || (name == "gamma" && written >= 3)
+      return {
+        status: if visible {
+          "visible"
+        } else {
+          "missing"
+        },
+      }
+    },
+    publish: { _package ->
+      harness.runtime.atomic_add(writes, 1)
+      return {success: true}
+    },
+    wait: { _delay ->
+      throw "a refused read must not be retried"
+    },
+  }
+  const stopped = publish_recover(PACKAGES, adapters)
+  assert(!stopped.ok)
+  assert_eq(harness.runtime.atomic_get(writes), 1)
+  assert_eq(stopped.published, ["alpha"])
+  assert_eq(stopped.failed[0]?.name, "alpha")
+  assert_eq(stopped.failed[0]?.category, "permanent")
+  assert_eq(stopped.remaining, ["beta", "gamma"])
+  // A later independent invocation sees the accepted upload through normal
+  // registry state. Only the fake's refusal changes; source/version do not.
+  harness.runtime.atomic_set(refused, 0)
+  const resumed = publish_recover(PACKAGES, adapters)
+  assert(resumed.ok)
+  assert_eq(resumed.already_present, ["alpha"])
+  assert_eq(resumed.published, ["beta", "gamma"])
+  assert_eq(resumed.failed, [])
+  assert_eq(harness.runtime.atomic_get(writes), 3)
+}
+
+@test
+pipeline test_publish_recovery_refuses_reconciliation_error_after_uncertain_write(
+  harness: Harness,
+) {
+  const writes = harness.runtime.atomic(0)
+  const receipt = publish_recover(
+    PACKAGES,
+    {
+      probe: { name, _version ->
+        if name == "alpha" {
+          return {status: "visible"}
+        }
+        if harness.runtime.atomic_get(writes) == 1 {
+          return {status: "error", detail: "crates.io returned HTTP 403"}
+        }
+        return {status: "missing"}
+      },
+      publish: { _package ->
+        harness.runtime.atomic_add(writes, 1)
+        return {success: false, output: "Recv failure: Connection reset by peer"}
+      },
+      wait: { _delay ->
+        throw "a refused reconciliation must not retry"
+      },
+    },
+  )
+  assert(!receipt.ok)
+  assert_eq(harness.runtime.atomic_get(writes), 1)
+  assert_eq(receipt.already_present, ["alpha"])
+  assert_eq(receipt.failed[0]?.name, "beta")
+  assert_eq(receipt.failed[0]?.category, "permanent")
+  assert_eq(receipt.remaining, ["gamma"])
+}
+
+@test
+pipeline test_publish_recovery_stops_visibility_wait_at_first_refusal(harness: Harness) {
+  const writes = harness.runtime.atomic(0)
+  const after_upload_probes = harness.runtime.atomic(0)
+  const waited = harness.runtime.atomic(0)
+  const receipt = publish_recover(
+    PACKAGES,
+    {
+      probe: { _name, _version ->
+        if harness.runtime.atomic_get(writes) == 1
+          && harness.runtime.atomic_add(after_upload_probes, 1) >= 1 {
+          return {status: "error", detail: "crates.io returned HTTP 403"}
+        }
+        return {status: "missing"}
+      },
+      publish: { _package ->
+        harness.runtime.atomic_add(writes, 1)
+        return {success: true}
+      },
+      wait: { delay ->
+        harness.runtime.atomic_add(waited, delay)
+        return nil
+      },
+    },
+    {backoff_ms: [5, 10, 20]},
+  )
+  assert(!receipt.ok)
+  assert_eq(harness.runtime.atomic_get(writes), 1)
+  assert_eq(harness.runtime.atomic_get(after_upload_probes), 2)
+  assert_eq(harness.runtime.atomic_get(waited), 5)
+  assert_eq(receipt.published, ["alpha"])
+  assert_eq(receipt.waiting, ["alpha"])
+  assert_eq(receipt.failed[0]?.category, "permanent")
+  assert_eq(receipt.remaining, ["beta", "gamma"])
+}
+
+@test
 pipeline test_publish_recovery_resumes_prior_progress_and_waits_for_visibility(
   harness: Harness,
   task: unknown,
@@ -19,6 +206,9 @@ pipeline test_publish_recovery_resumes_prior_progress_and_waits_for_visibility(
   const adapters: PublishAdapters = {
     probe: { name, _version ->
       if name == "alpha" {
+        return {status: "visible"}
+      }
+      if name == "gamma" && harness.runtime.atomic_get(publish_calls) == 2 {
         return {status: "visible"}
       }
       if name == "beta" {
@@ -93,10 +283,10 @@ pipeline test_publish_recovery_times_out_with_failed_and_remaining_dag(
   assert_eq(receipt.waiting, ["alpha"])
   const failure = receipt.failed[0]
   assert(failure != nil, "expected propagation failure")
-  assert_eq(failure.name, "beta")
+  assert_eq(failure.name, "alpha")
   assert_eq(failure.category, "propagation")
   assert(failure.detail.contains("index is still propagating"))
-  assert_eq(receipt.remaining, ["gamma"])
+  assert_eq(receipt.remaining, ["beta", "gamma"])
   assert_eq(harness.runtime.atomic_get(publish_calls), 1)
   assert_eq(harness.runtime.atomic_get(waits), 15)
 }
@@ -128,9 +318,19 @@ pipeline test_publish_recovery_accepts_already_uploaded_cargo_result(
   harness: Harness,
   task: unknown,
 ) {
+  const attempted = harness.runtime.atomic(0)
   const adapters: PublishAdapters = {
-    probe: { _name, _version -> return {status: "missing"} },
+    probe: { _name, _version ->
+      return {
+        status: if harness.runtime.atomic_get(attempted) == 1 {
+          "visible"
+        } else {
+          "missing"
+        },
+      }
+    },
     publish: { package ->
+      harness.runtime.atomic_set(attempted, 1)
       return {success: false, output: "crate version " + package.version + " is already uploaded"}
     },
     wait: { _delay_ms -> return nil },
@@ -149,7 +349,15 @@ pipeline test_publish_recovery_retries_rate_limits_with_injected_wait(
   const attempts = harness.runtime.atomic(0)
   const waited_ms = harness.runtime.atomic(0)
   const adapters: PublishAdapters = {
-    probe: { _name, _version -> return {status: "missing"} },
+    probe: { _name, _version ->
+      return {
+        status: if harness.runtime.atomic_get(attempts) == 2 {
+          "visible"
+        } else {
+          "missing"
+        },
+      }
+    },
     publish: { _package ->
       const attempt = harness.runtime.atomic_add(attempts, 1) + 1
       if attempt == 1 {
@@ -181,7 +389,15 @@ pipeline test_publish_recovery_retries_transient_crates_io_transport_failure(
   const attempts = harness.runtime.atomic(0)
   const waited_ms = harness.runtime.atomic(0)
   const adapters: PublishAdapters = {
-    probe: { _name, _version -> return {status: "missing"} },
+    probe: { _name, _version ->
+      return {
+        status: if harness.runtime.atomic_get(attempts) == 2 {
+          "visible"
+        } else {
+          "missing"
+        },
+      }
+    },
     publish: { _package ->
       const attempt = harness.runtime.atomic_add(attempts, 1) + 1
       if attempt == 1 {
@@ -289,6 +505,9 @@ pipeline test_publish_recovery_resumes_dag_after_registry_503(harness: Harness) 
   const adapters: PublishAdapters = {
     probe: { name, _version ->
       if name == "alpha" || (name == "beta" && harness.runtime.atomic_get(beta_published) == 1) {
+        return {status: "visible"}
+      }
+      if name == "gamma" && harness.runtime.atomic_get(attempts) == 3 {
         return {status: "visible"}
       }
       return {status: "missing"}

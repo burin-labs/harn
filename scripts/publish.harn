@@ -46,7 +46,7 @@ pub type PublishRecoveryOptions = {
   transient_network_delay_ms?: int,
 }
 
-type RegistryWait = {ok: bool, waited: bool, detail: string}
+type RegistryWait = {ok: bool, waited: bool, refused: bool, detail: string}
 
 fn package_by_name(packages: list<PublishPlanPackage>, name: string) -> PublishPlanPackage {
   for package in packages {
@@ -104,18 +104,25 @@ fn wait_until_visible(
 ) -> RegistryWait {
   let last = probe(name, version)
   if last.status == "visible" {
-    return {ok: true, waited: false, detail: "visible"}
+    return {ok: true, waited: false, refused: false, detail: "visible"}
+  }
+  if last.status == "error" {
+    return {ok: false, waited: false, refused: true, detail: last.detail ?? "registry read failed"}
   }
   for delay in backoff_ms {
     wait(delay)
     last = probe(name, version)
     if last.status == "visible" {
-      return {ok: true, waited: true, detail: "visible"}
+      return {ok: true, waited: true, refused: false, detail: "visible"}
+    }
+    if last.status == "error" {
+      return {ok: false, waited: true, refused: true, detail: last.detail ?? "registry read failed"}
     }
   }
   return {
     ok: false,
     waited: len(backoff_ms) > 0,
+    refused: false,
     detail: last.detail ?? "registry entry did not become selectable",
   }
 }
@@ -200,41 +207,76 @@ pub fn publish_recover(
       already_present = already_present + [name]
       continue
     }
-    for dep in package.deps {
-      if !published.contains(dep) {
-        continue
-      }
-      const visibility = wait_until_visible(dep, version, adapters.probe, adapters.wait, backoff_ms)
-      if visibility.waited {
-        waiting = add_unique(waiting, dep)
-      }
-      if !visibility.ok {
-        return failed_receipt(
-          version,
-          order,
-          published,
-          already_present,
-          waiting,
-          {
-            name: name,
-            category: "propagation",
-            detail: "dependency " + dep + ": " + visibility.detail,
-          },
-        )
-      }
+    if existing.status == "error" {
+      return failed_receipt(
+        version,
+        order,
+        published,
+        already_present,
+        waiting,
+        {name: name, category: "permanent", detail: existing.detail ?? "registry read failed"},
+      )
     }
+    // The dependency order only advances after each exact version is visible,
+    // so every prior dependency already has confirmation in this invocation.
     let attempt_number = 1
     let completed = false
     while attempt_number <= max_publish_attempts {
       const attempt = adapters.publish(package)
       if attempt.success {
         published = published + [name]
-        completed = true
-        break
       }
       const output = attempt.output ?? "cargo publish failed without output"
       const category = publish_failure_category(output)
-      if category == "already_present" || adapters.probe(name, version).status == "visible" {
+      if attempt.success || category == "already_present" {
+        // Cargo can exit after upload without confirming index visibility.
+        // Confirm even the final leaf before another write or terminal success.
+        const visibility = wait_until_visible(
+          name,
+          version,
+          adapters.probe,
+          adapters.wait,
+          backoff_ms,
+        )
+        if visibility.waited {
+          waiting = add_unique(waiting, name)
+        }
+        if !visibility.ok {
+          return failed_receipt(
+            version,
+            order,
+            published,
+            already_present,
+            waiting,
+            {
+              name: name,
+              category: if visibility.refused {
+                "permanent"
+              } else {
+                "propagation"
+              },
+              detail: visibility.detail,
+            },
+          )
+        }
+        if !attempt.success {
+          already_present = already_present + [name]
+        }
+        completed = true
+        break
+      }
+      const reconciled = adapters.probe(name, version)
+      if reconciled.status == "error" {
+        return failed_receipt(
+          version,
+          order,
+          published,
+          already_present,
+          waiting,
+          {name: name, category: "permanent", detail: reconciled.detail ?? "registry read failed"},
+        )
+      }
+      if reconciled.status == "visible" {
         already_present = already_present + [name]
         completed = true
         break
@@ -253,36 +295,6 @@ pub fn publish_recover(
         adapters.wait(rate_limit_delay_ms)
       } else if category == "transient_network" {
         adapters.wait(transient_network_delay_ms)
-      } else {
-        for dep in package.deps {
-          if !published.contains(dep) {
-            continue
-          }
-          const visibility = wait_until_visible(
-            dep,
-            version,
-            adapters.probe,
-            adapters.wait,
-            backoff_ms,
-          )
-          if visibility.waited {
-            waiting = add_unique(waiting, dep)
-          }
-          if !visibility.ok {
-            return failed_receipt(
-              version,
-              order,
-              published,
-              already_present,
-              waiting,
-              {
-                name: name,
-                category: "propagation",
-                detail: "dependency " + dep + ": " + visibility.detail,
-              },
-            )
-          }
-        }
       }
       attempt_number = attempt_number + 1
     }

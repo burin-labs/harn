@@ -100,6 +100,7 @@ jobs:
             tar -x -C "$source_root"
           (cd "$source_root" && cargo metadata --format-version 1 --no-deps --locked --offline) > "$RUNNER_TEMP/publish-plan-metadata.json"
           "$RUNTIME_PATH" test scripts/tests/publish_plan_test.harn
+          "$RUNTIME_PATH" test scripts/tests/publish_recovery_test.harn
           baseline=$(mktemp -d "$RUNNER_TEMP/publish-plan-baseline.XXXXXX")
           git show v0.10.180:scripts/publish_plan.harn > "$baseline/publish_plan.harn"
           cp scripts/verify_publish_workspace_plan.harn "$baseline/"

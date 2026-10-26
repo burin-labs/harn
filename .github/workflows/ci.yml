@@ -308,6 +308,7 @@ jobs:
               - 'scripts/verify_release_runtime_environment.harn'
               - 'scripts/publish*.harn'
               - 'scripts/tests/publish_plan_test.harn'
+              - 'scripts/tests/publish_recovery_test.harn'
               - 'scripts/verify_publish_workspace_plan.harn'
               - 'scripts/lib/published_release_correction.sh'
               - 'scripts/lib/candidate_archive_contract.sh'
