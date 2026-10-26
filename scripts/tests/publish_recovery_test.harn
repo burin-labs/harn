@@ -428,32 +428,44 @@ pipeline test_publish_recovery_retries_transient_crates_io_transport_failure(
 pipeline test_publish_recovery_does_not_reconcile_away_a_permanent_publish_refusal(
   harness: Harness,
 ) {
-  const writes = harness.runtime.atomic(0)
-  const receipt = publish_recover(
-    [{deps: [], name: "alpha", version: "1.2.3"}],
-    {
-      probe: { _name, _version ->
-        return {
-          status: if harness.runtime.atomic_get(writes) == 1 {
-            "visible"
-          } else {
-            "missing"
-          },
-        }
+  for output in [
+    "HTTP/2 403\nrequest id: 429",
+    "HTTP/2 401\nRecv failure: connection reset by peer",
+    "HTTP/2 403\ncrate version 1.2.3 is already uploaded",
+    "HTTP/2 403\nToo Many Requests",
+    "authentication token rejected\nRecv failure: connection reset by peer",
+    "owner authorization failed\n429 Too Many Requests",
+  ] {
+    const writes = harness.runtime.atomic(0)
+    const probes = harness.runtime.atomic(0)
+    const receipt = publish_recover(
+      [{deps: [], name: "alpha", version: "1.2.3"}],
+      {
+        probe: { _name, _version ->
+          harness.runtime.atomic_add(probes, 1)
+          return {
+            status: if harness.runtime.atomic_get(writes) == 1 {
+              "visible"
+            } else {
+              "missing"
+            },
+          }
+        },
+        publish: { _package ->
+          harness.runtime.atomic_add(writes, 1)
+          return {success: false, output: output}
+        },
+        wait: { _delay ->
+          throw "a permanent publish refusal must not wait or retry"
+        },
       },
-      publish: { _package ->
-        harness.runtime.atomic_add(writes, 1)
-        return {success: false, output: "HTTP/2 403"}
-      },
-      wait: { _delay ->
-        throw "a permanent publish refusal must not wait or retry"
-      },
-    },
-  )
-  assert(!receipt.ok)
-  assert_eq(harness.runtime.atomic_get(writes), 1)
-  assert_eq(receipt.already_present, [])
-  assert_eq(receipt.failed[0]?.category, "permanent")
+    )
+    assert(!receipt.ok)
+    assert_eq(harness.runtime.atomic_get(writes), 1)
+    assert_eq(harness.runtime.atomic_get(probes), 1)
+    assert_eq(receipt.already_present, [])
+    assert_eq(receipt.failed[0]?.category, "permanent")
+  }
 }
 
 @test
@@ -503,6 +515,13 @@ pipeline test_publish_failure_categories_are_closed(harness: Harness, task: unkn
 
 @test
 pipeline test_publish_http_failures_are_narrowly_classified() {
+  assert_eq(publish_failure_category("HTTP/2 429"), "rate_limited")
+  assert_eq(publish_failure_category("HTTP/2 503\nrequest id: 403"), "transient_network")
+  assert_eq(publish_failure_category("HTTP/2 200 Connection established\nHTTP/2 403"), "permanent")
+  assert_eq(
+    publish_failure_category("error: failed to get a 200 OK response, got 403"),
+    "permanent",
+  )
   for status in [500, 502, 503, 504] {
     for output in [
       "failed to get a 200 OK response, got ${status}",
@@ -524,6 +543,8 @@ pipeline test_publish_http_failures_are_narrowly_classified() {
     "validation failed at line 503",
     "package version 1.503.0 rejected",
     "unknown failure",
+    "request id: 429",
+    "package version 1.429.0 rejected",
   ] {
     assert_eq(publish_failure_category(output), "permanent")
   }

@@ -124,6 +124,25 @@ jobs:
               && failure.message.contains("actual    1"),
               "baseline did not reproduce the unexpected publish callback";
           ' -- "$refusal_baseline/result.json"
+          git fetch --no-tags origin 6ea6aeb00549a195e159a0cdb72f8124523a43a8
+          git show 6ea6aeb00549a195e159a0cdb72f8124523a43a8:scripts/publish.harn > "$refusal_baseline/publish.harn"
+          git show 6ea6aeb00549a195e159a0cdb72f8124523a43a8:scripts/publish_plan.harn > "$refusal_baseline/publish_plan.harn"
+          if "$RUNTIME_PATH" test "$refusal_baseline/tests/publish_recovery_test.harn" \
+            --filter test_publish_recovery_does_not_reconcile_away_a_permanent_publish_refusal \
+            --json-out "$refusal_baseline/mixed-result.json"; then
+            echo "error: original publisher did not reproduce the mixed-diagnostic refusal failure" >&2
+            exit 1
+          fi
+          "$RUNTIME_PATH" run --standalone --no-sandbox -e '
+            const report = json_parse(harness.fs.read_text(argv[0]));
+            require report.summary.total == 1 && report.summary.failed == 1
+              && report.summary.skipped == 0 && report.summary.timed_out == 0,
+              "baseline did not execute exactly one failing mixed-diagnostic control";
+            const failure = report.cases[0];
+            require failure.name == "test_publish_recovery_does_not_reconcile_away_a_permanent_publish_refusal"
+              && failure.outcome == "failed" && failure.message.contains("assert(!receipt.ok)"),
+              "baseline did not reproduce the false publication-success assertion";
+          ' -- "$refusal_baseline/mixed-result.json"
           baseline=$(mktemp -d "$RUNNER_TEMP/publish-plan-baseline.XXXXXX")
           git show v0.10.180:scripts/publish_plan.harn > "$baseline/publish_plan.harn"
           cp scripts/verify_publish_workspace_plan.harn "$baseline/"
