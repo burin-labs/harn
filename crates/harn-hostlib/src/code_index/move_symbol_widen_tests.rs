@@ -624,6 +624,8 @@ fn rust_widening_respects_receiver_lexical_scope() {
         "macro_rules! install { ($d:tt) => { macro_rules! assert { ($d name:ident, $d value:expr) => { let $d name = $d value; }; } }; }\ninstall!($);\npub fn run(out: &Buffer, other: &crate::other::Buffer) {\n    assert!(out, other);\n    out.flush();\n}\n",
         "pub fn run() {\n    #[derive(binding_macro::InstallBuffer)]\n    struct Marker;\n    let _ = Buffer { flush: 1 };\n}\n",
         "pub fn run() {\n    #[cfg_attr(all(), binding_macro::install_buffer)]\n    struct Marker;\n    let _ = Buffer { flush: 1 };\n}\n",
+        "pub fn run() {\n    #[cfg_attr(all(), derive(binding_macro::InstallBuffer))]\n    struct Marker;\n    let _ = Buffer { flush: 1 };\n}\n",
+        "pub fn run() {\n    #[cfg_attr(all(), cfg_attr(all(), binding_macro::install_buffer))]\n    struct Marker;\n    let _ = Buffer { flush: 1 };\n}\n",
     ] {
         let source =
             format!("pub struct Buffer;\n\nimpl Buffer {{\n    fn flush(&self) {{}}\n}}\n\n{body}");
@@ -652,6 +654,8 @@ fn rust_widening_keeps_proven_receivers_in_their_own_scope() {
         "pub fn run(out: &Buffer) {\n    { let out = 3; let _ = out; }\n    out.flush();\n}\n",
         "pub fn run(out: &Buffer) {\n    assert!(true);\n    out.flush();\n}\n",
         "pub fn run(out: &Buffer) {\n    use std::io::Write;\n    std::assert!(true);\n    out.flush();\n}\n",
+        "pub fn run(out: &Buffer) {\n    #[derive(Debug, Clone)]\n    struct Marker;\n    out.flush();\n}\n",
+        "pub fn run(out: &Buffer) {\n    #[cfg_attr(all(), derive(Debug, Clone))]\n    struct Marker;\n    out.flush();\n}\n",
     ] {
         let source =
             format!("pub struct Buffer;\n\nimpl Buffer {{\n    fn flush(&self) {{}}\n}}\n\n{body}");

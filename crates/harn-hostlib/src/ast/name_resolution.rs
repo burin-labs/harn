@@ -370,20 +370,16 @@ const RUST_ITEMLESS_STD_MACROS: &[&str] = &[
     "writeln",
 ];
 
-/// Built-in and tool attributes, which configure an item without expanding
-/// into new ones. `derive` adds trait impls, which bind no new name in scope.
+/// Built-in attributes that cannot introduce an unseen binding. Expansion
+/// wrappers (`derive` and `cfg_attr`) inspect their arguments separately.
 /// `path` is absent because it changes which file a module loads.
 const RUST_INERT_ATTRIBUTES: &[&str] = &[
     "allow",
     "automatically_derived",
     "cfg",
-    "cfg_attr",
-    "clippy",
     "cold",
     "deny",
     "deprecated",
-    "derive",
-    "diagnostic",
     "doc",
     "expect",
     "export_name",
@@ -396,7 +392,6 @@ const RUST_INERT_ATTRIBUTES: &[&str] = &[
     "no_mangle",
     "non_exhaustive",
     "repr",
-    "rustfmt",
     "should_panic",
     "test",
     "track_caller",
@@ -423,15 +418,119 @@ fn rust_expansion_may_bind(node: Node<'_>, source: &str) -> bool {
             in_statement_position && !rust_itemless_std_macro(node, source)
         }
         "attribute_item" | "inner_attribute_item" => {
-            let path = node
-                .named_child(0)
-                .and_then(|attribute| attribute.named_child(0))
-                .map_or("", |path| node_text(path, source));
-            let root = path.split("::").next().unwrap_or(path);
-            !RUST_INERT_ATTRIBUTES.contains(&root)
+            let Some(attribute) = node.named_child(0) else {
+                return true;
+            };
+            let Some(path) = attribute.named_child(0) else {
+                return true;
+            };
+            !rust_attribute_is_inert(
+                node,
+                source,
+                node_text(path, source),
+                attribute.child_by_field_name("arguments"),
+            )
         }
         _ => false,
     }
+}
+
+fn rust_attribute_is_inert(
+    site: Node<'_>,
+    source: &str,
+    path: &str,
+    arguments: Option<Node<'_>>,
+) -> bool {
+    match path {
+        "derive" => {
+            // Custom derives may append arbitrary items, including a local
+            // type that shadows the receiver owner. Only unshadowed builtins
+            // establish the narrower trait-implementation-only guarantee.
+            const BUILTIN_DERIVES: &[&str] = &[
+                "Clone",
+                "Copy",
+                "Debug",
+                "Default",
+                "Eq",
+                "Hash",
+                "Ord",
+                "PartialEq",
+                "PartialOrd",
+            ];
+            let Some(parts) = rust_attribute_arguments(arguments) else {
+                return false;
+            };
+            let mut expect_name = true;
+            for part in parts {
+                if expect_name && part.kind() == "identifier" {
+                    let name = node_text(part, source);
+                    if !BUILTIN_DERIVES.contains(&name)
+                        || !rust_macro_path_is_unshadowed(site, source, "", name)
+                    {
+                        return false;
+                    }
+                    expect_name = false;
+                } else if !expect_name && part.kind() == "," {
+                    expect_name = true;
+                } else {
+                    return false;
+                }
+            }
+            true
+        }
+        "cfg_attr" => {
+            let Some(parts) = rust_attribute_arguments(arguments) else {
+                return false;
+            };
+            let mut groups = parts.split(|part| part.kind() == ",");
+            // Do not guess a project's active configuration. Every possible
+            // generated attribute must preserve the same binding guarantee.
+            if groups.next().is_none_or(|predicate| predicate.is_empty()) {
+                return false;
+            }
+            let mut seen = false;
+            for group in groups {
+                if group.is_empty() {
+                    continue;
+                }
+                seen = true;
+                let path = node_text(group[0], source);
+                let arguments = match group.get(1) {
+                    Some(node) if node.kind() == "token_tree" && group.len() == 2 => Some(*node),
+                    _ if matches!(path, "derive" | "cfg_attr") => return false,
+                    _ => None,
+                };
+                if group[0].kind() != "identifier"
+                    || group.get(1).is_some_and(|node| node.kind() == "::")
+                    || !rust_attribute_is_inert(site, source, path, arguments)
+                {
+                    return false;
+                }
+            }
+            seen
+        }
+        _ => {
+            RUST_INERT_ATTRIBUTES.contains(&path)
+                || path.split_once("::").is_some_and(|(prefix, _)| {
+                    matches!(prefix, "clippy" | "rustfmt" | "diagnostic")
+                        && rust_macro_path_is_unshadowed(site, source, prefix, "")
+                })
+        }
+    }
+}
+
+fn rust_attribute_arguments(arguments: Option<Node<'_>>) -> Option<Vec<Node<'_>>> {
+    let arguments = arguments?;
+    let count = arguments.child_count();
+    if count < 2 || arguments.child(0)?.kind() != "(" || arguments.child(count - 1)?.kind() != ")" {
+        return None;
+    }
+    Some(
+        (1..count - 1)
+            .filter_map(|index| arguments.child(index))
+            .filter(|node| !matches!(node.kind(), "line_comment" | "block_comment"))
+            .collect(),
+    )
 }
 
 /// Whether a Rust `macro_invocation` names an itemless `std` macro, bare or
@@ -631,8 +730,12 @@ mod tests {
             "mod std {} fn f() { std::assert!(); Reading() }\n",
             "#[macro_use] extern crate other; fn f() { assert!(); Reading() }\n",
             "#[derive(binding_macro::Install)] struct Marker; fn f() { Reading() }\n",
+            "use binding_macro::Debug; #[derive(Debug)] struct Marker; fn f() { Reading() }\n",
+            "#[derive(Clone::Debug)] struct Marker; fn f() { Reading() }\n",
+            "#[allow::install] fn f() { Reading() }\n",
             "#[cfg_attr(all(), binding_macro::install)] fn f() { Reading() }\n",
             "#[cfg_attr(all(), derive(binding_macro::Install))] struct Marker; fn f() { Reading() }\n",
+            "#[cfg_attr(all(), cfg_attr(all(), binding_macro::install))] fn f() { Reading() }\n",
         ] {
             let resolution = assess_source(source, Language::Rust);
             assert!(!resolution.is_complete());
@@ -643,6 +746,7 @@ mod tests {
     #[test]
     fn itemless_rust_macros_and_inert_attributes_keep_resolution_complete() {
         let source = "#![allow(dead_code)]\nuse std::{io::{self}, fmt as fmt_alias};\nuse std::assert_eq as check;\n#[derive(Debug, Clone)]\npub struct Reading;\n\
+            #[cfg_attr(all(), allow(dead_code), cfg_attr(all(), derive(Debug, Clone)))]\nstruct Marker;\n\
             #[cfg(test)]\nmod tests {\n    #[test]\n    fn t() { assert_eq!(1, 1); println!(\"{}\", 2); }\n}\n\
             fn f() -> String { let v = vec![1]; std::format!(\"{v:?}\") }\n\
             fn g() -> usize { my_crate::count!(a, b) + 1 }\n";
