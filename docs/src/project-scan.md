@@ -56,7 +56,7 @@ Normalization rules:
 
 ## Makefile declarations
 
-The native project scanner selects the first default file in
+`harness.scanner.scan_project(...)` selects the first default file in
 `makefile_filenames()`: `GNUmakefile`, `makefile`, then `Makefile`. It reads
 literal target declarations without evaluating Make or expanding variables.
 Multi-target rules contribute each declared target; assignments and `define`
@@ -72,8 +72,8 @@ pattern rules are not resolved by this static parser.
 
 ```harn
 const targets = makefile_parse("unit test:\n\t@echo checked\n")
-assert_eq(targets[1].command, "make test")
-assert_eq(targets[1].recipe_preview, ["echo checked"])
+assert_eq(targets[1]?.command, "make test")
+assert_eq(targets[1]?.recipe_preview, ["echo checked"])
 ```
 
 ## Context profiles
