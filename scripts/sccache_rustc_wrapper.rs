@@ -3,7 +3,7 @@
 //! Cargo supplies `CARGO_BIN_EXE_*` only to compilation units that may embed a
 //! package binary path. sccache 0.17's daemon-side compiler path can lose those
 //! synthetic variables, so those rare units must stay in Cargo's process tree.
-//! Every other compilation keeps using sccache, with the worktree-specific
+//! Ordinary rustc compilation keeps using sccache, with the worktree-specific
 //! target directory removed from its cache identity.
 
 use std::env;
@@ -172,9 +172,13 @@ fn main() {
         process::exit(2);
     };
     let rustc_arguments: Vec<OsString> = arguments.collect();
-    let clippy_driver = Path::new(&rustc)
-        .file_stem()
-        .is_some_and(|name| name == "clippy-driver");
+    let clippy_driver = std::iter::once(&rustc)
+        .chain(rustc_arguments.first())
+        .any(|compiler| {
+            Path::new(compiler)
+                .file_stem()
+                .is_some_and(|name| name == "clippy-driver")
+        });
     // Clippy owns Cargo's compiler nesting and must receive rustc unchanged.
     let route = if clippy_driver {
         Route::Direct

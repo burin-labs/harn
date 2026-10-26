@@ -304,6 +304,11 @@ jobs:
               - 'scripts/bootstrap-harn.*'
               - 'scripts/tests/bootstrap_harn_seed_test.sh'
               - 'scripts/tests/runtime_install_test.harn'
+              - 'scripts/verify_published_harn_runtime.sh'
+              - 'scripts/verify_release_runtime_environment.harn'
+              - 'scripts/lib/published_release_correction.sh'
+              - 'scripts/lib/candidate_archive_contract.sh'
+              - 'scripts/lib/sha256.sh'
               - 'crates/harn-stdlib/src/stdlib/runtime/**'
               - '.harn-bootstrap-version'
             # Everything that can move release semantics out of agreement with
@@ -2837,6 +2842,10 @@ jobs:
 
   setup-harn-action:
     name: Setup Harn action (${{ matrix.os }})
+    permissions:
+      contents: read
+      pull-requests: read
+      attestations: read
     needs: [changes]
     if: needs.changes.outputs.setup_action == 'true'
     strategy:

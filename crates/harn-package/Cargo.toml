@@ -10,14 +10,14 @@ description = "Authoritative Harn package resolution, materialization and connec
 include = ["src/**/*", "Cargo.toml", "build.rs"]
 
 [dependencies]
-harn-flock = { path = "../harn-flock", version = "=0.10.181-dev" }
-harn-fmt = { path = "../harn-fmt", version = "=0.10.181-dev" }
-harn-kernel = { path = "../harn-kernel", version = "=0.10.181-dev" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.181-dev" }
-harn-modules = { path = "../harn-modules", version = "=0.10.181-dev" }
-harn-parser = { path = "../harn-parser", version = "=0.10.181-dev" }
-harn-vm = { path = "../harn-vm", version = "=0.10.181-dev", default-features = false }
-harn-rules = { path = "../harn-rules", version = "=0.10.181-dev", optional = true }
+harn-flock = { path = "../harn-flock", version = "=0.10.181" }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.181" }
+harn-kernel = { path = "../harn-kernel", version = "=0.10.181" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.181" }
+harn-modules = { path = "../harn-modules", version = "=0.10.181" }
+harn-parser = { path = "../harn-parser", version = "=0.10.181" }
+harn-vm = { path = "../harn-vm", version = "=0.10.181", default-features = false }
+harn-rules = { path = "../harn-rules", version = "=0.10.181", optional = true }
 base64 = "0.23"
 chrono-tz = "0.10.4"
 croner = "4.0.0"
@@ -43,8 +43,8 @@ uuid = { version = "1", features = ["v4", "v7"] }
 which = "8"
 
 [dev-dependencies]
-harn-modules = { path = "../harn-modules", version = "=0.10.181-dev", features = ["bundled-stdlib"] }
-harn-runtime = { path = "../harn-runtime", version = "=0.10.181-dev" }
+harn-modules = { path = "../harn-modules", version = "=0.10.181", features = ["bundled-stdlib"] }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.181" }
 futures = "0.3"
 
 [features]
@@ -53,7 +53,7 @@ hostlib = ["dep:harn-rules"]
 test-support = []
 
 [build-dependencies]
-harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.181-dev" }
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.181" }
 
 [lints]
 workspace = true

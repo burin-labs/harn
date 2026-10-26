@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  attestations: read
 
 jobs:
   install:
@@ -20,13 +21,14 @@ jobs:
       - name: Verify the stage-zero seed boundary
         run: sh scripts/tests/bootstrap_harn_seed_test.sh
       - name: Run deterministic setup-action tests
-        # The pinned bootstrap release predates positional multi-target tests.
-        run: sh scripts/bootstrap-harn.sh --seed-command test --test-path scripts/tests/runtime_install_test.harn
+        run: sh scripts/bootstrap-harn.sh --seed-command test scripts/tests/runtime_install_test.harn
       - name: Install a published Harn release
         id: harn
         uses: ./.github/actions/setup-harn
         with:
-          version: 0.10.28
+          # Keep the XZ target independent of the seed pin: reverting to a
+          # gzip-only seed must fail this real installation.
+          version: 0.10.180
           max-attempts: "3"
           retry-delay-seconds: "1"
       - name: Verify installed release and receipt outputs
@@ -38,10 +40,48 @@ jobs:
           HARN_RECEIPT: ${{ steps.harn.outputs.receipt }}
         run: |
           set -euo pipefail
-          test "$HARN_VERSION" = "0.10.28"
+          test "$HARN_VERSION" = "0.10.180"
           [[ "$HARN_CHECKSUM" =~ ^[0-9a-f]{64}$ ]]
           test -x "$HARN_PATH" || [[ "$RUNNER_OS" = "Windows" && -f "$HARN_PATH" ]]
           "$HARN_PATH" run -e 'const r = json_parse(harness.env.get("HARN_RECEIPT")); require r.schema_version == "harn-bootstrap-v1" && r.binary_path == harness.env.get("HARN_PATH"), "invalid setup receipt"'
           harn --version
           harn-lsp --version
           harn-dap --version
+
+      - name: Install the published registry orchestration runtime
+        if: runner.os == 'Linux'
+        id: published-runtime
+        timeout-minutes: 10
+        uses: burin-labs/harn/.github/actions/setup-harn@0dfd494224bbeb87592fbcf8a67ea4de0b3434f3
+        with:
+          version: 0.10.180
+          cache-dir: ${{ runner.temp }}/published-runtime-cache
+          install-dir: ${{ runner.temp }}/published-runtime-bin
+
+      - name: Verify actual published runtime provenance
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUNTIME_RECEIPT: ${{ steps.published-runtime.outputs.receipt }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin refs/tags/v0.10.180:refs/tags/v0.10.180
+          printf '%s\n' "$RUNTIME_RECEIPT" > "$RUNNER_TEMP/published-runtime-receipt.json"
+          bash scripts/verify_published_harn_runtime.sh \
+            "$RUNNER_TEMP/published-runtime-receipt.json" "$RUNNER_TEMP/published-runtime-cache" \
+            36b0c000132756a91c7c11f1533d97d9db9ea2db 0.10.180
+
+      - name: Exercise the publisher environment through the pinned bootstrap
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        shell: bash
+        env:
+          RUNTIME_PATH: ${{ steps.published-runtime.outputs.path }}
+          RUNTIME_VERSION: ${{ steps.published-runtime.outputs.version }}
+        run: |
+          # Match bootstrap-harn.sh's existing installer execution profile.
+          "$RUNTIME_PATH" run --standalone --no-sandbox \
+            scripts/verify_release_runtime_environment.harn -- "$RUNTIME_VERSION"

@@ -9,6 +9,181 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.181
+
+### Breaking
+
+- **`harn_vm::bytecode_cache::EmbeddedStdlibArtifact` stores its artifact
+  compressed.** The `bytes` field is replaced by `zstd`, one zstd frame, and
+  `len`, the artifact's decoded size. Only `harn-stdlib-artifacts`' build script
+  writes these rows, and hosts that call `harn_stdlib_artifacts::register()`
+  are unaffected.
+
+  Migration: a hand-built table compresses each artifact and records its size:
+
+  ```rust
+  // before
+  EmbeddedStdlibArtifact { file_name, bytes }
+  // after
+  EmbeddedStdlibArtifact { file_name, len: bytes.len(), zstd: compressed }
+  ```
+- **The embedded stdlib catalog is built on first read.** `harn_stdlib::CATALOG`
+  is a `LazyLock<StdlibCatalog>`, and `harn_stdlib_catalog::install` takes a
+  `&'static LazyCatalog`. The `harn_stdlib::STDLIB_SOURCES`,
+  `STDLIB_PROMPT_ASSETS` and `STDLIB_CLI_SCRIPTS` constants are removed in
+  favor of `CATALOG`'s fields. Hosts that call `harn_stdlib::install()` are
+  unaffected. A startup check that only needs to know a catalog is installed
+  calls `harn_stdlib_catalog::ensure_installed()`, which does not build it.
+
+  Migration: read the lists through `CATALOG`, and wrap a hand-built catalog
+  in `LazyCatalog` before installing it:
+
+  ```rust
+  // before
+  for entry in harn_stdlib::STDLIB_SOURCES {}
+  harn_stdlib_catalog::install(&MY_CATALOG)?; // static MY_CATALOG: StdlibCatalog
+  // after
+  for entry in harn_stdlib::CATALOG.sources {}
+  harn_stdlib_catalog::install(&MY_CATALOG)?; // static MY_CATALOG: LazyCatalog
+  ```
+
+### Added
+
+- Add an opt-in advisory edit-state oscillation detector to `std/agent/stall`.
+  Successful edits that revisit a reported content hash emit `edit_oscillation`
+  evidence without escalating to an automatic abort.
+- `harness.code_index.language_server({path})` reports whether a rename of a
+  file would reach a language server, which server, and its executable, from the
+  lookup `rename_symbol` uses, without starting a process. A caller deciding
+  whether to offer a rename of a name with competing declarations no longer needs
+  its own copy of the search order.
+- Verification checks can reuse an accepted successful result only while the command, workspace, source, dependency and
+  environment identities remain unchanged. Receipts distinguish execution from reuse, and unknown inputs force execution.
+
+### Changed
+
+- The release-PR auto-approver now accepts the first release after a retired, never-published version.
+  It folds a parked `## Unreleased` heading and accepts stable files that move from the latest published release.
+- The macOS workspace job empties a runner's persistent Cargo target before building when it passes 80 GiB
+  or its volume drops under 60 GiB free, so a full disk no longer fails release qualification.
+- Preparing many entries in one process now parses and hashes each imported file
+  once per file version instead of once per entry that imports it. Entry cache keys
+  fold in each imported file's digest rather than its text, so existing entry cache
+  records are recompiled once.
+- The release binary stores its tree-sitter grammars' parse tables compressed and unpacks each
+  grammar's tables on its first use, which takes 5 ms or less per grammar. The x86_64 Linux binary
+  is about 37 MiB smaller.
+- Precompiling a large multi-module tree uses about a third less CPU.
+  Each file now classifies its imported names in one pass instead of three; artifacts are byte-identical.
+- Model catalog generation now reads selected facts from a pinned Models.dev
+  snapshot. `harn provider catalog update-source` validates explicit upstream
+  routes before updating the cache; generation and runtime catalog loading use
+  committed data without fetching upstream. Harn retains provider behavior,
+  selection policy, and pricing rules
+  the importer cannot preserve.
+- `harn precompile <dir>` now compiles every source in one child process on a
+  worker pool instead of starting a process per source. The child shares process
+  startup, stdlib preparation, and each shared import's parse across the whole
+  tree. Output, artifacts, the summary, and the exit status are unchanged.
+- Precompiling a source builds its module graph once instead of up to three times.
+  On a large multi-module tree this cuts CPU by about a fifth; artifacts are byte-identical.
+- The Windows release binary is built with fat LTO and one codegen unit, like x86_64 Linux. ARM64 Linux and macOS
+  stay on thin LTO, because their fat-LTO builds ran out of memory or past the 135-minute build timeout.
+- The release binary stores its precompiled standard library compressed and decodes each module on
+  its first import. The x86_64 Linux binary is about 7.4 MiB smaller.
+- The release binary stores its standard library sources as one compressed archive and decodes it
+  on the first catalog read. The x86_64 Linux binary is about 4.6 MiB smaller.
+
+### Fixed
+
+- The macOS process sandbox now removes temporary-directory aliases whose workspace no longer exists.
+  Once per process it deletes only dangling `harn-<16 hex>` symlinks in the user temp directory, so they stop accumulating.
+- The shell guard now reads git aliases from the effective git configuration, so `git s` with a
+  repository-configured `s=stash pop` is refused like `git stash pop`.
+- The shell guard now analyzes the bodies of `$(...)`, backticks and process substitution as command lines,
+  so `echo $(git stash pop)` is refused like the bare command. A body that never closes is refused.
+- Background code-index release threads use the shared runtime stack contract.
+- The code index now starts warm in a new process. `harness.code_index.rebuild` on an
+  empty index restores that root's valid on-disk snapshot and reconciles it against
+  disk, reporting `mode: "restored"`, instead of walking and parsing the whole tree
+  again. A snapshot for another root, another format version, or one that fails to
+  decode still falls back to a full build. `harn serve acp` starts a background warm
+  for each session's project root when the session opens, without blocking the first
+  prompt; set `HARN_DISABLE_CODE_INDEX_WARM=1` to turn it off. `code_index.status`
+  reports the `root` the live index belongs to, or `nil` when none is loaded.
+- A compact tool's served summary no longer ends at `e.g.`, `i.e.`, `etc.`, or `vs.`, or at a period inside
+  parentheses or backticks, so a description such as "(e.g. languages, build files)" is not cut mid-clause.
+- Agent post-turn callbacks and completion evidence now carry the same typed completion-marker decision used by the loop,
+  including whether the parsed done block or raw response supplied it. A marker declaration remains separate from evidence
+  that the task succeeded.
+- Pull requests that require downstream consumer verification now observe the original rehearsal across credential windows
+  through its declared queue and execution budget. An attempt that reaches its full deadline without a verdict blocks the
+  pull request.
+- `rename_symbol` now finds a language server that `PATH` does not name. After
+  the override variable, the project's bin directory, and `PATH`, it searches
+  `$CARGO_HOME/bin` and the selected rustup toolchain, Go's `GOBIN` and
+  `GOPATH/bin`, npm's global prefixes, pnpm, Volta, Bun, `~/.local/bin`, and the
+  Homebrew directories, so an app opened from Finder or a non-login shell reaches
+  `rust-analyzer` in `~/.cargo/bin`. A rustup proxy whose toolchain lacks the
+  component, and a `tsc` older than TypeScript 7, are skipped with a reason
+  instead of failing at startup. The server starts with its own directory first
+  on `PATH` and with `CARGO_HOME` and `RUSTUP_HOME` set. An override naming a
+  missing file still forces the syntax-tree fallback.
+- Frozen and offline package installs tolerate interrupted writes of Harn's own
+  cache metadata. Incomplete metadata files remain outside package content hashes
+  and installed generations; other unexpected files still fail integrity checks.
+- Paired eval reports now calculate arm means, uncertainty, and regression decisions from the same matched cases as their
+  delta. Pairing ignores unnamed cases and uses one decided row per case, preventing duplicate rows from inflating evidence.
+- Confined commands preserve `PNPM_HOME`, so `pnpm run` can use an already
+  installed pinned pnpm version offline. Toolchain read and write permissions
+  and workspace-local build caches keep their existing policy.
+- Keep new release-command captures inside the existing publisher workspace so
+  manifest verification can read them without expanding filesystem authority.
+- Candidate AOT payloads and license notices now survive for the same 30 days as candidate archives,
+  allowing failed build jobs to resume after the first day without losing successful stage handoffs.
+- Release opening recovers automatically when an edited changelog fragment conflicts with a frozen release.
+  It waits for the correction to pass main CI, prepares a new immutable attempt, and resumes interrupted
+  replacement cleanup without rebuilding or changing an existing delivery grant. Source conflicts still
+  require inspection.
+- A release can rehearse an explicit consumer repair pull request against its
+  existing verified candidate archives, then promote only after that new
+  observer-owned measurement passes.
+- Release recovery verifies the exact candidate manifest artifact and its archive digest, and resumes matching publication
+  state after an interrupted upload.
+- Retain authenticated release-manifest output through the existing scoped
+  filesystem APIs, preserving archive identity and integrity checks.
+- Release candidates now require successful native qualification before starting
+  consumer rehearsals, so a failed native run stops the release before promotion.
+- Release recovery can inspect an existing verified draft through the normal release
+  App without uploading, tagging, publishing, repinning or advancing development.
+- Release recovery can measure an explicit consumer repair against the original
+  signed candidate archives without repeating successful build stages.
+  Exact-source full-suite CI and native qualification are required before the
+  new rehearsal starts, and publication reauthenticates the artifact-bound
+  consumer pass.
+- Release candidates now require full-suite main CI at their exact source before
+  starting artifact builds or consumer rehearsals, so a failed source stops early.
+- Allow explicit standalone release publication after Harn's own source and
+  archive checks pass, while keeping downstream compatibility and adoption
+  separately measured.
+- The parallel rustc front end now reaches only Harn's own crates, through a
+  Cargo workspace rustc wrapper. Setting `RUSTC_BOOTSTRAP=1` for the whole
+  build had switched `anyhow`, `thiserror`, and `proc-macro2` to nightly-only
+  code in every dependency. Dependencies now compile exactly as on stable,
+  published release builds run without unstable flags, and Windows builds stay
+  serial because they cannot run the wrapper.
+- Local builds compose the workspace compiler wrapper before sccache, preserving
+  parallel compilation and compiler-object caching with both wrappers enabled.
+  Run `make setup-rust` to refresh an existing checkout's installed wrapper.
+- Generated command drivers in the system temporary directory now keep run records in a per-user store.
+  Privileged invocations no longer block ordinary users from running commands such as `harn precompile`.
+  The shared-temp user namespace is private and rejects unsafe existing directories before record writes.
+- Command-risk scans expose source command groups with assignment-only stages and outer shell environment prefixes,
+  allowing guards to distinguish executable context from literal arguments.
+- Compiler-cache maintenance reclaims the oldest eligible targets when the filesystem has less than 10% free space,
+  while preserving recent targets and live builds. Unmet or unmeasured storage bounds report a partial result without
+  advancing the last-success receipt.
+
 ## v0.10.180
 
 ### Breaking
