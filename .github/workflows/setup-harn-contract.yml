@@ -73,3 +73,15 @@ jobs:
           bash scripts/verify_published_harn_runtime.sh \
             "$RUNNER_TEMP/published-runtime-receipt.json" "$RUNNER_TEMP/published-runtime-cache" \
             36b0c000132756a91c7c11f1533d97d9db9ea2db 0.10.180
+
+      - name: Exercise the publisher environment through the pinned bootstrap
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        shell: bash
+        env:
+          RUNTIME_PATH: ${{ steps.published-runtime.outputs.path }}
+          RUNTIME_VERSION: ${{ steps.published-runtime.outputs.version }}
+        run: |
+          # Match bootstrap-harn.sh's existing installer execution profile.
+          "$RUNTIME_PATH" run --standalone --no-sandbox \
+            scripts/verify_release_runtime_environment.harn -- "$RUNTIME_VERSION"

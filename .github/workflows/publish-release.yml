@@ -100,9 +100,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  # Published artifacts come from the stable compiler with no unstable flags;
-  # the parallel front end (scripts/lib/rustc_frontend.sh) is for iteration.
-  HARN_RUSTC_FRONTEND_THREADS: "1"
 
 jobs:
   detect-drift:
@@ -444,6 +441,10 @@ jobs:
             > "$RUNNER_TEMP/published-runtime-proof.json"
 
       - uses: ./.github/actions/rust-toolchain
+        # Only toolchain setup consumes this compiler setting. Released Harn
+        # runtimes must not inherit build controls added after their source cut.
+        env:
+          HARN_RUSTC_FRONTEND_THREADS: "1"
         with:
           components: clippy, rustfmt
 
