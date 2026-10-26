@@ -19,8 +19,8 @@ build on are [`std/cli/argparse`](./cli-argparse-reference.md),
 fast help text, completions, and subcommand dispatch. After parsing,
 ported subcommands hand control to an embedded `.harn` script via the
 **dispatch wedge** in [`crates/harn-cli/src/dispatch.rs`][dispatch].
-The wedge looks the script up in the `STDLIB_CLI_SCRIPTS` table in
-[`crates/harn-stdlib/src/lib.rs`][stdlib-table], writes the embedded
+The wedge looks the script up in the `cli_scripts` list in
+[`crates/harn-stdlib/src/catalog_entries.rs`][stdlib-table], writes the embedded
 source to a temp file, and runs it through the same `harn run` code
 path the user-facing CLI uses. Bytecode cache, harness install, skill
 loader, store/metadata/checkpoint builtins all come along for free.
@@ -146,13 +146,10 @@ fn main(harness: Harness) {
 
 ### 5. Register the script
 
-`crates/harn-stdlib/src/lib.rs`, in `STDLIB_CLI_SCRIPTS`:
+`crates/harn-stdlib/src/catalog_entries.rs`, in `cli_scripts`:
 
 ```rust
-StdlibCliScript {
-    name: "greet",
-    source: include_str!("stdlib/cli/greet.harn"),
-},
+"greet" => "stdlib/cli/greet.harn",
 ```
 
 The `name` is the lookup key the dispatch wedge passes in step 3;
@@ -484,7 +481,7 @@ per-call allocation off the hot path.
 
 [harn#2293]: https://github.com/burin-labs/harn/issues/2293
 [dispatch]: https://github.com/burin-labs/harn/blob/main/crates/harn-cli/src/dispatch.rs
-[stdlib-table]: https://github.com/burin-labs/harn/blob/main/crates/harn-stdlib/src/lib.rs
+[stdlib-table]: https://github.com/burin-labs/harn/blob/main/crates/harn-stdlib/src/catalog_entries.rs
 [w1-pr]: https://github.com/burin-labs/harn/pull/2328
 [c1-ratchet]: https://github.com/burin-labs/harn/issues/2314
 [g4]: https://github.com/burin-labs/harn/issues/2297

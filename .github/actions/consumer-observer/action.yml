@@ -12,6 +12,14 @@ inputs:
   token:
     description: Read authority for the consumer and public parent run
     required: true
+  producer-run-id:
+    description: Optional immutable archive-producing run
+    required: false
+    default: ''
+  producer-attempt:
+    description: Exact archive-producing attempt
+    required: false
+    default: ''
 outputs:
   owned:
     description: Explicit ownership after successful admission
@@ -32,4 +40,6 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
         OBSERVER_CONTEXT: ${{ inputs.observer }}
         SOURCE_REVISION: ${{ inputs.source-revision }}
+        RELEASE_PRODUCER_RUN_ID: ${{ inputs.producer-run-id }}
+        RELEASE_PRODUCER_RUN_ATTEMPT: ${{ inputs.producer-attempt }}
       run: node "$GITHUB_ACTION_PATH/../../../scripts/ci/consumer-observer-admit.mjs"

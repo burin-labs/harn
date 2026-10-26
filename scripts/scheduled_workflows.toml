@@ -60,6 +60,17 @@ health_failures = 3
 health_job = "Consumer canary"
 
 [[workflow]]
+path = ".github/workflows/consumer-observer-cleanup.yml"
+name = "Consumer observer cleanup"
+claim = "Preserved consumer measurements retain an authenticated deadline cleanup owner"
+crons = ["8,23,38,53 * * * *"]
+cadence_reason = "The completion listener checks once; the quarter-hour sweep revisits retained work after its original deadline. Five live-state censuses avoid scanning ordinary completed CI runs, and no build runs."
+job_ids = ["reconcile", "retire-candidate"]
+health_failures = 4
+health_job = "Reconcile owned consumer children"
+health_events = ["schedule", "workflow_dispatch"]
+
+[[workflow]]
 path = ".github/workflows/e2e.yml"
 name = "CLI end-to-end behavior"
 claim = "Slow subprocess CLI behavior remains functional outside the pull-request fast path"

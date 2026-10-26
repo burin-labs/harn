@@ -2515,31 +2515,56 @@ fn consumer_declaration_safe(action: dict?) -> bool {
       }
 }
 
-fn consumer_failure_safe(step: dict) -> bool {
+type ConsumerObserverDescriptor = {
+  name: string,
+  condition: string,
+  artifact: string,
+  receipt: string,
+}
+
+fn consumer_observer_descriptor_safe(step: dict) -> bool {
   const dollar = "$"
-  const receipt =
-    "steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt || steps.observe-4.outputs.failure-receipt || steps.interrupted.outputs.failure_receipt"
+  const descriptors = [
+    {
+      name: "Preserve the measured observer failure",
+      condition:
+        "always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '' || steps.observe-4.outputs.failure-receipt != '' || steps.interrupted.outputs.failure_receipt != '')",
+      artifact:
+        "consumer-observer-failure-${dollar}{{ github.run_attempt }}-${dollar}{{ needs.decide.outputs.source_revision }}-${dollar}{{ steps.canary.outputs.run_id || 'undispatched' }}",
+      receipt:
+        "steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt || steps.observe-4.outputs.failure-receipt || steps.interrupted.outputs.failure_receipt",
+    },
+    {
+      name: "Preserve the consumer observation checkpoint",
+      condition:
+        "always() && (steps.observe-1.outputs.checkpoint != '' || steps.observe-2.outputs.checkpoint != '' || steps.observe-3.outputs.checkpoint != '' || steps.observe-4.outputs.checkpoint != '')",
+      artifact:
+        "consumer-observer-checkpoint-${dollar}{{ github.run_attempt }}-${dollar}{{ needs.decide.outputs.source_revision }}",
+      receipt:
+        "steps.observe-1.outputs.checkpoint || steps.observe-2.outputs.checkpoint || steps.observe-3.outputs.checkpoint || steps.observe-4.outputs.checkpoint",
+    },
+  ]
   return action_is_pinned(step?.uses ?? "", "actions/upload-artifact")
-    && step
-      == {
-        name: "Preserve the measured observer failure",
-        if:
-          "always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '' || steps.observe-4.outputs.failure-receipt != '' || steps.interrupted.outputs.failure_receipt != '')",
-        uses: step.uses,
-        with: {
-          name:
-            "consumer-observer-failure-${dollar}{{ github.run_attempt }}-${dollar}{{ needs.decide.outputs.source_revision }}-${dollar}{{ steps.canary.outputs.run_id || 'undispatched' }}",
-          path: "${dollar}{{ ${receipt} }}",
-          "if-no-files-found": "error",
-          "retention-days": 7,
-        },
-      }
+    && descriptors.any(
+      fn(descriptor: ConsumerObserverDescriptor) -> bool { return step
+        == {
+          name: descriptor.name,
+          if: descriptor.condition,
+          uses: step.uses,
+          with: {
+            name: descriptor.artifact,
+            path: "${dollar}{{ ${descriptor.receipt} }}",
+            "if-no-files-found": "error",
+            "retention-days": 7,
+          },
+        } },
+    )
 }
 
 fn consumer_action_allowed(step: dict) -> bool {
   const uses = step_uses(step)
   return uses == "" || CONSUMER_CANARY_ACTIONS.any({ prefix -> uses.starts_with(prefix) })
-    || consumer_failure_safe(step)
+    || consumer_observer_descriptor_safe(step)
 }
 
 /** Fresh dispatch must retain its declared custody and bounded supersession. */

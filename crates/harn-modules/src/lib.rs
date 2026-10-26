@@ -32,7 +32,7 @@ pub use source_reads::{
 mod references;
 mod standalone;
 mod stdlib;
-pub use stdlib::{stdlib_catalog, try_stdlib_catalog};
+pub use stdlib::{ensure_stdlib_installed, stdlib_catalog, try_stdlib_catalog};
 mod symbol_reachability;
 mod type_dependencies;
 mod typecheck;

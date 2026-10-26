@@ -50,3 +50,14 @@ including standalone `env`. Redirect destinations are excluded
 from argv; quoted program text remains an argument. Literal nested shell
 payloads are expanded into their executed stages. Consumers must check the
 same `shell_io_complete` flag before treating the I/O facts as complete.
+
+For POSIX shell-mode requests, `shell_source_groups` preserves source chain
+groups and pipeline stages before
+nested-shell expansion. Each stage has decoded `source_argv` and unwrapped
+`argv`. Assignment-only stages remain present with empty `argv`; outer
+assignments on `sh -c` remain attached to that shell invocation. This lets
+policy distinguish an executable's environment from literal argument text.
+These are source facts, not expanded execution or environment values. Consumers
+must check `execution_semantics` and handle dynamic or unsupported syntax
+conservatively rather than interpreting an empty projection as a safe command.
+The field is null for argv mode and other or unknown shell dialects.

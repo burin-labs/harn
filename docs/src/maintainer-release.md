@@ -246,6 +246,20 @@ publication.
 Read the failing job before choosing a retry. Keep the commit, run ID, and
 candidate manifest attached to the release record.
 
+Transient observer read failures retry against the same consumer run within
+its original budget. Credential renewal keeps the run, start time, deadline,
+and any server-requested backoff. The `consumer-observer-checkpoint-<attempt>-<source>`
+artifact records the last observation and next action. Unknown timing is
+`null`; a checkpoint never supplies a product verdict or publication permission.
+After an observer fails, cleanup preserves a live child unless the parent was
+explicitly cancelled or a fresh authenticated job census proves a timeout.
+An unreadable census refuses cancellation and reports pending or refused work.
+The same cleanup workflow revisits live children every fifteen minutes, so work
+preserved by a completion listener is checked again after its deadline. A
+scheduled run discovers live children first, then authenticates their original
+receipts and parent attempts through the same cancellation gate. Scheduling can
+be delayed by GitHub; it does not extend a release's observation budget.
+
 Promotion reports a stuck release on its own. When main's stable version is
 still unpublished four hours after its version commit, every later promotion
 run fails and one `[Release] vX.Y.Z is unpublished on main` issue opens. Close
@@ -268,12 +282,13 @@ it after the release publishes.
 - Candidate succeeded but no main-push event started promotion: dispatch the
   existing promoter on main with that certified candidate's run ID and source:
   `gh workflow run promote-release.yml --repo burin-labs/harn --ref main -f candidate_run_id=RUN_ID -f candidate_sha=FULL_SHA`.
-  It refuses an unsuccessful or foreign producer and a source not contained
-  in main, then applies the normal version, manifest, digest and attestation
+  Ordinary recovery refuses an unsuccessful or foreign producer and a source
+  not contained in main, then applies the normal version, manifest, digest and attestation
   checks. If the producer never ran a consumer rehearsal, recovery runs the
   existing rehearsal workflow at that exact source and requires its measured
   pass before publication. Missing, failed, cancelled or mismatched results
-  refuse publication. A producer's existing failed rehearsal is not replaced.
+  refuse publication. Without an explicit repair, a producer's existing failed
+  rehearsal is not replaced.
   Recovery publishes the existing files without rebuilding them.
   When the consumer needs a prepared repair before it can land against the
   published tag, add `-f consumer_pull_request=PR_NUMBER`. Recovery selects
@@ -281,6 +296,13 @@ it after the release publishes.
   existing pairing checks; a fork, closed pull, malformed number, or conflicting
   source pairing refuses. Consumer observation and publication checks still
   run. This selection cannot reuse an earlier default-branch rehearsal.
+  An explicit repair can recover a waiting or failed consumer stage when every
+  original build, smoke, audit and required archive handoff succeeded. Recovery
+  checks exact-source full-suite CI and native qualification before dispatching
+  the new rehearsal. Its custody and terminal receipts bind the original
+  manifest artifact ID and digest, and publication reauthenticates that same
+  evidence and current repair head. Missing, expired or failed archive proof
+  refuses. The original candidate run stays unchanged.
 - The consumer observer reached its deadline, but its exact dispatched child
   later succeeded: after the completed-child recovery policy is on main,
   dispatch the normal promoter with the same producer and source plus
@@ -289,8 +311,8 @@ it after the release publishes.
   the child's complete successful census and product receipts, then rechecks
   both latest attempts. Only the observer deadline and its derived final
   verdict may have failed. Cancelled, failed, partial, replaced or mismatched
-  children refuse. The shared publisher authenticates the attempt-bound
-  authorization artifact before applying all normal archive and publication
+  children refuse. The shared publisher authenticates the original observer
+  context, deadline and reached product before applying all normal archive and publication
   checks. The original deadline remains unmeasured; no result is rewritten
   and no equal-tree source substitution is accepted.
 - Crate publication failed after the tag exists: rerun the failed jobs in the
@@ -305,6 +327,21 @@ second release controller. Retired Fleet launchers and candidate-build input
 tuples aren't recovery entry points for these workflows.
 
 ## Check downstream convergence
+
+For standalone Harn publication, dispatch the existing promoter with
+`candidate_run_id`, `candidate_sha`, and `standalone_harn=true`. This explicit
+manual mode requires the same exact-source full-suite CI, native qualification,
+successful build/smoke/audit stages, retained archives, signatures and
+attestations. It independently authenticates the original producing attempt
+and manifest ID/digest before verification and again before publication.
+Missing, failed, expired or mismatched Harn proof refuses publication.
+
+Standalone publication does not dispatch a consumer repair or consumer repins,
+and cannot combine with either consumer recovery selector. It creates the
+normal stable tag and latest GitHub release, which start crate publication;
+the existing container and development-bump jobs also follow publication.
+It does not claim consumer compatibility or adoption. Record and complete those
+separate obligations through the owning consumer workflows.
 
 Promotion's `repin` job dispatches the registered consumers' own update
 workflows. For the fleet-owned bump adapters that is one dispatch: the

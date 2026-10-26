@@ -7,13 +7,20 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Embedded Harn standard library source catalog"
+build = "build.rs"
 include = [
+    "build.rs",
     "src/**/*",
     "Cargo.toml",
 ]
 
 [dependencies]
-harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.180" }
+harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.181" }
+zstd = { version = "0.14", default-features = false }
+
+# Packs the catalog's files into one archive; see build.rs.
+[build-dependencies]
+zstd = { version = "0.14", default-features = false }
 
 [lints]
 workspace = true

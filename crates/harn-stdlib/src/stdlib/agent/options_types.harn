@@ -206,6 +206,8 @@ pub type StallDiagnostics = {
    * stall. Read at `std/agent/stall_config`.
    */
   observation_recurrence_advisory?: bool,
+  /** Report revisits to agent-produced file content without escalating a stall. */
+  edit_oscillation?: bool,
   /**
    * Callback the stall decision keys on to learn whether the verifier moved.
    * The whole verifier-progress arm is inert without it. Read at

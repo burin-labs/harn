@@ -9,9 +9,15 @@ use harn_stdlib_catalog::{CatalogNotInstalled, StdlibCatalog};
 /// With the `bundled-stdlib` feature the bundled catalog is installed on first
 /// read; otherwise the host must have called `harn_stdlib::install()`.
 pub fn try_stdlib_catalog() -> Result<&'static StdlibCatalog, CatalogNotInstalled> {
+    ensure_stdlib_installed()?;
+    harn_stdlib_catalog::installed()
+}
+
+/// Whether a stdlib catalog is installed, without building it.
+pub fn ensure_stdlib_installed() -> Result<(), CatalogNotInstalled> {
     #[cfg(any(test, feature = "bundled-stdlib"))]
     let _ = harn_stdlib::install();
-    harn_stdlib_catalog::installed()
+    harn_stdlib_catalog::ensure_installed()
 }
 
 /// The installed stdlib catalog. Reading the stdlib without one is a host

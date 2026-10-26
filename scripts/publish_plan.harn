@@ -1,5 +1,7 @@
 pub type PublishPlanPackage = {deps: list<string>, name: string, version: string}
 
+type CargoPublishDependency = {name: string, source: string?, kind: string?}
+
 type PublishVisitState = {ordered: list<string>, visited: list<string>, visiting: list<string>}
 
 fn workspace_member_ids(meta: dict) -> list<string> {
@@ -66,10 +68,25 @@ pub fn publish_plan_packages_from_metadata(meta: dict) -> list<PublishPlanPackag
       continue
     }
     let deps: list<string> = []
-    for dep in package?.dependencies ?? [] {
-      const dep_name = to_string(dep?.name ?? "")
-      if dep?.source == nil && publish_names.contains(dep_name) {
-        deps = deps + [dep_name]
+    for raw_dep in package?.dependencies ?? [] {
+      require raw_dep.keys().contains("kind"), "cargo metadata dependency is missing kind"
+      const dep: CargoPublishDependency = schema_expect(raw_dep, schema_of(CargoPublishDependency))
+      require dep.kind == nil || dep.kind == "build" || dep.kind == "dev",
+        "cargo metadata dependency has unknown kind: "
+        + to_string(dep.kind)
+      // The source-manifest adapter distinguishes omitted versions from an
+      // explicit wildcard, which Cargo metadata alone cannot distinguish.
+      let retained = true
+      if dep.kind == "dev" {
+        require raw_dep.keys().contains("publish_retained"),
+          "cargo dev dependency requires source-manifest publication evidence"
+        require type_of(raw_dep.publish_retained) == "bool",
+          "Cargo dependency publication evidence must be boolean"
+        retained = raw_dep.publish_retained
+      }
+      if retained && dep.source == nil && publish_names.contains(dep.name)
+        && !deps.contains(dep.name) {
+        deps = deps + [dep.name]
       }
     }
     const existing = find_package(packages, name)

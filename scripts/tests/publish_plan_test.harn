@@ -1,3 +1,4 @@
+import "../publish_manifest.harn"
 import "../publish_plan.harn"
 
 const META = {
@@ -8,7 +9,10 @@ const META = {
       name: "gamma",
       version: "1.2.3",
       publish: nil,
-      dependencies: [{name: "beta", source: nil}, {name: "alpha", source: nil}],
+      dependencies: [
+        {name: "beta", source: nil, kind: nil},
+        {name: "alpha", source: nil, kind: nil},
+      ],
     },
     {id: "id-private", name: "private-helper", version: "1.2.3", publish: [], dependencies: []},
     {
@@ -24,7 +28,7 @@ const META = {
       name: "beta",
       version: "1.2.3",
       publish: nil,
-      dependencies: [{name: "alpha", source: nil}],
+      dependencies: [{name: "alpha", source: nil, kind: nil}],
     },
     {id: "id-external", name: "external", version: "9.9.9", dependencies: []},
   ],
@@ -76,4 +80,122 @@ pipeline test_publish_plan_fails_closed_for_dependency_cycle(harness: Harness, t
     {deps: ["alpha"], name: "beta", version: "1.2.3"},
   ]
   assert_throws_contains({ -> publish_plan_order(packages) }, "dependency cycle")
+}
+
+@test
+pipeline test_publish_plan_refuses_unknown_package_and_empty_graph(
+  harness: Harness,
+  task: unknown,
+) {
+  assert_throws_contains(
+    { -> publish_plan_order([{deps: ["missing"], name: "alpha", version: "1.2.3"}]) },
+    "unknown workspace package",
+  )
+  assert_throws_contains({ -> publish_plan_version([]) }, "no publishable workspace packages")
+}
+
+fn metadata_with_return_edge(dep: dict) -> dict {
+  return {
+    workspace_members: ["id-builtins", "id-vm", "id-runtime"],
+    packages: [
+      {
+        id: "id-builtins",
+        name: "builtins",
+        version: "1.2.3",
+        publish: nil,
+        dependencies: [{name: "vm", source: nil, kind: nil}],
+      },
+      {id: "id-vm", name: "vm", version: "1.2.3", publish: nil, dependencies: [dep]},
+      {
+        id: "id-runtime",
+        name: "runtime",
+        version: "1.2.3",
+        publish: nil,
+        dependencies: [{name: "builtins", source: nil, kind: nil}],
+      },
+    ],
+  }
+}
+
+@test
+pipeline test_publish_plan_strips_only_versionless_dev_return_edge(
+  harness: Harness,
+  task: unknown,
+) {
+  const packages = publish_plan_packages_from_metadata(
+    metadata_with_return_edge({name: "runtime", source: nil, kind: "dev", publish_retained: false}),
+  )
+  assert_eq(publish_plan_order(packages), ["vm", "builtins", "runtime"])
+  const versioned = publish_plan_packages_from_metadata(
+    metadata_with_return_edge({name: "runtime", source: nil, kind: "dev", publish_retained: true}),
+  )
+  assert_throws_contains({ -> publish_plan_order(versioned) }, "dependency cycle")
+}
+
+@test
+pipeline test_publish_manifest_distinguishes_explicit_wildcard_and_path_only(
+  harness: Harness,
+  task: unknown,
+) {
+  const dep = {name: "runtime", rename: nil, target: nil, req: "*"}
+  assert(
+    !publish_dev_dependency_is_retained(
+      toml_parse("[dev-dependencies]\nruntime = { path = '../runtime' }"),
+      {},
+      dep,
+    ),
+  )
+  for version in ["*", "=1.2.3"] {
+    assert(
+      publish_dev_dependency_is_retained(
+        {"dev-dependencies": {runtime: {path: "../runtime", version: version}}},
+        {},
+        dep,
+      ),
+    )
+  }
+  assert(
+    publish_dev_dependency_is_retained(
+      {target: {"cfg(windows)": {"dev-dependencies": {alias: {workspace: true}}}}},
+      {workspace: {dependencies: {alias: {package: "runtime", path: "../runtime", version: "*"}}}},
+      {name: "runtime", rename: "alias", target: "cfg(windows)", req: "*"},
+    ),
+  )
+  assert_throws_contains(
+    { ->
+      publish_plan_packages_from_metadata(
+        metadata_with_return_edge({name: "runtime", source: nil, kind: "dev", req: "*"}),
+      )
+    },
+    "source-manifest publication evidence",
+  )
+}
+
+@test
+pipeline test_publish_plan_refuses_normal_and_build_cycles_on_all_targets(
+  harness: Harness,
+  task: unknown,
+) {
+  for kind in [nil, "build"] {
+    const packages = publish_plan_packages_from_metadata(
+      metadata_with_return_edge(
+        {name: "runtime", source: nil, kind: kind, target: "cfg(windows)", optional: true},
+      ),
+    )
+    assert_throws_contains({ -> publish_plan_order(packages) }, "dependency cycle")
+  }
+}
+
+@test
+pipeline test_publish_plan_refuses_unmeasured_dependency_kind(harness: Harness, task: unknown) {
+  for dep in [
+    {name: "runtime", source: nil},
+    {name: "runtime", source: nil, kind: "future-kind"},
+    {name: "runtime", source: nil, kind: 7},
+  ] {
+    assert_throws_contains(
+      { -> publish_plan_packages_from_metadata(metadata_with_return_edge(dep)) },
+      "kind",
+    )
+  }
 }

@@ -6,7 +6,7 @@ import {
 } from "std/agent/loop_result_status"
 import { AgentSpec } from "std/agent/options_types"
 import { __with_prompt_fragment } from "std/agent/preflight"
-import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { agent_tool_handler_result, agent_tool_result_data } from "std/agent/tool_lifecycle"
 import {
   AgentTranscriptToolLifecycle,
   agent_transcript_tool_lifecycle_report,
@@ -173,14 +173,6 @@ fn __completion_claim_results(dispatch: AgentToolDispatch) -> list {
     }
   }
   return matches
-}
-
-fn __completion_claim_payload(result: dict) {
-  const payload = result?.result
-  if payload?.schema == "harn.agent_tool_handler_result.v2" {
-    return payload?.data
-  }
-  return payload
 }
 
 fn __completion_claim_requirement_ids(opts: dict) -> list<string> {
@@ -362,16 +354,19 @@ pub fn agent_completion_claim_disposition(
     )
   }
   const result = matches[0]
-  const payload = __completion_claim_payload(result)
-  if type_of(payload) != "dict"
-    || payload?.schema != "harn.completion_claim.v1"
-    || payload?.source != "tool" {
+  const claim = match schema_parse(agent_tool_result_data(result), schema_of(CompletionClaim)) {
+    Ok(value) -> { value }
+    Err(_) -> { return __completion_claim_invalid(
+      "completion_claim_result_invalid",
+      "The task_complete result did not preserve Harn's completion-claim schema.",
+    ) }
+  }
+  if claim.source != "tool" {
     return __completion_claim_invalid(
       "completion_claim_result_invalid",
       "The task_complete result did not preserve Harn's completion-claim schema.",
     )
   }
-  const claim: CompletionClaim = payload
   if trim(to_string(claim.blocked_on ?? "")) != "" {
     return __completion_claim_invalid(
       "completion_claim_blocked",

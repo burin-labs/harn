@@ -30,6 +30,7 @@ pub import {
   agent_completion_review_should_skip_llm,
   agent_verify_completion_judge_cap,
 } from "std/agent/completion_review"
+import { agent_completion_signal } from "std/agent/completion_signal"
 pub import { CompletionVerificationStop } from "std/agent/completion_verification"
 import { __judge_invoke_closure } from "std/agent/completion_verification"
 import { agent_feedback_emit } from "std/agent/feedback"
@@ -276,6 +277,8 @@ fn __judge_payload(
     visible_text: text,
     last_text: text,
     raw_text: raw_text == "" ? text : raw_text,
+    completion_signal: opts?._completion_signal
+      ?? agent_completion_signal(raw_text == "" ? text : raw_text, opts?.done_sentinel),
     transcript: transcript,
     judge_evidence: evidence_serialized,
     judge_evidence_packet: evidence_packet,

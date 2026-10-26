@@ -83,3 +83,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/sha256.sh"
 sha256_file() {
   sha256_file_hex "$1"
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  [[ "$#" == 1 && "$1" == --targets-json ]] || exit 2
+  candidate_archive_expected_targets_json
+fi

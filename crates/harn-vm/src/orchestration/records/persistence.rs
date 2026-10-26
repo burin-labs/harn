@@ -603,6 +603,8 @@ pub(crate) fn save_run_record_with_transcript(
     let path = path
         .map(PathBuf::from)
         .unwrap_or_else(|| default_run_dir().join(format!("{}.json", run.id)));
+    crate::runtime_paths::prepare_run_record_parent(&path)
+        .map_err(|e| VmError::Runtime(format!("failed to create run directory: {e}")))?;
     let mut materialized = run.clone();
     normalize_evidence_identity(&mut materialized);
     merge_hitl_questions_from_active_log(&mut materialized);
@@ -615,11 +617,6 @@ pub(crate) fn save_run_record_with_transcript(
     let transcript_path =
         materialize_llm_transcript_sidecar(&materialized, &path, active_transcript_path);
     refresh_run_observability(&mut materialized, Some(&path), transcript_path.as_deref());
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| VmError::Runtime(format!("failed to create run directory: {e}")))?;
-        crate::runtime_paths::self_ignore_default_run_root(parent);
-    }
     let mut json_value = serde_json::to_value(&materialized)
         .map_err(|e| VmError::Runtime(format!("failed to encode run record: {e}")))?;
     crate::redact::current_policy().redact_json_in_place(&mut json_value);

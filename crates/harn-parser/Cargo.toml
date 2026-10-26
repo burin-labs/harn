@@ -9,11 +9,11 @@ homepage.workspace = true
 description = "Parser, AST, and type checker for the Harn programming language"
 
 [dependencies]
-harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.180" }
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.180" }
-harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.180" }
-harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.180" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.180" }
+harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.181" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.181" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.181" }
+harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.181" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.181" }
 imbl = "7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -24,7 +24,7 @@ yansi = "1"
 rstest.workspace = true
 
 [build-dependencies]
-harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.180" }
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.181" }
 
 [lints]
 workspace = true

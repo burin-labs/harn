@@ -180,6 +180,7 @@ sources = [
   "crates/harn-cli-aot-gen/",
   "crates/harn-cli/build_support/cli_aot_manifest.rs",
   "crates/harn-stdlib/src/lib.rs",
+  "crates/harn-stdlib/src/catalog_entries.rs",
   "crates/harn-stdlib/src/stdlib/cli/",
   "crates/harn-lexer/src/",
   "crates/harn-parser/src/",

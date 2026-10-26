@@ -3,11 +3,12 @@
 //! Cargo supplies `CARGO_BIN_EXE_*` only to compilation units that may embed a
 //! package binary path. sccache 0.17's daemon-side compiler path can lose those
 //! synthetic variables, so those rare units must stay in Cargo's process tree.
-//! Every other compilation keeps using sccache, with the worktree-specific
+//! Ordinary rustc compilation keeps using sccache, with the worktree-specific
 //! target directory removed from its cache identity.
 
 use std::env;
 use std::ffi::{OsStr, OsString};
+use std::path::Path;
 use std::process::{self, Command};
 
 const CARGO_BIN_EXE_PREFIX: &str = "CARGO_BIN_EXE_";
@@ -171,13 +172,39 @@ fn main() {
         process::exit(2);
     };
     let rustc_arguments: Vec<OsString> = arguments.collect();
-    let route = route_for_environment(env::vars_os());
+    let clippy_driver = std::iter::once(&rustc)
+        .chain(rustc_arguments.first())
+        .any(|compiler| {
+            Path::new(compiler)
+                .file_stem()
+                .is_some_and(|name| name == "clippy-driver")
+        });
+    // Clippy owns Cargo's compiler nesting and must receive rustc unchanged.
+    let route = if clippy_driver {
+        Route::Direct
+    } else {
+        route_for_environment(env::vars_os())
+    };
 
     let mut command = match route {
         Route::Direct => Command::new(&rustc),
         Route::Sccache => {
-            let mut command = Command::new("sccache");
-            command.arg(&rustc).env_remove("CARGO_TARGET_DIR");
+            // Cargo nests a workspace wrapper before the real compiler. Let it
+            // add its flags before sccache identifies and hashes the compiler.
+            let wraps_compiler = rustc_arguments
+                .first()
+                .and_then(|compiler| Path::new(compiler).file_stem())
+                .is_some_and(|name| name == "rustc" || name == "clippy-driver");
+            let mut command = if wraps_compiler {
+                let mut command = Command::new(&rustc);
+                command.arg("sccache");
+                command
+            } else {
+                let mut command = Command::new("sccache");
+                command.arg(&rustc);
+                command
+            };
+            command.env_remove("CARGO_TARGET_DIR");
             command
         }
     };
@@ -185,6 +212,7 @@ fn main() {
 
     if env::var_os(TRACE_ENV).is_some() {
         let label = match route {
+            Route::Direct if clippy_driver => "direct clippy driver",
             Route::Direct => "direct cargo-binary environment",
             Route::Sccache => "sccache",
         };

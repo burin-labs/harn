@@ -100,6 +100,9 @@ canary_header() {
 #
 # Locals are prefixed because the result is assigned through dynamic scope.
 canary_api() {
+  CANARY_API_FAILURE_CLASS=
+  CANARY_API_FAILURE_DETAIL=
+  CANARY_API_RETRY_WAIT_SECONDS=0
   local _optional=false _context=''
   while true; do
     case "$1" in
@@ -154,6 +157,9 @@ canary_api() {
       [[ -z "$_remaining" ]] || _detail+=" ratelimit_remaining=$_remaining"
       _detail+=$_context
       if [[ "$_optional" == true ]]; then
+        CANARY_API_FAILURE_CLASS=$_class
+        CANARY_API_FAILURE_DETAIL=$_detail
+        CANARY_API_RETRY_WAIT_SECONDS=$_wait
         canary_say "CONSUMER_CANARY unread=$_class $_detail"
         return 1
       fi
@@ -165,7 +171,30 @@ canary_api() {
   done
 }
 
+canary_observation_checkpoint() {
+  [[ -n "${CANARY_CHECKPOINT_FILE:-}" && "${CANARY_OBSERVATION_INITIALIZED:-false}" == true ]] || return 0
+  local state=$1 reason=$2 next=$3 temporary now
+  now=$(date +%s)
+  mkdir -p "$(dirname "$CANARY_CHECKPOINT_FILE")"
+  temporary=$(mktemp "${CANARY_CHECKPOINT_FILE}.XXXXXX")
+  jq -n --arg state "$state" --arg reason "$reason" --arg next "$next" \
+    --arg run "$CANARY_RUN_ID" --arg parent "${GITHUB_RUN_ID:-}" --arg attempt "${GITHUB_RUN_ATTEMPT:-}" \
+    --arg context "${OBSERVER_CONTEXT:-}" --argjson started "$CANARY_STARTED_AT" \
+    --argjson observed "$now" --argjson deadline "$CANARY_OBSERVATION_DEADLINE" \
+    --argjson not_before "${CANARY_READ_NOT_BEFORE:-0}" --argjson timing "${CANARY_TIMING_RECEIPT:-null}" \
+    '{schema:"harn.consumer_observer.checkpoint.v1",stage:"consumer-observation",state:$state,
+      parent_run_id:$parent,parent_run_attempt:$attempt,run_id:$run,started_at:$started,
+      observed_at:$observed,deadline_at:($started+$deadline),read_not_before:$not_before,reason:$reason,next_action:$next,
+      source_sha:((try ($context|fromjson|.source_revision) catch null) |
+        if type=="string" and test("^[0-9a-f]{40}$") then . else null end),timing:$timing}' > "$temporary"
+  mv -- "$temporary" "$CANARY_CHECKPOINT_FILE"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "checkpoint=$CANARY_CHECKPOINT_FILE" >> "$GITHUB_OUTPUT"
+  fi
+}
+
 canary_fail() {
+  canary_observation_checkpoint "${3:-unmeasured}" "$1" inspect_same_run
   if [[ -n "${CANARY_TIMING_RECEIPT:-}" ]]; then
     canary_say "CONSUMER_CANARY timing=$CANARY_TIMING_RECEIPT"
   fi
@@ -255,10 +284,17 @@ canary_dispatch() {
   local -a producer_inputs=()
   if [[ -n "$producer_run$producer_attempt" ]]; then
     [[ "$producer_run" =~ ^[1-9][0-9]*$ && "$producer_attempt" =~ ^[1-9][0-9]*$ \
-      && "$producer_run" == "${GITHUB_RUN_ID:-}" && "$producer_attempt" == "${GITHUB_RUN_ATTEMPT:-}" \
-      && "$revision" == "${GITHUB_SHA:-}" && "${GITHUB_REF:-}" == refs/heads/main \
+      && "${GITHUB_REF:-}" == refs/heads/main \
       && -z "${CANARY_PULL_REQUEST_CLI_RUN:-}${CANARY_PULL_REQUEST_BASE:-}${REHEARSAL_PROMOTION_RUN_ID:-}" ]] \
       || canary_fail release_producer_identity_invalid
+    if [[ "$producer_run" == "${GITHUB_RUN_ID:-}" && "$producer_attempt" == "${GITHUB_RUN_ATTEMPT:-}" \
+      && "$revision" == "${GITHUB_SHA:-}" ]]; then
+      :
+    else
+      [[ "${CONSUMER_PULL_REQUEST:-}" =~ ^[1-9][0-9]*$ ]] || canary_fail release_producer_identity_invalid
+      node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-observer-dispatch.mjs" --archive-producer >/dev/null \
+        || canary_fail release_producer_identity_invalid
+    fi
     producer_inputs=(-f release_producer_run_id="$producer_run" -f release_producer_run_attempt="$producer_attempt")
   fi
   # The consumer reads the target as a tag name, so resolve the source's
@@ -378,26 +414,90 @@ canary_observe() {
     || canary_fail observation_budget_invalid "run=$run_id"
   window_started=$(date +%s)
   CANARY_PENDING=false
+  CANARY_OBSERVATION_INITIALIZED=true
+  CANARY_OBSERVATION_DEADLINE=$deadline
+  CANARY_READ_NOT_BEFORE=0
+  if [[ -n "${CANARY_CHECKPOINT_FILE:-}" && -f "$CANARY_CHECKPOINT_FILE" ]]; then
+    CANARY_READ_NOT_BEFORE=$(jq -er --arg run "$run_id" --arg parent "${GITHUB_RUN_ID:-}" \
+      --arg attempt "${GITHUB_RUN_ATTEMPT:-}" --argjson started "$started" --argjson deadline "$deadline" '
+      select(.schema == "harn.consumer_observer.checkpoint.v1" and .run_id == $run
+        and .parent_run_id == $parent and .parent_run_attempt == $attempt
+        and .started_at == $started and .deadline_at == ($started+$deadline)) |
+      .read_not_before | select(type == "number" and . >= 0 and . <= 9007199254740991 and floor == .)' "$CANARY_CHECKPOINT_FILE") || CANARY_READ_NOT_BEFORE=0
+  fi
+  CANARY_TIMING_RECEIPT=
+  canary_observation_checkpoint pending none observe_same_run
 
-  local status conclusion now record timing reason
+  local status conclusion now record timing reason read_error retry_count=0 retry_wait remaining advice
   while true; do
     CANARY_TIMING_RECEIPT=
     now=$(date +%s)
     ((now >= started)) || canary_fail observation_clock_invalid "run=$run_id"
+    if (( CANARY_READ_NOT_BEFORE > 0 && now - started >= deadline )); then
+      canary_fail aggregate_deadline "run=$run_id verdict=unmeasured wall_seconds=$((now - started))"
+    fi
     if [[ "$budget_version" == 1 ]] && ((now - started >= deadline)); then
       canary_fail no_verdict_before_deadline "run=$run_id verdict=unmeasured wall_seconds=$((now - started))"
     fi
-    canary_api --detail "run=$run_id verdict=unmeasured" record consumer_read_refused \
-      secret:CONSUMER_CANARY_REPOSITORY "repos/$repo/actions/runs/$run_id" --jq '"\(.status) \(.conclusion // "none")"'
-    read -r status conclusion <<< "$record"
-    case "$status" in
-      completed|queued|in_progress|waiting|pending|requested) ;;
-      *) canary_fail consumer_state_unreported "run=$run_id verdict=unmeasured" ;;
-    esac
+    read_error=
+    advice=0
+    if (( CANARY_READ_NOT_BEFORE > now )); then
+      read_error=api_backoff_pending
+    elif canary_api --optional --detail "run=$run_id verdict=unmeasured" record consumer_read_refused \
+      secret:CONSUMER_CANARY_REPOSITORY "repos/$repo/actions/runs/$run_id" --jq '"\(.status) \(.conclusion // "none")"'; then
+      read -r status conclusion <<< "$record"
+      case "$status" in
+        completed|queued|in_progress|waiting|pending|requested) ;;
+        *) canary_fail consumer_state_unreported "run=$run_id verdict=unmeasured" ;;
+      esac
+    else
+      case "$CANARY_API_FAILURE_CLASS" in
+        api_unavailable|api_rate_limited) read_error=$CANARY_API_FAILURE_CLASS; advice=$CANARY_API_RETRY_WAIT_SECONDS ;;
+        *) canary_fail "$CANARY_API_FAILURE_CLASS" "$CANARY_API_FAILURE_DETAIL" ;;
+      esac
+    fi
+    if [[ -z "$read_error" && "$budget_version" == 2 ]]; then
+      if timing=$(CANARY_REPOSITORY="$repo" CANARY_RUN_ID="$run_id" node "$budget_reader"); then
+        :
+      elif jq -e '.schema == "harn.consumer_observer.read_refusal.v1" and .retryable == true' <<< "$timing" >/dev/null; then
+        read_error=$(jq -er .reason <<< "$timing")
+        advice=$(jq -er '.retry_after_seconds | select(type == "number" and . >= 0 and floor == .)' <<< "$timing") \
+          || canary_fail job_timing_unmeasured "run=$run_id verdict=unmeasured"
+      else
+        canary_fail job_timing_unmeasured "run=$run_id verdict=unmeasured"
+      fi
+    fi
+    if [[ -n "$read_error" ]]; then
+      now=$(date +%s)
+      if (( advice > 0 )); then CANARY_READ_NOT_BEFORE=$((now + advice)); fi
+      canary_observation_checkpoint pending "$read_error" retry_same_run
+      if (( now - started >= deadline )); then
+        canary_fail aggregate_deadline "run=$run_id verdict=unmeasured wall_seconds=$((now - started))"
+      fi
+      if (( now - window_started >= window )); then
+        CANARY_PENDING=true
+        canary_observation_checkpoint pending "$read_error" renew_same_run
+        canary_say "CONSUMER_CANARY pending run=$run_id status=unmeasured wall_seconds=$((now - started)) next_action=renew_same_run"
+        return 0
+      fi
+      retry_wait=$((5 << (retry_count < 4 ? retry_count : 4)))
+      (( retry_wait <= poll_limit )) || retry_wait=$poll_limit
+      remaining=$((CANARY_READ_NOT_BEFORE - now))
+      (( remaining <= retry_wait )) || retry_wait=$remaining
+      remaining=$((deadline - now + started))
+      (( retry_wait <= remaining )) || retry_wait=$remaining
+      remaining=$((window - now + window_started))
+      (( retry_wait <= remaining )) || retry_wait=$remaining
+      canary_say "CONSUMER_CANARY retry=$read_error run=$run_id wait_seconds=$retry_wait next_action=retry_same_run"
+      sleep "$retry_wait"
+      retry_count=$((retry_count + 1))
+      continue
+    fi
+    retry_count=0
+    CANARY_READ_NOT_BEFORE=0
     if [[ "$budget_version" == 2 ]]; then
-      timing=$(CANARY_REPOSITORY="$repo" CANARY_RUN_ID="$run_id" node "$budget_reader") \
-        || canary_fail job_timing_unmeasured "run=$run_id verdict=unmeasured"
       CANARY_TIMING_RECEIPT=$timing
+      canary_observation_checkpoint pending none observe_same_run
       reason=$(jq -er '.reason // "none"' <<< "$timing") \
         || canary_fail job_timing_unmeasured "run=$run_id verdict=unmeasured"
       if [[ "$reason" != none ]]; then
@@ -423,6 +523,7 @@ canary_observe() {
     fi
     if ((now - window_started >= window)); then
       CANARY_PENDING=true
+      canary_observation_checkpoint pending none renew_same_run
       if [[ -n "$CANARY_TIMING_RECEIPT" ]]; then
         canary_say "CONSUMER_CANARY timing=$CANARY_TIMING_RECEIPT"
       fi
@@ -437,11 +538,12 @@ canary_observe() {
     canary_say "CONSUMER_CANARY timing=$CANARY_TIMING_RECEIPT"
   fi
   [[ "$conclusion" == success ]] && verdict=pass
+  canary_observation_checkpoint "$verdict" none "$([[ "$verdict" == pass ]] && echo none || echo inspect_same_run)"
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
   fi
   canary_say "CONSUMER_CANARY verdict=$verdict conclusion=$conclusion run=$run_id wall_seconds=$((now - started))"
-  [[ "$verdict" == pass ]] || canary_fail consumer_rehearsal_failed "run=$run_id conclusion=$conclusion"
+  [[ "$verdict" == pass ]] || canary_fail consumer_rehearsal_failed "run=$run_id conclusion=$conclusion" fail
 }
 
 canary_main() {

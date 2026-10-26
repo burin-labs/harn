@@ -193,22 +193,12 @@ fn detect_php_test_command(root: &Path, commands: &mut BTreeMap<String, String>)
 }
 
 fn detect_makefile_targets(root: &Path, commands: &mut BTreeMap<String, String>) {
-    let makefile = root.join("Makefile");
-    let content = match fs::read_to_string(makefile) {
-        Ok(c) => c,
-        Err(_) => return,
+    let Ok(Some((filename, content))) = harn_makefile::read_default(root) else {
+        return;
     };
-    for line in content.lines() {
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with("test") {
-            continue;
-        }
-        let trimmed = trimmed.trim();
-        if let Some((target, _)) = trimmed.split_once(':') {
-            let target = target.trim();
-            if !target.is_empty() && !target.contains(' ') {
-                commands.insert(format!("make {target}"), "Makefile target".to_string());
-            }
+    for target in harn_makefile::parse(&content) {
+        if target.name.starts_with("test") {
+            commands.insert(target.command, format!("{filename} target"));
         }
     }
 }

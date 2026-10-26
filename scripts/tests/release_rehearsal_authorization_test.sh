@@ -37,4 +37,19 @@ for refusal in REQUIRES_ATTACHED_CONSUMER=unknown ATTACHED_RESULT= ATTACHED_RESU
   [[ ! -s "$tmp/output" ]] || fail "unauthorized attached output for $refusal"
 done
 if authorize ATTACHED_RESULT=success; then fail 'unexpected attached result accepted'; fi
+request="$(jq -cn --arg source "$sha" \
+  '{schema:"harn.release.consumer_repair.v1",context:{source_revision:$source},producer_run:"123",producer_attempt:1,consumer_pull:"7"}')"
+repair() {
+  authorize REQUIRES_CONSUMER_REPAIR=true REPAIR_RESULT=success REPAIR_REQUEST="$request" \
+    CANDIDATE_RUN_ID=123 PRODUCER_ATTEMPT=1 CONSUMER_PULL=7 "$@"
+}
+repair || fail 'authenticated archive repair refused'
+grep -Fxq 'ready=true' "$tmp/output" || fail 'repair positive emitted no authorization'
+for refusal in REQUIRES_CONSUMER_REPAIR=unknown REPAIR_RESULT= REPAIR_RESULT=skipped \
+  REPAIR_RESULT=failure REPAIR_REQUEST= REPAIR_REQUEST=null REPAIR_REQUEST='{}' \
+  CANDIDATE_RUN_ID=124 PRODUCER_ATTEMPT=2 CONSUMER_PULL=8 REQUIRES_REHEARSAL=false; do
+  if repair "$refusal"; then fail "accepted repair $refusal"; fi
+  [[ ! -s "$tmp/output" ]] || fail "unauthorized repair output for $refusal"
+done
+if authorize REPAIR_RESULT=success REPAIR_REQUEST="$request"; then fail 'unexpected repair accepted'; fi
 echo 'release_rehearsal_authorization_test: ok'

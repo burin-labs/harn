@@ -22,6 +22,20 @@ pub fn agent_stall_initial_checkpoint(session_id: string) -> AgentStallCheckpoin
 }
 
 /**
+ * Begin the next loop's local iteration scope. Content visits survive a stage
+ * handoff, but iterations from the prior loop are not comparable to this one.
+ * @effects: []
+ * @errors: []
+ */
+pub fn __agent_stall_resume_edit_history(state: AgentStallState) -> AgentStallState {
+  return state
+    + {
+      edit_state_visits: state.edit_state_visits.map({ visit -> visit + {iteration: nil} })
+        .to_list(),
+    }
+}
+
+/**
  * Inspect the latest completed dispatch without advancing the committed checkpoint.
  * The next loop commits pending evidence through its normal pre-turn fold once.
  * @effects: [agent]

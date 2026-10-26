@@ -258,6 +258,7 @@ jobs:
               - 'crates/harn-cli/src/commands/providers.rs'
               - 'crates/harn-cli/src/commands/providers/tool_probe_request.rs'
               - 'crates/harn-stdlib/src/lib.rs'
+              - 'crates/harn-stdlib/src/catalog_entries.rs'
               - 'crates/harn-provider-catalog/Cargo.toml'
               - 'crates/harn-provider-catalog/src/**'
               - 'crates/harn-vm/src/llm/capability_sources/**'
@@ -303,6 +304,16 @@ jobs:
               - 'scripts/bootstrap-harn.*'
               - 'scripts/tests/bootstrap_harn_seed_test.sh'
               - 'scripts/tests/runtime_install_test.harn'
+              - 'scripts/verify_published_harn_runtime.sh'
+              - 'scripts/verify_release_runtime_environment.harn'
+              - 'scripts/publish*.harn'
+              - 'scripts/stage_release_tools.sh'
+              - 'scripts/tests/publish_plan_test.harn'
+              - 'scripts/tests/publish_recovery_test.harn'
+              - 'scripts/verify_publish_workspace_plan.harn'
+              - 'scripts/lib/published_release_correction.sh'
+              - 'scripts/lib/candidate_archive_contract.sh'
+              - 'scripts/lib/sha256.sh'
               - 'crates/harn-stdlib/src/stdlib/runtime/**'
               - '.harn-bootstrap-version'
             # Everything that can move release semantics out of agreement with
@@ -1756,7 +1767,13 @@ jobs:
         if: matrix.kind == 'audit'
         with:
           node-version: "22"
-          cache-dependency-path: tree-sitter-harn/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            tree-sitter-harn/package-lock.json
+      - name: Install source audit dependencies
+        if: matrix.kind == 'audit'
+        timeout-minutes: 5
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Set up the stock TypeScript fixture runtime
         if: matrix.kind == 'audit-scripts'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -2836,6 +2853,10 @@ jobs:
 
   setup-harn-action:
     name: Setup Harn action (${{ matrix.os }})
+    permissions:
+      contents: read
+      pull-requests: read
+      attestations: read
     needs: [changes]
     if: needs.changes.outputs.setup_action == 'true'
     strategy:

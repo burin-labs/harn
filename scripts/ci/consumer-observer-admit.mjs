@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { admitChild, admitObserver, githubDeclaration, githubRecord, observerContext, observerRefusal } from '../lib/consumer-observer.mjs';
+import { admitChild, admitObserver, archiveProducerBinding, githubArchiveProducer, githubDeclaration, githubRecord, observerContext, observerRefusal } from '../lib/consumer-observer.mjs';
 
 async function main() {
   const env = process.env;
@@ -18,6 +18,9 @@ async function main() {
   const parent = await githubRecord(env.GH_TOKEN, context.parent_repository, context.parent_run_id);
   admitObserver(context, parent);
   const declaration = await githubDeclaration(env.GH_TOKEN, context);
+  const binding=env.RELEASE_PRODUCER_RUN_ID || env.RELEASE_PRODUCER_RUN_ATTEMPT ? archiveProducerBinding(
+    await githubArchiveProducer(env.GH_TOKEN,{sourceRevision:context.source_revision,
+      runId:env.RELEASE_PRODUCER_RUN_ID,attempt:Number(env.RELEASE_PRODUCER_RUN_ATTEMPT)})) : undefined;
   const [finalParent, child] = await Promise.all([
     githubRecord(env.GH_TOKEN, context.parent_repository, context.parent_run_id),
     githubRecord(env.GH_TOKEN, env.GITHUB_REPOSITORY, env.GITHUB_RUN_ID),
@@ -29,6 +32,7 @@ async function main() {
     headSha: env.GITHUB_SHA,
     workflow: env.GITHUB_WORKFLOW_REF.slice(workflowPrefix.length).split('@')[0],
     sourceRevision: env.SOURCE_REVISION,
+    ...(binding?{producerBinding:binding}:{}),
   }, child, event, declaration);
   const file = path.join(env.RUNNER_TEMP, `consumer-observer-${context.dispatch_nonce}.json`);
   fs.writeFileSync(file, `${JSON.stringify(receipt)}\n`, { flag: 'wx', mode: 0o600 });

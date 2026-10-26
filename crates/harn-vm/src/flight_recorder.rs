@@ -14,13 +14,12 @@ pub fn persist_recording(
     let parent = path
         .parent()
         .ok_or_else(|| format!("flight recording path has no parent: {}", path.display()))?;
-    std::fs::create_dir_all(parent).map_err(|error| {
+    crate::runtime_paths::prepare_run_record_parent(path).map_err(|error| {
         format!(
             "failed to create flight recording directory {}: {error}",
             parent.display()
         )
     })?;
-    crate::runtime_paths::self_ignore_default_run_root(parent);
     let bytes = serde_json::to_vec(recording)
         .map_err(|error| format!("failed to encode flight recording: {error}"))?;
     let write = || {

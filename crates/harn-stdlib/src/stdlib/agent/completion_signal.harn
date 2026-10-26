@@ -1,0 +1,30 @@
+/** The runtime's marker decision, independent of whether the task succeeded. */
+pub type AgentCompletionSignal = {
+  declared: bool,
+  source: "disabled" | "parsed_done_marker" | "raw_text",
+}
+
+/** Response facts preserved together across a completion boundary. */
+pub type AgentCompletionTurn = {raw_text: string, completion_signal: AgentCompletionSignal}
+
+/**
+ * Read the configured sentinel from the parser's marker when one exists,
+ * otherwise from the unprojected response. Display text carries no authority.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_completion_signal(
+  raw_text: string,
+  done_sentinel: string?,
+  parsed_done_marker: string? = nil,
+) -> AgentCompletionSignal {
+  if done_sentinel == nil || done_sentinel == "" {
+    return {declared: false, source: "disabled"}
+  }
+  if parsed_done_marker != nil && parsed_done_marker != "" {
+    return {declared: contains(parsed_done_marker, done_sentinel), source: "parsed_done_marker"}
+  }
+  return {declared: contains(raw_text, done_sentinel), source: "raw_text"}
+}

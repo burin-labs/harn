@@ -1,4 +1,4 @@
-import {admitObserverDispatch,dispatchObserverConsumer,githubConsumerSource,observerContext,parentHeadSha, observerRefusal } from '../lib/consumer-observer.mjs';
+import {admitObserver,admitObserverDispatch,dispatchObserverConsumer,githubArchiveProducer,githubConsumerSource,githubRecord,observerContext,parentHeadSha, observerRefusal } from '../lib/consumer-observer.mjs';
 
 async function main() {
   const env=process.env;
@@ -7,6 +7,20 @@ async function main() {
     || context.parent_run_attempt!==Number(env.GITHUB_RUN_ATTEMPT) || context.parent_head_sha!==parentHeadSha(env)
     || (env.SOURCE_REVISION && context.source_revision!==env.SOURCE_REVISION)){
     throw new Error('CONSUMER_OBSERVER reason=dispatch_invocation_unproven');
+  }
+  if(process.argv.length===3 && process.argv[2]==='--archive-producer'){
+    const parent=await githubRecord(env.PARENT_READ_TOKEN,context.parent_repository,context.parent_run_id);
+    admitObserver(context,parent);
+    if(parent.path!=='.github/workflows/promote-release.yml' || parent.event!=='workflow_dispatch'
+      || parent.head_branch!=='main' || !/^[1-9][0-9]*$/.test(env.CONSUMER_PULL_REQUEST??'')){
+      throw new Error('CONSUMER_OBSERVER reason=archive_producer_parent_unproven');
+    }
+    const proof=await githubArchiveProducer(env.PARENT_READ_TOKEN,{
+      sourceRevision:context.source_revision,runId:env.CANARY_RELEASE_PRODUCER_RUN_ID,
+      attempt:Number(env.CANARY_RELEASE_PRODUCER_RUN_ATTEMPT),
+    });
+    console.log(JSON.stringify(proof));
+    return;
   }
   const admissionOnly=process.argv.length===3 && process.argv[2]==='--admit';
   if(process.argv.length!==2 && !admissionOnly) throw new Error('CONSUMER_OBSERVER reason=dispatch_arguments_invalid');

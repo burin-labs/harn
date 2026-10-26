@@ -1,0 +1,31 @@
+fn main(harness: Harness) {
+  const scan = command_risk_scan(
+    {
+      request: {
+        mode: "shell",
+        shell: {id: "sh"},
+        command: "PATH='/older git/bin'; HOME=/other sh -c 'git history'",
+      },
+    },
+  )
+  assert(scan.shell_source_groups[0][0].argv == [])
+  assert(scan.shell_source_groups[0][0].source_argv == ["PATH=/older git/bin"])
+  assert(scan.shell_source_groups[1][0].source_argv == ["HOME=/other", "sh", "-c", "git history"])
+  assert(scan.execution_stages[0].argv == ["git", "history"])
+  assert(len(scan.shell_command_groups) == 1)
+  const literal = command_risk_scan(
+    {
+      request: {
+        mode: "shell",
+        shell: {id: "sh"},
+        command: "git commit -m 'PATH=/older/bin; HOME=/other'",
+      },
+    },
+  )
+  assert(literal.shell_source_groups[0][0].argv == literal.shell_source_groups[0][0].source_argv)
+  assert(
+    literal.shell_source_groups[0][0].argv
+      == ["git", "commit", "-m", "PATH=/older/bin; HOME=/other"],
+  )
+  harness.stdio.println("source environment groups preserved")
+}
