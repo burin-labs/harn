@@ -626,6 +626,9 @@ fn rust_widening_respects_receiver_lexical_scope() {
         "pub fn run() {\n    #[cfg_attr(all(), binding_macro::install_buffer)]\n    struct Marker;\n    let _ = Buffer { flush: 1 };\n}\n",
         "pub fn run() {\n    #[cfg_attr(all(), derive(binding_macro::InstallBuffer))]\n    struct Marker;\n    let _ = Buffer { flush: 1 };\n}\n",
         "pub fn run() {\n    #[cfg_attr(all(), cfg_attr(all(), binding_macro::install_buffer))]\n    struct Marker;\n    let _ = Buffer { flush: 1 };\n}\n",
+        "use binding_macro::install_buffer as test;\npub fn run() {\n    #[test]\n    struct Marker;\n    let _ = Buffer { flush: 1 };\n}\n",
+        "use binding_macro::install_buffer as derive;\npub fn run() {\n    #[derive(Debug)]\n    struct Marker;\n    let _ = Buffer { flush: 1 };\n}\n",
+        "use binding_macro::install_buffer as allow;\npub fn run() {\n    #[allow(dead_code)]\n    struct Marker;\n    let _ = Buffer { flush: 1 };\n}\n",
     ] {
         let source =
             format!("pub struct Buffer;\n\nimpl Buffer {{\n    fn flush(&self) {{}}\n}}\n\n{body}");
