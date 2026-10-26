@@ -73,7 +73,7 @@ pipeline test(harness: Harness) {
       harness.fs.write_text(path_join(dir, file), content)
     }
     if item.unreadable_directory != nil {
-      const unreadable = path_join(dir, item.unreadable_directory!)
+      const unreadable = path_join(dir, item.unreadable_directory)
       harness.fs.mkdir(unreadable)
       assert(harness.fs.stat(unreadable).is_dir)
       assert(
