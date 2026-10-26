@@ -17,3 +17,6 @@ refusal's `details` names the first few.
 Rust member widening proves each receiver in its lexical scope. A nested
 parameter, local shadow, generic type parameter, or unrelated qualified type
 cannot authorize widening a same-named member of another type.
+Custom derives and conditional macro attributes cannot supply an unseen type
+that authorizes widening. Built-in derives and conditional inert attributes
+retain the same lexical proof.
