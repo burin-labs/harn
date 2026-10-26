@@ -214,14 +214,16 @@ mod tests {
     fn insert(extension: &str, source: &str, query: &str, content: &str) -> VmValue {
         let file = write_temp(extension, source);
         let path = file.path().to_string_lossy().to_string();
-        run(&[dict(&[
+        let result = run(&[dict(&[
             ("path", vm_string(&path)),
             ("query", vm_string(query)),
             ("position", vm_string("last_child")),
             ("content", vm_string(content)),
             ("dry_run", VmValue::Bool(true)),
         ])])
-        .expect("insert_at_anchor runs")
+        .expect("insert_at_anchor runs");
+        crate::schemas::validate_response("ast.insert_at_anchor", "ast", "insert_at_anchor", result)
+            .expect("retry targets satisfy the public response contract")
     }
 
     fn candidates(result: &VmValue) -> Vec<(i64, String, String)> {
