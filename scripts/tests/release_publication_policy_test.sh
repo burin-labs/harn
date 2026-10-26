@@ -94,9 +94,8 @@ for armer in "$root/scripts/validate_development_bump.sh" "$root/scripts/lib/rel
   fi
 done
 
-ci_workflow="$root/.github/workflows/ci.yml"
-grep -Fq 'release_published_version_for_workspace "$workspace_version"' "$ci_workflow" \
-  || fail "source-only documentation checks try to install an unpublished -dev build"
+# Portable CI consumers' published runtime pin is checked structurally in
+# check_ci_cache_policy_test.harn for both documentation and editor jobs.
 canary_workflow="$root/.github/workflows/consumer-canary.yml"
 canary_script="$root/scripts/ci/consumer_canary.sh"
 grep -Fq 'WORKSPACE_VERSION=' "$canary_workflow" \
