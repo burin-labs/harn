@@ -293,6 +293,15 @@ for refusal in 401 403 404 422 429 5030 unreported; do
   expect 'semantic refusal does not sleep' "$(cat "$scratch/sleeps")" ''
   absent 'issue (create|edit|comment|close|reopen)|run rerun'
 done
+ISSUE_CENSUS='[[{"number":99,"body":null}]]' ATTEMPT=2 OUTCOME=failure run_case
+expect 'documented null body remains a measured issue record' "$(count)" 1
+if ISSUE_CENSUS='[[{"number":1}]]' ATTEMPT=2 OUTCOME=failure run_case; then
+  echo "Missing-body census accepted; signature issue count: $(count)" >&2
+  exit 1
+fi
+expect 'unknown issue body preserves the existing cause' "$(count)" 1
+absent 'issue (create|edit|comment|close|reopen)|run rerun'
+reset_issues
 for census in '[]' '{}' '[{}]' '[[],{"status":"502"}]' '[[{"number":1,"body":false}]]' '[[{"number":"1","body":""}]]'; do
   if ISSUE_CENSUS="$census" ATTEMPT=2 OUTCOME=failure run_case; then
     echo "Malformed issue census accepted: $census" >&2; exit 1

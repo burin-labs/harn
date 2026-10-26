@@ -67,7 +67,7 @@ read_api_json "repos/$GH_REPO/issues?state=open&per_page=100" paginated > "$scra
 jq '
   def positive_integer: type == "number" and . > 0 and floor == .;
   def issue_valid:
-    type == "object" and (.number | positive_integer)
+    type == "object" and (.number | positive_integer) and has("body")
     and (.body == null or (.body | type == "string"))
     and (.pull_request == null or (.pull_request | type == "object"));
   if type != "array" or length == 0 then error("missing issue pages") else . end
