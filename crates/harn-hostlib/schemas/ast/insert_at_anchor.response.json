@@ -95,7 +95,7 @@
           "line": { "type": "integer", "minimum": 1, "description": "1-based line of the container." },
           "kind": {
             "type": "string",
-            "enum": ["impl", "trait_impl", "trait", "class", "abstract_class", "interface", "enum", "record", "struct"]
+            "enum": ["impl", "trait_impl", "trait", "class", "abstract_class", "interface", "enum", "record", "struct", "object", "protocol", "module"]
           },
           "name": { "type": "string", "description": "The declared name; for an impl, the implementing type." }
         },
