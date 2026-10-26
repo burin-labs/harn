@@ -5,7 +5,7 @@ import { CompletionFacts, agent_completion_gate } from "std/agent/completion_gat
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { agent_session_finalize, agent_session_init } from "std/agent/state"
-import { llm_text, with_llm_script } from "std/testing"
+import { assert_error_contains, llm_text, with_llm_script } from "std/testing"
 
 const RESPONSE_REQUIREMENT = {
   requirements: [
@@ -50,6 +50,19 @@ fn check_goal_checkpoint(agent: HarnessAgent, captured: dict, store_root: string
 
 fn check_late_finalization_failure(agent: HarnessAgent, assessment: dict) {
   const session = agent_session_init(agent, "Answer the question.", nil, {provider: "mock"})
+  assert_error_contains(
+    fn() { agent_session_finalize(
+      agent,
+      session.session_id,
+      {
+        final_status: "done",
+        stop_reason: "natural",
+        iterations: 0,
+        completion_assessment: assessment + {gap_count: "invalid"},
+      },
+    ) },
+    "invalid completion assessment",
+  )
   const result = agent_session_finalize(
     agent,
     session.session_id,

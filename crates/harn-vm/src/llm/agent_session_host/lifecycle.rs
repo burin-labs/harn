@@ -471,6 +471,12 @@ pub(super) async fn host_agent_session_finalize(
         Some(run_id) => cancellation::AgentSessionFinalization::take_retry(&session_id, run_id)?,
         None => cancellation::AgentSessionFinalization::take(&session_id)?,
     };
+    let completion_assessment = super::goal_outcome::Assessment::read(opt_json(
+        finalization
+            .session_mut()
+            .finalization_status(&supplied_status),
+        "completion_assessment",
+    ))?;
     let (status_dict, mut finalization_stage) = finalization
         .session_mut()
         .begin_finalization(supplied_status);
@@ -479,8 +485,6 @@ pub(super) async fn host_agent_session_finalize(
     let mut terminal_error = opt_json(&status_dict, "error");
     let iterations = opt_int(&status_dict, "iterations").unwrap_or(0);
     let adaptive_budget = opt_json(&status_dict, "adaptive_budget");
-    let completion_assessment =
-        super::goal_outcome::Assessment::read(opt_json(&status_dict, "completion_assessment"))?;
 
     let session = finalization.session_mut();
 

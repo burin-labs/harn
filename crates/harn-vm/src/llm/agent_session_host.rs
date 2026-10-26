@@ -207,20 +207,28 @@ struct AgentHostSession {
 }
 
 impl AgentHostSession {
+    fn finalization_status<'a>(
+        &'a self,
+        supplied_status: &'a crate::value::DictMap,
+    ) -> &'a crate::value::DictMap {
+        self.pending_finalization
+            .as_ref()
+            .map(|pending| &pending.status)
+            .unwrap_or(supplied_status)
+    }
+
     fn begin_finalization(
         &mut self,
         supplied_status: crate::value::DictMap,
     ) -> (crate::value::DictMap, AgentFinalizationStage) {
-        match self.pending_finalization.as_ref() {
-            Some(pending) => (pending.status.clone(), pending.stage),
-            None => {
-                self.pending_finalization = Some(PendingAgentFinalization {
-                    status: supplied_status.clone(),
-                    stage: AgentFinalizationStage::Preparing,
-                });
-                (supplied_status, AgentFinalizationStage::Preparing)
-            }
-        }
+        let status = self.finalization_status(&supplied_status).clone();
+        let pending = self
+            .pending_finalization
+            .get_or_insert_with(|| PendingAgentFinalization {
+                status: status.clone(),
+                stage: AgentFinalizationStage::Preparing,
+            });
+        (status, pending.stage)
     }
 
     fn advance_finalization_to(&mut self, stage: AgentFinalizationStage) {
