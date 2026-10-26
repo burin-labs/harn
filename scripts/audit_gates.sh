@@ -327,6 +327,13 @@ fi
 audit_log="$(mktemp)"
 performance_log="$(mktemp)"
 conformance_log="$(mktemp)"
+worker_log_group_open=false
+end_worker_log_group() {
+  if [ "$worker_log_group_open" = true ]; then
+    echo '::endgroup::'
+    worker_log_group_open=false
+  fi
+}
 child_pids=()
 terminate_children() {
   local status="$1"
@@ -339,6 +346,7 @@ terminate_children() {
     [ -z "$pid" ] && continue
     wait "$pid" 2>/dev/null || true
   done
+  end_worker_log_group
   exit "$status"
 }
 forget_child() {
@@ -354,6 +362,11 @@ forget_child() {
 trap 'terminate_children 129' HUP
 trap 'terminate_children 130' INT
 trap 'terminate_children 143' TERM
+
+if [ "${GITHUB_ACTIONS:-false}" = true ]; then
+  echo '::group::Complete audit worker output'
+  worker_log_group_open=true
+fi
 
 audit_status=0
 audit_pid=""
@@ -511,15 +524,10 @@ if [ "$phase" != "audit" ] \
   fi
 fi
 
-# Say at the TAIL what failed, because the tail is where a reader looks.
-#
-# Conformance and the audit gates run in PARALLEL, so a failing gate prints its
-# `make: *** [target] Error N` minutes before this point and thousands of lines
-# above it. The tail then reads "ok: conformance" followed by a bare non-zero
-# exit — which is byte-identical to the documented sccache post-job flake
-# (ci.yml: "non-zero JOB exit (exit 2) AFTER every gate already passed"). A real
-# two-gate failure has been misread as that flake. A log that makes a real
-# failure look like a known flake is a defect even when every gate is correct.
+end_worker_log_group
+
+# Keep literal failure evidence outside the folded worker output. A bounded
+# excerpt is navigation, never a diagnosis or a substitute for the full log.
 failure_summary() {
   local failure_phase="$1"
   local log_path="${2:-$audit_log}"
@@ -536,23 +544,37 @@ failure_summary() {
     if [ -n "${names// /}" ]; then
       echo "failing gate(s): ${names}"
     fi
-    echo "The failing output is ABOVE, not at this tail."
-    if [ "$phase" = "all" ] && [ "$log_path" = "$audit_log" ]; then
-      echo "The audit gates run in parallel with conformance."
-    elif [ "$phase" = "all" ]; then
-      echo "This phase runs after conformance and the audit fanout."
+    awk '
+      /^[[:space:]]*(#[[:space:]]*Subtest:|ok [0-9])/ { remaining = 0 }
+      /(^|[[:space:]#])(not ok |Error( \[[^]]+\])?:|AssertionError|error:|error\[|FAIL:|FAILED[ :])/ {
+        remaining = 16
+        found = 1
+      }
+      remaining > 0 {
+        if (printed < 60) {
+          if (!printed) print "Reported failure context:"
+          print substr($0, 1, 600)
+          printed++
+        } else omitted = 1
+        remaining--
+      }
+      END {
+        if (!found) print "Cause unknown: no recognized test or error diagnostic was reported."
+        if (omitted) print "[Failure context truncated; inspect the complete log.]"
+      }
+    ' "$log_path"
+    echo "Next: inspect the reported failure and its surrounding output in the complete log."
+    if [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
+      echo "Full log: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} (Complete audit worker output)"
     else
-      echo "This worker runs independently of the other Harn proof worker."
+      echo "Full log: complete worker output above."
     fi
-    echo "Search this log for 'make: *** ' and 'FAIL:'."
-    if [ "$phase" = "all" ]; then
-      echo "'ok: conformance' near the tail does NOT mean this job passed."
-    fi
+    echo "Other passing gates do not change this failure."
   } >&2
 }
 
 if [ "$conformance_status" -ne 0 ]; then
-  failure_summary "conformance"
+  failure_summary "conformance" "$conformance_log"
   exit "$conformance_status"
 fi
 if [ "$audit_status" -ne 0 ] || [ "$script_test_status" -ne 0 ]; then
