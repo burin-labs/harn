@@ -20,3 +20,4 @@ cannot authorize widening a same-named member of another type.
 Custom derives and conditional macro attributes cannot supply an unseen type
 that authorizes widening. Built-in derives and conditional inert attributes
 retain the same lexical proof.
+Imported macros cannot borrow a built-in attribute's name to bypass that proof.
