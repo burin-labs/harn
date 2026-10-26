@@ -173,7 +173,9 @@ jobs:
     # work on a shared box to serve them is the trade this repository already
     # declined for its per-PR lanes.
     runs-on: >-
-      ${{ (needs.e2e-capacity.outputs.route == 'owned'
+      ${{ (github.event_name == 'workflow_dispatch'
+        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-namespace-proof-20261026"]'))
+        || (needs.e2e-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
         || 'ubuntu-24.04' }}
     # Read `!= 'false'` rather than `== 'true'`. A detector that failed, or
