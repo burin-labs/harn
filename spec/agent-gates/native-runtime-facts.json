@@ -44,6 +44,13 @@
   {
     "scope": "native-runner-option-helpers",
     "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+    "expression": "\"completion_assessment\"",
+    "owner": "opt_json",
+    "evidence": "The completion owner supplies its assessed receipt as terminal evidence. Native finalization validates its typed projection once and publishes the same goal outcome after final admission; this is not a caller policy setting."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
     "expression": "\"error\"",
     "owner": "opt_json",
     "evidence": "Terminal error is supplied by the runner result."
