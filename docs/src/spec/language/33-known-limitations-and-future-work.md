@@ -15,8 +15,6 @@ be addressed in future versions.
   at compile-time only. Passing an untyped value to an interface-typed
   parameter is not caught at runtime.
 
-### Runtime
-
 ### Syntax limitations
 
 - **No `impl Interface for Type` syntax**: Interface satisfaction is

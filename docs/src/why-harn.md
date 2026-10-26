@@ -43,7 +43,7 @@ const answer = harness.llm.call(
 )
 ```
 
-Harn ships with built-in configs for 44 providers, including Anthropic,
+Harn ships with built-in configs for every cataloged provider, including Anthropic,
 OpenAI, Google Gemini, OpenRouter, Groq, DeepSeek, Ollama, and local
 OpenAI-compatible servers. The
 [provider capability matrix](provider-matrix.md) has the full list. Switching

@@ -2237,7 +2237,7 @@ harness.llm.mock_clear()
 LLM provider endpoints, model aliases, inference rules, and default parameters
 are configured via a TOML file. The VM searches for config in this order:
 
-1. Built-in defaults for 44 providers, from hosted APIs (Anthropic, OpenAI,
+1. Built-in defaults for every cataloged provider, from hosted APIs (Anthropic, OpenAI,
    Gemini, Bedrock, Azure OpenAI, Vertex) to local servers (Ollama,
    llama.cpp, MLX, vLLM, TGI). See the
    [provider capability matrix](./provider-matrix.md).

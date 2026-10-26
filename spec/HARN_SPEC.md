@@ -8662,7 +8662,7 @@ The following environment variables configure runtime behavior:
 | Variable | Description |
 |---|---|
 | `HARN_LLM_PROVIDER` | Override the default LLM provider. Any configured provider is accepted. Built-in names include `anthropic` (default), `openai`, `openrouter`, `huggingface`, `ollama`, `local`, and `mock`. |
-| `HARN_LLM_TIMEOUT` | LLM request timeout in seconds. Default `120`. |
+| `HARN_LLM_TIMEOUT` | LLM request timeout in seconds. Default `120`, unless the model catalog sets `stream_timeout`. |
 | `HARN_LLM_FIRST_TOKEN_TIMEOUT` | Maximum seconds a provider stream may take to produce its first chunk. Defaults to four times `HARN_LLM_IDLE_TIMEOUT`, with a minimum of `120`. |
 | `HARN_LLM_IDLE_TIMEOUT` | Maximum seconds between provider stream chunks after streaming begins. Default `30`; `idle_timeout_ms` overrides it for an individual call. |
 | `HARN_STATE_DIR` | Override the runtime state root used for store, checkpoint, metadata, session-store, and default worktree state. Relative values resolve from the active project/runtime root. |
@@ -8731,8 +8731,6 @@ be addressed in future versions.
 - **No runtime interface enforcement**: Interface satisfaction is checked
   at compile-time only. Passing an untyped value to an interface-typed
   parameter is not caught at runtime.
-
-### Runtime
 
 ### Syntax limitations
 
