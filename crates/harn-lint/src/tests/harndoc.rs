@@ -320,11 +320,11 @@ fn helper() -> string {
 
 #[test]
 fn test_trailing_comment_above_item_is_not_migrated() {
-    let source = r#"const LIMIT = 3 // tuned by hand
+    let source = r"const LIMIT = 3 // tuned by hand
 pub fn exposed() -> int {
   return LIMIT
 }
-"#;
+";
     let diags = lint_source(source);
     assert!(
         !has_rule(&diags, "legacy-doc-comment"),
