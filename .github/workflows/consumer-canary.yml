@@ -320,6 +320,14 @@ jobs:
           CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
           CANARY_RUN_ID: ${{ steps.canary.outputs.run_id }}
         run: CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" node scripts/ci/consumer-observer-failure.mjs observation_interrupted
+      - name: Preserve the consumer observation checkpoint
+        if: always() && (steps.observe-1.outputs.checkpoint != '' || steps.observe-2.outputs.checkpoint != '' || steps.observe-3.outputs.checkpoint != '' || steps.observe-4.outputs.checkpoint != '')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: consumer-observer-checkpoint-${{ github.run_attempt }}-${{ needs.decide.outputs.source_revision }}
+          path: ${{ steps.observe-1.outputs.checkpoint || steps.observe-2.outputs.checkpoint || steps.observe-3.outputs.checkpoint || steps.observe-4.outputs.checkpoint }}
+          if-no-files-found: error
+          retention-days: 7
       - name: Preserve the measured observer failure
         if: always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '' || steps.observe-4.outputs.failure-receipt != '' || steps.interrupted.outputs.failure_receipt != '')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

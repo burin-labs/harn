@@ -54,6 +54,30 @@ Normalization rules:
   self-contained; downstream consumers consume the stable output tags rather
   than acting as a runtime dependency for detection.
 
+## Makefile declarations
+
+`harness.scanner.scan_project(...)` and the config tier of
+`harness.project.scan(...)` select the first default file in
+`makefile_filenames()`: `GNUmakefile`, `makefile`, then `Makefile`. They read
+literal target declarations without evaluating Make or expanding variables.
+Multi-target rules contribute each declared target; assignments and `define`
+bodies do not create targets. Test-shaped targets contribute their generated
+commands to the scanner's `test_commands` map. The config tier exposes all
+literal names in `makefile_targets` and build/test invocations in `build_commands`.
+
+`makefile_parse(text)` exposes the same parser to source-facing adapters. Each
+record has `name`, a shell-quoted `command`, `recipe_preview`, and
+`recipe_line_count`. The preview retains at most three lines of 512 characters
+each; the count includes all recipe lines. These are declared source facts,
+not evidence that a command ran or passed. Variable-generated targets and
+pattern rules are not resolved by this static parser.
+
+```harn
+const targets = makefile_parse("unit test:\n\t@echo checked\n")
+assert_eq(targets[1]?.command, "make test")
+assert_eq(targets[1]?.recipe_preview, ["echo checked"])
+```
+
 ## Context profiles
 
 `harness.project.context_profile(path?, options?)` turns project signals into the prompt,

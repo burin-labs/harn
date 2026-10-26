@@ -1,0 +1,137 @@
+type MakeCase = {
+  name: string,
+  files: dict<string, string>,
+  valid: bool,
+  unreadable_directory?: string,
+}
+
+pipeline test(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("makefile-commands-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const recipe = "test:\n\t@echo QUALITY_MAKE_REACHED\n"
+  const duplicate_recipe = "test test:\n\t@echo QUALITY_MAKE_REACHED\n\t@echo SECOND\n"
+  const cases: list<MakeCase> = [
+    {name: "ordinary", files: {Makefile: recipe}, valid: true},
+    {name: "duplicate-targets", files: {Makefile: duplicate_recipe}, valid: true},
+    {
+      name: "multiple-targets",
+      files: {Makefile: "unit test:\n\t@echo QUALITY_MAKE_REACHED\n"},
+      valid: true,
+    },
+    {
+      name: "variable-only",
+      files: {Makefile: "test := ignored\nall:\n\t@echo OTHER\n"},
+      valid: false,
+    },
+    {name: "gnu-makefile", files: {GNUmakefile: recipe}, valid: true},
+    {name: "lowercase-makefile", files: {makefile: recipe}, valid: true},
+    {
+      name: "unreadable-gnu-makefile",
+      files: {Makefile: recipe},
+      valid: false,
+      unreadable_directory: "GNUmakefile",
+    },
+    {
+      name: "unreadable-lowercase-makefile",
+      files: {Makefile: recipe},
+      valid: false,
+      unreadable_directory: "makefile",
+    },
+    {
+      name: "precedence",
+      files: {GNUmakefile: "all:\n\t@echo OTHER\n", Makefile: recipe},
+      valid: false,
+    },
+    {
+      name: "lowercase-precedence",
+      files: {makefile: "all:\n\t@echo OTHER\n", Makefile: recipe},
+      valid: false,
+    },
+    {
+      name: "double-colon-variable",
+      files: {Makefile: "test::=ignored\nall:\n\t@echo OTHER\n"},
+      valid: false,
+    },
+    {name: "target-variable", files: {Makefile: "test: VALUE = ignored\n"}, valid: false},
+    {
+      name: "define-body",
+      files: {
+        Makefile:
+          "define hidden\ntest:\n\t@echo QUALITY_MAKE_REACHED\nendef\nall:\n\t@echo OTHER\n",
+      },
+      valid: false,
+    },
+  ]
+  assert_eq(makefile_filenames(), ["GNUmakefile", "makefile", "Makefile"])
+  for item in cases {
+    const dir = path_join(root, item.name)
+    harness.fs.mkdir(dir)
+    harness.fs.write_text(path_join(dir, "index.js"), "export const KNOWN_SCANNER_INPUT = true;\n")
+    for (file, content) in item.files.iter() {
+      harness.fs.write_text(path_join(dir, file), content)
+    }
+    if item.unreadable_directory != nil {
+      const unreadable = path_join(dir, item.unreadable_directory)
+      harness.fs.mkdir(unreadable)
+      assert(harness.fs.stat(unreadable).is_dir)
+      assert(
+        is_err(
+          try {
+            harness.fs.read_text(unreadable)
+          },
+        ),
+        "the preferred Makefile must exist and fail a content read",
+      )
+    }
+    const scanned = harness.scanner.scan_project({root: dir, include_git_history: false})
+    assert(len(scanned.files) > 0, "each scanner call must reach the known source file")
+    const executed = harness.process.exec("make", "--no-print-directory", "-C", dir, "test")
+    assert_eq(executed.success, item.valid, "GNU make must confirm the fixture's target semantics")
+    assert_eq(contains(executed.stdout, "QUALITY_MAKE_REACHED"), item.valid)
+    const commands = keys(scanned.project.test_commands)
+    assert_eq(commands, item.valid ? ["make test"] : [], "scanner must agree with actual Make")
+    const configured = harness.project.scan(dir, {tiers: ["config"]})
+    assert_eq(configured.makefile_targets.contains("test"), item.valid)
+    assert_eq(configured.build_commands.contains("make test"), item.valid)
+  }
+  for literal in [true, false] {
+    const dir = path_join(root, literal ? "literal-percent" : "pattern-percent")
+    harness.fs.mkdir(dir)
+    harness.fs.write_text(path_join(dir, "index.js"), "export const KNOWN_SCANNER_INPUT = true;\n")
+    const declaration = literal ? "test\\%" : "test%"
+    const source = "${declaration}:\n\t@echo QUALITY_MAKE_REACHED\n"
+    harness.fs.write_text(path_join(dir, "Makefile"), source)
+    const executed = harness.process.exec("make", "--no-print-directory", "-C", dir, "test%")
+    assert(executed.success)
+    assert(contains(executed.stdout, "QUALITY_MAKE_REACHED"))
+    const parsed_targets = makefile_parse(source)
+    assert_eq(parsed_targets.map({ target -> target.name }).to_list(), literal ? ["test%"] : [])
+    assert_eq(
+      parsed_targets.map({ target -> target.command }).to_list(),
+      literal ? ["make 'test%'"] : [],
+    )
+    const scanned = harness.scanner.scan_project({root: dir, include_git_history: false})
+    assert(len(scanned.files) > 0)
+    assert_eq(keys(scanned.project.test_commands), literal ? ["make 'test%'"] : [])
+    const configured = harness.project.scan(dir, {tiers: ["config"]})
+    assert_eq(configured.makefile_targets.contains("test%"), literal)
+    assert(!configured.build_commands.contains("make 'test%'"))
+  }
+  const parsed = makefile_parse(
+    "unit test:\n\t@echo one\n\t-echo two\n\t+echo three\n\techo four\n",
+  )
+  const duplicate = makefile_parse(duplicate_recipe)
+  assert_eq(len(duplicate), 1)
+  assert_eq(duplicate[0]?.recipe_line_count, 2)
+  assert_eq(duplicate[0]?.recipe_preview, ["echo QUALITY_MAKE_REACHED", "echo SECOND"])
+  assert_eq(parsed.map({ target -> target.name }).to_list(), ["unit", "test"])
+  for target in parsed {
+    assert_eq(target.command, "make ${target.name}")
+    assert_eq(target.recipe_preview, ["echo one", "echo two", "echo three"])
+    assert_eq(target.recipe_line_count, 4)
+  }
+  assert_eq(makefile_parse("test\\ target:\n\t@echo marker\n")[0]?.command, "make 'test target'")
+  harness.stdio.println("Make discovery agrees with actual recipes and typed target facts")
+}

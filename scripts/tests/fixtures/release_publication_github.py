@@ -34,11 +34,17 @@ assets = []
 for ordinal, target in enumerate(targets, 1):
     name = f"harn-{target}" + (".zip" if target == "x86_64-pc-windows-msvc" else ".tar.xz")
     digest = hashlib.sha256(target.encode()).hexdigest()
-    index["assets"][target] = {"filename": name, "sha256": digest, "size": 100 + ordinal,
+    size = 100 + ordinal
+    runtime_archive = os.environ.get("PUBLICATION_RUNTIME_ARCHIVE")
+    if runtime_archive and target == "x86_64-unknown-linux-gnu":
+        payload = Path(runtime_archive).read_bytes()
+        digest = hashlib.sha256(payload).hexdigest()
+        size = len(payload)
+    index["assets"][target] = {"filename": name, "sha256": digest, "size": size,
                                "url": f"{base}/releases/download/{tag}/{name}"}
     archives.append({"kind": "archive", "target": target, "artifact": f"harn-{target}",
                      "file": name, "sha256": digest, "attestationPredicateType": predicate})
-    assets.append({"id": ordinal, "name": name, "size": 100 + ordinal, "state": "uploaded", "uploader": publisher,
+    assets.append({"id": ordinal, "name": name, "size": size, "state": "uploaded", "uploader": publisher,
                    "digest": f"sha256:{digest}"})
 if case == "incomplete-index":
     del index["assets"][targets[0]]

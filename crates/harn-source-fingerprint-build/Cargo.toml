@@ -9,7 +9,7 @@ homepage.workspace = true
 description = "Crate-local source collection for Harn compiler and check fingerprints"
 
 [dependencies]
-harn-source-fingerprint = { path = "../harn-source-fingerprint", version = "=0.10.181-dev" }
+harn-source-fingerprint = { path = "../harn-source-fingerprint", version = "=0.10.181" }
 sha2 = "0.11"
 
 [dev-dependencies]

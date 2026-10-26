@@ -35,6 +35,9 @@ inputs:
     default: ''
     description: Prior authenticated promotion when reusing a completed rehearsal
 outputs:
+  checkpoint:
+    description: Original run, deadline, measured timing or unknown, and next recovery action
+    value: ${{ steps.observe.outputs.checkpoint }}
   failure-receipt:
     description: Closed failure descriptor with queue counts and numeric run identities
     value: ${{ steps.observe.outputs.failure_receipt }}
@@ -71,5 +74,6 @@ runs:
         OBSERVER_CONTEXT: ${{ inputs.observer-context }}
         REHEARSAL_PROMOTION_RUN_ID: ${{ inputs.rehearsal-promotion-run-id }}
         CANARY_WINDOW_SECONDS: '2700'
+        CANARY_CHECKPOINT_FILE: ${{ runner.temp }}/consumer-observer-checkpoint-${{ inputs.run-id }}.json
         CANARY_DEADLINE_SECONDS: ${{ inputs.observer-context != '' && '9900' || '7200' }}
       run: CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" bash scripts/ci/consumer_canary.sh --observe

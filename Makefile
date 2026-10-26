@@ -773,6 +773,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/release_ship_root_harn_bin_test.sh
 	./scripts/tests/release_ship_tag_selector_test.sh
 	./scripts/tests/release_tag_main_ancestry_test.sh
+	bash ./scripts/tests/published_harn_runtime_test.sh
 	./scripts/tests/candidate_manifest_test.sh
 	./scripts/tests/release_promotion_plan_test.sh
 	bash ./scripts/tests/release_promotion_source_test.sh

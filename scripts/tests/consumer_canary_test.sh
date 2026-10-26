@@ -50,8 +50,9 @@ if(process.argv[1]?.endsWith('/consumer-observer-failure.mjs')){
   globalThis.fetch=async()=>({ok:true,json:async()=>({total_count:1,workflow_runs:[{id:99,run_attempt:1,status:'queued'}]})});
 }
 if(process.argv[1]?.endsWith('/consumer-observer-budget.mjs')&&!process.argv.includes('--policy')){
-  const {admitChild,observerDeclarationName,observerRunName,observerDispatchActor}=await import(
+  const {admitChild,observerDeclarationName,observerRunName,observerDispatchActor,readRetry}=await import(
     pathToFileURL(process.env.CANARY_TEST_ROOT+'/scripts/lib/consumer-observer.mjs'));
+  readRetry.backoffMs=0;
   const context=JSON.parse(process.env.OBSERVER_CONTEXT);
   const nowFile=path.join(process.env.STUB,'now');
   if(fs.existsSync(nowFile))Date.now=()=>Number(fs.readFileSync(nowFile,'utf8'))*1000;
@@ -89,6 +90,11 @@ if(process.argv[1]?.endsWith('/consumer-observer-budget.mjs')&&!process.argv.inc
     runner_id:queued?0:1,runner_name:queued?'':'fixture-worker',steps:queued?[]:[
       {status:status==='completed'?'completed':'in_progress',conclusion:null,started_at:iso(start)}]};
   globalThis.fetch=async(url,options={})=>{
+    const faultFile=path.join(process.env.STUB,'budget-faults');
+    if(fs.existsSync(faultFile)){
+      const faults=Number(fs.readFileSync(faultFile,'utf8'));
+      if(faults>0){fs.writeFileSync(faultFile,String(faults-1));throw new Error('private widget-host read timeout');}
+    }
     if(options.method&&options.method!=='GET')throw new Error('unexpected-budget-write');
     const p=new URL(url).pathname;
     if(p.endsWith('/'+parent.id+'/attempts/'+parent.run_attempt))return {ok:true,json:async()=>parent};
@@ -559,6 +565,15 @@ cat > "$scratch/bin/date" <<'EOF'
 if [[ "$*" == +%s ]]; then cat "$STUB/now"; else /bin/date "$@"; fi
 EOF
 chmod +x "$scratch/bin/date"
+cat > "$scratch/bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+read -r now < "$STUB/now"
+printf '%s\n' "$((now + $1))" > "$STUB/now"
+if (( $1 > 0 )) && [[ -f "$STUB/complete-after-read-wait" ]]; then
+  echo 'completed success' > "$STUB/run"
+fi
+EOF
+chmod +x "$scratch/bin/sleep"
 echo 1000 > "$scratch/now"
 OBSERVER_CONTEXT=$(jq -c '.started_at=1000' <<< "$OBSERVER_CONTEXT")
 echo "$run_url" > "$scratch/dispatch"
@@ -575,7 +590,7 @@ grep -qx 'CONSUMER_CANARY dispatched run=42 ref=default started_at=1000' "$scrat
 observe() {
   : > "$scratch/gho"
   PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host \
-    CANARY_WORKFLOW=rehearsal.yml CANARY_RUN_ID=42 CANARY_STARTED_AT=1000 CANARY_WINDOW_SECONDS=0 \
+    CANARY_WORKFLOW=rehearsal.yml CANARY_RUN_ID=42 CANARY_STARTED_AT=1000 CANARY_WINDOW_SECONDS="${CANARY_TEST_WINDOW_SECONDS:-0}" \
     CANARY_POLL_SECONDS=0 GH_TOKEN="$1" GITHUB_OUTPUT="$scratch/gho" \
     bash "$root/scripts/ci/consumer_canary.sh" --observe > "$scratch/out" 2>&1
 }
@@ -583,6 +598,53 @@ echo 'in_progress none' > "$scratch/run"
 observe fixture-fresh
 grep -q 'pending run=42' "$scratch/out"
 [[ ! -s "$scratch/gho" ]]
+
+# Four refused status reads retain the original child, back off, and reach its
+# terminal success without a second dispatch or resetting the deadline.
+printf '503\n503\n503\n503\n' > "$scratch/faults"
+touch "$scratch/complete-after-read-wait"
+CANARY_CHECKPOINT_FILE="$scratch/checkpoint.json" CANARY_TEST_WINDOW_SECONDS=60 observe fixture-fresh
+grep -q 'retry=api_unavailable run=42 wait_seconds=5 next_action=retry_same_run' "$scratch/out"
+grep -qx verdict=pass "$scratch/gho"
+jq -e '.schema == "harn.consumer_observer.checkpoint.v1" and .state == "pass"
+  and .run_id == "42" and .started_at == 1000 and .deadline_at == 10900
+  and .timing.owned == 1 and .next_action == "none"' "$scratch/checkpoint.json" >/dev/null
+[[ $(wc -l < "$scratch/dispatch-count") -eq 1 ]]
+
+# The authenticated Node reader can lose transport too. Its closed retry
+# classification follows the same bounded shell recovery without leaking URLs.
+echo 1000 > "$scratch/now"
+echo 'in_progress none' > "$scratch/run"
+echo 4 > "$scratch/budget-faults"
+CANARY_TEST_WINDOW_SECONDS=60 observe fixture-fresh
+grep -q 'retry=github_read_unavailable run=42 wait_seconds=5' "$scratch/out"
+grep -qx verdict=pass "$scratch/gho"
+if grep -qE 'widget-host|private|https://' "$scratch/out"; then
+  echo 'transport failure leaked private input' >&2; exit 1
+fi
+rm "$scratch/complete-after-read-wait"
+
+# An exhausted read window renews the same run with an explicit unknown census.
+echo 1000 > "$scratch/now"
+echo 'in_progress none' > "$scratch/run"
+printf '503\n503\n503\n503\n' > "$scratch/faults"
+CANARY_CHECKPOINT_FILE="$scratch/checkpoint.json" observe fixture-fresh
+jq -e '.state == "pending" and .next_action == "renew_same_run"
+  and .timing == null and .run_id == "42" and .deadline_at == 10900' "$scratch/checkpoint.json" >/dev/null
+assert_no_verdict
+
+# Retry-After survives authority renewal through the checkpoint. A new window
+# waits on the same run without re-reading a still-limited API or resetting time.
+printf '429 Retry-After=3600\n' > "$scratch/faults"
+CANARY_CHECKPOINT_FILE="$scratch/checkpoint.json" observe fixture-fresh
+jq -e '.read_not_before == 4600 and .next_action == "renew_same_run"' "$scratch/checkpoint.json" >/dev/null
+faults_before=$(wc -l < "$scratch/fault-count")
+CANARY_CHECKPOINT_FILE="$scratch/checkpoint.json" CANARY_TEST_WINDOW_SECONDS=60 observe fixture-fresh
+[[ $(wc -l < "$scratch/fault-count") -eq "$faults_before" ]]
+jq -e '.observed_at == 1060 and .read_not_before == 4600
+  and .started_at == 1000 and .deadline_at == 10900 and .timing == null' "$scratch/checkpoint.json" >/dev/null
+rm "$scratch/checkpoint.json"
+echo 1000 > "$scratch/now"
 
 # A paired pull closing while its observer is live retires the parent; its
 # authenticated completion listener owns cancellation of the exact child.

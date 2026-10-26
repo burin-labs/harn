@@ -1,0 +1,85 @@
+import { publish_recover } from "./publish.harn"
+import { publish_metadata_with_manifest_dependencies } from "./publish_manifest.harn"
+import {
+  publish_plan_order,
+  publish_plan_packages_from_metadata,
+  publish_plan_version,
+} from "./publish_plan.harn"
+
+fn main(harness: Harness) {
+  require len(argv) == 2,
+    "usage: verify_publish_workspace_plan.harn <cargo-metadata.json> <version>"
+  const packages = publish_plan_packages_from_metadata(
+    publish_metadata_with_manifest_dependencies(
+      harness.fs,
+      json_parse(harness.fs.read_text(argv[0])),
+    ),
+  )
+  require publish_plan_version(packages) == argv[1], "publication plan selected a different version"
+  const order = publish_plan_order(packages)
+  if argv[1] == "0.10.180" {
+    let frozen_seen: list<string> = []
+    for name in order {
+      if name == "harn-builtin-macros" {
+        require frozen_seen.contains("harn-builtin-registry"),
+          "frozen Cargo package requires builtin-registry before builtin-macros"
+      }
+      frozen_seen = frozen_seen + [name]
+    }
+    const accepted = [
+      "harn-aws-config",
+      "harn-source-fingerprint",
+      "harn-source-fingerprint-build",
+      "harn-builtin-meta",
+    ]
+    require order[0:4] == accepted, "frozen publication checkpoint prefix changed"
+    const writes = harness.runtime.atomic(0)
+    const receipt = publish_recover(
+      packages,
+      {
+        probe: { name, version ->
+          require version == "0.10.180", "resume probe selected another version"
+          const visible = order[0:4 + harness.runtime.atomic_get(writes)].contains(name)
+          return {
+            status: if visible {
+              "visible"
+            } else {
+              "missing"
+            },
+          }
+        },
+        publish: { package ->
+          const count = harness.runtime.atomic_get(writes)
+          require !accepted.contains(package.name), "resume attempted a duplicate accepted write"
+          if count == 0 {
+            require package.name == "harn-builtin-registry", "first new write must publish registry"
+          }
+          require package.name == order[4 + count], "resume changed package order"
+          harness.runtime.atomic_add(writes, 1)
+          return {success: true}
+        },
+        wait: { _delay ->
+          throw "visible checkpoint resume must not wait"
+        },
+      },
+    )
+    require receipt.ok && receipt.already_present == accepted
+      && len(receipt.published) == 46
+      && harness.runtime.atomic_get(writes) == 46,
+      "frozen checkpoint did not resume all remaining packages exactly once"
+  }
+  require len(order) == len(packages) && len(order) > 0, "publication plan is incomplete"
+  let seen: list<string> = []
+  for name in order {
+    require !seen.contains(name), "publication plan repeats " + name
+    const package = packages.filter({ candidate -> candidate.name == name }).to_list()[0]
+    for dep in package.deps {
+      require seen.contains(dep), "publication plan orders " + name + " before " + dep
+    }
+    seen = seen + [name]
+  }
+  harness.stdio.println(
+    "PASS: publication plan orders all " + to_string(len(order)) + " workspace crates at "
+      + argv[1],
+  )
+}
