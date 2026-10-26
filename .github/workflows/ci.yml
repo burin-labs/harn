@@ -2652,8 +2652,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.vscode == 'true'
     # The LSP test launches the shared CLI as harn-lsp. Rust changes require
-    # this run's verified artifact; editor-only changes use the published
-    # workspace version because the native server did not change.
+    # this run's verified artifact; editor-only changes use the repository's
+    # published bootstrap runtime pin because the native server did not change.
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     permissions:
@@ -2689,23 +2689,12 @@ jobs:
           "$RUNNER_TEMP/harn-cli"
           "$GITHUB_SHA"
           "$GITHUB_ENV"
-      - name: Resolve the published workspace version
-        if: needs.changes.outputs.rust != 'true'
-        id: harn-version
-        shell: bash
-        run: |
-          set -euo pipefail
-          source scripts/lib/release_version.sh
-          workspace_version="$(cargo metadata --locked --no-deps --format-version 1 \
-            | jq -er '[.packages[] | select(.name == "harn-cli") | .version] | unique | if length == 1 then .[0] else error("expected one harn-cli version") end')"
-          version="$(release_published_version_for_workspace "$workspace_version")"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Install pinned Harn release
         if: needs.changes.outputs.rust != 'true'
         id: harn
         uses: ./.github/actions/setup-harn
         with:
-          version: ${{ steps.harn-version.outputs.version }}
+          version-file: .harn-bootstrap-version
       - run: npm test
         working-directory: editors/vscode
         env:
@@ -2760,23 +2749,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Resolve the published workspace version
-        id: harn-version
-        shell: bash
-        run: |
-          source scripts/lib/release_version.sh
-          workspace_version="$(cargo metadata --locked --no-deps --format-version 1 \
-            | jq -er '[.packages[] | select(.name == "harn-cli") | .version] | unique | if length == 1 then .[0] else error("expected one harn-cli version") end')"
-          version="$(release_published_version_for_workspace "$workspace_version")" || {
-            echo "::error::Workspace version $workspace_version has no stable published projection"
-            exit 1
-          }
-          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Install pinned Harn release
         id: harn
         uses: ./.github/actions/setup-harn
         with:
-          version: ${{ steps.harn-version.outputs.version }}
+          version-file: .harn-bootstrap-version
       - name: Check documentation contracts
         env:
           HARN_BIN: ${{ steps.harn.outputs.path }}

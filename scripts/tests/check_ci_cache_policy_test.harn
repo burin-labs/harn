@@ -50,6 +50,22 @@ import "./ci_cache_policy/policy_integration_test.harn"
 
 type PathFilters = dict<string, list<string>>
 
+@test
+pipeline test_portable_consumers_use_the_published_runtime_pin(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  for job in ["docs-checks", "vscode"] {
+    let found = 0
+    for step in ci.jobs[job].steps {
+      if step?.uses == "./.github/actions/setup-harn" {
+        found += 1
+        assert_eq(step.with?.version, nil)
+        assert_eq(step.with?.["version-file"], ".harn-bootstrap-version")
+      }
+    }
+    assert_eq(found, 1)
+  }
+}
+
 /** ci-status checks out its verdict script first, so address the aggregate by name. */
 fn aggregate_index(workflow: dict) -> int {
   for {index, value: step} in workflow.jobs["ci-status"].steps.enumerate() {
