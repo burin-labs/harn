@@ -8,6 +8,8 @@
 //! `ensure_initialised` does not start a second full walk while the warm is
 //! still running. Once the slot is live, a later
 //! sync rebuild still re-walks disk — join only applies to an in-flight build.
+//! A sync rebuild into an empty slot restores the root's snapshot first, the
+//! same way the warm does, and walks the whole tree only when none is usable.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
@@ -115,6 +117,13 @@ impl WarmCoordinator {
                 .is_some_and(|inflight| inflight == &canonical)
         });
         drop(guard);
+    }
+
+    pub(super) fn is_idle(&self) -> bool {
+        self.state
+            .lock()
+            .expect("warm coordinator poisoned")
+            .is_idle()
     }
 
     pub(super) fn wait_until_idle(&self) {
@@ -323,7 +332,7 @@ impl CodeIndexCapability {
                 lower_to_background_priority();
                 let started = Instant::now();
                 match super::restore_shared(&index, resolver.as_ref(), &thread_root) {
-                    Ok(super::Restored::Published { needs_persist }) => {
+                    Ok(super::Restored::Published { needs_persist, .. }) => {
                         tracing::info!(
                             target: "harn_hostlib::code_index",
                             root = %thread_root.display(),
@@ -508,6 +517,69 @@ fn refresh_in_place(
     ))
 }
 
+/// Publish `canonical`'s on-disk snapshot, reconciled against disk, and
+/// return the rebuild stats for it.
+///
+/// Returns `None` when there is no usable snapshot: none on disk, one for
+/// another root or format version, or one that fails to decode. The caller
+/// then takes the full build path. The caller must own the rebuild flight.
+fn restore_for_rebuild(
+    index: &SharedIndex,
+    warm: &Arc<WarmCoordinator>,
+    resolver: Option<&HarnReferenceResolver>,
+    canonical: &Path,
+    started: Instant,
+) -> Option<VmValue> {
+    let (needs_persist, outcome, files_indexed) =
+        match super::restore_shared(index, resolver, canonical) {
+            Ok(super::Restored::Published {
+                needs_persist,
+                outcome,
+                files_indexed,
+            }) => (needs_persist, outcome, files_indexed),
+            Ok(super::Restored::Absent) => return None,
+            Err(error) => {
+                tracing::debug!(
+                    target: "harn_hostlib::code_index",
+                    %error,
+                    root = %canonical.display(),
+                    "code-index snapshot restore failed; falling back to rebuild",
+                );
+                return None;
+            }
+        };
+    if needs_persist {
+        // Counted before the caller ends the flight, so `wait_until_idle`
+        // still covers the write.
+        warm.persist_in_background(index.clone());
+    }
+    let elapsed_ms = started.elapsed().as_millis() as i64;
+    tracing::info!(
+        target: "harn_hostlib::code_index",
+        root = %canonical.display(),
+        files_indexed,
+        files_reindexed = outcome.files_reindexed,
+        elapsed_ms,
+        "code-index rebuild restored snapshot",
+    );
+    Some(build_dict([
+        ("mode", str_value("restored")),
+        ("files_indexed", VmValue::Int(files_indexed as i64)),
+        ("files_skipped", VmValue::Int(outcome.files_skipped as i64)),
+        (
+            "files_reindexed",
+            VmValue::Int(outcome.files_reindexed as i64),
+        ),
+        (
+            "files_unchanged",
+            VmValue::Int(outcome.files_unchanged as i64),
+        ),
+        ("files_added", VmValue::Int(outcome.files_added as i64)),
+        ("files_removed", VmValue::Int(outcome.files_removed as i64)),
+        ("elapsed_ms", VmValue::Int(elapsed_ms)),
+    ]))
+}
+
 /// Rebuild that joins any in-flight session warm for the same root.
 pub(super) fn run_rebuild_single_flight(
     index: &SharedIndex,
@@ -578,6 +650,13 @@ pub(super) fn run_rebuild_single_flight(
                         );
                     }
                 }
+                return Ok(stats);
+            }
+            // A slot that is empty or anchored elsewhere starts from this
+            // root's snapshot when one is valid, so a new process pays a
+            // load and a stat walk instead of a full parse.
+            if let Some(stats) = restore_for_rebuild(index, warm, resolver, &canonical, started) {
+                drop(flight);
                 return Ok(stats);
             }
         }
@@ -899,5 +978,157 @@ mod tests {
         let shared = cap.shared();
         let guard = shared.lock().unwrap();
         assert_eq!(guard.as_ref().map(|s| s.files.len()), Some(3));
+    }
+
+    /// Rebuild through the builtin path, checked against its response schema.
+    fn schema_checked_rebuild(cap: &CodeIndexCapability, root: &Path) -> VmValue {
+        let out = run_rebuild_single_flight(&cap.shared(), &cap.warm, None, &[root_arg(root)])
+            .expect("rebuild");
+        crate::schemas::validate_response(
+            super::super::builtins::BUILTIN_REBUILD,
+            "code_index",
+            "rebuild",
+            out,
+        )
+        .expect("rebuild response matches its schema")
+    }
+
+    fn get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
+        let VmValue::Dict(dict) = value else {
+            panic!("expected dict, got {value:?}");
+        };
+        dict.get(&harn_vm::value::intern_key(key))
+            .unwrap_or_else(|| panic!("missing `{key}` in {value:?}"))
+    }
+
+    fn int(value: &VmValue, key: &str) -> i64 {
+        match get(value, key) {
+            VmValue::Int(n) => *n,
+            other => panic!("expected int at `{key}`, got {other:?}"),
+        }
+    }
+
+    fn string(value: &VmValue, key: &str) -> String {
+        match get(value, key) {
+            VmValue::String(s) => s.to_string(),
+            other => panic!("expected string at `{key}`, got {other:?}"),
+        }
+    }
+
+    /// A new process over a tree a previous process indexed starts from the
+    /// snapshot that process left, rather than walking and parsing again.
+    #[test]
+    fn a_new_process_rebuild_restores_the_snapshot_instead_of_walking() {
+        let dir = fixture_tree();
+        let writer = CodeIndexCapability::new();
+        let first = schema_checked_rebuild(&writer, dir.path());
+        assert_eq!(string(&first, "mode"), "built");
+        writer.wait_until_idle();
+        assert!(CodeIndexSnapshot::path_for(dir.path()).exists());
+
+        let reader = CodeIndexCapability::new();
+        let restored = schema_checked_rebuild(&reader, dir.path());
+        assert_eq!(string(&restored, "mode"), "restored");
+        assert_eq!(int(&restored, "files_indexed"), 2);
+        assert_eq!(
+            int(&restored, "files_reindexed"),
+            0,
+            "a restore of an unchanged tree must not read a single file"
+        );
+        assert_eq!(int(&restored, "files_unchanged"), 2);
+
+        // A file written while no process was running is still picked up.
+        fs::write(
+            dir.path().join("src/gamma.rs"),
+            "pub fn gamma() -> i32 { 3 }\n",
+        )
+        .unwrap();
+        let next = CodeIndexCapability::new();
+        let reconciled = schema_checked_rebuild(&next, dir.path());
+        assert_eq!(string(&reconciled, "mode"), "restored");
+        assert_eq!(int(&reconciled, "files_added"), 1);
+        assert_eq!(int(&reconciled, "files_indexed"), 3);
+        next.wait_until_idle();
+    }
+
+    /// Only a snapshot that describes this root, in this format, and decodes
+    /// cleanly is restored. Anything else falls back to the full build.
+    #[test]
+    fn a_snapshot_that_does_not_describe_the_root_is_rebuilt() {
+        let other = fixture_tree();
+        let other_writer = CodeIndexCapability::new();
+        schema_checked_rebuild(&other_writer, other.path());
+        other_writer.wait_until_idle();
+        let other_bytes = fs::read(CodeIndexSnapshot::path_for(other.path())).unwrap();
+
+        type Mangle = fn(Vec<u8>, &[u8]) -> Vec<u8>;
+        let cases: [(&str, Mangle); 3] = [
+            ("another root's snapshot", |_, other| other.to_vec()),
+            ("another format version", |mut own, _| {
+                own[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
+                own
+            }),
+            ("a truncated snapshot", |mut own, _| {
+                own.truncate(own.len() / 2);
+                own
+            }),
+        ];
+        for (label, mangle) in cases {
+            let dir = fixture_tree();
+            let writer = CodeIndexCapability::new();
+            schema_checked_rebuild(&writer, dir.path());
+            writer.wait_until_idle();
+            let path = CodeIndexSnapshot::path_for(dir.path());
+            let own = fs::read(&path).unwrap();
+            fs::write(&path, mangle(own, &other_bytes)).unwrap();
+
+            let reader = CodeIndexCapability::new();
+            let out = schema_checked_rebuild(&reader, dir.path());
+            assert_eq!(string(&out, "mode"), "built", "{label}");
+            assert_eq!(int(&out, "files_reindexed"), 2, "{label}");
+            let guard = reader.index.lock().unwrap();
+            assert_eq!(
+                guard.as_ref().map(|state| state.root.clone()),
+                Some(canonicalize(dir.path())),
+                "{label}"
+            );
+        }
+    }
+
+    fn schema_checked_status(cap: &CodeIndexCapability) -> VmValue {
+        let out = super::super::builtins::run_status(&cap.shared(), &[]).expect("status");
+        crate::schemas::validate_response(
+            super::super::builtins::BUILTIN_STATUS,
+            "code_index",
+            "status",
+            out,
+        )
+        .expect("status response matches its schema")
+    }
+
+    /// A caller can tell an index for its own root from one for another root
+    /// or from no index at all.
+    #[test]
+    fn status_reports_the_root_the_live_index_belongs_to() {
+        let cap = CodeIndexCapability::new();
+        assert!(matches!(
+            get(&schema_checked_status(&cap), "root"),
+            VmValue::Nil
+        ));
+
+        let dir = fixture_tree();
+        schema_checked_rebuild(&cap, dir.path());
+        assert_eq!(
+            string(&schema_checked_status(&cap), "root"),
+            crate::tools::args::to_agent_path(canonicalize(dir.path()))
+        );
+
+        let other = fixture_tree();
+        schema_checked_rebuild(&cap, other.path());
+        assert_eq!(
+            string(&schema_checked_status(&cap), "root"),
+            crate::tools::args::to_agent_path(canonicalize(other.path()))
+        );
+        cap.wait_until_idle();
     }
 }

@@ -34,6 +34,27 @@
     "verdict": "KEEP-with-expiry"
   },
   {
+    "default": "false",
+    "evidence": "Source wiring for opt-in completed-dispatch content recurrence; declared deterministic fixtures exercise revisits, failure exclusions, retention, and checkpoint compaction/replay. Execution and downstream reachability are not inferred.",
+    "expiry": "2026-11-23",
+    "kind": "boolean option",
+    "layer": "stall handler",
+    "name": "AgentStallConfig.edit_oscillation",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+        "reader": "__agent_stall_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+        "reader": "agent_stall_observe_completed_dispatch"
+      }
+    ],
+    "reason": "Keep content recurrence opt-in and advisory because intentional reverts can revisit agent-produced states; evaluate host adoption before changing defaults.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "false when absent; object form enabled defaults true",
     "evidence": "Static declaration/read only; downstream headless binding not observed.",
     "expiry": "2026-09-13",

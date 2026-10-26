@@ -380,6 +380,54 @@ fn acp_cli_read_only_root_grants_exact_external_asset_reads() {
     granted.shutdown_expect_success();
 }
 
+/// Opening a session starts the code-index warm for its workspace, so the
+/// first prompt's rebuild joins or refreshes that index instead of walking
+/// the tree itself. The opt-out leaves the first rebuild cold.
+#[test]
+fn acp_cli_session_new_warms_the_code_index_unless_opted_out() {
+    let _guard = lock_acp_cli_tests();
+    for opted_out in [false, true] {
+        let temp = TempDir::new().unwrap();
+        let workspace = temp.path().canonicalize().unwrap();
+        write_file(&workspace, "src/lib.rs", "pub fn warmed() -> i32 { 1 }\n");
+        write_file(
+            &workspace,
+            "agent.harn",
+            &format!(
+                "pub pipeline main(harness: Harness) {{\n\
+                 const out = harness.code_index.rebuild({{root: {}}})\n\
+                 harness.stdio.println(json_stringify({{mode: out.mode}}))\n\
+                 }}\n",
+                serde_json::to_string(&workspace).unwrap(),
+            ),
+        );
+        let mut command = harn_e2e_command();
+        command
+            .current_dir(&workspace)
+            .args(["serve", "acp", "agent.harn"]);
+        if opted_out {
+            command.env("HARN_DISABLE_CODE_INDEX_WARM", "1");
+        } else {
+            command.env_remove("HARN_DISABLE_CODE_INDEX_WARM");
+        }
+        let mut client = StdioJsonRpcClient::spawn("harn serve acp", command);
+        let (updates, response) = prompt_once(&mut client, &workspace);
+        assert_eq!(response["result"]["stopReason"], "end_turn", "{response:#}");
+        let message = updates
+            .iter()
+            .find_map(|update| {
+                (update["params"]["update"]["sessionUpdate"] == "agent_message_chunk")
+                    .then(|| update["params"]["update"]["content"]["text"].as_str())
+                    .flatten()
+            })
+            .expect("rebuild receipt");
+        let receipt: JsonValue = serde_json::from_str(message.trim()).unwrap();
+        let expected = if opted_out { "built" } else { "refreshed" };
+        assert_eq!(receipt["mode"], expected, "opted_out={opted_out}");
+        client.shutdown_expect_success();
+    }
+}
+
 /// Send one client→agent request and read until its response, answering the
 /// agent's `host/capabilities` request inline and collecting `session/update`
 /// notifications along the way. Returns `(notifications, response)`.

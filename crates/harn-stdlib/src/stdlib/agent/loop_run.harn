@@ -28,6 +28,7 @@ import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
 import { __agent_loop_turn_setup } from "std/agent/loop_turn_setup"
 import {
+  __agent_stall_resume_edit_history,
   __agent_stall_validate_checkpoint,
   __agent_stall_verification_dispatch,
   agent_stall_initial_checkpoint,
@@ -93,7 +94,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       throw "agent_loop: stall checkpoint belongs to a different session"
     }
     __agent_stall_validate_checkpoint(stall_checkpoint)
-    let stall_state = stall_checkpoint.state
+    let stall_state = __agent_stall_resume_edit_history(stall_checkpoint.state)
     let stall_enabled_seen = false
     let stall_prev_dispatch = stall_checkpoint.dispatch
     let stall_hard_stop_rescues = 0

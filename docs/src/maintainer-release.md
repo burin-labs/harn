@@ -268,12 +268,13 @@ it after the release publishes.
 - Candidate succeeded but no main-push event started promotion: dispatch the
   existing promoter on main with that certified candidate's run ID and source:
   `gh workflow run promote-release.yml --repo burin-labs/harn --ref main -f candidate_run_id=RUN_ID -f candidate_sha=FULL_SHA`.
-  It refuses an unsuccessful or foreign producer and a source not contained
-  in main, then applies the normal version, manifest, digest and attestation
+  Ordinary recovery refuses an unsuccessful or foreign producer and a source
+  not contained in main, then applies the normal version, manifest, digest and attestation
   checks. If the producer never ran a consumer rehearsal, recovery runs the
   existing rehearsal workflow at that exact source and requires its measured
   pass before publication. Missing, failed, cancelled or mismatched results
-  refuse publication. A producer's existing failed rehearsal is not replaced.
+  refuse publication. Without an explicit repair, a producer's existing failed
+  rehearsal is not replaced.
   Recovery publishes the existing files without rebuilding them.
   When the consumer needs a prepared repair before it can land against the
   published tag, add `-f consumer_pull_request=PR_NUMBER`. Recovery selects
@@ -281,6 +282,13 @@ it after the release publishes.
   existing pairing checks; a fork, closed pull, malformed number, or conflicting
   source pairing refuses. Consumer observation and publication checks still
   run. This selection cannot reuse an earlier default-branch rehearsal.
+  An explicit repair can recover a waiting or failed consumer stage when every
+  original build, smoke, audit and required archive handoff succeeded. Recovery
+  checks exact-source full-suite CI and native qualification before dispatching
+  the new rehearsal. Its custody and terminal receipts bind the original
+  manifest artifact ID and digest, and publication reauthenticates that same
+  evidence and current repair head. Missing, expired or failed archive proof
+  refuses. The original candidate run stays unchanged.
 - The consumer observer reached its deadline, but its exact dispatched child
   later succeeded: after the completed-child recovery policy is on main,
   dispatch the normal promoter with the same producer and source plus
@@ -289,8 +297,8 @@ it after the release publishes.
   the child's complete successful census and product receipts, then rechecks
   both latest attempts. Only the observer deadline and its derived final
   verdict may have failed. Cancelled, failed, partial, replaced or mismatched
-  children refuse. The shared publisher authenticates the attempt-bound
-  authorization artifact before applying all normal archive and publication
+  children refuse. The shared publisher authenticates the original observer
+  context, deadline and reached product before applying all normal archive and publication
   checks. The original deadline remains unmeasured; no result is rewritten
   and no equal-tree source substitution is accepted.
 - Crate publication failed after the tag exists: rerun the failed jobs in the
@@ -305,6 +313,21 @@ second release controller. Retired Fleet launchers and candidate-build input
 tuples aren't recovery entry points for these workflows.
 
 ## Check downstream convergence
+
+For standalone Harn publication, dispatch the existing promoter with
+`candidate_run_id`, `candidate_sha`, and `standalone_harn=true`. This explicit
+manual mode requires the same exact-source full-suite CI, native qualification,
+successful build/smoke/audit stages, retained archives, signatures and
+attestations. It independently authenticates the original producing attempt
+and manifest ID/digest before verification and again before publication.
+Missing, failed, expired or mismatched Harn proof refuses publication.
+
+Standalone publication does not dispatch a consumer repair or consumer repins,
+and cannot combine with either consumer recovery selector. It creates the
+normal stable tag and latest GitHub release, which start crate publication;
+the existing container and development-bump jobs also follow publication.
+It does not claim consumer compatibility or adoption. Record and complete those
+separate obligations through the owning consumer workflows.
 
 Promotion's `repin` job dispatches the registered consumers' own update
 workflows. For the fleet-owned bump adapters that is one dispatch: the

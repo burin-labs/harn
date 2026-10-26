@@ -1,0 +1,56 @@
+import { agent_completion_signal } from "std/agent/completion_signal"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  const disabled = agent_completion_signal("##DONE##", nil, "##DONE##")
+  assert_eq(disabled, {declared: false, source: "disabled"})
+  assert_eq(agent_completion_signal("Still working.", ""), {declared: false, source: "disabled"})
+  const bare = agent_completion_signal("Finished.\n##DONE##", "##DONE##", "")
+  assert_eq(bare, {declared: true, source: "raw_text"})
+  const absent = agent_completion_signal("Still working.", "##DONE##")
+  assert_eq(absent, {declared: false, source: "raw_text"})
+  let post_signals = []
+  let judge_signals = []
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("<user_response>Still working. ##DONE##</user_response><done>not finished</done>"),
+      llm_text("<user_response>Finished.</user_response><done>##DONE##</done>"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Finish only after the configured marker is emitted in the done block.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 3,
+          max_nudges: 2,
+          done_sentinel: "##DONE##",
+          post_turn_callback: { info ->
+            post_signals = post_signals + [info.completion_signal]
+            return {stop: true, needs_verify: true}
+          },
+          verify_completion: { snapshot ->
+            judge_signals = judge_signals + [snapshot.completion_signal]
+            return if snapshot.completion_signal.declared {
+              nil
+            } else {
+              "The configured marker has not been emitted in the done block."
+            }
+          },
+        },
+      )
+      assert_eq(result.llm.iterations, 2)
+      assert_eq(result.terminal.reason, "sentinel")
+    },
+  )
+  assert_eq(len(post_signals), 2)
+  assert_eq(post_signals[0], {declared: false, source: "parsed_done_marker"})
+  assert_eq(post_signals[1], {declared: true, source: "parsed_done_marker"})
+  assert_eq(judge_signals, post_signals)
+  harness.stdio.println("completion signals preserved through post-turn and adjudication")
+}

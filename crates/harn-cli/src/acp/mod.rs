@@ -6,7 +6,135 @@ use harn_serve::{
     AcpProfileConfig, AcpRuntimeConfigurator, AcpSandboxConfig, AcpServerConfig, AuthPolicy,
 };
 
-struct CliAcpRuntimeConfigurator;
+/// Opts a server out of warming the code index when a session opens.
+pub(crate) const DISABLE_CODE_INDEX_WARM_ENV: &str = "HARN_DISABLE_CODE_INDEX_WARM";
+
+fn code_index_warm_disabled(value: Option<&str>) -> bool {
+    value.is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+/// Hostlib handles per session project root, so a session warm fills the
+/// code index, and holds the single-flight gate, that every later VM over
+/// that workspace installs.
+///
+/// A root's handles stay while a session over it is open or its index has
+/// work in flight, so a second workspace opening never strands the first
+/// one's warm. They are released at the last close, or when index work
+/// still running at that close ends.
+#[cfg(feature = "hostlib")]
+#[derive(Default)]
+struct WorkspaceHostlib {
+    by_root: Arc<std::sync::Mutex<WorkspaceMap>>,
+}
+
+#[cfg(feature = "hostlib")]
+type WorkspaceMap = std::collections::HashMap<std::path::PathBuf, WorkspaceEntry>;
+
+#[cfg(feature = "hostlib")]
+struct WorkspaceEntry {
+    handles: harn_hostlib::DefaultHostlibHandles,
+    open_sessions: usize,
+}
+
+#[cfg(feature = "hostlib")]
+impl WorkspaceHostlib {
+    fn lock(&self) -> std::sync::MutexGuard<'_, WorkspaceMap> {
+        Self::lock_map(&self.by_root)
+    }
+
+    fn lock_map(
+        by_root: &std::sync::Mutex<WorkspaceMap>,
+    ) -> std::sync::MutexGuard<'_, WorkspaceMap> {
+        by_root
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn entry<'a>(by_root: &'a mut WorkspaceMap, project_root: &Path) -> &'a mut WorkspaceEntry {
+        by_root
+            .entry(project_root.to_path_buf())
+            .or_insert_with(|| WorkspaceEntry {
+                handles: crate::default_hostlib_handles(),
+                open_sessions: 0,
+            })
+    }
+
+    /// Drop every root no open session needs and no index work holds.
+    fn release_unused(by_root: &mut WorkspaceMap) {
+        by_root.retain(|_, entry| entry.open_sessions > 0 || !entry.handles.code_index.is_idle());
+    }
+
+    /// The handles a VM over `project_root` installs.
+    fn handles_for(&self, project_root: &Path) -> harn_hostlib::DefaultHostlibHandles {
+        Self::entry(&mut self.lock(), project_root).handles.clone()
+    }
+
+    /// Count a session opening over `project_root` and return its handles.
+    fn open_session(&self, project_root: &Path) -> harn_hostlib::DefaultHostlibHandles {
+        let mut by_root = self.lock();
+        Self::release_unused(&mut by_root);
+        let entry = Self::entry(&mut by_root, project_root);
+        entry.open_sessions += 1;
+        entry.handles.clone()
+    }
+
+    /// Returns the thread that releases a root whose index work outlived its
+    /// last session, if one was scheduled.
+    fn close_session(&self, project_root: &Path) -> Option<std::thread::JoinHandle<()>> {
+        let mut by_root = self.lock();
+        if let Some(entry) = by_root.get_mut(project_root) {
+            entry.open_sessions = entry.open_sessions.saturating_sub(1);
+        }
+        Self::release_unused(&mut by_root);
+        // No later session event is guaranteed, so a root no session needs
+        // but whose index work is still running is released when it ends.
+        let entry = by_root
+            .get(project_root)
+            .filter(|entry| entry.open_sessions == 0)?;
+        let code_index = entry.handles.code_index.clone();
+        let map = Arc::clone(&self.by_root);
+        harn_parser::runtime_stack::builder()
+            .name("harn-acp-index-release".to_string())
+            .spawn(move || {
+                code_index.wait_until_idle();
+                Self::release_unused(&mut Self::lock_map(&map));
+            })
+            .inspect_err(|error| {
+                tracing::warn!(
+                    target: "harn_cli::acp",
+                    %error,
+                    "could not schedule the code-index release; it waits for the next session event",
+                );
+            })
+            .ok()
+    }
+}
+
+struct CliAcpRuntimeConfigurator {
+    #[cfg(feature = "hostlib")]
+    hostlib: WorkspaceHostlib,
+    warm_code_index: bool,
+}
+
+impl CliAcpRuntimeConfigurator {
+    fn from_env() -> Self {
+        let disabled = std::env::var(DISABLE_CODE_INDEX_WARM_ENV).ok();
+        Self::new(!code_index_warm_disabled(disabled.as_deref()))
+    }
+
+    fn new(warm_code_index: bool) -> Self {
+        Self {
+            #[cfg(feature = "hostlib")]
+            hostlib: WorkspaceHostlib::default(),
+            warm_code_index,
+        }
+    }
+}
 
 #[async_trait(?Send)]
 impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
@@ -22,7 +150,11 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
         // `crates/harn-hostlib/README.md` for the boundary contract.
         #[cfg(feature = "hostlib")]
         {
-            crate::install_default_hostlib(vm);
+            let handles = match vm.explicit_project_root() {
+                Some(root) => self.hostlib.handles_for(root),
+                None => crate::default_hostlib_handles(),
+            };
+            crate::install_hostlib_with_handles(vm, &handles);
         }
 
         // Install the lazy neural injection-classifier loader (Layer 2, guard
@@ -60,6 +192,33 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
             .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
         Ok(())
     }
+
+    fn warm_session_workspace(&self, project_root: &Path) {
+        #[cfg(feature = "hostlib")]
+        {
+            let handles = self.hostlib.open_session(project_root);
+            if !self.warm_code_index {
+                return;
+            }
+            let outcome = handles.code_index.warm_session(project_root);
+            tracing::debug!(
+                target: "harn_cli::acp",
+                root = %project_root.display(),
+                ?outcome,
+                "code-index session warm requested",
+            );
+        }
+        #[cfg(not(feature = "hostlib"))]
+        let _ = project_root;
+    }
+
+    fn release_session_workspace(&self, project_root: &Path) {
+        // The release thread runs detached; only tests join it.
+        #[cfg(feature = "hostlib")]
+        drop(self.hostlib.close_session(project_root));
+        #[cfg(not(feature = "hostlib"))]
+        let _ = project_root;
+    }
 }
 
 pub(crate) fn server_config(
@@ -86,7 +245,7 @@ pub(crate) fn server_config_with_boundary(
         .unwrap_or_default();
     let mut config = AcpServerConfig::new(pipeline)
         .with_auth_policy(auth_policy)
-        .with_runtime_configurator(Arc::new(CliAcpRuntimeConfigurator))
+        .with_runtime_configurator(Arc::new(CliAcpRuntimeConfigurator::from_env()))
         .with_llm_overrides(extensions.llm, extensions.capabilities);
     config.host_inference_boundary = host_inference_boundary;
     config
@@ -158,7 +317,7 @@ pub fn on_tick(_event) -> nil {
         let mut vm = harn_vm::new_vm();
         harn_runtime::register_vm_stdlib(&mut vm);
         let result = async {
-            CliAcpRuntimeConfigurator
+            CliAcpRuntimeConfigurator::new(false)
                 .configure(&mut vm, Some(&script))
                 .await?;
             let extensions = crate::package::load_runtime_extensions(&script);
@@ -193,5 +352,137 @@ pub fn on_tick(_event) -> nil {
             error.contains("host_call") && error.contains("not callable source API"),
             "unexpected refusal: {error}"
         );
+    }
+
+    #[test]
+    fn the_code_index_warm_opt_out_reads_boolean_values() {
+        for value in ["1", "true", "YES", " on "] {
+            assert!(code_index_warm_disabled(Some(value)), "{value}");
+        }
+        for value in [None, Some(""), Some("0"), Some("false"), Some("off")] {
+            assert!(!code_index_warm_disabled(value), "{value:?}");
+        }
+    }
+
+    /// The warm fills the index the server's VMs share, and an opted-out
+    /// server leaves it empty.
+    #[test]
+    fn a_session_warm_fills_the_shared_code_index_unless_opted_out() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::create_dir_all(workspace.path().join("src")).unwrap();
+        std::fs::write(
+            workspace.path().join("src/lib.rs"),
+            "pub fn warmed() -> i32 { 1 }\n",
+        )
+        .unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        for warm in [true, false] {
+            let configurator = CliAcpRuntimeConfigurator::new(warm);
+            configurator.warm_session_workspace(&root);
+            let code_index = configurator.hostlib.handles_for(&root).code_index;
+            code_index.wait_until_idle();
+            let shared = code_index.shared();
+            let live_root = shared
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|state| state.root.clone());
+            let expected = warm.then(|| root.clone());
+            assert_eq!(live_root, expected, "warm={warm}");
+        }
+    }
+
+    /// A workspace's index lives while a session over it is open, and is
+    /// released once its last session closes and no work is in flight.
+    #[test]
+    fn closing_the_last_session_over_a_workspace_releases_its_index() {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("lib.rs"), "pub fn f() {}\n").unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        let configurator = CliAcpRuntimeConfigurator::new(true);
+        configurator.warm_session_workspace(&root);
+        configurator.warm_session_workspace(&root);
+        let warmed = configurator.hostlib.handles_for(&root).code_index.shared();
+        configurator
+            .hostlib
+            .handles_for(&root)
+            .code_index
+            .wait_until_idle();
+
+        configurator.release_session_workspace(&root);
+        let while_open = configurator.hostlib.handles_for(&root).code_index.shared();
+        assert!(
+            Arc::ptr_eq(&warmed, &while_open),
+            "a session is still open over the workspace"
+        );
+
+        configurator.release_session_workspace(&root);
+        let after_close = configurator.hostlib.handles_for(&root).code_index.shared();
+        assert!(
+            !Arc::ptr_eq(&warmed, &after_close),
+            "the last close must release the warmed index"
+        );
+        assert!(after_close.lock().unwrap().is_none());
+    }
+
+    /// A warm still running when the last session closes is released when it
+    /// ends, even though no later session event arrives.
+    #[test]
+    fn a_warm_running_at_the_last_close_is_released_when_it_ends() {
+        let workspace = tempfile::tempdir().unwrap();
+        for file in 0..400 {
+            std::fs::write(
+                workspace.path().join(format!("m{file}.rs")),
+                "pub fn f() -> u32 { 1 }\n",
+            )
+            .unwrap();
+        }
+        let root = workspace.path().canonicalize().unwrap();
+        let configurator = CliAcpRuntimeConfigurator::new(true);
+        configurator.warm_session_workspace(&root);
+        // Holding the index lock keeps the warm from publishing, so the
+        // close below deterministically meets in-flight work.
+        let shared = configurator.hostlib.handles_for(&root).code_index.shared();
+        let publish_gate = shared.lock().unwrap();
+        assert!(publish_gate.is_none(), "the warm finished before the gate");
+        let release = configurator.hostlib.close_session(&root);
+        let retained = || configurator.hostlib.lock().contains_key(&root);
+        assert!(retained(), "in-flight work keeps the root");
+
+        drop(publish_gate);
+        release
+            .expect("a release is scheduled for in-flight work")
+            .join()
+            .unwrap();
+        assert!(!retained(), "the root must be released once its warm ends");
+    }
+
+    /// A second workspace opening must not strand the first one's warm: the
+    /// first workspace's VMs still install the index its warm filled.
+    #[test]
+    fn opening_another_workspace_keeps_the_first_workspaces_warm_index() {
+        let workspaces = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+        let roots: Vec<_> = workspaces
+            .iter()
+            .map(|dir| {
+                std::fs::write(dir.path().join("lib.rs"), "pub fn f() {}\n").unwrap();
+                dir.path().canonicalize().unwrap()
+            })
+            .collect();
+        let configurator = CliAcpRuntimeConfigurator::new(true);
+        for root in &roots {
+            configurator.warm_session_workspace(root);
+        }
+        for root in &roots {
+            let code_index = configurator.hostlib.handles_for(root).code_index;
+            code_index.wait_until_idle();
+            let shared = code_index.shared();
+            let live_root = shared
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|state| state.root.clone());
+            assert_eq!(live_root.as_ref(), Some(root));
+        }
     }
 }

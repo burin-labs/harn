@@ -16,12 +16,12 @@ include = [
 [dependencies]
 blake3 = "1.8.7"
 croner = "4.0.0"
-harn-execution-policy = { path = "../harn-execution-policy", version = "=0.10.180" }
-harn-flock = { path = "../harn-flock", version = "=0.10.180" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.180" }
-harn-parser = { path = "../harn-parser", version = "=0.10.180" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.180", optional = true }
-harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.180" }
+harn-execution-policy = { path = "../harn-execution-policy", version = "=0.10.181" }
+harn-flock = { path = "../harn-flock", version = "=0.10.181" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.181" }
+harn-parser = { path = "../harn-parser", version = "=0.10.181" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.181", optional = true }
+harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.181" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
@@ -36,11 +36,11 @@ unicode-normalization = "0.1"
 bundled-stdlib = ["dep:harn-stdlib"]
 
 [dev-dependencies]
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.180" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.181" }
 tempfile = "3"
 
 [build-dependencies]
-harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.180" }
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.181" }
 
 [lints]
 workspace = true

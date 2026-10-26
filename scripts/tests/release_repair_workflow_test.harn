@@ -1,0 +1,62 @@
+import { read_yaml } from "std/fs"
+
+fn expression(value: string) -> string {
+  return "$" + "{{ " + value + " }}"
+}
+
+pipeline test_recovery_requires_exact_source_ci_and_native_before_the_consumer(harness: Harness) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/promote-release.yml", nil)
+  assert_eq(workflow.jobs["consumer-rehearsal"].needs, "plan")
+  for job_name in ["plan", "authorize"] {
+    const job = workflow.jobs[job_name]
+    const gates = job.steps.filter({ step -> step?.run == "bash scripts/ci/require_full_suite.sh" })
+      .to_list()
+    assert_eq(len(gates), 1)
+    const gate = gates[0]
+    assert_eq(
+      gate.env.SOURCE_SHA,
+      expression(
+        job_name == "plan" ? "needs.resolve.outputs.source_sha" : "needs.plan.outputs.source_sha",
+      ),
+    )
+    assert_eq(gate.env.GH_REPO, expression("github.repository"))
+    assert_eq(gate.env.WAIT_FOR_FULL_SUITE, "true")
+    assert_eq(gate["continue-on-error"], nil)
+    assert_eq(gate["timeout-minutes"], 90)
+  }
+}
+
+pipeline test_publication_receives_only_the_authenticated_recovery_outputs(harness: Harness) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/promote-release.yml", nil)
+  const job = workflow.jobs.authorize
+  const readers = job.steps.filter({ step -> step?.id == "consumer-repair" }).to_list()
+  assert_eq(len(readers), 1)
+  const reader = readers[0]
+  assert(reader.run.contains("node scripts/ci/consumer-observer-read-decision.mjs --repair"))
+  assert_eq(
+    reader.env.ISSUED_CONTEXT,
+    expression("needs.consumer-rehearsal.outputs.observer_context"),
+  )
+  assert_eq(reader.env.PRODUCER_RUN, expression("needs.plan.outputs.run_id"))
+  assert_eq(reader.env.PRODUCER_ATTEMPT, expression("needs.plan.outputs.producer_attempt"))
+  assert_eq(reader.env.CONSUMER_PULL, expression("inputs.consumer_pull_request"))
+  assert_eq(reader.env.REQUIRE_CURRENT_DEFAULT, "false")
+  assert_eq(job.outputs.consumer_repair, expression("steps.consumer-repair.outputs.repair_request"))
+  const call = workflow.jobs.promote
+  assert_eq(call.with["consumer-repair"], expression("needs.authorize.outputs.consumer_repair"))
+  assert_eq(
+    call.with["original-consumer-context"],
+    expression("needs.authorize.outputs.original_context"),
+  )
+  assert_eq(call.with["authorization-run-id"], nil)
+  assert_eq(call.with["authorization-attempt"], nil)
+  assert_eq(
+    call.secrets.CONSUMER_CANARY_REPOSITORY,
+    expression("secrets.CONSUMER_CANARY_REPOSITORY"),
+  )
+  const authority = job.steps.filter({ step -> step?.id == "completed-consumer-token" }).to_list()
+  assert_eq(len(authority), 1)
+  assert_eq(authority[0].with["permission-actions"], "read")
+  assert_eq(authority[0].with["permission-contents"], "read")
+  assert_eq(authority[0].with["permission-pull-requests"], "read")
+}

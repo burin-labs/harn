@@ -402,3 +402,156 @@ async fn acp_runtime_authority_refusal_never_polls_the_engine_future() {
         })
         .await;
 }
+
+struct WarmRecorder {
+    warmed: Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>,
+    released: Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl AcpRuntimeConfigurator for WarmRecorder {
+    fn warm_session_workspace(&self, project_root: &std::path::Path) {
+        self.warmed.lock().unwrap().push(project_root.to_path_buf());
+    }
+
+    fn release_session_workspace(&self, project_root: &std::path::Path) {
+        self.released
+            .lock()
+            .unwrap()
+            .push(project_root.to_path_buf());
+    }
+}
+
+/// Opening a session hands its project root to the host's warm before any
+/// prompt, and closing it releases that root, including through the
+/// endpoint-override wrapper.
+#[tokio::test(flavor = "current_thread")]
+async fn session_new_asks_the_host_to_warm_its_project_root() {
+    harn_vm::reset_thread_local_state();
+    let workspace = tempfile::tempdir().expect("workspace");
+    let expected = workspace.path().canonicalize().unwrap();
+    for wrapped in [false, true] {
+        let warmed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let released = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut config = AcpServerConfig::new(None);
+        if wrapped {
+            config = config
+                .with_llm_overrides(Some(endpoint_overlay()), None)
+                .with_runtime_provider_endpoint("fixture", "http://127.0.0.1:9")
+                .expect("endpoint override");
+        }
+        let config = config.with_runtime_configurator(Arc::new(WarmRecorder {
+            warmed: warmed.clone(),
+            released: released.clone(),
+        }));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server = AcpServer::new_with_output(config, AcpOutput::Channel(tx));
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "session/new",
+                "params": {
+                    "cwd": workspace.path(),
+                    "environmentPolicy": {"kind": "isolated", "grants": []},
+                },
+            }))
+            .await;
+        let created = recv_json(&mut rx).await;
+        let session_id = created["result"]["sessionId"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{created}"))
+            .to_string();
+        assert_eq!(
+            *warmed.lock().unwrap(),
+            vec![expected.clone()],
+            "wrapped={wrapped}"
+        );
+        assert!(released.lock().unwrap().is_empty(), "wrapped={wrapped}");
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0", "id": 2, "method": "session/close",
+                "params": {"sessionId": session_id},
+            }))
+            .await;
+        let closed = loop {
+            let message = recv_json(&mut rx).await;
+            if message["id"] == 2 {
+                break message;
+            }
+        };
+        assert!(closed["error"].is_null(), "{closed}");
+        assert_eq!(
+            *released.lock().unwrap(),
+            vec![expected.clone()],
+            "wrapped={wrapped}"
+        );
+    }
+}
+
+/// A session that re-anchors to another root moves its warm there: the root
+/// it left is released at once, and close releases the new root, so neither
+/// stays held after the session is gone.
+#[tokio::test(flavor = "current_thread")]
+async fn reanchoring_a_session_moves_its_warm_to_the_new_root() {
+    harn_vm::reset_thread_local_state();
+    let workspace = tempfile::tempdir().expect("workspace");
+    let (first, second) = (workspace.path().join("a"), workspace.path().join("b"));
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    let first_root = super::super::sessions::session_project_root_for_cwd(&first);
+    let second_root = super::super::sessions::session_project_root_for_cwd(&second);
+    assert_ne!(first_root, second_root);
+    let warmed = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let released = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let config = AcpServerConfig::new(None).with_runtime_configurator(Arc::new(WarmRecorder {
+        warmed: warmed.clone(),
+        released: released.clone(),
+    }));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(config, AcpOutput::Channel(tx));
+    let mut reply = async |server: &mut AcpServer, id: i64, method: &str, params| {
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0", "id": id, "method": method, "params": params,
+            }))
+            .await;
+        let message = loop {
+            let message = recv_json(&mut rx).await;
+            if message["id"] == id {
+                break message;
+            }
+        };
+        assert!(message["error"].is_null(), "{message}");
+        message
+    };
+    let created = reply(
+        &mut server,
+        1,
+        "session/new",
+        serde_json::json!({
+            "cwd": first,
+            "environmentPolicy": {"kind": "isolated", "grants": []},
+        }),
+    )
+    .await;
+    let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
+    reply(
+        &mut server,
+        2,
+        "harn.session_reanchor",
+        serde_json::json!({"sessionId": session_id, "path": second}),
+    )
+    .await;
+    assert_eq!(
+        *warmed.lock().unwrap(),
+        vec![first_root.clone(), second_root.clone()]
+    );
+    assert_eq!(*released.lock().unwrap(), vec![first_root.clone()]);
+    reply(
+        &mut server,
+        3,
+        "session/close",
+        serde_json::json!({"sessionId": session_id}),
+    )
+    .await;
+    assert_eq!(*released.lock().unwrap(), vec![first_root, second_root]);
+}

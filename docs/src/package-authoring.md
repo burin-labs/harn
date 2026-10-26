@@ -357,6 +357,12 @@ Path dependencies remain live-linked; their lockfile entry records the
 resolved `path+file://` URI plus the same `package_version` and
 `manifest_digest` so `harn package audit` flags drift without rebuilding.
 
+Harn's `.harn-content-hash` and `.harn-package-cache.toml` cache markers,
+including their UUID-named incomplete atomic writes, are outside package
+content identity. Harn neither copies these files into installed generations
+nor admits them as package entry points. Other unexpected files remain
+covered by integrity checks.
+
 ## Maturing the package surface
 
 Once a manifest and lockfile are in place, these commands cover the

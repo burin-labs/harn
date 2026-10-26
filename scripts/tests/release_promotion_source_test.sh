@@ -111,4 +111,33 @@ if resolve 4242 0000000000000000000000000000000000000000; then
 fi
 [[ ! -s "$tmp/output" ]] || fail 'mismatched publication key emitted output'
 if resolve 4242 abc; then fail 'invalid publication key accepted'; fi
+
+# The archive reader owns the producer census; this fixture checks that the
+# resolver actually calls it before admitting an otherwise failed producer.
+cat > "$tmp/bin/node" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$#" == 1 && "$1" == */ci/qualify-release-producer.mjs &&
+   "$GITHUB_REPOSITORY" == burin-labs/harn && "$CANDIDATE_RUN_ID" == 4242 &&
+   "$CANDIDATE_RUN_ATTEMPT" == 1 && -n "$EXPECTED_SOURCE_SHA" ]] || exit 71
+[[ "${FIXTURE_ARCHIVE_REFUSE:-false}" == false ]] || exit 72
+echo 'fixture archive reader measured'
+EOF
+chmod +x "$tmp/bin/node"
+jq '.event="push" | .head_branch="main" | .run_attempt=1 | .conclusion="failure"' \
+  "$tmp/good-run.json" > "$tmp/run.json"
+STANDALONE_HARN=true resolve || fail 'qualified standalone failed producer refused'
+grep -Fxq 'standalone_harn=true' "$tmp/output" || fail 'standalone scope was not preserved'
+for mode in consumer completed malformed; do
+  case "$mode" in
+    consumer) if STANDALONE_HARN=true CONSUMER_PULL_REQUEST=7 resolve; then fail 'mixed repair scope accepted'; fi ;;
+    completed) if STANDALONE_HARN=true COMPLETED_CONSUMER_RUN_ID=7 resolve; then fail 'mixed attached scope accepted'; fi ;;
+    malformed) if STANDALONE_HARN=unknown resolve; then fail 'unreported standalone choice accepted'; fi ;;
+  esac
+  [[ ! -s "$tmp/output" ]] || fail 'mixed or malformed scope emitted source'
+done
+if STANDALONE_HARN=true FIXTURE_ARCHIVE_REFUSE=true resolve; then
+  fail 'unqualified archives authorized standalone publication'
+fi
+[[ ! -s "$tmp/output" ]] || fail 'failed archive reader emitted source'
 echo 'release_promotion_source_test: ok'

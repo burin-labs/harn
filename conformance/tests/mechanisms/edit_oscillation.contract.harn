@@ -1,0 +1,98 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+fn observe_edits(harness: Harness, contents: list<string>, enabled: bool) -> list {
+  const sid = harness.agent.open()
+  let executed = []
+  let warnings: list = []
+  const tools = tool_define(
+    tool_registry(),
+    "edit",
+    "Apply an edit and report its content identity",
+    {
+      parameters: {content: {type: "string"}},
+      annotations: {kind: "edit"},
+      handler: { args ->
+        executed = executed + [args.content]
+        return agent_tool_handler_result(
+          "Applied edit",
+          {
+            path: "src/example",
+            before_sha256: sha256("pristine"),
+            after_sha256: sha256(args.content),
+            mutation_status: "applied",
+          },
+        )
+      },
+    },
+  )
+  try {
+    const captured = agent_capture_events(
+      harness.agent,
+      sid,
+      { ->
+        return with_llm_script(
+          harness.llm,
+          contents.map({ content -> llm_tool_call("edit", {content: content}) }).to_list()
+            + [llm_text("Finished. ##DONE##")],
+          { ->
+            return agent_loop(
+              harness,
+              "Apply the edits",
+              nil,
+              {
+                session_id: sid,
+                provider: "mock",
+                tools: tools,
+                tool_format: "native",
+                loop_until_done: true,
+                done_sentinel: "##DONE##",
+                max_iterations: len(contents) + 1,
+                stall_diagnostics: {
+                  enabled: true,
+                  edit_oscillation: enabled,
+                  inject_feedback: false,
+                  post_edit_reverify: false,
+                  repeat_same_observation: 99,
+                  repeat_success: 99,
+                  ping_pong_cycles: 99,
+                },
+              },
+            )
+          },
+        )
+      },
+    )
+    assert_eq(executed, contents, "every scripted edit must actually execute")
+    assert_eq(captured.result.llm.iterations, len(contents) + 1)
+    warnings = captured.events.filter(
+      { event ->
+        event.type == "agent_loop_stall_warning" && event.warning.pattern == "edit_oscillation"
+      },
+    )
+      .map({ event -> event.warning })
+      .to_list()
+  } finally {
+    harness.agent.close(sid)
+  }
+  return warnings
+}
+
+pipeline default(harness: Harness) {
+  const forward = observe_edits(harness, ["A", "B", "C"], true)
+  assert_eq(len(forward), 0, "forward edits must not warn")
+  const disabled = observe_edits(harness, ["A", "B", "A"], false)
+  assert_eq(len(disabled), 0, "disabled content observation must not warn")
+  const pristine = observe_edits(harness, ["A", "pristine"], true)
+  assert_eq(len(pristine), 0, "the pre-edit original must not seed a visit")
+  const revisit = observe_edits(harness, ["A", "B", "A"], true)
+  harness.stdio.println("executed A-B-A; edit oscillation warnings=${len(revisit)}")
+  assert_eq(len(revisit), 1, "a completed agent-authored revisit must warn exactly once")
+  assert_eq(revisit[0].kind, "edit_oscillation")
+  assert_eq(revisit[0].path, "src/example")
+  assert_eq(revisit[0].revisit_count, 1)
+  assert_eq(revisit[0].iteration_distance, 2)
+  assert(!revisit[0].hard_stop, "content recurrence is advisory")
+}

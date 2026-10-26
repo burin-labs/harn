@@ -8,6 +8,7 @@
 
 use std::env;
 use std::ffi::{OsStr, OsString};
+use std::path::Path;
 use std::process::{self, Command};
 
 const CARGO_BIN_EXE_PREFIX: &str = "CARGO_BIN_EXE_";
@@ -176,8 +177,22 @@ fn main() {
     let mut command = match route {
         Route::Direct => Command::new(&rustc),
         Route::Sccache => {
-            let mut command = Command::new("sccache");
-            command.arg(&rustc).env_remove("CARGO_TARGET_DIR");
+            // Cargo nests a workspace wrapper before the real compiler. Let it
+            // add its flags before sccache identifies and hashes the compiler.
+            let wraps_compiler = rustc_arguments
+                .first()
+                .and_then(|compiler| Path::new(compiler).file_stem())
+                .is_some_and(|name| name == "rustc" || name == "clippy-driver");
+            let mut command = if wraps_compiler {
+                let mut command = Command::new(&rustc);
+                command.arg("sccache");
+                command
+            } else {
+                let mut command = Command::new("sccache");
+                command.arg(&rustc);
+                command
+            };
+            command.env_remove("CARGO_TARGET_DIR");
             command
         }
     };

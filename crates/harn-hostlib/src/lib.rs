@@ -132,10 +132,36 @@ pub type HarnReferenceResolver =
 
 /// Handles retained from [`install_default_with_handles`] so embedders can
 /// warm or introspect capabilities out-of-band of the VM.
+///
+/// Cloning shares state. A host that builds more than one VM over the same
+/// workspace keeps one set and installs it into each with
+/// [`install_default_with_embed_and_handles`], so the code index outlives
+/// any single VM and can be warmed before the first VM exists.
+#[derive(Clone)]
 pub struct DefaultHostlibHandles {
     /// Shared code-index capability when the `ast` feature is enabled.
     #[cfg(feature = "ast")]
     pub code_index: code_index::CodeIndexCapability,
+}
+
+impl DefaultHostlibHandles {
+    /// Fresh handles with empty state, using `harn_reference_resolver` for
+    /// the code index when one is supplied.
+    pub fn new(harn_reference_resolver: Option<HarnReferenceResolver>) -> Self {
+        #[cfg(feature = "ast")]
+        {
+            let mut code_index = code_index::CodeIndexCapability::new();
+            if let Some(resolver) = harn_reference_resolver {
+                code_index = code_index.with_harn_reference_resolver(resolver);
+            }
+            Self { code_index }
+        }
+        #[cfg(not(feature = "ast"))]
+        {
+            let _ = harn_reference_resolver;
+            Self {}
+        }
+    }
 }
 
 /// Convenience: build a `HostlibRegistry` populated with every capability
@@ -187,25 +213,32 @@ pub fn install_default_with_embed_and_harn_reference_resolver(
     embed: embed::EmbedCapability,
     harn_reference_resolver: Option<HarnReferenceResolver>,
 ) -> (HostlibRegistry, DefaultHostlibHandles) {
+    let handles = DefaultHostlibHandles::new(harn_reference_resolver);
+    let registry = install_default_with_embed_and_handles(vm, embed, &handles);
+    (registry, handles)
+}
+
+/// Install the default hostlib surface around handles the caller retains,
+/// so their state is shared with every VM they are installed into.
+pub fn install_default_with_embed_and_handles(
+    vm: &mut harn_vm::Vm,
+    embed: embed::EmbedCapability,
+    handles: &DefaultHostlibHandles,
+) -> HostlibRegistry {
     let mut registry = HostlibRegistry::new();
     let session = session::SessionCapability::with_embedder(embed.embedder().clone());
     // The code-intelligence capabilities (`ast` + `code_index`) are only
     // compiled when the `ast` feature is on. Lean clients that omit it get
     // the deterministic tool surface without tree-sitter or any grammar.
     #[cfg(feature = "ast")]
-    let code_index_handle = {
-        let mut code_index = code_index::CodeIndexCapability::new();
-        if let Some(resolver) = harn_reference_resolver {
-            code_index = code_index.with_harn_reference_resolver(resolver);
-        }
-        let handle = code_index.clone();
+    {
+        let code_index = handles.code_index.clone();
         registry = registry
             .with(ast::AstCapabilityWithCodeIndex::new(code_index.shared()))
             .with(code_index);
-        handle
-    };
+    }
     #[cfg(not(feature = "ast"))]
-    let _ = harn_reference_resolver;
+    let _ = handles;
     registry = registry
         .with(scanner::ScannerCapability)
         .with(embed)
@@ -241,9 +274,5 @@ pub fn install_default_with_embed_and_harn_reference_resolver(
     // that spelling as a no-op so dispatch does not fall through to an
     // embedder host bridge.
     vm.register_builtin("hostlib_enable", |_args, _out| Ok(harn_vm::VmValue::Nil));
-    let handles = DefaultHostlibHandles {
-        #[cfg(feature = "ast")]
-        code_index: code_index_handle,
-    };
-    (registry, handles)
+    registry
 }
