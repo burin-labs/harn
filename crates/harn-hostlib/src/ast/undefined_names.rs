@@ -244,6 +244,8 @@ mod python;
 mod ruby;
 mod rust;
 
+pub(super) use rust::bind_use_tree as bind_rust_use_tree;
+
 #[cfg(test)]
 mod tests {
     use super::*;

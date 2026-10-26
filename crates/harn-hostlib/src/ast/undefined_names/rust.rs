@@ -248,7 +248,7 @@ fn bind_pattern(node: Node<'_>, source: &str, defined: &mut HashSet<String>) {
 
 /// Names a `use` tree brings into scope: the last segment of each path, or
 /// its alias. A glob binds nothing the parse can see.
-fn bind_use_tree(node: Node<'_>, source: &str, defined: &mut HashSet<String>) {
+pub(in crate::ast) fn bind_use_tree(node: Node<'_>, source: &str, defined: &mut HashSet<String>) {
     match node.kind() {
         "identifier" => {
             defined.insert(node_text(node, source).to_string());
@@ -261,6 +261,22 @@ fn bind_use_tree(node: Node<'_>, source: &str, defined: &mut HashSet<String>) {
         "use_as_clause" => {
             if let Some(alias) = node.child_by_field_name("alias") {
                 defined.insert(node_text(alias, source).to_string());
+            }
+        }
+        "self" => {
+            if let Some(path) = node
+                .parent()
+                .and_then(|list| list.parent())
+                .and_then(|scope| scope.child_by_field_name("path"))
+            {
+                let name = if path.kind() == "scoped_identifier" {
+                    path.child_by_field_name("name")
+                } else {
+                    Some(path)
+                };
+                if let Some(name) = name {
+                    defined.insert(node_text(name, source).to_string());
+                }
             }
         }
         "scoped_use_list" => {

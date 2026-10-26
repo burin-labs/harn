@@ -649,6 +649,7 @@ fn rust_widening_keeps_proven_receivers_in_their_own_scope() {
         "pub fn run() {\n    fn helper(out: &Buffer) { out.flush(); }\n}\n",
         "pub fn run(out: &Buffer) {\n    { let out = 3; let _ = out; }\n    out.flush();\n}\n",
         "pub fn run(out: &Buffer) {\n    assert!(true);\n    out.flush();\n}\n",
+        "pub fn run(out: &Buffer) {\n    use std::io::Write;\n    std::assert!(true);\n    out.flush();\n}\n",
     ] {
         let source =
             format!("pub struct Buffer;\n\nimpl Buffer {{\n    fn flush(&self) {{}}\n}}\n\n{body}");

@@ -22,13 +22,15 @@
 //! Callers decide what to do with a low-confidence finding; this module only
 //! refuses to overstate one.
 
+use std::collections::HashSet;
+
 use harn_vm::VmValue;
 use tree_sitter::{Node, Tree};
 
 use crate::tools::args::{build_dict, str_value};
 
 use super::language::Language;
-use super::undefined_names::node_text;
+use super::undefined_names::{bind_rust_use_tree, node_text};
 
 /// How far single-file name resolution can be trusted for a language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -469,11 +471,14 @@ fn rust_macro_path_is_unshadowed(
                     .is_some_and(|name| node_text(name, source) == binding)
             });
         }
-        "use_declaration" => walk_nodes(node, &mut |part| {
-            shadowed |= part.kind() == "use_wildcard"
-                || (matches!(part.kind(), "identifier" | "type_identifier")
-                    && node_text(part, source) == binding);
-        }),
+        "use_declaration" => {
+            let mut bindings = HashSet::new();
+            if let Some(argument) = node.child_by_field_name("argument") {
+                bind_rust_use_tree(argument, source, &mut bindings);
+            }
+            shadowed |= bindings.contains(binding);
+            walk_nodes(node, &mut |part| shadowed |= part.kind() == "use_wildcard");
+        }
         "attribute_item" | "inner_attribute_item" if prefix.is_empty() => {
             shadowed |= node
                 .named_child(0)
@@ -621,6 +626,8 @@ mod tests {
             "#[binding_macro::bind]\nfn f() { Reading() }\n",
             "fn f() { macro_rules! assert { () => { let Reading = 1; }; } assert!(); Reading }\n",
             "use other::assert; fn f() { assert!(); Reading() }\n",
+            "use other::{bind as assert}; fn f() { assert!(); Reading() }\n",
+            "use other::std::{self}; fn f() { std::assert!(); Reading() }\n",
             "mod std {} fn f() { std::assert!(); Reading() }\n",
             "#[macro_use] extern crate other; fn f() { assert!(); Reading() }\n",
         ] {
@@ -632,7 +639,7 @@ mod tests {
 
     #[test]
     fn itemless_rust_macros_and_inert_attributes_keep_resolution_complete() {
-        let source = "#![allow(dead_code)]\n#[derive(Debug, Clone)]\npub struct Reading;\n\
+        let source = "#![allow(dead_code)]\nuse std::{io::{self}, fmt as fmt_alias};\nuse std::assert_eq as check;\n#[derive(Debug, Clone)]\npub struct Reading;\n\
             #[cfg(test)]\nmod tests {\n    #[test]\n    fn t() { assert_eq!(1, 1); println!(\"{}\", 2); }\n}\n\
             fn f() -> String { let v = vec![1]; std::format!(\"{v:?}\") }\n\
             fn g() -> usize { my_crate::count!(a, b) + 1 }\n";
