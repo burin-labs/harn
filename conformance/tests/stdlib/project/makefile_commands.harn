@@ -6,8 +6,10 @@ pipeline test(harness: Harness) {
     harness.fs.delete(root)
   }
   const recipe = "test:\n\t@echo QUALITY_MAKE_REACHED\n"
+  const duplicate_recipe = "test test:\n\t@echo QUALITY_MAKE_REACHED\n\t@echo SECOND\n"
   const cases: list<MakeCase> = [
     {name: "ordinary", files: {Makefile: recipe}, valid: true},
+    {name: "duplicate-targets", files: {Makefile: duplicate_recipe}, valid: true},
     {
       name: "multiple-targets",
       files: {Makefile: "unit test:\n\t@echo QUALITY_MAKE_REACHED\n"},
@@ -67,6 +69,10 @@ pipeline test(harness: Harness) {
   const parsed = makefile_parse(
     "unit test:\n\t@echo one\n\t-echo two\n\t+echo three\n\techo four\n",
   )
+  const duplicate = makefile_parse(duplicate_recipe)
+  assert_eq(len(duplicate), 1)
+  assert_eq(duplicate[0]?.recipe_line_count, 2)
+  assert_eq(duplicate[0]?.recipe_preview, ["echo QUALITY_MAKE_REACHED", "echo SECOND"])
   assert_eq(parsed.map({ target -> target.name }).to_list(), ["unit", "test"])
   for target in parsed {
     assert_eq(target.command, "make ${target.name}")

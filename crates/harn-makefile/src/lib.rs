@@ -106,7 +106,9 @@ pub fn parse(source: &str) -> Vec<MakefileTarget> {
                 });
                 index
             });
-            current.push(index);
+            if !current.contains(&index) {
+                current.push(index);
+            }
         }
         if let Some(semicolon) = unescaped(tail, ';') {
             #[expect(
