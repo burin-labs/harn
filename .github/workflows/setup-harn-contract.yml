@@ -154,6 +154,7 @@ jobs:
             exit 1
           fi
           grep -F 'workspace publish dependency cycle includes: harn-builtins' "$baseline/result.log"
+          git fetch --no-tags origin 90d82dfdffa6dcfd0964485b65c50abd0e7ab5c9
           git show 90d82dfdffa6dcfd0964485b65c50abd0e7ab5c9:scripts/publish_plan.harn > "$baseline/publish_plan.harn"
           if "$RUNTIME_PATH" run --standalone --no-sandbox "$baseline/verify_publish_workspace_plan.harn" -- \
             "$RUNNER_TEMP/publish-plan-metadata.json" 0.10.180 > "$baseline/versioned-dev.log" 2>&1; then
