@@ -78,7 +78,14 @@ fn gate_observing(observed: string, reason: string) {
 
 fn judge_refusing(detail: string) -> dict {
   return {
-    text: json_stringify({verdict: "continue", detail: detail, gap_class: "missing_artifact"}),
+    text: json_stringify(
+      {
+        verdict: "continue",
+        detail: detail,
+        gap_class: "missing_artifact",
+        goal_assessment: {kind: "unknown", evidence_refs: []},
+      },
+    ),
   }
 }
 

@@ -43,6 +43,7 @@ pub(super) struct Assessment {
     action: Action,
     evidence_id: String,
     requirements: Option<Requirements>,
+    goal_assessment: Option<GoalAssessment>,
     pending_tool_batch_effect_count: usize,
     gap_count: usize,
 }
@@ -56,13 +57,19 @@ impl Assessment {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 enum Kind {
     Achieved,
     PartiallyAchieved,
     NotAchieved,
     Unknown,
+}
+
+#[derive(Deserialize)]
+struct GoalAssessment {
+    kind: Kind,
+    evidence_refs: Vec<i64>,
 }
 
 #[derive(Serialize)]
@@ -73,6 +80,7 @@ enum Reason {
     RequirementsMet,
     RequirementsUnmet,
     RequirementsUnassessed,
+    GoalAssessed,
     PendingEffects,
     CompletionNotAccepted,
 }
@@ -105,6 +113,29 @@ pub(super) fn project(assessment: Option<Assessment>, publication_admitted: bool
     };
     if let Some(assessment) = assessment {
         outcome.evidence_id = Some(assessment.evidence_id);
+        let undeclared = assessment
+            .requirements
+            .as_ref()
+            .is_none_or(|report| report.required_count == 0 && report.pending_count == 0);
+        if undeclared {
+            outcome.reason = Reason::NoDeclaredRequirements;
+            if assessment.pending_tool_batch_effect_count > 0 {
+                outcome.reason = Reason::PendingEffects;
+            } else if let Some(goal) = assessment.goal_assessment {
+                if goal.kind == Kind::Unknown || !goal.evidence_refs.is_empty() {
+                    if goal.kind == Kind::Achieved
+                        && (!publication_admitted
+                            || !matches!(assessment.action, Action::Accept | Action::StopVerified)
+                            || assessment.gap_count > 0)
+                    {
+                        outcome.reason = Reason::CompletionNotAccepted;
+                    } else {
+                        outcome.kind = goal.kind;
+                        outcome.reason = Reason::GoalAssessed;
+                    }
+                }
+            }
+        }
         if let Some(report) = assessment.requirements {
             let mut summary = Summary {
                 required_count: report.required_count,
@@ -123,12 +154,15 @@ pub(super) fn project(assessment: Option<Assessment>, publication_admitted: bool
                     RowStatus::Unsupported => summary.unsupported_count += 1,
                 }
             }
-            outcome.reason = Reason::RequirementsUnassessed;
-            if summary.required_count == 0 {
-                outcome.reason = Reason::NoDeclaredRequirements;
-            } else if assessment.pending_tool_batch_effect_count > 0 {
+            if summary.required_count > 0 {
+                outcome.reason = Reason::RequirementsUnassessed;
+            }
+            if summary.required_count > 0 && assessment.pending_tool_batch_effect_count > 0 {
                 outcome.reason = Reason::PendingEffects;
-            } else if summary.missing_count == 0 && summary.unsupported_count == 0 {
+            } else if summary.required_count > 0
+                && summary.missing_count == 0
+                && summary.unsupported_count == 0
+            {
                 if summary.unmet_count > 0 {
                     outcome.kind = if summary.met_count > 0 {
                         Kind::PartiallyAchieved
@@ -160,6 +194,27 @@ pub(super) fn project(assessment: Option<Assessment>, publication_admitted: bool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Direct native finalization can supply fields that the loop's receipt
+    // owner would omit. A fallback must not erase declared or pending rows.
+    #[test]
+    fn fallback_assessment_cannot_override_declared_requirements() {
+        let mut receipt = serde_json::json!({
+            "action": "accept", "evidence_id": "assessed-state",
+            "pending_tool_batch_effect_count": 0, "gap_count": 0,
+            "goal_assessment": {"kind": "achieved", "evidence_refs": [-1]},
+            "requirements": {
+                "complete": false, "required_count": 1, "pending_count": 1,
+                "pending_names": ["Delivery"], "rows": [{"status": "unmet"}]
+            }
+        });
+        let declared = Assessment::read(Some(receipt.clone())).unwrap();
+        assert_eq!(project(declared, true)["kind"], "not_achieved");
+        receipt["requirements"]["required_count"] = serde_json::json!(0);
+        receipt["requirements"]["rows"] = serde_json::json!([]);
+        let pending = Assessment::read(Some(receipt)).unwrap();
+        assert_eq!(project(pending, true)["kind"], "unknown");
+    }
 
     // Direct native finalization can receive a truncated report, unlike the
     // canonical loop's normalized requirement owner. Absence cannot pass here.

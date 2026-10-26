@@ -76,7 +76,9 @@ pipeline default(harness: Harness) {
     harness.llm,
     [
       llm_text("The requested review is complete."),
-      llm_text("{\"verdict\":\"done\",\"detail\":\"The review result is explicit.\"}"),
+      llm_text(
+        "{\"verdict\":\"done\",\"detail\":\"The review result is explicit.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
+      ),
     ],
     { ->
       const session = "terminal-judge-" + harness.random.uuid()

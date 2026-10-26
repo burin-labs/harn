@@ -30,6 +30,7 @@ pub type AgentGoalOutcomeReason = "unassessed" \
   | "requirements_met" \
   | "requirements_unmet" \
   | "requirements_unassessed" \
+  | "goal_assessed" \
   | "pending_effects" \
   | "completion_not_accepted"
 

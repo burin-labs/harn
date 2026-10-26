@@ -179,7 +179,15 @@ pipeline test(harness: Harness) {
         harness.llm,
         [
           llm_text("Reviewed ##DONE##"),
-          llm_text(json_stringify({verdict: "done", detail: "Task complete"})),
+          llm_text(
+            json_stringify(
+              {
+                verdict: "done",
+                detail: "Task complete",
+                goal_assessment: {kind: "unknown", evidence_refs: []},
+              },
+            ),
+          ),
         ],
         { ->
           agent_loop(

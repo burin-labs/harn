@@ -101,9 +101,16 @@ fn gate_observing(observed: string, reason: string) {
  * A judge scripted to REFUSE. A case where it is called is then visible twice
  * over: in the call count, and in a directive that did not accept.
  */
-fn judge_refusing(detail: string) {
+fn judge_refusing(detail: string, declared: bool = false) {
+  const body = {verdict: "continue", detail: detail, gap_class: "missing_artifact"}
   return {
-    text: json_stringify({verdict: "continue", detail: detail, gap_class: "missing_artifact"}),
+    text: json_stringify(
+      if declared {
+        body
+      } else {
+        body + {goal_assessment: {kind: "unknown", evidence_refs: []}}
+      },
+    ),
   }
 }
 
@@ -279,7 +286,7 @@ pipeline default(harness: Harness) {
   const open_ledger = run_case(
     harness,
     "open-ledger",
-    working_script(judge_refusing(refusal)),
+    working_script(judge_refusing(refusal, true)),
     {verify_completion: gate_observing("passed", "verified_after_write")}
       + completion_judge_with_open_ledger(),
   )

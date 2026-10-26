@@ -44,7 +44,7 @@ pipeline default(harness: Harness) {
     [
       llm_text("<user_response>capped one</user_response>\n<done>##DONE##</done>"),
       llm_text(
-        "{\"verdict\":\"continue\",\"detail\":\"Keep going after the first and only judge call.\"}",
+        "{\"verdict\":\"continue\",\"detail\":\"Keep going after the first and only judge call.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
       ),
       llm_text("<user_response>capped two</user_response>\n<done>##DONE##</done>"),
       llm_text("<user_response>capped three</user_response>\n<done>##DONE##</done>"),
@@ -80,7 +80,9 @@ pipeline default(harness: Harness) {
     [
       llm_text("<user_response>closure one</user_response>\n<done>##DONE##</done>"),
       llm_text("<user_response>closure two</user_response>\n<done>##DONE##</done>"),
-      llm_text("{\"verdict\":\"done\",\"detail\":\"The closure is complete on turn two.\"}"),
+      llm_text(
+        "{\"verdict\":\"done\",\"detail\":\"The closure is complete on turn two.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
+      ),
     ],
     { ->
       const closure_session = "turn-end-judge-closure-" + harness.random.uuid()

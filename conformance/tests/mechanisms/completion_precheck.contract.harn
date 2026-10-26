@@ -47,7 +47,12 @@ fn run_boundary(harness: Harness, reply: dict, extra: dict, judge_extra: dict) -
       reply,
       llm_text(
         json_stringify(
-          {verdict: "done", detail: "The full judge accepted the fixture.", gap_class: "none"},
+          {verdict: "done", detail: "The full judge accepted the fixture.", gap_class: "none"}
+            + if judge_extra?.requirement_contract == nil {
+              {goal_assessment: {kind: "unknown", evidence_refs: []}}
+            } else {
+              {}
+            },
         ),
       )
         + {provider: "openai", model: "gpt-5.4-nano", input_tokens: 100, output_tokens: 30},
@@ -157,7 +162,12 @@ pipeline test(harness: Harness) {
   assert_eq(capped.started, 0)
   const done = llm_text(
     json_stringify(
-      {verdict: "done", detail: "The full judge accepted the fixture.", gap_class: "none"},
+      {
+        verdict: "done",
+        detail: "The full judge accepted the fixture.",
+        gap_class: "none",
+        goal_assessment: {kind: "unknown", evidence_refs: []},
+      },
     ),
   )
     + {provider: "openai", model: "gpt-5.4-nano", input_tokens: 100, output_tokens: 30}

@@ -34,6 +34,7 @@ import {
   CompletionRequirementBoundary,
   CompletionRequirementReport,
 } from "std/agent/completion_requirements"
+import { CompletionGoalAssessment } from "std/agent/goal_assessment"
 import {
   CompletionJudgeAdmission,
   CompletionJudgeGapClass,
@@ -89,6 +90,7 @@ pub type CompletionStageVerdict = {
   admission?: CompletionJudgeAdmission?,
   typed_checkpoint?: dict?,
   requirement_report?: CompletionRequirementReport?,
+  goal_assessment?: CompletionGoalAssessment?,
 }
 
 pub type CompletionPolicyEvaluation = {

@@ -347,6 +347,7 @@ catalog_entries! {
     "agent/pins" => "stdlib/agent/pins.harn",
     "agent/goal" => "stdlib/agent/goal.harn",
     "agent/goal_contract" => "stdlib/agent/goal_contract.harn",
+    "agent/goal_assessment" => "stdlib/agent/goal_assessment.harn",
     "agent/goal_projection" => "stdlib/agent/goal_projection.harn",
     "agent/task_plan" => "stdlib/agent/task_plan.harn",
     "personas/compiler" => "stdlib/personas/compiler.harn",

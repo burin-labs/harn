@@ -95,7 +95,15 @@ fn check_requirement_case(
     [
       llm_text("The answer.\n##DONE##"),
       if model_judge {
-        llm_text(json_stringify({verdict: "done", detail: "The answer meets the request."}))
+        llm_text(
+          json_stringify(
+            {
+              verdict: "done",
+              detail: "The answer meets the request.",
+              goal_assessment: {kind: "unknown", evidence_refs: []},
+            },
+          ),
+        )
       } else {
         llm_text("The answer.\n##DONE##")
       },

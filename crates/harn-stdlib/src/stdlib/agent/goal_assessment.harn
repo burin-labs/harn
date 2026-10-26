@@ -1,0 +1,68 @@
+import { CompletionRequirementEvidencePacket } from "std/agent/completion_requirements"
+import { AgentGoalOutcomeKind } from "std/agent/contracts"
+
+/** A goal reading, separate from the decision to end the turn. */
+pub type CompletionGoalAssessment = {kind: AgentGoalOutcomeKind, evidence_refs: list<int>}
+
+fn completion_goal_evidence_indices(packet: CompletionRequirementEvidencePacket) -> list<int> {
+  let indices: list<int> = []
+  for record in packet.requirement_evidence ?? [] {
+    indices = indices + [record.evidence_index]
+  }
+  for action in (packet.actions ?? []) + (packet.fallback_observations ?? []) {
+    const index = action?.evidence_index
+    if type_of(index) == "int" {
+      indices = indices + [index]
+    }
+  }
+  return indices.filter(
+    { index -> len(indices.filter({ candidate -> candidate == index }).to_list()) == 1 },
+  )
+    .to_list()
+}
+
+/**
+ * Constrain citations to unambiguous observations in the current packet.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __completion_goal_assessment_schema(packet: CompletionRequirementEvidencePacket) -> dict {
+  const schema = schema_to_json_schema(schema_of(CompletionGoalAssessment))
+  const indices = completion_goal_evidence_indices(packet)
+  const refs = if len(indices) == 0 {
+    {type: "array", items: {type: "integer"}, maxItems: 0}
+  } else {
+    {type: "array", items: {type: "integer", enum: indices}}
+  }
+  return schema + {properties: schema.properties + {evidence_refs: refs}}
+}
+
+/**
+ * Admit an assessment only when every citation names one current observation.
+ * Missing evidence is not a negative result or permission to retry the actor.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __completion_goal_assessment_read(
+  raw: unknown,
+  packet: CompletionRequirementEvidencePacket,
+) -> CompletionGoalAssessment? {
+  const assessment = match schema_parse(raw, schema_of(CompletionGoalAssessment)) {
+    Ok(value) -> { value }
+    Err(_) -> { return nil }
+  }
+  if assessment.kind != "unknown" && len(assessment.evidence_refs) == 0 {
+    return nil
+  }
+  const indices = completion_goal_evidence_indices(packet)
+  for evidence_ref in assessment.evidence_refs {
+    if !indices.contains(evidence_ref) {
+      return nil
+    }
+  }
+  return assessment
+}
