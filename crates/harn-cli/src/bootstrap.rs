@@ -11,7 +11,7 @@ pub(crate) fn args_after_pre_runtime_command() -> Vec<String> {
     let raw_args: Vec<String> = match env::args_os().map(|arg| arg.into_string()).collect() {
         Ok(args) => args,
         Err(arg) => {
-            eprintln!("error: argument {arg:?} is not valid UTF-8");
+            eprintln!("error: argument `{}` is not valid UTF-8", arg.display());
             process::exit(2);
         }
     };
