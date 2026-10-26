@@ -1,5 +1,16 @@
-import { AgentToolDispatch, __dispatch_results_list } from "std/agent/loop_result_status"
-import { AgentStallConfig, AgentStallState } from "std/agent/stall_types"
+import {
+  AgentToolDispatch,
+  __dispatch_results_list,
+  __tool_result_ok,
+} from "std/agent/loop_result_status"
+import {
+  AgentEditContentState,
+  AgentEditStateVisit,
+  AgentStallConfig,
+  AgentStallState,
+} from "std/agent/stall_types"
+import { agent_tool_resolve_workspace_write_name } from "std/agent/tool_annotations"
+import { agent_tool_result_data } from "std/agent/tool_lifecycle"
 import { VerificationGateInput, verification_gate_input } from "std/verification"
 
 /**
@@ -221,6 +232,87 @@ pub fn __agent_stall_completed_result(
     return results[index]
   }
   return nil
+}
+
+// A fixed session-checkpoint ceiling, shared across paths, retains only opaque
+// keys and counters. Eviction forgets the least recently visited content state.
+pub const STALL_EDIT_STATE_VISIT_LIMIT = 256
+
+pub type AgentEditStateObservation = {
+  state: AgentStallState,
+  path: string,
+  count: int,
+  iteration_distance: int?,
+}
+
+/**
+ * Observe a completed agent edit from producer facts only. Never retain a
+ * pre-image, rendered output, file content, or ambient filesystem observation.
+ * Missing hashes are unavailable evidence, not one shared empty content state.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __agent_stall_edit_state(
+  state: AgentStallState,
+  session_id: string,
+  tool_name: string,
+  result: dict?,
+  iteration: int,
+  registry: any,
+  policy: any,
+) -> AgentEditStateObservation {
+  const absent = {state: state, path: "", count: 0, iteration_distance: nil}
+  if tool_name == ""
+    || result == nil
+    || !__tool_result_ok(result)
+    || result?.status == "running"
+    || (result?.dispatch_receipt?.disposition ?? "executed") != "executed"
+    || agent_tool_resolve_workspace_write_name(registry, policy, tool_name) == "" {
+    return absent
+  }
+  const data = agent_tool_result_data(result)
+  if type_of(data) != "dict" {
+    return absent
+  }
+  const report = match schema_parse(
+    {path: data?.path, after_sha256: data?.after_sha256, mutation_status: data?.mutation_status},
+    schema_of(AgentEditContentState),
+  ) {
+    Ok(value) -> { value }
+    Err(_) -> { return absent }
+  }
+  const path = report.path
+  const hash = report.after_sha256
+  if trim(path) == "" || trim(hash) == "" {
+    return absent
+  }
+  const key = sha256(json_stringify([session_id, path, hash]))
+  let retained: list<AgentEditStateVisit> = []
+  let count = 1
+  let distance = nil
+  for visit in state.edit_state_visits {
+    if visit.key == key {
+      count = visit.count + 1
+      // A resumed loop starts its iteration counter again. The checkpoint
+      // owner invalidates old coordinates while preserving content identity.
+      if visit.iteration != nil && iteration >= visit.iteration {
+        distance = iteration - visit.iteration
+      }
+    } else {
+      retained = retained + [visit]
+    }
+  }
+  retained = retained + [{key: key, iteration: iteration, count: count}]
+  if len(retained) > STALL_EDIT_STATE_VISIT_LIMIT {
+    retained = retained[1:]
+  }
+  return {
+    state: state + {edit_state_visits: retained},
+    path: path,
+    count: count,
+    iteration_distance: distance,
+  }
 }
 
 /**

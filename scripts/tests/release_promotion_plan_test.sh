@@ -172,6 +172,17 @@ plan from_queue FAKE_CANDIDATE_RUN=4242
 plan recovery RECOVERY=true FAKE_RUNS_FAIL=1
 [[ "$(output recovery promote)" == true && "$(output recovery run_id)" == 9001 ]] \
   || fail "recovery did not retain its certified run: $(cat "$tmp/recovery.log")"
+plan standalone RECOVERY=true STANDALONE_HARN=true FAKE_CONSUMER=failure
+[[ "$(output standalone promote)" == true && "$(output standalone requires_rehearsal)" == false ]] \
+  || fail "standalone publication incorrectly requires downstream acceptance"
+! grep -Fq '/jobs?filter=latest' "$tmp/standalone.calls" \
+  || fail "standalone plan incorrectly reads a consumer verdict"
+plan standalone_automatic STANDALONE_HARN=true
+[[ "$(cat "$tmp/standalone_automatic.status")" != 0 ]] \
+  || fail "automatic publication accepted standalone scope"
+plan standalone_red_source RECOVERY=true STANDALONE_HARN=true FAKE_GREEN=ahead
+[[ "$(cat "$tmp/standalone_red_source.status")" != 0 ]] \
+  || fail "standalone publication bypassed source CI admission"
 plan recovery_missing RECOVERY=true FAKE_CONSUMER=missing
 [[ "$(output recovery_missing promote)" == true && "$(output recovery_missing requires_rehearsal)" == true ]] \
   || fail "missing rehearsal did not require actual measurement"

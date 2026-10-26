@@ -903,6 +903,7 @@ pub(super) fn run_status(index: &SharedIndex, _args: &[VmValue]) -> Result<VmVal
     let guard = index.lock().expect("code_index mutex poisoned");
     match guard.as_ref() {
         Some(state) => Ok(build_dict([
+            ("root", str_value(to_agent_path(&state.root))),
             ("file_count", VmValue::Int(state.files.len() as i64)),
             (
                 "current_seq",
@@ -945,6 +946,7 @@ pub(super) fn run_status(index: &SharedIndex, _args: &[VmValue]) -> Result<VmVal
             ),
         ])),
         None => Ok(build_dict([
+            ("root", VmValue::Nil),
             ("file_count", VmValue::Int(0)),
             ("current_seq", VmValue::Int(0)),
             ("last_indexed_at_ms", VmValue::Int(0)),

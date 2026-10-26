@@ -5,6 +5,10 @@
   "description": "Snapshot of the workspace index state. Empty/zeroed shape when no rebuild has happened yet.",
   "type": "object",
   "properties": {
+    "root": {
+      "type": ["string", "null"],
+      "description": "Canonical absolute workspace root the live index belongs to, with `/` separators, or null when no index is loaded."
+    },
     "file_count": { "type": "integer", "minimum": 0 },
     "current_seq": { "type": "integer", "minimum": 0 },
     "last_indexed_at_ms": { "type": "integer", "minimum": 0 },
@@ -26,6 +30,6 @@
       }
     }
   },
-  "required": ["file_count", "current_seq", "last_indexed_at_ms", "git_head", "agents"],
+  "required": ["root", "file_count", "current_seq", "last_indexed_at_ms", "git_head", "agents"],
   "additionalProperties": false
 }

@@ -86,6 +86,20 @@ pub fn agent_tool_handler_result_normalize<T>(
   return agent_tool_handler_result(to_string(rendered), data, outcome)
 }
 
+/**
+ * Read producer data from one completed dispatch result, preserving nominal results.
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_result_data(result: dict) -> unknown {
+  const payload = result?.result
+  if payload?.schema == "harn.agent_tool_handler_result.v2" {
+    return payload?.data
+  }
+  return payload
+}
+
 const TOOL_LIFECYCLE_ERROR_CATEGORIES = [
   "schema_validation",
   "tool_error",

@@ -595,6 +595,9 @@ pub(super) struct Session {
     /// The environment policy this session launched under, resolved once at
     /// `session/new` and reused for every prompt turn.
     pub(super) environment_policy: harn_vm::security::SessionEnvironment,
+    /// The root the runtime configurator was asked to warm for this session.
+    /// It is released on close or re-anchor, even if `project_root` moved.
+    pub(super) workspace_warm_root: Option<PathBuf>,
 }
 
 pub(super) fn session_project_root_for_cwd(cwd: &Path) -> PathBuf {

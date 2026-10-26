@@ -10,7 +10,7 @@ description = "Execution capability ceilings, sandbox policy, and tool semantics
 
 [dependencies]
 memchr = "2"
-harn-glob = { path = "../harn-glob", version = "=0.10.180" }
+harn-glob = { path = "../harn-glob", version = "=0.10.181-dev" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "=1.2.2"
