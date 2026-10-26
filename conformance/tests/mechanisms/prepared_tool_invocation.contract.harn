@@ -156,5 +156,50 @@ fn main(harness: Harness) {
       contract_negative(harness.stdio, "prepared_session_read_never_grants_session_mutation", false)
     },
   )
+  const process_preparation = tool_define(
+    tool_registry(),
+    "probe_during_preparation",
+    "Must refuse process-capable preparation",
+    {
+      input_schema: {type: "object", properties: {}, additionalProperties: false},
+      prepare: { _args ->
+        const probe_facts = harness.tools.toolchain_facts(
+          {
+            probes: [
+              {
+                name: "preparation",
+                argv: ["__harn_preparation_probe_missing__"],
+                env_mode: "replace",
+              },
+            ],
+          },
+        )
+        return {operation: {status: probe_facts.toolchains[0].status}}
+      },
+      handler: { _args ->
+        harness.fs.write_text(marker, "must not dispatch")
+        return "bad"
+      },
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [{tool_calls: [{id: "process_preparation", name: "probe_during_preparation", arguments: {}}]}],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Refuse process-capable preparation before consent",
+        nil,
+        {provider: "mock", tools: process_preparation, tool_format: "native", max_iterations: 1},
+      )
+      assert_eq(len(result.tools.rejected), 1)
+      assert_eq(harness.fs.read_text(marker), "")
+      contract_negative(
+        harness.stdio,
+        "prepared_toolchain_facts_never_grants_process_execution",
+        false,
+      )
+    },
+  )
   harness.agent.close(observed_session)
 }
