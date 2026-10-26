@@ -244,6 +244,7 @@ pub(crate) async fn flush_init_terminal(
             "terminal": terminal,
             "visible_reply": "",
             "provider_call_count": physical_usage.dispatched_calls,
+            "goal_outcome": serde_json::Value::Null,
         })),
     );
     let phase = append_terminal_phase(session_id, event)?;

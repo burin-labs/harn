@@ -136,7 +136,10 @@ pub(super) fn project(assessment: Option<Assessment>, publication_admitted: bool
                         Kind::NotAchieved
                     };
                     outcome.reason = Reason::RequirementsUnmet;
-                } else if report.complete && summary.pending_count == 0 {
+                } else if report.complete
+                    && summary.pending_count == 0
+                    && summary.met_count == summary.required_count
+                {
                     if publication_admitted
                         && matches!(assessment.action, Action::Accept | Action::StopVerified)
                         && assessment.gap_count == 0
@@ -152,4 +155,31 @@ pub(super) fn project(assessment: Option<Assessment>, publication_admitted: bool
         }
     }
     serde_json::to_value(outcome).expect("goal outcome contains only JSON-safe fields")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Direct native finalization can receive a truncated report, unlike the
+    // canonical loop's normalized requirement owner. Absence cannot pass here.
+    #[test]
+    fn truncated_report_cannot_establish_goal_success() {
+        let mut receipt = serde_json::json!({
+            "action": "accept", "evidence_id": "assessed-state",
+            "pending_tool_batch_effect_count": 0, "gap_count": 0,
+            "requirements": {
+                "complete": true, "required_count": 1, "pending_count": 0,
+                "pending_names": [], "rows": [{"status": "met"}]
+            }
+        });
+        let measured = Assessment::read(Some(receipt.clone())).unwrap();
+        assert_eq!(project(measured, true)["kind"], "achieved");
+        receipt["requirements"]["rows"] = serde_json::json!([]);
+        let truncated = Assessment::read(Some(receipt)).unwrap();
+        let outcome = project(truncated, true);
+        assert_eq!(outcome["kind"], "unknown");
+        assert_eq!(outcome["requirements"]["required_count"], 1);
+        assert_eq!(outcome["requirements"]["met_count"], 0);
+    }
 }
