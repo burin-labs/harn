@@ -698,12 +698,37 @@ fn rust_widening_never_confuses_shared_and_mutable_method_receivers() {
 
 #[test]
 fn rust_widening_never_assumes_a_conditional_member_is_present() {
-    let fixture = receiver_dispatch_fixture(
-        "#[cfg(feature = \"hidden_inherent\")] fn flush(&self) {}",
+    for attribute in [
+        "#[cfg(feature = \"hidden_inherent\")]",
+        "#[cfg_attr(all(), cfg(feature = \"hidden_inherent\"))]",
+        "#[cfg_attr(all(), cfg_attr(all(), cfg(feature = \"hidden_inherent\")))]",
+    ] {
+        let method = format!("{attribute} fn flush(&self) {{}}");
+        let fixture = receiver_dispatch_fixture(
+            &method,
+            "pub fn run(out: &Buffer) { #[cfg(not(feature = \"hidden_inherent\"))] { use crate::other::Flush; out.flush(); } }",
+            "pub trait Flush { fn flush(&self); }\nimpl Flush for crate::a::Buffer { fn flush(&self) {} }\n",
+        );
+        fixture.refused(
+            "visibility_required",
+            &widening_args("run", "src/a.rs", "src/b.rs", Some("pub")),
+        );
+    }
+    let inner = receiver_dispatch_fixture(
+        "fn flush(&self) { #![cfg(feature = \"hidden_inherent\")] }",
         "pub fn run(out: &Buffer) { #[cfg(not(feature = \"hidden_inherent\"))] { use crate::other::Flush; out.flush(); } }",
         "pub trait Flush { fn flush(&self); }\nimpl Flush for crate::a::Buffer { fn flush(&self) {} }\n",
     );
-    fixture.refused(
+    inner.refused(
+        "visibility_required",
+        &widening_args("run", "src/a.rs", "src/b.rs", Some("pub")),
+    );
+    let conditional_impl = receiver_dispatch_fixture(
+        "",
+        "#[cfg(feature = \"hidden_inherent\")] impl Buffer { fn flush(&self) {} }\npub fn run(out: &Buffer) { #[cfg(not(feature = \"hidden_inherent\"))] { use crate::other::Flush; out.flush(); } }",
+        "pub trait Flush { fn flush(&self); }\nimpl Flush for crate::a::Buffer { fn flush(&self) {} }\n",
+    );
+    conditional_impl.refused(
         "visibility_required",
         &widening_args("run", "src/a.rs", "src/b.rs", Some("pub")),
     );

@@ -370,13 +370,12 @@ const RUST_ITEMLESS_STD_MACROS: &[&str] = &[
     "writeln",
 ];
 
-/// Built-in attributes that cannot introduce an unseen binding. Expansion
+/// Built-in attributes that preserve the decorated declaration. Expansion
 /// wrappers (`derive` and `cfg_attr`) inspect their arguments separately.
 /// `path` is absent because it changes which file a module loads.
 const RUST_INERT_ATTRIBUTES: &[&str] = &[
     "allow",
     "automatically_derived",
-    "cfg",
     "cold",
     "deny",
     "deprecated",
@@ -393,19 +392,59 @@ const RUST_INERT_ATTRIBUTES: &[&str] = &[
     "non_exhaustive",
     "repr",
     "should_panic",
-    "test",
     "track_caller",
     "used",
     "warn",
 ];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RustAttributeEffect {
+    Inert,
+    Conditional,
+    Opaque,
+}
+
+/// A declaration behind an unknown configuration cannot authorize a write.
+pub(crate) fn rust_declaration_is_unconditional(node: Node<'_>, source: &str) -> bool {
+    let mut up = Some(node);
+    while let Some(scope) = up {
+        let mut previous = scope.prev_named_sibling();
+        while let Some(prefix) = previous {
+            match prefix.kind() {
+                "attribute_item"
+                    if rust_attribute_effect_at(prefix, source) != RustAttributeEffect::Inert =>
+                {
+                    return false;
+                }
+                "attribute_item" | "line_comment" | "block_comment" => {}
+                _ => break,
+            }
+            previous = prefix.prev_named_sibling();
+        }
+        for container in [Some(scope), scope.child_by_field_name("body")]
+            .into_iter()
+            .flatten()
+        {
+            let mut cursor = container.walk();
+            if container.named_children(&mut cursor).any(|child| {
+                child.kind() == "inner_attribute_item"
+                    && rust_attribute_effect_at(child, source) != RustAttributeEffect::Inert
+            }) {
+                return false;
+            }
+        }
+        up = scope.parent();
+    }
+    true
+}
 
 /// Whether a Rust macro invocation or attribute can expand into bindings the
 /// parse cannot see.
 ///
 /// Only an invocation in item or statement position can declare an item or a
 /// call-site `let` that sibling code sees; one nested in an expression expands
-/// to that expression. Attributes other than the inert set may rewrite the
-/// item they decorate.
+/// to that expression. Opaque attributes may rewrite their item; conditional
+/// attributes separately constrain whether a declaration is present.
 fn rust_expansion_may_bind(node: Node<'_>, source: &str) -> bool {
     match node.kind() {
         "macro_invocation" => {
@@ -418,36 +457,41 @@ fn rust_expansion_may_bind(node: Node<'_>, source: &str) -> bool {
             in_statement_position && !rust_itemless_std_macro(node, source)
         }
         "attribute_item" | "inner_attribute_item" => {
-            let Some(attribute) = node.named_child(0) else {
-                return true;
-            };
-            let Some(path) = attribute.named_child(0) else {
-                return true;
-            };
-            !rust_attribute_is_inert(
-                node,
-                source,
-                node_text(path, source),
-                attribute.child_by_field_name("arguments"),
-            )
+            rust_attribute_effect_at(node, source) == RustAttributeEffect::Opaque
         }
         _ => false,
     }
 }
 
-fn rust_attribute_is_inert(
+fn rust_attribute_effect_at(node: Node<'_>, source: &str) -> RustAttributeEffect {
+    let Some(attribute) = node.named_child(0) else {
+        return RustAttributeEffect::Opaque;
+    };
+    let Some(path) = attribute.named_child(0) else {
+        return RustAttributeEffect::Opaque;
+    };
+    rust_attribute_effect(
+        node,
+        source,
+        node_text(path, source),
+        attribute.child_by_field_name("arguments"),
+    )
+}
+
+fn rust_attribute_effect(
     site: Node<'_>,
     source: &str,
     path: &str,
     arguments: Option<Node<'_>>,
-) -> bool {
+) -> RustAttributeEffect {
     // An imported procedural attribute can replace even `derive` or `test`.
     // Prove the binding before trusting either its spelling or arguments.
     let (prefix, name) = path.split_once("::").unwrap_or(("", path));
     if !rust_macro_path_is_unshadowed(site, source, prefix, name) {
-        return false;
+        return RustAttributeEffect::Opaque;
     }
     match path {
+        "cfg" | "test" => RustAttributeEffect::Conditional,
         "derive" => {
             // Custom derives may append arbitrary items, including a local
             // type that shadows the receiver owner. Only unshadowed builtins
@@ -464,7 +508,7 @@ fn rust_attribute_is_inert(
                 "PartialOrd",
             ];
             let Some(parts) = rust_attribute_arguments(arguments) else {
-                return false;
+                return RustAttributeEffect::Opaque;
             };
             let mut expect_name = true;
             for part in parts {
@@ -473,28 +517,29 @@ fn rust_attribute_is_inert(
                     if !BUILTIN_DERIVES.contains(&name)
                         || !rust_macro_path_is_unshadowed(site, source, "", name)
                     {
-                        return false;
+                        return RustAttributeEffect::Opaque;
                     }
                     expect_name = false;
                 } else if !expect_name && part.kind() == "," {
                     expect_name = true;
                 } else {
-                    return false;
+                    return RustAttributeEffect::Opaque;
                 }
             }
-            true
+            RustAttributeEffect::Inert
         }
         "cfg_attr" => {
             let Some(parts) = rust_attribute_arguments(arguments) else {
-                return false;
+                return RustAttributeEffect::Opaque;
             };
             let mut groups = parts.split(|part| part.kind() == ",");
             // Do not guess a project's active configuration. Every possible
             // generated attribute must preserve the same binding guarantee.
             if groups.next().is_none_or(|predicate| predicate.is_empty()) {
-                return false;
+                return RustAttributeEffect::Opaque;
             }
             let mut seen = false;
+            let mut effect = RustAttributeEffect::Inert;
             for group in groups {
                 if group.is_empty() {
                     continue;
@@ -503,23 +548,38 @@ fn rust_attribute_is_inert(
                 let path = node_text(group[0], source);
                 let arguments = match group.get(1) {
                     Some(node) if node.kind() == "token_tree" && group.len() == 2 => Some(*node),
-                    _ if matches!(path, "derive" | "cfg_attr") => return false,
+                    _ if matches!(path, "derive" | "cfg_attr") => {
+                        return RustAttributeEffect::Opaque;
+                    }
                     _ => None,
                 };
                 if group[0].kind() != "identifier"
                     || group.get(1).is_some_and(|node| node.kind() == "::")
-                    || !rust_attribute_is_inert(site, source, path, arguments)
                 {
-                    return false;
+                    return RustAttributeEffect::Opaque;
+                }
+                match rust_attribute_effect(site, source, path, arguments) {
+                    RustAttributeEffect::Opaque => return RustAttributeEffect::Opaque,
+                    RustAttributeEffect::Conditional => effect = RustAttributeEffect::Conditional,
+                    RustAttributeEffect::Inert => {}
                 }
             }
-            seen
+            if seen {
+                effect
+            } else {
+                RustAttributeEffect::Opaque
+            }
         }
         _ => {
-            RUST_INERT_ATTRIBUTES.contains(&path)
+            if RUST_INERT_ATTRIBUTES.contains(&path)
                 || path.split_once("::").is_some_and(|(prefix, _)| {
                     matches!(prefix, "clippy" | "rustfmt" | "diagnostic")
                 })
+            {
+                RustAttributeEffect::Inert
+            } else {
+                RustAttributeEffect::Opaque
+            }
         }
     }
 }

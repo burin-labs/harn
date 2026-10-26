@@ -21,3 +21,7 @@ Custom derives and conditional macro attributes cannot supply an unseen type
 that authorizes widening. Built-in derives and conditional inert attributes
 retain the same lexical proof.
 Imported macros cannot borrow a built-in attribute's name to bypass that proof.
+Private method widening also proves the declaration is unconditional and the
+receiver selects that method without an implicit adjustment. Specialized impls,
+unproven receiver modes and conditional members refuse instead of exposing an
+unrelated private API; generic fields and proven exact receivers remain usable.

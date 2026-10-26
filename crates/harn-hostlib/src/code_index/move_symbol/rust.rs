@@ -477,12 +477,13 @@ impl Workspace {
                                 .collect()
                         })
                         .unwrap_or_default(),
-                    child.child_by_field_name("type").map(|ty| {
-                        if ty.kind() == "generic_type" {
-                            ty.child_by_field_name("type").unwrap_or(ty)
-                        } else {
-                            ty
-                        }
+                    // An impl family name alone does not prove applicability.
+                    child.child_by_field_name("type").filter(|ty| {
+                        ty.kind() == "type_identifier"
+                            && child.child_by_field_name("type_parameters").is_none()
+                            && !text::members(child)
+                                .into_iter()
+                                .any(|part| part.kind() == "where_clause")
                     }),
                 ),
                 _ => (Vec::new(), None),
@@ -506,17 +507,20 @@ impl Workspace {
             if !hidden {
                 continue;
             }
-            let mut blocker = declared(
-                rel,
-                source,
-                *member,
-                format!("`{name}` is private to the source module but the moved item uses it"),
-            );
             let unique = found.iter().filter(|(_, other, _)| other == name).count() == 1;
-            blocker.placeable &= unique
+            let proven = unique
                 && owner
                     .as_ref()
-                    .is_some_and(|o| receiver::uses_resolve_to(item, source, name, o));
+                    .is_some_and(|o| receiver::uses_resolve_to(item, source, *member, o));
+            let reason = if proven {
+                format!("`{name}` is private to the source module but the moved item uses it")
+            } else {
+                format!(
+                    "cannot prove that the moved `{name}` use refers to this private declaration"
+                )
+            };
+            let mut blocker = declared(rel, source, *member, reason);
+            blocker.placeable &= proven;
             sites.push(blocker);
         }
         sites

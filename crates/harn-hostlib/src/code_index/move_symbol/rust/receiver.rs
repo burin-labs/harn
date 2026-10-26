@@ -2,14 +2,44 @@
 
 use tree_sitter::Node;
 
-use crate::ast::{name_resolution::binding_defeaters_at, Language};
+use crate::ast::{
+    name_resolution::{binding_defeaters_at, rust_declaration_is_unconditional},
+    Language,
+};
 
 use super::text;
 
-pub(super) fn uses_resolve_to(item: Node<'_>, source: &str, member: &str, owner: &str) -> bool {
-    if !binding_defeaters_at(item, source, Language::Rust).is_empty() {
+#[derive(Clone, Copy)]
+enum MemberKind {
+    Field,
+    Method(ReceiverMode),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReceiverMode {
+    Owned,
+    Shared,
+    Mutable,
+}
+
+pub(super) fn uses_resolve_to(
+    item: Node<'_>,
+    source: &str,
+    declaration: Node<'_>,
+    owner: &str,
+) -> bool {
+    if !binding_defeaters_at(item, source, Language::Rust).is_empty()
+        || !rust_declaration_is_unconditional(declaration, source)
+    {
         return false;
     }
+    let Some(kind) = member_kind(declaration) else {
+        return false;
+    };
+    let Some(name) = declaration.child_by_field_name("name") else {
+        return false;
+    };
+    let member = text::text(name, source);
     let mut seen = false;
     let mut proven = true;
     text::walk(item, |node| {
@@ -20,11 +50,54 @@ pub(super) fn uses_resolve_to(item: Node<'_>, source: &str, member: &str, owner:
         {
             seen = true;
             proven &= type_is_unshadowed(node, item, source, owner)
-                && member_owner(node, item, source) == Some(owner);
+                && member_owner(node, item, source, kind) == Some(owner);
         }
         true
     });
     seen && proven
+}
+
+fn member_kind(declaration: Node<'_>) -> Option<MemberKind> {
+    match declaration.kind() {
+        "field_declaration" => Some(MemberKind::Field),
+        "function_item" => {
+            let parameters = declaration.child_by_field_name("parameters")?;
+            let parameter = parameters.named_child(0)?;
+            (parameter.kind() == "self_parameter")
+                .then(|| MemberKind::Method(receiver_mode(parameter)))
+        }
+        _ => None,
+    }
+}
+
+fn receiver_mode(node: Node<'_>) -> ReceiverMode {
+    let mut cursor = node.walk();
+    if !node.children(&mut cursor).any(|child| child.kind() == "&") {
+        ReceiverMode::Owned
+    } else if text::members(node)
+        .into_iter()
+        .any(|child| child.kind() == "mutable_specifier")
+    {
+        ReceiverMode::Mutable
+    } else {
+        ReceiverMode::Shared
+    }
+}
+
+fn declared_receiver_type<'a>(ty: Node<'a>, source: &'a str, kind: MemberKind) -> Option<&'a str> {
+    let MemberKind::Method(expected) = kind else {
+        return base_type(ty, source);
+    };
+    // A different adjustment can select a trait method before the inherent one.
+    if receiver_mode(ty) != expected {
+        return None;
+    }
+    let nominal = if ty.kind() == "reference_type" {
+        ty.child_by_field_name("type")?
+    } else {
+        ty
+    };
+    (nominal.kind() == "type_identifier").then(|| text::text(nominal, source))
 }
 
 fn base_type<'a>(mut ty: Node<'a>, source: &'a str) -> Option<&'a str> {
@@ -83,12 +156,17 @@ fn type_is_unshadowed(node: Node<'_>, item: Node<'_>, source: &str, owner: &str)
     true
 }
 
-fn member_owner<'a>(node: Node<'a>, item: Node<'a>, source: &'a str) -> Option<&'a str> {
+fn member_owner<'a>(
+    node: Node<'a>,
+    item: Node<'a>,
+    source: &'a str,
+    kind: MemberKind,
+) -> Option<&'a str> {
     let parent = node.parent()?;
     if parent.kind() == "field_expression" {
         let receiver = parent.child_by_field_name("value")?;
         return (receiver.kind() == "identifier")
-            .then(|| parameter_type(receiver, item, source))
+            .then(|| parameter_type(receiver, item, source, kind))
             .flatten();
     }
     let mut up = Some(parent);
@@ -109,7 +187,12 @@ fn member_owner<'a>(node: Node<'a>, item: Node<'a>, source: &'a str) -> Option<&
     None
 }
 
-fn parameter_type<'a>(receiver: Node<'a>, item: Node<'a>, source: &'a str) -> Option<&'a str> {
+fn parameter_type<'a>(
+    receiver: Node<'a>,
+    item: Node<'a>,
+    source: &'a str,
+    kind: MemberKind,
+) -> Option<&'a str> {
     let name = text::text(receiver, source);
     let at = receiver.start_byte();
     let mut up = receiver.parent();
@@ -173,7 +256,7 @@ fn parameter_type<'a>(receiver: Node<'a>, item: Node<'a>, source: &'a str) -> Op
                                 .then(|| {
                                     parameter
                                         .child_by_field_name("type")
-                                        .and_then(|ty| base_type(ty, source))
+                                        .and_then(|ty| declared_receiver_type(ty, source, kind))
                                 })
                                 .flatten();
                         }
