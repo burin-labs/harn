@@ -98,7 +98,7 @@ impl WorkspaceHostlib {
             .filter(|entry| entry.open_sessions == 0)?;
         let code_index = entry.handles.code_index.clone();
         let map = Arc::clone(&self.by_root);
-        std::thread::Builder::new()
+        harn_parser::runtime_stack::builder()
             .name("harn-acp-index-release".to_string())
             .spawn(move || {
                 code_index.wait_until_idle();
