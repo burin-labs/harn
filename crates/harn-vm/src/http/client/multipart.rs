@@ -15,6 +15,7 @@ struct MultipartField {
     value: Vec<u8>,
     filename: Option<String>,
     content_type: Option<String>,
+    headers: reqwest::header::HeaderMap,
 }
 
 fn parse_multipart_field(value: &VmValue) -> Result<MultipartField, VmError> {
@@ -31,6 +32,29 @@ fn parse_multipart_field(value: &VmValue) -> Result<MultipartField, VmError> {
         .or_else(|| dict.get("mime_type"))
         .map(|value| value.display())
         .filter(|value| !value.is_empty());
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Some(value) = dict.get("headers") {
+        let values = value
+            .as_dict()
+            .ok_or_else(|| vm_error("http: multipart headers must be a dict"))?;
+        for (name, value) in values {
+            let name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
+                .map_err(|_| vm_error("http: invalid multipart header name"))?;
+            if name == reqwest::header::CONTENT_TYPE || name == reqwest::header::CONTENT_DISPOSITION
+            {
+                return Err(vm_error("http: multipart Content-Type and Content-Disposition use content_type, name and filename"));
+            }
+            if headers.contains_key(&name) {
+                return Err(vm_error("http: duplicate multipart header name"));
+            }
+            let VmValue::String(value) = value else {
+                return Err(vm_error("http: multipart header values must be strings"));
+            };
+            let value = reqwest::header::HeaderValue::from_str(value.as_str())
+                .map_err(|_| vm_error("http: invalid multipart header value"))?;
+            headers.insert(name, value);
+        }
+    }
 
     let mut filename = dict
         .get("filename")
@@ -70,6 +94,7 @@ fn parse_multipart_field(value: &VmValue) -> Result<MultipartField, VmError> {
         value,
         filename,
         content_type,
+        headers,
     })
 }
 
@@ -109,6 +134,12 @@ fn multipart_mock_body(parts: &[MultipartField]) -> String {
             out.push_str(content_type);
             out.push_str("\r\n");
         }
+        for (name, value) in &part.headers {
+            out.push_str(name.as_str());
+            out.push_str(": ");
+            out.push_str(&String::from_utf8_lossy(value.as_bytes()));
+            out.push_str("\r\n");
+        }
         out.push_str("\r\n");
         out.push_str(&String::from_utf8_lossy(&part.value));
         out.push_str("\r\n");
@@ -133,7 +164,7 @@ pub(super) fn multipart_form(
                 vm_error(format!("http: invalid multipart content_type: {error}"))
             })?;
         }
-        form = form.part(field.name.clone(), part);
+        form = form.part(field.name.clone(), part.headers(field.headers.clone()));
     }
     Ok(form)
 }

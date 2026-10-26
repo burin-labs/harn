@@ -3585,6 +3585,9 @@ query_stringify([{key: "name", value: "ali ce"}])
 
 - `http_get/post/put/patch/delete/request` return
   `{status, headers, body, ok}` for outbound HTTP calls.
+- Request bodies preserve raw `bytes` or UTF-8 strings. `response_type: "bytes"`
+  adds `body_bytes` and leaves `body` empty; the default `"text"` mode decodes
+  UTF-8. Both modes enforce `max_response_bytes` while buffering.
 - `harness.net.download(url, dst_path, options?)` streams a response body to disk and
   returns `{bytes_written, status, headers, ok}`.
 - `http_stream_open/read/info/close` expose pull-based response streaming;
@@ -3598,7 +3601,9 @@ query_stringify([{key: "name", value: "ali ce"}])
 - `http_post/put/patch` accept either `(url, body, options?)` or `(url, options)`
   when the request is driven entirely by options such as `multipart`.
 - `multipart` accepts a list of part dicts with `name` plus one of `value`,
-  `value_base64`, or `path`, along with optional `filename` and `content_type`.
+  `value_base64`, or `path`, along with optional `filename`, `content_type` and
+  `headers`. Use the dedicated fields for `Content-Type` and
+  `Content-Disposition`; invalid or duplicate part headers refuse before sending.
 - Default retries cover `408`, `429`, `500`, `502`, `503`, and `504` for
   idempotent methods only. `Retry-After` is honored on `429` / `503`.
 - `http_mock(method, url_pattern, response)` can script multiple responses

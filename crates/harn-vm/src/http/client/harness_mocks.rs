@@ -28,8 +28,10 @@ pub(in crate::http) async fn http_verb_handler(
         super::get_options_arg(&args, 1)
     };
     if has_body && !(matches!(args.get(1), Some(VmValue::Dict(_))) && args.get(2).is_none()) {
-        let body = args.get(1).map(VmValue::display).unwrap_or_default();
-        crate::value::VmDictExt::put_str(&mut options, "body", body);
+        options.insert(
+            crate::value::intern_key("body"),
+            args.get(1).cloned().unwrap_or_else(|| VmValue::string("")),
+        );
     }
     vm_execute_http_request_with_mocks(mocks, method, &url, &options).await
 }
@@ -110,7 +112,10 @@ pub(super) fn consume_http_mock(
                 method,
                 final_url,
                 parts.recorded_headers.clone(),
-                parts.body.clone(),
+                parts
+                    .body
+                    .as_ref()
+                    .map(|body| String::from_utf8_lossy(body).into_owned()),
             )
         })
         .or_else(|| {
@@ -118,7 +123,10 @@ pub(super) fn consume_http_mock(
                 method,
                 final_url,
                 parts.recorded_headers.clone(),
-                parts.body.clone(),
+                parts
+                    .body
+                    .as_ref()
+                    .map(|body| String::from_utf8_lossy(body).into_owned()),
             )
         })
 }

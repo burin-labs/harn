@@ -21,9 +21,12 @@ use super::{
     MAX_RETRY_DELAY_MS, MULTIPART_MOCK_BOUNDARY,
 };
 
+mod body;
 pub(super) mod harness_mocks;
 mod multipart;
 mod named_inputs;
+pub(super) use body::ResponseBody;
+use body::{read_response_body_limited, ResponseMode};
 use multipart::{multipart_form, parse_multipart_request, MultipartRequest};
 use named_inputs::apply_session_secret_headers;
 pub(super) use named_inputs::{build_http_download_response, build_http_response};
@@ -87,7 +90,7 @@ pub(super) struct HttpRequestParts {
     pub(super) method: reqwest::Method,
     pub(super) headers: reqwest::header::HeaderMap,
     pub(super) recorded_headers: crate::value::DictMap,
-    pub(super) body: Option<String>,
+    pub(super) body: Option<Vec<u8>>,
     multipart: Option<MultipartRequest>,
 }
 
@@ -649,9 +652,11 @@ pub(super) fn parse_http_request_parts(
         headers: header_map,
         recorded_headers,
         body: if multipart.is_some() {
-            multipart.as_ref().map(|request| request.mock_body.clone())
+            multipart
+                .as_ref()
+                .map(|request| request.mock_body.as_bytes().to_vec())
         } else {
-            options.get("body").map(|v| v.display())
+            options.get("body").map(value_to_bytes)
         },
         multipart,
     })
@@ -750,37 +755,6 @@ fn ensure_response_body_within_limit(body_len: usize, max_bytes: usize) -> Resul
     Ok(())
 }
 
-async fn read_response_text_limited(
-    mut response: reqwest::Response,
-    max_bytes: usize,
-) -> Result<String, VmError> {
-    if response
-        .content_length()
-        .is_some_and(|len| len > max_bytes as u64)
-    {
-        return Err(vm_error(format!(
-            "http: response body exceeded max_response_bytes ({max_bytes})"
-        )));
-    }
-
-    let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|error| {
-        vm_error(format!(
-            "http: failed to read response body: {}",
-            crate::egress::redact_reqwest_error(&error)
-        ))
-    })? {
-        let next_len = body
-            .len()
-            .checked_add(chunk.len())
-            .ok_or_else(|| vm_error("http: response body length overflow"))?;
-        ensure_response_body_within_limit(next_len, max_bytes)?;
-        body.extend_from_slice(&chunk);
-    }
-    String::from_utf8(body)
-        .map_err(|error| vm_error(format!("http: response body is not valid UTF-8: {error}")))
-}
-
 pub(super) fn compute_retry_delay(
     attempt: u32,
     base_ms: u64,
@@ -849,6 +823,7 @@ pub(super) async fn vm_execute_http_request_with_client(
     url: &str,
     options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
+    let response_mode = ResponseMode::parse(options)?;
     let mut parts = parse_http_request_parts(method, options)?;
     let final_url = final_http_url(url, options, "http")?;
     if options.contains_key("secret_headers") && config.retry.max > 0 {
@@ -887,7 +862,7 @@ pub(super) async fn vm_execute_http_request_with_client(
             return Ok(build_http_response(
                 mock_response.status,
                 mock_response.headers,
-                mock_response.body,
+                response_mode.decode(mock_response.body.into_bytes())?,
                 &final_url,
                 &private_filter,
             ));
@@ -925,12 +900,13 @@ pub(super) async fn vm_execute_http_request_with_client(
                 let resp_headers = response_headers(response.headers());
 
                 let response_url = response.url().to_string();
-                let body_text =
-                    read_response_text_limited(response, config.max_response_bytes).await?;
+                let body =
+                    read_response_body_limited(response, config.max_response_bytes, response_mode)
+                        .await?;
                 return Ok(build_http_response(
                     status as i64,
                     resp_headers,
-                    body_text,
+                    body,
                     &response_url,
                     &private_filter,
                 ));

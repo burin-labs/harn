@@ -42,7 +42,7 @@ pub(super) async fn apply(
         service: service.as_str(),
         region: region.as_str(),
         headers: &headers,
-        body: parts.body.as_deref().unwrap_or_default().as_bytes(),
+        body: parts.body.as_deref().unwrap_or_default(),
         timestamp: Utc::now(),
     })
     .map_err(|error| vm_error(format!("http: aws_sigv4 signing failed: {error}")))?;

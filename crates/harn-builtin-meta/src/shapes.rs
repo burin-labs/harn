@@ -26,7 +26,7 @@
 //!   callsites still work.
 
 use crate::{
-    ShapeFieldDescriptor, Ty, TY_ANY, TY_BOOL, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT, TY_INT,
+    ShapeFieldDescriptor, Ty, TY_ANY, TY_BOOL, TY_BYTES, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT, TY_INT,
     TY_INT_OR_NIL, TY_LIST, TY_NIL, TY_STRING, TY_STRING_OR_NIL,
 };
 
@@ -234,12 +234,13 @@ pub const PROCESS_RESULT: Ty = Ty::Shape(&[
 ///
 /// The typed projection of `build_http_response` in `harn-vm`, shared by live
 /// and mocked responses. A 4xx or 5xx is a response with `ok: false`; a
-/// transport failure throws. `body` is untrusted text: decode it with
-/// `json_parse` and `schema_parse`.
+/// transport failure throws. Text mode returns untrusted `body`; explicit
+/// byte mode adds `body_bytes` and leaves `body` empty.
 pub const HTTP_RESPONSE: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("status", TY_INT),
     ShapeFieldDescriptor::new("headers", TY_DICT),
     ShapeFieldDescriptor::new("body", TY_STRING),
+    ShapeFieldDescriptor::optional("body_bytes", TY_BYTES),
     ShapeFieldDescriptor::new("final_url", TY_STRING),
     ShapeFieldDescriptor::new("ok", TY_BOOL),
 ]);

@@ -2,6 +2,63 @@ use super::*;
 use crate::session_inputs::{InputKind, InputLifetime, InputSpec, InputUsage};
 
 #[tokio::test]
+async fn explicit_binary_responses_apply_the_current_private_input_filter() {
+    reset_http_state();
+    let session = crate::agent_sessions::open_or_create(None).unwrap();
+    let _session = crate::agent_sessions::enter_current_session(session.clone());
+    crate::session_inputs::put(
+        &session,
+        InputSpec {
+            name: "BYTE_CANARY".into(),
+            kind: InputKind::Secret,
+            lifetime: InputLifetime::Session,
+            usage: InputUsage::SessionTools,
+        },
+        "private-byte-fixture".into(),
+        false,
+        0,
+    )
+    .unwrap();
+    let url = "https://example.test/private-byte-response";
+    push_http_mock(
+        "GET",
+        url,
+        vec![HttpMockResponse::new(
+            200,
+            "public-private-byte-fixture-tail",
+        )],
+    );
+    let options =
+        crate::value::json::json_to_vm_value(&serde_json::json!({"response_type":"bytes"}));
+    let response = vm_execute_http_request("GET", url, options.as_dict().unwrap())
+        .await
+        .unwrap();
+    let body = response.as_dict().unwrap()["body_bytes"]
+        .as_bytes()
+        .unwrap();
+    let text = std::str::from_utf8(body).unwrap();
+    assert!(text.starts_with("public-") && text.ends_with("-tail"));
+    assert!(!text.contains("private-byte-fixture"));
+    let mut raw = vec![0, 255];
+    raw.extend_from_slice(b"public-private-byte-fixture-tail");
+    raw.push(254);
+    let binary = super::super::client::build_http_response(
+        200,
+        crate::value::DictMap::new(),
+        super::super::client::ResponseBody::Bytes(raw),
+        url,
+        &crate::session_inputs::OutputFilter::capture(),
+    );
+    let raw = binary.as_dict().unwrap()["body_bytes"].as_bytes().unwrap();
+    assert!(raw.starts_with(&[0, 255]) && raw.ends_with(&[254]));
+    assert!(!raw
+        .windows(b"private-byte-fixture".len())
+        .any(|window| window == b"private-byte-fixture"));
+    assert!(crate::agent_sessions::close(&session));
+    reset_http_state();
+}
+
+#[tokio::test]
 async fn signed_session_input_headers_stay_private_in_mock_recordings() {
     use crate::security::{EnvironmentPolicyKind, LauncherEnvironment};
 

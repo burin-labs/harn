@@ -1270,12 +1270,28 @@ pipeline summarize(harness: Harness) {
 
 ## HTTP
 
+Request bodies accept UTF-8 strings or raw `bytes`. Set `response_type: "bytes"`
+to receive a buffered body in `body_bytes`; `body` is then an empty string.
+The default `response_type: "text"` returns UTF-8 text in `body` and omits
+`body_bytes`. Other response types fail before a request. `max_response_bytes`
+limits both modes, including responses without a declared content length.
+
+Multipart parts accept `headers` alongside `name`, `value`/`value_base64`/`path`,
+`filename`, and `content_type`. `Content-Type` and `Content-Disposition` use
+those dedicated fields; duplicate or invalid part headers fail before sending.
+Named-input output filtering applies to both text and byte responses.
+
+`connector_http_request` carries byte bodies through successful and failed
+responses. `redact_error_body: true` also removes bytes from failures.
+`connector_http_json` decodes explicit byte responses as UTF-8 JSON and reports
+invalid JSON for non-UTF-8 data.
+
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `harness.net.get(url, options?)` | url: string, options: dict | dict | GET request |
-| `harness.net.post(url, body, options?)` | url: string, body: string, options: dict | dict | POST request |
-| `harness.net.put(url, body, options?)` | url: string, body: string, options: dict | dict | PUT request |
-| `harness.net.patch(url, body, options?)` | url: string, body: string, options: dict | dict | PATCH request |
+| `harness.net.post(url, body, options?)` | url: string, body: string or bytes, options: dict | dict | POST request |
+| `harness.net.put(url, body, options?)` | url: string, body: string or bytes, options: dict | dict | PUT request |
+| `harness.net.patch(url, body, options?)` | url: string, body: string or bytes, options: dict | dict | PATCH request |
 | `harness.net.delete(url, options?)` | url: string, options: dict | dict | DELETE request |
 | `harness.net.request(method, url, options?)` | method: string, url: string, options: dict | dict | Generic HTTP request |
 | `harness.net.download(url, dst_path, options?)` | url: string, dst_path: string, options: dict | dict | Stream a response body to a file |
