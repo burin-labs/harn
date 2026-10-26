@@ -20,7 +20,9 @@ read_api_json() {
       return 0
     fi
     cat "$diagnostic" >&2
-    status=$(sed -nE 's/^gh:.* \(HTTP ([0-9]{3})\)$/\1/p' "$diagnostic")
+    status=$(sed -nE -e $'s/\r$//' \
+      -e 's/^gh:.* \(HTTP ([0-9]{3})\)$/\1/p' \
+      -e 's/^gh: HTTP ([0-9]{3})$/\1/p' "$diagnostic")
     rm -f "$diagnostic"
     # Discard the entire failed attempt, including any successful earlier pages.
     if [[ -z "$status" ]]; then

@@ -22,7 +22,13 @@ if [[ "$fault_match" == true ]]; then
   count=$((count + 1))
   printf '%s\n' "$count" > "$FIXTURE/api-attempts"
   if (( count <= ${API_FAULT_COUNT:-1} )); then
-    printf 'gh: Server Error (HTTP %s)\n' "${API_DIAGNOSTIC_STATUS:-${API_FAULT_STATUS:-502}}" >&2
+    if [[ "${API_DIAGNOSTIC_FORM:-}" == bare-crlf ]]; then
+      printf 'gh: HTTP %s\r\n' "${API_DIAGNOSTIC_STATUS:-${API_FAULT_STATUS:-502}}" >&2
+    elif [[ "${API_DIAGNOSTIC_FORM:-}" == bare ]]; then
+      printf 'gh: HTTP %s\n' "${API_DIAGNOSTIC_STATUS:-${API_FAULT_STATUS:-502}}" >&2
+    else
+      printf 'gh: Server Error (HTTP %s)\n' "${API_DIAGNOSTIC_STATUS:-${API_FAULT_STATUS:-502}}" >&2
+    fi
     jq -n --arg status "${API_FAULT_STATUS:-502}" --arg partial "${API_FAULT_PARTIAL:-false}" \
       --arg unstructured "${API_FAULT_UNSTRUCTURED:-false}" \
       '{message: "fixture API refusal", status: $status}
@@ -253,6 +259,21 @@ if ! API_FAULT_ROUTE='issues?state=open' API_FAULT_UNSTRUCTURED=true ATTEMPT=2 O
 fi
 expect 'observed CLI502 recovers without a body status field' "$(count)" 1
 reset_issues
+if ! API_FAULT_ROUTE='issues?state=open' API_FAULT_UNSTRUCTURED=true API_DIAGNOSTIC_FORM=bare ATTEMPT=2 OUTCOME=failure run_case; then
+  echo 'Bare CLI502 without body status did not recover' >&2
+  cat "$scratch/log" >&2
+  exit 1
+fi
+expect 'bare CLI502 recovers without body status' "$(count)" 1
+reset_issues
+API_FAULT_ROUTE='issues?state=open' API_FAULT_UNSTRUCTURED=true API_DIAGNOSTIC_FORM=bare-crlf ATTEMPT=2 OUTCOME=failure run_case
+expect 'bare CLI502 accepts CRLF diagnostics' "$(count)" 1
+reset_issues
+if API_FAULT_ROUTE='issues?state=open' API_FAULT_STATUS=502 API_DIAGNOSTIC_STATUS=403 API_DIAGNOSTIC_FORM=bare ATTEMPT=2 OUTCOME=failure run_case; then
+  echo 'Bare native permission refusal overruled by response body' >&2; exit 1
+fi
+expect 'bare permission refusal is not retried' "$(cat "$scratch/api-attempts")" 1
+absent 'issue (create|edit|comment|close|reopen)|run rerun'
 if API_FAULT_ROUTE='issues?state=open' API_FAULT_STATUS=502 API_DIAGNOSTIC_STATUS=403 ATTEMPT=2 OUTCOME=failure run_case; then
   echo 'Native permission refusal overruled by response body' >&2; exit 1
 fi
