@@ -37,7 +37,7 @@ pipeline main(harness: Harness, task: unknown) {{
     harness.llm,
     [
       llm_text("Added the retry. I was asked to stop, so I am reporting where I got to. ##DONE##"),
-      {{text: "{{\"verdict\":\"done\",\"detail\":\"The run reported its state.\"}}"}},
+      {{text: json_stringify({{verdict: "done", detail: "The run reported its state.", goal_assessment: {{kind: "unknown", evidence_refs: []}}}})}},
     ],
     {{ ->
       const session = "{session_id}"
