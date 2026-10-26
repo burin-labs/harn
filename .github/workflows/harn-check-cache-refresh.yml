@@ -76,19 +76,18 @@ jobs:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/ci/resolve_main_cli_artifact.sh "$GITHUB_OUTPUT"
+      - name: Download shared Harn binary
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          artifact-ids: ${{ steps.cli.outputs.artifact_id }}
+          run-id: ${{ steps.cli.outputs.run_id }}
+          path: ${{ runner.temp }}
+          skip-decompress: "true"
+      # Load this commit's download action before switching to the CLI source.
       - name: Check out the commit the binary was built from
         env:
           CLI_SHA: ${{ steps.cli.outputs.sha }}
         run: git checkout --quiet --detach "$CLI_SHA"
-      - name: Download shared Harn binary
-        env:
-          GH_REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ github.token }}
-          CLI_ARTIFACT_ID: ${{ steps.cli.outputs.artifact_id }}
-        # The artifact is published unarchived, so the download is the file.
-        run: >-
-          gh api "repos/$GH_REPO/actions/artifacts/$CLI_ARTIFACT_ID/zip"
-          > "$RUNNER_TEMP/harn-cli.tar.zst"
       - name: Verify shared Harn binary
         env:
           CLI_SHA: ${{ steps.cli.outputs.sha }}
