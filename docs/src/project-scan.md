@@ -56,12 +56,14 @@ Normalization rules:
 
 ## Makefile declarations
 
-`harness.scanner.scan_project(...)` selects the first default file in
-`makefile_filenames()`: `GNUmakefile`, `makefile`, then `Makefile`. It reads
+`harness.scanner.scan_project(...)` and the config tier of
+`harness.project.scan(...)` select the first default file in
+`makefile_filenames()`: `GNUmakefile`, `makefile`, then `Makefile`. They read
 literal target declarations without evaluating Make or expanding variables.
 Multi-target rules contribute each declared target; assignments and `define`
 bodies do not create targets. Test-shaped targets contribute their generated
-commands to the scanner's `test_commands` map.
+commands to the scanner's `test_commands` map. The config tier exposes all
+literal names in `makefile_targets` and build/test invocations in `build_commands`.
 
 `makefile_parse(text)` exposes the same parser to source-facing adapters. Each
 record has `name`, a shell-quoted `command`, `recipe_preview`, and
