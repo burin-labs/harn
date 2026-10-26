@@ -47,7 +47,10 @@ if [[ "${WAIT_FOR_FULL_SUITE:-false}" == true ]]; then
   fi
   if [[ -n "$active" ]]; then
     # The terminal records decide proof, including a failed watched run.
-    gh run watch "$active" --repo "$GH_REPO" --exit-status || true
+    if ! release_watch_run "$GH_REPO" "$active"; then
+      unmeasured watch
+      exit 1
+    fi
   fi
 fi
 if ! runs=$(gh api --paginate "repos/$GH_REPO/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha=$SOURCE_SHA&per_page=100" --jq '.workflow_runs[] | [.id, .head_sha, .status, .conclusion] | @tsv'); then

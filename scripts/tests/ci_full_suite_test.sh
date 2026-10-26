@@ -9,6 +9,27 @@ cat > "$scratch/bin/gh" <<'SH'
 set -euo pipefail
 [[ "${FAKE_GH_FAILURE:-false}" != true ]] || exit 1
 case "$*" in
+  'run watch '*)
+    printf '%s\n' "$*" >> "$FIXTURE/watch-calls"
+    case "${FAKE_WATCH_CASE:-}" in
+      recover)
+        if [[ $(wc -l < "$FIXTURE/watch-calls" | tr -d ' ') == 1 ]]; then
+          echo 'failed to get run: HTTP 502: fixture interruption' >&2
+          exit 1
+        fi
+        printf '71\t%s\tcompleted\tsuccess\n' "$SOURCE_SHA" > "$FIXTURE/runs" ;;
+      refusal)
+        echo 'failed to get run: HTTP 403: request detail HTTP 502: incidental' >&2
+        exit 1 ;;
+      exhausted)
+        echo 'failed to get run: HTTP 503: fixture interruption' >&2
+        exit 1 ;;
+      failed)
+        printf '71\t%s\tcompleted\tfailure\n' "$SOURCE_SHA" > "$FIXTURE/runs"
+        exit 1 ;;
+      *) exit 9 ;;
+    esac ;;
+  *workflows/ci.yml/runs*sort_by*) printf '71\n' ;;
   *workflows/ci.yml/runs*) cat "$FIXTURE/runs" ;;
   *workflows/macos-nightly.yml/runs*)
     if [[ ${FAKE_NATIVE_DISCOVERY:-false} == true && ! -f "$FIXTURE/discovery-read" ]]; then
@@ -63,6 +84,31 @@ grep -q '"status":"complete"' "$scratch/log"
 head -n 1 "$scratch/log" | jq -e \
   '.kind == "harn.release.full_suite.v1" and .verdict == "success" and .pending_count == 0 and .failed_count == 0 and .next_action == "continue"' >/dev/null
 jq -e '.verdict == "success" and .next_action == "continue"' "$FULL_SUITE_STATUS_FILE" >/dev/null
+printf '71\t%s\tin_progress\t\n' "$SOURCE_SHA" > "$scratch/runs"
+: > "$scratch/watch-calls"
+WAIT_FOR_FULL_SUITE=true FAKE_WATCH_CASE=recover \
+  bash "$root/scripts/ci/require_full_suite.sh" --main-only > "$scratch/watch-recovery-log"
+[[ $(wc -l < "$scratch/watch-calls" | tr -d ' ') == 2 ]]
+[[ $(sort -u "$scratch/watch-calls") == 'run watch 71 --repo fixture/repo --exit-status' ]]
+jq -e '.verdict == "success" and .pending_count == 0 and .failed_count == 0' "$FULL_SUITE_STATUS_FILE" >/dev/null
+for scenario in refusal exhausted failed; do
+  : > "$scratch/watch-calls"
+  printf '71\t%s\tin_progress\t\n' "$SOURCE_SHA" > "$scratch/runs"
+  if WAIT_FOR_FULL_SUITE=true FAKE_WATCH_CASE=$scenario \
+    bash "$root/scripts/ci/require_full_suite.sh" --main-only > "$scratch/watch-$scenario-log"; then
+    echo "Watch $scenario accepted as release proof" >&2; exit 1
+  fi
+  expected=1
+  [[ $scenario != exhausted ]] || expected=3
+  [[ $(wc -l < "$scratch/watch-calls" | tr -d ' ') == "$expected" ]]
+  if [[ $scenario == failed ]]; then
+    jq -e '.verdict == "failure"' "$FULL_SUITE_STATUS_FILE" >/dev/null
+  else
+    jq -e '.verdict == "unmeasured" and .reason == "watch" and .pending_count == null' "$FULL_SUITE_STATUS_FILE" >/dev/null
+  fi
+done
+printf '71\t%s\tcompleted\tsuccess\n' "$SOURCE_SHA" > "$scratch/runs"
+: > "$scratch/discovery-waits"
 WAIT_FOR_FULL_SUITE=true FAKE_NATIVE_DISCOVERY=true NATIVE_QUALIFICATION_STATUS_FILE="$scratch/native-status.json" \
   bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/discovery-log"
 [[ $(cat "$scratch/discovery-waits") == 5 ]]
