@@ -73,4 +73,19 @@ first="$(head -1 "$record" || true)"
 [[ "$first" == staged\ * ]] \
   || fail "a root without harn_bin.sh did not fall back to the staged copy: '${first:-<none>}'"
 
+# Hosted finalization can instead supply its authenticated published tool.
+# Neither source resolver may compile a second orchestration binary first.
+published="$tmp/published-harn"
+write_stub "$published" published
+: > "$record"
+(cd "$root" && env -u HARN_RELEASE_METADATA_BIN HARN_BIN="$published" \
+  HARN_RELEASE_ROOT="$root" \
+  "$tools/release_ship.sh" --finalize --skip-github-release) > "$tmp/out" 2>&1 || true
+first="$(head -1 "$record" || true)"
+[[ "$first" == published\ run\ * ]] \
+  || fail "explicit published tool was not reached first: '${first:-<none>}'"
+if grep -Eq '^(root|staged) ' "$record"; then
+  fail "published-tool finalization invoked a source resolver: $(cat "$record")"
+fi
+
 echo "release_ship_root_harn_bin_test: ok"
