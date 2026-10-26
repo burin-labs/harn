@@ -162,5 +162,22 @@ jobs:
             exit 1
           fi
           grep -F 'frozen Cargo package requires builtin-registry before builtin-macros' "$baseline/versioned-dev.log"
-          "$RUNTIME_PATH" run --standalone --no-sandbox scripts/verify_publish_workspace_plan.harn -- \
-            "$RUNNER_TEMP/publish-plan-metadata.json" 0.10.180
+          git fetch --no-tags origin 6e95f471786c28ade33a191ee7dea1e4fcb6e187
+          old_policy=$(mktemp -d "$RUNNER_TEMP/publish-stage-old-policy.XXXXXX")
+          git archive 6e95f471786c28ade33a191ee7dea1e4fcb6e187 -- \
+            scripts .markdownlint.jsonc .markdownlintignore package.json package-lock.json |
+            tar -x -C "$old_policy"
+          old_tools="$RUNNER_TEMP/publish-stage-old-tools"
+          bash "$old_policy/scripts/stage_release_tools.sh" "$old_tools"
+          if (cd "$source_root" && HARN_BIN="$RUNTIME_PATH" bash "$old_tools/publish.sh" --help) > "$RUNNER_TEMP/old-stage.log" 2>&1; then
+            echo "error: old staging did not reproduce the missing publisher module" >&2
+            exit 1
+          fi
+          grep -F "error[HARN-MOD-001]: unresolved import './publish_manifest.harn'" "$RUNNER_TEMP/old-stage.log"
+          staged_tools="$RUNNER_TEMP/publish-plan-staged-tools"
+          bash scripts/stage_release_tools.sh "$staged_tools"
+          cp scripts/verify_publish_workspace_plan.harn "$staged_tools/"
+          (cd "$source_root" && HARN_BIN="$RUNTIME_PATH" bash "$staged_tools/publish.sh" --help) > "$RUNNER_TEMP/staged-publisher-help.log"
+          grep -F 'usage: harn run --no-sandbox scripts/publish.harn' "$RUNNER_TEMP/staged-publisher-help.log"
+          (cd "$source_root" && "$RUNTIME_PATH" run --standalone --no-sandbox "$staged_tools/verify_publish_workspace_plan.harn" -- \
+            "$RUNNER_TEMP/publish-plan-metadata.json" 0.10.180)

@@ -35,6 +35,7 @@ for source in \
   npm_ci_with_retry.sh \
   publish.sh \
   publish.harn \
+  publish_manifest.harn \
   publish_plan.harn \
   cargo_with_worktree_build_dir.sh \
   harn_bin.sh
