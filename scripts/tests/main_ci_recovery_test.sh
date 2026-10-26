@@ -10,6 +10,27 @@ cat > "$scratch/bin/gh" <<'SH'
 set -euo pipefail
 printf '%s\n' "$*" >> "$FIXTURE/calls"
 issues="$FIXTURE/issues"
+fault_match=false
+if [[ "${API_FAULT_ROUTE:-}" == run ]]; then
+  [[ "$*" != "api repos/fixture/repo/actions/runs/$RUN_ID" ]] || fault_match=true
+elif [[ -n "${API_FAULT_ROUTE:-}" && "$*" == *"$API_FAULT_ROUTE"* ]]; then
+  fault_match=true
+fi
+if [[ "$fault_match" == true ]]; then
+  count=0
+  [[ ! -f "$FIXTURE/api-attempts" ]] || count=$(cat "$FIXTURE/api-attempts")
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$FIXTURE/api-attempts"
+  if (( count <= ${API_FAULT_COUNT:-1} )); then
+    jq -n --arg status "${API_FAULT_STATUS:-502}" --arg partial "${API_FAULT_PARTIAL:-false}" \
+      '{message: "fixture API refusal", status: $status} | if $partial == "true" then [[], .] else . end'
+    exit 1
+  fi
+fi
+if [[ -n "${ISSUE_CENSUS:-}" && "$*" == *'issues?state=open'* ]]; then
+  printf '%s\n' "$ISSUE_CENSUS"
+  exit 0
+fi
 case "$*" in
   'api --help') echo '      --allow-escape-sequences   Allow printing terminal escape sequences' ;;
   *actions/jobs/*/logs)
@@ -82,6 +103,11 @@ case "$*" in
 esac
 SH
 chmod +x "$scratch/bin/gh"
+cat > "$scratch/bin/sleep" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FIXTURE/sleeps"
+SH
+chmod +x "$scratch/bin/sleep"
 export PATH="$scratch/bin:$PATH" FIXTURE="$scratch" GH_REPO=fixture/repo GH_TOKEN=fixture-token
 cd "$scratch/repo"
 
@@ -91,6 +117,8 @@ state() { cat "$scratch/issues/$1.state"; }
 comments() { grep -c '^---$' "$scratch/issues/$1.comments" || true; }
 run_case() {
   : > "$scratch/calls"
+  : > "$scratch/sleeps"
+  rm -f "$scratch/api-attempts"
   bash "${HARN_RECOVERY_SCRIPT:-$root/scripts/ci/recover_main_ci.sh}" > "$scratch/log" 2>&1
 }
 absent() {
@@ -192,4 +220,46 @@ fi
 if ATTEMPT=1 OUTCOME=failure EVENT=pull_request run_case; then
   echo 'Untrusted event was accepted' >&2; exit 1
 fi
-echo 'Main recovery: one issue per failure cause across SHAs, repeat comments, idempotent replay, ancestry-gated close, reopen, flake retention, unreadable-log filing, census controls passed.'
+# A transient read failure cannot become an empty or partial issue census.
+reset_issues
+for route in 'issues?state=open' run 'attempts/1/jobs' 'jobs?filter=latest'; do
+  if ! API_FAULT_ROUTE="$route" ATTEMPT=2 OUTCOME=failure RUN_ID=42 run_case; then
+    echo "Transient metadata read did not recover: $route" >&2
+    cat "$scratch/log" >&2
+    exit 1
+  fi
+  expect 'transient read retries once' "$(cat "$scratch/api-attempts")" 2
+  expect 'retry delay is bounded' "$(cat "$scratch/sleeps")" 1
+  expect 'complete retry files one cause' "$(count)" 1
+  reset_issues
+done
+for transient in 500 503 504; do
+  API_FAULT_ROUTE='issues?state=open' API_FAULT_STATUS="$transient" ATTEMPT=2 OUTCOME=failure run_case
+  expect 'explicit server failure recovers' "$(cat "$scratch/api-attempts")" 2
+  expect 'server failure files once' "$(count)" 1
+  reset_issues
+done
+API_FAULT_ROUTE='issues?state=open' API_FAULT_PARTIAL=true ATTEMPT=2 OUTCOME=failure run_case
+expect 'partial failed pages are discarded' "$(count)" 1
+reset_issues
+if API_FAULT_ROUTE='issues?state=open' API_FAULT_COUNT=3 ATTEMPT=2 OUTCOME=failure run_case; then
+  echo 'Exhausted API read accepted' >&2; exit 1
+fi
+expect 'read attempt budget' "$(cat "$scratch/api-attempts")" 3
+expect 'bounded retry delays' "$(tr '\n' ',' < "$scratch/sleeps")" '1,2,'
+absent 'issue (create|edit|comment|close|reopen)|run rerun'
+for refusal in 401 403 404 422 429 5030 unreported; do
+  if API_FAULT_ROUTE='issues?state=open' API_FAULT_STATUS="$refusal" ATTEMPT=2 OUTCOME=failure run_case; then
+    echo "Semantic API refusal $refusal accepted" >&2; exit 1
+  fi
+  expect 'semantic refusal is not retried' "$(cat "$scratch/api-attempts")" 1
+  expect 'semantic refusal does not sleep' "$(cat "$scratch/sleeps")" ''
+  absent 'issue (create|edit|comment|close|reopen)|run rerun'
+done
+for census in '[]' '{}' '[{}]' '[[],{"status":"502"}]' '[[{"number":1,"body":false}]]' '[[{"number":"1","body":""}]]'; do
+  if ISSUE_CENSUS="$census" ATTEMPT=2 OUTCOME=failure run_case; then
+    echo "Malformed issue census accepted: $census" >&2; exit 1
+  fi
+  absent 'issue (create|edit|comment|close|reopen)|run rerun'
+done
+echo 'Main recovery: failure signatures, complete API reads, bounded transient retries, semantic refusals and census controls passed.'

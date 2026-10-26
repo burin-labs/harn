@@ -3,7 +3,34 @@ set -euo pipefail
 : "${GH_REPO:?repository required}"
 : "${RUN_ID:?run required}"
 [[ "$RUN_ID" =~ ^[0-9]+$ ]] || exit 1
-run=$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID")
+read_api_json() {
+  local endpoint="$1" mode="${2:-single}" response status attempt
+  local flags=()
+  case "$mode" in
+    single) ;;
+    paginated) flags=(--paginate --slurp) ;;
+    *) return 1 ;;
+  esac
+  for attempt in 1 2 3; do
+    if response=$(gh api ${flags[@]+"${flags[@]}"} "$endpoint"); then
+      printf '%s\n' "$response"
+      return 0
+    fi
+    # Discard the entire failed attempt, including any successful earlier pages.
+    status=$(jq -er '
+      (if type == "array" then .[-1] else . end)
+      | select(type == "object") | .status | tonumber
+      | select(. == 500 or . == 502 or . == 503 or . == 504)
+    ' <<< "$response" 2>/dev/null) || {
+      echo "GitHub metadata read refused; no retry: $endpoint" >&2
+      return 1
+    }
+    echo "GitHub metadata read HTTP $status, attempt $attempt/3: $endpoint" >&2
+    (( attempt < 3 )) || return 1
+    sleep "$attempt"
+  done
+}
+run=$(read_api_json "repos/$GH_REPO/actions/runs/$RUN_ID")
 jq -e --arg repo "$GH_REPO" '.event == "push" and .head_branch == "main" and .head_repository.full_name == $repo and .name == "CI" and .status == "completed"' <<< "$run" >/dev/null
 sha=$(jq -er '.head_sha' <<< "$run")
 attempt=$(jq -er '.run_attempt' <<< "$run")
@@ -26,8 +53,18 @@ run_url="https://github.com/$GH_REPO/actions/runs/$RUN_ID"
 # name, failed steps, and the normalized failure lines from its log. Open
 # signature issues are read from the issue listing, not search, so a repeat
 # seconds after the first occurrence still finds its issue.
-gh api --paginate --slurp "repos/$GH_REPO/issues?state=open&per_page=100" \
-  | jq '[.[][] | select(.pull_request == null and ((.body // "") | contains("<!-- main-ci-signature:")))]' > "$scratch/open.json"
+read_api_json "repos/$GH_REPO/issues?state=open&per_page=100" paginated > "$scratch/issue-pages.json"
+jq '
+  def positive_integer: type == "number" and . > 0 and floor == .;
+  def issue_valid:
+    type == "object" and (.number | positive_integer)
+    and (.body == null or (.body | type == "string"))
+    and (.pull_request == null or (.pull_request | type == "object"));
+  if type != "array" or length == 0 then error("missing issue pages") else . end
+  | if all(.[]; type == "array" and all(.[]; issue_valid))
+    then [.[][] | select(.pull_request == null and ((.body // "") | contains("<!-- main-ci-signature:")))]
+    else error("malformed issue census") end
+' "$scratch/issue-pages.json" > "$scratch/open.json"
 
 # Close each open signature issue whose last occurrence was persistent once its
 # job passes on this run's source or a descendant of the source it failed on.
@@ -76,9 +113,9 @@ if type != "array" or length == 0 then error("missing job pages") else . end
      or ([$jobs[].id] | unique | length) != length
   then error("incomplete or malformed job census") else . end
 JQ
-gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/1/jobs?per_page=100" > "$scratch/first-pages.json"
+read_api_json "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/1/jobs?per_page=100" paginated > "$scratch/first-pages.json"
 jq -f "$scratch/census.jq" "$scratch/first-pages.json" > "$scratch/first.json"
-gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" > "$scratch/latest-pages.json"
+read_api_json "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" paginated > "$scratch/latest-pages.json"
 jq -f "$scratch/census.jq" "$scratch/latest-pages.json" > "$scratch/latest.json"
 # A job failing on the latest attempt is persistent; one that failed only on the
 # first attempt is a flake. Each record names the attempt whose log shows it.
