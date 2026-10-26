@@ -124,7 +124,7 @@ case "$*" in
       exit 43
     fi
     if [[ -n "${FAKE_AUDIT_DIAGNOSTIC_FIXTURE-}" ]]; then
-      if node --test "$FAKE_AUDIT_DIAGNOSTIC_FIXTURE"; then
+      if node --test --test-reporter=tap "$FAKE_AUDIT_DIAGNOSTIC_FIXTURE"; then
         exit 0
       fi
       echo "make: *** [Makefile:1729: check-rust-test-lane-policy] Error 1" >&2
