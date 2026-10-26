@@ -122,17 +122,17 @@ grammar-data = [
 ]
 
 [dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.181-dev" }
-harn-clock = { path = "../harn-clock", version = "=0.10.181-dev" }
-harn-languages = { path = "../harn-languages", version = "=0.10.181-dev" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.181" }
+harn-clock = { path = "../harn-clock", version = "=0.10.181" }
+harn-languages = { path = "../harn-languages", version = "=0.10.181" }
 # Hostlib never issues Postgres queries, so it takes the VM lean and lets
 # the full CLI re-enable `pg.*` through its own direct harn-vm edge (Cargo
 # unifies the feature across the build graph).
-harn-flock = { path = "../harn-flock", version = "=0.10.181-dev" }
-harn-parser = { path = "../harn-parser", version = "=0.10.181-dev" }
-harn-session-store = { path = "../harn-session-store", version = "=0.10.181-dev" }
-harn-vm = { path = "../harn-vm", version = "=0.10.181-dev", default-features = false }
-harn-terminal = { path = "../harn-terminal", version = "=0.10.181-dev", optional = true }
+harn-flock = { path = "../harn-flock", version = "=0.10.181" }
+harn-parser = { path = "../harn-parser", version = "=0.10.181" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.181" }
+harn-vm = { path = "../harn-vm", version = "=0.10.181", default-features = false }
+harn-terminal = { path = "../harn-terminal", version = "=0.10.181", optional = true }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
@@ -187,7 +187,7 @@ image = { version = "0.25", optional = true }
 
 # Tree-sitter grammars driving `ast::*` (issue #564). Each `grammar-*`
 # family above turns on its grammars here.
-harn-grammars = { path = "../harn-grammars", version = "=0.10.181-dev", default-features = false }
+harn-grammars = { path = "../harn-grammars", version = "=0.10.181", default-features = false }
 arcstr = { version = "1", features = ["serde", "std"] }
 
 # Native process supervision uses POSIX process and group signals.
@@ -209,17 +209,17 @@ serde_json = "1"
 # Tests run scripts against every builtin family. The library itself registers
 # through harn-vm's registry, so the binaries that link harn-runtime supply the
 # families and hostlib does not wait on harn-builtins to compile.
-harn-runtime = { path = "../harn-runtime", version = "=0.10.181-dev" }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.181" }
 rstest.workspace = true
-harn-modules = { path = "../harn-modules", version = "=0.10.181-dev", features = ["bundled-stdlib"] }
-harn-clock = { path = "../harn-clock", version = "=0.10.181-dev", features = ["test-support"] }
+harn-modules = { path = "../harn-modules", version = "=0.10.181", features = ["bundled-stdlib"] }
+harn-clock = { path = "../harn-clock", version = "=0.10.181", features = ["test-support"] }
 serde_json = "1"
 jsonschema.workspace = true
 shell-words = "1.1"
 filetime = "0.2"
 criterion = "0.8"
-harn-lexer = { path = "../harn-lexer", version = "=0.10.181-dev" }
-harn-parser = { path = "../harn-parser", version = "=0.10.181-dev" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.181" }
+harn-parser = { path = "../harn-parser", version = "=0.10.181" }
 time = "0.3"
 
 [[bench]]
