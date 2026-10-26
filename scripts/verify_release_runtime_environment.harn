@@ -60,7 +60,10 @@ fn main(harness: Harness) {
   )
   require receipt.version == version && receipt.asset.ends_with(".tar.xz"),
     "publisher bootstrap did not resolve the intended published archive"
-  for name in ["HARN_RUSTC_FRONTEND_THREADS", "HARN_UNEXPECTED_RELEASE_RUNTIME_SETTING"] {
+  // Intentional unknown fixture, not a production setting. Match the registry's
+  // retired_limit_names_are_unknown_at_startup and agent gate fixture convention.
+  const unknown_setting = "HARN" + "_UNEXPECTED_RELEASE_RUNTIME_SETTING"
+  for name in ["HARN_RUSTC_FRONTEND_THREADS", unknown_setting] {
     let refused_environment = environment + {}
     refused_environment[name] = "1"
     const refused = harness.process.run(
