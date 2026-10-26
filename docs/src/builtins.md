@@ -1293,7 +1293,8 @@ those dedicated fields; duplicate or invalid part headers fail before sending.
 Named-input output filtering applies to both text and byte responses.
 HTTP mock call records retain the text preview in `body` and the exact request
 bytes in `body_bytes` when a body was provided. Private-input filtering applies
-before either view is recorded; the Rust mock-call snapshot exposes both views.
+before either view is recorded. The Rust `HttpMockCallSnapshot` exposes the text
+preview in `body`; `body_bytes` is available in Harn mock call records.
 
 `connector_http_request` carries byte bodies through successful and failed
 responses. `redact_error_body: true` also removes bytes from failures.
