@@ -101,6 +101,29 @@ jobs:
           (cd "$source_root" && cargo metadata --format-version 1 --no-deps --locked --offline) > "$RUNNER_TEMP/publish-plan-metadata.json"
           "$RUNTIME_PATH" test scripts/tests/publish_plan_test.harn
           "$RUNTIME_PATH" test scripts/tests/publish_recovery_test.harn
+          git fetch --no-tags origin b1a459fa820e620787b87846c685d6eb29405564
+          refusal_baseline=$(mktemp -d "$RUNNER_TEMP/publish-refusal-baseline.XXXXXX")
+          mkdir "$refusal_baseline/tests"
+          git show b1a459fa820e620787b87846c685d6eb29405564:scripts/publish.harn > "$refusal_baseline/publish.harn"
+          git show b1a459fa820e620787b87846c685d6eb29405564:scripts/publish_plan.harn > "$refusal_baseline/publish_plan.harn"
+          cp scripts/tests/publish_recovery_test.harn "$refusal_baseline/tests/"
+          if "$RUNTIME_PATH" test "$refusal_baseline/tests/publish_recovery_test.harn" \
+            --filter test_publish_recovery_refuses_registry_read_error_before_writes \
+            --json-out "$refusal_baseline/result.json"; then
+            echo "error: original publisher did not reproduce the read-refusal failure" >&2
+            exit 1
+          fi
+          "$RUNTIME_PATH" run --standalone --no-sandbox -e '
+            const report = json_parse(harness.fs.read_text(argv[0]));
+            require report.summary.total == 1 && report.summary.failed == 1
+              && report.summary.skipped == 0 && report.summary.timed_out == 0,
+              "baseline did not execute exactly one failing refusal control";
+            const failure = report.cases[0];
+            require failure.name == "test_publish_recovery_refuses_registry_read_error_before_writes"
+              && failure.outcome == "failed" && failure.message.contains("expected  0")
+              && failure.message.contains("actual    1"),
+              "baseline did not reproduce the unexpected publish callback";
+          ' -- "$refusal_baseline/result.json"
           baseline=$(mktemp -d "$RUNNER_TEMP/publish-plan-baseline.XXXXXX")
           git show v0.10.180:scripts/publish_plan.harn > "$baseline/publish_plan.harn"
           cp scripts/verify_publish_workspace_plan.harn "$baseline/"
