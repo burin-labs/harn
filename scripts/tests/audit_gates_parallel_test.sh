@@ -454,7 +454,10 @@ fi
 cat > "$tmp_root/assertion.cjs" <<'JS'
 const assert = require('node:assert/strict');
 const test = require('node:test');
-test('configuration keeps the requested worker count', () => assert.equal(23, 17));
+test('configuration group', async t => {
+  await t.test('configuration keeps the requested worker count', () => assert.equal(23, 17));
+  await t.test('following nested passing case', () => {});
+});
 test('unrelated passing output', () => {
   for (let i = 0; i < 300; i++) console.log(`passing fixture noise ${i}`);
 });
@@ -499,7 +502,7 @@ for expected in 'configuration keeps the requested worker count' 'expected: 17' 
     exit 1
   fi
 done
-if grep -Eq 'passing fixture noise|unrelated passing output' "$tmp_root/assertion.out.summary"; then
+if grep -Eq 'passing fixture noise|unrelated passing output|following nested passing case' "$tmp_root/assertion.out.summary"; then
   echo "failure summary repeated unrelated passing output" >&2
   exit 1
 fi
