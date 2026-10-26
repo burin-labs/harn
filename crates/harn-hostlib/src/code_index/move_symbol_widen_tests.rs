@@ -671,6 +671,109 @@ fn rust_widening_never_confuses_inherent_impl_specializations() {
 }
 
 #[test]
+fn rust_widening_never_confuses_owned_and_borrowed_method_receivers() {
+    let fixture = receiver_dispatch_fixture(
+        "fn flush(&self) {}",
+        "pub fn run(out: Buffer) { use crate::other::Flush; out.flush(); }",
+        "pub trait Flush { fn flush(self); }\nimpl Flush for crate::a::Buffer { fn flush(self) {} }\n",
+    );
+    fixture.refused(
+        "visibility_required",
+        &widening_args("run", "src/a.rs", "src/b.rs", Some("pub")),
+    );
+}
+
+#[test]
+fn rust_widening_never_confuses_shared_and_mutable_method_receivers() {
+    let fixture = receiver_dispatch_fixture(
+        "fn flush(&mut self) {}",
+        "pub fn run(out: &Buffer) { use crate::other::Flush; out.flush(); }",
+        "pub trait Flush { fn flush(&self); }\nimpl Flush for crate::a::Buffer { fn flush(&self) {} }\n",
+    );
+    fixture.refused(
+        "visibility_required",
+        &widening_args("run", "src/a.rs", "src/b.rs", Some("pub")),
+    );
+}
+
+#[test]
+fn rust_widening_never_assumes_a_conditional_member_is_present() {
+    let fixture = receiver_dispatch_fixture(
+        "#[cfg(feature = \"hidden_inherent\")] fn flush(&self) {}",
+        "pub fn run(out: &Buffer) { #[cfg(not(feature = \"hidden_inherent\"))] { use crate::other::Flush; out.flush(); } }",
+        "pub trait Flush { fn flush(&self); }\nimpl Flush for crate::a::Buffer { fn flush(&self) {} }\n",
+    );
+    fixture.refused(
+        "visibility_required",
+        &widening_args("run", "src/a.rs", "src/b.rs", Some("pub")),
+    );
+}
+
+#[test]
+fn rust_widening_keeps_exact_method_receivers_and_generic_fields() {
+    for (method, caller, trait_code) in [
+        (
+            "#[inline] fn flush(&self) {}",
+            "pub fn run(out: &Buffer) { use crate::other::Flush; out.flush(); }",
+            "pub trait Flush { fn flush(self); }\nimpl Flush for &crate::a::Buffer { fn flush(self) {} }\n",
+        ),
+        (
+            "#[cfg_attr(all(), inline)] fn flush(&mut self) {}",
+            "pub fn run(out: &mut Buffer) { use crate::other::Flush; out.flush(); }",
+            "pub trait Flush { fn flush(self); }\nimpl Flush for &mut crate::a::Buffer { fn flush(self) {} }\n",
+        ),
+        (
+            "fn flush(self) {}",
+            "pub fn run(out: Buffer) { use crate::other::Flush; out.flush(); }",
+            "pub trait Flush { fn flush(&self); }\nimpl Flush for crate::a::Buffer { fn flush(&self) {} }\n",
+        ),
+    ] {
+        let fixture = receiver_dispatch_fixture(method, caller, trait_code);
+        let result = fixture.move_symbol(&widening_args(
+            "run", "src/a.rs", "src/b.rs", Some("pub(super)"),
+        ));
+        assert_eq!(tag(&result), "applied", "{result:?}");
+        assert_eq!(
+            widened(&result),
+            [("src/a.rs".to_string(), 3, "private".to_string(), "pub(super)".to_string())],
+        );
+    }
+    let field = Fixture::new(&[
+        KIT,
+        ("src/lib.rs", "pub mod a;\npub mod b;\n"),
+        ("src/a.rs", "pub struct Buffer<T> {\n    flush: T,\n}\n\npub fn run(out: &Buffer<u8>) -> u8 { out.flush }\n"),
+        ("src/b.rs", "pub fn other() {}\n"),
+    ]);
+    let result = field.move_symbol(&widening_args(
+        "run",
+        "src/a.rs",
+        "src/b.rs",
+        Some("pub(super)"),
+    ));
+    assert_eq!(tag(&result), "applied", "{result:?}");
+    assert_eq!(
+        widened(&result),
+        [(
+            "src/a.rs".to_string(),
+            2,
+            "private".to_string(),
+            "pub(super)".to_string()
+        )]
+    );
+}
+
+fn receiver_dispatch_fixture(method: &str, caller: &str, trait_code: &str) -> Fixture {
+    let source = format!("pub struct Buffer;\nimpl Buffer {{\n    {method}\n}}\n\n{caller}\n");
+    Fixture::new(&[
+        KIT,
+        ("src/lib.rs", "pub mod a;\npub mod b;\npub mod other;\n"),
+        ("src/a.rs", &source),
+        ("src/b.rs", "pub fn other() {}\n"),
+        ("src/other.rs", trait_code),
+    ])
+}
+
+#[test]
 fn rust_widening_keeps_proven_receivers_in_their_own_scope() {
     for body in [
         "pub fn run(out: &Buffer) {\n    fn helper(out: &mut std::io::Stdout) {}\n    out.flush();\n}\n",
