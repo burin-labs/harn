@@ -2,10 +2,9 @@
 //! expression add noise and can hide places where the grammar now accepts
 //! the direct form.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use harn_lexer::{FixEdit, Span, Token, TokenKind};
-use harn_parser::operators::is_parenthesized;
 use harn_parser::{DiagnosticCode as Code, Node, SNode};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
@@ -20,7 +19,7 @@ pub(crate) fn check_unnecessary_parentheses(
         return;
     };
 
-    let value_spans = collect_single_value_spans(source, program);
+    let value_spans = collect_single_value_spans(source, &tokens, program);
     if value_spans.is_empty() {
         return;
     }
@@ -146,12 +145,30 @@ fn span_from_offsets(source: &str, start: usize, end: usize) -> Span {
 
 /// Spans of single-value expressions with any grouping parentheses peeled
 /// off, since the parser includes those in the span: `((x))` yields the span
-/// of `x`, so only the innermost pair matches.
-fn collect_single_value_spans(source: &str, program: &[SNode]) -> HashSet<(usize, usize)> {
+/// of `x`, so only the innermost pair matches. Pairs come from the shared
+/// token stream so the rule does not re-lex expression text.
+fn collect_single_value_spans(
+    source: &str,
+    tokens: &[Token],
+    program: &[SNode],
+) -> HashSet<(usize, usize)> {
+    let mut pairs = HashMap::new();
+    let mut stack = Vec::new();
+    for token in tokens {
+        match token.kind {
+            TokenKind::LParen => stack.push(token.span.start),
+            TokenKind::RParen => {
+                if let Some(open) = stack.pop() {
+                    pairs.insert(open, token.span.end);
+                }
+            }
+            _ => {}
+        }
+    }
     collect_expression_spans(program, is_single_value_expr)
         .into_iter()
         .map(|(mut start, mut end)| {
-            while source.get(start..end).is_some_and(is_parenthesized) {
+            while pairs.get(&start) == Some(&end) {
                 start =
                     trim_ascii_whitespace_forward(source, start + 1, end - 1).unwrap_or(start + 1);
                 end = trim_ascii_whitespace_backward(source, start, end - 1);
