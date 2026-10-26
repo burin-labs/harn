@@ -545,6 +545,7 @@ failure_summary() {
       echo "failing gate(s): ${names}"
     fi
     awk '
+      /^(#[[:space:]]*Subtest:|ok [0-9])/ { remaining = 0 }
       /(^|[[:space:]#])(not ok |Error( \[[^]]+\])?:|AssertionError|error:|error\[|FAIL:|FAILED[ :])/ {
         remaining = 16
         found = 1

@@ -480,6 +480,15 @@ run_reporting_fixture() {
     exit 1
   fi
   sed -n '/^=== FAILED: audit gates ===/,$p' "$output" > "$output.summary"
+  if ! awk '
+    /^::group::Complete audit worker output$/ { opened++ }
+    /^::endgroup::$/ { closed++ }
+    /^=== FAILED: audit gates ===$/ { if (opened == 1 && closed == 1) reached = 1 }
+    END { exit !(opened == 1 && closed == 1 && reached) }
+  ' "$output"; then
+    echo "worker output was not folded before the visible failure summary" >&2
+    exit 1
+  fi
 }
 
 run_reporting_fixture "$tmp_root/assertion.cjs" "$tmp_root/assertion.out"
@@ -490,7 +499,7 @@ for expected in 'configuration keeps the requested worker count' 'expected: 17' 
     exit 1
   fi
 done
-if grep -Fq 'passing fixture noise' "$tmp_root/assertion.out.summary"; then
+if grep -Eq 'passing fixture noise|unrelated passing output' "$tmp_root/assertion.out.summary"; then
   echo "failure summary repeated unrelated passing output" >&2
   exit 1
 fi
@@ -502,6 +511,21 @@ for expected in 'ERR_MODULE_NOT_FOUND' '@harn-fixture/uninstalled-dependency' 'l
     exit 1
   fi
 done
+if ! grep -Fq 'unrelated passing output' "$tmp_root/assertion.out"; then
+  echo "failure reporting discarded the complete passing output" >&2
+  exit 1
+fi
+cat > "$tmp_root/many-failures.cjs" <<'JS'
+const assert = require('node:assert/strict');
+const test = require('node:test');
+for (let i = 0; i < 8; i++) test(`failing worker ${i}`, () => assert.equal(i, -1));
+JS
+run_reporting_fixture "$tmp_root/many-failures.cjs" "$tmp_root/many-failures.out"
+if ! grep -Fq 'Failure context truncated' "$tmp_root/many-failures.out.summary" \
+  || [[ "$(wc -l < "$tmp_root/many-failures.out.summary")" -gt 68 ]]; then
+  echo "failure summary did not bound a large set of real diagnostics" >&2
+  exit 1
+fi
 if ! grep -Fq 'Cause unknown:' "$tmp_root/audit-fail.out"; then
   echo "failure summary invented a diagnosis for an unrecognized failure" >&2
   exit 1
