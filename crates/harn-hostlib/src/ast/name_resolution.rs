@@ -738,7 +738,7 @@ mod tests {
             "#[cfg_attr(all(), cfg_attr(all(), binding_macro::install))] fn f() { Reading() }\n",
             "use binding_macro::install as test; #[test] fn f() { Reading() }\n",
             "use binding_macro::install as derive; #[derive(Debug)] struct Marker; fn f() { Reading() }\n",
-            "use binding_macro::install as allow; #[allow(dead_code)] fn f() { Reading() }\n",
+            "use binding_macro::install as derive; #[cfg_attr(all(), derive(Debug))] struct Marker; fn f() { Reading() }\n",
         ] {
             let resolution = assess_source(source, Language::Rust);
             assert!(!resolution.is_complete());
