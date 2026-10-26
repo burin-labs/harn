@@ -1,0 +1,81 @@
+type BytePayload = bytes
+
+type ByteBatch = {
+  payload: BytePayload,
+  chunks: list<BytePayload>,
+  by_name: dict<string, BytePayload>,
+  optional_bytes: BytePayload?,
+  choice: BytePayload | string,
+}
+
+type StringMap = dict<string, string>
+
+type UntypedPayload = unknown
+
+fn main(harness: Harness) {
+  const byte_schema = schema_of(BytePayload)
+  const projected = schema_to_json_schema(byte_schema)
+  assert(projected.type == "object")
+  assert(projected.properties["$bytes_b64"].type == "string")
+  assert(projected.properties["$bytes_b64"].contentEncoding == "base64")
+  assert(len(projected.required) == 1)
+  assert(projected.required[0] == "$bytes_b64")
+  assert(type_of(projected.additionalProperties) == "bool")
+  assert(projected.additionalProperties == false)
+  const openapi = schema_to_openapi_schema(byte_schema)
+  assert(openapi.properties["$bytes_b64"].format == "byte")
+  const original = bytes_from_hex("00ff80")
+  const encoded = json_stringify(original)
+  const raw = json_parse(encoded)
+  assert(type_of(raw) == "dict")
+  assert(schema_is(raw, projected))
+  assert(!schema_is(raw, byte_schema))
+  assert(is_ok(schema_check(original, byte_schema)))
+  assert(is_err(schema_parse(raw, byte_schema)))
+  const decoded = json_decode(encoded, byte_schema)
+  assert(is_ok(decoded))
+  assert(bytes_to_hex(unwrap(decoded)) == "00ff80")
+  const empty = json_decode(json_stringify(bytes_from_hex("")), byte_schema)
+  assert(is_ok(empty))
+  assert(type_of(unwrap(empty)) == "bytes")
+  assert(bytes_to_hex(unwrap(empty)) == "")
+  const batch: ByteBatch = {
+    payload: original,
+    chunks: [bytes_from_hex("ff"), bytes_from_hex("fe")],
+    by_name: {empty: bytes_from_hex(""), value: bytes_from_hex("1234")},
+    optional_bytes: nil,
+    choice: bytes_from_hex("abcd"),
+  }
+  const batch_result = json_decode(json_stringify(batch), schema_of(ByteBatch))
+  assert(is_ok(batch_result))
+  const restored = unwrap(batch_result)
+  assert(bytes_to_hex(restored.payload) == "00ff80")
+  assert(len(restored.chunks) == 2)
+  assert(bytes_to_hex(restored.chunks[0]) == "ff")
+  assert(bytes_to_hex(restored.chunks[1]) == "fe")
+  assert(len(restored.by_name) == 2)
+  assert(type_of(restored.by_name.empty) == "bytes")
+  assert(bytes_to_hex(restored.by_name.empty) == "")
+  assert(bytes_to_hex(restored.by_name.value) == "1234")
+  assert(restored.optional_bytes == nil)
+  assert(bytes_to_hex(restored.choice) == "abcd")
+  const with_text = batch + {choice: "AP8=", optional_bytes: original}
+  const text_result = json_decode(json_stringify(with_text), schema_of(ByteBatch))
+  assert(is_ok(text_result))
+  assert(unwrap(text_result).choice == "AP8=")
+  assert(bytes_to_hex(unwrap(text_result).optional_bytes) == "00ff80")
+  const ordinary = json_decode(encoded, schema_of(StringMap))
+  assert(is_ok(ordinary))
+  assert(type_of(unwrap(ordinary)) == "dict")
+  assert(unwrap(ordinary)["$bytes_b64"] == "AP+A")
+  const untyped = json_decode(encoded, schema_of(UntypedPayload))
+  assert(is_ok(untyped))
+  assert(type_of(unwrap(untyped)) == "dict")
+  for invalid in ["AB==", "AA", "AA==\n", "AAB=", "--__"] {
+    assert(is_err(json_decode(json_stringify({"$bytes_b64": invalid}), byte_schema)))
+  }
+  assert(is_err(json_decode(json_stringify({"$bytes_b64": 3}), byte_schema)))
+  assert(is_err(json_decode(json_stringify({"$bytes_b64": "AA==", extra: true}), byte_schema)))
+  assert(is_err(json_decode("\"AP8=\"", byte_schema)))
+  harness.stdio.println("bytes JSON roundtrip and isolation checks passed")
+}

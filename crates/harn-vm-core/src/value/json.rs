@@ -38,6 +38,42 @@ pub fn tagged_bytes_json(bytes: &[u8]) -> serde_json::Value {
     })
 }
 
+pub(crate) fn bytes_json_schema(openapi_style: bool) -> serde_json::Map<String, serde_json::Value> {
+    let encoded = if openapi_style {
+        serde_json::json!({"type": "string", "format": "byte"})
+    } else {
+        serde_json::json!({"type": "string", "contentEncoding": "base64"})
+    };
+    [
+        ("type".into(), serde_json::json!("object")),
+        ("x-harn-type".into(), serde_json::json!("bytes")),
+        (
+            "properties".into(),
+            serde_json::json!({BYTES_B64_TAG: encoded}),
+        ),
+        ("required".into(), serde_json::json!([BYTES_B64_TAG])),
+        ("additionalProperties".into(), serde_json::json!(false)),
+    ]
+    .into_iter()
+    .collect()
+}
+
+pub(crate) fn decode_tagged_bytes(value: &VmValue) -> Option<VmValue> {
+    use base64::Engine;
+
+    let fields = value.as_dict()?;
+    if fields.len() != 1 {
+        return None;
+    }
+    let VmValue::String(encoded) = fields.get(BYTES_B64_TAG)? else {
+        return None;
+    };
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.as_bytes())
+        .ok()?;
+    Some(VmValue::Bytes(std::sync::Arc::new(bytes)))
+}
+
 pub fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {
     match jv {
         serde_json::Value::Null => VmValue::Nil,

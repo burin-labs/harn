@@ -8,6 +8,7 @@ use crate::value::value_structural_hash_key;
 use crate::value::{VmDictExt, VmError, VmValue};
 
 use super::canonicalize::{canonical_to_json_schema, canonicalize_schema_value};
+use super::jsonschema_validate::{validate_schema_value_as, InputRepresentation};
 use super::result::{
     issue_messages, issue_values, result_err_value, result_ok_value, ValidationIssue,
 };
@@ -64,11 +65,30 @@ fn cached_canonical_param_schema(schema: &VmValue) -> Result<CanonicalParamSchem
 }
 
 pub fn schema_result_value(data: &VmValue, schema: &VmValue, apply_defaults: bool) -> VmValue {
+    schema_result_value_as(data, schema, apply_defaults, InputRepresentation::Native)
+}
+
+/// Restore byte envelopes at their declared schema positions before validating JSON data.
+pub fn schema_decode_json_value(data: &VmValue, schema: &VmValue, apply_defaults: bool) -> VmValue {
+    schema_result_value_as(data, schema, apply_defaults, InputRepresentation::Json)
+}
+
+fn schema_result_value_as(
+    data: &VmValue,
+    schema: &VmValue,
+    apply_defaults: bool,
+    representation: InputRepresentation,
+) -> VmValue {
     let normalized = match canonicalize_schema_value(schema) {
         Ok(schema) => schema,
         Err(error) => return result_err_value(vec![ValidationIssue::new("schema", error)], None),
     };
-    let result = validate_schema_value(data, &normalized, ValidationOptions { apply_defaults });
+    let result = validate_schema_value_as(
+        data,
+        &normalized,
+        ValidationOptions { apply_defaults },
+        representation,
+    );
     if result.errors.is_empty() {
         result_ok_value(result.value)
     } else {

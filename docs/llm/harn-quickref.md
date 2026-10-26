@@ -1058,6 +1058,11 @@ schema_of(T))` validates a value you already hold. Both return `Result<T,
 returns a dynamic value. Unknown fields pass. See "Decode at the boundary"
 in `docs/src/error-handling.md`.
 
+For a `bytes` target, `json_decode` restores the `{"$bytes_b64":"..."}` envelope
+written by `json_stringify`, including byte fields in records, lists and maps.
+`json_parse` preserves that envelope as an ordinary dict; `schema_parse` validates
+native Harn values rather than decoding the byte envelope.
+
 Use `jq(value, expr)` for a jq-like stream query; it always returns a
 list. Use `jq_first(value, expr)` when you expect one value or `nil`.
 Supported v1 forms include `.`, `.foo.bar`, `.[2]`, `.[2:5]`,
