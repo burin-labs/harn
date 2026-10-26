@@ -15,6 +15,8 @@ git -C "$fixture" config user.name "Development Cutover Monitor Test"
 git -C "$fixture" config user.email "development-cutover-monitor@example.com"
 git -C "$fixture" config commit.gpgsign false
 git -C "$fixture" config tag.gpgSign false
+git -C "$fixture" config maintenance.auto false
+git -C "$fixture" config gc.auto 0
 printf '[workspace.package]\nversion = "1.2.3"\n' > "$fixture/Cargo.toml"
 git -C "$fixture" add Cargo.toml
 git -C "$fixture" commit --quiet -m 'Release v1.2.3'
@@ -206,6 +208,8 @@ git -C "$off_ancestry_fixture" config user.name "Development Cutover Monitor Tes
 git -C "$off_ancestry_fixture" config user.email "development-cutover-monitor@example.com"
 git -C "$off_ancestry_fixture" config commit.gpgsign false
 git -C "$off_ancestry_fixture" config tag.gpgSign false
+git -C "$off_ancestry_fixture" config maintenance.auto false
+git -C "$off_ancestry_fixture" config gc.auto 0
 printf '[workspace.package]\nversion = "1.2.3"\n' > "$off_ancestry_fixture/Cargo.toml"
 git -C "$off_ancestry_fixture" add Cargo.toml
 git -C "$off_ancestry_fixture" commit --quiet -m initial
