@@ -96,6 +96,29 @@ pipeline test(harness: Harness) {
     assert_eq(configured.makefile_targets.contains("test"), item.valid)
     assert_eq(configured.build_commands.contains("make test"), item.valid)
   }
+  for literal in [true, false] {
+    const dir = path_join(root, literal ? "literal-percent" : "pattern-percent")
+    harness.fs.mkdir(dir)
+    harness.fs.write_text(path_join(dir, "index.js"), "export const KNOWN_SCANNER_INPUT = true;\n")
+    const declaration = literal ? "test\\%" : "test%"
+    const source = "${declaration}:\n\t@echo QUALITY_MAKE_REACHED\n"
+    harness.fs.write_text(path_join(dir, "Makefile"), source)
+    const executed = harness.process.exec("make", "--no-print-directory", "-C", dir, "test%")
+    assert(executed.success)
+    assert(contains(executed.stdout, "QUALITY_MAKE_REACHED"))
+    const parsed_targets = makefile_parse(source)
+    assert_eq(parsed_targets.map({ target -> target.name }).to_list(), literal ? ["test%"] : [])
+    assert_eq(
+      parsed_targets.map({ target -> target.command }).to_list(),
+      literal ? ["make test%"] : [],
+    )
+    const scanned = harness.scanner.scan_project({root: dir, include_git_history: false})
+    assert(len(scanned.files) > 0)
+    assert_eq(keys(scanned.project.test_commands), literal ? ["make test%"] : [])
+    const configured = harness.project.scan(dir, {tiers: ["config"]})
+    assert_eq(configured.makefile_targets.contains("test%"), literal)
+    assert(!configured.build_commands.contains("make test%"))
+  }
   const parsed = makefile_parse(
     "unit test:\n\t@echo one\n\t-echo two\n\t+echo three\n\techo four\n",
   )

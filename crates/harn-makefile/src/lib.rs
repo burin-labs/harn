@@ -188,6 +188,7 @@ fn target_names(head: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut word = String::new();
     let mut escaped = false;
+    let mut pattern = false;
     for ch in head.chars().chain(std::iter::once(' ')) {
         if escaped {
             word.push(ch);
@@ -196,13 +197,15 @@ fn target_names(head: &str) -> Vec<String> {
             escaped = true;
         } else if ch.is_whitespace() {
             if !word.is_empty() {
-                if word != "&" && !word.contains(['$', '%', '=']) {
+                if word != "&" && !pattern && !word.contains(['$', '=']) {
                     words.push(std::mem::take(&mut word));
                 } else {
                     word.clear();
                 }
             }
+            pattern = false;
         } else {
+            pattern |= ch == '%';
             word.push(ch);
         }
     }
