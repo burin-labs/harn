@@ -22,8 +22,12 @@ if [[ "$fault_match" == true ]]; then
   count=$((count + 1))
   printf '%s\n' "$count" > "$FIXTURE/api-attempts"
   if (( count <= ${API_FAULT_COUNT:-1} )); then
+    printf 'gh: Server Error (HTTP %s)\n' "${API_DIAGNOSTIC_STATUS:-${API_FAULT_STATUS:-502}}" >&2
     jq -n --arg status "${API_FAULT_STATUS:-502}" --arg partial "${API_FAULT_PARTIAL:-false}" \
-      '{message: "fixture API refusal", status: $status} | if $partial == "true" then [[], .] else . end'
+      --arg unstructured "${API_FAULT_UNSTRUCTURED:-false}" \
+      '{message: "fixture API refusal", status: $status}
+       | if $unstructured == "true" then del(.status) else . end
+       | if $partial == "true" then [[], .] else . end'
     exit 1
   fi
 fi
@@ -242,6 +246,18 @@ done
 API_FAULT_ROUTE='issues?state=open' API_FAULT_PARTIAL=true ATTEMPT=2 OUTCOME=failure run_case
 expect 'partial failed pages are discarded' "$(count)" 1
 reset_issues
+if ! API_FAULT_ROUTE='issues?state=open' API_FAULT_UNSTRUCTURED=true ATTEMPT=2 OUTCOME=failure run_case; then
+  echo 'Observed CLI502 without body status did not recover' >&2
+  cat "$scratch/log" >&2
+  exit 1
+fi
+expect 'observed CLI502 recovers without a body status field' "$(count)" 1
+reset_issues
+if API_FAULT_ROUTE='issues?state=open' API_FAULT_STATUS=502 API_DIAGNOSTIC_STATUS=403 ATTEMPT=2 OUTCOME=failure run_case; then
+  echo 'Native permission refusal overruled by response body' >&2; exit 1
+fi
+expect 'native refusal is not retried' "$(cat "$scratch/api-attempts")" 1
+absent 'issue (create|edit|comment|close|reopen)|run rerun'
 if API_FAULT_ROUTE='issues?state=open' API_FAULT_COUNT=3 ATTEMPT=2 OUTCOME=failure run_case; then
   echo 'Exhausted API read accepted' >&2; exit 1
 fi

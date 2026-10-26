@@ -4,7 +4,7 @@ set -euo pipefail
 : "${RUN_ID:?run required}"
 [[ "$RUN_ID" =~ ^[0-9]+$ ]] || exit 1
 read_api_json() {
-  local endpoint="$1" mode="${2:-single}" response status attempt
+  local endpoint="$1" mode="${2:-single}" response status attempt diagnostic
   local flags=()
   case "$mode" in
     single) ;;
@@ -12,19 +12,27 @@ read_api_json() {
     *) return 1 ;;
   esac
   for attempt in 1 2 3; do
-    if response=$(gh api ${flags[@]+"${flags[@]}"} "$endpoint"); then
+    diagnostic=$(mktemp) || return 1
+    if response=$(gh api ${flags[@]+"${flags[@]}"} "$endpoint" 2> "$diagnostic"); then
+      cat "$diagnostic" >&2
+      rm -f "$diagnostic"
       printf '%s\n' "$response"
       return 0
     fi
+    cat "$diagnostic" >&2
+    status=$(sed -nE 's/^gh:.* \(HTTP ([0-9]{3})\)$/\1/p' "$diagnostic")
+    rm -f "$diagnostic"
     # Discard the entire failed attempt, including any successful earlier pages.
-    status=$(jq -er '
-      (if type == "array" then .[-1] else . end)
-      | select(type == "object") | .status | tonumber
-      | select(. == 500 or . == 502 or . == 503 or . == 504)
-    ' <<< "$response" 2>/dev/null) || {
-      echo "GitHub metadata read refused; no retry: $endpoint" >&2
-      return 1
-    }
+    if [[ -z "$status" ]]; then
+      status=$(jq -er '
+        (if type == "array" then .[-1] else . end)
+        | select(type == "object") | .status | tonumber
+      ' <<< "$response" 2>/dev/null) || status=unreported
+    fi
+    case "$status" in
+      500|502|503|504) ;;
+      *) echo "GitHub metadata read refused; no retry: $endpoint" >&2; return 1 ;;
+    esac
     echo "GitHub metadata read HTTP $status, attempt $attempt/3: $endpoint" >&2
     (( attempt < 3 )) || return 1
     sleep "$attempt"
