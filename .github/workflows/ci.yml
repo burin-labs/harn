@@ -2841,6 +2841,10 @@ jobs:
 
   setup-harn-action:
     name: Setup Harn action (${{ matrix.os }})
+    permissions:
+      contents: read
+      pull-requests: read
+      attestations: read
     needs: [changes]
     if: needs.changes.outputs.setup_action == 'true'
     strategy:
