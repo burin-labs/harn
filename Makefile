@@ -853,6 +853,10 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 test-rust-lint-lane-cache:
 	./scripts/tests/rust_lint_lane_cache_test.sh
 
+.PHONY: test-sccache-rustc-wrapper
+test-sccache-rustc-wrapper:
+	./scripts/tests/sccache_rustc_wrapper_test.sh
+
 test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	@if [ -z "$(strip $(HARN_BIN))" ] || [ ! -x "$(HARN_BIN)" ]; then \
 		echo "test-pr-gate-post-warm-integrations requires an executable HARN_BIN" >&2; \
@@ -861,7 +865,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/cargo_target_seed_reuse_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
-	./scripts/tests/sccache_rustc_wrapper_test.sh
+	$(MAKE) test-sccache-rustc-wrapper
 	./scripts/tests/sccache_wrapper_restore_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/ci_preemption_recover_test.sh
