@@ -1,6 +1,7 @@
 # CLI reference
 
-Reference for the most-used commands. Run `harn --help` or `harn <cmd> --help` for the full list; `spec/cli-surface.txt` is the generated inventory.
+Reference for the most-used commands. Run `harn --help` or `harn <cmd> --help`
+for the full list; `spec/cli-surface.txt` is the generated inventory.
 
 To add a new subcommand or port an existing one off Rust, see
 [Extending the CLI in `.harn`](./cli-extending-in-harn.md). For the

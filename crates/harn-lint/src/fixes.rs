@@ -312,8 +312,11 @@ pub(crate) fn is_pure_expression(node: &Node) -> bool {
             .iter()
             .all(|e| is_pure_expression(&e.key.node) && is_pure_expression(&e.value.node)),
         Node::UnaryOp { operand, .. } => is_pure_expression(&operand.node),
-        Node::BinaryOp { left, right, .. } => {
-            is_pure_expression(&left.node) && is_pure_expression(&right.node)
+        // `x |> f` calls `f`, so a pipe is never pure.
+        Node::BinaryOp { op, left, right } => {
+            !matches!(op, BinaryOperator::Pipe)
+                && is_pure_expression(&left.node)
+                && is_pure_expression(&right.node)
         }
         Node::Ternary {
             condition,

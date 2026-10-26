@@ -2,6 +2,7 @@ mod binary;
 mod casts;
 
 use harn_lexer::{FixEdit, Span, StringSegment};
+use harn_parser::operators::{is_parenthesized, operand_needs_parens, OperandSide, Precedence};
 use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode};
 
 use self::casts::unnecessary_cast_target;
@@ -488,7 +489,17 @@ impl<'a> Linter<'a> {
                 {
                     let fix = self.source.and_then(|src| {
                         let fallback_text = src.get(fallback.span.start..fallback.span.end)?;
-                        let replacement = format!("{ident} ?? {fallback_text}");
+                        // `x == nil ? a || b : x` must become `x ?? (a || b)`.
+                        let replacement = if operand_needs_parens(
+                            Precedence::NilCoalescing,
+                            Precedence::of_node(&fallback.node),
+                            OperandSide::Right,
+                        ) && !is_parenthesized(fallback_text)
+                        {
+                            format!("{ident} ?? ({fallback_text})")
+                        } else {
+                            format!("{ident} ?? {fallback_text}")
+                        };
                         Some(vec![FixEdit {
                             span: snode.span,
                             replacement,

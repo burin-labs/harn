@@ -87,3 +87,23 @@ pipeline default(task) {
         "rewrite would change semantics, lint must be silent, got: {diags:?}"
     );
 }
+
+#[test]
+fn test_fix_redundant_nil_ternary_groups_looser_fallback() {
+    for (ternary, expected) in [
+        ("x == nil ? a || b : x", "x ?? (a || b)"),
+        ("x == nil ? (a || b) : x", "x ?? (a || b)"),
+        ("x != nil ? x : a + 1", "x ?? a + 1"),
+    ] {
+        let source = format!(
+            "pipeline default(task) {{\n  const x = 5\n  const a = true\n  const b = false\n  const y = {ternary}\n  log(y)\n}}\n"
+        );
+        let diags = lint_source(&source);
+        let result = apply_fixes(&source, &diags);
+        assert!(
+            result.contains(&format!("const y = {expected}\n")),
+            "`{ternary}` should become `{expected}`, got: {result}"
+        );
+        harn_parser::parse_source(&result).expect("reparse after fix");
+    }
+}

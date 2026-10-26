@@ -96,11 +96,15 @@ impl Parser {
             }
             TokenKind::LParen => {
                 self.advance();
-                let expr = self.with_nesting("parenthesized expression", |parser| {
+                let mut expr = self.with_nesting("parenthesized expression", |parser| {
                     let expr = parser.parse_expression()?;
                     parser.consume(&TokenKind::RParen, ")")?;
                     Ok(expr)
                 })?;
+                // The span covers the parentheses so a parent that starts at
+                // this operand, and any fix that splices its source, stays
+                // balanced: `(a + b) * c` must not read as `a + b) * c`.
+                expr.span = Span::merge(start, self.prev_span());
                 Ok(expr)
             }
             TokenKind::LBracket => self.parse_list_literal(),

@@ -7,7 +7,14 @@ mod gate_receipt;
 const INTERNAL_EXECUTABLE_PATH_COMMAND: &str = "__internal-executable-path";
 
 pub(crate) fn args_after_pre_runtime_command() -> Vec<String> {
-    let raw_args: Vec<String> = env::args().collect();
+    // `env::args()` panics on a non-UTF-8 argument; report it instead.
+    let raw_args: Vec<String> = match env::args_os().map(|arg| arg.into_string()).collect() {
+        Ok(args) => args,
+        Err(arg) => {
+            eprintln!("error: argument {arg:?} is not valid UTF-8");
+            process::exit(2);
+        }
+    };
     if handle_pre_runtime_command(&raw_args) {
         process::exit(0);
     }

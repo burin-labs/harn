@@ -7,6 +7,7 @@ pipeline test(harness: Harness, task: unknown) {
   const multi = "first\nsecond\n\nfourth"
   const bumped = indent(multi, "  ")
   assert_eq(bumped, "  first\n  second\n\n  fourth", "indent preserves blank lines")
+  assert_eq(indent("a\r\n\r\n   \nb", "> "), "> a\r\n\r\n   \n> b", "indent skips whitespace-only lines")
   // dedent: strip the longest common prefix
   const heredoc = "    line one\n      line two\n    line three"
   const flush = dedent(heredoc)

@@ -13,6 +13,8 @@
 
 use std::fmt;
 
+use harn_lexer::TokenKind;
+
 /// A binary operator. Spelling, wire name, and precedence live here so no
 /// consumer compares operator text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -448,6 +450,34 @@ pub fn loosest_bare_operand(parent: Precedence, side: OperandSide) -> Precedence
 #[must_use]
 pub fn operand_needs_parens(parent: Precedence, child: Precedence, side: OperandSide) -> bool {
     child < loosest_bare_operand(parent, side)
+}
+
+/// Whether `text` is exactly one parenthesized group: `(a || b)` but not
+/// `(a) + (b)`. The parser keeps a grouped expression's parentheses in its
+/// span, so source sliced from that span may already carry them.
+#[must_use]
+pub fn is_parenthesized(text: &str) -> bool {
+    let Ok(tokens) = harn_lexer::Lexer::new(text).tokenize() else {
+        return false;
+    };
+    let mut significant = tokens
+        .iter()
+        .filter(|token| !matches!(token.kind, TokenKind::Newline | TokenKind::Eof));
+    if !matches!(significant.next(), Some(token) if token.kind == TokenKind::LParen) {
+        return false;
+    }
+    let mut depth = 1usize;
+    for token in significant {
+        if depth == 0 {
+            return false;
+        }
+        match token.kind {
+            TokenKind::LParen => depth += 1,
+            TokenKind::RParen => depth -= 1,
+            _ => {}
+        }
+    }
+    depth == 0
 }
 
 impl Precedence {
