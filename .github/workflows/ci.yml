@@ -1756,7 +1756,13 @@ jobs:
         if: matrix.kind == 'audit'
         with:
           node-version: "22"
-          cache-dependency-path: tree-sitter-harn/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            tree-sitter-harn/package-lock.json
+      - name: Install source audit dependencies
+        if: matrix.kind == 'audit'
+        timeout-minutes: 5
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Set up the stock TypeScript fixture runtime
         if: matrix.kind == 'audit-scripts'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
