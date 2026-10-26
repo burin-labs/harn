@@ -90,6 +90,19 @@ setup-rust:
 setup-bootstrap:
 	HARN_DEV_SETUP_PROFILE=bootstrap HARN_DEV_TARGET_WORKTREE_PATH="$(CURDIR)" ./scripts/dev_setup.sh
 
+.PHONY: refresh-cargo-wrapper
+# Refresh only the already-configured source-addressed compiler-cache wrapper.
+refresh-cargo-wrapper:
+	./scripts/dev_setup.sh --refresh-cargo-wrapper
+
+.PHONY: test-cargo-wrapper-refresh
+test-cargo-wrapper-refresh:
+	bash ./scripts/tests/cargo_wrapper_refresh_test.sh
+
+.PHONY: test-cargo-wrapper-refresh-native
+test-cargo-wrapper-refresh-native:
+	./scripts/tests/sccache_wrapper_restore_test.sh
+
 # Install the pinned browser-Wasm toolchain outside the checkout so every
 # worktree keeps its mutable build products private while reusing one immutable
 # tool binary. wasm-pack installs the matching wasm-bindgen test runner.
@@ -821,6 +834,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/build_revision_workflow_test.sh
 	bash ./scripts/tests/fetch_release_base_test.sh
 	./scripts/tests/dev_setup_profile_test.sh
+	$(MAKE) test-cargo-wrapper-refresh
 	./scripts/tests/sync_diagnostics_catalog_test.sh
 	./scripts/tests/sign_local_macos_test.sh
 	./scripts/tests/bench_vm_startup_test.sh
@@ -866,7 +880,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
 	$(MAKE) test-sccache-rustc-wrapper
-	./scripts/tests/sccache_wrapper_restore_test.sh
+	$(MAKE) test-cargo-wrapper-refresh-native
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/ci_preemption_recover_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/check_harn_syntax_sensitive_scans_performance_test.sh

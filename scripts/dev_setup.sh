@@ -79,17 +79,18 @@ write_build_config() {
   local target_dir="${2:-}"
   local build_dir="${3:-}"
   local force_target_dir="${4:-0}"
+  local preserve_other_build_values="${5:-0}"
   local config_path=".cargo/config.toml"
   local drop_generated_target_dir=0
   local drop_generated_build_dir=0
   local source_path="/dev/null"
   local tmp_path
 
-  if [[ -z "${target_dir}" ]]; then
+  if [[ -z "${target_dir}" && "${preserve_other_build_values}" != 1 ]]; then
     drop_generated_target_dir=1
   fi
 
-  if [[ -z "${build_dir}" ]]; then
+  if [[ -z "${build_dir}" && "${preserve_other_build_values}" != 1 ]]; then
     drop_generated_build_dir=1
   fi
 
@@ -101,7 +102,12 @@ write_build_config() {
   if [[ -f "${config_path}" ]]; then
     source_path="${config_path}"
   fi
-  tmp_path="$(mktemp)"
+  if [[ "${preserve_other_build_values}" == 1 ]]; then
+    tmp_path="$(mktemp "${config_path}.XXXXXX")"
+    cp -p "${config_path}" "${tmp_path}"
+  else
+    tmp_path="$(mktemp)"
+  fi
 
   awk \
     -v rustc_wrapper="${rustc_wrapper}" \
@@ -161,14 +167,14 @@ write_build_config() {
       saw_build_dir = 0
     }
 
-    /^\[build\][[:space:]]*$/ {
+    /^[[:space:]]*\[build\][[:space:]]*(#.*)?$/ {
       saw_build = 1
       in_build = 1
       print
       next
     }
 
-    /^\[[^]]+\][[:space:]]*$/ {
+    /^[[:space:]]*\[/ {
       if (in_build) {
         print_missing_build_values()
         in_build = 0
@@ -388,6 +394,70 @@ install_locked_node_dependencies() {
 build_sccache_rustc_wrapper() {
   harn_build_sccache_wrapper "$ROOT_DIR" "$HARN_DEV_SETUP_STORAGE_ROOT"
 }
+
+refresh_configured_cargo_wrapper() (
+  local config_path=.cargo/config.toml configured storage current produced snapshot current_after
+  [[ -f "$config_path" && ! -L "$config_path" && ! -L .cargo ]] || {
+    echo "error: wrapper refresh requires an existing regular Cargo config" >&2
+    return 1
+  }
+  configured="$(awk '
+    /^[[:space:]]*\[build\][[:space:]]*(#.*)?$/ { in_build = 1; next }
+    /^[[:space:]]*\[/ { in_build = 0 }
+    in_build && /^[[:space:]]*rustc-wrapper[[:space:]]*=/ {
+      count++
+      if ($0 !~ /^[[:space:]]*rustc-wrapper[[:space:]]*=[[:space:]]*"[^"\\]+"[[:space:]]*(#.*)?$/) bad = 1
+      value = $0
+      sub(/^[^=]*=[[:space:]]*"/, "", value)
+      sub(/"[[:space:]]*(#.*)?$/, "", value)
+    }
+    END { if (count != 1 || bad) exit 1; print value }
+  ' "$config_path")" || {
+    echo "error: wrapper refresh requires one generated build.rustc-wrapper path" >&2
+    return 1
+  }
+  case "$configured" in
+    /*/sccache-wrapper/*/harn-sccache-wrapper | /*/sccache-wrapper/*/harn-sccache-wrapper.exe) ;;
+    *) echo "error: wrapper refresh does not manage $configured" >&2; return 1 ;;
+  esac
+  local key
+  key="$(basename "$(dirname "$configured")")"
+  [[ "$key" =~ ^[A-Za-z0-9_.-]+-[0-9a-f]{64}$ &&
+    "$(basename "$(dirname "$(dirname "$configured")")")" == sccache-wrapper ]] || {
+    echo "error: configured wrapper is not source-addressed" >&2
+    return 1
+  }
+  storage="$(dirname "$(dirname "$(dirname "$configured")")")"
+  current="$(harn_sccache_wrapper_path "$ROOT_DIR" "$storage")"
+  [[ "${key%-*}" == "$(basename "$(dirname "$current")" | sed 's/-[^-]*$//')" &&
+    "$(basename "$configured")" == "$(basename "$current")" ]] || {
+    echo "error: configured wrapper belongs to a different host" >&2
+    return 1
+  }
+  snapshot="$(mktemp)"
+  trap 'rm -f "$snapshot"' EXIT
+  cp -p "$config_path" "$snapshot"
+  produced="$(harn_build_sccache_wrapper "$ROOT_DIR" "$storage")"
+  current_after="$(harn_sccache_wrapper_path "$ROOT_DIR" "$storage")"
+  if [[ "$produced" != "$current" || "$current_after" != "$current" || -L "$config_path" || -L .cargo ]] ||
+    ! cmp -s "$config_path" "$snapshot"; then
+    echo "error: wrapper source or Cargo config changed during refresh" >&2
+    return 1
+  fi
+  if [[ "$configured" != "$current" ]]; then
+    write_build_config "$current" "" "" 0 1
+  fi
+  printf 'Configured current source wrapper -> %s\n' "$current"
+)
+
+if [[ "$#" -gt 0 ]]; then
+  [[ "$#" == 1 && "$1" == --refresh-cargo-wrapper ]] || {
+    echo "usage: $0 [--refresh-cargo-wrapper]" >&2
+    exit 2
+  }
+  refresh_configured_cargo_wrapper
+  exit
+fi
 
 echo "=== Harn dev setup ==="
 
