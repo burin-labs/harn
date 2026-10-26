@@ -20,13 +20,10 @@ import {
 } from "std/agent/control"
 import { agent_daemon_step } from "std/agent/daemon"
 import { agent_feedback_emit } from "std/agent/feedback"
-import { agent_evaluate_completion } from "std/agent/judge"
+import { CompletionDirectiveReceipt, agent_evaluate_completion } from "std/agent/judge"
 import { AgentToolDispatch, __tool_names_by_status } from "std/agent/loop_result_status"
 import { __agent_loop_with_llm_render_context } from "std/agent/loop_support"
-import {
-  __agent_loop_terminal_verification_from_directive,
-  __agent_loop_verified_completion,
-} from "std/agent/loop_terminal"
+import { __agent_loop_verified_completion } from "std/agent/loop_terminal"
 import {
   AGENT_LOOP_REJECTED_TURN_MARKER,
   __agent_loop_pop_rejected_assistant_turn,
@@ -127,7 +124,7 @@ pub type AgentLoopPostTurnState = {
   opts: dict,
   stall_state: AgentStallState,
   stop_reason: string?,
-  terminal_verification: dict?,
+  terminal_assessment: CompletionDirectiveReceipt?,
   terminal_write_unverified: bool,
   turns_since_loop_progress: int,
   turns_since_progress: int,
@@ -277,7 +274,7 @@ pub fn agent_loop_post_turn_transition(
   let next = state
   const tool_count = len(context.tool_calls)
   if tool_count > 0 {
-    next = next + {terminal_verification: nil}
+    next = next + {terminal_assessment: nil}
   }
   next = next
     + {
@@ -493,7 +490,7 @@ pub fn agent_loop_post_turn_transition(
     )
     verdict_record = reverdict
     next = next
-      + {terminal_verification: __agent_loop_terminal_verification_from_directive(reverdict)}
+      + {terminal_assessment: reverdict?.receipt}
     next = next
       + {
         feedback_history: reverdict.feedback_history ?? next.feedback_history,
@@ -559,7 +556,7 @@ pub fn agent_loop_post_turn_transition(
       )
       verdict_record = verdict
       next = next
-        + {terminal_verification: __agent_loop_terminal_verification_from_directive(verdict)}
+        + {terminal_assessment: verdict?.receipt}
       next = next
         + {
           feedback_history: verdict.feedback_history ?? next.feedback_history,

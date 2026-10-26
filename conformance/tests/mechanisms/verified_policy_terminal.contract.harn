@@ -1,23 +1,54 @@
 import { agent_completion_gate } from "std/agent/completion_gate"
 import { agent_capture_events } from "std/agent/events"
+import { CompletionDirectiveReceipt } from "std/agent/judge"
 import { agent_loop } from "std/agent/loop"
 import {
   __agent_loop_resolve_verified_policy_stop,
-  __agent_loop_terminal_verification_from_directive,
+  __agent_loop_terminal_verification_from_assessment,
 } from "std/agent/loop_terminal"
 import { llm_text, with_llm_script } from "std/testing"
 import { repair_test_tools } from "../../fixtures/agents/repair_tools"
 
-fn accepted_verification() -> dict {
+fn accepted_verification() -> CompletionDirectiveReceipt {
   return {
+    schema: "harn.completion_directive_receipt.v1",
     action: "accept",
-    receipt: {
-      evidence_id: "verified-1",
-      verification: {oracle_expected: true, observed: "passed", command: "fixture-verify"},
-      requirements: {pending_count: 0},
-      pending_tool_batch_effect_count: 0,
-      gap_count: 0,
+    evidence_id: "verified-1",
+    trigger: "fixture",
+    source: "deterministic",
+    outcome: "accepted",
+    reason: "verified",
+    invoked: {deterministic: true, verify_completion_judge: false, turn_end_condition: false},
+    feedback_delivery: "none",
+    projection: {
+      schema: "harn.completion_judge_evidence_projection.v1",
+      raw_message_count: 0,
+      relevant_call_count: 0,
+      included_action_count: 0,
+      included_fallback_observation_count: 0,
+      included_read_only_call_count: 0,
+      omitted_read_only_call_count: 0,
+      omitted_older_action_count: 0,
+      omitted_harness_authored_result_count: 0,
+      lifecycle_issue_count: 0,
+      serialized_chars: 0,
+      raw_transcript_digest: "fixture",
+      selected_actions: [],
     },
+    verification: {oracle_expected: true, observed: "passed", command: "fixture-verify"},
+    requirements: {
+      schema: "harn.completion_requirement_report.v1",
+      complete: true,
+      required_count: 0,
+      reported_count: 0,
+      pending_count: 0,
+      pending_names: [],
+      rows: [],
+    },
+    pending_tool_batch_effect_count: 0,
+    gap_count: 0,
+    gaps_unattributed: 0,
+    repeated_verified_criteria: [],
   }
 }
 
@@ -90,7 +121,7 @@ fn run_live_case(
 }
 
 pipeline default(harness: Harness) {
-  const evidence = __agent_loop_terminal_verification_from_directive(accepted_verification())
+  const evidence = __agent_loop_terminal_verification_from_assessment(accepted_verification())
   assert(evidence != nil, "an accepted positive verifier must be readable")
   for status in ["budget_exhausted", "verify_exhausted", "completion_unverified", "stuck"] {
     const resolved = __agent_loop_resolve_verified_policy_stop(
@@ -140,22 +171,19 @@ pipeline default(harness: Harness) {
     nil,
   )
   assert_eq(natural.stop_reason, "explicit_completion_claim")
-  const red = __agent_loop_terminal_verification_from_directive(
+  const red = __agent_loop_terminal_verification_from_assessment(
     accepted_verification()
-      + {
-        receipt: accepted_verification().receipt
-          + {verification: {oracle_expected: true, observed: "failed", command: "fixture-verify"}},
-      },
+      + {verification: {oracle_expected: true, observed: "failed", command: "fixture-verify"}},
   )
   assert_eq(red, nil)
-  const pending = __agent_loop_terminal_verification_from_directive(
+  const pending = __agent_loop_terminal_verification_from_assessment(
     accepted_verification()
-      + {receipt: accepted_verification().receipt + {requirements: {pending_count: 1}}},
+      + {requirements: (accepted_verification().requirements ?? {}) + {pending_count: 1}},
   )
   assert_eq(pending, nil)
-  const missing_evidence = __agent_loop_terminal_verification_from_directive(
+  const missing_evidence = __agent_loop_terminal_verification_from_assessment(
     accepted_verification()
-      + {receipt: accepted_verification().receipt + {evidence_id: "", gap_count: nil}},
+      + {evidence_id: ""},
   )
   assert_eq(missing_evidence, nil)
   const errored = __agent_loop_resolve_verified_policy_stop(

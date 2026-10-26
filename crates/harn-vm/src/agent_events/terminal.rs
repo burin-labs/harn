@@ -359,12 +359,14 @@ impl AgentTerminalOutcome {
         session_id: &str,
         final_status: &str,
         stop_reason: &str,
+        goal_outcome: &serde_json::Value,
     ) -> AgentEvent {
         AgentEvent::TypedCheckpoint {
             session_id: session_id.to_owned(),
             checkpoint: serde_json::json!({
                 "schema": "harn.agent_terminal.v1",
                 "terminal": self.to_json(),
+                "goal_outcome": goal_outcome,
                 "final_status": final_status,
                 "stop_reason": stop_reason,
             }),

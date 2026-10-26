@@ -244,6 +244,7 @@ pub(crate) async fn flush_init_terminal(
             "terminal": terminal,
             "visible_reply": "",
             "provider_call_count": physical_usage.dispatched_calls,
+            "goal_outcome": serde_json::Value::Null,
         })),
     );
     let phase = append_terminal_phase(session_id, event)?;
@@ -266,6 +267,8 @@ pub(crate) struct TerminalAccounting<'a> {
     pub provider_call_count: i64,
     /// The loop owns the decision schema; the host persists its account unchanged.
     pub adaptive_budget: Option<&'a serde_json::Value>,
+    /// The completion owner supplies the assessment; persistence does not rejudge it.
+    pub goal_outcome: Option<&'a serde_json::Value>,
 }
 
 pub(crate) async fn flush_terminal(
@@ -289,6 +292,7 @@ pub(crate) async fn flush_terminal(
         "terminal": terminal,
         "visible_reply": visible_reply,
         "provider_call_count": accounting.provider_call_count,
+        "goal_outcome": accounting.goal_outcome,
     });
     if let Some(budget) = accounting.adaptive_budget {
         metadata["adaptive_budget"] = budget.clone();

@@ -121,6 +121,8 @@ pub type CompletionDirectiveReceipt = {
   feedback_delivery: CompletionFeedbackDelivery,
   projection: CompletionEvidenceProjectionStats,
   pending_tool_batch_effect_count: int,
+  gap_count: int,
+  gaps_unattributed: int,
   repeated_verified_criteria: list<string>,
   // The gap the model judge named, and — when an adjudication was overruled —
   // WHAT overruled it. `trigger` names whichever adjudicator ANSWERED, not the
