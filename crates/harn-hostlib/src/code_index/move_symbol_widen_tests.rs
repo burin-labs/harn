@@ -650,6 +650,27 @@ fn rust_widening_respects_receiver_lexical_scope() {
 }
 
 #[test]
+fn rust_widening_never_confuses_inherent_impl_specializations() {
+    let fixture = Fixture::new(&[
+        KIT,
+        ("src/lib.rs", "pub mod a;\npub mod b;\npub mod other;\n"),
+        (
+            "src/a.rs",
+            "pub struct Buffer<T>(pub T);\n\nimpl Buffer<String> {\n    fn flush(&self) {}\n}\n\nimpl std::ops::Deref for Buffer<u8> {\n    type Target = crate::other::Buffer;\n    fn deref(&self) -> &Self::Target { &crate::other::Buffer }\n}\n\npub fn run(out: &Buffer<u8>) {\n    out.flush();\n}\n",
+        ),
+        ("src/b.rs", "pub fn other() {}\n"),
+        (
+            "src/other.rs",
+            "pub struct Buffer;\nimpl Buffer { pub fn flush(&self) {} }\n",
+        ),
+    ]);
+    fixture.refused(
+        "visibility_required",
+        &widening_args("run", "src/a.rs", "src/b.rs", Some("pub")),
+    );
+}
+
+#[test]
 fn rust_widening_keeps_proven_receivers_in_their_own_scope() {
     for body in [
         "pub fn run(out: &Buffer) {\n    fn helper(out: &mut std::io::Stdout) {}\n    out.flush();\n}\n",
