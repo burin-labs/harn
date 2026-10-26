@@ -45,8 +45,8 @@ pipeline test(harness: Harness) {
     const dir = path_join(root, item.name)
     harness.fs.mkdir(dir)
     harness.fs.write_text(path_join(dir, "index.js"), "export const KNOWN_SCANNER_INPUT = true;\n")
-    for file in keys(item.files) {
-      harness.fs.write_text(path_join(dir, file), item.files[file])
+    for (file, content) in item.files.iter() {
+      harness.fs.write_text(path_join(dir, file), content)
     }
     const scanned = harness.scanner.scan_project({root: dir, include_git_history: false})
     assert(len(scanned.files) > 0, "each scanner call must reach the known source file")
