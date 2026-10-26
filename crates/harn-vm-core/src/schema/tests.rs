@@ -8,8 +8,8 @@ use super::transform::{merge_schema_dicts, schema_partial_dict};
 use super::validate::{validate_schema_value, ValidationOptions};
 use super::{
     normalize_provider_json_schema, reject_unsatisfiable_output_schema, schema_assert_param,
-    schema_is_value, schema_report_value, schema_result_value, schema_to_json_schema_value,
-    schema_to_openapi_schema_value, vm_value_to_serde_json,
+    schema_decode_json_value, schema_is_value, schema_report_value, schema_result_value,
+    schema_to_json_schema_value, schema_to_openapi_schema_value, vm_value_to_serde_json,
 };
 
 fn s(v: &str) -> VmValue {
@@ -26,6 +26,115 @@ fn make_vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
 
 fn make_list(items: Vec<VmValue>) -> VmValue {
     VmValue::list(items)
+}
+
+fn decoded_json_value(data: &VmValue, schema: &VmValue, apply_defaults: bool) -> VmValue {
+    let result = schema_decode_json_value(data, schema, apply_defaults);
+    let VmValue::EnumVariant(result) = result else {
+        panic!("expected Result");
+    };
+    assert!(result.is_variant("Result", "Ok"), "{result:?}");
+    result.fields.first().expect("Ok payload").clone()
+}
+
+#[test]
+fn byte_schemas_describe_the_existing_json_carrier() {
+    let schema = make_vm_dict(vec![("type", s("bytes"))]);
+    let bytes = VmValue::Bytes(std::sync::Arc::new(vec![0, 255, 128]));
+    assert!(schema_is_value(&bytes, &schema).unwrap());
+    let projected = schema_to_json_schema_value(&schema).unwrap();
+    let json = vm_value_to_serde_json(&projected);
+    assert_eq!(json["type"], "object");
+    assert_eq!(
+        json["properties"][super::BYTES_B64_TAG]["contentEncoding"],
+        "base64"
+    );
+    let validator = jsonschema::draft202012::new(&json).expect("valid JSON Schema");
+    assert!(validator.is_valid(&super::tagged_bytes_json(&[0, 255, 128])));
+    for invalid in [
+        serde_json::json!({}),
+        serde_json::json!({(super::BYTES_B64_TAG): 3}),
+        serde_json::json!({(super::BYTES_B64_TAG): "", "extra": true}),
+    ] {
+        assert!(!validator.is_valid(&invalid), "{invalid}");
+    }
+    let openapi = schema_to_openapi_schema_value(&schema).unwrap();
+    let openapi = vm_value_to_serde_json(&openapi);
+    assert_eq!(openapi["type"], "object");
+    assert_eq!(
+        openapi["properties"][super::BYTES_B64_TAG]["format"],
+        "byte"
+    );
+    assert!(openapi["properties"][super::BYTES_B64_TAG]
+        .get("contentEncoding")
+        .is_none());
+}
+
+#[test]
+fn json_byte_decoding_is_strict_and_schema_directed() {
+    let schema = make_vm_dict(vec![("type", s("bytes"))]);
+    for bytes in [vec![], vec![0, 255, 128]] {
+        let wire = super::json_to_vm_value(&super::tagged_bytes_json(&bytes));
+        assert!(wire.as_dict().is_some());
+        let decoded = decoded_json_value(&wire, &schema, false);
+        assert_eq!(decoded.as_bytes(), Some(bytes.as_slice()));
+        assert!(!schema_is_value(&wire, &schema).unwrap());
+        let untyped = make_vm_dict(vec![("type", s("any"))]);
+        let ordinary = decoded_json_value(&wire, &untyped, false);
+        assert!(ordinary.as_dict().is_some());
+        assert_eq!(
+            vm_value_to_serde_json(&ordinary),
+            vm_value_to_serde_json(&wire)
+        );
+    }
+    for invalid in [
+        serde_json::json!({(super::BYTES_B64_TAG): "AB=="}),
+        serde_json::json!({(super::BYTES_B64_TAG): "AA"}),
+        serde_json::json!({(super::BYTES_B64_TAG): "AA==\n"}),
+        serde_json::json!({(super::BYTES_B64_TAG): "AA==", "extra": true}),
+        serde_json::json!({(super::BYTES_B64_TAG): 3}),
+        serde_json::json!("AA=="),
+    ] {
+        let invalid = super::json_to_vm_value(&invalid);
+        let decoded = schema_decode_json_value(&invalid, &schema, true);
+        assert!(
+            matches!(decoded, VmValue::EnumVariant(value) if value.is_variant("Result", "Err"))
+        );
+    }
+}
+
+#[test]
+fn json_byte_decoding_reuses_refs_unions_and_collection_traversal() {
+    let schema = super::json_to_vm_value(&serde_json::json!({
+        "type": "dict",
+        "properties": {
+            "items": {"type": "list", "items": {"$ref": "#/definitions/Blob"}},
+            "by_name": {"type": "dict", "additional_properties": {"$ref": "#/definitions/Blob"}},
+            "choice": {"union": [{"type": "string"}, {"$ref": "#/definitions/Blob"}]},
+            "defaulted": {"type": "string", "default": "ready"}
+        },
+        "definitions": {"Blob": {"type": "bytes"}}
+    }));
+    let wire = super::json_to_vm_value(&serde_json::json!({
+        "items": [super::tagged_bytes_json(&[255]), super::tagged_bytes_json(&[254])],
+        "by_name": {"empty": super::tagged_bytes_json(&[])},
+        "choice": super::tagged_bytes_json(&[0, 255])
+    }));
+    for defaults in [false, true] {
+        let decoded = decoded_json_value(&wire, &schema, defaults);
+        let fields = decoded.as_dict().unwrap();
+        let VmValue::List(items) = &fields["items"] else {
+            panic!("items")
+        };
+        assert_eq!(items[0].as_bytes(), Some([255].as_slice()));
+        assert_eq!(items[1].as_bytes(), Some([254].as_slice()));
+        assert_eq!(
+            fields["by_name"].as_dict().unwrap()["empty"].as_bytes(),
+            Some([].as_slice())
+        );
+        assert_eq!(fields["choice"].as_bytes(), Some([0, 255].as_slice()));
+        assert_eq!(fields.contains_key("defaulted"), defaults);
+    }
 }
 
 fn assert_schema_error_contains(schema: &VmValue, expected: &str) {

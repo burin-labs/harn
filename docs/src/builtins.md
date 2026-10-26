@@ -134,6 +134,17 @@ Type mapping:
 | array | list |
 | object | dict |
 
+`json_stringify` represents bytes as `{"$bytes_b64":"..."}` with standard base64.
+`json_decode` restores bytes when the target Harn schema specifies `bytes`,
+including nested record, list, map and union values. It rejects malformed base64,
+non-string payloads and extra envelope fields. Empty bytes have an empty base64
+payload. `json_parse` leaves the envelope as a dict, and native schema checks do
+not reinterpret it as bytes.
+
+Byte schemas export an object with one required `$bytes_b64` string field and
+no additional properties. JSON Schema marks the string with
+`contentEncoding: "base64"`; OpenAPI uses `format: "byte"`.
+
 ### Canonical schema format
 
 The canonical schema is a plain Harn dict. The validator also accepts compatible

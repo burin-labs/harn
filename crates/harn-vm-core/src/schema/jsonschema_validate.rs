@@ -12,6 +12,18 @@ use super::{child_path, index_path, vm_value_to_serde_json};
 
 const MAX_CACHED_SCHEMA_BYTES: usize = 64 * 1024;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum InputRepresentation {
+    Native,
+    Json,
+}
+
+#[derive(Clone, Copy)]
+struct NormalizationOptions {
+    apply_defaults: bool,
+    representation: InputRepresentation,
+}
+
 #[derive(Clone)]
 enum CompiledValidator {
     Ready(Arc<jsonschema::Validator>),
@@ -80,10 +92,28 @@ pub(super) fn validate_schema_value(
     schema: &VmValue,
     options: ValidationOptions,
 ) -> ValidationResult {
+    validate_schema_value_as(data, schema, options, InputRepresentation::Native)
+}
+
+pub(super) fn validate_schema_value_as(
+    data: &VmValue,
+    schema: &VmValue,
+    options: ValidationOptions,
+    representation: InputRepresentation,
+) -> ValidationResult {
     let root = schema.as_dict().cloned().unwrap_or_default();
     let mut traversal = SchemaTraversal::new();
-    let normalized = if options.apply_defaults {
-        apply_defaults(data, &root, &root, &mut traversal)
+    let normalized = if options.apply_defaults || representation == InputRepresentation::Json {
+        normalize_input(
+            data,
+            &root,
+            &root,
+            &mut traversal,
+            NormalizationOptions {
+                apply_defaults: options.apply_defaults,
+                representation,
+            },
+        )
     } else {
         data.clone()
     };
@@ -526,25 +556,27 @@ fn collection_items(value: &VmValue) -> Option<&[VmValue]> {
     }
 }
 
-fn apply_defaults(
+fn normalize_input(
     value: &VmValue,
     schema: &crate::value::DictMap,
     root: &crate::value::DictMap,
     traversal: &mut SchemaTraversal,
+    options: NormalizationOptions,
 ) -> VmValue {
     if traversal.enter_schema().is_err() {
         return value.clone();
     }
-    let normalized = apply_defaults_inner(value, schema, root, traversal);
+    let normalized = normalize_input_inner(value, schema, root, traversal, options);
     traversal.exit_schema();
     normalized
 }
 
-fn apply_defaults_inner(
+fn normalize_input_inner(
     value: &VmValue,
     schema: &crate::value::DictMap,
     root: &crate::value::DictMap,
     traversal: &mut SchemaTraversal,
+    options: NormalizationOptions,
 ) -> VmValue {
     if let Some(VmValue::String(pointer)) = schema.get("$ref") {
         if traversal.expand_ref().is_err() {
@@ -552,18 +584,23 @@ fn apply_defaults_inner(
         }
         return resolve_canonical_ref_with_path(root, pointer).map_or_else(
             || value.clone(),
-            |(_, resolved)| apply_defaults(value, &resolved, root, traversal),
+            |(_, resolved)| normalize_input(value, &resolved, root, traversal, options),
         );
+    }
+    if options.representation == InputRepresentation::Json
+        && schema_type_name(schema) == Some("bytes")
+    {
+        return crate::value::json::decode_tagged_bytes(value).unwrap_or_else(|| value.clone());
     }
     let mut normalized = value.clone();
     if let Some(VmValue::List(branches)) = schema.get("all_of") {
         for branch in branches.iter().filter_map(VmValue::as_dict) {
-            normalized = apply_defaults(&normalized, branch, root, traversal);
+            normalized = normalize_input(&normalized, branch, root, traversal, options);
         }
     }
     if let Some(VmValue::List(branches)) = schema.get("union") {
         for branch in branches.iter().filter_map(VmValue::as_dict) {
-            let candidate = apply_defaults(&normalized, branch, root, traversal);
+            let candidate = normalize_input(&normalized, branch, root, traversal, options);
             let result = validate_schema_fragment(
                 &candidate,
                 branch,
@@ -595,12 +632,33 @@ fn apply_defaults_inner(
                 };
                 if let Some(child) = fields.get(name).cloned() {
                     let normalized = with_child_ref_budget(traversal, |traversal| {
-                        apply_defaults(&child, child_schema, root, traversal)
+                        normalize_input(&child, child_schema, root, traversal, options)
                     });
                     fields.insert(name.clone(), normalized);
-                } else if let Some(default) = child_schema.get("default") {
+                } else if let Some(default) = child_schema
+                    .get("default")
+                    .filter(|_| options.apply_defaults)
+                {
                     let normalized = with_child_ref_budget(traversal, |traversal| {
-                        apply_defaults(default, child_schema, root, traversal)
+                        normalize_input(default, child_schema, root, traversal, options)
+                    });
+                    fields.insert(name.clone(), normalized);
+                }
+            }
+        }
+        if options.representation == InputRepresentation::Json {
+            if let Some(VmValue::Dict(additional)) = schema.get("additional_properties") {
+                let properties = schema.get("properties").and_then(VmValue::as_dict);
+                let additional_options = NormalizationOptions {
+                    apply_defaults: false,
+                    ..options
+                };
+                for (name, child) in fields.clone().iter() {
+                    if properties.is_some_and(|properties| properties.contains_key(name)) {
+                        continue;
+                    }
+                    let normalized = with_child_ref_budget(traversal, |traversal| {
+                        normalize_input(child, additional, root, traversal, additional_options)
                     });
                     fields.insert(name.clone(), normalized);
                 }
@@ -618,7 +676,7 @@ fn apply_defaults_inner(
             .iter()
             .map(|item| {
                 with_child_ref_budget(traversal, |traversal| {
-                    apply_defaults(item, item_schema, root, traversal)
+                    normalize_input(item, item_schema, root, traversal, options)
                 })
             })
             .collect::<Vec<_>>();

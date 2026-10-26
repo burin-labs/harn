@@ -524,6 +524,9 @@ fn canonical_to_json_schema_with(
 
         if let Some(type_name) = schema_type_name(schema_dict) {
             match type_name {
+                "bytes" => {
+                    out.extend(crate::value::json::bytes_json_schema(openapi_style));
+                }
                 "set" => {
                     out.insert(
                         "type".to_string(),
@@ -638,7 +641,8 @@ fn canonical_to_json_schema_with(
                 ),
             );
         } else if !openapi_style && out.contains_key("properties") {
-            out.insert("required".to_string(), serde_json::Value::Array(Vec::new()));
+            out.entry("required".to_string())
+                .or_insert_with(|| serde_json::Value::Array(Vec::new()));
         }
         if let Some(extra) = schema_dict.get("additional_properties") {
             let exported = match extra {
