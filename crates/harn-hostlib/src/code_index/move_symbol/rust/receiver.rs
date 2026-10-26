@@ -115,7 +115,7 @@ fn parameter_type<'a>(receiver: Node<'a>, item: Node<'a>, source: &'a str) -> Op
     let mut up = receiver.parent();
     while let Some(scope) = up {
         match scope.kind() {
-            "block" => {
+            "block"
                 if text::members(scope)
                     .into_iter()
                     .any(|child| match child.kind() {
@@ -130,26 +130,23 @@ fn parameter_type<'a>(receiver: Node<'a>, item: Node<'a>, source: &'a str) -> Op
                             .is_some_and(|binding| text::text(binding, source) == name),
                         "use_declaration" => mentions(child, source, name),
                         _ => false,
-                    })
-                {
-                    return None;
-                }
+                    }) =>
+            {
+                return None;
             }
-            "closure_expression" => {
+            "closure_expression"
                 if scope
                     .child_by_field_name("parameters")
-                    .is_some_and(|parameters| mentions(parameters, source, name))
-                {
-                    return None;
-                }
+                    .is_some_and(|parameters| mentions(parameters, source, name)) =>
+            {
+                return None;
             }
-            "for_expression" | "match_arm" => {
+            "for_expression" | "match_arm"
                 if scope
                     .child_by_field_name("pattern")
-                    .is_some_and(|pattern| mentions(pattern, source, name))
-                {
-                    return None;
-                }
+                    .is_some_and(|pattern| mentions(pattern, source, name)) =>
+            {
+                return None;
             }
             "if_expression" | "while_expression" => {
                 let mut shadows = false;

@@ -180,7 +180,7 @@ pub(crate) fn binding_defeaters_at(
         note(Defeater::SyntaxError);
     }
     walk_nodes(root, &mut |node| {
-        scan_node(node, source, language, &mut note)
+        scan_node(node, source, language, &mut note);
     });
     defeaters
 }
