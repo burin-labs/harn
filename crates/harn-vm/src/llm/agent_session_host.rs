@@ -68,6 +68,7 @@ mod assistant_messages;
 pub(crate) mod cancellation;
 mod control_history;
 mod daemon_bridge;
+mod goal_outcome;
 mod inbox;
 mod lifecycle;
 mod tool_result_messages;

@@ -23,6 +23,34 @@ pub type AgentTerminalLifecycleState = "completed" \
   | "cancelled" \
   | "suspended"
 
+pub type AgentGoalOutcomeKind = "achieved" | "partially_achieved" | "not_achieved" | "unknown"
+
+pub type AgentGoalOutcomeReason = "unassessed" \
+  | "no_declared_requirements" \
+  | "requirements_met" \
+  | "requirements_unmet" \
+  | "requirements_unassessed" \
+  | "pending_effects" \
+  | "completion_not_accepted"
+
+pub type AgentGoalRequirementSummary = {
+  required_count: int,
+  met_count: int,
+  unmet_count: int,
+  missing_count: int,
+  unsupported_count: int,
+  pending_count: int,
+  pending_names: list<string>,
+}
+
+/** Assessed task success is independent of why the loop stopped. */
+pub type AgentGoalOutcome = {
+  kind: AgentGoalOutcomeKind,
+  reason: AgentGoalOutcomeReason,
+  evidence_id: string?,
+  requirements: AgentGoalRequirementSummary?,
+}
+
 pub type AgentTerminalOutcome = {
   kind: AgentTerminalKind,
   reason: string,
@@ -249,6 +277,7 @@ pub type AgentResult = {
   acp_stop_reason: string,
   terminal_class: string?,
   terminal: AgentTerminalOutcome,
+  goal_outcome: AgentGoalOutcome?,
   abandonment?: AgentAbandonment,
   declared_artifacts?: AgentDeclaredArtifactAudit,
   adaptive_budget?: dict,
