@@ -39,7 +39,7 @@ fn check_goal_checkpoint(harness: Harness, captured: dict, store_root: string) {
   assert_eq(len(terminals), 1)
   assert_eq(terminals[0].checkpoint.goal_outcome, captured.result.goal_outcome)
   const stored = harness.agent.session_store_events(captured.result.session_id, {root: store_root})
-  assert_eq(stored.state, "ok")
+  assert_eq(stored.state, "present")
   const durable = stored.value.filter(
     fn(event) { return event.payload?.transcript_event?.kind == "agent_run_terminal" },
   )
