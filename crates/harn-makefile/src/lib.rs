@@ -28,6 +28,10 @@ pub fn parse(source: &str) -> Vec<MakefileTarget> {
 
     for raw in source.lines() {
         if define_depth == 0 && pending.is_empty() && raw.starts_with(prefix) {
+            #[expect(
+                clippy::string_slice,
+                reason = "starts_with matched the complete recipe-prefix character"
+            )]
             let recipe = raw[prefix.len_utf8()..].trim();
             append_recipe(&mut targets, &current, &mut recipe_started, recipe);
             continue;
@@ -71,8 +75,16 @@ pub fn parse(source: &str) -> Vec<MakefileTarget> {
             continue;
         };
         let (head, tail) = line.split_at(colon);
+        #[expect(
+            clippy::string_slice,
+            reason = "tail begins at the matched ASCII colon"
+        )]
         let tail = &tail[1..];
         // Assignments can contain colons in either their operator or value.
+        #[expect(
+            clippy::string_slice,
+            reason = "unescaped returns a char_indices UTF-8 boundary"
+        )]
         let prerequisites = unescaped(tail, ';').map_or(tail, |index| &tail[..index]);
         if head.contains('=')
             || head.contains('$')
@@ -97,12 +109,12 @@ pub fn parse(source: &str) -> Vec<MakefileTarget> {
             current.push(index);
         }
         if let Some(semicolon) = unescaped(tail, ';') {
-            append_recipe(
-                &mut targets,
-                &current,
-                &mut recipe_started,
-                &tail[semicolon + 1..],
-            );
+            #[expect(
+                clippy::string_slice,
+                reason = "unescaped returns a UTF-8 boundary and semicolon is ASCII"
+            )]
+            let recipe = &tail[semicolon + 1..];
+            append_recipe(&mut targets, &current, &mut recipe_started, recipe);
         }
     }
     targets
@@ -143,6 +155,10 @@ fn unescaped(text: &str, needle: char) -> Option<usize> {
     None
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "unescaped returns a char_indices UTF-8 boundary"
+)]
 fn without_comment(text: &str) -> &str {
     match (unescaped(text, '#'), unescaped(text, ';')) {
         (Some(comment), Some(recipe)) if recipe < comment => text,
