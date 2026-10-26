@@ -630,6 +630,9 @@ mod tests {
             "use other::std::{self}; fn f() { std::assert!(); Reading() }\n",
             "mod std {} fn f() { std::assert!(); Reading() }\n",
             "#[macro_use] extern crate other; fn f() { assert!(); Reading() }\n",
+            "#[derive(binding_macro::Install)] struct Marker; fn f() { Reading() }\n",
+            "#[cfg_attr(all(), binding_macro::install)] fn f() { Reading() }\n",
+            "#[cfg_attr(all(), derive(binding_macro::Install))] struct Marker; fn f() { Reading() }\n",
         ] {
             let resolution = assess_source(source, Language::Rust);
             assert!(!resolution.is_complete());

@@ -622,6 +622,8 @@ fn rust_widening_respects_receiver_lexical_scope() {
         "pub fn run(out: &Buffer, other: &crate::other::Buffer) {\n    macro_rules! bind { ($name:ident, $value:expr) => { let $name = $value; }; }\n    bind!(out, other);\n    out.flush();\n}\n",
         "pub fn run(out: &Buffer, other: &crate::other::Buffer) {\n    macro_rules! assert { ($name:ident, $value:expr) => { let $name = $value; }; }\n    assert!(out, other);\n    out.flush();\n}\n",
         "macro_rules! install { ($d:tt) => { macro_rules! assert { ($d name:ident, $d value:expr) => { let $d name = $d value; }; } }; }\ninstall!($);\npub fn run(out: &Buffer, other: &crate::other::Buffer) {\n    assert!(out, other);\n    out.flush();\n}\n",
+        "pub fn run() {\n    #[derive(binding_macro::InstallBuffer)]\n    struct Marker;\n    let _ = Buffer { flush: 1 };\n}\n",
+        "pub fn run() {\n    #[cfg_attr(all(), binding_macro::install_buffer)]\n    struct Marker;\n    let _ = Buffer { flush: 1 };\n}\n",
     ] {
         let source =
             format!("pub struct Buffer;\n\nimpl Buffer {{\n    fn flush(&self) {{}}\n}}\n\n{body}");
