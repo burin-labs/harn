@@ -425,6 +425,38 @@ pipeline test_publish_recovery_retries_transient_crates_io_transport_failure(
 }
 
 @test
+pipeline test_publish_recovery_does_not_reconcile_away_a_permanent_publish_refusal(
+  harness: Harness,
+) {
+  const writes = harness.runtime.atomic(0)
+  const receipt = publish_recover(
+    [{deps: [], name: "alpha", version: "1.2.3"}],
+    {
+      probe: { _name, _version ->
+        return {
+          status: if harness.runtime.atomic_get(writes) == 1 {
+            "visible"
+          } else {
+            "missing"
+          },
+        }
+      },
+      publish: { _package ->
+        harness.runtime.atomic_add(writes, 1)
+        return {success: false, output: "HTTP/2 403"}
+      },
+      wait: { _delay ->
+        throw "a permanent publish refusal must not wait or retry"
+      },
+    },
+  )
+  assert(!receipt.ok)
+  assert_eq(harness.runtime.atomic_get(writes), 1)
+  assert_eq(receipt.already_present, [])
+  assert_eq(receipt.failed[0]?.category, "permanent")
+}
+
+@test
 pipeline test_publish_recovery_probes_after_uncertain_transport_failure(
   harness: Harness,
   task: unknown,

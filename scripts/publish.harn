@@ -265,6 +265,16 @@ pub fn publish_recover(
         completed = true
         break
       }
+      if category == "permanent" {
+        return failed_receipt(
+          version,
+          order,
+          published,
+          already_present,
+          waiting,
+          {name: name, category: category, detail: truncate_text(output, 1000)},
+        )
+      }
       const reconciled = adapters.probe(name, version)
       if reconciled.status == "error" {
         return failed_receipt(
@@ -281,7 +291,7 @@ pub fn publish_recover(
         completed = true
         break
       }
-      if category == "permanent" || attempt_number == max_publish_attempts {
+      if attempt_number == max_publish_attempts {
         return failed_receipt(
           version,
           order,
