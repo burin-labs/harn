@@ -1,3 +1,4 @@
+import "../publish_manifest.harn"
 import "../publish_plan.harn"
 
 const META = {
@@ -117,16 +118,57 @@ fn metadata_with_return_edge(dep: dict) -> dict {
 }
 
 @test
-pipeline test_publish_plan_allows_dev_return_edge(harness: Harness, task: unknown) {
+pipeline test_publish_plan_strips_only_versionless_dev_return_edge(
+  harness: Harness,
+  task: unknown,
+) {
   const packages = publish_plan_packages_from_metadata(
-    metadata_with_return_edge({name: "runtime", source: nil, kind: "dev", req: "*"}),
+    metadata_with_return_edge({name: "runtime", source: nil, kind: "dev", publish_retained: false}),
   )
   assert_eq(publish_plan_order(packages), ["vm", "builtins", "runtime"])
-  // Versioned dev dependencies also do not order a library's uploads.
   const versioned = publish_plan_packages_from_metadata(
-    metadata_with_return_edge({name: "runtime", source: nil, kind: "dev", req: "=1.2.3"}),
+    metadata_with_return_edge({name: "runtime", source: nil, kind: "dev", publish_retained: true}),
   )
-  assert_eq(publish_plan_order(versioned), ["vm", "builtins", "runtime"])
+  assert_throws_contains({ -> publish_plan_order(versioned) }, "dependency cycle")
+}
+
+@test
+pipeline test_publish_manifest_distinguishes_explicit_wildcard_and_path_only(
+  harness: Harness,
+  task: unknown,
+) {
+  const dep = {name: "runtime", rename: nil, target: nil, req: "*"}
+  assert(
+    !publish_dev_dependency_is_retained(
+      toml_parse("[dev-dependencies]\nruntime = { path = '../runtime' }"),
+      {},
+      dep,
+    ),
+  )
+  for version in ["*", "=1.2.3"] {
+    assert(
+      publish_dev_dependency_is_retained(
+        {"dev-dependencies": {runtime: {path: "../runtime", version: version}}},
+        {},
+        dep,
+      ),
+    )
+  }
+  assert(
+    publish_dev_dependency_is_retained(
+      {target: {"cfg(windows)": {"dev-dependencies": {alias: {workspace: true}}}}},
+      {workspace: {dependencies: {alias: {package: "runtime", path: "../runtime", version: "*"}}}},
+      {name: "runtime", rename: "alias", target: "cfg(windows)", req: "*"},
+    ),
+  )
+  assert_throws_contains(
+    { ->
+      publish_plan_packages_from_metadata(
+        metadata_with_return_edge({name: "runtime", source: nil, kind: "dev", req: "*"}),
+      )
+    },
+    "source-manifest publication evidence",
+  )
 }
 
 @test

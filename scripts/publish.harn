@@ -2,6 +2,7 @@ import { help_requested, parse, parser } from "std/cli/argparse"
 import { CommandResult, command_run } from "std/command"
 import { shell_quote } from "std/runtime"
 import { truncate_text } from "std/text"
+import { publish_metadata_with_manifest_dependencies } from "./publish_manifest.harn"
 import {
   PublishPlanPackage,
   publish_plan_order,
@@ -435,7 +436,9 @@ fn load_publish_packages(fs: HarnessFs, tools: HarnessTools) -> list<PublishPlan
   }
   const text = fs.read_text(metadata_path)
   const _ = command_run(tools, ["rm", "-f", metadata_path])
-  return publish_plan_packages_from_metadata(json_parse(text))
+  return publish_plan_packages_from_metadata(
+    publish_metadata_with_manifest_dependencies(fs, json_parse(text)),
+  )
 }
 
 fn arg_spec() {

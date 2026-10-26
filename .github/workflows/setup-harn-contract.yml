@@ -146,11 +146,20 @@ jobs:
           baseline=$(mktemp -d "$RUNNER_TEMP/publish-plan-baseline.XXXXXX")
           git show v0.10.180:scripts/publish_plan.harn > "$baseline/publish_plan.harn"
           cp scripts/verify_publish_workspace_plan.harn "$baseline/"
+          cp scripts/publish_manifest.harn "$baseline/"
+          cp scripts/publish.harn "$baseline/"
           if "$RUNTIME_PATH" run --standalone --no-sandbox "$baseline/verify_publish_workspace_plan.harn" -- \
             "$RUNNER_TEMP/publish-plan-metadata.json" 0.10.180 > "$baseline/result.log" 2>&1; then
             echo "error: original planner did not reproduce the frozen workspace failure" >&2
             exit 1
           fi
           grep -F 'workspace publish dependency cycle includes: harn-builtins' "$baseline/result.log"
+          git show 90d82dfdffa6dcfd0964485b65c50abd0e7ab5c9:scripts/publish_plan.harn > "$baseline/publish_plan.harn"
+          if "$RUNTIME_PATH" run --standalone --no-sandbox "$baseline/verify_publish_workspace_plan.harn" -- \
+            "$RUNNER_TEMP/publish-plan-metadata.json" 0.10.180 > "$baseline/versioned-dev.log" 2>&1; then
+            echo "error: blanket dev exclusion did not reproduce the frozen package ordering failure" >&2
+            exit 1
+          fi
+          grep -F 'frozen Cargo package requires builtin-registry before builtin-macros' "$baseline/versioned-dev.log"
           "$RUNTIME_PATH" run --standalone --no-sandbox scripts/verify_publish_workspace_plan.harn -- \
             "$RUNNER_TEMP/publish-plan-metadata.json" 0.10.180

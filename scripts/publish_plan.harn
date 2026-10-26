@@ -74,10 +74,17 @@ pub fn publish_plan_packages_from_metadata(meta: dict) -> list<PublishPlanPackag
       require dep.kind == nil || dep.kind == "build" || dep.kind == "dev",
         "cargo metadata dependency has unknown kind: "
         + to_string(dep.kind)
-      // Cargo allows dev cycles; path-only dev dependencies are stripped on
-      // publication. Normal and build edges order uploads on every target,
-      // including optional dependencies. Do not filter those by local features.
-      if dep.kind != "dev" && dep.source == nil && publish_names.contains(dep.name)
+      // The source-manifest adapter distinguishes omitted versions from an
+      // explicit wildcard, which Cargo metadata alone cannot distinguish.
+      let retained = true
+      if dep.kind == "dev" {
+        require raw_dep.keys().contains("publish_retained"),
+          "cargo dev dependency requires source-manifest publication evidence"
+        require type_of(raw_dep.publish_retained) == "bool",
+          "Cargo dependency publication evidence must be boolean"
+        retained = raw_dep.publish_retained
+      }
+      if retained && dep.source == nil && publish_names.contains(dep.name)
         && !deps.contains(dep.name) {
         deps = deps + [dep.name]
       }
