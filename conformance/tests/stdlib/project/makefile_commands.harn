@@ -110,14 +110,14 @@ pipeline test(harness: Harness) {
     assert_eq(parsed_targets.map({ target -> target.name }).to_list(), literal ? ["test%"] : [])
     assert_eq(
       parsed_targets.map({ target -> target.command }).to_list(),
-      literal ? ["make test%"] : [],
+      literal ? ["make 'test%'"] : [],
     )
     const scanned = harness.scanner.scan_project({root: dir, include_git_history: false})
     assert(len(scanned.files) > 0)
-    assert_eq(keys(scanned.project.test_commands), literal ? ["make test%"] : [])
+    assert_eq(keys(scanned.project.test_commands), literal ? ["make 'test%'"] : [])
     const configured = harness.project.scan(dir, {tiers: ["config"]})
     assert_eq(configured.makefile_targets.contains("test%"), literal)
-    assert(!configured.build_commands.contains("make test%"))
+    assert(!configured.build_commands.contains("make 'test%'"))
   }
   const parsed = makefile_parse(
     "unit test:\n\t@echo one\n\t-echo two\n\t+echo three\n\techo four\n",
