@@ -758,7 +758,12 @@ pub(super) async fn host_agent_session_finalize(
         .map(vm_to_json)
         .unwrap_or(serde_json::Value::Null);
 
-    emit_event(&terminal_outcome.checkpoint(&session_id, &canonical_status, &stop_reason));
+    emit_event(&terminal_outcome.checkpoint(
+        &session_id,
+        &canonical_status,
+        &stop_reason,
+        &goal_outcome,
+    ));
     // The trace event log never carried tool or loop-lifecycle facts (#5997),
     // so the summary reads them from the same session state that produces
     // `tools` and `llm` below. Deriving both projections from one owner is

@@ -178,7 +178,7 @@ pipeline default(harness: Harness) {
   assert_eq(red, nil)
   const pending = __agent_loop_terminal_verification_from_assessment(
     accepted_verification()
-      + {requirements: accepted_verification().requirements + {pending_count: 1}},
+      + {requirements: (accepted_verification().requirements ?? {}) + {pending_count: 1}},
   )
   assert_eq(pending, nil)
   const missing_evidence = __agent_loop_terminal_verification_from_assessment(
