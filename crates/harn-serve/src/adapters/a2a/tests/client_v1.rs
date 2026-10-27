@@ -26,9 +26,21 @@ async fn dispatch_to_version(
 ) {
     let server = start_mock_server(move |request| {
         if request.path == "GET /.well-known/agent-card.json" {
+            if version == "unauthorized" {
+                return status_text(StatusCode::UNAUTHORIZED, "unauthorized");
+            }
+            if version == "forbidden" {
+                return status_text(StatusCode::FORBIDDEN, "forbidden");
+            }
             if version == "0.3" {
+                if request.headers.contains_key("a2a-version") {
+                    return status_text(StatusCode::BAD_REQUEST, "unsupported version");
+                }
                 return ok_json(json!({"name": "fixture", "protocolVersion": "0.3.0",
                     "preferredTransport": "JSONRPC", "url": format!("http://{}/rpc", request.headers["host"])}));
+            }
+            if request.headers.get("a2a-version").map(String::as_str) != Some("1.0") {
+                return status_text(StatusCode::BAD_REQUEST, "version header required");
             }
             return ok_json(json!({"name": "fixture", "supportedInterfaces": [{
                 "protocolBinding": "JSONRPC", "protocolVersion": "1.0",
@@ -72,6 +84,23 @@ async fn dispatch_to_version(
 }
 
 #[tokio::test]
+async fn discovery_does_not_retry_authorization_failures() {
+    for version in ["unauthorized", "forbidden"] {
+        let (outcome, requests) = dispatch_to_version(version, json!({})).await;
+        assert!(matches!(
+            outcome,
+            Err(harn_vm::a2a::A2aClientError::Denied(_))
+        ));
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].path, "GET /.well-known/agent-card.json");
+        assert_eq!(
+            requests[0].headers.get("a2a-version").map(String::as_str),
+            Some("1.0")
+        );
+    }
+}
+
+#[tokio::test]
 async fn legacy_dispatch_keeps_v03_wire_format() {
     let (outcome, requests) = dispatch_to_version(
         "0.3",
@@ -97,6 +126,16 @@ async fn legacy_dispatch_keeps_v03_wire_format() {
     assert_eq!(body["params"]["message"]["role"], "user");
     assert_eq!(body["params"]["message"]["parts"][0]["type"], "text");
     assert!(body["params"].get("tenant").is_none());
+    let cards: Vec<_> = requests
+        .iter()
+        .filter(|request| request.path == "GET /.well-known/agent-card.json")
+        .collect();
+    assert_eq!(cards.len(), 2);
+    assert_eq!(
+        cards[0].headers.get("a2a-version").map(String::as_str),
+        Some("1.0")
+    );
+    assert!(!cards[1].headers.contains_key("a2a-version"));
 }
 
 #[tokio::test]
@@ -107,6 +146,14 @@ async fn v1_dispatch_uses_discovered_version_tenant_and_task_response() {
     }}))
     .await;
     let (_endpoint, ack) = outcome.expect("v1 task dispatch");
+    let card = requests
+        .iter()
+        .find(|request| request.path == "GET /.well-known/agent-card.json")
+        .unwrap();
+    assert_eq!(
+        card.headers.get("a2a-version").map(String::as_str),
+        Some("1.0")
+    );
     assert!(
         matches!(ack, harn_vm::a2a::DispatchAck::InlineResult { ref task_id, ref result }
         if task_id == "task-1" && result == &json!({"answer": 42}))

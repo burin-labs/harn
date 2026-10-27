@@ -617,25 +617,14 @@ async fn fetch_agent_card(
     card_url: &str,
     cancel_rx: &mut broadcast::Receiver<()>,
 ) -> Result<Value, AgentCardFetchError> {
-    let response = tokio::select! {
-        response = crate::llm::shared_utility_client().get(card_url).send() => {
-            match response {
-                Ok(response) => Ok(response),
-                Err(error) if error.is_timeout() => Err(AgentCardFetchError::Timeout(
-                    format!("A2A HTTP request timed out: {}", crate::egress::redact_reqwest_error(&error))
-                )),
-                Err(error) if is_connect_refused(&error) => Err(AgentCardFetchError::ConnectRefused(
-                    format!("A2A HTTP request failed: {}", crate::egress::redact_reqwest_error(&error))
-                )),
-                Err(error) => Err(AgentCardFetchError::Discovery(
-                    format!("A2A HTTP request failed: {}", crate::egress::redact_reqwest_error(&error))
-                )),
-            }
-        }
-        _ = recv_cancel(cancel_rx) => Err(AgentCardFetchError::Cancelled(
-            "A2A agent-card fetch cancelled".to_string()
-        )),
-    }?;
+    let response = fetch_agent_card_response(card_url, true, cancel_rx).await?;
+    // A 0.3-only peer may reject the 1.0 discovery header. Discovery is a
+    // read, and the returned card still determines the dispatched version.
+    let response = if response.status() == reqwest::StatusCode::BAD_REQUEST {
+        fetch_agent_card_response(card_url, false, cancel_rx).await?
+    } else {
+        response
+    };
     if matches!(
         response.status(),
         reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
@@ -658,6 +647,39 @@ async fn fetch_agent_card(
             crate::egress::redact_diagnostic_text(card_url)
         ))
     })
+}
+
+async fn fetch_agent_card_response(
+    card_url: &str,
+    request_v1: bool,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<reqwest::Response, AgentCardFetchError> {
+    let request = crate::llm::shared_utility_client().get(card_url);
+    let request = if request_v1 {
+        request.header("A2A-Version", A2aWireVersion::V1_0.header())
+    } else {
+        request
+    };
+    let response = tokio::select! {
+        response = request.send() => {
+            match response {
+                Ok(response) => Ok(response),
+                Err(error) if error.is_timeout() => Err(AgentCardFetchError::Timeout(
+                    format!("A2A HTTP request timed out: {}", crate::egress::redact_reqwest_error(&error))
+                )),
+                Err(error) if is_connect_refused(&error) => Err(AgentCardFetchError::ConnectRefused(
+                    format!("A2A HTTP request failed: {}", crate::egress::redact_reqwest_error(&error))
+                )),
+                Err(error) => Err(AgentCardFetchError::Discovery(
+                    format!("A2A HTTP request failed: {}", crate::egress::redact_reqwest_error(&error))
+                )),
+            }
+        }
+        _ = recv_cancel(cancel_rx) => Err(AgentCardFetchError::Cancelled(
+            "A2A agent-card fetch cancelled".to_string()
+        )),
+    }?;
+    Ok(response)
 }
 
 fn endpoint_from_card(
