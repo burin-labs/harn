@@ -51,7 +51,7 @@ pub(super) async fn render(
     let envelope_json = match serde_json::to_string(&envelope) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to serialise models-test envelope: {error}");
+            cli_diagnostic!("error: failed to serialise models-test envelope: {error}");
             return 1;
         }
     };

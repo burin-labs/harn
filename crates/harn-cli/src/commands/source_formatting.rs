@@ -21,7 +21,7 @@ fn project_options(path: &Path) -> harn_fmt::FmtOptions {
     let config = match harn_modules::project_config::load_for_path(path) {
         Ok(config) => config,
         Err(error) => {
-            eprintln!(
+            cli_diagnostic!(
                 "warning: failed to load formatter config for {}: {error}; using defaults",
                 path.display()
             );

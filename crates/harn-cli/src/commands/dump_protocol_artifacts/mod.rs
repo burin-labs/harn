@@ -87,11 +87,11 @@ impl Artifact {
 
 pub(crate) fn run(output_dir: &str, check_only: bool) {
     let source = ProtocolArtifactSource::discover().unwrap_or_else(|error| {
-        eprintln!("error: failed to locate protocol sources: {error}");
+        cli_diagnostic!("error: failed to locate protocol sources: {error}");
         process::exit(1);
     });
     let artifacts = generate_artifacts(&source).unwrap_or_else(|error| {
-        eprintln!("error: failed to generate protocol artifacts: {error}");
+        cli_diagnostic!("error: failed to generate protocol artifacts: {error}");
         process::exit(1);
     });
     let output_root = Path::new(output_dir);
@@ -108,7 +108,7 @@ pub(crate) fn run(output_dir: &str, check_only: bool) {
             }
         }
         if !stale.is_empty() {
-            eprintln!("error: protocol artifacts are stale or missing:");
+            cli_diagnostic!("error: protocol artifacts are stale or missing:");
             for path in stale {
                 eprintln!("  {}", path.display());
             }
@@ -121,7 +121,7 @@ pub(crate) fn run(output_dir: &str, check_only: bool) {
     for artifact in artifacts {
         let path = output_root.join(&artifact.relative_path);
         if let Err(error) = write_file(&path, &artifact.contents) {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             process::exit(1);
         }
         println!("wrote {}", path.display());

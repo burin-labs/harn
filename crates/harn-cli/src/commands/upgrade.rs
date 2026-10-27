@@ -342,14 +342,14 @@ fn upgrade(
     progress(format!("Downloading {archive_name}"));
     download(&archive_url, &archive_path).map_err(|error| phase("download_failed", error))?;
     let verification = if args.no_verify {
-        eprintln!("warning: SHA256 verification skipped (--no-verify)");
+        cli_diagnostic!("warning: SHA256 verification skipped (--no-verify)");
         ChecksumVerification::Unavailable(0)
     } else {
         let verification = verify_checksum(&checksums_url, &archive_name, &archive_path)
             .map_err(|error| phase("checksum_failed", error))?;
         match verification {
             ChecksumVerification::Verified => progress(format!("Verified SHA256 ({archive_name})")),
-            ChecksumVerification::Unavailable(status) => eprintln!(
+            ChecksumVerification::Unavailable(status) => cli_diagnostic!(
                 "warning: no SHA256SUMS published for this release (status {status}); skipping verification"
             ),
         }
@@ -728,7 +728,7 @@ fn print_hook_runtime_outcome(report: &hook_runtime::HookRuntimeRefreshReport) {
         HookRuntimeRefreshStatus::Refreshed => {
             eprintln!("Refreshed enrolled standalone hook runtime.");
         }
-        HookRuntimeRefreshStatus::SkippedUnverified => eprintln!(
+        HookRuntimeRefreshStatus::SkippedUnverified => cli_diagnostic!(
             "warning: enrolled standalone hook runtime was not refreshed because the archive was not checksum-verified"
         ),
     }

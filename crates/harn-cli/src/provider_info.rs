@@ -228,7 +228,7 @@ pub(crate) async fn dispatch_provider_catalog(available_only: bool) -> i32 {
     let payload_json = match serde_json::to_string(&payload) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to serialise provider catalog payload: {error}");
+            cli_diagnostic!("error: failed to serialise provider catalog payload: {error}");
             return 1;
         }
     };

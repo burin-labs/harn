@@ -118,7 +118,7 @@ pub(crate) async fn run_changed_lint_command(args: &crate::cli::PathTargetsArgs)
                     JsonEnvelope::err(LINT_SCHEMA_VERSION, error.code(), error.message());
                 println!("{}", crate::json_envelope::to_string_pretty(&envelope));
             } else {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
             }
             std::process::exit(1);
         }

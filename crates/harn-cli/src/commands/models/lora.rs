@@ -55,7 +55,7 @@ async fn inspect(args: &ModelsLoraInspectArgs) -> i32 {
     let report = match inspect_report(args) {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -74,7 +74,7 @@ async fn plan(args: &ModelsLoraPlanArgs) -> i32 {
     let report = match plan_report(args) {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };

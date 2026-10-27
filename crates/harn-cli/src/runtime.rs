@@ -79,7 +79,7 @@ pub(crate) fn build_cli_runtime(mode: CliRuntimeMode) -> tokio::runtime::Runtime
                     "failed to start async runtime: Tokio signal driver unavailable in this environment: {message}"
                 );
                 if mode.enables_tokio_io() {
-                    eprintln!(
+                    cli_diagnostic!(
                         "error: this harn command requires Tokio I/O support; run it outside a sandbox that denies socketpair"
                     );
                 }

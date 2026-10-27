@@ -231,9 +231,11 @@ struct DispatchAuditToolProbeCommandContext<'a> {
 pub(crate) fn run(args: &ProviderDispatchExplainArgs) {
     let resolved = harn_vm::llm_config::resolve_model_info(&args.model);
     if resolved.alias.is_some() && resolved.provider != args.provider {
-        eprintln!(
+        cli_diagnostic!(
             "error: model selector `{}` resolves to provider `{}`, not requested provider `{}`",
-            args.model, resolved.provider, args.provider
+            args.model,
+            resolved.provider,
+            args.provider
         );
         std::process::exit(1);
     }

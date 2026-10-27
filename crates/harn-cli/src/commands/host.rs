@@ -322,7 +322,7 @@ fn print_error(code: &str, message: &str, json: bool) -> i32 {
             JsonEnvelope::err(HOST_LEASE_CLI_SCHEMA_VERSION, code, message);
         println!("{}", to_string_pretty(&envelope));
     } else {
-        eprintln!("error: {message}");
+        cli_diagnostic!("error: {message}");
     }
     1
 }

@@ -40,7 +40,7 @@ pub(crate) async fn run_portal(
     let addr: SocketAddr = match format!("{host}:{port}").parse() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("error: invalid portal bind address {host}:{port}: {e}");
+            cli_diagnostic!("error: invalid portal bind address {host}:{port}: {e}");
             std::process::exit(1);
         }
     };
@@ -73,12 +73,12 @@ pub(crate) async fn run_portal(
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("error: failed to bind portal listener on {addr}: {e}");
+            cli_diagnostic!("error: failed to bind portal listener on {addr}: {e}");
             std::process::exit(1);
         }
     };
     if let Err(e) = axum::serve(listener, app).await {
-        eprintln!("error: portal server failed: {e}");
+        cli_diagnostic!("error: portal server failed: {e}");
         std::process::exit(1);
     }
 }

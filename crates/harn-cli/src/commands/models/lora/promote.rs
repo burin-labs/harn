@@ -15,13 +15,13 @@ pub(super) async fn promote(args: &ModelsLoraPromoteArgs) -> i32 {
     let bundle = match promotion_evidence_bundle(args) {
         Ok(bundle) => bundle,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
     if let Some(path) = args.out.as_deref() {
         if let Err(error) = prepare_receipt_parent(path) {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
         let outcome = match run_embedded_report(
@@ -36,14 +36,14 @@ pub(super) async fn promote(args: &ModelsLoraPromoteArgs) -> i32 {
         {
             Ok(outcome) => outcome,
             Err(error) => {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
                 return 1;
             }
         };
         match final_report_from_json_envelope(&outcome.stdout) {
             Ok(report) => {
                 if let Err(error) = write_receipt_value(path, &report) {
-                    eprintln!("error: {error}");
+                    cli_diagnostic!("error: {error}");
                     return 1;
                 }
             }
@@ -51,7 +51,7 @@ pub(super) async fn promote(args: &ModelsLoraPromoteArgs) -> i32 {
                 if !outcome.stderr.is_empty() {
                     eprint!("{}", outcome.stderr);
                 }
-                eprintln!("error: failed to capture Harn promotion receipt: {error}");
+                cli_diagnostic!("error: failed to capture Harn promotion receipt: {error}");
                 return 1;
             }
         }

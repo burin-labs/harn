@@ -133,7 +133,7 @@ fn load_rows_for_docs(sources: &[String]) -> Vec<ConnectorCapabilityMatrixRow> {
     };
     let rows = load_rows_from_sources(&sources);
     if rows.is_empty() {
-        eprintln!(
+        cli_diagnostic!(
             "error: no connector providers with manifests found under {}",
             sources
                 .iter()
@@ -155,7 +155,7 @@ fn default_sources_for_cli() -> Vec<PathBuf> {
     if let Some(manifest_dir) = find_nearest_manifest_dir(&cwd) {
         return vec![manifest_dir.join("harn.toml")];
     }
-    eprintln!(
+    cli_diagnostic!(
         "error: no harn.toml found for connector matrix; pass package manifests or package directories"
     );
     process::exit(1);
@@ -174,7 +174,7 @@ fn load_rows_from_sources(sources: &[PathBuf]) -> Vec<ConnectorCapabilityMatrixR
         let manifest = match read_manifest_from_path(&manifest_path) {
             Ok(manifest) => manifest,
             Err(error) => {
-                eprintln!("error: failed to read {}: {error}", manifest_path.display());
+                cli_diagnostic!("error: failed to read {}: {error}", manifest_path.display());
                 process::exit(1);
             }
         };
@@ -194,7 +194,7 @@ fn collect_manifest_paths(source: &Path, manifests: &mut Vec<PathBuf>) {
         if source.file_name().is_some_and(|name| name == "harn.toml") {
             manifests.push(source.to_path_buf());
         } else {
-            eprintln!(
+            cli_diagnostic!(
                 "error: connector matrix source {} is not a harn.toml manifest",
                 source.display()
             );
@@ -203,7 +203,7 @@ fn collect_manifest_paths(source: &Path, manifests: &mut Vec<PathBuf>) {
         return;
     }
     if !source.is_dir() {
-        eprintln!(
+        cli_diagnostic!(
             "error: connector matrix source {} does not exist",
             source.display()
         );
@@ -219,7 +219,7 @@ fn collect_manifest_paths(source: &Path, manifests: &mut Vec<PathBuf>) {
     let entries = match fs::read_dir(source) {
         Ok(entries) => entries,
         Err(error) => {
-            eprintln!("error: cannot read {}: {error}", source.display());
+            cli_diagnostic!("error: cannot read {}: {error}", source.display());
             process::exit(1);
         }
     };
@@ -227,7 +227,7 @@ fn collect_manifest_paths(source: &Path, manifests: &mut Vec<PathBuf>) {
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
-                eprintln!("error: cannot read directory entry: {error}");
+                cli_diagnostic!("error: cannot read directory entry: {error}");
                 process::exit(1);
             }
         };
@@ -355,7 +355,7 @@ fn filtered_rows(
     };
     let normalized = normalize_connector_capability(feature);
     if !ConnectorCapabilities::FEATURES.contains(&normalized.as_str()) {
-        eprintln!(
+        cli_diagnostic!(
             "error: unknown connector matrix feature `{feature}`. Expected one of: {}",
             ConnectorCapabilities::FEATURES.join(", ")
         );

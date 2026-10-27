@@ -43,7 +43,7 @@ const DEBOUNCE: Duration = Duration::from_millis(200);
 /// Top-level entry point for `harn dev`.
 pub(crate) async fn run(args: DevArgs) {
     if !args.watch {
-        eprintln!(
+        cli_diagnostic!(
             "error: `harn dev` currently requires `--watch`. Pass `--watch` to start the incremental loop."
         );
         process::exit(2);
@@ -52,14 +52,14 @@ pub(crate) async fn run(args: DevArgs) {
     let root = match args.root.as_deref() {
         Some(p) => PathBuf::from(p),
         None => std::env::current_dir().unwrap_or_else(|e| {
-            eprintln!("error: could not read current directory: {e}");
+            cli_diagnostic!("error: could not read current directory: {e}");
             process::exit(1);
         }),
     };
     let root = match root.canonicalize() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("error: could not canonicalize {}: {e}", root.display());
+            cli_diagnostic!("error: could not canonicalize {}: {e}", root.display());
             process::exit(1);
         }
     };
@@ -86,7 +86,7 @@ pub(crate) async fn run(args: DevArgs) {
     let _watcher = match start_watcher(&root, tx.clone()) {
         Ok(w) => w,
         Err(e) => {
-            eprintln!(
+            cli_diagnostic!(
                 "error: could not start file watcher on {}: {e}",
                 root.display()
             );

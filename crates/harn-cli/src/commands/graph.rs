@@ -110,7 +110,7 @@ pub(crate) async fn run(args: GraphArgs) -> i32 {
                     JsonEnvelope::err(GRAPH_SCHEMA_VERSION, "graph_error", error);
                 println!("{}", to_string_pretty(&envelope));
             } else {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
             }
             return 1;
         }

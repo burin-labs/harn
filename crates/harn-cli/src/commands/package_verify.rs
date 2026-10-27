@@ -1352,7 +1352,7 @@ pub(crate) fn print_connector_report(report: &ConnectorCheckReport) {
         );
     }
     for warning in &report.warnings {
-        eprintln!("warning: {warning}");
+        cli_diagnostic!("warning: {warning}");
     }
 }
 

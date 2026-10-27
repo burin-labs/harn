@@ -1101,7 +1101,7 @@ pub(crate) async fn run_user_tests(
         process::exit(crate::exit::PROGRAM_FAILURE);
     }
     if fail_on_skip && summary.skipped > 0 {
-        eprintln!(
+        cli_diagnostic!(
             "error: {} user test(s) skipped under --fail-on-skip",
             summary.skipped
         );
@@ -1148,7 +1148,7 @@ fn preflight_dependencies_or_exit(paths: &[PathBuf]) {
             continue;
         }
         if let Err(error) = crate::package::ensure_dependencies_materialized(&anchor) {
-            eprintln!("error: failed to prepare test dependencies: {error}");
+            cli_diagnostic!("error: failed to prepare test dependencies: {error}");
             process::exit(crate::exit::RUN_SETUP_FAILURE);
         }
     }

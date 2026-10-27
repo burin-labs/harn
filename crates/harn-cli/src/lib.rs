@@ -10,6 +10,14 @@ compile_error!(
      without hostlib, embed `harn-serve` or `harn-vm` instead."
 );
 
+// Preserve formatted command diagnostics while sending them through the
+// same sink as the runtime's status messages.
+macro_rules! cli_diagnostic {
+    ($($arg:tt)*) => {
+        harn_vm::events::log_status(&format!($($arg)*))
+    };
+}
+
 pub mod acp;
 mod bootstrap;
 pub mod cli;
@@ -132,7 +140,7 @@ pub fn run() {
 
     #[cfg(target_os = "linux")]
     if let Err(error) = commands::serve::confine_before_runtime(&raw_args) {
-        eprintln!("error: {error}");
+        cli_diagnostic!("error: {error}");
         process::exit(1);
     }
 

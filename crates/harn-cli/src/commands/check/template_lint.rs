@@ -38,7 +38,7 @@ pub(crate) fn lint_prompt_file_inner(
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(error) => {
-            eprintln!("error: failed to read {path_str}: {error}");
+            cli_diagnostic!("error: failed to read {path_str}: {error}");
             return CommandOutcome {
                 has_error: true,
                 has_warning: false,
@@ -64,7 +64,7 @@ pub(crate) fn lint_prompt_fix_file(
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(error) => {
-            eprintln!("error: failed to read {path_str}: {error}");
+            cli_diagnostic!("error: failed to read {path_str}: {error}");
             return CommandOutcome {
                 has_error: true,
                 has_warning: false,

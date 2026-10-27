@@ -30,7 +30,7 @@ use crate::cli::{
 
 pub(crate) fn run_init(args: &MergeCaptainMockInitArgs) -> i32 {
     if args.scenario.is_some() && args.manifest.is_some() {
-        eprintln!("error: --scenario and --manifest are mutually exclusive");
+        cli_diagnostic!("error: --scenario and --manifest are mutually exclusive");
         return 2;
     }
     let dir = Path::new(&args.dir);
@@ -40,13 +40,13 @@ pub(crate) fn run_init(args: &MergeCaptainMockInitArgs) -> i32 {
         {
             Ok(m) => m,
             Err(error) => {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
                 return 1;
             }
         };
     if args.force {
         if let Err(error) = playground::cleanup_playground_at(dir) {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     }
@@ -57,7 +57,7 @@ pub(crate) fn run_init(args: &MergeCaptainMockInitArgs) -> i32 {
     }) {
         Ok(state) => state,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -96,7 +96,7 @@ pub(crate) fn run_cleanup(args: &MergeCaptainMockCleanupArgs) -> i32 {
             0
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             1
         }
     }
@@ -107,7 +107,7 @@ pub(crate) fn run_status(args: &MergeCaptainMockStatusArgs) -> i32 {
     let (state, manifest) = match playground::load_playground(dir) {
         Ok(pair) => pair,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -156,7 +156,7 @@ pub(crate) fn run_step(args: &MergeCaptainMockStepArgs) -> i32 {
     let (mut state, manifest) = match playground::load_playground(dir) {
         Ok(pair) => pair,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -165,7 +165,7 @@ pub(crate) fn run_step(args: &MergeCaptainMockStepArgs) -> i32 {
         match playground::run_named_step(dir, &mut state, &manifest, name) {
             Ok(report) => report,
             Err(error) => {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
                 return 1;
             }
         }
@@ -177,20 +177,20 @@ pub(crate) fn run_step(args: &MergeCaptainMockStepArgs) -> i32 {
         let action: playground::ScenarioAction = match serde_json::from_str(raw) {
             Ok(a) => a,
             Err(error) => {
-                eprintln!("error: failed to parse --action JSON: {error}");
+                cli_diagnostic!("error: failed to parse --action JSON: {error}");
                 return 2;
             }
         };
         match playground::apply_one_action(dir, &mut state, &manifest, &action) {
             Ok(report) => report,
             Err(error) => {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
                 return 1;
             }
         }
     };
     if let Err(error) = state.save(dir) {
-        eprintln!("error: {error}");
+        cli_diagnostic!("error: {error}");
         return 1;
     }
     let body = json!({
@@ -221,7 +221,7 @@ pub(crate) fn run_scenarios() -> i32 {
                 println!("{}\t{}", name, m.description);
             }
             Err(error) => {
-                eprintln!("error: built-in scenario {name} failed to load: {error}");
+                cli_diagnostic!("error: built-in scenario {name} failed to load: {error}");
                 return 1;
             }
         }
@@ -234,14 +234,14 @@ pub(crate) async fn run_serve(args: &MergeCaptainMockServeArgs) -> i32 {
     let (state, _manifest) = match playground::load_playground(&dir) {
         Ok(pair) => pair,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
     let bind: SocketAddr = match args.bind.parse() {
         Ok(addr) => addr,
         Err(error) => {
-            eprintln!("error: invalid --bind address {:?}: {error}", args.bind);
+            cli_diagnostic!("error: invalid --bind address {:?}: {error}", args.bind);
             return 2;
         }
     };
@@ -250,14 +250,14 @@ pub(crate) async fn run_serve(args: &MergeCaptainMockServeArgs) -> i32 {
     let listener = match TcpListener::bind(bind).await {
         Ok(l) => l,
         Err(error) => {
-            eprintln!("error: failed to bind {bind}: {error}");
+            cli_diagnostic!("error: failed to bind {bind}: {error}");
             return 1;
         }
     };
     let resolved = match listener.local_addr() {
         Ok(addr) => addr,
         Err(error) => {
-            eprintln!("error: failed to resolve bind address: {error}");
+            cli_diagnostic!("error: failed to resolve bind address: {error}");
             return 1;
         }
     };
@@ -272,7 +272,7 @@ pub(crate) async fn run_serve(args: &MergeCaptainMockServeArgs) -> i32 {
         eprintln!("serving fake GitHub on http://{resolved} (Ctrl-C to stop)");
     }
     if let Err(error) = axum::serve(listener, router).await {
-        eprintln!("error: serve failed: {error}");
+        cli_diagnostic!("error: serve failed: {error}");
         return 1;
     }
     0
@@ -560,7 +560,7 @@ fn short_sha(sha: &str) -> String {
 fn print_json(value: &Value) {
     match serde_json::to_string_pretty(value) {
         Ok(text) => println!("{text}"),
-        Err(error) => eprintln!("error: failed to serialize JSON: {error}"),
+        Err(error) => cli_diagnostic!("error: failed to serialize JSON: {error}"),
     }
 }
 

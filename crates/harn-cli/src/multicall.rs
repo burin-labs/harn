@@ -37,7 +37,7 @@ pub fn main() {
             std::process::exit(2);
         }
         // Exactly one line, once, naming why caching is off for this run.
-        Ok(Some(warning)) => eprintln!("warning: {warning}"),
+        Ok(Some(warning)) => cli_diagnostic!("warning: {warning}"),
         Ok(None) => {}
     }
     match invoked_as().as_deref() {

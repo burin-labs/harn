@@ -84,7 +84,7 @@ async fn dispatch(args: ProviderToolCalibrateArgs) -> i32 {
         match serde_json::to_string_pretty(&store) {
             Ok(json) => println!("{json}"),
             Err(error) => {
-                eprintln!("error: failed to render tool-format fitness: {error}");
+                cli_diagnostic!("error: failed to render tool-format fitness: {error}");
                 return 1;
             }
         }

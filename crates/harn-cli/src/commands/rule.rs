@@ -167,7 +167,7 @@ fn run_test(args: crate::cli::RuleTestArgs) {
             println!("SKIP  {} (no fixture)", path.display());
         }
         for err in &errors {
-            eprintln!("error: {err}");
+            cli_diagnostic!("error: {err}");
         }
         println!(
             "{} passed, {failed} failed, {} skipped",

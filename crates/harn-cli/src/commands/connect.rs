@@ -230,7 +230,7 @@ struct ConnectSetupStep {
 
 pub(crate) async fn run_connect(args: ConnectArgs) {
     if let Err(error) = run_connect_inner(args).await {
-        eprintln!("error: {error}");
+        cli_diagnostic!("error: {error}");
         std::process::exit(1);
     }
 }

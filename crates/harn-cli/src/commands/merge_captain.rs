@@ -29,7 +29,7 @@ fn run_driver_with_run_root(args: &MergeCaptainRunArgs, run_root: PathBuf) -> i3
     let backend = match resolve_backend(args) {
         Ok(backend) => backend,
         Err(message) => {
-            eprintln!("error: {message}");
+            cli_diagnostic!("error: {message}");
             return 2;
         }
     };
@@ -55,11 +55,11 @@ fn run_driver_with_run_root(args: &MergeCaptainRunArgs, run_root: PathBuf) -> i3
     let output = match harn_vm::orchestration::run_merge_captain_driver(options) {
         Ok(output) => output,
         Err(VmError::Runtime(message)) => {
-            eprintln!("error: {message}");
+            cli_diagnostic!("error: {message}");
             return 1;
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -67,21 +67,21 @@ fn run_driver_with_run_root(args: &MergeCaptainRunArgs, run_root: PathBuf) -> i3
     match &args.summary_out {
         Some(path) => {
             if let Err(error) = write_summary(Path::new(path), &output.summary) {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
                 return 1;
             }
         }
         None if stream_stdout => match serde_json::to_string(&output.summary) {
             Ok(summary) => eprintln!("{summary}"),
             Err(error) => {
-                eprintln!("error: failed to serialize merge-captain summary: {error}");
+                cli_diagnostic!("error: failed to serialize merge-captain summary: {error}");
                 return 1;
             }
         },
         None => match serde_json::to_string_pretty(&output.summary) {
             Ok(summary) => println!("{summary}"),
             Err(error) => {
-                eprintln!("error: failed to serialize merge-captain summary: {error}");
+                cli_diagnostic!("error: failed to serialize merge-captain summary: {error}");
                 return 1;
             }
         },
@@ -95,11 +95,11 @@ pub(crate) fn run_ladder(args: &MergeCaptainLadderArgs) -> i32 {
     let manifest = match load_ladder_manifest_for_cli(manifest_path) {
         Ok(manifest) => manifest,
         Err(VmError::Runtime(message)) => {
-            eprintln!("error: {message}");
+            cli_diagnostic!("error: {message}");
             return 1;
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -107,18 +107,18 @@ pub(crate) fn run_ladder(args: &MergeCaptainLadderArgs) -> i32 {
     let report = match harn_vm::orchestration::run_persona_eval_ladder(&manifest) {
         Ok(report) => report,
         Err(VmError::Runtime(message)) => {
-            eprintln!("error: {message}");
+            cli_diagnostic!("error: {message}");
             return 1;
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
 
     if let Some(path) = &args.report_out {
         if let Err(error) = write_json(Path::new(path), &report, "merge-captain ladder report") {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     }
@@ -140,36 +140,36 @@ pub(crate) fn run_iterate(args: &MergeCaptainIterateArgs) -> i32 {
     }
 
     let Some(manifest) = args.manifest.as_deref() else {
-        eprintln!("error: merge-captain iterate requires a manifest or --diff A B");
+        cli_diagnostic!("error: merge-captain iterate requires a manifest or --diff A B");
         return 2;
     };
     let manifest_path = Path::new(manifest);
     let manifest = match load_merge_captain_iteration_manifest(manifest_path) {
         Ok(manifest) => manifest,
         Err(VmError::Runtime(message)) => {
-            eprintln!("error: {message}");
+            cli_diagnostic!("error: {message}");
             return 1;
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
     let report = match harn_vm::orchestration::run_merge_captain_iteration(&manifest) {
         Ok(report) => report,
         Err(VmError::Runtime(message)) => {
-            eprintln!("error: {message}");
+            cli_diagnostic!("error: {message}");
             return 1;
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
 
     if let Some(path) = &args.report_out {
         if let Err(error) = write_json(Path::new(path), &report, "merge-captain iteration report") {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     }
@@ -180,7 +180,7 @@ pub(crate) fn run_iterate(args: &MergeCaptainIterateArgs) -> i32 {
             &markdown,
             "merge-captain iteration Markdown summary",
         ) {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     }
@@ -198,18 +198,18 @@ pub(crate) fn run_iterate(args: &MergeCaptainIterateArgs) -> i32 {
 
 fn run_iteration_diff(args: &MergeCaptainIterateArgs) -> i32 {
     if args.diff.len() != 2 {
-        eprintln!("error: --diff requires exactly two paths");
+        cli_diagnostic!("error: --diff requires exactly two paths");
         return 2;
     }
     let diff =
         match diff_merge_captain_iterations(Path::new(&args.diff[0]), Path::new(&args.diff[1])) {
             Ok(diff) => diff,
             Err(VmError::Runtime(message)) => {
-                eprintln!("error: {message}");
+                cli_diagnostic!("error: {message}");
                 return 1;
             }
             Err(error) => {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
                 return 1;
             }
         };
@@ -219,7 +219,7 @@ fn run_iteration_diff(args: &MergeCaptainIterateArgs) -> i32 {
             &diff,
             "merge-captain iteration diff report",
         ) {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     }
@@ -230,7 +230,7 @@ fn run_iteration_diff(args: &MergeCaptainIterateArgs) -> i32 {
             &markdown,
             "merge-captain iteration Markdown diff",
         ) {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     }
@@ -381,11 +381,11 @@ pub(crate) fn run_audit(args: &MergeCaptainAuditArgs) -> i32 {
     let loaded = match load_transcript_jsonl(transcript_path) {
         Ok(loaded) => loaded,
         Err(VmError::Runtime(message)) => {
-            eprintln!("error: {message}");
+            cli_diagnostic!("error: {message}");
             return 1;
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -394,11 +394,11 @@ pub(crate) fn run_audit(args: &MergeCaptainAuditArgs) -> i32 {
         Some(path) => match load_merge_captain_golden(Path::new(path)) {
             Ok(golden) => Some(golden),
             Err(VmError::Runtime(message)) => {
-                eprintln!("error: {message}");
+                cli_diagnostic!("error: {message}");
                 return 1;
             }
             Err(error) => {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
                 return 1;
             }
         },
@@ -434,7 +434,9 @@ fn print_json(report: &AuditReport) {
 fn ladder_output_format(args: &MergeCaptainLadderArgs) -> Option<MergeCaptainLadderFormat> {
     if args.json {
         if !matches!(args.format, MergeCaptainLadderFormat::Text) {
-            eprintln!("error: merge-captain ladder accepts either --json or --format, not both");
+            cli_diagnostic!(
+                "error: merge-captain ladder accepts either --json or --format, not both"
+            );
             return None;
         }
         Some(MergeCaptainLadderFormat::Json)
@@ -449,7 +451,9 @@ fn ladder_output_format(args: &MergeCaptainLadderArgs) -> Option<MergeCaptainLad
 fn iterate_output_format(args: &MergeCaptainIterateArgs) -> Option<MergeCaptainIterateFormat> {
     if args.json {
         if !matches!(args.format, MergeCaptainIterateFormat::Text) {
-            eprintln!("error: merge-captain iterate accepts either --json or --format, not both");
+            cli_diagnostic!(
+                "error: merge-captain iterate accepts either --json or --format, not both"
+            );
             return None;
         }
         Some(MergeCaptainIterateFormat::Json)
@@ -464,7 +468,9 @@ fn iterate_output_format(args: &MergeCaptainIterateArgs) -> Option<MergeCaptainI
 fn audit_output_format(args: &MergeCaptainAuditArgs) -> Option<MergeCaptainAuditFormat> {
     if args.json {
         if !matches!(args.format, MergeCaptainAuditFormat::Text) {
-            eprintln!("error: merge-captain audit accepts either --json or --format, not both");
+            cli_diagnostic!(
+                "error: merge-captain audit accepts either --json or --format, not both"
+            );
             return None;
         }
         Some(MergeCaptainAuditFormat::Json)
@@ -480,7 +486,7 @@ fn print_json_value<T: serde::Serialize>(value: &T) {
     match serde_json::to_string_pretty(value) {
         Ok(text) => println!("{text}"),
         Err(error) => {
-            eprintln!("error: failed to serialize JSON output: {error}");
+            cli_diagnostic!("error: failed to serialize JSON output: {error}");
         }
     }
 }

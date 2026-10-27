@@ -105,7 +105,7 @@ pub(crate) async fn run(args: RoutesArgs) -> i32 {
                     JsonEnvelope::err(ROUTES_SCHEMA_VERSION, "routes_error", error);
                 println!("{}", to_string_pretty(&envelope));
             } else {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
             }
             return 1;
         }
