@@ -177,14 +177,15 @@ impl AcpServer {
             );
             return;
         };
-        let Some(cwd) = self
+        let Some((cwd, store_scope)) = self
             .sessions
             .get(session_id.as_str())
-            .map(|session| session.cwd.clone())
+            .map(|session| (session.cwd.clone(), session.store_scope.clone()))
         else {
             self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
             return;
         };
+        let _store_scope = store_scope.enter();
         let text = |camel: &str, snake: &str| {
             params
                 .get(camel)
