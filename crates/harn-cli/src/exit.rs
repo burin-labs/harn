@@ -63,6 +63,15 @@ pub(crate) fn command_error(message: &str) -> ! {
         .exit()
 }
 
+pub(crate) fn fatal_error(message: impl std::fmt::Display) -> ! {
+    fatal_error_with_code(message, 1)
+}
+
+pub(crate) fn fatal_error_with_code(message: impl std::fmt::Display, code: i32) -> ! {
+    harn_vm::events::log_status(&format!("error: {message}"));
+    process::exit(code);
+}
+
 pub(crate) fn print_check_error(code: &str, message: &str) -> ! {
     let envelope: json_envelope::JsonEnvelope<commands::check::CheckReport> =
         json_envelope::JsonEnvelope::err(commands::check::CHECK_SCHEMA_VERSION, code, message);

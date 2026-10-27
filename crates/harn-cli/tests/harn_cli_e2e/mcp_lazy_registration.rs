@@ -117,3 +117,32 @@ command = "harn-test-command-that-does-not-exist"
         );
     }
 }
+
+#[test]
+fn unknown_mcp_server_reports_a_prefixed_error_on_stderr() {
+    let temp = TempDir::new().unwrap();
+    let output = harn_e2e_command()
+        .current_dir(temp.path())
+        .args(["mcp", "status", "missing-server"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("[harn] error:"), "{stderr}");
+    assert!(stderr.contains("missing-server"), "{stderr}");
+}
+
+#[test]
+fn fatal_command_error_survives_disabled_logs_and_keeps_its_exit_code() {
+    let output = harn_e2e_command()
+        .env("HARN_LOG_LEVEL", "off")
+        .args(["provider", "admission", "--request", "invalid-json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("[harn] error:"), "{stderr}");
+    assert!(stderr.contains("malformed"), "{stderr}");
+}
