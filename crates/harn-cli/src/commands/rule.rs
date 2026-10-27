@@ -67,8 +67,7 @@ fn run_test(args: crate::cli::RuleTestArgs) {
                     match crate::commands::rules_cli::collect_rule_files_in_dir(&dir) {
                         Ok(mut found) => files.append(&mut found),
                         Err(error) => {
-                            eprintln!("rule test: {error}");
-                            std::process::exit(2);
+                            crate::fatal_error_with_code(format!("rule test: {error}"), 2);
                         }
                     }
                 }
@@ -76,14 +75,15 @@ fn run_test(args: crate::cli::RuleTestArgs) {
             }
             Ok(_) => (discover_rule_files(Path::new(".")), ".".to_string()),
             Err(error) => {
-                eprintln!("rule test: {error}");
-                std::process::exit(2);
+                crate::fatal_error_with_code(format!("rule test: {error}"), 2);
             }
         },
     };
     if rule_files.is_empty() {
-        eprintln!("rule test: no `*.toml` rules found under `{source}`");
-        std::process::exit(2);
+        crate::fatal_error_with_code(
+            format!("rule test: no `*.toml` rules found under `{source}`"),
+            2,
+        );
     }
     // A failed load of an explicitly-named rule file is a hard error; a stray
     // non-rule `*.toml` swept from a directory is silently skipped.

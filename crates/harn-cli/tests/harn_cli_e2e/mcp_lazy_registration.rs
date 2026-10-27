@@ -199,3 +199,19 @@ fn missing_session_bundle_uses_the_common_error_sink() {
     assert!(stderr.starts_with("[harn] error:"), "{stderr}");
     assert!(stderr.contains("missing.json"), "{stderr}");
 }
+
+#[test]
+fn existing_project_directory_uses_the_common_error_sink() {
+    let temp = TempDir::new().unwrap();
+    fs::create_dir(temp.path().join("existing")).unwrap();
+    let output = harn_e2e_command()
+        .current_dir(temp.path())
+        .args(["new", "existing"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("[harn] error:"), "{stderr}");
+    assert!(stderr.contains("existing"), "{stderr}");
+}

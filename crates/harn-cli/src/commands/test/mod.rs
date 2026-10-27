@@ -922,7 +922,7 @@ fn error_line_matches(actual_error: &str, pattern: &str) -> bool {
         match Regex::new(re_pattern.trim()) {
             Ok(re) => re.is_match(actual_error),
             Err(_) => {
-                eprintln!("    warning: invalid regex in .error file: {re_pattern}");
+                cli_diagnostic!("    warning: invalid regex in .error file: {re_pattern}");
                 false
             }
         }
@@ -942,7 +942,7 @@ fn write_junit_xml_or_exit(path: &str, report: &TestReport, announce: bool) {
             }
         }
         Err(error) => {
-            eprintln!("{error}");
+            cli_diagnostic!("{error}");
             process::exit(1);
         }
     }
@@ -956,7 +956,7 @@ fn write_user_test_json_or_exit(path: &str, report: &TestReport, announce: bool)
             }
         }
         Err(error) => {
-            eprintln!("{error}");
+            cli_diagnostic!("{error}");
             process::exit(1);
         }
     }
@@ -1039,7 +1039,7 @@ pub(crate) async fn run_user_tests(
     let paths = path_strs.iter().map(PathBuf::from).collect::<Vec<_>>();
     for (path_str, path) in path_strs.iter().zip(&paths) {
         if !path.exists() {
-            eprintln!("Path not found: {path_str}");
+            cli_diagnostic!("Path not found: {path_str}");
             process::exit(1);
         }
     }
@@ -1108,7 +1108,7 @@ pub(crate) async fn run_user_tests(
         process::exit(crate::exit::PROGRAM_FAILURE);
     }
     if summary.total == 0 && !allow_empty {
-        eprintln!("{}", empty_user_test_message(display_targets, filter));
+        cli_diagnostic!("{}", empty_user_test_message(display_targets, filter));
         process::exit(crate::exit::PROGRAM_FAILURE);
     }
 }
@@ -1173,7 +1173,7 @@ fn emit_coverage_report(report: &harn_vm::coverage::Coverage, out: Option<&str>)
     // records).
     if let Some(path) = out {
         if let Err(error) = fs::write(path, report.render_lcov()) {
-            eprintln!("failed to write coverage report to {path}: {error}");
+            cli_diagnostic!("failed to write coverage report to {path}: {error}");
             process::exit(1);
         }
         println!("LCOV tracefile written to {path}");
@@ -1189,11 +1189,11 @@ fn preflight_report_path(path: &str) {
     let buf = PathBuf::from(path);
     if let Some(parent) = buf.parent().filter(|p| !p.as_os_str().is_empty()) {
         if !parent.exists() {
-            eprintln!("report directory does not exist: {}", parent.display());
+            cli_diagnostic!("report directory does not exist: {}", parent.display());
             process::exit(1);
         }
         if !parent.is_dir() {
-            eprintln!("report directory is not a directory: {}", parent.display());
+            cli_diagnostic!("report directory is not a directory: {}", parent.display());
             process::exit(1);
         }
     }
@@ -1429,7 +1429,7 @@ pub(crate) async fn run_determinism_tests(
     cli_skill_dirs: &[PathBuf],
 ) {
     let files = collect_user_test_files(path_str).unwrap_or_else(|error| {
-        eprintln!("{error}");
+        cli_diagnostic!("{error}");
         process::exit(1);
     });
     let mut passed = 0usize;
