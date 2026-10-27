@@ -22,16 +22,31 @@ pub fn pricing_clock_now() -> OffsetDateTime {
 
 const MODEL_DEFAULT_UNSET_KEY: &str = "_unset";
 
-fn endpoint_data_controls(
-    provider: &ProviderDef,
-    base_url: &str,
-) -> Option<Option<ModelDataControlsDef>> {
+/// An endpoint may have no scoped declarations, an unverified destination,
+/// or one verified declaration. These states must not collapse into a bool.
+#[derive(Clone)]
+pub(crate) enum EndpointDataControls {
+    Unscoped,
+    Unverified,
+    Verified(ModelDataControlsDef),
+}
+
+impl EndpointDataControls {
+    pub(crate) fn verified(self) -> Option<ModelDataControlsDef> {
+        match self {
+            Self::Verified(controls) => Some(controls),
+            Self::Unscoped | Self::Unverified => None,
+        }
+    }
+}
+
+fn endpoint_data_controls(provider: &ProviderDef, base_url: &str) -> EndpointDataControls {
     if !provider
         .regions
         .values()
         .any(|region| region.data_controls.is_some())
     {
-        return None;
+        return EndpointDataControls::Unscoped;
     }
     let mut matches = provider
         .regions
@@ -40,19 +55,20 @@ fn endpoint_data_controls(
     let controls = matches
         .next()
         .and_then(|region| region.data_controls.clone());
-    Some(if matches.next().is_none() {
-        controls
-    } else {
-        None
-    })
+    match (controls, matches.next()) {
+        (Some(controls), None) => EndpointDataControls::Verified(controls),
+        _ => EndpointDataControls::Unverified,
+    }
 }
 
 /// Endpoint-specific data promises cannot authorize a redirected request.
 pub(crate) fn has_endpoint_data_controls(base_url: &str) -> bool {
-    effective_config()
-        .providers
-        .values()
-        .any(|provider| matches!(endpoint_data_controls(provider, base_url), Some(Some(_))))
+    effective_config().providers.values().any(|provider| {
+        matches!(
+            endpoint_data_controls(provider, base_url),
+            EndpointDataControls::Verified(_)
+        )
+    })
 }
 
 /// Get provider config for resolving base_url, auth, etc.
@@ -69,12 +85,11 @@ pub fn provider_config(name: &str) -> Option<ProviderDef> {
     Some(provider)
 }
 
-/// The outer option distinguishes providers without endpoint facts from an
-/// endpoint-scoped provider whose selected endpoint is unverified.
-pub(crate) fn resolved_endpoint_data_controls(
-    provider: &str,
-) -> Option<Option<ModelDataControlsDef>> {
-    let definition = provider_config(provider)?;
+/// Preserve whether a route is unscoped, unverified, or verified.
+pub(crate) fn resolved_endpoint_data_controls(provider: &str) -> EndpointDataControls {
+    let Some(definition) = provider_config(provider) else {
+        return EndpointDataControls::Unscoped;
+    };
     endpoint_data_controls(&definition, &super::resolve_base_url(&definition))
 }
 
@@ -101,13 +116,13 @@ pub fn effective_training_default(provider: &str, model_id: &str) -> Option<Trai
     let definition = provider_config(provider)?;
     let endpoint_controls =
         endpoint_data_controls(&definition, &super::resolve_base_url(&definition));
-    if matches!(endpoint_controls, Some(None)) {
+    if matches!(endpoint_controls, EndpointDataControls::Unverified) {
         return None;
     }
     if let Some(model_controls) = model_catalog_entry(model_id).and_then(|row| row.data_controls) {
         return Some(model_controls.training_default);
     }
-    if let Some(Some(controls)) = endpoint_controls {
+    if let EndpointDataControls::Verified(controls) = endpoint_controls {
         return Some(controls.training_default);
     }
     definition
