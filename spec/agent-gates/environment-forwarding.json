@@ -36,6 +36,13 @@
   },
   {
     "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/api/inference_boundary/account.rs",
+    "expression": "HOST_ACCOUNT_ATTESTATIONS_ENV",
+    "owner": "capture_process_attestations / declared HARN_PROVIDER_ACCOUNT_ATTESTATIONS_JSON constant",
+    "evidence": "The environment declaration census binds the constant to the host account-confirmation input. CLI product tests cover credential matching, malformed input, and withholding from scripts and child processes."
+  },
+  {
+    "scope": "runner-model-environment",
     "file": "crates/harn-vm/src/llm/api/options.rs",
     "expression": "name",
     "owner": "environment reader / declared environment constant",
