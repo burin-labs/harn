@@ -35,7 +35,7 @@ pub(super) fn warm_stdlib_before_cases(threads: usize, json: bool) {
         started.elapsed().as_secs_f64()
     );
     for (module, error) in &report.failed {
-        eprintln!("harn conformance: stdlib module {module} left lazy: {error}");
+        cli_diagnostic!("harn conformance: stdlib module {module} left lazy: {error}");
     }
 }
 

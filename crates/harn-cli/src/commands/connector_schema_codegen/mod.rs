@@ -26,7 +26,7 @@ pub(crate) fn run(args: &ConnectorSchemaCodegenArgs) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
         Err(message) => {
-            eprintln!("harn connector-schema-codegen: {message}");
+            cli_diagnostic!("harn connector-schema-codegen: {message}");
             1
         }
     }

@@ -269,7 +269,7 @@ pub(crate) async fn run_serve(args: &MergeCaptainMockServeArgs) -> i32 {
         });
         println!("{summary}");
     } else {
-        eprintln!("serving fake GitHub on http://{resolved} (Ctrl-C to stop)");
+        cli_diagnostic!("serving fake GitHub on http://{resolved} (Ctrl-C to stop)");
     }
     if let Err(error) = axum::serve(listener, router).await {
         cli_diagnostic!("error: serve failed: {error}");

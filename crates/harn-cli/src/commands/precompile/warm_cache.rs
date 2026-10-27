@@ -22,7 +22,7 @@ pub(super) fn run(args: &PrecompileArgs) {
     ensure_builtin_signatures_installed();
     let mut compiler = bytecode_cache::CachePrecompiler::default();
     if !args.quiet {
-        eprintln!("precompile cache: preparing the runtime stdlib");
+        cli_diagnostic!("precompile cache: preparing the runtime stdlib");
     }
     compiler
         .prepare_stdlib_catalog()

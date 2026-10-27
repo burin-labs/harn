@@ -25,7 +25,7 @@ pub(crate) fn run(args: &PgCodegenArgs) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
         Err(message) => {
-            eprintln!("harn pg codegen: {message}");
+            cli_diagnostic!("harn pg codegen: {message}");
             1
         }
     }

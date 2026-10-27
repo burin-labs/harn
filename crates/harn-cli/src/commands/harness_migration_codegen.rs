@@ -34,7 +34,7 @@ pub(crate) fn run(args: &DumpHarnessMigrationsArgs) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
         Err(message) => {
-            eprintln!("harn dump-harness-migrations: {message}");
+            cli_diagnostic!("harn dump-harness-migrations: {message}");
             1
         }
     }
