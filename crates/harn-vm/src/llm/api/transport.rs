@@ -635,9 +635,9 @@ async fn vm_call_llm_api_with_body_inner(
     }
 
     let client = if use_stream_transport {
-        crate::llm::streaming_client_for_base_url(&resolved.base_url)
+        crate::llm::streaming_client_for_base_url(&resolved.base_url, approved_wire_route)
     } else {
-        crate::llm::blocking_client_for_base_url(&resolved.base_url)
+        crate::llm::blocking_client_for_base_url(&resolved.base_url, approved_wire_route)
     };
 
     let req = client

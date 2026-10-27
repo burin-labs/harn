@@ -67,7 +67,8 @@ impl OpenAiResponsesProvider {
         if let Some(approved) = &approved {
             approved.verify(&request.provider, &resolved.url(), &body)?;
         }
-        let client = crate::llm::blocking_client_for_base_url(&resolved.base_url);
+        let client =
+            crate::llm::blocking_client_for_base_url(&resolved.base_url, approved.as_ref());
         let req = client
             .post(resolved.url())
             .header("Content-Type", "application/json")

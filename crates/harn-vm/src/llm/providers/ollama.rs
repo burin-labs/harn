@@ -235,9 +235,9 @@ impl OllamaProvider {
             approved.verify(&request.provider, &url, &body)?;
         }
         let client = if request.stream {
-            crate::llm::streaming_client_for_base_url(&base_url)
+            crate::llm::streaming_client_for_base_url(&base_url, approved.as_ref())
         } else {
-            crate::llm::blocking_client_for_base_url(&base_url)
+            crate::llm::blocking_client_for_base_url(&base_url, approved.as_ref())
         };
         let req = client
             .post(url)

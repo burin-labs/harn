@@ -220,10 +220,22 @@ pub(crate) fn shared_utility_client() -> &'static reqwest::Client {
     })
 }
 
-pub(crate) fn streaming_client_for_base_url(base_url: &str) -> reqwest::Client {
+fn restrict_inference_redirects(
+    base_url: &str,
+    approved: Option<&api::inference_boundary::ApprovedWireRoute>,
+) -> bool {
+    approved.is_some()
+        || api::inference_boundary::effective(None).is_some()
+        || admission::bounds_dispatch()
+        || crate::llm_config::has_endpoint_data_controls(base_url)
+}
+
+pub(crate) fn streaming_client_for_base_url(
+    base_url: &str,
+    approved: Option<&api::inference_boundary::ApprovedWireRoute>,
+) -> reqwest::Client {
     static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
-    let restrict_redirects =
-        admission::bounds_dispatch() || crate::llm_config::has_endpoint_data_controls(base_url);
+    let restrict_redirects = restrict_inference_redirects(base_url, approved);
     cached_client_for_base_url(
         "streaming",
         base_url,
@@ -239,10 +251,12 @@ pub(crate) fn streaming_client_for_base_url(base_url: &str) -> reqwest::Client {
     )
 }
 
-pub(crate) fn blocking_client_for_base_url(base_url: &str) -> reqwest::Client {
+pub(crate) fn blocking_client_for_base_url(
+    base_url: &str,
+    approved: Option<&api::inference_boundary::ApprovedWireRoute>,
+) -> reqwest::Client {
     static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
-    let restrict_redirects =
-        admission::bounds_dispatch() || crate::llm_config::has_endpoint_data_controls(base_url);
+    let restrict_redirects = restrict_inference_redirects(base_url, approved);
     cached_client_for_base_url(
         "blocking",
         base_url,
@@ -279,7 +293,7 @@ fn inference_redirect_policy(
     restrict_redirects: bool,
 ) -> reqwest::redirect::Policy {
     if restrict_redirects {
-        // A redirect escapes the admitted spend or endpoint-specific data policy.
+        // A redirect escapes the admitted inference, spend, or endpoint policy.
         reqwest::redirect::Policy::none()
     } else {
         crate::egress::redirect_policy(surface, 10)

@@ -117,7 +117,7 @@ impl AzureOpenAiProvider {
         if let Some(approved) = &approved {
             approved.verify_url_model(&request.provider, &url, &deployment, &body)?;
         }
-        let mut req = crate::llm::blocking_client_for_base_url(&url)
+        let mut req = crate::llm::blocking_client_for_base_url(&url, approved.as_ref())
             .post(url)
             .header("Content-Type", "application/json")
             .timeout(std::time::Duration::from_secs(request.resolve_timeout()))

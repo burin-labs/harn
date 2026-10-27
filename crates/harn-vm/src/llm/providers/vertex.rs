@@ -158,7 +158,7 @@ impl VertexProvider {
         if let Some(approved) = &approved {
             approved.verify_url_model(&request.provider, &url, &model, &body)?;
         }
-        let response = crate::llm::blocking_client_for_base_url(&url)
+        let response = crate::llm::blocking_client_for_base_url(&url, approved.as_ref())
             .post(url)
             .header("Content-Type", "application/json")
             .header("Authorization", format!("Bearer {token}"))
