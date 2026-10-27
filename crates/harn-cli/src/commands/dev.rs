@@ -95,7 +95,7 @@ pub(crate) async fn run(args: DevArgs) {
     };
 
     if !args.json {
-        eprintln!(
+        cli_diagnostic!(
             "\x1b[2m[dev] watching {} for .harn changes (ctrl-c to stop)\x1b[0m",
             root.display()
         );
@@ -504,7 +504,7 @@ impl Emitter {
     fn print_human(&self, event: &DevEvent) {
         match event {
             DevEvent::Ready { root, modules, .. } => {
-                eprintln!("\x1b[2m[dev] ready: {modules} module(s) under {root}\x1b[0m");
+                cli_diagnostic!("\x1b[2m[dev] ready: {modules} module(s) under {root}\x1b[0m");
             }
             DevEvent::FingerprintChanged { module, old, new } => {
                 let label = match (old.is_empty(), new.is_empty()) {
@@ -512,10 +512,10 @@ impl Emitter {
                     (false, true) => "removed",
                     _ => "interface changed",
                 };
-                eprintln!("\x1b[33m[dev] {label}: {module}\x1b[0m");
+                cli_diagnostic!("\x1b[33m[dev] {label}: {module}\x1b[0m");
             }
             DevEvent::Rerun { modules } => {
-                eprintln!("\x1b[2m[dev] rerunning {} module(s)\x1b[0m", modules.len());
+                cli_diagnostic!("\x1b[2m[dev] rerunning {} module(s)\x1b[0m", modules.len());
             }
             DevEvent::Diagnostics {
                 module,
@@ -523,17 +523,20 @@ impl Emitter {
                 diagnostics,
             } => {
                 if *count == 0 {
-                    eprintln!("\x1b[32m[dev] {module}: ok\x1b[0m");
+                    cli_diagnostic!("\x1b[32m[dev] {module}: ok\x1b[0m");
                 } else {
-                    eprintln!("\x1b[31m[dev] {module}: {count} diagnostic(s)\x1b[0m");
+                    cli_diagnostic!("\x1b[31m[dev] {module}: {count} diagnostic(s)\x1b[0m");
                     for diag in diagnostics {
                         let loc = match (diag.line, diag.column) {
                             (Some(l), Some(c)) => format!(":{l}:{c}"),
                             _ => String::new(),
                         };
-                        eprintln!(
+                        cli_diagnostic!(
                             "  {} {}{loc} {}: {}",
-                            diag.severity, module, diag.code, diag.message
+                            diag.severity,
+                            module,
+                            diag.code,
+                            diag.message
                         );
                     }
                 }
@@ -545,18 +548,18 @@ impl Emitter {
                 failures,
             } => {
                 if *failed == 0 {
-                    eprintln!("\x1b[32m[dev] {module}: tests passed ({passed})\x1b[0m");
+                    cli_diagnostic!("\x1b[32m[dev] {module}: tests passed ({passed})\x1b[0m");
                 } else {
-                    eprintln!(
+                    cli_diagnostic!(
                         "\x1b[31m[dev] {module}: tests {passed} passed, {failed} failed\x1b[0m"
                     );
                     for f in failures {
-                        eprintln!("    - {}: {}", f.name, f.error);
+                        cli_diagnostic!("    - {}: {}", f.name, f.error);
                     }
                 }
             }
             DevEvent::TestError { module, error } => {
-                eprintln!("\x1b[31m[dev] {module}: test runner error: {error}\x1b[0m");
+                cli_diagnostic!("\x1b[31m[dev] {module}: test runner error: {error}\x1b[0m");
             }
         }
     }
