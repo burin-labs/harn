@@ -93,6 +93,22 @@ fn main(harness: Harness) {
         .current_dir(temp.path())
         .args(["serve", "mcp", "server.harn"]);
     let mut client = StdioJsonRpcClient::spawn("Code Mode MCP server", command);
+    let discovered = client.request(stable_request(0, "tools/list", json!({})));
+    let tools = discovered["result"]["tools"].as_array().expect("tool list");
+    for name in [
+        "echo",
+        "harn.code.generate_harn_api",
+        "harn.code.execute_composition",
+    ] {
+        assert!(
+            tools.iter().any(|tool| tool["name"] == name),
+            "{discovered}"
+        );
+    }
+    assert!(
+        !tools.iter().any(|tool| tool["name"] == "phantom"),
+        "{discovered}"
+    );
     let api = client.request(stable_request(
         1,
         "tools/call",

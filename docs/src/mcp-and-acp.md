@@ -482,8 +482,10 @@ This exposes `harn.code.search_examples`, `harn.code.generate_harn_api`, and
 `harn.code.execute_composition`. The executor still runs through Harn's
 read-only composition path and returns the reduced snippet result by default
 instead of an opaque "execute code" result. Hybrid servers can call
-`composition_mcp_tools(existing_registry)` to expose ordinary tools and the
-compact Code Mode profile together.
+`composition_mcp_tools(existing_registry)` to expose ordinary tools and bind
+the profile to that registry's declared read-only tools. Client manifests select
+from those bindings; they cannot add tools or grant trust. Without a registered
+read-only tool, the profile cannot call one.
 
 ### Defining resources and prompts
 

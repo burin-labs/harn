@@ -189,8 +189,9 @@ without a live provider or host dispatcher.
 
 By default, every binding call resolves through `metadata.mock_output` or a
 structured echo, which is the right behavior for replay fixtures and offline
-audits. Hosts that want real tool dispatch pass a `dispatcher` closure on the
-options dict:
+audits. This low-level call is a simulation when no dispatcher is supplied;
+the served MCP profile never uses it as a live tool result. Hosts that want real
+tool dispatch pass a `dispatcher` closure on the options dict:
 
 ```harn
 fn dispatch_binding(fs: HarnessFs, binding_name: string, input: dict) {
