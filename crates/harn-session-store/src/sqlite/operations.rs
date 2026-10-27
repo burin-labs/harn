@@ -88,6 +88,7 @@ impl SessionStore for SqliteSessionStore {
         // That lets both backends share one decision instead of restating it
         // as SQL here and as Rust in the in-memory store.
         let (current, _) = read_session_meta(&tx, session_id)?;
+        let indexed_before = current.clone();
         let (title, title_pinned) = crate::memory_helpers::resolve_title_update(
             current.title,
             current.title_pinned,
@@ -140,20 +141,25 @@ impl SessionStore for SqliteSessionStore {
             return Err(StoreError::NotFound(session_id.to_string()));
         }
         let (meta, _) = read_session_meta(&tx, session_id)?;
-        let mut events = load_all_events(&tx, session_id)?;
-        redact_stored_events(self.hooks(), &mut events)?;
-        tx.execute(
-            "DELETE FROM session_events_fts WHERE session_id = ?1",
-            params![session_id],
-        )
-        .map_err(map_sql)?;
-        tx.execute(
-            "DELETE FROM session_event_vectors WHERE session_id = ?1",
-            params![session_id],
-        )
-        .map_err(map_sql)?;
-        for event in &events {
-            insert_search_rows(&tx, self.hooks(), &meta, event)?;
+        // Re-indexing costs one embedding per event, so a spend or usage
+        // update must not pay it when no indexed document changes.
+        if crate::search::search_metadata(&indexed_before) != crate::search::search_metadata(&meta)
+        {
+            let mut events = load_all_events(&tx, session_id)?;
+            redact_stored_events(self.hooks(), &mut events)?;
+            tx.execute(
+                "DELETE FROM session_events_fts WHERE session_id = ?1",
+                params![session_id],
+            )
+            .map_err(map_sql)?;
+            tx.execute(
+                "DELETE FROM session_event_vectors WHERE session_id = ?1",
+                params![session_id],
+            )
+            .map_err(map_sql)?;
+            for event in &events {
+                insert_search_rows(&tx, self.hooks(), &meta, event)?;
+            }
         }
         tx.commit().map_err(map_sql)?;
         // Publish only after the commit lands and the writer lock is gone, so
