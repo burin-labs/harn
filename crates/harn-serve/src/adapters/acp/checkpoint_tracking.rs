@@ -44,6 +44,7 @@ impl CheckpointTracking {
         }
     }
 
+    #[cfg(any(test, feature = "hostlib"))]
     pub(super) fn failure(&self, id: &str) -> Result<Option<String>, &'static str> {
         let state = self
             .0
