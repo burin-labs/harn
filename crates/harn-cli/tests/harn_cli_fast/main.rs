@@ -29,6 +29,7 @@ mod bytecode_cache;
 mod check_cli;
 mod crystallize_cli;
 mod demo_cli;
+mod diagnostic_policy;
 mod eval_prompt_cli;
 #[cfg(unix)]
 mod file_secrets;
