@@ -281,6 +281,13 @@ pub(super) fn require_registry_membership_for(
             "tool '{tool_name}' is not present in the active agent tool registry"
         ));
     };
+    if audience == crate::tool_registry::ToolAudience::Mcp
+        && !crate::mcp_server::composition_allows_tool(tool_name, entry)
+    {
+        return Err(format!(
+            "tool '{tool_name}' does not match the MCP server's published binding"
+        ));
+    }
     match crate::tool_registry::tool_entry_allows_audience(entry, audience) {
         Ok(true) => Ok(()),
         Ok(false) => Err(format!(
@@ -318,14 +325,34 @@ mod tests {
     use super::*;
     use crate::value::{DictMap, VmDictExt};
 
-    #[test]
-    fn mcp_dispatch_requires_an_explicit_registry() {
-        assert!(require_registry_membership_for(
-            None,
-            "anything",
-            crate::tool_registry::ToolAudience::Mcp
+    #[tokio::test]
+    async fn mcp_dispatch_requires_an_explicit_registry() {
+        let entry = crate::schema::json_to_vm_value(&serde_json::json!({
+            "name": "anything", "governance": {"audiences": ["mcp"]}
+        }));
+        let VmValue::Dict(published) = &entry else {
+            panic!("fixture must be a dictionary");
+        };
+        let published = published.clone();
+        crate::mcp_server::scope_composition_for_test(
+            std::collections::BTreeMap::from([("anything".to_string(), published)]),
+            async {
+                let allowed = registry(vec![entry]);
+                assert!(require_registry_membership_for(
+                    Some(&allowed),
+                    "anything",
+                    crate::tool_registry::ToolAudience::Mcp
+                )
+                .is_ok());
+                assert!(require_registry_membership_for(
+                    None,
+                    "anything",
+                    crate::tool_registry::ToolAudience::Mcp
+                )
+                .is_err());
+            },
         )
-        .is_err());
+        .await;
         assert!(require_registry_membership_for(
             None,
             "anything",

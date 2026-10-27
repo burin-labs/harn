@@ -16,6 +16,9 @@ use tempfile::TempDir;
 use test_util::process::harn_e2e_command;
 use test_util::stdio_jsonrpc::StdioJsonRpcClient;
 
+mod publication;
+use publication::write_export_fixture;
+
 const PROCESS_READY_TIMEOUT: Duration = Duration::from_mins(1);
 const PROTOCOL_VERSION: &str = "2026-07-28";
 
@@ -39,21 +42,6 @@ pub(super) fn stable_request(id: u64, method: &str, mut params: JsonValue) -> Js
     json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
 }
 
-fn write_export_fixture(temp: &TempDir) {
-    fs::write(
-        temp.path().join("server.harn"),
-        r#"
-pub fn greet(name: string, excited: bool = false) -> dict {
-  if excited {
-    return {message: "Hello, " + name + "!"}
-  }
-  return {message: "Hello, " + name}
-}
-"#,
-    )
-    .unwrap();
-}
-
 #[test]
 fn serve_mcp_code_mode_dispatches_only_server_registered_read_tools() {
     let temp = TempDir::new().unwrap();
@@ -62,6 +50,7 @@ fn serve_mcp_code_mode_dispatches_only_server_registered_read_tools() {
         r##"
 import { composition_mcp_tools } from "std/composition"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 
 fn main(harness: Harness) {
   let source = tool_registry({name: "composition-fixture"}, {schemas: {MessageValue: {type: "string"}}})
@@ -94,8 +83,16 @@ fn main(harness: Harness) {
     returns: {type: "object"},
     annotations: {side_effect_level: "read_only"},
     handler: {_args ->
-      const attempt = agent_dispatch_tool_call(harness.tools, {name: "mcp_only", arguments: {value: "forged"}}, before_forgery_tool, {_composition_mcp: true})
-      return {allowed: attempt.ok}
+      const hidden = tool_find(before_forgery_tool, "agent_only")
+      if hidden == nil { throw "agent-only fixture missing" }
+      const forged_registry = {_type: "tool_registry", tools: [hidden + {governance: {audiences: ["mcp"]}}]}
+      const attempt = agent_dispatch_tool_call(harness.tools, {name: "agent_only", arguments: {}}, forged_registry, {_composition_mcp: true})
+      const visible = tool_find(before_forgery_tool, "mcp_only")
+      if visible == nil { throw "MCP-only fixture missing" }
+      const alias = before_forgery_tool + {tools: [visible + {handler: hidden.handler}]}
+      const alias_attempt = agent_dispatch_tool_call(harness.tools, {name: "mcp_only", arguments: {value: "forged"}}, alias, {_composition_mcp: true})
+      const result = {allowed: attempt.ok, alias_allowed: alias_attempt.ok}
+      return agent_tool_handler_result(to_string(result), result)
     },
   })
   source = tool_define(source, "mutate", "A write operation", {
@@ -163,6 +160,25 @@ fn main(harness: Harness) {
     assert_eq!(
         forged["result"]["structuredContent"]["allowed"], false,
         "{forged}"
+    );
+    assert_eq!(
+        forged["result"]["structuredContent"]["alias_allowed"], false,
+        "{forged}"
+    );
+    let nested_forgery = client.request(stable_request(
+        18,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return forge_audience({})"
+        }}),
+    ));
+    assert_eq!(
+        nested_forgery["result"]["structuredContent"]["result"]["data"]["allowed"], false,
+        "{nested_forgery}"
+    );
+    assert_eq!(
+        nested_forgery["result"]["structuredContent"]["result"]["data"]["alias_allowed"], false,
+        "{nested_forgery}"
     );
     let mcp_only = client.request(stable_request(
         15,
@@ -346,73 +362,6 @@ fn main(harness: Harness) {
             ["error"],
         "composition_mcp: trust is configured by the server"
     );
-    client.shutdown_expect_success();
-}
-
-#[test]
-fn serve_mcp_rejects_caught_invalid_catalog_declaration() {
-    let temp = TempDir::new().unwrap();
-    fs::write(
-        temp.path().join("server.harn"),
-        r#"
-fn main(harness: Harness) {
-  const rejected = try {
-    harness.tools.mcp_prompt(
-      {name: "review", arguments: [{name: "input"}, 7], handler: {args -> args.input}},
-    )
-  }
-  assert(is_err(rejected), "the declaration must fail")
-  harness.tools.mcp_tools(tool_registry())
-}
-"#,
-    )
-    .unwrap();
-
-    let output = harn_e2e_command()
-        .current_dir(temp.path())
-        .args(["serve", "mcp", "server.harn"])
-        .output()
-        .unwrap();
-    assert!(
-        !output.status.success(),
-        "invalid catalog must not start serving"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("invalid MCP publication") && stderr.contains("arguments[1]"),
-        "startup must identify the rejected declaration: {stderr}"
-    );
-}
-
-#[ignore = "binary surface — runs in the slow E2E/smoke job"]
-#[test]
-fn serve_mcp_dispatches_declared_tool_parameters() {
-    let temp = TempDir::new().unwrap();
-    fs::write(
-        temp.path().join("server.harn"),
-        r#"
-fn main(harness: Harness) {
-  tool greet(name: string, suffix: string = "!") -> string {
-    return "Hello, " + name + suffix
-  }
-  harness.tools.mcp_tools(greet)
-}
-"#,
-    )
-    .unwrap();
-    let mut command = harn_e2e_command();
-    command
-        .current_dir(temp.path())
-        .args(["serve", "mcp", "server.harn"]);
-    let mut client = StdioJsonRpcClient::spawn("declared tool MCP server", command);
-    let response = client.request(stable_request(
-        1,
-        "tools/call",
-        json!({"name": "greet", "arguments": {"name": "Ada"}}),
-    ));
-    assert!(response.get("error").is_none(), "{response}");
-    assert_ne!(response["result"]["isError"], true, "{response}");
-    assert_eq!(response["result"]["content"][0]["text"], "Hello, Ada!");
     client.shutdown_expect_success();
 }
 
