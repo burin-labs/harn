@@ -26,6 +26,44 @@ fn run_script(body: &str) -> std::process::Output {
         .unwrap()
 }
 
+#[test]
+fn allow_list_preserves_pure_alias_families_without_weakening_explicit_deny() {
+    let temp = TempDir::new().unwrap();
+    let expression = r#"assert_eq(base64url_encode("f"), "Zg")
+assert_eq(bytes_to_base64url("f"), "Zg")"#;
+    let run = |policy: &str, names: &str| {
+        harn_e2e_command()
+            .current_dir(temp.path())
+            .args([
+                "run",
+                "--standalone",
+                "--no-sandbox",
+                policy,
+                names,
+                "-e",
+                expression,
+            ])
+            .output()
+            .unwrap()
+    };
+    let allowed = run("--allow", "range");
+    assert!(
+        allowed.status.success(),
+        "pure canonical and alias calls must both run: {}",
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+    let denied = run("--deny", "bytes_to_base64url");
+    assert!(
+        !denied.status.success(),
+        "explicit alias denial must still reject its family"
+    );
+    assert!(
+        String::from_utf8_lossy(&denied.stderr).contains("not permitted"),
+        "the negative control must reach the builtin policy: {}",
+        String::from_utf8_lossy(&denied.stderr)
+    );
+}
+
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn pipeline_main_returning_int_sets_exit_code() {

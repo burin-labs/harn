@@ -1436,7 +1436,14 @@ pipeline main(harness: Harness) {
 #[test]
 fn allow_list_keeps_every_pure_builtin_and_still_denies_effects() {
     let denied = build_denied_builtins(None, Some("command_risk_scan"));
-    for granted in ["range", "lowercase", "command_risk_scan", "println"] {
+    for granted in [
+        "range",
+        "lowercase",
+        "base64url_encode",
+        "bytes_to_base64url",
+        "command_risk_scan",
+        "println",
+    ] {
         assert!(!denied.contains(granted), "`{granted}` must stay callable");
     }
     let defs = harn_vm::stdlib::all_builtin_defs();
@@ -1446,9 +1453,10 @@ fn allow_list_keeps_every_pure_builtin_and_still_denies_effects() {
             matches!(
                 def.contract.exposure,
                 harn_builtin_meta::BuiltinExposure::PureGlobal
-            ) && denied.contains(def.sig.name)
+            )
         })
-        .map(|def| def.sig.name)
+        .flat_map(|def| std::iter::once(def.sig.name).chain(def.aliases.iter().copied()))
+        .filter(|name| denied.contains(*name))
         .collect();
     assert!(
         pure_denied.is_empty(),

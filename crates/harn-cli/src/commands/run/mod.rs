@@ -143,7 +143,7 @@ pub(crate) fn build_denied_builtins(
                         harn_builtin_meta::BuiltinExposure::PureGlobal
                     )
                 })
-                .map(|def| def.sig.name),
+                .flat_map(|def| std::iter::once(def.sig.name).chain(def.aliases.iter().copied())),
         );
 
         // Create a temporary VM with stdlib registered to enumerate all builtin names.
