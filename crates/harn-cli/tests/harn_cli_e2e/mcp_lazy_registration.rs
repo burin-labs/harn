@@ -167,4 +167,7 @@ fn argument_errors_are_short_unless_explained() {
         assert!(stderr.contains("--not-a-real-option"), "{stderr}");
         assert_eq!(stderr.contains("Usage:"), explain, "{stderr}");
     }
+    let output = harn_e2e_command().output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Usage:"));
 }

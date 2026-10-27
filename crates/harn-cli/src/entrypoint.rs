@@ -28,7 +28,9 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
         Err(error) => {
             if matches!(
                 error.kind(),
-                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+                ErrorKind::DisplayHelp
+                    | ErrorKind::DisplayVersion
+                    | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
             ) {
                 error.exit();
             }
