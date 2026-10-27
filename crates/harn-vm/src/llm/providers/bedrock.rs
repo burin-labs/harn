@@ -190,7 +190,7 @@ impl BedrockProvider {
             timestamp: Utc::now(),
         })
         .map_err(|error| vm_err(format!("bedrock request signing failed: {error}")))?;
-        let mut req = crate::llm::blocking_client_for_base_url(&base_url)
+        let mut req = crate::llm::blocking_client_for_base_url(&base_url, approved.as_ref())
             .post(url)
             .header("Accept", "application/json")
             .timeout(std::time::Duration::from_secs(request.resolve_timeout()))

@@ -5,6 +5,9 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+type InferenceClientFactory =
+    fn(&str, Option<&super::super::inference_boundary::ApprovedWireRoute>) -> reqwest::Client;
+
 fn quota(path: &std::path::Path, limit: i64) -> MachineSpendQuota {
     MachineSpendQuota::open(
         path,
@@ -168,7 +171,7 @@ fn endpoint_specific_data_policy_disables_redirects_without_a_spend_budget() {
         .unwrap();
     runtime.block_on(async {
         for factory in [
-            crate::llm::blocking_client_for_base_url as fn(&str) -> reqwest::Client,
+            crate::llm::blocking_client_for_base_url as InferenceClientFactory,
             crate::llm::streaming_client_for_base_url,
         ] {
             let followed = Arc::new(AtomicUsize::new(0));
@@ -189,7 +192,7 @@ fn endpoint_specific_data_policy_disables_redirects_without_a_spend_budget() {
             });
             let base = format!("http://{}", source.addr());
             let url = format!("{base}/start");
-            assert_eq!(factory(&base).post(&url).body("synthetic content").send().await.unwrap().status(), 200);
+            assert_eq!(factory(&base, None).post(&url).body("synthetic content").send().await.unwrap().status(), 200);
             assert_eq!(followed.load(Ordering::SeqCst), 1);
             let overlay = format!(
                 concat!(
@@ -201,10 +204,10 @@ fn endpoint_specific_data_policy_disables_redirects_without_a_spend_budget() {
                 base = base
             );
             crate::llm_config::set_user_overrides(Some(toml::from_str(&overlay).unwrap()));
-            assert_eq!(factory(&base).post(&url).body("synthetic content").send().await.unwrap().status(), 307);
+            assert_eq!(factory(&base, None).post(&url).body("synthetic content").send().await.unwrap().status(), 307);
             assert_eq!(followed.load(Ordering::SeqCst), 1);
             crate::llm_config::clear_user_overrides();
-            assert_eq!(factory(&base).post(&url).body("synthetic content").send().await.unwrap().status(), 200);
+            assert_eq!(factory(&base, None).post(&url).body("synthetic content").send().await.unwrap().status(), 200);
             assert_eq!(followed.load(Ordering::SeqCst), 2);
         }
     });
@@ -225,7 +228,7 @@ fn metered_inference_clients_isolate_redirect_policy_in_both_cache_directions() 
         let temp = tempfile::tempdir().unwrap();
         let quota = quota(&temp.path().join("spend.sqlite"), 2_000_000);
         for factory in [
-            crate::llm::blocking_client_for_base_url as fn(&str) -> reqwest::Client,
+            crate::llm::blocking_client_for_base_url as InferenceClientFactory,
             crate::llm::streaming_client_for_base_url,
         ] {
             for cross_host in [false, true] {
@@ -265,15 +268,21 @@ fn metered_inference_clients_isolate_redirect_policy_in_both_cache_directions() 
                 let url = format!("http://{}/start", source.addr());
                 // Warm the ordinary cache first, then prove the metered client
                 // neither reuses it nor poisons a later ordinary lookup.
-                assert_eq!(factory(&url).get(&url).send().await.unwrap().status(), 200);
+                assert_eq!(
+                    factory(&url, None).get(&url).send().await.unwrap().status(),
+                    200
+                );
                 assert_eq!(destinations.load(Ordering::SeqCst), 1);
                 let status = quota
-                    .scope(async { factory(&url).get(&url).send().await.unwrap().status() })
+                    .scope(async { factory(&url, None).get(&url).send().await.unwrap().status() })
                     .await
                     .unwrap();
                 assert_eq!(status, 302);
                 assert_eq!(destinations.load(Ordering::SeqCst), 1);
-                assert_eq!(factory(&url).get(&url).send().await.unwrap().status(), 200);
+                assert_eq!(
+                    factory(&url, None).get(&url).send().await.unwrap().status(),
+                    200
+                );
                 assert_eq!(destinations.load(Ordering::SeqCst), 2);
             }
         }
@@ -309,7 +318,7 @@ fn host_budget_without_a_machine_quota_also_refuses_redirects() {
         let budget = crate::llm::ConservativeLlmBudget::new(1.0).unwrap();
         let status = budget
             .scope(async {
-                crate::llm::blocking_client_for_base_url(&url)
+                crate::llm::blocking_client_for_base_url(&url, None)
                     .get(&url)
                     .send()
                     .await

@@ -152,7 +152,7 @@ impl GeminiInteractions {
         if let Some(approved) = &approved {
             approved.verify(&request.provider, &url, &body)?;
         }
-        let client = crate::llm::blocking_client_for_base_url(&base_url);
+        let client = crate::llm::blocking_client_for_base_url(&base_url, approved.as_ref());
         let http = client
             .post(url)
             .header("Content-Type", "application/json")
