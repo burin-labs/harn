@@ -679,6 +679,29 @@ if [[ -n "$git_read" ]]; then
   exit 1
 fi
 
+heredoc_write="$(
+  standalone_verdict <<'PAYLOAD'
+{"tool_name":"Bash","tool_input":{"command":"cat <<'EOF'\n'\nEOF\necho \"$(git stash pop)\""}}
+PAYLOAD
+)"
+if [[ "$heredoc_write" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$heredoc_write" != *'git stash'* ]] \
+  || [[ "$heredoc_write" == *'policy faulted'* ]]; then
+  echo "the guard missed an executed stash write after a literal heredoc" >&2
+  printf '%s\n' "$heredoc_write" >&2
+  exit 1
+fi
+heredoc_literal="$(
+  standalone_verdict <<'PAYLOAD'
+{"tool_name":"Bash","tool_input":{"command":"cat <<'EOF'\ngit stash pop\nEOF"}}
+PAYLOAD
+)"
+if [[ -n "$heredoc_literal" ]]; then
+  echo "the guard treated literal heredoc text as an executed command" >&2
+  printf '%s\n' "$heredoc_literal" >&2
+  exit 1
+fi
+
 for stash_command in 'WORKTREE_MODE=review git stash push' 'git -c alias.hidden=stash hidden'; do
   stash_verdict="$(
     printf '{"tool_name":"Bash","tool_input":{"command":"%s"}}' "$stash_command" \

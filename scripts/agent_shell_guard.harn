@@ -1350,12 +1350,7 @@ fn substitution_bodies(command: string, quotes_literal: bool) -> dict {
   return {ok: true, bodies: bodies}
 }
 
-/**
- * Whether a heredoc with an unquoted delimiter is opened anywhere in the text. The shell expands
- * `$(...)` and backticks in such a body and treats apostrophes there as plain bytes, so quote
- * tracking cannot decide what runs. Quote context of the `<<` itself is ignored: that only widens
- * the refusal.
- */
+/** The shared shell scanner does not yet expose every expansion in an unquoted heredoc. */
 fn has_expanding_heredoc(command: string) -> bool {
   let index = command.index_of("<<")
   while index >= 0 {
@@ -1373,8 +1368,7 @@ fn has_expanding_heredoc(command: string) -> bool {
         return true
       }
     }
-    const rest = command.substring(index + 2)
-    const next = rest.index_of("<<")
+    const next = command.substring(index + 2).index_of("<<")
     if next < 0 {
       return false
     }
@@ -1384,6 +1378,25 @@ fn has_expanding_heredoc(command: string) -> bool {
 }
 
 fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>) -> dict) -> bool {
+  if command.contains("<<") && !has_expanding_heredoc(command) {
+    // Shell analysis knows which heredoc bodies expand and which text is literal.
+    const scan = command_risk_scan({request: {mode: "shell", command: command}})
+    if scan.execution_semantics?.resolved != true || len(scan.execution_stages ?? []) == 0 {
+      return true
+    }
+    for stage in scan.execution_stages ?? [] {
+      const argv: list<string> = stage.argv
+      if xargs_operands_write_stash(argv, alias_lookup) {
+        return true
+      }
+      const launched = launched_argv(argv, 0)
+      if argv_program(launched) == "git"
+        && git_args_write_stash(launched, git_subcommand_args(launched), depth, alias_lookup) {
+        return true
+      }
+    }
+    return false
+  }
   // A substitution body is a command line the shell runs, so it gets the same analysis. A body that
   // never closes, or one nested past the depth cap, cannot be proven harmless and is refused.
   const substitutions = substitution_bodies(command, !has_expanding_heredoc(command))
