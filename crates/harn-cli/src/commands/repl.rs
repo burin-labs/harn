@@ -380,7 +380,7 @@ impl ReplSession {
                     self.accumulated.push(emitted_line);
                 }
             }
-            Err(e) => eprintln!("Error: {e}"),
+            Err(e) => cli_diagnostic!("Error: {e}"),
         }
     }
 }
@@ -497,11 +497,11 @@ async fn run_repl_interactive() {
                 break;
             }
             Ok((_editor, Err(e))) => {
-                eprintln!("Read error: {e}");
+                cli_diagnostic!("Read error: {e}");
                 break;
             }
             Err(e) => {
-                eprintln!("Runtime error: {e}");
+                cli_diagnostic!("Runtime error: {e}");
                 break;
             }
         }

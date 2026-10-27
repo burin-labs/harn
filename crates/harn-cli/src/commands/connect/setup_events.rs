@@ -222,7 +222,7 @@ impl ConnectorSetupReporter {
             match encode_event(&event) {
                 Ok(line) => println!("{line}"),
                 Err(error) => {
-                    cli_diagnostic!("error: failed to encode connector setup event: {error}")
+                    cli_diagnostic!("error: failed to encode connector setup event: {error}");
                 }
             }
         } else {

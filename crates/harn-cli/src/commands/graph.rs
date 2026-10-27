@@ -123,7 +123,7 @@ async fn run_dispatch(report: &GraphReport, json: bool) -> i32 {
     let view_json = match serde_json::to_string(report) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("internal error: failed to serialise graph view: {error}");
+            cli_diagnostic!("error: failed to serialise graph view: {error}");
             return 1;
         }
     };

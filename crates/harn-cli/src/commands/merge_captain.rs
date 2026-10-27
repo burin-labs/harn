@@ -442,7 +442,9 @@ fn ladder_output_format(args: &MergeCaptainLadderArgs) -> Option<MergeCaptainLad
         Some(MergeCaptainLadderFormat::Json)
     } else {
         if matches!(args.format, MergeCaptainLadderFormat::Json) {
-            eprintln!("WARNING: `merge-captain ladder --format=json` is deprecated; use `--json`");
+            cli_diagnostic!(
+                "WARNING: `merge-captain ladder --format=json` is deprecated; use `--json`"
+            );
         }
         Some(args.format)
     }
@@ -459,7 +461,9 @@ fn iterate_output_format(args: &MergeCaptainIterateArgs) -> Option<MergeCaptainI
         Some(MergeCaptainIterateFormat::Json)
     } else {
         if matches!(args.format, MergeCaptainIterateFormat::Json) {
-            eprintln!("WARNING: `merge-captain iterate --format=json` is deprecated; use `--json`");
+            cli_diagnostic!(
+                "WARNING: `merge-captain iterate --format=json` is deprecated; use `--json`"
+            );
         }
         Some(args.format)
     }
@@ -476,7 +480,9 @@ fn audit_output_format(args: &MergeCaptainAuditArgs) -> Option<MergeCaptainAudit
         Some(MergeCaptainAuditFormat::Json)
     } else {
         if matches!(args.format, MergeCaptainAuditFormat::Json) {
-            eprintln!("WARNING: `merge-captain audit --format=json` is deprecated; use `--json`");
+            cli_diagnostic!(
+                "WARNING: `merge-captain audit --format=json` is deprecated; use `--json`"
+            );
         }
         Some(args.format)
     }

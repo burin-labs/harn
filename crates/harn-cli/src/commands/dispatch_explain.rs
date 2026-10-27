@@ -1240,7 +1240,7 @@ fn print_json_or_exit(value: &impl Serialize, label: &str) {
     match serde_json::to_string_pretty(value) {
         Ok(json) => println!("{json}"),
         Err(error) => {
-            eprintln!("internal error: failed to render {label}: {error}");
+            cli_diagnostic!("error: failed to render {label}: {error}");
             process::exit(1);
         }
     }
