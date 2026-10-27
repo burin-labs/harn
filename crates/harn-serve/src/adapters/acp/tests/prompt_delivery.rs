@@ -29,6 +29,10 @@ fn harn_path(path: &std::path::Path) -> String {
 
 impl DeliveryHarness {
     async fn start() -> Self {
+        Self::start_with_checkpoint(false).await
+    }
+
+    async fn start_with_checkpoint(checkpoint: bool) -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let gate = dir.path().join("gate");
         let ticks = dir.path().join("ticks.txt");
@@ -88,11 +92,37 @@ pipeline default(harness: Harness, task: unknown) {{
             max_iterations = TICKS + 4,
         );
         std::fs::write(&pipeline, source).expect("write delivery pipeline");
-        let (tx, rx, server, session_id) = start_acp_code_session_with_config(
-            AcpServerConfig::for_pipeline(pipeline.to_string_lossy().to_string()),
-            serde_json::json!(dir.path()),
-        )
-        .await;
+        let config = AcpServerConfig::for_pipeline(pipeline.to_string_lossy().to_string());
+        let (tx, rx, server, session_id) = if checkpoint {
+            for args in [
+                vec!["init", "-q"],
+                vec!["config", "user.email", "t@example.com"],
+                vec!["config", "user.name", "t"],
+                vec!["add", "-A"],
+                vec!["commit", "-q", "-m", "init"],
+            ] {
+                assert!(std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(dir.path())
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success());
+            }
+            let (tx, mut rx, server, session_id) = start_acp_channel_session_with_params(
+                config,
+                serde_json::json!({"cwd":dir.path(), "environmentPolicy":{"kind":"isolated", "grants":[]}, "workspaceCheckpoint":true}),
+            ).await;
+            tx.send(serde_json::json!({
+                "jsonrpc":"2.0", "id":2, "method":"session/set_mode",
+                "params":{"sessionId":session_id, "modeId":"code"},
+            }))
+            .unwrap();
+            let _ack = recv_response_with_id(&mut rx, 2).await;
+            (tx, rx, server, session_id)
+        } else {
+            start_acp_code_session_with_config(config, serde_json::json!(dir.path())).await
+        };
         Self {
             _dir: dir,
             gate,
@@ -303,6 +333,48 @@ async fn queued_prompt_starts_its_own_turn_after_the_running_one() {
             "receipt preceded the queued prompt's insertion"
         );
         assert!(receipt_at < idle_at);
+        h.finish().await;
+    })
+    .await;
+}
+
+#[cfg(feature = "hostlib")]
+#[tokio::test(flavor = "current_thread")]
+async fn queued_prompt_captures_its_boundary_when_the_turn_starts() {
+    harn_clock::test_support::with_local_tasks(async {
+        use harn_hostlib::workspace_checkpoint as checkpoint;
+        let mut h = DeliveryHarness::start_with_checkpoint(true).await;
+        h.prompt(3, "tick", None);
+        h.ticks_reach(1).await;
+        h.prompt(4, "after this", Some("queue"));
+        h.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":5, "method":"session/pending_prompts",
+            "params":{"sessionId":h.session_id},
+        }));
+        let (_, pending) = h.reply(5).await;
+        assert_eq!(pending["result"]["prompts"][0]["messageId"], "m4");
+        h.open_gate();
+        let (_, first) = h.reply(3).await;
+        assert_eq!(first["result"]["stopReason"], "end_turn");
+        let (_, receipt) = h.reply(4).await;
+        assert_eq!(receipt["result"]["messageId"], "m4");
+        h.state_update(0, "idle").await;
+
+        let begin = checkpoint::call_begin(&h.session_id, "probe").unwrap();
+        assert!(matches!(begin, checkpoint::Outcome::Ready(_)), "{begin:?}");
+        std::fs::write(&h.ticks, "later probe\n").unwrap();
+        let end = checkpoint::call_end(&h.session_id, "probe", None).unwrap();
+        assert!(matches!(end, checkpoint::Outcome::Ready(_)), "{end:?}");
+        let restored = checkpoint::restore(&h.session_id, "m4", None).unwrap();
+        assert!(
+            matches!(restored, checkpoint::Outcome::Ready(_)),
+            "{restored:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&h.ticks).unwrap(),
+            "tick\n".repeat(TICKS)
+        );
+        checkpoint::drop_session(&h.session_id);
         h.finish().await;
     })
     .await;

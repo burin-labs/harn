@@ -2,6 +2,65 @@ use super::*;
 
 #[cfg(feature = "hostlib")]
 #[tokio::test(flavor = "current_thread")]
+async fn cold_loaded_session_captures_its_next_prompt() {
+    harn_clock::test_support::with_local_tasks(async {
+        use harn_session_store::{CreateSession, SessionStore, SqliteSessionStore};
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git").arg("-C").arg(&root).args(args).status().unwrap().success());
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@example.com"]);
+        git(&["config", "user.name", "t"]);
+        let pipeline = root.join("test.harn");
+        std::fs::write(&pipeline, "pipeline default(harness: Harness) { 42 }\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "init"]);
+        std::fs::create_dir(root.join(".harn")).unwrap();
+        let session = "loaded-checkpoint-session";
+        let store = SqliteSessionStore::open(root.join(".harn/session-store.sqlite")).unwrap();
+        store.create(CreateSession {
+            id: Some(session.to_string()),
+            cwd: Some(root.display().to_string()),
+            project_scope: Some(root.display().to_string()),
+            ..CreateSession::default()
+        }).await.unwrap();
+        drop(store);
+
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+        let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+        let config = AcpServerConfig::for_pipeline(pipeline.to_string_lossy().into_owned());
+        let _server = tokio::task::spawn_local(super::super::run_acp_channel_server(config, request_rx, response_tx));
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":1, "method":"session/load",
+            "params":{"sessionId":session, "cwd":root.to_string_lossy(), "environmentPolicy":{"kind":"isolated", "grants":[]}, "workspaceCheckpoint":true},
+        })).unwrap();
+        let loaded = recv_response_with_id(&mut response_rx, 1).await;
+        assert_eq!(loaded["result"]["workspaceCheckpointTracking"], true, "{loaded}");
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":2, "method":"session/prompt",
+            "params":{"sessionId":session, "messageId":"after-load", "prompt":[{"type":"text", "text":"hello"}]},
+        })).unwrap();
+        let response = harn_clock::test_support::within("loaded prompt response", async {
+            loop {
+                let message = recv_json(&mut response_rx).await;
+                if message["method"] == "host/capabilities" {
+                    reply_empty_result(&request_tx, &message);
+                } else if message["id"] == 2 {
+                    break message;
+                }
+            }
+        }).await;
+        assert!(response["error"].is_null(), "{response}");
+        let plan = harn_hostlib::workspace_checkpoint::plan(session, "after-load").unwrap();
+        assert!(matches!(plan, harn_hostlib::workspace_checkpoint::Outcome::Ready(_)), "{plan:?}");
+        harn_hostlib::workspace_checkpoint::drop_session(session);
+    }).await;
+}
+
+#[cfg(feature = "hostlib")]
+#[tokio::test(flavor = "current_thread")]
 async fn opted_in_prompt_captures_its_caller_identity_at_admission() {
     harn_clock::test_support::with_local_tasks(async {
     let dir = tempfile::TempDir::new().unwrap();
