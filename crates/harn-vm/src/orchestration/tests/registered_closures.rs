@@ -286,6 +286,154 @@ fn registered_provider_closure_resolves_sibling_fn_after_registering_vm_dropped(
     );
 }
 
+fn run_transitive_provider_probe(
+    drop_registration_vm: bool,
+    namespace: bool,
+) -> Result<String, String> {
+    clear_execution_policy_stacks();
+    crate::llm::reminder_providers::clear_reminder_providers();
+    clear_session_hooks();
+    let rt = crate::test_support::current_thread_runtime();
+    let result = rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("temporary module root");
+        std::fs::write(
+            dir.path().join("leaf.harn"),
+            r#"pub fn host_pipeline_input() { return "reached" }"#,
+        )
+        .unwrap();
+        let middle = if namespace {
+            r#"import * as leaf from "./leaf"
+pub fn active_session_verify_command() { return leaf.host_pipeline_input() }"#
+        } else {
+            r#"import { host_pipeline_input } from "./leaf"
+pub fn active_session_verify_command() { return host_pipeline_input() }"#
+        };
+        std::fs::write(dir.path().join("middle.harn"), middle).unwrap();
+        std::fs::write(
+            dir.path().join("provider.harn"),
+            r#"import { active_session_verify_command } from "./middle"
+pub fn register(agent: HarnessAgent) {
+  agent.register_reminder_provider({
+    id: "transitive-provider", subscribes_to: ["session_start"],
+    evaluate: { ctx ->
+      assert(active_session_verify_command() == "reached", "the imported leaf ran")
+      return [{reminder: {body: "reached"}}]
+    },
+  })
+  agent.register_session_hook("session_start", { _harness, _payload ->
+    assert(active_session_verify_command() == "reached", "the hook's imported leaf ran")
+    return {block: true, reason: "transitive hook reached"}
+  })
+}"#,
+        )
+        .unwrap();
+        let mut registration_vm = crate::new_vm();
+        crate::stdlib::register_vm_stdlib(&mut registration_vm);
+        let leaf_exports = registration_vm
+            .load_module_exports(&dir.path().join("leaf.harn"))
+            .await
+            .expect("load leaf module");
+        let leaf_state = leaf_exports["host_pipeline_input"]
+            .module_state_for_test()
+            .expect("leaf module has state");
+        let leaf_weak = Arc::downgrade(&leaf_state);
+        drop(leaf_state);
+        drop(leaf_exports);
+        let exports = registration_vm
+            .load_module_exports(&dir.path().join("provider.harn"))
+            .await
+            .expect("load provider module graph");
+        let register = exports.get("register").expect("provider exported").clone();
+        let agent = match registration_vm.root_harness_value().unwrap() {
+            crate::value::VmValue::Harness(root) => {
+                crate::value::VmValue::harness(root.sub_handle("agent").unwrap())
+            }
+            _ => unreachable!(),
+        };
+        registration_vm
+            .call_closure_pub(&register, &[agent])
+            .await
+            .expect("register provider");
+        drop(register);
+        drop(exports);
+        let registration_vm = if drop_registration_vm {
+            drop(registration_vm);
+            None
+        } else {
+            Some(registration_vm)
+        };
+
+        let mut vm = crate::new_vm();
+        crate::stdlib::register_vm_stdlib(&mut vm);
+        vm.register_async_builtin("__test_fire_reminders", |ctx, _args| async move {
+            let report = crate::llm::reminder_providers::evaluate_and_inject(
+                Some(&ctx),
+                crate::orchestration::HookEvent::SessionStart,
+                "transitive-provider-probe",
+                serde_json::json!({}),
+                serde_json::json!({}),
+            )
+            .await?;
+            Ok(crate::json_to_vm_value(&report))
+        });
+        let chunk = crate::compile_source(
+            r#"pipeline main(harness: Harness) {
+  const session = harness.agent.open("transitive-provider-probe")
+  harness.agent.reset(session)
+  const hook = __host_fire_session_hook("session_start", {session: {id: session}})
+  assert(hook.control == "block" && hook.reason == "transitive hook reached", "the hook fired")
+  const report = __test_fire_reminders()
+  harness.stdio.println(json_stringify(report))
+}"#,
+        )
+        .expect("compile reminder firing pipeline");
+        let outcome = vm.execute(&chunk).await;
+        let result = outcome
+            .map(|_| vm.output().to_string())
+            .map_err(|error| error.to_string());
+        drop(registration_vm);
+        (result, leaf_weak)
+    }));
+    clear_execution_policy_stacks();
+    crate::llm::reminder_providers::clear_reminder_providers();
+    clear_session_hooks();
+    assert!(
+        result.1.upgrade().is_none(),
+        "unregister must release the imported module scope"
+    );
+    result.0
+}
+
+fn assert_transitive_provider_fired(result: Result<String, String>) {
+    let output = result.expect("the provider must resolve its transitive imports");
+    let report: serde_json::Value =
+        serde_json::from_str(output.trim()).expect("reminder report JSON");
+    let reports = report["reports"].as_array().expect("reminder reports");
+    let fired = reports
+        .iter()
+        .find(|item| item["provider"] == "transitive-provider")
+        .expect("the provider must fire");
+    assert_eq!(
+        fired["body_bytes"], 7,
+        "the expected reminder was injected: {report}"
+    );
+}
+
+#[test]
+fn registered_provider_resolves_transitive_import_while_registering_vm_is_alive() {
+    assert_transitive_provider_fired(run_transitive_provider_probe(false, false));
+}
+
+#[test]
+fn registered_provider_resolves_transitive_import_after_registering_vm_dropped() {
+    assert_transitive_provider_fired(run_transitive_provider_probe(true, false));
+}
+
+#[test]
+fn registered_provider_resolves_transitive_namespace_after_registering_vm_dropped() {
+    assert_transitive_provider_fired(run_transitive_provider_probe(true, true));
+}
+
 // Same invariant for a `register_session_hook` handler closure that calls a
 // sibling module `pub fn`, fired from a VM other than the registering one.
 #[test]
