@@ -1,6 +1,6 @@
 {
-  "schema_version": 13,
-  "schema": "https://harnlang.com/schemas/provider-catalog.v13.json",
+  "schema_version": 14,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v14.json",
   "generated_by": "harn provider catalog generate",
   "providers": [
     {

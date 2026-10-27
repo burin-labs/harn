@@ -43,7 +43,7 @@ pub const EMBEDDED_PROVIDERS_TOML: &str = include_str!("providers.toml");
 /// Generated capability snapshot packaged with this crate.
 pub const EMBEDDED_CAPABILITIES_TOML: &str = include_str!("capabilities.toml");
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 13;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 14;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v13.json";
+    "https://harnlang.com/schemas/provider-catalog.v14.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog generate";
