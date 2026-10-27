@@ -40,6 +40,8 @@
 //! harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY,to=in_process agent.harn
 //! ```
 
+use std::sync::Arc;
+
 use clap::ValueEnum;
 
 use harn_vm::security::{
@@ -80,7 +82,7 @@ pub(crate) struct EnvironmentPolicyConfig {
     grants: Vec<GrantSpec>,
     // Launch reports the canonical sanitized error; its source text is unused.
     host_inference_boundary: Result<Option<harn_vm::llm::api::InferenceBoundary>, ()>,
-    host_account_attestations: Result<Vec<harn_vm::llm::api::ProviderAccountAttestation>, ()>,
+    host_account_attestations: Result<Arc<Vec<harn_vm::llm::api::ProviderAccountAttestation>>, ()>,
 }
 
 impl Default for EnvironmentPolicyConfig {
@@ -91,6 +93,7 @@ impl Default for EnvironmentPolicyConfig {
             host_inference_boundary: harn_vm::llm::api::InferenceBoundary::capture_process()
                 .map_err(|_| ()),
             host_account_attestations: harn_vm::llm::api::capture_process_attestations()
+                .map(Arc::new)
                 .map_err(|_| ()),
         }
     }
@@ -124,6 +127,7 @@ impl EnvironmentPolicyConfig {
             host_inference_boundary: harn_vm::llm::api::InferenceBoundary::capture_process()
                 .map_err(|_| ()),
             host_account_attestations: harn_vm::llm::api::capture_process_attestations()
+                .map(Arc::new)
                 .map_err(|_| ()),
         })
     }
@@ -152,7 +156,7 @@ impl EnvironmentPolicyConfig {
         .map(|environment| {
             environment
                 .with_host_inference_boundary(*host)
-                .with_host_account_attestations(attestations.clone())
+                .with_host_account_attestations(attestations.as_ref().clone())
         })
     }
 }

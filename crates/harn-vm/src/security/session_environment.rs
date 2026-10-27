@@ -50,6 +50,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::sync::Arc;
 
 use super::environment_policy::environment_names_equal;
 use serde::{Deserialize, Serialize};
@@ -665,7 +666,7 @@ pub struct SessionEnvironment {
     launcher_snapshot: BTreeMap<String, String>,
     grants: Vec<SessionGrant>,
     host_inference_boundary: Option<crate::llm::api::InferenceBoundary>,
-    host_account_attestations: Option<Vec<crate::llm::api::ProviderAccountAttestation>>,
+    host_account_attestations: Option<Arc<Vec<crate::llm::api::ProviderAccountAttestation>>>,
 }
 
 impl SessionEnvironment {
@@ -760,13 +761,15 @@ impl SessionEnvironment {
         mut self,
         attestations: Vec<crate::llm::api::ProviderAccountAttestation>,
     ) -> Self {
-        self.host_account_attestations = Some(match self.host_account_attestations.take() {
-            Some(existing) => existing
-                .into_iter()
-                .filter(|fact| attestations.contains(fact))
-                .collect(),
-            None => attestations,
-        });
+        self.host_account_attestations =
+            Some(Arc::new(match self.host_account_attestations.take() {
+                Some(existing) => existing
+                    .iter()
+                    .filter(|fact| attestations.contains(fact))
+                    .cloned()
+                    .collect(),
+                None => attestations,
+            }));
         self.launcher_snapshot.retain(|name, _| {
             !environment_names_equal(name, crate::llm::api::HOST_ACCOUNT_ATTESTATIONS_ENV)
         });
@@ -778,7 +781,7 @@ impl SessionEnvironment {
     ) -> &[crate::llm::api::ProviderAccountAttestation] {
         self.host_account_attestations
             .as_deref()
-            .unwrap_or_default()
+            .map_or(&[], Vec::as_slice)
     }
 
     /// An isolated environment with no grants.

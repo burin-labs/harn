@@ -213,7 +213,9 @@ fn main(harness: Harness) {
         .env("HARN_PROVIDER_ACCOUNT_ATTESTATIONS_JSON", "[]")
         .env("ACCOUNT_TEST_SENTINEL", "retained")
         .env_remove("HARN_INFERENCE_BOUNDARY_JSON")
-        .args(["run", "-e", source])
+        // Exercise the session environment independently of host sandbox
+        // availability (some macOS CI hosts cannot provide confinement).
+        .args(["run", "--no-sandbox", "-e", source])
         .output()
         .unwrap();
     assert!(
@@ -229,7 +231,7 @@ fn main(harness: Harness) {
     let malformed = harn_e2e_command()
         .current_dir(temp.path())
         .env("HARN_PROVIDER_ACCOUNT_ATTESTATIONS_JSON", "not-valid-json")
-        .args(["run", "-e", source])
+        .args(["run", "--no-sandbox", "-e", source])
         .output()
         .unwrap();
     assert!(!malformed.status.success());
