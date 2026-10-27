@@ -187,7 +187,13 @@ pub(crate) fn governing_rule(
             .iter()
             .any(|control| control.effect == "training"),
     };
-    decide(boundary, provider, model, facts)
+    decide(boundary, provider, model, facts).map_err(|mut denial| {
+        if let (DenialRule::TrainingUnknown, Some(note)) = (denial.rule, &controls.note) {
+            denial.message.push_str(". ");
+            denial.message.push_str(note);
+        }
+        denial
+    })
 }
 
 pub(crate) fn catalog_evidence(

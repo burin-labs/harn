@@ -146,7 +146,11 @@ fn preview_needs_positive_open_weight_evidence_and_uses_model_training_overrides
         super::super::InferenceReach::HostedOpenWeight,
     ));
     assert_eq!(open.open_weight, Some(true));
-    assert_eq!(open.status, InferenceAdmissionStatus::Admitted);
+    assert_eq!(open.status, InferenceAdmissionStatus::Unknown);
+    assert_eq!(
+        open.governing_rule.as_deref(),
+        Some("inference_boundary.training_unknown")
+    );
     let missing = preview_inference_admission(&request(
         "mistral",
         "unknown-weight-model",
