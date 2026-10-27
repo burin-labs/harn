@@ -58,7 +58,7 @@ async fn orchestrator_json_logs_stay_on_stderr() {
     let stderr = child.stderr.take().expect("stderr pipe");
     let mut lines = BufReader::new(stderr).lines();
     let mut saw_json_log = false;
-    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    harn_clock::test_support::within("orchestrator readiness", async {
         while let Some(line) = lines.next_line().await.expect("stderr line") {
             if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
                 saw_json_log |= event.to_string().contains("orchestrator starting");
@@ -69,16 +69,15 @@ async fn orchestrator_json_logs_stay_on_stderr() {
         }
         panic!("orchestrator exited before readiness");
     })
-    .await
-    .expect("orchestrator readiness timeout");
+    .await;
     assert!(saw_json_log, "the JSON log must actually reach stderr");
     let pid = i32::try_from(child.id().expect("live child")).unwrap();
     // SAFETY: the pid belongs to the child owned by this test.
     assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
-    let output = tokio::time::timeout(std::time::Duration::from_secs(30), child.wait_with_output())
-        .await
-        .expect("shutdown timeout")
-        .expect("wait for orchestrator");
+    let output =
+        harn_clock::test_support::within("orchestrator shutdown", child.wait_with_output())
+            .await
+            .expect("wait for orchestrator");
     assert!(
         output.status.success(),
         "orchestrator exit: {}",
