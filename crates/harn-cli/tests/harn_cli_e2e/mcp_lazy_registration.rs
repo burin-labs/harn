@@ -171,3 +171,16 @@ fn argument_errors_are_short_unless_explained() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("Usage:"));
 }
+
+#[test]
+fn invalid_run_options_use_the_common_error_sink() {
+    let output = harn_e2e_command()
+        .args(["run", "-e", "1", "--allow-unsigned"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("[harn] error:"), "{stderr}");
+    assert!(stderr.contains("cannot be combined with `-e`"), "{stderr}");
+}

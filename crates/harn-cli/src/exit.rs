@@ -58,9 +58,7 @@ impl RunFailure {
 }
 
 pub(crate) fn command_error(message: &str) -> ! {
-    Cli::command()
-        .error(ErrorKind::ValueValidation, message)
-        .exit()
+    fatal_error_with_code(message, 2)
 }
 
 pub(crate) fn fatal_error(message: impl std::fmt::Display) -> ! {
