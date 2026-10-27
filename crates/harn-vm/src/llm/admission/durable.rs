@@ -21,7 +21,7 @@ const SCALE: i64 = 1_000_000;
 const LIFETIME_PERIOD: &str = "L";
 const SQLITE_SCHEMA: RuntimeSqliteSchema = RuntimeSqliteSchema::new(
     "machine_spend_quota",
-    3,
+    4,
     "CREATE TABLE IF NOT EXISTS spend_policy (scope TEXT PRIMARY KEY, daily_limit INTEGER, monthly_limit INTEGER, contract_broken INTEGER NOT NULL DEFAULT 0);
      CREATE TABLE IF NOT EXISTS spend_period (scope TEXT NOT NULL, period TEXT NOT NULL, reserved INTEGER NOT NULL CHECK(reserved >= 0), PRIMARY KEY(scope, period));
      CREATE TABLE IF NOT EXISTS spend_attempt (id TEXT PRIMARY KEY, scope TEXT NOT NULL, day TEXT NOT NULL, month TEXT NOT NULL, reserved INTEGER NOT NULL CHECK(reserved >= 0), actual INTEGER, settled INTEGER NOT NULL DEFAULT 0, created_ms INTEGER NOT NULL);
@@ -96,6 +96,8 @@ pub struct MachineSpendReceipt {
     pub lifetime_reserved_microusd: i64,
     pub lifetime_actual_known_microusd: i64,
     pub lifetime_usage_unknown_attempts: u64,
+    pub lifetime_unsettled_attempts: u64,
+    pub lifetime_unpriced_attempts: u64,
     pub lifetime_remaining_microusd: Option<i64>,
     pub daily_reset_unix_ms: i64,
     pub monthly_reset_unix_ms: i64,
@@ -133,18 +135,43 @@ struct LifetimeSpend {
     reserved: i64,
     actual_known: i64,
     usage_unknown: u64,
+    unsettled: u64,
+    unpriced: u64,
 }
 
 fn lifetime_spend(connection: &Connection, scope: &str) -> Result<LifetimeSpend, VmError> {
-    connection.query_row(
-        "SELECT COALESCE(SUM(reserved), 0), COALESCE(SUM(actual), 0), COALESCE(SUM(CASE WHEN actual IS NULL THEN 1 ELSE 0 END), 0) FROM spend_attempt WHERE scope = ?1",
-        [scope],
-        |row| Ok(LifetimeSpend {
-            reserved: row.get(0)?,
-            actual_known: row.get(1)?,
-            usage_unknown: row.get::<_, i64>(2)?.try_into().unwrap_or(u64::MAX),
-        }),
-    ).map_err(db_error)
+    connection
+        .query_row(
+            concat!(
+                "SELECT COALESCE(SUM(reserved), 0), COALESCE(SUM(actual), 0), ",
+                "COALESCE(SUM(CASE WHEN actual IS NULL THEN 1 ELSE 0 END), 0), ",
+                "COALESCE(SUM(CASE WHEN settled = 0 THEN 1 ELSE 0 END), 0), ",
+                "COALESCE(SUM(CASE WHEN settled = 1 AND actual IS NULL THEN 1 ELSE 0 END), 0) ",
+                "FROM spend_attempt WHERE scope = ?1",
+            ),
+            [scope],
+            |row| {
+                Ok(LifetimeSpend {
+                    reserved: row.get(0)?,
+                    actual_known: row.get(1)?,
+                    usage_unknown: row.get::<_, i64>(2)?.try_into().unwrap_or(u64::MAX),
+                    unsettled: row.get::<_, i64>(3)?.try_into().unwrap_or(u64::MAX),
+                    unpriced: row.get::<_, i64>(4)?.try_into().unwrap_or(u64::MAX),
+                })
+            },
+        )
+        .map_err(db_error)
+}
+
+fn unresolved_usage(
+    connection: &Connection,
+    scope: &str,
+) -> Result<Option<LifetimeSpend>, VmError> {
+    if !read_stop_on_unknown_usage(connection, scope)? {
+        return Ok(None);
+    }
+    let usage = lifetime_spend(connection, scope)?;
+    Ok((usage.unsettled > 0 || usage.unpriced > 0).then_some(usage))
 }
 
 #[derive(Debug)]
@@ -178,6 +205,31 @@ impl MachineSpendQuota {
         policy: MachineSpendPolicy,
         clock: Arc<dyn harn_clock::Clock>,
     ) -> Result<Self, VmError> {
+        Self::open_with_clock_and_usage_policy(path, scope, policy, clock, false)
+    }
+
+    pub(super) fn open_with_usage_policy(
+        path: impl AsRef<Path>,
+        scope: impl Into<String>,
+        policy: MachineSpendPolicy,
+        stop_on_unknown_usage: bool,
+    ) -> Result<Self, VmError> {
+        Self::open_with_clock_and_usage_policy(
+            path,
+            scope,
+            policy,
+            harn_clock::RealClock::arc(),
+            stop_on_unknown_usage,
+        )
+    }
+
+    fn open_with_clock_and_usage_policy(
+        path: impl AsRef<Path>,
+        scope: impl Into<String>,
+        policy: MachineSpendPolicy,
+        clock: Arc<dyn harn_clock::Clock>,
+        stop_on_unknown_usage: bool,
+    ) -> Result<Self, VmError> {
         let scope = scope.into();
         Self::validate_policy(path.as_ref(), &scope, &policy)?;
         let config = Arc::new(QuotaConfig {
@@ -188,8 +240,8 @@ impl MachineSpendQuota {
         let connection = connect(&config.path)?;
         connection
             .execute(
-                "INSERT OR IGNORE INTO spend_policy(scope, daily_limit, monthly_limit, lifetime_limit) VALUES (?1, ?2, ?3, ?4)",
-                params![config.scope, policy.daily_limit_microusd, policy.monthly_limit_microusd, policy.lifetime_limit_microusd],
+                "INSERT OR IGNORE INTO spend_policy(scope, daily_limit, monthly_limit, lifetime_limit, stop_on_unknown_usage) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![config.scope, policy.daily_limit_microusd, policy.monthly_limit_microusd, policy.lifetime_limit_microusd, stop_on_unknown_usage],
             )
             .map_err(db_error)?;
         let stored = read_policy(&connection, &config.scope)?;
@@ -197,6 +249,12 @@ impl MachineSpendQuota {
             return Err(error(
                 DenialKind::InvalidBudget,
                 "machine spend policy differs from the durable policy; use an authorized policy update",
+            ));
+        }
+        if read_stop_on_unknown_usage(&connection, &config.scope)? != stop_on_unknown_usage {
+            return Err(error(
+                DenialKind::InvalidBudget,
+                "machine spend usage policy differs from the durable scope",
             ));
         }
         Ok(Self { inner: config })
@@ -370,6 +428,15 @@ impl MachineSpendQuota {
                 "machine spend scope has an unresolved provider contract violation",
             ));
         }
+        if let Some(usage) = unresolved_usage(&tx, &self.inner.scope)? {
+            return Err(error(
+                DenialKind::UnresolvedUsage,
+                &format!(
+                    "machine spend scope has {} unsettled and {} unpriced attempts",
+                    usage.unsettled, usage.unpriced
+                ),
+            ));
+        }
         for (period, kind, limit, reset) in [
             (
                 day.as_str(),
@@ -417,7 +484,7 @@ impl MachineSpendQuota {
         })
     }
 
-    /// Budget preflight reads indexed counters, without scanning usage history.
+    /// Budget preflight reads indexed counters and checks strict usage history.
     pub(super) fn remaining_microusd(&self) -> Result<i64, VmError> {
         let (day, month, _, _) = periods(self.inner.clock.now_utc());
         let mut connection = connect(&self.inner.path)?;
@@ -425,7 +492,9 @@ impl MachineSpendQuota {
             .transaction_with_behavior(TransactionBehavior::Deferred)
             .map_err(db_error)?;
         let policy = read_policy(&snapshot, &self.inner.scope)?;
-        if contract_broken(&snapshot, &self.inner.scope)? {
+        if contract_broken(&snapshot, &self.inner.scope)?
+            || unresolved_usage(&snapshot, &self.inner.scope)?.is_some()
+        {
             return Ok(0);
         }
         let mut remaining = None;
@@ -472,6 +541,8 @@ impl MachineSpendQuota {
             lifetime_reserved_microusd: lifetime.reserved,
             lifetime_actual_known_microusd: lifetime.actual_known,
             lifetime_usage_unknown_attempts: lifetime.usage_unknown,
+            lifetime_unsettled_attempts: lifetime.unsettled,
+            lifetime_unpriced_attempts: lifetime.unpriced,
             lifetime_remaining_microusd: policy
                 .lifetime_limit_microusd
                 .map(|limit| limit.saturating_sub(lifetime.reserved).max(0)),
@@ -577,6 +648,14 @@ fn connect(path: &Path) -> Result<Connection, VmError> {
                     tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} INTEGER"))?;
                 }
             }
+            let mut statement = tx.prepare("PRAGMA table_info(spend_policy)")?;
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            drop(statement);
+            if !columns.iter().any(|name| name == "stop_on_unknown_usage") {
+                tx.execute_batch("ALTER TABLE spend_policy ADD COLUMN stop_on_unknown_usage INTEGER NOT NULL DEFAULT 0")?;
+            }
             // Upgrade the existing period projection once, in the schema
             // transaction. Admission then reads one indexed row per ceiling.
             tx.execute(
@@ -624,6 +703,16 @@ fn contract_broken(connection: &Connection, scope: &str) -> Result<bool, VmError
             "SELECT contract_broken FROM spend_policy WHERE scope = ?1",
             [scope],
             |row| row.get::<_, bool>(0),
+        )
+        .map_err(db_error)
+}
+
+fn read_stop_on_unknown_usage(connection: &Connection, scope: &str) -> Result<bool, VmError> {
+    connection
+        .query_row(
+            "SELECT stop_on_unknown_usage FROM spend_policy WHERE scope = ?1",
+            [scope],
+            |row| row.get(0),
         )
         .map_err(db_error)
 }
