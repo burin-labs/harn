@@ -21,6 +21,8 @@ use crate::value::VmError;
 pub const CONTEXT_EVAL_SCHEMA_VERSION: u32 = 1;
 pub const CONTEXT_EVAL_MANIFEST_TYPE: &str = "harn.context_eval.manifest.v1";
 pub const CONTEXT_EVAL_REPORT_TYPE: &str = "harn.context_eval.report.v1";
+pub const CONTEXT_EVAL_REPORT_V2_TYPE: &str = "harn.context_eval.report.v2";
+pub const CONTEXT_EVAL_REPORT_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -151,6 +153,8 @@ pub struct ContextEvalObserved {
     pub output_tokens: Option<usize>,
     #[serde(default, alias = "cost-usd")]
     pub cost_usd: Option<f64>,
+    #[serde(default, alias = "known-cost-usd")]
+    pub known_cost_usd: Option<f64>,
     #[serde(default, alias = "cache-hit")]
     pub cache_hit: Option<bool>,
     #[serde(default, alias = "compaction-count")]
@@ -188,6 +192,43 @@ pub struct ContextEvalAggregate {
     pub total_input_tokens: usize,
     pub total_output_tokens: usize,
     pub total_cost_usd: f64,
+    pub total_compaction_count: usize,
+    pub total_error_recovery_count: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ContextEvalReportV2 {
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    pub schema_version: u32,
+    pub manifest_id: String,
+    pub manifest_name: Option<String>,
+    pub pass: bool,
+    pub total_runs: usize,
+    pub passed_runs: usize,
+    pub failed_runs: usize,
+    pub total_tasks: usize,
+    pub total_modes: usize,
+    pub aggregate: ContextEvalAggregateV2,
+    pub modes: Vec<ContextEvalModeSummary>,
+    pub tasks: Vec<ContextEvalTaskSummary>,
+    pub runs: Vec<ContextEvalRunReportV2>,
+    pub metadata: BTreeMap<String, JsonValue>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ContextEvalAggregateV2 {
+    pub mean_final_correctness: f64,
+    pub mean_tool_call_quality: f64,
+    pub total_latency_ms: u64,
+    pub total_input_tokens: usize,
+    pub total_output_tokens: usize,
+    pub total_cost_usd: Option<f64>,
+    pub total_known_cost_usd: f64,
+    pub cost_measured_runs: usize,
+    pub cost_unmeasured_runs: usize,
     pub total_compaction_count: usize,
     pub total_error_recovery_count: usize,
 }
@@ -235,6 +276,32 @@ pub struct ContextEvalRunReport {
     pub input_tokens: usize,
     pub output_tokens: usize,
     pub cost_usd: f64,
+    pub compaction_count: usize,
+    pub projection: ContextEvalProjectionReport,
+    pub context: ContextEvalContextReport,
+    pub cache: ContextEvalCacheReport,
+    pub error_recovery_count: usize,
+    pub preprocessing: ContextEvalPreprocessing,
+    pub failures: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ContextEvalRunReportV2 {
+    pub run_id: String,
+    pub task_id: String,
+    pub mode_id: String,
+    pub mode_kind: String,
+    pub status: String,
+    pub passed: bool,
+    pub final_correctness: ContextEvalCorrectness,
+    pub reads_before_first_edit: usize,
+    pub tool_call_quality: ContextEvalToolQuality,
+    pub latency_ms: u64,
+    pub input_tokens: usize,
+    pub output_tokens: usize,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: Option<f64>,
     pub compaction_count: usize,
     pub projection: ContextEvalProjectionReport,
     pub context: ContextEvalContextReport,
@@ -334,6 +401,37 @@ pub fn load_context_eval_manifest(path: &Path) -> Result<ContextEvalManifest, Vm
 pub fn evaluate_context_eval_manifest(
     manifest: &ContextEvalManifest,
 ) -> Result<ContextEvalReport, VmError> {
+    let report = evaluate_context_eval_manifest_v2(manifest)?;
+    context_eval_report_v1(&report)
+        .map_err(|error| VmError::Runtime(format!("failed to project context eval v1: {error}")))
+}
+
+/// Project the deprecated v1 numeric cost fields from the v2 report.
+pub fn context_eval_report_v1(
+    report: &ContextEvalReportV2,
+) -> Result<ContextEvalReport, serde_json::Error> {
+    let mut value = serde_json::to_value(report)?;
+    value["_type"] = serde_json::json!(CONTEXT_EVAL_REPORT_TYPE);
+    value["schema_version"] = serde_json::json!(CONTEXT_EVAL_SCHEMA_VERSION);
+    if value["aggregate"]["total_cost_usd"].is_null() {
+        value["aggregate"]["total_cost_usd"] = serde_json::json!(round6(
+            report.runs.iter().filter_map(|run| run.cost_usd).sum()
+        ));
+    }
+    for run in value["runs"]
+        .as_array_mut()
+        .expect("serialized report has runs")
+    {
+        if run["cost_usd"].is_null() {
+            run["cost_usd"] = serde_json::json!(0.0);
+        }
+    }
+    serde_json::from_value(value)
+}
+
+pub fn evaluate_context_eval_manifest_v2(
+    manifest: &ContextEvalManifest,
+) -> Result<ContextEvalReportV2, VmError> {
     let mut manifest = manifest.clone();
     normalize_context_eval_manifest(&mut manifest)?;
 
@@ -371,9 +469,9 @@ pub fn evaluate_context_eval_manifest(
     let passed_runs = runs.iter().filter(|run| run.passed).count();
     let failed_runs = total_runs.saturating_sub(passed_runs);
     let aggregate = aggregate_runs(&runs);
-    Ok(ContextEvalReport {
-        type_name: CONTEXT_EVAL_REPORT_TYPE.to_string(),
-        schema_version: CONTEXT_EVAL_SCHEMA_VERSION,
+    Ok(ContextEvalReportV2 {
+        type_name: CONTEXT_EVAL_REPORT_V2_TYPE.to_string(),
+        schema_version: CONTEXT_EVAL_REPORT_VERSION,
         manifest_id: manifest.id,
         manifest_name: manifest.name,
         pass: failed_runs == 0,
@@ -452,6 +550,10 @@ fn normalize_context_eval_manifest(manifest: &mut ContextEvalManifest) -> Result
                 task.id
             )));
         }
+        validate_observed_cost(&task.observed, &task.id)?;
+        for (mode_id, observation) in &task.mode_observations {
+            validate_observed_cost(observation, &format!("{}::{mode_id}", task.id))?;
+        }
         for (artifact_index, artifact) in task.artifacts.iter_mut().enumerate() {
             normalize_eval_artifact(artifact, &task.id, artifact_index);
         }
@@ -462,6 +564,20 @@ fn normalize_context_eval_manifest(manifest: &mut ContextEvalManifest) -> Result
                 .cmp(&right.order.unwrap_or(usize::MAX))
                 .then_with(|| left.name.cmp(&right.name))
         });
+    }
+    Ok(())
+}
+
+fn validate_observed_cost(observed: &ContextEvalObserved, subject: &str) -> Result<(), VmError> {
+    if [observed.cost_usd, observed.known_cost_usd]
+        .into_iter()
+        .flatten()
+        .any(|cost| !cost.is_finite() || cost < 0.0)
+        || matches!((observed.cost_usd, observed.known_cost_usd), (Some(exact), Some(known)) if known > exact)
+    {
+        return Err(VmError::Runtime(format!(
+            "context eval observation '{subject}' costs must be finite and non-negative, and known_cost_usd cannot exceed cost_usd"
+        )));
     }
     Ok(())
 }
@@ -493,7 +609,7 @@ fn normalize_eval_artifact(artifact: &mut ArtifactRecord, task_id: &str, index: 
 fn evaluate_task_mode(
     task: &ContextEvalTask,
     mode: &ContextEvalMode,
-) -> Result<ContextEvalRunReport, VmError> {
+) -> Result<ContextEvalRunReportV2, VmError> {
     let prepared = prepare_mode_run(task, mode)?;
     let mode_id = mode.id.clone();
     let mode_kind = mode_kind(mode);
@@ -530,7 +646,8 @@ fn evaluate_task_mode(
         .unwrap_or(0);
     let compaction_count = observed.compaction_count.unwrap_or(0) + mode_compaction_count(mode);
     let latency_ms = observed.latency_ms.unwrap_or(0);
-    let cost_usd = observed.cost_usd.unwrap_or(0.0);
+    let cost_usd = observed.cost_usd;
+    let known_cost_usd = cost_usd.or(observed.known_cost_usd);
     let mut failures = Vec::new();
     if !final_correctness.required_terms_missing.is_empty() {
         failures.push(format!(
@@ -568,7 +685,7 @@ fn evaluate_task_mode(
         .cache_namespace
         .clone()
         .unwrap_or_else(|| "harn.context_eval".to_string());
-    Ok(ContextEvalRunReport {
+    Ok(ContextEvalRunReportV2 {
         run_id: format!("{}__{}", task.id, mode.id),
         task_id: task.id.clone(),
         mode_id,
@@ -582,6 +699,7 @@ fn evaluate_task_mode(
         input_tokens,
         output_tokens,
         cost_usd,
+        known_cost_usd,
         compaction_count,
         projection: prepared.projection,
         context: ContextEvalContextReport {
@@ -962,17 +1080,22 @@ fn error_recovery_count(events: &[ContextEvalToolEvent]) -> usize {
         .count()
 }
 
-fn aggregate_runs(runs: &[ContextEvalRunReport]) -> ContextEvalAggregate {
+fn aggregate_runs(runs: &[ContextEvalRunReportV2]) -> ContextEvalAggregateV2 {
     let total = runs.len();
     let mean_final_correctness = mean(total, runs.iter().map(|run| run.final_correctness.score));
     let mean_tool_call_quality = mean(total, runs.iter().map(|run| run.tool_call_quality.score));
-    ContextEvalAggregate {
+    let cost_measured_runs = runs.iter().filter(|run| run.cost_usd.is_some()).count();
+    let total_known_cost_usd = round6(runs.iter().filter_map(|run| run.known_cost_usd).sum());
+    ContextEvalAggregateV2 {
         mean_final_correctness,
         mean_tool_call_quality,
         total_latency_ms: runs.iter().map(|run| run.latency_ms).sum(),
         total_input_tokens: runs.iter().map(|run| run.input_tokens).sum(),
         total_output_tokens: runs.iter().map(|run| run.output_tokens).sum(),
-        total_cost_usd: round6(runs.iter().map(|run| run.cost_usd).sum()),
+        total_cost_usd: (total > 0 && cost_measured_runs == total).then_some(total_known_cost_usd),
+        total_known_cost_usd,
+        cost_measured_runs,
+        cost_unmeasured_runs: total - cost_measured_runs,
         total_compaction_count: runs.iter().map(|run| run.compaction_count).sum(),
         total_error_recovery_count: runs.iter().map(|run| run.error_recovery_count).sum(),
     }
@@ -1218,5 +1341,74 @@ mod tests {
         assert_eq!(report.runs[1].reads_before_first_edit, 1);
         assert_eq!(report.runs[1].tool_call_quality.score, 1.0);
         assert_eq!(report.runs[1].cache.stable_input_hash.len(), 64);
+    }
+
+    #[test]
+    fn cost_aggregate_distinguishes_empty_missing_and_measured_zero() {
+        let run = |cost_usd| ContextEvalRunReportV2 {
+            cost_usd,
+            known_cost_usd: cost_usd,
+            ..Default::default()
+        };
+        let empty = aggregate_runs(&[]);
+        assert_eq!(empty.total_cost_usd, None);
+        let missing = aggregate_runs(&[run(None)]);
+        assert_eq!(
+            (
+                missing.total_cost_usd,
+                missing.cost_measured_runs,
+                missing.cost_unmeasured_runs
+            ),
+            (None, 0, 1)
+        );
+        let zero = aggregate_runs(&[run(Some(0.0))]);
+        assert_eq!(
+            (
+                zero.total_cost_usd,
+                zero.cost_measured_runs,
+                zero.cost_unmeasured_runs
+            ),
+            (Some(0.0), 1, 0)
+        );
+        let mixed = aggregate_runs(&[run(Some(0.25)), run(None)]);
+        assert_eq!(
+            (
+                mixed.total_cost_usd,
+                mixed.total_known_cost_usd,
+                mixed.cost_measured_runs,
+                mixed.cost_unmeasured_runs
+            ),
+            (None, 0.25, 1, 1)
+        );
+        let partial = aggregate_runs(&[ContextEvalRunReportV2 {
+            known_cost_usd: Some(0.125),
+            ..Default::default()
+        }]);
+        assert_eq!(
+            (partial.total_cost_usd, partial.total_known_cost_usd),
+            (None, 0.125)
+        );
+    }
+
+    #[test]
+    fn observed_cost_requires_finite_nonnegative_values() {
+        for cost in [-0.01, f64::NAN, f64::INFINITY] {
+            let observed = ContextEvalObserved {
+                cost_usd: Some(cost),
+                ..Default::default()
+            };
+            assert!(validate_observed_cost(&observed, "task").is_err());
+        }
+        let observed = ContextEvalObserved {
+            cost_usd: Some(0.0),
+            ..Default::default()
+        };
+        assert!(validate_observed_cost(&observed, "task").is_ok());
+        let inconsistent = ContextEvalObserved {
+            cost_usd: Some(0.1),
+            known_cost_usd: Some(0.2),
+            ..Default::default()
+        };
+        assert!(validate_observed_cost(&inconsistent, "task").is_err());
     }
 }

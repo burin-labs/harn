@@ -3607,13 +3607,19 @@ compaction, or limited tool disclosure. The local runner does not call an LLM;
 it scores whether each mode exposes enough deterministic context for the task
 and writes:
 
-- `summary.json`: a `harn.context_eval.report.v1` aggregate report
+- `summary.json`: a `harn.context_eval.report.v2` aggregate report
 - `per_run.jsonl`: one machine-readable record per task/mode run
 - `summary.md`: a compact human-readable table
 
 The report schema is checked into
-`spec/schemas/context-eval-report.v1.schema.json` so hosted evaluators,
+`spec/schemas/context-eval-report.v2.schema.json` so hosted evaluators,
 dashboards, and downstream products can ingest the same local artifacts.
+Unmeasured run costs and incomplete totals are null; the aggregate includes a
+known subtotal and measured and unmeasured run counts. `--report-version 1`
+emits the deprecated v1 JSON format for one release, where missing costs are
+represented as zero and the numeric total can be incomplete.
+`--report-version` accepts `1` or `2` and defaults to `2`. The Markdown
+summary always shows whether cost coverage is incomplete.
 
 ### harn eval prompt
 

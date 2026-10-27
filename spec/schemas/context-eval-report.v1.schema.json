@@ -2,6 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/context-eval-report.v1.schema.json",
   "title": "Harn context eval report v1",
+  "deprecated": true,
+  "description": "Deprecated compatibility format. Missing run costs are represented as zero; use v2 for cost coverage and exact totals.",
   "type": "object",
   "required": [
     "_type",
