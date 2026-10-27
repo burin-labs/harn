@@ -385,8 +385,8 @@ async fn shared_registry_shares_on_match_and_isolates_on_mismatch() {
     //
     // Simulate two requests opening the same identity: build the record once
     // through the registry, then a second "request" must adopt it.
-    let key_a = shared::PoolKey::new("postgres://u:p@h/db_a", &[], None, false);
-    let key_b = shared::PoolKey::new("postgres://u:p@h/db_b", &[], None, false);
+    let key_a = shared::PoolKey::new("postgres://u:p@h/db_a", &[], None, false).unwrap();
+    let key_b = shared::PoolKey::new("postgres://u:p@h/db_b", &[], None, false).unwrap();
 
     let rec_a1 = Arc::new(lazy_record());
     let shared_a1 = shared::get_or_insert(key_a.clone(), Arc::clone(&rec_a1));
@@ -480,6 +480,36 @@ async fn open_pool_shares_across_requests_when_registry_installed() {
         "different pool shape must not share"
     );
 
+    // The text and integer render alike but produce different pool limits.
+    let text = dict(&[("max_connections", s("2"))]);
+    let text_pool = open_pool(&ctx, &s(&url), text.as_dict(), false)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        pool_record_from_handle(&h1, "test")
+            .unwrap()
+            .max_connections,
+        2
+    );
+    assert_eq!(
+        pool_record_from_handle(&text_pool, "test")
+            .unwrap()
+            .max_connections,
+        5
+    );
+    assert!(!Arc::ptr_eq(&pool_ptr(&h1), &pool_ptr(&text_pool)));
+
+    // Opaque options cannot produce a safe shared identity.
+    let options = dict(&[("extra", VmValue::task_handle("task"))]);
+    let first = open_pool(&ctx, &s(&url), options.as_dict(), false)
+        .await
+        .unwrap();
+    let second = open_pool(&ctx, &s(&url), options.as_dict(), false)
+        .await
+        .unwrap();
+
+    assert!(!Arc::ptr_eq(&pool_ptr(&first), &pool_ptr(&second)));
     shared::clear_for_test();
 }
 

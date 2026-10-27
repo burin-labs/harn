@@ -583,7 +583,8 @@ async fn open_pool(
     // part of the shared-pool key, so a shared hit always has the same value).
     let application_name = option_string(options, "application_name");
     let shared_key = shared::is_installed()
-        .then(|| shared::PoolKey::new(&primary_url, &replica_urls, options, single_connection));
+        .then(|| shared::PoolKey::new(&primary_url, &replica_urls, options, single_connection))
+        .flatten();
     if let Some(key) = &shared_key {
         if let Some(record) = shared::get(key) {
             return Ok(register_local_pool_handle(
