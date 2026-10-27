@@ -14,7 +14,7 @@ import {
 } from "./agent_shell_guard_test_fixtures"
 
 pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
-  const aliases = { options ->
+  const aliases = { _options ->
     {
       history: "stash push",
       hidden: "stash push",
@@ -103,7 +103,7 @@ pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
 }
 
 pipeline test_git_global_options_without_a_subcommand_cannot_execute_aliases() {
-  const unreadable = { options -> {"<unreadable>": ""} }
+  const unreadable = { _options -> {"<unreadable>": ""} }
   for command in [
     "git --version",
     "/usr/bin/git --version",
@@ -118,6 +118,11 @@ pipeline test_git_queries_use_the_selected_trusted_executable() {
   assert(git_program_in_hook_path("/usr/bin:/opt/git/bin/", "git", ":"))
   assert(git_program_in_hook_path("/usr/bin:/opt/git/bin/", "/opt/git/bin/git", ":"))
   assert(git_program_in_hook_path("C:\\Git\\bin;C:\\Windows", "C:\\Git\\bin\\git.exe", ";"))
+  assert(git_program_in_hook_path("\\\\server\\share\\bin", "\\\\server\\share\\bin\\git.exe", ";"))
+  assert(!git_program_in_hook_path("\\\\server\\share\\bin:/usr/bin", "git", ":"))
+  assert(
+    !git_program_in_hook_path("\\\\server\\share\\bin:/usr/bin", "\\\\server\\share\\bin/git", ":"),
+  )
   assert(git_program_in_hook_path(".:/usr/bin:", "/usr/bin/git", ":"))
   for program in ["./git", "../bin/git", "/payload/bin/git"] {
     assert(!git_program_in_hook_path("/usr/bin:/opt/git/bin/", program, ":"))
@@ -153,10 +158,11 @@ pipeline test_git_preflight_does_not_execute_a_payload_program(harness: Harness)
       harness.fs.write_text(program, "#!/bin/sh\nprintf reached > '${marker}'\n")
       const executable = harness.process.run({program: "chmod", args: ["+x", program]})
       assert(executable.exit_code == 0)
-      assert(git_builtin_commands(harness.process, harness.env, program) == [])
+      assert(git_builtin_commands(harness.process, harness.env, harness.system, program) == [])
       const aliases = git_config_aliases_for(
         harness.process,
         harness.env,
+        harness.system,
         {program: program, options: []},
       )
       assert(aliases.has("<unreadable>"))

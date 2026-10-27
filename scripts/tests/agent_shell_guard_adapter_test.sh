@@ -679,6 +679,34 @@ if [[ -n "$git_read" ]]; then
   exit 1
 fi
 
+# On POSIX, backslashes name a relative directory, even when they resemble a
+# Windows UNC path. A hook must not execute that directory's Git during preflight.
+mkdir -p "$make_root/\\\\untrusted"
+cat >"$make_root/\\\\untrusted/git" <<EOF
+#!/bin/sh
+printf reached > "$make_root/untrusted-git-ran"
+EOF
+chmod +x "$make_root/\\\\untrusted/git"
+untrusted_verdict="$(
+  cd "$make_root"
+  PATH='\\untrusted:/usr/bin:/bin' git --list-cmds=builtins
+  [[ -e "$make_root/untrusted-git-ran" ]] || { echo "fake Git control did not run" >&2; exit 1; }
+  rm "$make_root/untrusted-git-ran"
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git history"}}' \
+    | OS=Windows_NT PATH='\\untrusted:/usr/bin:/bin' standalone_verdict
+)"
+if [[ -e "$make_root/untrusted-git-ran" ]]; then
+  echo "preflight executed a POSIX relative directory disguised as a Windows path" >&2
+  exit 1
+fi
+if [[ "$untrusted_verdict" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$untrusted_verdict" != *'git stash'* ]] \
+  || [[ "$untrusted_verdict" == *'policy faulted'* ]]; then
+  echo "the guard did not refuse an unmeasured Git alias" >&2
+  printf '%s\n' "$untrusted_verdict" >&2
+  exit 1
+fi
+
 for stash_command in 'WORKTREE_MODE=review git stash push' 'git -c alias.hidden=stash hidden'; do
   stash_verdict="$(
     printf '{"tool_name":"Bash","tool_input":{"command":"%s"}}' "$stash_command" \

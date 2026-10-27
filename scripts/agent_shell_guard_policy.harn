@@ -102,8 +102,14 @@ pub const MAKE_OWNED_COMMAND_RULES: list<MakeOwnedCommandRule> = [
   {program: "swift", verb: "test", target: "swift-test", escape: "HARN_ALLOW_RAW_SWIFT=1"},
 ]
 
-pub fn git_program_is_absolute(program: string) -> bool {
-  return program.starts_with("/") || program.starts_with("\\\\")
+pub fn git_program_is_absolute(program: string, separator: string) -> bool {
+  if separator == ":" {
+    return program.starts_with("/")
+  }
+  if separator != ";" {
+    return false
+  }
+  return program.starts_with("\\\\")
     || (len(program) > 2 && program.substring(1, 2) == ":"
       && "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".contains(program.substring(0, 1))
       && ["/", "\\"].contains(program.substring(2, 3)))
@@ -117,12 +123,12 @@ pub fn git_program_in_hook_path(path: string, program: string, separator: string
       || path.contains("${separator}${separator}") {
       return false
     }
-    return entries.all({ entry -> git_program_is_absolute(entry) })
+    return entries.all({ entry -> git_program_is_absolute(entry, separator) })
   }
   const normalized = program.replace("\\", "/")
   return entries.any(
     { entry ->
-      if !git_program_is_absolute(entry) {
+      if !git_program_is_absolute(entry, separator) {
         return false
       }
       let directory = entry.replace("\\", "/")

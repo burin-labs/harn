@@ -869,20 +869,21 @@ pub fn git_config_aliases(listing: string) -> dict {
 }
 
 /** Only the installed Git can establish which command names cannot be aliases. */
-fn git_program_is_trusted(env: HarnessEnv, program: string) -> bool {
+fn git_program_is_trusted(env: HarnessEnv, system: HarnessSystem, program: string) -> bool {
   return git_program_in_hook_path(
     env.get("PATH") ?? "",
     program,
-    env.get("OS") == "Windows_NT" ? ";" : ":",
+    system.platform().os == "windows" ? ";" : ":",
   )
 }
 
 pub fn git_builtin_commands(
   process: HarnessProcess,
   env: HarnessEnv,
+  system: HarnessSystem,
   program: string,
 ) -> list<string> {
-  if !git_program_is_trusted(env, program) {
+  if !git_program_is_trusted(env, system, program) {
     return []
   }
   const listed = process.run({program: program, args: ["--list-cmds=builtins"]})
@@ -1042,9 +1043,10 @@ pub const NO_GIT_BUILTINS: fn(string) -> list<string> = { program -> [] }
 pub fn git_config_aliases_for(
   process: HarnessProcess,
   env: HarnessEnv,
+  system: HarnessSystem,
   context: GitAliasContext,
 ) -> dict {
-  if !git_program_is_trusted(env, context.program) {
+  if !git_program_is_trusted(env, system, context.program) {
     return {"<unreadable>": ""}
   }
   const listed = process.run(
@@ -1361,7 +1363,8 @@ fn git_stash_write_in(
   // never closes, or one nested past the depth cap, cannot be proven harmless and is refused.
   const context = git_executable_context(command)
   const builtins = { program ->
-    if !git_program_is_absolute(program)
+    // This is only a shape check; builtin_lookup independently checks the hook's platform and PATH.
+    if !(git_program_is_absolute(program, ":") || git_program_is_absolute(program, ";"))
       && (context.path_changed
         || (context.cwd_changed && (program.contains("/") || program.contains("\\")))) {
       return []
@@ -1829,8 +1832,8 @@ fn main(harness: Harness) {
     payload,
     worktree_admission_census_from_env(harness.env),
     make_target_census_from_env(harness.env),
-    { context -> git_config_aliases_for(harness.process, harness.env, context) },
-    { program -> git_builtin_commands(harness.process, harness.env, program) },
+    { context -> git_config_aliases_for(harness.process, harness.env, harness.system, context) },
+    { program -> git_builtin_commands(harness.process, harness.env, harness.system, program) },
   )
   if verdict.allow {
     return nil
