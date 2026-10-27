@@ -281,7 +281,7 @@ pub fn composition_mcp_tools(
   const opts = options ?? {}
   const registry_source = __composition_registry(harness, opts?.tools ?? registry)
   const projected_source = tool_project(registry_source, "mcp")
-  const source = {_type: "tool_registry", tools: projected_source.tools}
+  const source = registry_source + {tools: projected_source.tools}
   const manifest_options = (opts?.manifest_options ?? opts) + {side_effect_ceiling: "read_only"}
   const candidate_manifest = composition_binding_manifest(source, manifest_options)
   let read_bindings = []
@@ -405,7 +405,7 @@ pub fn composition_mcp_tools(
             harness.tools,
             {name: name, arguments: input},
             source,
-            opts?.dispatch_options ?? opts,
+            (opts?.dispatch_options ?? opts) + {_composition_mcp: true},
           )
           return __composition_dispatch_value(outcome, name)
         }

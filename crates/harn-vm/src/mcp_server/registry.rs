@@ -14,6 +14,16 @@ use crate::stdlib::json_to_vm_value;
 use crate::value::VmError;
 use crate::vm::Vm;
 
+tokio::task_local! {
+    static SERVED_MCP_COMPOSITION: bool;
+}
+
+pub(crate) fn is_served_composition() -> bool {
+    SERVED_MCP_COMPOSITION
+        .try_with(|allowed| *allowed)
+        .unwrap_or(false)
+}
+
 /// Tools, resources, and prompts a script published for `harn serve mcp`.
 ///
 /// The registry owns the script's handlers and the projections of its
@@ -148,7 +158,12 @@ impl McpScriptRegistry {
             client_capabilities(params),
             scope_context(
                 progress,
-                crate::tool_handler_scope::scope(vm.call_closure_pub(&tool.handler, &[args_vm])),
+                SERVED_MCP_COMPOSITION.scope(
+                    tool.catalog.name == "harn.code.execute_composition",
+                    crate::tool_handler_scope::scope(
+                        vm.call_closure_pub(&tool.handler, &[args_vm]),
+                    ),
+                ),
             ),
         )
         .await

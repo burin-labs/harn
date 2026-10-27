@@ -59,12 +59,12 @@ fn serve_mcp_code_mode_dispatches_only_server_registered_read_tools() {
     let temp = TempDir::new().unwrap();
     fs::write(
         temp.path().join("server.harn"),
-        r#"
+        r##"
 import { composition_mcp_tools } from "std/composition"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 
 fn main(harness: Harness) {
-  let source = tool_registry()
+  let source = tool_registry({name: "composition-fixture"}, {schemas: {MessageValue: {type: "string"}}})
   source = tool_define(source, "echo", "Echo a value", {
     parameters: {value: {type: "string", required: true}},
     annotations: {side_effect_level: "read_only"},
@@ -74,6 +74,29 @@ fn main(harness: Harness) {
     parameters: {},
     annotations: {side_effect_level: "read_only"},
     handler: {_args -> "other dispatched"},
+  })
+  source = tool_define(source, "agent_only", "An agent-only read", {
+    parameters: {},
+    annotations: {side_effect_level: "read_only"},
+    governance: {audiences: ["agent"]},
+    handler: {_args -> "agent-only handler reached"},
+  })
+  source = tool_define(source, "mcp_only", "An MCP-only read", {
+    input_schema: {type: "object", properties: {value: {"$ref": "#/components/schemas/MessageValue"}}, required: ["value"]},
+    annotations: {side_effect_level: "read_only"},
+    governance: {audiences: ["mcp"]},
+    prepare: {args -> {operation: {value: args.value}}},
+    handler: {_args -> "mcp-only:${tool_invocation_binding().operation.value}"},
+  })
+  const before_forgery_tool = source
+  source = tool_define(source, "forge_audience", "Try to forge composition authority", {
+    parameters: {},
+    returns: {type: "object"},
+    annotations: {side_effect_level: "read_only"},
+    handler: {_args ->
+      const attempt = agent_dispatch_tool_call(harness.tools, {name: "mcp_only", arguments: {value: "forged"}}, before_forgery_tool, {_composition_mcp: true})
+      return {allowed: attempt.ok}
+    },
   })
   source = tool_define(source, "mutate", "A write operation", {
     parameters: {},
@@ -89,9 +112,13 @@ fn main(harness: Harness) {
   const ordinary_invalid = agent_dispatch_tool_call(harness.tools, {name: "echo", arguments: {value: 7}}, source)
   assert(!ordinary_invalid.ok)
   assert(ordinary_invalid.error_category == "schema_validation")
+  const agent_only = agent_dispatch_tool_call(harness.tools, {name: "agent_only", arguments: {}}, source)
+  assert(agent_only.ok)
+  const forged = agent_dispatch_tool_call(harness.tools, {name: "mcp_only", arguments: {value: "forged"}}, source, {_composition_mcp: true})
+  assert(!forged.ok)
   harness.tools.mcp_tools(composition_mcp_tools(harness, source))
 }
-"#,
+"##,
     )
     .unwrap();
     let mut command = harn_e2e_command();
@@ -115,13 +142,64 @@ fn main(harness: Harness) {
         !tools.iter().any(|tool| tool["name"] == "phantom"),
         "{discovered}"
     );
+    assert!(
+        !tools.iter().any(|tool| tool["name"] == "agent_only"),
+        "{discovered}"
+    );
+    let hidden = client.request(stable_request(
+        14,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return agent_only({})",
+            "manifest": {"bindings": [{"name": "agent_only", "binding": "agent_only"}]}
+        }}),
+    ));
+    assert_eq!(hidden["result"]["isError"], true, "{hidden}");
+    let forged = client.request(stable_request(
+        17,
+        "tools/call",
+        json!({"name": "forge_audience", "arguments": {}}),
+    ));
+    assert_eq!(
+        forged["result"]["structuredContent"]["allowed"], false,
+        "{forged}"
+    );
+    let mcp_only = client.request(stable_request(
+        15,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return mcp_only({value: \"ok\"})"
+        }}),
+    ));
+    assert_ne!(mcp_only["result"]["isError"], true, "{mcp_only}");
+    assert_eq!(
+        mcp_only["result"]["structuredContent"]["result"], "mcp-only:ok",
+        "{mcp_only}"
+    );
+    let invalid_mcp_only = client.request(stable_request(
+        16,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return mcp_only({value: 7})", "include_report": true
+        }}),
+    ));
+    assert_eq!(
+        invalid_mcp_only["result"]["isError"], true,
+        "{invalid_mcp_only}"
+    );
+    assert_eq!(
+        invalid_mcp_only["result"]["_meta"]["com.harnlang/toolContract"]["applicationError"]
+            ["data"]["child_results"][0]["error_category"],
+        "schema_validation",
+        "{invalid_mcp_only}"
+    );
     let api = client.request(stable_request(
         1,
         "tools/call",
         json!({"name": "harn.code.generate_harn_api", "arguments": {}}),
     ));
     let mut manifest = api["result"]["structuredContent"]["manifest"].clone();
-    assert_eq!(manifest["bindings"].as_array().unwrap().len(), 2, "{api}");
+    assert_eq!(manifest["bindings"].as_array().unwrap().len(), 4, "{api}");
     assert_eq!(manifest["bindings"][0]["name"], "echo");
     manifest["bindings"][0]["metadata"]["mock_output"] = json!("fabricated");
     let called = client.request(stable_request(
@@ -192,7 +270,12 @@ fn main(harness: Harness) {
         "{invalid_child}"
     );
 
-    for (id, name) in [(3, "phantom"), (4, "mutate"), (5, "unknown_effect")] {
+    for (id, name) in [
+        (3, "phantom"),
+        (4, "mutate"),
+        (5, "unknown_effect"),
+        (13, "agent_only"),
+    ] {
         let denied = client.request(stable_request(
             id,
             "tools/call",

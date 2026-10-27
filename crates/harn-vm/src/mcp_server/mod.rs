@@ -12,6 +12,7 @@ pub(crate) mod convert;
 mod defs;
 mod register;
 mod registry;
+pub(crate) use registry::is_served_composition;
 mod tools_schema;
 pub mod uri;
 
