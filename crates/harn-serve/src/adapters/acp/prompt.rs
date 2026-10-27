@@ -81,6 +81,23 @@ impl AcpServer {
         cancellation: Option<Arc<PromptCancellation>>,
         reply: TurnReply,
     ) {
+        let checkpoint_tracking = params
+            .get("sessionId")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|session_id| self.sessions.get(session_id))
+            .is_some_and(|session| session.workspace_checkpoint);
+        if checkpoint_tracking
+            && !matches!(
+                params.get("messageId").and_then(serde_json::Value::as_str),
+                Some(message_id) if !message_id.trim().is_empty()
+            )
+        {
+            self.send_prompt_protocol_error(
+                id,
+                "workspaceCheckpoint tracking requires a nonempty messageId",
+            );
+            return;
+        }
         let admission = match params.get("sessionId").and_then(|value| value.as_str()) {
             Some(session_id) => match self.prompt_admission(session_id) {
                 Ok(admission) => admission,
