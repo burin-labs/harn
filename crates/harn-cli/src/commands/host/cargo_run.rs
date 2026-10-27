@@ -128,9 +128,10 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
     // and one that needed none otherwise produce the same terminal receipt,
     // which would hide the very failure the supervisor exists to absorb.
     if supervised.restarts > 0 {
-        eprintln!(
+        cli_diagnostic!(
             "note: host lease run {} replaced {} worker(s) that exited before acquiring",
-            run.run_id, supervised.restarts,
+            run.run_id,
+            supervised.restarts,
         );
     }
     match finalize_run(store, &run.run_id, supervised.completion, &binary) {
@@ -591,12 +592,12 @@ fn report_terminal_run(
     projection: TerminalProjection,
 ) -> Result<i32, String> {
     if let Some(diagnostic) = projection.diagnostic {
-        eprintln!("{diagnostic}");
+        cli_diagnostic!("{diagnostic}");
     }
     let path = store
         .run_receipt_path(run_id)
         .map_err(|error| error.to_string())?;
-    eprintln!("Cargo lease receipt: {}", path.display());
+    cli_diagnostic!("Cargo lease receipt: {}", path.display());
     Ok(projection.exit_code)
 }
 
@@ -705,7 +706,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
     let saw_wait = Cell::new(false);
     let mut report_wait = |receipt: &harn_hostlib::HostLeaseAcquireReceipt| {
         saw_wait.set(true);
-        eprintln!("{}", format_lease_wait(receipt));
+        cli_diagnostic!("{}", format_lease_wait(receipt));
     };
     let acquisition = store.acquire_wait_for_run_with_progress(
         &args.run_id,
@@ -715,7 +716,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
     let acquisition = match acquisition {
         Ok(receipt) if receipt.status == harn_hostlib::HostLeaseAcquireStatus::Acquired => {
             if saw_wait.get() {
-                eprintln!(
+                cli_diagnostic!(
                     "Acquired rust-heavy lease after {}",
                     format_duration_ms(receipt.waited_ms)
                 );
@@ -727,7 +728,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
                 .defer
                 .as_ref()
                 .expect("deferred lease has a typed receipt");
-            eprintln!(
+            cli_diagnostic!(
                 "rust-heavy lease on {} remains held; retry after its next receipt wake",
                 deferred.host
             );
