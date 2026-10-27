@@ -517,7 +517,11 @@ pub fn judge_unavailable_mechanism(
     target: &str,
 ) -> Verdict {
     if !enforcing
-        && refusal.availability == SandboxMechanismAvailability::AbsentOnHost
+        && matches!(
+            refusal.availability,
+            SandboxMechanismAvailability::AbsentOnHost
+                | SandboxMechanismAvailability::HostProtectionUnavailable
+        )
         && refusal.mechanism == filesystem_mechanism
         && refusal.profile == policy.sandbox_profile
     {

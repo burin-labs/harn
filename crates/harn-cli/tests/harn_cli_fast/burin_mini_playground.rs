@@ -667,6 +667,7 @@ mod stage_summary_tests {
             profile: harn_vm::orchestration::SandboxProfile::OsHardened,
             requirement: SandboxRequirement::Profile,
             unconfined: vec![],
+            host_protection_gap: None,
         };
         let unsupported = serde_json::json!({
             "confines_processes": false,

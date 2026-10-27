@@ -31,6 +31,15 @@ pub(crate) trait SandboxBackend {
 
     fn available() -> bool;
 
+    /// The refusal a spawn meets when `filesystem_available` is false.
+    fn filesystem_unavailable(profile: SandboxProfile) -> super::SandboxMechanismUnavailable {
+        super::SandboxMechanismUnavailable::new(
+            Self::filesystem_mechanism(),
+            SandboxMechanismAvailability::AbsentOnHost,
+            profile,
+        )
+    }
+
     /// Whether native parent confinement makes the child's network grants inherited.
     fn inherits_network_grants() -> bool {
         false

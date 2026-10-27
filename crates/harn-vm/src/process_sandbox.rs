@@ -29,12 +29,12 @@ pub use crate::stdlib::sandbox::{
     push_process_sandbox_scope, render_policy_root, rustc_wrapper, session_std_command,
     session_tokio_command, std_command_for, std_command_for_with_env_state, tokio_command_for,
     tokio_command_for_with_env_state, validate_command_environment, workspace_local_tmpdir,
-    FsAccess, ProcessCommandConfig, ProcessSandboxAssessment, ProcessSandboxDenialReporting,
-    ProcessSandboxGrants, ProcessSandboxMechanism, ProcessSandboxNetwork, ProcessSandboxOperation,
-    ProcessSandboxRefusal, ProcessSandboxReport, ProcessSandboxReportingContext,
-    ProcessSandboxScope, ProcessSandboxScopeGuard, SandboxMechanism, SandboxMechanismAvailability,
-    SandboxMechanismUnavailable, SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
-    SANDBOX_CONFINEMENT_SCHEMA,
+    FsAccess, HostProtectionGap, ProcessCommandConfig, ProcessSandboxAssessment,
+    ProcessSandboxDenialReporting, ProcessSandboxGrants, ProcessSandboxMechanism,
+    ProcessSandboxNetwork, ProcessSandboxOperation, ProcessSandboxRefusal, ProcessSandboxReport,
+    ProcessSandboxReportingContext, ProcessSandboxScope, ProcessSandboxScopeGuard,
+    SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
+    SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV, SANDBOX_CONFINEMENT_SCHEMA,
 };
 
 pub use crate::stdlib::git_topology::check_repository_metadata_scope;

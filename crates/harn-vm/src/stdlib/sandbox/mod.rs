@@ -140,9 +140,9 @@ pub use linux::{decode_seccomp_hex, transferable_confinement, TransferableConfin
 pub(crate) use refusal::unavailable;
 pub use refusal::{
     infer_process_sandbox_mechanism, is_process_sandbox_signal, process_violation_error,
-    ProcessSandboxAssessment, ProcessSandboxDenialReporting, ProcessSandboxGrants,
-    ProcessSandboxMechanism, ProcessSandboxNetwork, ProcessSandboxOperation, ProcessSandboxRefusal,
-    ProcessSandboxReport, ProcessSandboxReportingContext, SandboxMechanism,
+    HostProtectionGap, ProcessSandboxAssessment, ProcessSandboxDenialReporting,
+    ProcessSandboxGrants, ProcessSandboxMechanism, ProcessSandboxNetwork, ProcessSandboxOperation,
+    ProcessSandboxRefusal, ProcessSandboxReport, ProcessSandboxReportingContext, SandboxMechanism,
     SandboxMechanismAvailability, SandboxMechanismUnavailable, SandboxRequirement,
 };
 pub(crate) use refusal::{path_is_denied, process_sandbox_read_deny_roots};

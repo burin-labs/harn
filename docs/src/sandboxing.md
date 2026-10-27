@@ -347,12 +347,20 @@ the cause as typed fields rather than as advice prose. The caught value is a
 `tool_rejected` dict whose `source` is `sandbox_mechanism` and whose
 `sandbox_mechanism` member names the `mechanism` (`linux_landlock`,
 `macos_sandbox_exec`, `openbsd_unveil`, or `none` on a platform with no OS
-sandbox), the `availability` (`absent_on_host` or `does_not_confine`), the requested `profile`, the unsatisfied `requirement`
+sandbox), the `availability` (`absent_on_host`, `does_not_confine`, or
+`host_protection_unavailable`), the requested `profile`, the unsatisfied `requirement`
 (`profile` or `fallback`), and `selector_honored` —
 false when the requested profile requires the mechanism outright, so no
 `HARN_HANDLER_SANDBOX` value can weaken it. A `does_not_confine` refusal also
 lists the table dimensions the profile required and the backend does not hold,
 as `unconfined` (for example `["reads", "network"]`).
+
+A `host_protection_unavailable` refusal means the mechanism is present but the
+host fails a prerequisite that keeps the spawning process's own environment
+from confined children. On macOS, `host_protection_gap` names it:
+`unrestricted_dtrace` when System Integrity Protection allows unrestricted
+DTrace (always the case with SIP disabled, as on GitHub-hosted macOS runners),
+`development_kernel`, or `kernel_configuration_unreadable`.
 
 Harn's own message states the mechanism fact and nothing else. Which control an
 operator actually has depends on the embedding product: an embedder that hardens

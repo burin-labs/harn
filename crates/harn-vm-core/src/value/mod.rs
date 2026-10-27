@@ -57,7 +57,7 @@ pub use mcp_client::VmMcpClientHandle;
 pub use random::RandomOperation;
 pub use sandbox_refusal::NO_OS_SANDBOX;
 pub use sandbox_refusal::{
-    ConfinementDimension, SandboxMechanism, SandboxMechanismAvailability,
+    ConfinementDimension, HostProtectionGap, SandboxMechanism, SandboxMechanismAvailability,
     SandboxMechanismUnavailable, SandboxRequirement,
 };
 pub use semantics::{char_substring, split_separator_required, string_discriminator};
