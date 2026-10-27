@@ -1,4 +1,6 @@
-pub(crate) const CASES: [&str; 22] = [
+pub(crate) const CASES: [&str; 24] = [
+    "provider_account_confirmation::gemini_confirmation_requires_billing_and_contributor_sharing_off",
+    "provider_account_confirmation::account_confirmation_is_not_exposed_to_scripts_or_child_processes",
     "provider_admission_privacy::admission_requires_account_evidence_for_conditional_provider_terms",
     "provider_admission_privacy::unknown_gemini_account_is_refused_before_transport",
     "eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs",

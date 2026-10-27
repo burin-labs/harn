@@ -1377,6 +1377,10 @@ harn precompile <positional 1>
 harn provider
 harn provider admission
 harn provider admission --request
+harn provider attest-account
+harn provider attest-account --billing-enabled
+harn provider attest-account --contributor-sharing-enabled
+harn provider attest-account --provider
 harn provider cache-probe
 harn provider cache-probe --json
 harn provider cache-probe --model

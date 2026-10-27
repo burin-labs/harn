@@ -134,6 +134,11 @@ training_default = "trains"
 checked_on = "2026-10-27"
 sources = ["https://example.invalid/project-restriction"]
 
+[llm.models.gemini-4-argon]
+name = "Gemini 4 Argon"
+provider = "gemini"
+context_window = 1048576
+
 [llm.models.gemini-4-argon.data_controls]
 training_default = "does_not_train"
 checked_on = "2026-10-27"

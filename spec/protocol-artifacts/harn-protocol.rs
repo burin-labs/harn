@@ -5038,6 +5038,64 @@ impl std::fmt::Display for HarnInferenceAdmissionDataPosture {
 /// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
+pub enum HarnNoTrainingRequirement {
+    BillingEnabled,
+    ContributorSharingDisabled,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnNoTrainingRequirement {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::BillingEnabled, Self::ContributorSharingDisabled];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::BillingEnabled => "billing_enabled",
+            Self::ContributorSharingDisabled => "contributor_sharing_disabled",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "billing_enabled" => Self::BillingEnabled,
+            "contributor_sharing_disabled" => Self::ContributorSharingDisabled,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnNoTrainingRequirement {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnNoTrainingRequirement> for String {
+    fn from(value: HarnNoTrainingRequirement) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnNoTrainingRequirement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum HarnInferenceAdmissionDataControlsOutcome {
     NotRequested,
     Applied,
@@ -5193,6 +5251,8 @@ pub struct HarnInferenceAdmissionSnapshot {
     pub training_control_planned: bool,
     pub data_posture: HarnInferenceAdmissionDataPosture,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_confirmation_applied: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_controls_note: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_controls_outcome: Option<HarnInferenceAdmissionDataControlsOutcome>,
@@ -5206,8 +5266,20 @@ pub struct HarnInferenceAdmissionSnapshot {
     pub local_runtime: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open_weight: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_account_facts: Vec<HarnNoTrainingRequirement>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub training_default: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnProviderAccountAttestation {
+    pub provider: String,
+    pub credential_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contributor_sharing_enabled: Option<bool>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnCanonicalSessionBoundary {

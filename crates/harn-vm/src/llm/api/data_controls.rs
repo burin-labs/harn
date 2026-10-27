@@ -310,15 +310,18 @@ pub(crate) fn resolve_for_boundary(
         )
     });
     let training_default = match &trusted {
-        Some(_) if account_confirmed => {
+        Some(facts) => {
+            let admitted = if account_confirmed {
+                Some(TrainingDefault::DoesNotTrain)
+            } else {
+                intersect_training_facts(facts.training_default, selected_training)
+            };
             crate::llm_config::execution_training_restrictions(provider, model)
                 .into_iter()
-                .fold(
-                    Some(TrainingDefault::DoesNotTrain),
-                    |current, restriction| intersect_training_facts(current, Some(restriction)),
-                )
+                .fold(admitted, |current, restriction| {
+                    intersect_training_facts(current, Some(restriction))
+                })
         }
-        Some(facts) => intersect_training_facts(facts.training_default, selected_training),
         None => selected_training,
     };
     let account_confirmation_applied =

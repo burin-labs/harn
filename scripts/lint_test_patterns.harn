@@ -243,6 +243,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/llm_fixture_policy.rs",
   // Admission and no-training refusal cross CLI launch and real HTTP transport.
   "crates/harn-cli/tests/harn_cli_e2e/provider_admission_privacy.rs",
+  // Account confirmations must bind the actual CLI credential and launch context.
+  "crates/harn-cli/tests/harn_cli_e2e/provider_account_confirmation.rs",
   // The documented allocation example launches independent processes, whose
   // provider dispatch and refusal counts must be measured through the CLI.
   "crates/harn-cli/tests/harn_cli_e2e/conservative_experiment.rs",
