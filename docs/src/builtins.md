@@ -855,6 +855,7 @@ builtins were deleted.
 | `harness.env.get_or(name, default)` | name: string, default: any | string or default | Read environment variable, or return `default` when unset. One-line replacement for the common `let v = harness.env.get(K); if v { v } else { default }` pattern |
 | `harness.clock.timestamp()` | none | float | Unix timestamp in seconds with sub-second precision |
 | `harness.clock.elapsed()` | none | int | Milliseconds since VM startup |
+| `harness.process.find_executable(program)` | program: non-empty bare name | string or nil | Read the executable selection used by the process launcher without running it. Returns nil when unresolved. |
 | `harness.process.exec(cmd, args...)` | cmd: string, args: strings | dict | Execute argv and return stdout/stderr plus status metadata and `success` |
 | `harness.process.exec_at(dir, cmd, args...)` | dir: string, cmd: string, args: strings | dict | Execute argv inside a specific directory |
 | `harness.process.shell(cmd)` | cmd: string | dict | Execute a user-authored shell command |
@@ -876,6 +877,14 @@ builtins were deleted.
 | `harness.fs.project_root()` | none | string or nil | Nearest ancestor directory containing `harn.toml` |
 | `harness.fs.runtime_paths()` | none | `{execution_root: string, asset_root: string, state_root: string, run_root: string, worktree_root: string}` | Resolved runtime path model. `state_root` / `run_root` / `worktree_root` honor `HARN_STATE_DIR` / `HARN_RUN_DIR` / `HARN_WORKTREE_DIR`, so ask here instead of writing `.harn` by hand |
 | `harness.clock.date_iso()` | none | string | Current UTC time in ISO 8601 format |
+
+`find_executable` searches the parent process's current `PATH` and, on Windows,
+`PATHEXT`, through the same selector the sandboxed process launcher uses. It
+accepts names such as `python3`, not paths. It reads file metadata without
+running a version probe or changing runtime state, so tool preparation can use
+it. A selected file does not prove that it can start, has a particular version,
+or passes a verifier; those facts require execution. Nil means unresolved,
+including an unavailable search path or unreadable candidate.
 
 When the OS cannot start an argv-style process, `harness.process.exec`
 throw `{error: "io_error", kind, message, category: "environment"}`. `kind`
