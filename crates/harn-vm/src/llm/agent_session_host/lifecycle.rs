@@ -373,7 +373,7 @@ async fn host_agent_session_init(
             Ok(result)
         }
         Err(error) => {
-            init_rollback.fail(Some(&ctx)).await;
+            init_rollback.fail(Some(&ctx), &error).await;
             Err(error)
         }
     }
