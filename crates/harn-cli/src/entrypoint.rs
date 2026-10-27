@@ -2,7 +2,7 @@
 //! `harn` invocation lands in, plus the argument shims and one-off subcommand
 //! runners it owns.
 
-use crate::cli::PackageRegistryCommand;
+use crate::cli::{ConfigCommand, PackageRegistryCommand};
 use crate::*;
 
 #[allow(clippy::large_stack_frames)] // dispatch entrypoint owns full Args + per-feature locals.
@@ -15,7 +15,7 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
     // local observability is opt-in and must never fail the run.
     if runtime_mode.enables_tokio_io() {
         if let Err(error) = harn_vm::events::install_otel_sink_from_env() {
-            eprintln!("[harn] OTel exporter disabled: {error}");
+            harn_vm::events::log_warn("telemetry", &format!("OTel exporter disabled: {error}"));
         }
     }
 
@@ -46,7 +46,7 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
         return;
     }
 
-    let Some(subcommand) = cli.command else {
+    let Some(mut subcommand) = cli.command else {
         // `arg_required_else_help` already shows help when no args are
         // supplied. We only land here if a top-level flag (e.g. a
         // future `--version` long flag) parsed without a subcommand.
@@ -54,6 +54,11 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
         cmd.print_help().ok();
         return;
     };
+    if let Command::Config(args) = &mut subcommand {
+        if let ConfigCommand::Inspect(inspect) = &mut args.command {
+            inspect.explain = cli.explain;
+        }
+    }
     let parent_handoff = if cli.parent_secret_stdin {
         Some(
             harn_vm::secrets::ParentSecretHandoff::read_from(std::io::stdin().lock())
@@ -64,7 +69,10 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
     };
     if let Err(error) = harn_vm::secrets::with_parent_secret_handoff(
         parent_handoff,
-        crate::spend_policy::run(cli.spend_policy.as_deref(), Box::pin(dispatch(subcommand))),
+        crate::spend_policy::run(
+            cli.spend_policy.as_deref(),
+            Box::pin(dispatch(subcommand, cli.explain)),
+        ),
     )
     .await
     {
@@ -74,7 +82,7 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
 }
 
 #[allow(clippy::large_stack_frames)]
-async fn dispatch(subcommand: Command) {
+async fn dispatch(subcommand: Command, explain: bool) {
     match subcommand {
         Command::Version(args) => {
             let exit = run_version(args).await;
@@ -213,6 +221,7 @@ async fn dispatch(subcommand: Command) {
                     json_options,
                     aux_options,
                     control_options,
+                    explain,
                 )
                 .await;
                 runtime::exit_on_error(exit_code);
@@ -257,6 +266,7 @@ async fn dispatch(subcommand: Command) {
                             aux_options.clone(),
                             control_options.clone(),
                             harnpack_options.clone(),
+                            explain,
                         )
                         .await
                     };
@@ -281,6 +291,7 @@ async fn dispatch(subcommand: Command) {
                             aux_options,
                             control_options,
                             harnpack_options,
+                            explain,
                         )
                         .await
                     };
@@ -626,7 +637,7 @@ async fn dispatch(subcommand: Command) {
         Command::Watch(args) => {
             let denied =
                 commands::run::build_denied_builtins(args.deny.as_deref(), args.allow.as_deref());
-            commands::run::run_watch(&args.file, denied).await;
+            commands::run::run_watch(&args.file, denied, explain).await;
         }
         Command::Dev(args) => {
             commands::dev::run(args).await;

@@ -43,6 +43,7 @@ enum ImportFailureClass {
 pub(super) struct ImportLoadFailure {
     pub(super) detail: ImportFailureDetail,
     pub(super) rendered: String,
+    pub(super) brief: String,
 }
 
 pub(super) fn for_run(
@@ -78,6 +79,7 @@ pub(super) fn for_run(
                 &message,
                 Some(&help),
             ),
+            brief: message,
         });
     }
 
@@ -95,6 +97,7 @@ pub(super) fn for_run(
             .into_iter()
             .find(|import| import.raw_path == issue.module)
             .and_then(|import| import.resolved_path);
+        let message = issue.message();
         return Some(ImportLoadFailure {
             detail: detail(
                 entry_path,
@@ -108,9 +111,10 @@ pub(super) fn for_run(
                 entry_path,
                 &issue.span,
                 harn_parser::diagnostic_codes::Code::ImportSymbolMissing,
-                &issue.message(),
+                &message,
                 Some(&issue.help()),
             ),
+            brief: message,
         });
     }
 
@@ -140,6 +144,7 @@ pub(super) fn for_run(
             &message,
             Some("create the module or correct the import specifier"),
         ),
+        brief: message,
     })
 }
 

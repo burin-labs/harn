@@ -43,7 +43,7 @@ pub(crate) use self::builtin_policy::build_denied_builtins;
 pub(crate) use self::chunk_loading::{
     compile_or_load_chunk_for_run, compile_or_load_chunk_with_timing, LoadedChunk,
 };
-use self::chunk_loading::{parse_source_for_run, typecheck_with_imports};
+use self::chunk_loading::{parse_source_for_run, typecheck_with_imports, ChunkLoadFailure};
 pub(crate) use self::environment::{EnvironmentPolicyArg, EnvironmentPolicyConfig};
 use self::eval_source::create_eval_temp_file;
 pub(crate) use self::eval_source::prepare_eval_temp_file;
@@ -134,6 +134,7 @@ impl ProjectRuntimeMode {
 
 struct ExecuteRunInputs<'a> {
     evaluation: EvaluationReplayOptions,
+    explain: bool,
     path: &'a str,
     trace: bool,
     denied_builtins: HashSet<String>,
@@ -162,6 +163,7 @@ pub struct RunOutcome {
     pub exit_code: i32,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_file(
     path: &str,
     trace: bool,
@@ -170,6 +172,7 @@ pub(crate) async fn run_file(
     llm_mock_mode: CliLlmMockMode,
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
+    explain: bool,
 ) {
     let exit_code = run_file_with_skill_dirs(
         path,
@@ -185,6 +188,7 @@ pub(crate) async fn run_file(
         RunAuxOptions::default(),
         RunControlOptions::default(),
         HarnpackRunOptions::default(),
+        explain,
     )
     .await;
     if exit_code != 0 {
@@ -218,6 +222,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     aux: RunAuxOptions,
     control: RunControlOptions,
     harnpack: HarnpackRunOptions,
+    explain: bool,
 ) -> i32 {
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
     let interrupt_tokens = install_signal_shutdown_handler();
@@ -231,6 +236,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     });
     let outcome = execute_run_inner(ExecuteRunInputs {
         evaluation: control.evaluation,
+        explain,
         path,
         trace,
         denied_builtins,
@@ -287,6 +293,7 @@ pub(crate) async fn run_resume_with_skill_dirs(
     json: Option<RunJsonOptions>,
     aux: RunAuxOptions,
     control: RunControlOptions,
+    explain: bool,
 ) -> i32 {
     let source = r#"import { resume_agent, wait_agent } from "std/agent/workers"
 
@@ -330,6 +337,7 @@ pipeline main(harness: Harness) {
         aux,
         control,
         HarnpackRunOptions::default(),
+        explain,
     )
     .await
 }
@@ -552,6 +560,7 @@ pub async fn execute_run_with_options(
     } = options;
     execute_run_inner(ExecuteRunInputs {
         evaluation,
+        explain: true,
         path,
         trace,
         denied_builtins,
@@ -630,6 +639,7 @@ pub async fn execute_run_json_with_options(
     } = execution_options;
     execute_run_inner(ExecuteRunInputs {
         evaluation,
+        explain: true,
         path,
         trace,
         denied_builtins,
@@ -662,6 +672,7 @@ pub(crate) async fn execute_run_with_timing(
 ) -> RunOutcome {
     execute_run_inner(ExecuteRunInputs {
         evaluation: EvaluationReplayOptions::default(),
+        explain: true,
         path,
         trace: false,
         denied_builtins: HashSet::new(),
@@ -725,6 +736,7 @@ async fn execute_run_inner_scoped(
 ) -> RunOutcome {
     let ExecuteRunInputs {
         evaluation,
+        explain,
         path,
         trace,
         denied_builtins,
@@ -869,6 +881,20 @@ async fn execute_run_inner_scoped(
         Err(failure) => {
             let message = stderr.clone();
             let details = failure.details();
+            if json_session.is_none() {
+                if let ChunkLoadFailure::Program(brief) | ChunkLoadFailure::Import(_, brief) =
+                    &failure
+                {
+                    if !explain {
+                        let brief = brief.lines().next().unwrap_or("program error");
+                        stderr = format!("[harn] error: {brief} (use --explain for details)\n");
+                    } else {
+                        stderr.insert_str(0, "[harn] ");
+                    }
+                } else {
+                    stderr.insert_str(0, "[harn] ");
+                }
+            }
             return finalize_run_error_with_details(
                 stdout,
                 stderr,
@@ -1173,7 +1199,10 @@ async fn execute_run_inner_scoped(
                 Ok(value) => RunExecution::Terminal(TerminalRun::Returned(value)),
                 Err(error) => match error.process_exit_code() {
                     Some(code) => RunExecution::Terminal(TerminalRun::ProcessExited(code)),
-                    None => RunExecution::Failed(vm.format_runtime_error(&error)),
+                    None => RunExecution::Failed {
+                        brief: error.to_string(),
+                        detail: vm.format_runtime_error(&error),
+                    },
                 },
             }
         })
@@ -1183,14 +1212,17 @@ async fn execute_run_inner_scoped(
         let succeeded =
             matches!(&execution, RunExecution::Terminal(terminal) if terminal.exit_code() == 0);
         if let Err(error) = session.finish(succeeded) {
-            execution = RunExecution::Failed(error);
+            execution = RunExecution::Failed {
+                brief: error.clone(),
+                detail: error,
+            };
         }
     }
     let evidence_status = match &execution {
         RunExecution::Terminal(terminal) if terminal.exit_code() == 0 => {
             harn_vm::orchestration::ExecutionRecordStatus::Completed
         }
-        RunExecution::Terminal(_) | RunExecution::Failed(_) => {
+        RunExecution::Terminal(_) | RunExecution::Failed { .. } => {
             harn_vm::orchestration::ExecutionRecordStatus::Failed
         }
     };
@@ -1285,7 +1317,7 @@ async fn execute_run_inner_scoped(
 
     let exit_code = match &execution {
         RunExecution::Terminal(terminal) => terminal.exit_code(),
-        RunExecution::Failed(_) => 1,
+        RunExecution::Failed { .. } => 1,
     };
 
     if let (Some(options), Some(log)) = (attestation.as_ref(), attestation_log.as_ref()) {
@@ -1389,8 +1421,16 @@ async fn execute_run_inner_scoped(
                 exit_code: aux_emission.exit_code,
             }
         }
-        RunExecution::Failed(rendered_error) => {
-            stderr.push_str(&rendered_error);
+        RunExecution::Failed { brief, detail } => {
+            if explain {
+                stderr.push_str("[harn] ");
+                stderr.push_str(&detail);
+            } else {
+                let summary = brief.lines().next().unwrap_or("runtime error");
+                stderr.push_str(&format!(
+                    "[harn] error: {summary} (use --explain for details)\n"
+                ));
+            }
             let main_events = harn_vm::tracing::peek_spans().len() as u64;
             let cpu_ms_total = cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start));
             let profile_rollup = if profile.is_enabled() {
@@ -1420,8 +1460,7 @@ async fn execute_run_inner_scoped(
                 &mut stderr,
             );
             if let Some(session) = json_session {
-                let mut outcome =
-                    session.finalize_error("runtime", rendered_error, aux_emission.exit_code);
+                let mut outcome = session.finalize_error("runtime", detail, aux_emission.exit_code);
                 outcome.stderr = aux_emission.stderr;
                 return outcome;
             }

@@ -47,6 +47,7 @@ fn main(harness: Harness) {
     harness.stdio.println("activation-attempt-reached")
   }
 }
+
 "#,
     )
     .unwrap();
@@ -71,5 +72,49 @@ fn main(harness: Harness) {
             );
             assert!(!marker.exists(), "help/version started a lazy child");
         }
+    }
+}
+
+#[test]
+fn eager_mcp_warning_uses_the_stderr_log_level() {
+    let temp = TempDir::new().unwrap();
+    fs::write(
+        temp.path().join("harn.toml"),
+        r#"
+[package]
+name = "mcp-log-fixture"
+version = "0.1.0"
+[[mcp]]
+name = "missing-server"
+command = "harn-test-command-that-does-not-exist"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("main.harn"),
+        "fn main(harness: Harness) { harness.stdio.println(\"program-output\") }\n",
+    )
+    .unwrap();
+    for (level, expected_warning) in [("info", true), ("off", false)] {
+        let output = harn_e2e_command()
+            .current_dir(temp.path())
+            .env("HARN_LOG_LEVEL", level)
+            .args(["run", "--no-sandbox", "main.harn"])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{level}: {stdout}\n{stderr}");
+        assert_eq!(stdout, "program-output\n");
+        assert_eq!(
+            stderr.contains("[harn] warning: harn run --no-sandbox disables"),
+            expected_warning,
+            "{level}: {stderr}"
+        );
+        assert_eq!(
+            stderr.contains("[harn] warning: mcp: failed to connect to 'missing-server'"),
+            expected_warning,
+            "{level}: {stderr}"
+        );
     }
 }

@@ -83,7 +83,10 @@ async fn serve_http_router(
     let local_addr = listener
         .local_addr()
         .map_err(|error| format!("failed to read local addr: {error}"))?;
-    eprintln!("[harn] MCP HTTP listener ready on http://{local_addr}{path}");
+    harn_vm::events::log_info(
+        "mcp",
+        &format!("MCP HTTP listener ready on http://{local_addr}{path}"),
+    );
     axum::serve(listener, router)
         .await
         .map_err(|error| format!("MCP HTTP server failed: {error}"))

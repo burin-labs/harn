@@ -156,7 +156,10 @@ pub fn run() {
             // reach the configured collector. No-op when OTel is not
             // configured.
             if let Err(error) = harn_vm::events::shutdown_otel_sink() {
-                eprintln!("[harn] OTel exporter shutdown failed: {error}");
+                harn_vm::events::log_warn(
+                    "telemetry",
+                    &format!("OTel exporter shutdown failed: {error}"),
+                );
             }
         })
         .unwrap_or_else(|error| {

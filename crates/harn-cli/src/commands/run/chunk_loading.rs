@@ -34,9 +34,9 @@ pub(crate) enum ChunkLoadFailure {
     PackageMaterialization,
     /// An import failed before the VM started. The typed facts are retained
     /// here so every run-launch projection consumes the same value.
-    Import(ImportFailureDetail),
+    Import(ImportFailureDetail, String),
     /// The program did not parse, typecheck, or compile.
-    Program,
+    Program(String),
 }
 
 impl ChunkLoadFailure {
@@ -47,23 +47,23 @@ impl ChunkLoadFailure {
         match self {
             Self::EntryUnreadable => "entry_unreadable",
             Self::PackageMaterialization => "package_materialization",
-            Self::Import(_) => "compile_error",
-            Self::Program => "compile_error",
+            Self::Import(_, _) => "compile_error",
+            Self::Program(_) => "compile_error",
         }
     }
 
     pub(crate) fn classification(&self) -> crate::exit::RunFailure {
         match self {
             Self::EntryUnreadable | Self::PackageMaterialization => crate::exit::RunFailure::Setup,
-            Self::Import(_) | Self::Program => crate::exit::RunFailure::Program,
+            Self::Import(_, _) | Self::Program(_) => crate::exit::RunFailure::Program,
         }
     }
 
     pub(crate) fn details(&self) -> serde_json::Value {
         match self {
-            Self::Import(details) => serde_json::to_value(details)
+            Self::Import(details, _) => serde_json::to_value(details)
                 .expect("the closed import failure detail must serialize"),
-            Self::EntryUnreadable | Self::PackageMaterialization | Self::Program => {
+            Self::EntryUnreadable | Self::PackageMaterialization | Self::Program(_) => {
                 serde_json::Value::Null
             }
         }
@@ -178,8 +178,9 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     }
 
     let parse_start = Instant::now();
-    let Some(program) = parse_source_for_run(path, &source, stderr) else {
-        return Err(ChunkLoadFailure::Program);
+    let mut brief = String::new();
+    let Some(program) = parse_source_for_run_with_brief(path, &source, stderr, &mut brief) else {
+        return Err(ChunkLoadFailure::Program(brief));
     };
     if let Some(t) = timing.as_deref_mut() {
         t.parse = parse_start.elapsed();
@@ -205,18 +206,21 @@ pub(crate) fn compile_or_load_chunk_with_timing(
         let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {
             had_type_error = true;
+            if brief.is_empty() {
+                brief = brief_diagnostic(path, diag.span.as_ref(), &diag.message);
+            }
         }
         stderr.push_str(&rendered);
     }
     if let Some(failure) = typecheck.failure {
         stderr.push_str(&failure.rendered);
-        return Err(ChunkLoadFailure::Import(failure.detail));
+        return Err(ChunkLoadFailure::Import(failure.detail, failure.brief));
     }
     if let Some(t) = timing.as_deref_mut() {
         t.typecheck = typecheck_start.elapsed();
     }
     if had_type_error {
-        return Err(ChunkLoadFailure::Program);
+        return Err(ChunkLoadFailure::Program(brief));
     }
 
     let compile_step_start = Instant::now();
@@ -230,7 +234,11 @@ pub(crate) fn compile_or_load_chunk_with_timing(
         Ok(c) => c,
         Err(e) => {
             stderr.push_str(&format!("error: compile error: {e}\n"));
-            return Err(ChunkLoadFailure::Program);
+            return Err(ChunkLoadFailure::Program(brief_diagnostic(
+                path,
+                None,
+                &format!("compile error: {e}"),
+            )));
         }
     };
 
@@ -264,7 +272,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
         }
         if let Err(err) = store.store(&chunk) {
             if std::env::var_os(crate::dispatch::CACHE_DEBUG_ENV).is_some() {
-                eprintln!("[harn] bytecode cache write skipped: {err}");
+                harn_vm::events::log_info("cache", &format!("bytecode cache write skipped: {err}"));
             }
         }
     }
@@ -284,12 +292,22 @@ pub(super) fn parse_source_for_run(
     source: &str,
     stderr: &mut String,
 ) -> Option<Vec<harn_parser::SNode>> {
+    parse_source_for_run_with_brief(path, source, stderr, &mut String::new())
+}
+
+fn parse_source_for_run_with_brief(
+    path: &str,
+    source: &str,
+    stderr: &mut String,
+    brief: &mut String,
+) -> Option<Vec<harn_parser::SNode>> {
     crate::ensure_builtin_signatures_installed();
 
     let mut lexer = harn_lexer::Lexer::new(source);
     let tokens = match lexer.tokenize() {
         Ok(tokens) => tokens,
         Err(error) => {
+            *brief = brief_diagnostic(path, Some(&error_span_from_lex(&error)), &error.to_string());
             let diagnostic = harn_parser::diagnostic::render_diagnostic_with_code(
                 source,
                 path,
@@ -310,14 +328,34 @@ pub(super) fn parse_source_for_run(
         Ok(program) => Some(program),
         Err(error) => {
             if parser.all_errors().is_empty() {
+                *brief = brief_diagnostic(
+                    path,
+                    Some(&error_span_from_parse(&error)),
+                    &harn_parser::diagnostic::parser_error_message(&error),
+                );
                 render_parse_error(path, source, &error, stderr);
             } else {
                 for error in parser.all_errors() {
+                    if brief.is_empty() {
+                        *brief = brief_diagnostic(
+                            path,
+                            Some(&error_span_from_parse(error)),
+                            &harn_parser::diagnostic::parser_error_message(error),
+                        );
+                    }
                     render_parse_error(path, source, error, stderr);
                 }
             }
             None
         }
+    }
+}
+
+fn brief_diagnostic(path: &str, span: Option<&harn_lexer::Span>, message: &str) -> String {
+    let path = harn_parser::diagnostic::normalize_diagnostic_path(path);
+    match span {
+        Some(span) => format!("{path}:{}:{}: {message}", span.line, span.column),
+        None => format!("{path}: {message}"),
     }
 }
 

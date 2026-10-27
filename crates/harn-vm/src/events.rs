@@ -47,6 +47,13 @@ pub trait EventSink {
 /// Default sink that writes formatted output to stderr.
 pub struct StderrSink;
 
+/// Prefix for human-readable Harn logs on stderr.
+pub const HARN_LOG_PREFIX: &str = "[harn] ";
+
+pub(crate) fn write_stderr_log(bytes: &[u8]) {
+    crate::host_stdio::write_bytes(crate::host_stdio::HostStdioStream::Stderr, bytes);
+}
+
 impl EventSink for StderrSink {
     fn emit_log(&self, event: &LogEvent) {
         if !stderr_level_enabled(event.level) {
@@ -61,17 +68,15 @@ impl EventSink for StderrSink {
         };
         // "[harn]" prefix for warn/error is relied on by downstream
         // tooling and tests that parse stderr.
-        match event.level {
-            EventLevel::Warn => {
-                eprintln!("[harn] warning: {}", event.message);
-            }
-            EventLevel::Error => {
-                eprintln!("[harn] error: {}", event.message);
-            }
-            _ => {
-                eprintln!("[{level_str}] [{}] {}", event.category, event.message);
-            }
-        }
+        let line = match event.level {
+            EventLevel::Warn => format!("{HARN_LOG_PREFIX}warning: {}\n", event.message),
+            EventLevel::Error => format!("{HARN_LOG_PREFIX}error: {}\n", event.message),
+            _ => format!(
+                "{HARN_LOG_PREFIX}{level_str} [{}] {}\n",
+                event.category, event.message
+            ),
+        };
+        write_stderr_log(line.as_bytes());
     }
 
     fn emit_span_start(&self, _event: &SpanEvent) {

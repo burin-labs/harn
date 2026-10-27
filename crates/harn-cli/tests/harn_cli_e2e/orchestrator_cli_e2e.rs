@@ -21,6 +21,76 @@ use support::{
 };
 use test_util::connectors::{provider_declarations, write_first_party_connector_modules};
 
+#[cfg(unix)]
+#[tokio::test]
+async fn orchestrator_json_logs_stay_on_stderr() {
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "harn.toml",
+        "[package]\nname = \"log-fixture\"\n",
+    );
+    let mut child = tokio::process::Command::new(test_util::process::harn_e2e_binary())
+        .current_dir(temp.path())
+        .args([
+            "orchestrator",
+            "serve",
+            "--config",
+            "harn.toml",
+            "--state-dir",
+            "./state",
+            "--role",
+            "single-tenant",
+            "--bind",
+            "127.0.0.1:0",
+            "--log-format",
+            "json",
+        ])
+        .env("RUST_LOG", "info")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn orchestrator");
+    let stderr = child.stderr.take().expect("stderr pipe");
+    let mut lines = BufReader::new(stderr).lines();
+    let mut saw_json_log = false;
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        while let Some(line) = lines.next_line().await.expect("stderr line") {
+            if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
+                saw_json_log |= event.to_string().contains("orchestrator starting");
+            }
+            if line.contains("HTTP listener ready on") {
+                return;
+            }
+        }
+        panic!("orchestrator exited before readiness");
+    })
+    .await
+    .expect("orchestrator readiness timeout");
+    assert!(saw_json_log, "the JSON log must actually reach stderr");
+    let pid = i32::try_from(child.id().expect("live child")).unwrap();
+    // SAFETY: the pid belongs to the child owned by this test.
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(30), child.wait_with_output())
+        .await
+        .expect("shutdown timeout")
+        .expect("wait for orchestrator");
+    assert!(
+        output.status.success(),
+        "orchestrator exit: {}",
+        output.status
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "logs reached stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum SnapshotStatus {
@@ -91,9 +161,16 @@ pub fn on_issue(harness: Harness, event: TriggerEvent) {
 "#,
     );
 
-    let mut process = OrchestratorProcess::spawn(&temp, &[]);
+    let mut process = OrchestratorProcess::spawn(&temp, &[("RUST_LOG", "info")]);
     let listener = process.wait_for_listener_url().await;
     let stderr = process.terminate_gracefully().await;
+
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.starts_with("[harn] ") && line.contains("orchestrator starting")),
+        "the structured startup log must use the shared prefix: {stderr}"
+    );
 
     assert!(stderr.contains("secret providers:"), "stderr={stderr}");
     assert!(
