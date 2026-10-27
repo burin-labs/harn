@@ -141,6 +141,21 @@ impl BedrockProvider {
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
         let region = resolve_live_region(request.region.as_deref()).await?;
+        let path = format!(
+            "/model/{}/converse",
+            percent_encode_component(&request.model)
+        );
+        let base_url = bedrock_base_url(&region);
+        let url = format!("{}{}", base_url.trim_end_matches('/'), path);
+        let boundary =
+            crate::llm::api::inference_boundary::effective_result(request.inference_boundary)
+                .map_err(VmError::Runtime)?;
+        let approved = crate::llm::api::inference_boundary::ApprovedWireRoute::capture(
+            boundary,
+            &request.provider,
+            &url,
+            &crate::llm_config::wire_model_id(&request.model),
+        );
         let mut body = Self::build_request_body(request);
         apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
         strip_anthropic_sampling_params(&mut body, request);
@@ -156,15 +171,12 @@ impl BedrockProvider {
             &["additionalModelRequestFields.thinking"],
             &body,
         );
+        if let Some(approved) = &approved {
+            approved.verify_url_model(&request.provider, &url, &request.model, &body)?;
+        }
         let body_bytes = serde_json::to_vec(&body)
             .map_err(|error| vm_err(format!("bedrock request serialization failed: {error}")))?;
-        let path = format!(
-            "/model/{}/converse",
-            percent_encode_component(&request.model)
-        );
-        let base_url = bedrock_base_url(&region);
         let credentials = resolve_bedrock_credentials(&region, &base_url).await?;
-        let url = format!("{}{}", base_url.trim_end_matches('/'), path);
         let sign_headers =
             BTreeMap::from([("Content-Type".to_string(), "application/json".to_string())]);
         let signed = sign_sigv4_request(AwsSigV4Input {

@@ -217,7 +217,6 @@ impl GeminiProvider {
         if dialect.stream_protocol() == crate::llm::api::StreamProtocol::GeminiInteractionsSse {
             return interactions::GeminiInteractions::chat(request, delta_tx).await;
         }
-        let body = dialect.build_request_body(request);
         let pdef = crate::llm_config::provider_config(&request.provider);
         let base_url = pdef
             .as_ref()
@@ -226,6 +225,19 @@ impl GeminiProvider {
         let wire_model = crate::llm_config::wire_model_id(&request.model);
         let model = wire_model.strip_prefix("models/").unwrap_or(&wire_model);
         let url = generate_content_url(&base_url, model, request.stream);
+        let boundary =
+            crate::llm::api::inference_boundary::effective_result(request.inference_boundary)
+                .map_err(VmError::Runtime)?;
+        let approved = crate::llm::api::inference_boundary::ApprovedWireRoute::capture(
+            boundary,
+            &request.provider,
+            &url,
+            model,
+        );
+        let body = dialect.build_request_body(request);
+        if let Some(approved) = &approved {
+            approved.verify_url_model(&request.provider, &url, model, &body)?;
+        }
         let client = if request.stream {
             crate::llm::streaming_client_for_base_url(&base_url)
         } else {
