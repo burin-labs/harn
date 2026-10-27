@@ -148,13 +148,19 @@ pub async fn dispatch_to_embedded_script_no_sandbox(
     argv: Vec<String>,
     json_mode: bool,
 ) -> i32 {
-    let outcome = run_embedded_script_with_sandbox(
+    let mut outcome = run_embedded_script_with_sandbox(
         script_name,
         argv,
         json_mode,
         RunSandboxOptions::disabled(),
     )
     .await;
+    if let Some(rest) = outcome
+        .stderr
+        .strip_prefix(crate::commands::run::sandbox::NO_SANDBOX_WARNING)
+    {
+        outcome.stderr = rest.to_string();
+    }
     flush_outcome(&outcome);
     outcome.exit_code
 }

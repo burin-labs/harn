@@ -193,10 +193,6 @@ pub(crate) fn sandbox_options_from_args(args: &crate::cli::SandboxArgs) -> RunSa
     let capability = EnvironmentPolicyConfig::from_flags(args.environment_policy, &args.grant)
         .unwrap_or_else(|error| crate::command_error(&error));
     let options = if args.no_sandbox {
-        harn_vm::events::log_warn(
-            "sandbox",
-            "harn run --no-sandbox disables filesystem, process, and egress sandbox defaults",
-        );
         RunSandboxOptions::disabled()
     } else {
         RunSandboxOptions::sandboxed(args.allow_process_network)
@@ -240,12 +236,16 @@ impl RunSandboxScope {
     }
 }
 
+pub(crate) const NO_SANDBOX_WARNING: &str =
+    "[harn] warning: harn run --no-sandbox disables filesystem, process, and egress sandbox defaults\n";
+
 pub(super) fn install_run_sandbox_scope(
     options: &RunSandboxOptions,
     workspace_root: &Path,
     stderr: &mut String,
 ) -> RunSandboxScope {
     if !options.enabled {
+        stderr.push_str(NO_SANDBOX_WARNING);
         return RunSandboxScope::disabled();
     }
 

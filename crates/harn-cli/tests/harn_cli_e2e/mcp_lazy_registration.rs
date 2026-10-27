@@ -106,9 +106,8 @@ command = "harn-test-command-that-does-not-exist"
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(output.status.success(), "{level}: {stdout}\n{stderr}");
         assert_eq!(stdout, "program-output\n");
-        assert_eq!(
+        assert!(
             stderr.contains("[harn] warning: harn run --no-sandbox disables"),
-            expected_warning,
             "{level}: {stderr}"
         );
         assert_eq!(
