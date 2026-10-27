@@ -41,7 +41,6 @@ mod orchestrator_http;
 mod pack_cli;
 mod persona_cli;
 mod profile;
-mod provider_admission_privacy;
 mod run_approval_owner;
 mod stop_default_stack;
 mod test_bench_cli;
@@ -53,7 +52,7 @@ fn required_pr_e2e_inventory_is_selected_by_every_pr_profile() {
         .expect("nextest configuration must parse");
     assert_eq!(
         required_pr_e2e::CASES.len(),
-        20,
+        22,
         "required PR E2E inventory must remain explicit",
     );
 
