@@ -1264,10 +1264,11 @@ fn round4(value: f64) -> f64 {
 }
 
 fn round6(value: f64) -> f64 {
-    if value.abs() > f64::MAX / 1_000_000.0 {
+    let scaled = value * 1_000_000.0;
+    if !scaled.is_finite() {
         value
     } else {
-        (value * 1_000_000.0).round() / 1_000_000.0
+        scaled.round() / 1_000_000.0
     }
 }
 

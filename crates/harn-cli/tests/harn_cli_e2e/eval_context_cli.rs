@@ -176,8 +176,27 @@ async fn context_report_preserves_large_finite_cost_and_rejects_overflow() {
     for task in manifest["tasks"].as_array_mut().unwrap() {
         task["observed"]["cost_usd"] = serde_json::json!(0.0);
     }
-    manifest["tasks"][0]["observed"]["cost_usd"] = serde_json::json!(1e303);
     let manifest_path = tmp.path().join("manifest.json");
+    let boundary = f64::MAX / 1_000_000.0;
+    manifest["tasks"][0]["observed"]["cost_usd"] = serde_json::json!(boundary / 3.0);
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let boundary_output = tmp.path().join("boundary");
+    let result = harn_cli::commands::eval_context::run(EvalContextArgs {
+        manifest: manifest_path.clone(),
+        output: Some(boundary_output.clone()),
+        json: false,
+        report_version: 2,
+    })
+    .await;
+    assert_eq!(result, 0);
+    let summary: serde_json::Value =
+        serde_json::from_slice(&fs::read(boundary_output.join("summary.json")).unwrap()).unwrap();
+    assert_eq!(
+        summary["aggregate"]["total_cost_usd"].as_f64(),
+        Some(boundary)
+    );
+
+    manifest["tasks"][0]["observed"]["cost_usd"] = serde_json::json!(1e303);
     fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
     for version in [1, 2] {
         let output = tmp.path().join(format!("large-{version}"));
