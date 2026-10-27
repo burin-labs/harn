@@ -57,6 +57,25 @@ pub(super) fn prepared_handler_catalog(
     )?)
 }
 
+/// Validate the resolved tool against the same input contract as other adapters.
+/// Unknown names still reach the registry rejection path.
+pub(super) fn validate_registered_input(
+    registry: Option<&VmValue>,
+    name: &str,
+    arguments: &serde_json::Value,
+) -> Result<(), String> {
+    let schemas = super::tools::collect_tool_schemas(registry, None);
+    super::tools::validate_tool_args(name, arguments, &schemas)?;
+    let Some(registry) = registry.filter(|_| schemas.iter().any(|schema| schema.name == name))
+    else {
+        return Ok(());
+    };
+    prepared_handler_catalog(registry, name)
+        .map_err(|error| error.to_string())?
+        .validate_input(name, arguments)
+        .map_err(|error| error.to_string())
+}
+
 fn prepare_catalog(
     catalog: crate::tool_registry::ToolCatalog,
 ) -> Result<std::sync::Arc<PreparedToolCatalog>, VmError> {
