@@ -28,7 +28,7 @@ pub(super) fn warm_stdlib_before_cases(threads: usize, json: bool) {
     if json {
         return;
     }
-    eprintln!(
+    cli_diagnostic!(
         "harn conformance: warmed {} of {} stdlib module(s) in {:.1}s",
         report.warmed,
         report.modules,

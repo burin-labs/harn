@@ -17,8 +17,9 @@ fn rust_sources(directory: &Path, files: &mut Vec<PathBuf>) {
 #[test]
 fn labeled_command_diagnostics_use_the_shared_sink() {
     let direct_diagnostic =
-        regex::Regex::new(r#"eprintln!\(\s*"(?:error:|warning:|warning\[)"#).unwrap();
+        regex::Regex::new(r#"(?i)eprintln!\(\s*"(?:error:|warning:|warning\[|warn:)"#).unwrap();
     assert!(direct_diagnostic.is_match("eprintln!(\n  \"error: example\")"));
+    assert!(direct_diagnostic.is_match("eprintln!(\n  \"WARN: example\")"));
     assert!(!direct_diagnostic.is_match("cli_diagnostic!(\"error: example\")"));
 
     let source = PathBuf::from(

@@ -408,14 +408,14 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
             .or(report.stderr_excerpt.as_deref())
             .filter(|detail| !detail.trim().is_empty());
         match detail {
-            Some(detail) => eprintln!(
+            Some(detail) => cli_diagnostic!(
                 "{} {} {}: {} ({detail})",
                 report.fixture_id,
                 selector_label(&report.selector),
                 report.tool_format,
                 report.status
             ),
-            None => eprintln!(
+            None => cli_diagnostic!(
                 "{} {} {}: {}",
                 report.fixture_id,
                 selector_label(&report.selector),
@@ -1192,7 +1192,7 @@ fn write_json_artifacts(output_dir: &Path, summary: &EvalSummary) -> Result<(), 
 }
 
 fn announce_output_paths(output_dir: &Path) {
-    eprintln!(
+    cli_diagnostic!(
         "wrote {}, {}, {}, {}, {}, {}, and {}",
         output_dir.join("summary.json").display(),
         output_dir.join("per_run.jsonl").display(),

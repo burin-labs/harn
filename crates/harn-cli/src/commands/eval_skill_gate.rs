@@ -36,7 +36,7 @@ pub async fn run(args: EvalSkillGateArgs) -> i32 {
         cli_diagnostic!("error: failed to write skill gate outputs: {error}");
         return 1;
     }
-    eprintln!(
+    cli_diagnostic!(
         "wrote {}, {}, {}, and {}",
         output_dir.join("summary.json").display(),
         output_dir.join("per_case.jsonl").display(),

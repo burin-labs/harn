@@ -561,9 +561,10 @@ async fn execute_runs(
                 );
                 return Err(1);
             }
-            eprintln!(
+            cli_diagnostic!(
                 "warn: provider `{}` (for `{}`) unauthenticated — skipping run",
-                render.provider, render.selector,
+                render.provider,
+                render.selector,
             );
             runs.insert(
                 render.selector.clone(),

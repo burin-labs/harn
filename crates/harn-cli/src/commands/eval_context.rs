@@ -147,7 +147,7 @@ fn post_render_exit_code(report: &ContextEvalReportV2) -> i32 {
 }
 
 fn announce_output_paths(output_dir: &Path) {
-    eprintln!(
+    cli_diagnostic!(
         "wrote {}, {}, and {}",
         output_dir.join("summary.json").display(),
         output_dir.join("per_run.jsonl").display(),

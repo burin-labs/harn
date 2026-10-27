@@ -112,7 +112,7 @@ fn acquire(store: &harn_hostlib::HostLeaseStore, args: HostLeaseAcquireArgs) -> 
                 println!("{}", to_string_pretty(&envelope));
             } else if let Some(defer) = receipt.defer {
                 if let Some(active) = defer.active {
-                    eprintln!(
+                    cli_diagnostic!(
                         "Host {} is leased by {} ({}, lease {})",
                         defer.host,
                         active.owner,
@@ -120,7 +120,7 @@ fn acquire(store: &harn_hostlib::HostLeaseStore, args: HostLeaseAcquireArgs) -> 
                         active.lease_id
                     );
                 } else {
-                    eprintln!("Host {} lease registry is busy", defer.host);
+                    cli_diagnostic!("Host {} lease registry is busy", defer.host);
                 }
             }
             EX_TEMPFAIL
@@ -312,7 +312,7 @@ fn print_failure_data<T: Serialize>(code: &str, message: &str, value: T, json: b
         };
         println!("{}", to_string_pretty(&envelope));
     } else {
-        eprintln!("{message}");
+        cli_diagnostic!("{message}");
     }
 }
 
