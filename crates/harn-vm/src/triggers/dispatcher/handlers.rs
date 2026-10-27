@@ -97,6 +97,14 @@ impl Dispatcher {
                             metadata,
                         })
                     }
+                    crate::a2a::DispatchAck::InlineMessage { message_id, result } => {
+                        metadata.insert("message_id".to_string(), serde_json::json!(message_id));
+                        metadata.insert("state".to_string(), serde_json::json!("completed"));
+                        Ok(DispatchCallResult {
+                            output: result,
+                            metadata,
+                        })
+                    }
                     crate::a2a::DispatchAck::PendingTask {
                         task_id,
                         state,
