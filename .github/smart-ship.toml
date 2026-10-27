@@ -10,6 +10,9 @@ review = true
 # A runner has no agent settings, so without this grant every hosted repair
 # model is refused before anything is sent.
 inference_reach = "anyHosted"
+# Install the checkout's pinned Rust toolchain and fetch locked dependencies
+# before the agent is confined; rustup cannot write its home from the sandbox.
+setup_command = ["cargo", "fetch", "--locked"]
 # A resolution is pushed only once the workspace compiles; CI on the pushed
 # merge runs the full suite before it can land.
 verify_command = "cargo check --workspace --locked"
