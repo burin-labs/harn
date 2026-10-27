@@ -14,7 +14,7 @@ compile_error!(
 // same sink as the runtime's status messages.
 macro_rules! cli_diagnostic {
     ($($arg:tt)*) => {
-        harn_vm::events::log_status(&format!($($arg)*))
+        crate::exit::log_cli_diagnostic(&format!($($arg)*))
     };
 }
 

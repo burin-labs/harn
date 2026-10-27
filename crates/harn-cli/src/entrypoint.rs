@@ -80,7 +80,10 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
         parent_handoff,
         crate::spend_policy::run(
             cli.spend_policy.as_deref(),
-            Box::pin(dispatch(subcommand, cli.explain)),
+            Box::pin(crate::exit::with_diagnostic_detail(
+                cli.explain,
+                dispatch(subcommand, cli.explain),
+            )),
         ),
     )
     .await

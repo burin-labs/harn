@@ -107,20 +107,38 @@ fn unknown_code_exits_two() {
 fn malformed_invariant_source_uses_the_cli_diagnostic_sink() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("broken.harn");
-    std::fs::write(&source, "fn broken( {").unwrap();
-    let harn = run_explain(
-        &[
-            "--invariant",
-            "fs.writes",
-            "broken",
-            source.to_str().unwrap(),
-        ],
-        &[],
-    );
-    assert_ne!(harn.exit_code, 0);
-    assert!(harn.stdout.is_empty(), "{}", harn.stdout);
-    assert!(harn.stderr.starts_with("[harn] "), "{}", harn.stderr);
-    assert!(harn.stderr.contains("error"), "{}", harn.stderr);
+    for invalid_source in ["fn broken( {", "\"unterminated"] {
+        std::fs::write(&source, invalid_source).unwrap();
+        let path = source.to_str().unwrap();
+        let brief = run_explain(&["--invariant", "fs.writes", "broken", path], &[]);
+        assert_ne!(brief.exit_code, 0);
+        assert!(brief.stdout.is_empty(), "{}", brief.stdout);
+        assert!(
+            brief.stderr.starts_with("[harn] error:"),
+            "{}",
+            brief.stderr
+        );
+        assert_eq!(brief.stderr.lines().count(), 1, "{}", brief.stderr);
+        assert!(brief.stderr.contains("--explain"), "{}", brief.stderr);
+
+        let detailed = run_explain(
+            &["--explain", "--invariant", "fs.writes", "broken", path],
+            &[],
+        );
+        assert_ne!(detailed.exit_code, 0);
+        assert!(detailed.stdout.is_empty(), "{}", detailed.stdout);
+        assert!(
+            detailed.stderr.starts_with("[harn] "),
+            "{}",
+            detailed.stderr
+        );
+        assert!(
+            detailed.stderr.contains(invalid_source),
+            "{}",
+            detailed.stderr
+        );
+        assert!(detailed.stderr.lines().count() > 1, "{}", detailed.stderr);
+    }
 }
 
 #[test]

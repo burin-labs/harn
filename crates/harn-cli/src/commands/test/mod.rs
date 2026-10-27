@@ -3,13 +3,12 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{self, Stdio};
 
-use clap::{error::ErrorKind, CommandFactory};
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
 
-use crate::cli::{Cli, TestArgs};
+use crate::cli::TestArgs;
 use crate::commands::run::{
     install_cli_llm_mock_mode, persist_cli_llm_mock_recording, CliLlmMockMode,
 };
@@ -693,9 +692,7 @@ fn resolve_test_shard(
 }
 
 fn command_error(message: &str) -> ! {
-    Cli::command()
-        .error(ErrorKind::ValueValidation, message)
-        .exit()
+    crate::exit::command_error(message)
 }
 
 /// Optional report contract threaded into `run_user_tests` as one unit.

@@ -34,7 +34,11 @@ pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>)
                 Some("here"),
                 None,
             );
-            cli_diagnostic!("{}", diagnostic.trim_end());
+            if diagnostic_detail_requested() {
+                cli_diagnostic!("{}", diagnostic.trim_end());
+            } else {
+                cli_diagnostic!("error: {path}: {e} (use --explain for details)");
+            }
             process::exit(1);
         }
     };
@@ -43,7 +47,12 @@ pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>)
     let program = match parser.parse() {
         Ok(p) => p,
         Err(err) => {
-            if parser.all_errors().is_empty() {
+            if !diagnostic_detail_requested() {
+                cli_diagnostic!(
+                    "error: {path}: {} (use --explain for details)",
+                    harn_parser::diagnostic::parser_error_message(&err)
+                );
+            } else if parser.all_errors().is_empty() {
                 let span = error_span_from_parse(&err);
                 let diagnostic = harn_parser::diagnostic::render_diagnostic_with_code(
                     &source,
