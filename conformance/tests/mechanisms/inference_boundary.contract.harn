@@ -93,6 +93,70 @@ pipeline default(harness: Harness) {
       )
     }
   }
+  const confirmation = command_run(
+    harness.tools,
+    [
+      binary,
+      "provider",
+      "attest-account",
+      "--provider",
+      "gemini",
+      "--billing-enabled",
+      "true",
+      "--contributor-sharing-enabled",
+      "false",
+    ],
+    {env: {GEMINI_API_KEY: "inference-contract-fixture-only"}, capture: {max_inline_bytes: 32768}},
+  )
+  require confirmation.success, confirmation.stderr
+  const attestation = json_stringify([json_parse(confirmation.stdout)])
+  const admission_request = json_stringify(
+    {
+      provider: "gemini",
+      model: "gemini-4-argon",
+      boundary: {reach: "any_hosted", allow_training_discounts: false},
+    },
+  )
+  for scenario in [
+    {
+      name: "missing_account_confirmation",
+      key: "inference-contract-fixture-only",
+      facts: "[]",
+      status: "unknown",
+    },
+    {
+      name: "matching_account_confirmation",
+      key: "inference-contract-fixture-only",
+      facts: attestation,
+      status: "admitted",
+    },
+    {
+      name: "mismatched_credential",
+      key: "other-fixture-key",
+      facts: attestation,
+      status: "unknown",
+    },
+  ] {
+    const child = command_run(
+      harness.tools,
+      [binary, "provider", "admission", "--request", admission_request],
+      {
+        env: {
+          GEMINI_API_KEY: scenario.key,
+          HARN_PROVIDER_ACCOUNT_ATTESTATIONS_JSON: scenario.facts,
+        },
+        capture: {max_inline_bytes: 32768},
+      },
+    )
+    require child.success, child.stderr
+    const result = json_parse(child.stdout)
+    const applied = result.account_confirmation_applied ?? false
+    if scenario.status == "admitted" {
+      contract_effect(harness.stdio, scenario.name, result.status == "admitted" && applied)
+    } else {
+      contract_negative(harness.stdio, scenario.name, result.status != "unknown" || applied)
+    }
+  }
   with_llm_script(
     harness.llm,
     [llm_text("A fixture reply.")],
