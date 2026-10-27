@@ -19,7 +19,12 @@ pipeline main(harness: Harness) {
   const manifest = composition_binding_manifest(source_tools)
   const execute = tool_find(tools, "harn.code.execute_composition")
   const dispatched = execute.handler(
-    {snippet: "return read_file({path: \"README.md\"})", manifest: manifest, run_id: "profile-run"},
+    {
+      snippet: "return read_file({path: \"README.md\"})",
+      manifest: manifest,
+      run_id: "profile-run",
+      include_report: true,
+    },
   )
   const report = dispatched.data
   harness.stdio.println(report.ok)
