@@ -329,6 +329,7 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // an in-process server would not prove the `serve api` runtime projection.
   "crates/harn-cli/tests/harn_cli_e2e/harn_serve_api_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/harn_serve_mcp_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/harn_serve_mcp_cli/publication.rs",
   // The generated command tree exists only after a real script publishes its
   // registry, so schema, help, validation, and handler dispatch cross the CLI
   // process boundary together.
