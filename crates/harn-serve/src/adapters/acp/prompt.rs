@@ -546,10 +546,10 @@ impl AcpServer {
                                     false,
                                 ),
                             harn_vm::bridge::UserInjectionStage::Delivered => {
-                                tracking.finish_injection(message_id, true)
+                                tracking.finish_injection(message_id, true);
                             }
                             harn_vm::bridge::UserInjectionStage::Failed => {
-                                tracking.finish_injection(message_id, false)
+                                tracking.finish_injection(message_id, false);
                             }
                             _ => tracking.finish_injection(message_id, false),
                         }
