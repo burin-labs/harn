@@ -43,6 +43,60 @@ fn redirect(stream: &mut std::net::TcpStream, location: &str) {
 }
 
 #[test]
+fn endpoint_specific_data_policy_disables_redirects_without_a_spend_budget() {
+    let _env = env_guard();
+    let egress = crate::egress::test_support::test_env_guard();
+    egress.set("HARN_EGRESS_ALLOW_LOOPBACK", "1");
+    let _cleanup = Cleanup;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        for factory in [
+            crate::llm::blocking_client_for_base_url as fn(&str) -> reqwest::Client,
+            crate::llm::streaming_client_for_base_url,
+        ] {
+            let followed = Arc::new(AtomicUsize::new(0));
+            let count = followed.clone();
+            let source = spawn_llm_stub_many("endpoint policy redirect", 5, move |_, stream| {
+                let (start, body) = request(stream);
+                if start.starts_with("POST /redirected ") {
+                    assert_eq!(body, b"synthetic content");
+                    count.fetch_add(1, Ordering::SeqCst);
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                    )
+                    .unwrap();
+                } else {
+                    write!(stream, "HTTP/1.1 307 Temporary Redirect\r\nLocation: /redirected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                }
+            });
+            let base = format!("http://{}", source.addr());
+            let url = format!("{base}/start");
+            assert_eq!(factory(&base).post(&url).body("synthetic content").send().await.unwrap().status(), 200);
+            assert_eq!(followed.load(Ordering::SeqCst), 1);
+            let overlay = format!(
+                concat!(
+                    "[providers.fixture.regions.safe]\nbase_url = \"{base}\"\n",
+                    "[providers.fixture.regions.safe.data_controls]\n",
+                    "training_default = \"does_not_train\"\nchecked_on = \"2026-10-27\"\n",
+                    "sources = [\"https://example.com/policy\"]\n"
+                ),
+                base = base
+            );
+            crate::llm_config::set_user_overrides(Some(toml::from_str(&overlay).unwrap()));
+            assert_eq!(factory(&base).post(&url).body("synthetic content").send().await.unwrap().status(), 307);
+            assert_eq!(followed.load(Ordering::SeqCst), 1);
+            crate::llm_config::clear_user_overrides();
+            assert_eq!(factory(&base).post(&url).body("synthetic content").send().await.unwrap().status(), 200);
+            assert_eq!(followed.load(Ordering::SeqCst), 2);
+        }
+    });
+}
+
+#[test]
 fn metered_inference_clients_isolate_redirect_policy_in_both_cache_directions() {
     let _env = env_guard();
     let egress = crate::egress::test_support::test_env_guard();

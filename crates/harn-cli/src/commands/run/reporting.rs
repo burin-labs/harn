@@ -544,7 +544,7 @@ fn receipt_output_path(
         return path.clone();
     }
     harn_vm::runtime_paths::state_root(store_base)
-        .join("receipts")
+        .join(harn_vm::runtime_paths::RECEIPTS_DIR)
         .join(format!("{receipt_id}.json"))
 }
 

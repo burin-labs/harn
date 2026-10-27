@@ -20,13 +20,20 @@ pub(crate) fn load_source_snapshot() -> Result<ProviderSourceSnapshot, String> {
         path.try_exists()
             .map_err(|error| format!("cannot inspect {}: {error}", path.display()))
     };
-    let config = if present(&catalog_source)? {
-        generated_provider_config(&catalog_source)?.config
+    let (config, registration_capabilities) = if present(&catalog_source)? {
+        let generated = generated_provider_config(&catalog_source)?;
+        (generated.config, generated.registration_capabilities)
     } else {
-        harn_provider_catalog::config::embedded_config(None)
+        (
+            harn_provider_catalog::config::embedded_config(None),
+            String::new(),
+        )
     };
     let capabilities = if present(&capability_source)? {
-        generated_provider_capabilities(&capability_source)?.capabilities
+        generated_provider_capabilities(&capability_source, &registration_capabilities)?
+            .capabilities
+    } else if !registration_capabilities.is_empty() {
+        return Err("registered model requests require capability source fragments".into());
     } else {
         harn_provider_catalog::capabilities::builtin_file().clone()
     };

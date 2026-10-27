@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-const LOCAL_SUBDIR: &str = "local";
+const LOCAL_SUBDIR: &str = crate::runtime_paths::LOCAL_DIR;
 const SELECTION_FILE: &str = "selection.json";
 
 /// The local provider/model pair `harn local switch` last selected.

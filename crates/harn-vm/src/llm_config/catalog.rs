@@ -3,6 +3,7 @@
 //! tier candidate enumeration.
 use std::collections::BTreeMap;
 
+use super::endpoint_data_controls::endpoint_data_controls;
 use super::*;
 
 use harn_glob::match_name as glob_match;
@@ -22,6 +23,16 @@ pub fn pricing_clock_now() -> OffsetDateTime {
 
 const MODEL_DEFAULT_UNSET_KEY: &str = "_unset";
 
+/// Endpoint-specific data promises cannot authorize a redirected request.
+pub(crate) fn has_endpoint_data_controls(base_url: &str) -> bool {
+    effective_config().providers.values().any(|provider| {
+        matches!(
+            endpoint_data_controls(provider, base_url),
+            EndpointDataControls::Verified(_)
+        )
+    })
+}
+
 /// Get provider config for resolving base_url, auth, etc.
 pub fn provider_config(name: &str) -> Option<ProviderDef> {
     let mut provider = effective_config().providers.get(name).cloned()?;
@@ -34,6 +45,14 @@ pub fn provider_config(name: &str) -> Option<ProviderDef> {
         provider.region_env = None;
     }
     Some(provider)
+}
+
+/// Preserve whether a route is unscoped, unverified, or verified.
+pub(crate) fn resolved_endpoint_data_controls(provider: &str) -> EndpointDataControls {
+    let Some(definition) = provider_config(provider) else {
+        return EndpointDataControls::Unscoped;
+    };
+    endpoint_data_controls(&definition, &super::resolve_base_url(&definition))
 }
 
 /// The posture Harn requests when a caller names none.
@@ -56,11 +75,20 @@ pub fn data_controls_default_posture() -> DataPosture {
 /// from `Some(TrainingDefault::Unspecified)`, which is the stronger claim that
 /// someone looked and the provider publishes no answer.
 pub fn effective_training_default(provider: &str, model_id: &str) -> Option<TrainingDefault> {
+    let definition = provider_config(provider)?;
+    let endpoint_controls =
+        endpoint_data_controls(&definition, &super::resolve_base_url(&definition));
+    if matches!(endpoint_controls, EndpointDataControls::Unverified) {
+        return None;
+    }
     if let Some(model_controls) = model_catalog_entry(model_id).and_then(|row| row.data_controls) {
         return Some(model_controls.training_default);
     }
-    provider_config(provider)
-        .and_then(|definition| definition.data_controls)
+    if let EndpointDataControls::Verified(controls) = endpoint_controls {
+        return Some(controls.training_default);
+    }
+    definition
+        .data_controls
         .map(|controls| controls.training_default)
 }
 

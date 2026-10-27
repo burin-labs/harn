@@ -35,7 +35,7 @@ const READ_TEXT_BUILTIN: &str = "hostlib_fs_read_text";
 const EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN: &str = "hostlib_fs_emit_safe_text_patch_result";
 
 const MANIFEST_VERSION: u32 = 1;
-const STATE_REL: &[&str] = &[".harn", "state", "staged"];
+const STATE_REL: &[&str] = &[".harn", harn_vm::runtime_paths::HOSTLIB_STATE_DIR, "staged"];
 
 pub(crate) mod paths;
 #[cfg(test)]

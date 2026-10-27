@@ -362,6 +362,7 @@ harn eval coding-agent --tool-format
 harn eval context
 harn eval context --json
 harn eval context --output
+harn eval context --report-version
 harn eval context <positional 1>
 harn eval prompt
 harn eval prompt --bindings

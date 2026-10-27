@@ -265,7 +265,7 @@ impl AcpBridge {
     /// a full replacement for the client's current plan state.
     #[allow(dead_code)]
     pub(super) fn send_plan(&self, entries: serde_json::Value) {
-        let update = plan_update(entries);
+        let update = acp_plan_update(entries);
         self.send_notification(
             "session/update",
             serde_json::json!({
@@ -414,7 +414,71 @@ impl AcpBridge {
     }
 }
 
-pub(super) fn plan_update(entries: serde_json::Value) -> serde_json::Value {
+/// Project Harn plan entries into the ACP plan update wire shape.
+pub fn acp_plan_update(entries: serde_json::Value) -> serde_json::Value {
+    let entries: Vec<_> = entries
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let mut projected = entry.as_object()?.clone();
+            let content = entry.get("content")?.as_str()?;
+            let raw_status = entry.get("status");
+            let status = raw_status.and_then(serde_json::Value::as_str);
+            let recognized_status = matches!(status, Some("pending" | "in_progress" | "completed"));
+            let content = match status {
+                Some(value) if !recognized_status => format!("[{value}] {content}"),
+                _ => content.to_string(),
+            };
+            let raw_priority = entry.get("priority");
+            let priority = raw_priority.and_then(serde_json::Value::as_str);
+            let recognized_priority = matches!(priority, Some("high" | "medium" | "low"));
+            projected.insert("content".to_string(), serde_json::json!(content));
+            projected.insert(
+                "status".to_string(),
+                serde_json::json!(if recognized_status {
+                    status.unwrap()
+                } else {
+                    "pending"
+                }),
+            );
+            projected.insert(
+                "priority".to_string(),
+                serde_json::json!(if recognized_priority {
+                    priority.unwrap()
+                } else {
+                    "medium"
+                }),
+            );
+            let mut original = serde_json::Map::new();
+            if let Some(value) = raw_status.filter(|value| !value.is_null() && !recognized_status) {
+                original.insert("originalStatus".to_string(), value.clone());
+            }
+            if let Some(value) =
+                raw_priority.filter(|value| !value.is_null() && !recognized_priority)
+            {
+                original.insert("originalPriority".to_string(), value.clone());
+            }
+            if !original.is_empty() {
+                let meta = projected
+                    .entry("_meta")
+                    .or_insert_with(|| serde_json::json!({}));
+                if !meta.is_object() {
+                    *meta = serde_json::json!({});
+                }
+                let harn = meta
+                    .as_object_mut()
+                    .unwrap()
+                    .entry("harn")
+                    .or_insert_with(|| serde_json::json!({}));
+                if !harn.is_object() {
+                    *harn = serde_json::json!({});
+                }
+                harn.as_object_mut().unwrap().extend(original);
+            }
+            Some(serde_json::Value::Object(projected))
+        })
+        .collect();
     serde_json::json!({
         "sessionUpdate": "plan",
         "entries": entries,

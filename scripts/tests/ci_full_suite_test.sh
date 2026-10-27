@@ -29,7 +29,7 @@ case "$*" in
         exit 1 ;;
       *) exit 9 ;;
     esac ;;
-  *workflows/ci.yml/runs*sort_by*) printf '71\n' ;;
+  *sort_by*workflows/ci.yml/runs*|*workflows/ci.yml/runs*sort_by*) printf '71\n' ;;
   *workflows/ci.yml/runs*) cat "$FIXTURE/runs" ;;
   *workflows/macos-nightly.yml/runs*)
     if [[ ${FAKE_NATIVE_DISCOVERY:-false} == true && ! -f "$FIXTURE/discovery-read" ]]; then
@@ -46,7 +46,17 @@ case "$*" in
   *runs/81/artifacts*) cat "$FIXTURE/native-artifacts" ;;
   *runs/82/artifacts*) cat "$FIXTURE/native-artifacts" ;;
   *artifacts/101/zip*) cat "$FIXTURE/native-receipt.zip" ;;
-  *runs/71/jobs*) cat "$FIXTURE/jobs" ;;
+  *runs/71/jobs*)
+    count=0
+    [[ ! -f "$FIXTURE/job-read-count" ]] || count=$(cat "$FIXTURE/job-read-count")
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$FIXTURE/job-read-count"
+    if (( count <= ${FAKE_JOB_FAILURES:-0} )); then
+      cat "$FIXTURE/jobs"
+      printf 'gh: Server Error (HTTP %s)\n' "${FAKE_JOB_HTTP_STATUS:-502}" >&2
+      exit 1
+    fi
+    cat "$FIXTURE/jobs" ;;
   *) exit 9 ;;
 esac
 SH
@@ -84,6 +94,23 @@ grep -q '"status":"complete"' "$scratch/log"
 head -n 1 "$scratch/log" | jq -e \
   '.kind == "harn.release.full_suite.v1" and .verdict == "success" and .pending_count == 0 and .failed_count == 0 and .next_action == "continue"' >/dev/null
 jq -e '.verdict == "success" and .next_action == "continue"' "$FULL_SUITE_STATUS_FILE" >/dev/null
+rm -f "$scratch/job-read-count"
+: > "$scratch/discovery-waits"
+FAKE_JOB_FAILURES=1 FAKE_JOB_HTTP_STATUS=502 \
+  bash "$root/scripts/ci/require_full_suite.sh" --main-only > "$scratch/retry-log"
+[[ $(cat "$scratch/job-read-count") == 2 ]]
+[[ $(cat "$scratch/discovery-waits") == 1 ]]
+jq -e '.verdict == "success" and .pending_count == 0 and .failed_count == 0' "$FULL_SUITE_STATUS_FILE" >/dev/null
+for scenario in '502 3 3' '501 3 3' '403 3 1' '429 3 1'; do
+  read -r status failures expected <<< "$scenario"
+  rm -f "$scratch/job-read-count"
+  if FAKE_JOB_FAILURES="$failures" FAKE_JOB_HTTP_STATUS="$status" \
+    bash "$root/scripts/ci/require_full_suite.sh" --main-only > "$scratch/retry-log"; then
+    echo "Unreadable jobs read was accepted: HTTP $status" >&2; exit 1
+  fi
+  [[ $(cat "$scratch/job-read-count") == "$expected" ]]
+  jq -e '.verdict == "unmeasured" and .reason == "jobs" and .pending_count == null and .next_action == "retry-read"' "$FULL_SUITE_STATUS_FILE" >/dev/null
+done
 printf '71\t%s\tin_progress\t\n' "$SOURCE_SHA" > "$scratch/runs"
 : > "$scratch/watch-calls"
 WAIT_FOR_FULL_SUITE=true FAKE_WATCH_CASE=recover \
@@ -158,8 +185,7 @@ cp "$scratch/good-jobs" "$scratch/jobs"
 if FAKE_GH_FAILURE=true bash "$root/scripts/ci/require_full_suite.sh" --main-only > "$scratch/log" 2>&1; then
   echo 'Unreadable CI admitted before building' >&2; exit 1
 fi
-jq -e '.verdict == "unmeasured" and .pending_count == null and .next_action == "retry-read"' "$scratch/log" >/dev/null
-jq -e '.verdict == "unmeasured" and .pending_count == null' "$FULL_SUITE_STATUS_FILE" >/dev/null
+jq -e '.verdict == "unmeasured" and .reason == "runs" and .pending_count == null and .next_action == "retry-read"' "$FULL_SUITE_STATUS_FILE" >/dev/null
 for outcome in failure cancelled ''; do
   printf '71\t%s\tcompleted\t%s\n' "$SOURCE_SHA" "$outcome" > "$scratch/runs"
   if bash "$root/scripts/ci/require_full_suite.sh" > "$scratch/log" 2>&1; then

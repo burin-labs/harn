@@ -36,7 +36,7 @@ impl CheckpointState {
         Self {
             data: BTreeMap::new(),
             path: state_root
-                .join("checkpoints")
+                .join(crate::runtime_paths::CHECKPOINTS_DIR)
                 .join(format!("{pipeline_name}.json")),
         }
     }

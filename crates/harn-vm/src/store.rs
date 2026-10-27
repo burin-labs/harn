@@ -23,7 +23,7 @@ impl StoreState {
     }
 
     fn at_state_root(state_root: &Path) -> Self {
-        Self::at_path(state_root.join("store.json"))
+        Self::at_path(state_root.join(crate::runtime_paths::STORE_FILE))
     }
 
     fn at_path(path: PathBuf) -> Self {

@@ -54,6 +54,7 @@
           "entries": [
             {
               "content": "inspect protocol fixtures",
+              "priority": "medium",
               "status": "completed"
             }
           ]
@@ -67,6 +68,7 @@
         "sessionId": "session-1",
         "update": {
           "sessionUpdate": "current_mode_update",
+          "currentModeId": "architect",
           "modeId": "architect"
         }
       }
@@ -115,13 +117,13 @@
     }
   ],
   "matrix": {
-    "version": "v0.12.2",
+    "version": "v1.26.0",
     "family": "session_update",
     "case": "success",
     "source": {
       "kind": "official_example",
       "url": "https://agentclientprotocol.com/protocol/schema",
-      "description": "Canonical ACP session/update discriminators represented in the upstream v0.12.2 schema."
+      "description": "Canonical ACP session/update discriminators represented in the upstream v1.26.0 schema."
     }
   }
 }

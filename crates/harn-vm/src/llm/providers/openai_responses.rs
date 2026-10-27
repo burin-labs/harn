@@ -32,6 +32,22 @@ impl OpenAiResponsesProvider {
         let clock = harn_clock::RealClock::arc();
         let started_ms = clock.monotonic_ms();
         let compact = request.compact.unwrap_or(false);
+        let mut resolved = crate::llm::helpers::ResolvedProvider::resolve(&request.provider);
+        resolved.endpoint = if compact {
+            RESPONSES_COMPACT_ENDPOINT
+        } else {
+            RESPONSES_ENDPOINT
+        }
+        .to_string();
+        let boundary =
+            crate::llm::api::inference_boundary::effective_result(request.inference_boundary)
+                .map_err(VmError::Runtime)?;
+        let approved = crate::llm::api::inference_boundary::ApprovedWireRoute::capture(
+            boundary,
+            &request.provider,
+            &resolved.url(),
+            &crate::llm_config::wire_model_id(&request.model),
+        );
         let mut body = if compact {
             Self::build_compact_request_body(request)
         } else {
@@ -48,13 +64,9 @@ impl OpenAiResponsesProvider {
             body["stream"] = serde_json::Value::Bool(true);
         }
 
-        let mut resolved = crate::llm::helpers::ResolvedProvider::resolve(&request.provider);
-        resolved.endpoint = if compact {
-            RESPONSES_COMPACT_ENDPOINT
-        } else {
-            RESPONSES_ENDPOINT
+        if let Some(approved) = &approved {
+            approved.verify(&request.provider, &resolved.url(), &body)?;
         }
-        .to_string();
         let client = crate::llm::blocking_client_for_base_url(&resolved.base_url);
         let req = client
             .post(resolved.url())

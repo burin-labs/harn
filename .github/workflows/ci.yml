@@ -2264,6 +2264,11 @@ jobs:
         env:
           PROTOCOL_SYMBOL_GUARD_BASE: HEAD^1
         run: make check-protocol-symbol-removals
+      - name: Check provider catalog schema version
+        if: always()
+        env:
+          CATALOG_SCHEMA_GUARD_BASE: HEAD^1
+        run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/check_provider_catalog_schema_version.harn'
       # The contract that keeps the three refusals above reachable from a pull
       # request is itself a policy check, and the expensive sweep that also
       # runs it is push-only. Running it only there would mean a re-added

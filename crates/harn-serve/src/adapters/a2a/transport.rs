@@ -64,6 +64,7 @@ impl A2aServer {
             .layer(axum::extract::DefaultBodyLimit::max(
                 crate::DEFAULT_HTTP_BODY_LIMIT_BYTES,
             ))
+            .layer(axum::middleware::from_fn(version_query_header))
             .with_state(state)
     }
 
@@ -384,6 +385,28 @@ impl A2aServer {
     }
 }
 
+async fn version_query_header(
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let versions: Vec<_> = request
+        .uri()
+        .query()
+        .map(|query| {
+            url::form_urlencoded::parse(query.as_bytes())
+                .filter(|(name, _)| name.eq_ignore_ascii_case(A2A_VERSION_HEADER))
+                .map(|(_, value)| value.into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    for version in versions {
+        let header =
+            HeaderValue::from_str(&version).unwrap_or_else(|_| HeaderValue::from_static("invalid"));
+        request.headers_mut().append(A2A_VERSION_HEADER, header);
+    }
+    next.run(request).await
+}
+
 pub(super) async fn agent_card_request(State(state): State<HttpState>) -> Response {
     Json(state.server.agent_card(&state.public_url)).into_response()
 }
@@ -394,7 +417,6 @@ pub(super) async fn jsonrpc_request(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    log_legacy_version_header(&headers);
     let request = match serde_json::from_slice::<JsonValue>(body.as_ref()) {
         Ok(value) => value,
         Err(error) => {
@@ -409,6 +431,9 @@ pub(super) async fn jsonrpc_request(
                 .into_response()
         }
     };
+    if let Some(response) = unsupported_version_response(&headers, Some(&request)) {
+        return response;
+    }
     let auth = AuthRequest::from_http(&method, "/", body.to_vec(), &headers);
     let processed = state
         .server
@@ -721,7 +746,9 @@ pub(super) async fn rest_dispatch_no_body(
     rpc_method: &str,
     params: JsonValue,
 ) -> Response {
-    log_legacy_version_header(&headers);
+    if let Some(response) = unsupported_version_response(&headers, None) {
+        return response;
+    }
     let auth = AuthRequest::from_http(&method, auth_path, Vec::new(), &headers);
     let request = harn_vm::jsonrpc::request(Uuid::now_v7().to_string(), rpc_method, params);
     let processed = state
@@ -740,7 +767,9 @@ pub(super) async fn rest_dispatch_with_body(
     rpc_method: &str,
     params: JsonValue,
 ) -> Response {
-    log_legacy_version_header(&headers);
+    if let Some(response) = unsupported_version_response(&headers, None) {
+        return response;
+    }
     let auth = AuthRequest::from_http(&method, auth_path, body.to_vec(), &headers);
     let request = harn_vm::jsonrpc::request(Uuid::now_v7().to_string(), rpc_method, params);
     let processed = state
@@ -776,7 +805,9 @@ pub(super) async fn rest_task_request(
     rpc_method: &str,
     rest_deprecation: Option<&'static str>,
 ) -> Response {
-    log_legacy_version_header(&headers);
+    if let Some(response) = unsupported_version_response(&headers, None) {
+        return response;
+    }
     let params = match serde_json::from_slice::<JsonValue>(body.as_ref()) {
         Ok(value) => value,
         Err(error) => {
@@ -804,6 +835,46 @@ pub(super) async fn rest_task_request(
     // transport doesn't have its own.
     processed.deprecation = rest_deprecation.or(processed.deprecation);
     rest_response(processed)
+}
+
+fn unsupported_version_response(
+    headers: &HeaderMap,
+    request: Option<&JsonValue>,
+) -> Option<Response> {
+    if accepts_version_header(headers) {
+        return None;
+    }
+    let supported = json!([supported_wire_version()]);
+    if let Some(request) = request {
+        let mut response = error_response(
+            request.get("id").cloned().unwrap_or(JsonValue::Null),
+            -32009,
+            "A2A protocol version not supported",
+        );
+        response["error"]["data"] = json!([{
+            "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+            "reason": "VERSION_NOT_SUPPORTED",
+            "domain": "a2a-protocol.org",
+            "metadata": {"supportedVersions": supported_wire_version()},
+        }]);
+        return Some((StatusCode::BAD_REQUEST, Json(response)).into_response());
+    }
+    let mut response = (
+        StatusCode::BAD_REQUEST,
+        Json(json!({
+            "type": "https://a2a-protocol.org/errors/version-not-supported",
+            "title": "Protocol Version Not Supported",
+            "status": 400,
+            "detail": "The requested A2A protocol version is not supported by this agent",
+            "supportedVersions": supported,
+        })),
+    )
+        .into_response();
+    response.headers_mut().insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/problem+json"),
+    );
+    Some(response)
 }
 
 pub(super) fn rpc_response(processed: ProcessedRpc) -> Response {

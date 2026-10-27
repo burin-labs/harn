@@ -404,7 +404,9 @@ provider_rule! {
         #[serde(default)]
         pub reasoning_text_promotable: Option<bool>,
         /// Provider-specific reasoning request shape for OpenAI-compatible
-        /// transports. Known values are `openrouter`, `enabled`, and `minimax`.
+        /// transports. `openai` selects scalar `reasoning_effort`, overriding
+        /// an inherited dialect. Other values include `openrouter`, `enabled`,
+        /// `minimax`, `groq_qwen`, and `thinking_type`.
         #[serde(default)]
         pub reasoning_wire_format: Option<String>,
         /// Caller-selected portable generation options this route permits normally

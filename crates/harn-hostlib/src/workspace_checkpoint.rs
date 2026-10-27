@@ -37,16 +37,21 @@
 //!   `.harn/state/checkpoints/<session>/blobs/` and die with the session.
 
 mod anchored_fs;
+mod fork;
+mod scan;
 use anchored_fs::{open_anchor, restore_one, Step};
 #[cfg(all(test, unix))]
 use anchored_fs::{Stage, RESTORE_HOOK};
+pub use fork::{fork_session, ForkReceipt};
+#[cfg(all(test, unix))]
+use scan::scan_tree_with_exclusions;
+use scan::{excluded_paths, is_excluded, scan_tree};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs as stdfs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
 
 use harn_vm::tool_annotations::SideEffectLevel;
 use harn_vm::VmValue;
@@ -68,7 +73,11 @@ const DROP_BUILTIN: &str = "hostlib_fs_checkpoint_drop";
 
 const ALREADY_AT_BOUNDARY: &str = "already matches the boundary";
 
-const STATE_REL: &[&str] = &[".harn", "state", "checkpoints"];
+const STATE_REL: &[&str] = &[
+    ".harn",
+    harn_vm::runtime_paths::HOSTLIB_STATE_DIR,
+    "checkpoints",
+];
 
 /// Largest dirty or untracked file a boundary stores. Larger files are listed
 /// as unrestorable instead of copied on every turn.
@@ -303,6 +312,7 @@ struct StoredFile {
     exec: bool,
 }
 
+#[derive(Clone)]
 struct Boundary {
     id: String,
     /// Git tree of the index at capture; clean tracked content resolves here.
@@ -315,11 +325,24 @@ struct Boundary {
     unrestorable: BTreeMap<String, String>,
 }
 
+#[derive(Clone)]
 struct CallRecord {
     call_id: String,
     boundary_idx: usize,
     side_effect: Option<SideEffectLevel>,
+    scan_errors: usize,
     changes: Vec<AttributedChange>,
+}
+
+struct PendingCall {
+    boundary_idx: usize,
+    scan: PendingScan,
+}
+
+enum PendingScan {
+    Beginning,
+    Active(Arc<Scan>),
+    Ending,
 }
 
 struct Session {
@@ -329,12 +352,22 @@ struct Session {
     blob_dir: PathBuf,
     boundaries: Vec<Boundary>,
     calls: Vec<CallRecord>,
-    pending: HashMap<String, Scan>,
+    pending: HashMap<String, PendingCall>,
+    revision: u64,
 }
 
 type SharedSession = Arc<Mutex<Session>>;
 
 static SESSIONS: OnceLock<Mutex<BTreeMap<String, SharedSession>>> = OnceLock::new();
+
+#[cfg(all(test, unix))]
+type CallEndHook = Box<dyn Fn()>;
+
+#[cfg(all(test, unix))]
+thread_local! {
+    static CALL_END_HOOK: std::cell::RefCell<Option<CallEndHook>> = const { std::cell::RefCell::new(None) };
+    static CALL_BEGIN_HOOK: std::cell::RefCell<Option<CallEndHook>> = const { std::cell::RefCell::new(None) };
+}
 
 fn sessions() -> &'static Mutex<BTreeMap<String, SharedSession>> {
     SESSIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
@@ -354,8 +387,21 @@ fn lock(session: &SharedSession) -> std::sync::MutexGuard<'_, Session> {
         .expect("workspace checkpoint session poisoned")
 }
 
+/// Whether a captured session still belongs to the requested workspace root.
+pub fn root_matches(session_id: &str, root: &Path) -> Option<bool> {
+    find_session(session_id).map(|session| lock(&session).root == resolve_root(Some(root)))
+}
+
 fn backend(builtin: &'static str) -> impl Fn(String) -> HostlibError {
     move |message| HostlibError::Backend { builtin, message }
+}
+
+fn advance_revision(state: &mut Session, builtin: &'static str) -> Result<(), HostlibError> {
+    state.revision = state
+        .revision
+        .checked_add(1)
+        .ok_or_else(|| backend(builtin)("checkpoint revision exhausted".to_string()))?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -373,6 +419,25 @@ pub fn capture(
     validate_session_id(CAPTURE_BUILTIN, session_id)?;
     require_non_empty(CAPTURE_BUILTIN, "boundary_id", boundary_id)?;
     let root = resolve_root(root);
+    let initial_generation = if let Some(session) = find_session(session_id) {
+        let state = lock(&session);
+        if state.root != root {
+            return Err(HostlibError::InvalidParameter {
+                builtin: CAPTURE_BUILTIN,
+                param: "root",
+                message: format!(
+                    "session `{session_id}` already checkpoints {}",
+                    state.root.display()
+                ),
+            });
+        }
+        if let Some(detail) = pending_calls_detail(&state) {
+            return Ok(unavailable("calls_in_flight", detail));
+        }
+        Some((state.revision, state.boundaries.len()))
+    } else {
+        None
+    };
 
     let prefix = match git(&root, &["rev-parse", "--show-prefix"]) {
         Ok(out) => String::from_utf8_lossy(&out).trim().to_string(),
@@ -389,6 +454,18 @@ pub fn capture(
         Ok(out) => String::from_utf8_lossy(&out).trim().to_string(),
         Err(error) => return Ok(unavailable("index_not_writable_as_tree", error.detail())),
     };
+    let scan = scan_tree(&root, read_parent_ignores);
+    if scan.errors > 0 {
+        let paths = if scan.error_paths.is_empty() {
+            "unlocated".to_string()
+        } else {
+            scan.error_paths.join(", ")
+        };
+        return Ok(unavailable(
+            "incomplete_capture",
+            format!("workspace scan errors: {}; paths: {paths}", scan.errors),
+        ));
+    }
 
     let dirty = nul_list(&git_text(
         &root,
@@ -402,10 +479,13 @@ pub fn capture(
     let mut stored = BTreeMap::new();
     let mut unrestorable = BTreeMap::new();
     let mut stored_bytes = 0u64;
+    let excluded = excluded_paths(&root);
     for path in dirty {
-        if path.ends_with('/') || absent_tracked.contains(&path) || path.starts_with(".harn/state/")
+        if path.ends_with('/')
+            || absent_tracked.contains(&path)
+            || is_excluded(&root, &root.join(&path), &excluded)
         {
-            continue; // nested repository or already deleted
+            continue; // nested repository, already deleted, or runtime-owned
         }
         let full = root.join(&path);
         let Ok(meta) = stdfs::symlink_metadata(&full) else {
@@ -433,7 +513,6 @@ pub fn capture(
         );
     }
 
-    let scan = scan_tree(&root, read_parent_ignores);
     let receipt = CaptureReceipt {
         available: true,
         boundary_id: boundary_id.to_string(),
@@ -464,10 +543,22 @@ pub fn capture(
                 boundaries: Vec::new(),
                 calls: Vec::new(),
                 pending: HashMap::new(),
+                revision: 0,
             }))
         })
         .clone();
     let mut state = lock(&session);
+    if let Some(detail) = pending_calls_detail(&state) {
+        return Ok(unavailable("calls_in_flight", detail));
+    }
+    if initial_generation.map_or(!state.boundaries.is_empty(), |generation| {
+        generation != (state.revision, state.boundaries.len())
+    }) {
+        return Ok(unavailable(
+            "concurrent_calls",
+            "the session changed while the workspace boundary was being captured",
+        ));
+    }
     if state.boundaries.iter().any(|b| b.id == boundary_id) {
         return Err(HostlibError::InvalidParameter {
             builtin: CAPTURE_BUILTIN,
@@ -485,6 +576,7 @@ pub fn capture(
             ),
         });
     }
+    advance_revision(&mut state, CAPTURE_BUILTIN)?;
     state.boundaries.push(boundary);
     Ok(Outcome::Ready(receipt))
 }
@@ -500,10 +592,32 @@ pub fn call_begin(
         return Ok(no_checkpoint(session_id));
     };
     let (root, parents) = {
-        let state = lock(&session);
+        let mut state = lock(&session);
+        if state.pending.contains_key(call_id) {
+            return Err(HostlibError::InvalidParameter {
+                builtin: CALL_BEGIN_BUILTIN,
+                param: "call_id",
+                message: format!("checkpoint call `{call_id}` is already in flight"),
+            });
+        }
+        advance_revision(&mut state, CALL_BEGIN_BUILTIN)?;
+        let boundary_idx = state.boundaries.len().saturating_sub(1);
+        state.pending.insert(
+            call_id.to_string(),
+            PendingCall {
+                boundary_idx,
+                scan: PendingScan::Beginning,
+            },
+        );
         (state.root.clone(), state.read_parent_ignores)
     };
     let scan = scan_tree(&root, parents);
+    #[cfg(all(test, unix))]
+    CALL_BEGIN_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow().as_ref() {
+            hook();
+        }
+    });
     let receipt = CallBeginReceipt {
         available: true,
         call_id: call_id.to_string(),
@@ -511,7 +625,11 @@ pub fn call_begin(
         scan_errors: scan.errors,
         scan_ms: scan.elapsed_ms,
     };
-    lock(&session).pending.insert(call_id.to_string(), scan);
+    lock(&session)
+        .pending
+        .get_mut(call_id)
+        .expect("beginning call remains pending")
+        .scan = PendingScan::Active(Arc::new(scan));
     Ok(Outcome::Ready(receipt))
 }
 
@@ -526,17 +644,43 @@ pub fn call_end(
     let Some(session) = find_session(session_id) else {
         return Ok(no_checkpoint(session_id));
     };
-    let (root, parents, before) = {
+    let (root, parents, before, boundary_idx) = {
         let mut state = lock(&session);
-        let Some(before) = state.pending.remove(call_id) else {
+        let root = state.root.clone();
+        let parents = state.read_parent_ignores;
+        let Some(pending) = state.pending.get_mut(call_id) else {
             return Err(HostlibError::InvalidParameter {
                 builtin: CALL_END_BUILTIN,
                 param: "call_id",
                 message: format!("no checkpoint_call_begin for `{call_id}`"),
             });
         };
-        (state.root.clone(), state.read_parent_ignores, before)
+        let before = match &pending.scan {
+            PendingScan::Beginning => {
+                return Err(HostlibError::InvalidParameter {
+                    builtin: CALL_END_BUILTIN,
+                    param: "call_id",
+                    message: format!("checkpoint call `{call_id}` is still beginning"),
+                });
+            }
+            PendingScan::Ending => {
+                return Err(HostlibError::InvalidParameter {
+                    builtin: CALL_END_BUILTIN,
+                    param: "call_id",
+                    message: format!("checkpoint call `{call_id}` is already ending"),
+                });
+            }
+            PendingScan::Active(before) => before.clone(),
+        };
+        pending.scan = PendingScan::Ending;
+        (root, parents, before, pending.boundary_idx)
     };
+    #[cfg(all(test, unix))]
+    CALL_END_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow().as_ref() {
+            hook();
+        }
+    });
     let after = scan_tree(&root, parents);
     let mut changes = Vec::new();
     let mut push = |path: &str, kind: &'static str, post_hash: Option<String>, unreadable: bool| {
@@ -571,18 +715,20 @@ pub fn call_end(
     changes.sort_by(|a, b| a.path.cmp(&b.path));
 
     let mut state = lock(&session);
-    let boundary_idx = state.boundaries.len().saturating_sub(1);
+    state.pending.remove(call_id);
+    let scan_errors = after.errors + before.errors;
     state.calls.push(CallRecord {
         call_id: call_id.to_string(),
         boundary_idx,
         side_effect,
+        scan_errors,
         changes: changes.clone(),
     });
     Ok(Outcome::Ready(CallEndReceipt {
         available: true,
         call_id: call_id.to_string(),
         changes,
-        scan_errors: after.errors + before.errors,
+        scan_errors,
     }))
 }
 
@@ -594,6 +740,12 @@ pub fn plan(session_id: &str, boundary_id: &str) -> Result<Outcome<PlanReceipt>,
         return Ok(no_checkpoint(session_id));
     };
     let state = lock(&session);
+    if let Some(detail) = pending_calls_detail(&state) {
+        return Ok(unavailable("calls_in_flight", detail));
+    }
+    if let Some(detail) = incomplete_attribution(&state, boundary_id) {
+        return Ok(unavailable("incomplete_attribution", detail));
+    }
     let Some(planned) = compute_plan(&state, boundary_id, PLAN_BUILTIN)? else {
         return Ok(unknown_boundary(boundary_id));
     };
@@ -626,9 +778,16 @@ pub fn restore(
         return Ok(no_checkpoint(session_id));
     };
     let mut state = lock(&session);
+    if let Some(detail) = pending_calls_detail(&state) {
+        return Ok(unavailable("calls_in_flight", detail));
+    }
+    if let Some(detail) = incomplete_attribution(&state, boundary_id) {
+        return Ok(unavailable("incomplete_attribution", detail));
+    }
     let Some(planned) = compute_plan(&state, boundary_id, RESTORE_BUILTIN)? else {
         return Ok(unknown_boundary(boundary_id));
     };
+    advance_revision(&mut state, RESTORE_BUILTIN)?;
     let root = state.root.clone();
     let anchor = open_anchor(&root);
     let selected: Option<BTreeSet<&str>> =
@@ -775,6 +934,40 @@ struct WritePayload {
 struct Planned {
     actions: Vec<PlannedAction>,
     irreversible: Vec<IrreversibleEffect>,
+}
+
+fn pending_calls_detail(state: &Session) -> Option<String> {
+    if state.pending.is_empty() {
+        return None;
+    }
+    let mut calls: Vec<&str> = state.pending.keys().map(String::as_str).collect();
+    calls.sort_unstable();
+    Some(format!(
+        "pending calls: {}; ids: {}",
+        calls.len(),
+        calls.join(", ")
+    ))
+}
+
+fn incomplete_attribution(state: &Session, boundary_id: &str) -> Option<String> {
+    let idx = state
+        .boundaries
+        .iter()
+        .position(|boundary| boundary.id == boundary_id)?;
+    let failed: Vec<&CallRecord> = state
+        .calls
+        .iter()
+        .filter(|call| call.boundary_idx >= idx && call.scan_errors > 0)
+        .collect();
+    if failed.is_empty() {
+        return None;
+    }
+    let count: usize = failed.iter().map(|call| call.scan_errors).sum();
+    let names: Vec<&str> = failed.iter().map(|call| call.call_id.as_str()).collect();
+    Some(format!(
+        "workspace scan errors: {count}; calls: {}",
+        names.join(", ")
+    ))
 }
 
 enum Target {
@@ -933,6 +1126,12 @@ fn boundary_target(
         let blob = blob_dir.join(&file.hash);
         let bytes =
             stdfs::read(&blob).map_err(|e| format!("read stored blob {}: {e}", blob.display()))?;
+        if sha256_hex(&bytes) != file.hash {
+            return Err(format!(
+                "stored checkpoint blob {} has a hash mismatch",
+                blob.display()
+            ));
+        }
         return Ok(Target::Present {
             hash: file.hash.clone(),
             bytes,
@@ -1020,78 +1219,6 @@ fn is_executable(_meta: &stdfs::Metadata) -> bool {
 // ---------------------------------------------------------------------------
 // Stat scan
 // ---------------------------------------------------------------------------
-
-/// Stat every regular file in the non-ignored tree under `root`. `.git`,
-/// nested repositories, and Harn's own state directory are excluded.
-fn scan_tree(root: &Path, read_parent_ignores: bool) -> Scan {
-    let started = Instant::now();
-    let state_dir: PathBuf = [".harn", "state"]
-        .iter()
-        .fold(root.to_path_buf(), |p, c| p.join(c));
-    let walk_root = root.to_path_buf();
-    let walker = ignore::WalkBuilder::new(root)
-        .hidden(false)
-        .ignore(false)
-        .require_git(false)
-        .parents(read_parent_ignores)
-        .follow_links(false)
-        .filter_entry(move |entry| {
-            if entry.file_name() == ".git" || entry.path() == state_dir {
-                return false;
-            }
-            let is_dir = entry.file_type().is_some_and(|t| t.is_dir());
-            !(is_dir && entry.path() != walk_root && entry.path().join(".git").exists())
-        })
-        .build();
-    let mut index = StatIndex::new();
-    let mut errors = 0;
-    let mut error_paths = Vec::new();
-    let mut unlocated_error = false;
-    let mut note_error = |path: Option<&Path>| {
-        errors += 1;
-        match path.and_then(|p| p.strip_prefix(root).ok()) {
-            Some(rel) => error_paths.push(to_agent_path(rel)),
-            None => unlocated_error = true,
-        }
-    };
-    for result in walker {
-        let entry = match result {
-            Ok(entry) => entry,
-            Err(error) => {
-                note_error(error_path(&error).as_deref());
-                continue;
-            }
-        };
-        if !entry.file_type().is_some_and(|t| t.is_file()) {
-            continue;
-        }
-        let Ok(meta) = entry.metadata() else {
-            note_error(Some(entry.path()));
-            continue;
-        };
-        let Ok(rel) = entry.path().strip_prefix(root) else {
-            continue;
-        };
-        index.insert(to_agent_path(rel), stat_entry(&meta));
-    }
-    Scan {
-        index,
-        errors,
-        error_paths,
-        unlocated_error,
-        elapsed_ms: started.elapsed().as_millis() as u64,
-    }
-}
-
-fn error_path(error: &ignore::Error) -> Option<PathBuf> {
-    match error {
-        ignore::Error::WithPath { path, .. } => Some(path.clone()),
-        ignore::Error::WithDepth { err, .. } | ignore::Error::WithLineNumber { err, .. } => {
-            error_path(err)
-        }
-        _ => None,
-    }
-}
 
 /// True when the scan could not see `path`: it, or a directory above it, failed.
 fn scan_blind_to(scan: &Scan, path: &str) -> bool {

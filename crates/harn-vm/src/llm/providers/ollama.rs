@@ -211,7 +211,6 @@ impl OllamaProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
-        let body = Self::build_raw_generate_body(request);
         let pdef = crate::llm_config::provider_config(&request.provider);
         let base_url = pdef
             .as_ref()
@@ -221,13 +220,27 @@ impl OllamaProvider {
             .as_ref()
             .and_then(|provider| provider.completion_endpoint.as_deref())
             .unwrap_or("/api/generate");
+        let url = format!("{base_url}{endpoint}");
+        let boundary =
+            crate::llm::api::inference_boundary::effective_result(request.inference_boundary)
+                .map_err(VmError::Runtime)?;
+        let approved = crate::llm::api::inference_boundary::ApprovedWireRoute::capture(
+            boundary,
+            &request.provider,
+            &url,
+            &crate::llm_config::wire_model_id(&request.model),
+        );
+        let body = Self::build_raw_generate_body(request);
+        if let Some(approved) = &approved {
+            approved.verify(&request.provider, &url, &body)?;
+        }
         let client = if request.stream {
             crate::llm::streaming_client_for_base_url(&base_url)
         } else {
             crate::llm::blocking_client_for_base_url(&base_url)
         };
         let req = client
-            .post(format!("{base_url}{endpoint}"))
+            .post(url)
             .header("Content-Type", "application/json")
             .timeout(std::time::Duration::from_secs(request.resolve_timeout()))
             .json(&body);

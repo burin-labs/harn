@@ -26,9 +26,10 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use harn_vm::orchestration::{
-    context_eval_default_output_dir, evaluate_context_eval_manifest, load_context_eval_manifest,
-    ContextEvalReport, ContextEvalRunReport,
+    context_eval_default_output_dir, context_eval_report_v1, evaluate_context_eval_manifest_v2,
+    load_context_eval_manifest, ContextEvalReportV2,
 };
+use serde::Serialize;
 
 use crate::cli::EvalContextArgs;
 use crate::dispatch;
@@ -59,6 +60,10 @@ const CONTEXT_OUTPUT_MODE_ENV: &str = "HARN_EVAL_CONTEXT_OUTPUT_MODE";
 static DISPATCH_RENDER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub async fn run(args: EvalContextArgs) -> i32 {
+    if !matches!(args.report_version, 1 | 2) {
+        eprintln!("error: context eval report version must be 1 or 2");
+        return 1;
+    }
     let report = match aggregate_report(&args) {
         Ok(report) => report,
         Err(code) => return code,
@@ -70,22 +75,46 @@ pub async fn run(args: EvalContextArgs) -> i32 {
         return 1;
     }
 
+    let legacy = if args.report_version == 1 {
+        eprintln!("warning: context eval report v1 is deprecated and substitutes zero for missing costs; use v2 for cost coverage");
+        match context_eval_report_v1(&report) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                eprintln!("error: failed to project context eval report v1: {error}");
+                return 1;
+            }
+        }
+    } else {
+        None
+    };
+
     // The JSON artifacts (summary.json, per_run.jsonl) always stay on the
     // serde-driven Rust path — see module docstring for the byte-format
     // rationale. They write before any rendering so a render failure
     // doesn't leave a partially-written report directory.
-    if let Err(error) = write_json_artifacts(&output_dir, &report) {
+    let result = if let Some(value) = &legacy {
+        write_json_artifacts(&output_dir, value, &value.runs)
+    } else {
+        write_json_artifacts(&output_dir, &report, &report.runs)
+    };
+    if let Err(error) = result {
         eprintln!("error: failed to write context eval outputs: {error}");
         return 1;
     }
 
+    // Human-readable output always uses the truthful v2 cost coverage.
     match write_markdown_dispatch(&output_dir, &report).await {
         Ok(()) => {}
         Err(code) => return code,
     }
     announce_output_paths(&output_dir);
     if args.json {
-        if let Err(code) = print_json_dispatch(&report).await {
+        let result = if let Some(value) = &legacy {
+            print_json_dispatch(value).await
+        } else {
+            print_json_dispatch(&report).await
+        };
+        if let Err(code) = result {
             return code;
         }
     } else if let Err(code) = print_summary_dispatch(&report).await {
@@ -94,8 +123,8 @@ pub async fn run(args: EvalContextArgs) -> i32 {
     post_render_exit_code(&report)
 }
 
-/// Build the aggregated [`ContextEvalReport`] without any rendering.
-fn aggregate_report(args: &EvalContextArgs) -> Result<ContextEvalReport, i32> {
+/// Build the aggregated [`ContextEvalReportV2`] without any rendering.
+fn aggregate_report(args: &EvalContextArgs) -> Result<ContextEvalReportV2, i32> {
     let manifest = match load_context_eval_manifest(&args.manifest) {
         Ok(manifest) => manifest,
         Err(error) => {
@@ -103,7 +132,7 @@ fn aggregate_report(args: &EvalContextArgs) -> Result<ContextEvalReport, i32> {
             return Err(1);
         }
     };
-    let report = match evaluate_context_eval_manifest(&manifest) {
+    let report = match evaluate_context_eval_manifest_v2(&manifest) {
         Ok(report) => report,
         Err(error) => {
             eprintln!("error: {error}");
@@ -113,7 +142,7 @@ fn aggregate_report(args: &EvalContextArgs) -> Result<ContextEvalReport, i32> {
     Ok(report)
 }
 
-fn post_render_exit_code(report: &ContextEvalReport) -> i32 {
+fn post_render_exit_code(report: &ContextEvalReportV2) -> i32 {
     i32::from(!report.pass)
 }
 
@@ -126,17 +155,21 @@ fn announce_output_paths(output_dir: &Path) {
     );
 }
 
-fn write_json_artifacts(output_dir: &Path, report: &ContextEvalReport) -> Result<(), String> {
+fn write_json_artifacts<T: Serialize, R: Serialize>(
+    output_dir: &Path,
+    report: &T,
+    runs: &[R],
+) -> Result<(), String> {
     write_json(output_dir.join("summary.json"), report)?;
-    write_jsonl(output_dir.join("per_run.jsonl"), &report.runs)
+    write_jsonl(output_dir.join("per_run.jsonl"), runs)
 }
 
-fn write_json(path: PathBuf, report: &ContextEvalReport) -> Result<(), String> {
+fn write_json<T: Serialize>(path: PathBuf, report: &T) -> Result<(), String> {
     let payload = serde_json::to_string_pretty(report).map_err(|error| error.to_string())?;
     fs::write(path, payload).map_err(|error| error.to_string())
 }
 
-fn write_jsonl(path: PathBuf, runs: &[ContextEvalRunReport]) -> Result<(), String> {
+fn write_jsonl<T: Serialize>(path: PathBuf, runs: &[T]) -> Result<(), String> {
     let mut file = fs::File::create(path).map_err(|error| error.to_string())?;
     for run in runs {
         let line = serde_json::to_string(run).map_err(|error| error.to_string())?;
@@ -149,7 +182,10 @@ fn write_jsonl(path: PathBuf, runs: &[ContextEvalRunReport]) -> Result<(), Strin
 
 // ─── Dispatch (.harn) render path ────────────────────────────────────────
 
-async fn write_markdown_dispatch(output_dir: &Path, report: &ContextEvalReport) -> Result<(), i32> {
+async fn write_markdown_dispatch(
+    output_dir: &Path,
+    report: &ContextEvalReportV2,
+) -> Result<(), i32> {
     let payload = render_via_dispatch(report, "markdown").await?;
     if let Err(error) = fs::write(output_dir.join("summary.md"), payload) {
         eprintln!("error: failed to write context eval markdown: {error}");
@@ -158,7 +194,7 @@ async fn write_markdown_dispatch(output_dir: &Path, report: &ContextEvalReport) 
     Ok(())
 }
 
-async fn print_summary_dispatch(report: &ContextEvalReport) -> Result<(), i32> {
+async fn print_summary_dispatch(report: &ContextEvalReportV2) -> Result<(), i32> {
     let payload = render_via_dispatch(report, "summary").await?;
     print!("{payload}");
     if !payload.ends_with('\n') {
@@ -167,7 +203,7 @@ async fn print_summary_dispatch(report: &ContextEvalReport) -> Result<(), i32> {
     Ok(())
 }
 
-async fn print_json_dispatch(report: &ContextEvalReport) -> Result<(), i32> {
+async fn print_json_dispatch<T: Serialize>(report: &T) -> Result<(), i32> {
     let payload = render_via_dispatch(report, "json").await?;
     print!("{payload}");
     if !payload.ends_with('\n') {
@@ -184,7 +220,7 @@ async fn print_json_dispatch(report: &ContextEvalReport) -> Result<(), i32> {
 /// in-process callers don't race on the global env vars the Rust shim
 /// sets to hand the report to the script. See the lock's docstring for
 /// the trade-off rationale.
-async fn render_via_dispatch(report: &ContextEvalReport, mode: &str) -> Result<String, i32> {
+async fn render_via_dispatch<T: Serialize>(report: &T, mode: &str) -> Result<String, i32> {
     let report_json = match serde_json::to_string(report) {
         Ok(json) => json,
         Err(error) => {

@@ -249,7 +249,8 @@ fn worker_state_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            crate::runtime_paths::state_root_reference(&base).join("workers")
+            crate::runtime_paths::state_root_reference(&base)
+                .join(crate::runtime_paths::WORKERS_DIR)
         })
 }
 

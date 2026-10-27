@@ -177,14 +177,15 @@ impl AcpServer {
             );
             return;
         };
-        let Some(cwd) = self
+        let Some((cwd, store_scope)) = self
             .sessions
             .get(session_id.as_str())
-            .map(|session| session.cwd.clone())
+            .map(|session| (session.cwd.clone(), session.store_scope.clone()))
         else {
             self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
             return;
         };
+        let _store_scope = store_scope.enter();
         let text = |camel: &str, snake: &str| {
             params
                 .get(camel)
@@ -196,6 +197,21 @@ impl AcpServer {
             self.send_error(id, -32602, "session/workspace_checkpoint requires action");
             return;
         };
+        if matches!(
+            action.as_str(),
+            "capture" | "call_begin" | "call_end" | "plan" | "restore"
+        ) && checkpoint::root_matches(&session_id, &cwd) == Some(false)
+        {
+            self.send_response(
+                id,
+                serde_json::json!({
+                    "available": false,
+                    "reason": "workspace_root_changed",
+                    "detail": "the checkpoint belongs to a different workspace root",
+                }),
+            );
+            return;
+        }
         let required = |camel: &str, snake: &str| {
             text(camel, snake).ok_or_else(|| {
                 format!("session/workspace_checkpoint action {action} requires {camel}")

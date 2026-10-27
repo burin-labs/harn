@@ -281,6 +281,6 @@
   ],
   "metadata": {
     "issue": "2195",
-    "consumer_schema": "harn.context_eval.report.v1"
+    "consumer_schema": "harn.context_eval.report.v2"
   }
 }

@@ -13,9 +13,13 @@ source "$script_dir/require_native_qualification.sh"
 if [[ -f "$script_dir/../lib/full_suite_jobs.sh" ]]; then
   # shellcheck source=scripts/lib/full_suite_jobs.sh
   source "$script_dir/../lib/full_suite_jobs.sh"
+  # shellcheck source=scripts/lib/github_read_retry.sh
+  source "$script_dir/../lib/github_read_retry.sh"
 else
   # shellcheck source=scripts/lib/full_suite_jobs.sh
   source "$script_dir/lib/full_suite_jobs.sh"
+  # shellcheck source=scripts/lib/github_read_retry.sh
+  source "$script_dir/lib/github_read_retry.sh"
 fi
 policy_file="$script_dir/release_audit_contract.json"
 if [[ ! -f "$policy_file" ]]; then
@@ -41,7 +45,7 @@ if [[ -n "${FULL_SUITE_STATUS_FILE:-}" ]]; then
   unmeasured ci-read-started >/dev/null
 fi
 if [[ "${WAIT_FOR_FULL_SUITE:-false}" == true ]]; then
-  if ! active=$(gh api "repos/$GH_REPO/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha=$SOURCE_SHA&per_page=100" --jq '.workflow_runs | sort_by(.id) | last | select(.status != "completed") | .id // empty'); then
+  if ! active=$(read_api_json "repos/$GH_REPO/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha=$SOURCE_SHA&per_page=100" single '.workflow_runs | sort_by(.id) | last | select(.status != "completed") | .id // empty'); then
     unmeasured runs
     exit 1
   fi
@@ -53,7 +57,7 @@ if [[ "${WAIT_FOR_FULL_SUITE:-false}" == true ]]; then
     fi
   fi
 fi
-if ! runs=$(gh api --paginate "repos/$GH_REPO/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha=$SOURCE_SHA&per_page=100" --jq '.workflow_runs[] | [.id, .head_sha, .status, .conclusion] | @tsv'); then
+if ! runs=$(read_api_json "repos/$GH_REPO/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha=$SOURCE_SHA&per_page=100" paginated '.workflow_runs[] | [.id, .head_sha, .status, .conclusion] | @tsv'); then
   unmeasured runs
   exit 1
 fi
@@ -62,7 +66,7 @@ while IFS=$'\t' read -r id sha status conclusion; do
   [[ "$sha" == "$SOURCE_SHA" ]] || continue
   [[ "$id" =~ ^[0-9]+$ ]] || { unmeasured run-identity; exit 1; }
   observed=$((observed + 1))
-  if ! jobs=$(gh api --paginate "repos/$GH_REPO/actions/runs/$id/jobs?filter=latest&per_page=100" --jq '.jobs[] | [.name, .status, .conclusion] | @tsv'); then
+  if ! jobs=$(read_api_json "repos/$GH_REPO/actions/runs/$id/jobs?filter=latest&per_page=100" paginated '.jobs[] | [.name, .status, .conclusion] | @tsv'); then
     unmeasured jobs
     exit 1
   fi

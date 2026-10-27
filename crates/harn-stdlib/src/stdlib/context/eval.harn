@@ -14,7 +14,7 @@
  */
 const CONTEXT_EVAL_MANIFEST_SCHEMA = "harn.context_eval.manifest.v1"
 
-const CONTEXT_EVAL_REPORT_SCHEMA = "harn.context_eval.report.v1"
+const CONTEXT_EVAL_REPORT_SCHEMA = "harn.context_eval.report.v2"
 
 const CONTEXT_EVAL_VERSION = 1
 
@@ -118,6 +118,7 @@ pub type ContextEvalObserved = {
   input_tokens?: int,
   output_tokens?: int,
   cost_usd?: float,
+  known_cost_usd?: float,
   cache_hit?: bool,
   compaction_count?: int,
   metadata?: dict,
@@ -284,7 +285,8 @@ pub type ContextEvalRunReport = {
   latency_ms: int,
   input_tokens: int,
   output_tokens: int,
-  cost_usd: float,
+  cost_usd: float?,
+  known_cost_usd: float?,
   compaction_count: int,
   projection: ContextEvalProjectionReport,
   context: ContextEvalContextReport,
@@ -302,7 +304,10 @@ pub type ContextEvalAggregate = {
   total_latency_ms: int,
   total_input_tokens: int,
   total_output_tokens: int,
-  total_cost_usd: float,
+  total_cost_usd: float?,
+  total_known_cost_usd: float,
+  cost_measured_runs: int,
+  cost_unmeasured_runs: int,
   total_compaction_count: int,
   total_error_recovery_count: int,
   ...rest,

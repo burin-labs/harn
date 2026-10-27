@@ -82,8 +82,7 @@ reasoning_modes = [
 # GPT-6.1 Sol (released 2026-09-29) — the balanced-tier successor to GPT-6
 # Sol at the same $2 / $10 list price, with cached input halved to $0.10 (5%
 # of input) and knowledge cutoff moved to 2026-04-30 (model and pricing pages
-# read 2026-09-29). It is the only GPT-6.1 model: OpenAI publishes no 6.1
-# Astra, Terra, or Luna, and no `gpt-6.1-sol-pro` id — OpenRouter's `-pro`
+# read 2026-09-29). There is no direct `gpt-6.1-sol-pro` id; OpenRouter's `-pro`
 # slug sells `reasoning.mode = "pro"` on this model. Its request surface is
 # Astra's, not GPT-6 Sol's: effort is low/medium/high/xhigh only (`none`,
 # `minimal`, and the documented `max` are 400s) and function tools need the
@@ -177,7 +176,6 @@ logical_model = "gpt-5.6-terra"
 equivalence_group = "gpt-5.6-terra"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
-superseded_by = "gpt-6.1-sol"
 tier = "mid"
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]

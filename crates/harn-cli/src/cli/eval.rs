@@ -102,6 +102,9 @@ pub struct EvalContextArgs {
     /// Print the aggregate summary JSON to stdout.
     #[arg(long)]
     pub json: bool,
+    /// Report format: 2 (default), or deprecated 1 for compatibility.
+    #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(1..=2))]
+    pub report_version: u8,
 }
 
 #[derive(Debug, Args)]

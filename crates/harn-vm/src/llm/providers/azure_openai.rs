@@ -37,7 +37,9 @@ impl AzureOpenAiProvider {
         body
     }
 
-    pub(crate) fn endpoint_url(request: &LlmRequestPayload) -> Result<String, VmError> {
+    fn endpoint_url_and_deployment(
+        request: &LlmRequestPayload,
+    ) -> Result<(String, String), VmError> {
         let pdef = crate::llm_config::provider_config("azure_openai");
         let base_url = pdef
             .as_ref()
@@ -60,10 +62,16 @@ impl AzureOpenAiProvider {
         let api_version = crate::stdlib::process::session_env_var("AZURE_OPENAI_API_VERSION")?
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_API_VERSION.to_string());
-        Ok(format!(
+        let url = format!(
             "{base_url}/openai/deployments/{}/chat/completions?api-version={api_version}",
             percent_encode_component(deployment.trim())
-        ))
+        );
+        Ok((url, deployment.trim().to_string()))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn endpoint_url(request: &LlmRequestPayload) -> Result<String, VmError> {
+        Self::endpoint_url_and_deployment(request).map(|(url, _)| url)
     }
 
     pub(crate) fn resolve_auth(api_key: &str) -> Result<AzureAuth, VmError> {
@@ -93,10 +101,22 @@ impl AzureOpenAiProvider {
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
         let dialect = Self::dialect();
-        let url = Self::endpoint_url(request)?;
+        let (url, deployment) = Self::endpoint_url_and_deployment(request)?;
+        let boundary =
+            crate::llm::api::inference_boundary::effective_result(request.inference_boundary)
+                .map_err(VmError::Runtime)?;
+        let approved = crate::llm::api::inference_boundary::ApprovedWireRoute::capture(
+            boundary,
+            &request.provider,
+            &url,
+            &crate::llm_config::wire_model_id(&request.model),
+        );
         let auth = Self::resolve_auth(&request.api_key)?;
         let mut body = Self::build_request_body(request);
         apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
+        if let Some(approved) = &approved {
+            approved.verify_url_model(&request.provider, &url, &deployment, &body)?;
+        }
         let mut req = crate::llm::blocking_client_for_base_url(&url)
             .post(url)
             .header("Content-Type", "application/json")

@@ -5,7 +5,7 @@
 //! commands from top-level `pipeline` declarations annotated with
 //! `@command(name?, description?, hint?)` in the loaded `.harn` source.
 //!
-//! Wire shape (canonical ACP, schema v0.12.2):
+//! Wire shape (canonical ACP, schema v1.26.0):
 //! ```json
 //! {
 //!   "method": "session/update",

@@ -5,6 +5,7 @@ use std::{io, path::Path};
 pub use harn_vm_core::conditional_replace::{
     require_parent, scope_conditional_replace_lock_root, ConditionalReplaceOptions,
     ConditionalReplaceReceipt, ConditionalReplaceStatus, ScopedConditionalReplaceLockRoot,
+    CONDITIONAL_REPLACE_LOCK_DIRECTORY,
 };
 
 pub(crate) fn scope_native_lock_root() -> Option<ScopedConditionalReplaceLockRoot> {
@@ -13,7 +14,7 @@ pub(crate) fn scope_native_lock_root() -> Option<ScopedConditionalReplaceLockRoo
     }
     let runtime_root = crate::stdlib::process::runtime_root_base();
     Some(scope_conditional_replace_lock_root(
-        crate::runtime_paths::state_root(&runtime_root).join("fs-cas-locks"),
+        crate::runtime_paths::state_root(&runtime_root).join(CONDITIONAL_REPLACE_LOCK_DIRECTORY),
     ))
 }
 
