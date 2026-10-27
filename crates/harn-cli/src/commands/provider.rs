@@ -175,7 +175,7 @@ async fn dispatch_provider_tool_probe(mut args: ProviderToolProbeArgs) -> i32 {
         match crate::commands::providers::resolve_probe_wire_model(&args.provider, &args.model) {
             Ok(model) => model,
             Err(error) => {
-                eprintln!("{error}");
+                cli_diagnostic!("error: {error}");
                 return 1;
             }
         };
@@ -183,13 +183,13 @@ async fn dispatch_provider_tool_probe(mut args: ProviderToolProbeArgs) -> i32 {
         return crate::commands::providers::render_tool_probe_request(&args);
     }
     if let Some(error) = args.live_request_profile_error() {
-        eprintln!("{error}");
+        cli_diagnostic!("error: {error}");
         return 1;
     }
     let report = match aggregate_tool_conformance_report(&args).await {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("{error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -260,7 +260,7 @@ async fn dispatch_provider_tool_scorecard(args: ProviderToolScorecardArgs) -> i3
         ) {
             Ok(plan) => plan,
             Err(error) => {
-                eprintln!("{error}");
+                cli_diagnostic!("error: {error}");
                 return 1;
             }
         };
@@ -270,7 +270,7 @@ async fn dispatch_provider_tool_scorecard(args: ProviderToolScorecardArgs) -> i3
     let report = match aggregate_tool_scorecard(&args) {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("{error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };

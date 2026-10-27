@@ -57,20 +57,17 @@ pub(crate) async fn run_command(command: ServeCommand) {
         }
         ServeCommand::Site(args) => {
             if let Err(error) = run_site_server(&args).await {
-                eprintln!("{error}");
-                std::process::exit(1);
+                crate::fatal_error(error);
             }
         }
         ServeCommand::Worker(args) => {
             if let Err(error) = run_worker_server(&args).await {
-                eprintln!("{error}");
-                std::process::exit(1);
+                crate::fatal_error(error);
             }
         }
         ServeCommand::Test => {
             if let Err(error) = crate::commands::test_worker::serve_stdio().await {
-                eprintln!("{error}");
-                std::process::exit(1);
+                crate::fatal_error(error);
             }
         }
     }
