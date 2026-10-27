@@ -6,7 +6,10 @@ pub(super) async fn dispatch_to_v1(
     result: JsonValue,
 ) -> (
     Result<
-        (harn_vm::a2a::ResolvedA2aEndpoint, harn_vm::a2a::DispatchAck),
+        (
+            harn_vm::a2a::ResolvedA2aEndpoint,
+            harn_vm::a2a::DispatchOutcome,
+        ),
         harn_vm::a2a::A2aClientError,
     >,
     Vec<MockRequest>,
@@ -19,7 +22,10 @@ async fn dispatch_to_version(
     result: JsonValue,
 ) -> (
     Result<
-        (harn_vm::a2a::ResolvedA2aEndpoint, harn_vm::a2a::DispatchAck),
+        (
+            harn_vm::a2a::ResolvedA2aEndpoint,
+            harn_vm::a2a::DispatchOutcome,
+        ),
         harn_vm::a2a::A2aClientError,
     >,
     Vec<MockRequest>,
@@ -70,17 +76,41 @@ async fn dispatch_to_version(
         SignatureStatus::Verified,
     );
     let (_cancel_tx, mut cancel_rx) = tokio::sync::broadcast::channel(1);
-    let outcome = harn_vm::a2a::dispatch_trigger_event(
-        &target,
-        true,
-        "binding",
-        "key",
-        &event,
-        &mut cancel_rx,
-    )
-    .await;
+    let outcome = if version == "legacy-api" {
+        harn_vm::a2a::dispatch_trigger_event(
+            &target,
+            true,
+            "binding",
+            "key",
+            &event,
+            &mut cancel_rx,
+        )
+        .await
+        .map(|(endpoint, ack)| (endpoint, ack.into()))
+    } else {
+        harn_vm::a2a::dispatch_trigger_outcome(
+            &target,
+            true,
+            "binding",
+            "key",
+            &event,
+            &mut cancel_rx,
+        )
+        .await
+    };
     let requests = server.requests.lock().unwrap().clone();
     (outcome, requests)
+}
+
+#[tokio::test]
+async fn legacy_rust_api_refuses_v1_before_dispatch() {
+    let (outcome, requests) = dispatch_to_version("legacy-api", json!({})).await;
+    assert!(matches!(
+        outcome,
+        Err(harn_vm::a2a::A2aClientError::Protocol(_))
+    ));
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].path, "GET /.well-known/agent-card.json");
 }
 
 #[tokio::test]
@@ -111,7 +141,7 @@ async fn legacy_dispatch_keeps_v03_wire_format() {
     )
     .await;
     assert!(matches!(outcome.unwrap().1,
-        harn_vm::a2a::DispatchAck::InlineResult { ref task_id, ref result }
+        harn_vm::a2a::DispatchOutcome::InlineResult { ref task_id, ref result }
         if task_id == "legacy-task" && result == &json!("legacy")));
     let sent = requests
         .iter()
@@ -155,7 +185,7 @@ async fn v1_dispatch_uses_discovered_version_tenant_and_task_response() {
         Some("1.0")
     );
     assert!(
-        matches!(ack, harn_vm::a2a::DispatchAck::InlineResult { ref task_id, ref result }
+        matches!(ack, harn_vm::a2a::DispatchOutcome::InlineResult { ref task_id, ref result }
         if task_id == "task-1" && result == &json!({"answer": 42}))
     );
     let sent = requests

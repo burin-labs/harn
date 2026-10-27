@@ -273,7 +273,7 @@ mod tests {
         assert!(legacy.get("taskPushNotificationConfig").is_none());
     }
 
-    fn endpoint(card: &Value) -> Result<super::super::ResolvedA2aEndpoint, A2aClientError> {
+    fn endpoint(card: &Value) -> Result<super::super::NegotiatedEndpoint, A2aClientError> {
         super::super::endpoint_from_card(
             "https://trusted.example/.well-known/agent-card.json".to_string(),
             false,
@@ -294,6 +294,23 @@ mod tests {
         assert_eq!(selected.protocol_version, A2aWireVersion::V1_0);
         assert_eq!(selected.tenant.as_deref(), Some("team-a"));
         assert_eq!(selected.rpc_url, "https://trusted.example/v1");
+        assert_eq!(
+            super::super::peer_wire_settings(
+                &card,
+                &selected.card_url,
+                &selected.rpc_url,
+                "trusted.example/reviewer",
+            )
+            .unwrap(),
+            (A2aWireVersion::V1_0, Some("team-a".to_string()))
+        );
+        assert!(super::super::peer_wire_settings(
+            &card,
+            &selected.card_url,
+            "https://trusted.example/other",
+            "trusted.example/reviewer",
+        )
+        .is_err());
         let mut foreign = card.clone();
         foreign["supportedInterfaces"][1]["url"] = json!("https://other.example/v1");
         assert!(endpoint(&foreign).is_err());

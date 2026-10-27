@@ -7,7 +7,7 @@ async fn v1_dispatch_handles_direct_messages_and_rejects_invalid_unions() {
         "messageId": "message-1", "contextId": "ctx-1", "role": "ROLE_AGENT", "parts": [{"text": "done"}]
     }})).await;
     assert!(
-        matches!(outcome.unwrap().1, harn_vm::a2a::DispatchAck::InlineMessage { ref message_id, ref result }
+        matches!(outcome.unwrap().1, harn_vm::a2a::DispatchOutcome::InlineMessage { ref message_id, ref result }
         if message_id == "message-1" && result == &json!("done"))
     );
     let (invalid, _) = dispatch_to_v1(json!({"task": {}, "message": {}})).await;
@@ -23,7 +23,8 @@ async fn v1_pending_handles_retain_protocol_and_tenant_and_failures_do_not_succe
         "id": "task-pending", "status": {"state": "TASK_STATE_WORKING"}
     }}))
     .await;
-    let harn_vm::a2a::DispatchAck::PendingTask { state, handle, .. } = pending.unwrap().1 else {
+    let harn_vm::a2a::DispatchOutcome::PendingTask { state, handle, .. } = pending.unwrap().1
+    else {
         panic!("expected pending task");
     };
     assert_eq!(state, "working");

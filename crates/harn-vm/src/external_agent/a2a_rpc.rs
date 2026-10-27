@@ -10,7 +10,13 @@ pub(super) async fn send_a2a_rpc(
     mut params: Value,
     cancel_rx: &mut broadcast::Receiver<()>,
 ) -> Result<Value, ExternalAgentError> {
-    if let Some(tenant) = peer.tenant.as_ref() {
+    let (protocol_version, tenant) = crate::a2a::peer_wire_settings(
+        &peer.card,
+        &peer.card_url,
+        &peer.rpc_url,
+        &super::normalize_a2a_target(&peer.target),
+    )?;
+    if let Some(tenant) = tenant.as_ref() {
         params["tenant"] = serde_json::json!(tenant);
     }
     let request = crate::jsonrpc::request(request_id.clone(), method, params);
@@ -18,7 +24,7 @@ pub(super) async fn send_a2a_rpc(
         &peer.rpc_url,
         &request,
         &request_id,
-        peer.protocol_version,
+        protocol_version,
         cancel_rx,
     )
     .await?;

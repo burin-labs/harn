@@ -57,7 +57,7 @@ impl Dispatcher {
                 }
                 let (endpoint, ack) = self
                     .a2a_client
-                    .dispatch(
+                    .dispatch_outcome(
                         target,
                         *allow_cleartext,
                         binding.id.as_str(),
@@ -89,7 +89,7 @@ impl Dispatcher {
                     metadata.insert("remote_agent_id".to_string(), serde_json::json!(agent_id));
                 }
                 match ack {
-                    crate::a2a::DispatchAck::InlineResult { task_id, result } => {
+                    crate::a2a::DispatchOutcome::InlineResult { task_id, result } => {
                         metadata.insert("task_id".to_string(), serde_json::json!(task_id));
                         metadata.insert("state".to_string(), serde_json::json!("completed"));
                         Ok(DispatchCallResult {
@@ -97,7 +97,7 @@ impl Dispatcher {
                             metadata,
                         })
                     }
-                    crate::a2a::DispatchAck::InlineMessage { message_id, result } => {
+                    crate::a2a::DispatchOutcome::InlineMessage { message_id, result } => {
                         metadata.insert("message_id".to_string(), serde_json::json!(message_id));
                         metadata.insert("state".to_string(), serde_json::json!("completed"));
                         Ok(DispatchCallResult {
@@ -105,7 +105,7 @@ impl Dispatcher {
                             metadata,
                         })
                     }
-                    crate::a2a::DispatchAck::PendingTask {
+                    crate::a2a::DispatchOutcome::PendingTask {
                         task_id,
                         state,
                         handle,

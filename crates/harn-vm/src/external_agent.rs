@@ -137,10 +137,6 @@ pub struct ExternalAgentPeer {
     pub target: String,
     pub card_url: String,
     pub rpc_url: String,
-    #[serde(skip_serializing_if = "crate::a2a::A2aWireVersion::is_legacy")]
-    pub protocol_version: crate::a2a::A2aWireVersion,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tenant: Option<String>,
     pub agent_id: Option<String>,
     pub target_agent: String,
     pub capabilities: ExternalAgentCapabilities,
@@ -154,8 +150,6 @@ impl Default for ExternalAgentPeer {
             target: String::new(),
             card_url: String::new(),
             rpc_url: String::new(),
-            protocol_version: crate::a2a::A2aWireVersion::V0_3,
-            tenant: None,
             agent_id: None,
             target_agent: String::new(),
             capabilities: ExternalAgentCapabilities::default(),
@@ -616,8 +610,6 @@ fn peer_from_a2a(target: &str, endpoint: ResolvedA2aEndpoint, card: Value) -> Ex
         target: target.to_string(),
         card_url: endpoint.card_url,
         rpc_url: endpoint.rpc_url,
-        protocol_version: endpoint.protocol_version,
-        tenant: endpoint.tenant,
         agent_id: endpoint.agent_id,
         target_agent: endpoint.target_agent,
         capabilities: capabilities_from_card(&card),

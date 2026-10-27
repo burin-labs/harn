@@ -7,8 +7,11 @@ use tokio::sync::broadcast;
 
 use crate::triggers::TriggerEvent;
 
+mod negotiation;
 mod transport;
 mod wire;
+use negotiation::endpoint_from_card;
+pub(crate) use negotiation::peer_wire_settings;
 #[cfg(test)]
 use transport::send_http;
 use transport::send_jsonrpc;
@@ -59,10 +62,23 @@ const A2A_ACTOR_CHAIN_METADATA_POINTERS: &[&str] = &[
 pub struct ResolvedA2aEndpoint {
     pub card_url: String,
     pub rpc_url: String,
-    pub protocol_version: A2aWireVersion,
-    pub tenant: Option<String>,
     pub agent_id: Option<String>,
     pub target_agent: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NegotiatedEndpoint {
+    endpoint: ResolvedA2aEndpoint,
+    protocol_version: A2aWireVersion,
+    tenant: Option<String>,
+}
+
+impl std::ops::Deref for NegotiatedEndpoint {
+    type Target = ResolvedA2aEndpoint;
+
+    fn deref(&self) -> &Self::Target {
+        &self.endpoint
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +93,21 @@ pub enum DispatchAck {
         task_id: String,
         result: Value,
     },
+    PendingTask {
+        task_id: String,
+        state: String,
+        handle: Value,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// A task or direct-message response from a remote agent.
+#[non_exhaustive]
+pub enum DispatchOutcome {
+    InlineResult {
+        task_id: String,
+        result: Value,
+    },
     InlineMessage {
         message_id: String,
         result: Value,
@@ -86,6 +117,23 @@ pub enum DispatchAck {
         state: String,
         handle: Value,
     },
+}
+
+impl From<DispatchAck> for DispatchOutcome {
+    fn from(ack: DispatchAck) -> Self {
+        match ack {
+            DispatchAck::InlineResult { task_id, result } => Self::InlineResult { task_id, result },
+            DispatchAck::PendingTask {
+                task_id,
+                state,
+                handle,
+            } => Self::PendingTask {
+                task_id,
+                state,
+                handle,
+            },
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -127,6 +175,29 @@ pub trait A2aClient: Send + Sync + 'static {
         event: &TriggerEvent,
         cancel_rx: &mut broadcast::Receiver<()>,
     ) -> Result<(ResolvedA2aEndpoint, DispatchAck), A2aClientError>;
+
+    /// Dispatch with support for direct messages as well as tasks.
+    async fn dispatch_outcome(
+        &self,
+        target: &str,
+        allow_cleartext: bool,
+        binding_id: &str,
+        binding_key: &str,
+        event: &TriggerEvent,
+        cancel_rx: &mut broadcast::Receiver<()>,
+    ) -> Result<(ResolvedA2aEndpoint, DispatchOutcome), A2aClientError> {
+        let (endpoint, ack) = self
+            .dispatch(
+                target,
+                allow_cleartext,
+                binding_id,
+                binding_key,
+                event,
+                cancel_rx,
+            )
+            .await?;
+        Ok((endpoint, ack.into()))
+    }
 }
 
 /// Production implementation that performs real HTTP A2A calls.
@@ -144,6 +215,26 @@ impl A2aClient for RealA2aClient {
         cancel_rx: &mut broadcast::Receiver<()>,
     ) -> Result<(ResolvedA2aEndpoint, DispatchAck), A2aClientError> {
         dispatch_trigger_event(
+            target,
+            allow_cleartext,
+            binding_id,
+            binding_key,
+            event,
+            cancel_rx,
+        )
+        .await
+    }
+
+    async fn dispatch_outcome(
+        &self,
+        target: &str,
+        allow_cleartext: bool,
+        binding_id: &str,
+        binding_key: &str,
+        event: &TriggerEvent,
+        cancel_rx: &mut broadcast::Receiver<()>,
+    ) -> Result<(ResolvedA2aEndpoint, DispatchOutcome), A2aClientError> {
+        dispatch_trigger_outcome(
             target,
             allow_cleartext,
             binding_id,
@@ -182,6 +273,8 @@ enum AgentCardFetchError {
     Timeout(String),
 }
 
+/// Dispatch using the task-only response contract. A 1.0 peer is rejected
+/// before sending because it may respond with a direct message.
 pub async fn dispatch_trigger_event(
     raw_target: &str,
     allow_cleartext: bool,
@@ -190,6 +283,68 @@ pub async fn dispatch_trigger_event(
     event: &TriggerEvent,
     cancel_rx: &mut broadcast::Receiver<()>,
 ) -> Result<(ResolvedA2aEndpoint, DispatchAck), A2aClientError> {
+    let (endpoint, outcome) = dispatch_trigger_outcome_inner(
+        raw_target,
+        allow_cleartext,
+        binding_id,
+        binding_key,
+        event,
+        cancel_rx,
+        false,
+    )
+    .await?;
+    let ack = match outcome {
+        DispatchOutcome::InlineResult { task_id, result } => {
+            DispatchAck::InlineResult { task_id, result }
+        }
+        DispatchOutcome::PendingTask {
+            task_id,
+            state,
+            handle,
+        } => DispatchAck::PendingTask {
+            task_id,
+            state,
+            handle,
+        },
+        DispatchOutcome::InlineMessage { .. } => {
+            return Err(A2aClientError::Protocol(
+                "A2A direct-message responses require dispatch_trigger_outcome".to_string(),
+            ))
+        }
+    };
+    Ok((endpoint, ack))
+}
+
+/// Dispatch using the response contract that also supports direct messages.
+pub async fn dispatch_trigger_outcome(
+    raw_target: &str,
+    allow_cleartext: bool,
+    binding_id: &str,
+    binding_key: &str,
+    event: &TriggerEvent,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<(ResolvedA2aEndpoint, DispatchOutcome), A2aClientError> {
+    dispatch_trigger_outcome_inner(
+        raw_target,
+        allow_cleartext,
+        binding_id,
+        binding_key,
+        event,
+        cancel_rx,
+        true,
+    )
+    .await
+}
+
+async fn dispatch_trigger_outcome_inner(
+    raw_target: &str,
+    allow_cleartext: bool,
+    binding_id: &str,
+    binding_key: &str,
+    event: &TriggerEvent,
+    cancel_rx: &mut broadcast::Receiver<()>,
+    supports_direct_messages: bool,
+) -> Result<(ResolvedA2aEndpoint, DispatchOutcome), A2aClientError> {
     let started = std::time::Instant::now();
     let target = match parse_target(raw_target) {
         Ok(target) => target,
@@ -205,6 +360,12 @@ pub async fn dispatch_trigger_event(
             return Err(error);
         }
     };
+    if endpoint.protocol_version == A2aWireVersion::V1_0 && !supports_direct_messages {
+        record_a2a_metric(raw_target, "failed", started.elapsed());
+        return Err(A2aClientError::Protocol(
+            "A2A 1.0 dispatch requires dispatch_trigger_outcome".to_string(),
+        ));
+    }
     let message_id = format!("{}.{}", event.trace_id.0, event.id.0);
     let actor_chain = crate::agent_sessions::current_actor_chain()
         .as_ref()
@@ -320,8 +481,8 @@ pub async fn dispatch_trigger_event(
             })?;
             record_a2a_metric(raw_target, "succeeded", started.elapsed());
             return Ok((
-                endpoint,
-                DispatchAck::InlineMessage {
+                endpoint.endpoint,
+                DispatchOutcome::InlineMessage {
                     message_id,
                     result: output,
                 },
@@ -359,8 +520,8 @@ pub async fn dispatch_trigger_event(
         };
         record_a2a_metric(raw_target, "succeeded", started.elapsed());
         return Ok((
-            endpoint,
-            DispatchAck::InlineResult {
+            endpoint.endpoint,
+            DispatchOutcome::InlineResult {
                 task_id,
                 result: inline,
             },
@@ -414,8 +575,8 @@ pub async fn dispatch_trigger_event(
         }
     }
     Ok((
-        endpoint.clone(),
-        DispatchAck::PendingTask {
+        endpoint.endpoint,
+        DispatchOutcome::PendingTask {
             task_id: task_id.clone(),
             state: state.clone(),
             handle,
@@ -431,7 +592,7 @@ pub async fn resolve_agent(
     let target = parse_target(raw_target)?;
     let resolved = resolve_endpoint_with_card(&target, allow_cleartext, cancel_rx).await?;
     Ok(ResolvedA2aAgent {
-        endpoint: resolved.0,
+        endpoint: resolved.0.endpoint,
         card: resolved.1,
     })
 }
@@ -555,7 +716,7 @@ async fn resolve_endpoint(
     target: &ParsedTarget,
     allow_cleartext: bool,
     cancel_rx: &mut broadcast::Receiver<()>,
-) -> Result<ResolvedA2aEndpoint, A2aClientError> {
+) -> Result<NegotiatedEndpoint, A2aClientError> {
     Ok(
         resolve_endpoint_with_card(target, allow_cleartext, cancel_rx)
             .await?
@@ -567,7 +728,7 @@ async fn resolve_endpoint_with_card(
     target: &ParsedTarget,
     allow_cleartext: bool,
     cancel_rx: &mut broadcast::Receiver<()>,
-) -> Result<(ResolvedA2aEndpoint, Value), A2aClientError> {
+) -> Result<(NegotiatedEndpoint, Value), A2aClientError> {
     let mut last_error = None;
     for scheme in card_resolution_schemes(allow_cleartext) {
         let mut last_scheme_error = None;
@@ -682,39 +843,6 @@ async fn fetch_agent_card_response(
     Ok(response)
 }
 
-fn endpoint_from_card(
-    card_url: String,
-    allow_cleartext: bool,
-    requested_authority: &str,
-    target_agent: String,
-    card: &Value,
-) -> Result<ResolvedA2aEndpoint, A2aClientError> {
-    let (rpc_url, protocol_version, tenant) = if let Some(interface) =
-        endpoint_from_supported_interfaces(card, allow_cleartext, requested_authority)?
-    {
-        interface
-    } else if has_current_transport_fields(card) {
-        (
-            endpoint_from_current_card(card, allow_cleartext, requested_authority)?,
-            A2aWireVersion::V0_3,
-            None,
-        )
-    } else {
-        return Err(A2aClientError::Discovery(
-            "A2A agent card missing preferredTransport/additionalInterfaces".to_string(),
-        ));
-    };
-
-    Ok(ResolvedA2aEndpoint {
-        card_url,
-        rpc_url: rpc_url.to_string(),
-        protocol_version,
-        tenant,
-        agent_id: card.get("id").and_then(Value::as_str).map(str::to_string),
-        target_agent,
-    })
-}
-
 fn has_current_transport_fields(card: &Value) -> bool {
     card.get("preferredTransport").is_some() || card.get("additionalInterfaces").is_some()
 }
@@ -796,68 +924,6 @@ fn current_additional_jsonrpc_url(card: &Value) -> Result<Option<&str>, A2aClien
         }
     }
     Ok(None)
-}
-
-fn endpoint_from_supported_interfaces(
-    card: &Value,
-    allow_cleartext: bool,
-    requested_authority: &str,
-) -> Result<Option<(Url, A2aWireVersion, Option<String>)>, A2aClientError> {
-    let Some(interfaces) = card.get("supportedInterfaces") else {
-        return Ok(None);
-    };
-    let interfaces = interfaces.as_array().ok_or_else(|| {
-        A2aClientError::Discovery("A2A supportedInterfaces must be an array".to_string())
-    })?;
-    let mut saw_jsonrpc = false;
-    for interface in interfaces {
-        if !interface
-            .get("protocolBinding")
-            .and_then(Value::as_str)
-            .is_some_and(transport_is_jsonrpc)
-        {
-            continue;
-        }
-        saw_jsonrpc = true;
-        let Some(protocol_version) = interface
-            .get("protocolVersion")
-            .and_then(Value::as_str)
-            .and_then(A2aWireVersion::from_advertised)
-        else {
-            continue;
-        };
-        let interface_url = interface
-            .get("url")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                A2aClientError::Discovery("A2A JSONRPC supportedInterface missing url".to_string())
-            })?;
-        let tenant = match interface.get("tenant") {
-            None => None,
-            Some(Value::String(value)) => Some(value.clone()),
-            Some(_) => {
-                return Err(A2aClientError::Discovery(
-                    "A2A interface tenant must be a string".to_string(),
-                ))
-            }
-        };
-        return resolve_declared_url(
-            interface_url,
-            allow_cleartext,
-            requested_authority,
-            "JSONRPC supportedInterface url",
-        )
-        .map(|url| Some((url, protocol_version, tenant)));
-    }
-    if saw_jsonrpc {
-        return Err(A2aClientError::Discovery(
-            "A2A supportedInterfaces does not expose JSONRPC for a supported protocol version"
-                .to_string(),
-        ));
-    }
-    Err(A2aClientError::Discovery(
-        "A2A agent card does not expose a JSONRPC supportedInterface".to_string(),
-    ))
 }
 
 fn transport_is_jsonrpc(transport: &str) -> bool {
