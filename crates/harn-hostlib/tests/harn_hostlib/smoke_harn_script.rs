@@ -52,6 +52,49 @@ fn run_harn_with_policy_result(
 }
 
 #[test]
+#[cfg(unix)]
+fn configured_toolchain_probe_requires_process_authority_during_preparation() {
+    let (result, _) = run_harn(
+        r#"
+const request = {probes: [{name: "control", argv: ["/usr/bin/printf", "preparation-process-control"], env_mode: "replace"}]}
+const direct = harness.tools.toolchain_facts(request)
+const registry = tool_define(tool_registry(), "inspect_probe", "Inspect probe", {
+  input_schema: {type: "object", properties: {}, additionalProperties: false},
+  returns: {type: "object"},
+  prepare: { args ->
+    const facts = harness.tools.toolchain_facts(request)
+    return {operation: {version: facts.toolchains[0].raw_version}}
+  },
+  handler: { args ->
+    return {schema: "harn.agent_tool_handler_result.v2", outcome: "ok",
+      text: "probe observed", data: tool_invocation_binding().operation}
+  },
+})
+const prepared = harness.tools.dispatch_agent_call(
+  {name: "inspect_probe", id: "probe", arguments: {}}, registry, {})
+return {direct: direct, prepared: prepared}
+"#,
+    );
+    let result = harn_vm::llm::vm_value_to_json(&result);
+    assert_eq!(
+        result["direct"]["toolchains"][0]["available"], true,
+        "{result}"
+    );
+    assert_eq!(
+        result["direct"]["toolchains"][0]["raw_version"],
+        "preparation-process-control"
+    );
+    assert_eq!(result["prepared"]["ok"], false, "{result}");
+    assert!(
+        result["prepared"]["error"]
+            .as_str()
+            .expect("preparation refusal")
+            .contains("not a read-only invocation preparation operation"),
+        "{result}"
+    );
+}
+
+#[test]
 #[cfg(unix)] // Declared-root subprocess reads require OS filesystem confinement.
 fn repository_identity_runs_through_read_only_harness_without_process_authority() {
     let dir = super::tools_git::fixture_repo();
