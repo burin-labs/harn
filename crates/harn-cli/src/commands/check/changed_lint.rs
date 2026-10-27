@@ -237,7 +237,7 @@ fn render_changed_lint(outcome: &LintJsonCommandOutcome) {
     };
     for file in &report.files {
         if file.diagnostics.is_empty() {
-            eprintln!("{}: no issues found on added lines", file.path);
+            cli_diagnostic!("{}: no issues found on added lines", file.path);
             continue;
         }
         let source = report

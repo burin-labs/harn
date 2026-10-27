@@ -166,7 +166,7 @@ pub struct RunOutcome {
 
 pub(crate) fn format_program_error(brief: &str, detail: &str, explain: bool) -> String {
     if explain {
-        format!("[harn] {detail}")
+        format!("{}{detail}", harn_vm::events::HARN_LOG_PREFIX)
     } else {
         let summary = brief.split_whitespace().collect::<Vec<_>>().join(" ");
         let summary = if summary.is_empty() {
@@ -174,7 +174,10 @@ pub(crate) fn format_program_error(brief: &str, detail: &str, explain: bool) -> 
         } else {
             &summary
         };
-        format!("[harn] error: {summary} (use --explain for details)\n")
+        format!(
+            "{}error: {summary} (use --explain for details)\n",
+            harn_vm::events::HARN_LOG_PREFIX
+        )
     }
 }
 

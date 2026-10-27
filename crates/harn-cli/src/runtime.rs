@@ -68,15 +68,15 @@ pub(crate) fn build_cli_runtime(mode: CliRuntimeMode) -> tokio::runtime::Runtime
     match build {
         Ok(Ok(runtime)) => runtime,
         Ok(Err(error)) => {
-            eprintln!("failed to start async runtime: {error}");
+            cli_diagnostic!("error: failed to start async runtime: {error}");
             process::exit(1);
         }
         Err(payload) => {
             if let Some(message) = panic_payload_message(payload.as_ref())
                 .filter(|message| message.contains("failed to create UnixStream"))
             {
-                eprintln!(
-                    "failed to start async runtime: Tokio signal driver unavailable in this environment: {message}"
+                cli_diagnostic!(
+                    "error: failed to start async runtime: Tokio signal driver unavailable in this environment: {message}"
                 );
                 if mode.enables_tokio_io() {
                     cli_diagnostic!(

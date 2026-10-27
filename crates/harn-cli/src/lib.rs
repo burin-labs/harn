@@ -171,7 +171,7 @@ pub fn run() {
             }
         })
         .unwrap_or_else(|error| {
-            eprintln!("failed to start CLI runtime thread: {error}");
+            cli_diagnostic!("error: failed to start CLI runtime thread: {error}");
             process::exit(1);
         });
 

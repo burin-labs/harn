@@ -691,7 +691,7 @@ fn apply_memory_cap(core_cap: usize) -> usize {
     let budget = per_worker_memory_mb();
     let mem_cap = memory_worker_cap(available_mb, budget, RESERVED_SYSTEM_MEMORY_MB);
     if mem_cap < core_cap {
-        eprintln!(
+        cli_diagnostic!(
             "harn test: capping workers {core_cap} -> {mem_cap} \
              (~{available_mb} MiB available, {budget} MiB/worker; \
              override with --jobs / HARN_TEST_JOBS)"

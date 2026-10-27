@@ -48,7 +48,7 @@ pub(crate) fn lint_prompt_file_inner(
     };
     let diagnostics = harn_lint::lint_prompt_template(&source, branch_threshold, disabled_rules);
     if diagnostics.is_empty() {
-        eprintln!("{path_str}: no issues found");
+        cli_diagnostic!("{path_str}: no issues found");
         return CommandOutcome::default();
     }
     print_lint_diagnostics(&path_str, &source, &diagnostics)

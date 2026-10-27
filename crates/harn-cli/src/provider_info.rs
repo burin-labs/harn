@@ -257,7 +257,7 @@ pub(crate) async fn run_provider_ready(
     } else if readiness.ok {
         println!("{}", readiness.message);
     } else {
-        eprintln!("{}", readiness.message);
+        cli_diagnostic!("error: {}", readiness.message);
     }
     if !readiness.ok {
         process::exit(1);

@@ -104,6 +104,26 @@ fn unknown_code_exits_two() {
 }
 
 #[test]
+fn malformed_invariant_source_uses_the_cli_diagnostic_sink() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("broken.harn");
+    std::fs::write(&source, "fn broken( {").unwrap();
+    let harn = run_explain(
+        &[
+            "--invariant",
+            "fs.writes",
+            "broken",
+            source.to_str().unwrap(),
+        ],
+        &[],
+    );
+    assert_ne!(harn.exit_code, 0);
+    assert!(harn.stdout.is_empty(), "{}", harn.stdout);
+    assert!(harn.stderr.starts_with("[harn] "), "{}", harn.stderr);
+    assert!(harn.stderr.contains("error"), "{}", harn.stderr);
+}
+
+#[test]
 fn catalog_flag_stays_on_host_codegen_path() {
     // --catalog is out of scope for the .harn renderer. It is a codegen
     // tool consumed by `make sync-diagnostics-catalog`, so the dispatch

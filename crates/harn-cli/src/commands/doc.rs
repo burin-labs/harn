@@ -47,7 +47,7 @@ pub(crate) fn run(path: &Path, output: Option<&Path>) -> i32 {
                 return 1;
             }
             let symbols: usize = modules.iter().map(|module| module.symbols.len()).sum();
-            eprintln!(
+            cli_diagnostic!(
                 "Wrote {symbols} symbol(s) from {} module(s) to {}",
                 modules.len(),
                 out.display()
