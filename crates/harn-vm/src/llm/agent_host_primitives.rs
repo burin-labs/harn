@@ -1236,6 +1236,34 @@ pub(crate) async fn host_agent_dispatch_tool_call(
         return Ok(json_to_vm_value(&denied));
     }
 
+    // Use the same complete catalog contract as the MCP and CLI adapters.
+    // Unknown names still reach the ordinary registry rejection path below.
+    if let Some(registry) =
+        tools.filter(|_| tool_schemas.iter().any(|schema| schema.name == tool_name))
+    {
+        let validation =
+            super::agent_tool_governance::prepared_handler_catalog(registry, &tool_name)
+                .map_err(|error| error.to_string())
+                .and_then(|catalog| {
+                    catalog
+                        .validate_input(&tool_name, &tool_args)
+                        .map_err(|error| error.to_string())
+                });
+        if let Err(message) = validation {
+            let stop_reason = agent_primitive_option_str(options, "_stop_reason");
+            let denied = schema_validation_tool_result(
+                &tool_name,
+                &tool_id,
+                &tool_args,
+                message,
+                &raw_args_json(),
+                stop_reason.as_deref().filter(|reason| !reason.is_empty()),
+            );
+            let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
+            return Ok(json_to_vm_value(&denied));
+        }
+    }
+
     let final_annotations = tool_annotations_for(tools, &tool_name);
     let final_denial = dispatch_policy
         .recheck(

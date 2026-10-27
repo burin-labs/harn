@@ -61,11 +61,12 @@ fn serve_mcp_code_mode_dispatches_only_server_registered_read_tools() {
         temp.path().join("server.harn"),
         r#"
 import { composition_mcp_tools } from "std/composition"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
 
 fn main(harness: Harness) {
   let source = tool_registry()
   source = tool_define(source, "echo", "Echo a value", {
-    parameters: {value: "string"},
+    parameters: {value: {type: "string", required: true}},
     annotations: {side_effect_level: "read_only"},
     handler: {args -> "bound:${args.value}"},
   })
@@ -83,6 +84,11 @@ fn main(harness: Harness) {
     parameters: {},
     handler: {_args -> "unknown tool was dispatched"},
   })
+  const ordinary_ok = agent_dispatch_tool_call(harness.tools, {name: "echo", arguments: {value: "direct"}}, source)
+  assert(ordinary_ok.ok)
+  const ordinary_invalid = agent_dispatch_tool_call(harness.tools, {name: "echo", arguments: {value: 7}}, source)
+  assert(!ordinary_invalid.ok)
+  assert(ordinary_invalid.error_category == "schema_validation")
   harness.tools.mcp_tools(composition_mcp_tools(harness, source))
 }
 "#,
@@ -131,6 +137,60 @@ fn main(harness: Harness) {
     let report = &called["result"]["structuredContent"];
     assert_eq!(report["run"]["result"], "bound:hello", "{called}");
     assert_eq!(report["child_calls"][0]["tool_name"], "echo", "{called}");
+
+    let invalid = client.request(stable_request(
+        10,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return echo({})", "include_report": true
+        }}),
+    ));
+    assert_eq!(invalid["result"]["isError"], true, "{invalid}");
+    let failure =
+        &invalid["result"]["_meta"]["com.harnlang/toolContract"]["applicationError"]["data"];
+    assert_eq!(failure["child_results"][0]["status"], "failed", "{invalid}");
+    assert_eq!(
+        failure["child_results"][0]["raw_output"],
+        JsonValue::Null,
+        "{invalid}"
+    );
+
+    let invalid_direct = client.request(stable_request(
+        11,
+        "tools/call",
+        json!({"name": "echo", "arguments": {"value": 7}}),
+    ));
+    assert_eq!(invalid_direct["error"]["code"], -32602, "{invalid_direct}");
+    let invalid_child = client.request(stable_request(
+        12,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return echo({value: 7})", "include_report": true
+        }}),
+    ));
+    assert_eq!(invalid_child["result"]["isError"], true, "{invalid_child}");
+    let failure =
+        &invalid_child["result"]["_meta"]["com.harnlang/toolContract"]["applicationError"]["data"];
+    assert_eq!(
+        failure["child_results"][0]["status"], "failed",
+        "{invalid_child}"
+    );
+    assert_eq!(
+        failure["child_results"][0]["raw_output"],
+        JsonValue::Null,
+        "{invalid_child}"
+    );
+    assert_eq!(
+        failure["child_results"][0]["error_category"], "schema_validation",
+        "{invalid_child}"
+    );
+    assert!(
+        failure["child_results"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("declared schema"),
+        "{invalid_child}"
+    );
 
     for (id, name) in [(3, "phantom"), (4, "mutate"), (5, "unknown_effect")] {
         let denied = client.request(stable_request(

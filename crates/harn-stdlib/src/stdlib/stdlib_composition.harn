@@ -110,7 +110,12 @@ fn __composition_dispatch_value(result: dict, name: string) {
   if result?.ok ?? false {
     return result?.result
   }
-  throw result?.error ?? result?.rendered_result ?? "composition_mcp_execute: tool failed: ${name}"
+  throw {
+    schema: "harn.composition.dispatch_error.v1",
+    message: result?.error ?? result?.rendered_result
+      ?? "composition_mcp_execute: tool failed: ${name}",
+    error_category: result?.error_category ?? "tool_error",
+  }
 }
 
 fn __composition_mcp_reduced_result(report: dict, opts: dict) {
