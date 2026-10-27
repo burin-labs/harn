@@ -126,7 +126,7 @@ impl Launch {
         probe: &dyn install::Probe,
         root: &Path,
     ) -> Result<String, String> {
-        if let Some(program) = probe.var(self.program_env) {
+        if let Some(program) = probe.raw_var(self.program_env) {
             // A set override wins even when it names nothing, so evals can
             // force the fallback.
             let program = PathBuf::from(program);
@@ -202,7 +202,12 @@ impl Launch {
             });
         }
         if program == "tsc" {
-            let major = typescript_major(found)?;
+            let Some(major) = typescript_major(found) else {
+                return Some(format!(
+                    "cannot determine the TypeScript version for `{}`; `tsc --lsp` needs TypeScript 7",
+                    found.display()
+                ));
+            };
             return (major < 7).then(|| {
                 format!(
                     "`{}` is TypeScript {major}; `tsc --lsp` needs TypeScript 7",
@@ -217,7 +222,27 @@ impl Launch {
 /// The major version of the `typescript` package a `tsc` launcher belongs to,
 /// when its `package.json` can be found.
 fn typescript_major(tsc: &Path) -> Option<u64> {
-    let script = std::fs::canonicalize(tsc).ok()?;
+    let mut script = std::fs::canonicalize(tsc).ok()?;
+    if script
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd"))
+    {
+        // npm's Windows shim launches a relative TypeScript script. Accept
+        // only the two package-manager layouts, not an unrelated sibling
+        // manifest beside an arbitrary executable.
+        let shim = std::fs::read_to_string(&script).ok()?;
+        let (_, invocation) = shim
+            .lines()
+            .last()?
+            .rsplit_once(" & \"%_prog%\"  \"%dp0%\\")?;
+        let target = invocation.strip_suffix("\" %*")?;
+        let relative = match target {
+            r"..\typescript\bin\tsc" => "../typescript/bin/tsc",
+            r"node_modules\typescript\bin\tsc" => "node_modules/typescript/bin/tsc",
+            _ => return None,
+        };
+        script = std::fs::canonicalize(script.parent()?.join(relative)).ok()?;
+    }
     let package = script.parent()?.parent()?.join("package.json");
     let manifest: Value = serde_json::from_str(&std::fs::read_to_string(package).ok()?).ok()?;
     if manifest.get("name")?.as_str()? != "typescript" {
@@ -230,6 +255,48 @@ fn typescript_major(tsc: &Path) -> Option<u64> {
         .next()?
         .parse()
         .ok()
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::typescript_major;
+
+    #[test]
+    fn npm_windows_shims_identify_the_launched_typescript_package() {
+        let root = tempfile::tempdir().unwrap();
+        for (shim_dir, package_dir, target) in [
+            (
+                "local/node_modules/.bin",
+                "local/node_modules/typescript",
+                r"..\typescript\bin\tsc",
+            ),
+            (
+                "global",
+                "global/node_modules/typescript",
+                r"node_modules\typescript\bin\tsc",
+            ),
+        ] {
+            let shim_dir = root.path().join(shim_dir);
+            let package_dir = root.path().join(package_dir);
+            std::fs::create_dir_all(&shim_dir).unwrap();
+            std::fs::create_dir_all(package_dir.join("bin")).unwrap();
+            std::fs::write(package_dir.join("bin/tsc"), "").unwrap();
+            std::fs::write(
+                package_dir.join("package.json"),
+                r#"{"name":"typescript","version":"7.0.1"}"#,
+            )
+            .unwrap();
+            let shim = shim_dir.join("tsc.cmd");
+            std::fs::write(&shim, format!("endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\{target}\" %*\r\n")).unwrap();
+            assert_eq!(typescript_major(&shim), Some(7));
+            std::fs::write(&shim, "@echo off\r\necho unrelated\r\n").unwrap();
+            assert_eq!(
+                typescript_major(&shim),
+                None,
+                "an unrelated launcher must not inherit a neighboring package's version"
+            );
+        }
+    }
 }
 
 /// The executable `program` names in `dir`. Windows launches by extension, and
