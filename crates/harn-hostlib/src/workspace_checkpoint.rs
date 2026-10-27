@@ -55,7 +55,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use harn_vm::tool_annotations::SideEffectLevel;
 use harn_vm::VmValue;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::HostlibError;
@@ -155,6 +155,8 @@ pub struct CaptureReceipt {
     pub available: bool,
     /// Echoed boundary id.
     pub boundary_id: String,
+    /// Writer policy enforced by this checkpoint session.
+    pub writer_policy: WriterPolicy,
     /// Files in the stat index.
     pub scanned_files: usize,
     /// Dirty or untracked files whose bytes were stored.
@@ -167,6 +169,53 @@ pub struct CaptureReceipt {
     pub scan_errors: usize,
     /// Wall time of the stat scan.
     pub scan_ms: u64,
+}
+
+/// How checkpoint restores handle changes without verified writer evidence.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum WriterPolicy {
+    /// Preserve the historical scan-based attribution behavior.
+    LegacyScan,
+    /// Refuse to overwrite a path whose writer is not known.
+    RequireKnown,
+}
+
+/// Writer evidence for a workspace change.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[non_exhaustive]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ChangeWriter {
+    /// A scan detected a change but cannot identify its writer.
+    Unknown,
+}
+
+/// The exact file state shown to a person before a restore is confirmed.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ObservedFileState {
+    /// No file exists at the path.
+    Absent,
+    /// A file exists with this SHA-256 hash.
+    Present {
+        /// Lowercase SHA-256 digest of the file contents.
+        sha256: String,
+    },
+}
+
+/// A path and file state explicitly confirmed by the host's user.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfirmedPath {
+    /// Session shown when the host obtained confirmation.
+    pub session_id: String,
+    /// Boundary shown when the host obtained confirmation.
+    pub boundary_id: String,
+    /// Path relative to the workspace root.
+    pub path: String,
+    /// State shown when the person confirmed the restore.
+    pub observed: ObservedFileState,
 }
 
 /// Result of [`call_begin`].
@@ -191,6 +240,8 @@ pub struct AttributedChange {
     pub path: String,
     /// `created`, `modified`, or `deleted`.
     pub kind: &'static str,
+    /// Writer evidence for the change.
+    pub writer: ChangeWriter,
     /// SHA-256 of the content after the call; absent when deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub post_hash: Option<String>,
@@ -220,6 +271,11 @@ pub struct PlanEntry {
     pub path: String,
     /// `restore`, `delete`, `recreate`, `refuse`, `skip`, or `fail`.
     pub action: &'static str,
+    /// Writer evidence for this path.
+    pub writer: ChangeWriter,
+    /// The file state used for a possible user confirmation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed: Option<ObservedFileState>,
     /// Why the path is refused or skipped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -245,6 +301,8 @@ pub struct IrreversibleEffect {
 pub struct PlanReceipt {
     /// Always `true`.
     pub available: bool,
+    /// Session the plan belongs to.
+    pub session_id: String,
     /// Boundary the plan restores to.
     pub boundary_id: String,
     /// One entry per attributed path.
@@ -347,6 +405,7 @@ enum PendingScan {
 
 struct Session {
     root: PathBuf,
+    writer_policy: WriterPolicy,
     /// Whether ignore files above `root` apply (root is below the git toplevel).
     read_parent_ignores: bool,
     blob_dir: PathBuf,
@@ -415,6 +474,16 @@ pub fn capture(
     boundary_id: &str,
     root: Option<&Path>,
 ) -> Result<Outcome<CaptureReceipt>, HostlibError> {
+    capture_with_writer_policy(session_id, boundary_id, root, None)
+}
+
+/// Capture a boundary with an optional policy fixed for the session lifetime.
+pub fn capture_with_writer_policy(
+    session_id: &str,
+    boundary_id: &str,
+    root: Option<&Path>,
+    requested_policy: Option<WriterPolicy>,
+) -> Result<Outcome<CaptureReceipt>, HostlibError> {
     let fail = backend(CAPTURE_BUILTIN);
     validate_session_id(CAPTURE_BUILTIN, session_id)?;
     require_non_empty(CAPTURE_BUILTIN, "boundary_id", boundary_id)?;
@@ -431,10 +500,17 @@ pub fn capture(
                 ),
             });
         }
+        if requested_policy.is_some_and(|policy| policy != state.writer_policy) {
+            return Err(HostlibError::InvalidParameter {
+                builtin: CAPTURE_BUILTIN,
+                param: "writer_policy",
+                message: "cannot change the checkpoint session's writer policy".to_string(),
+            });
+        }
         if let Some(detail) = pending_calls_detail(&state) {
             return Ok(unavailable("calls_in_flight", detail));
         }
-        Some((state.revision, state.boundaries.len()))
+        Some((state.revision, state.boundaries.len(), state.writer_policy))
     } else {
         None
     };
@@ -516,6 +592,10 @@ pub fn capture(
     let receipt = CaptureReceipt {
         available: true,
         boundary_id: boundary_id.to_string(),
+        writer_policy: initial_generation
+            .map(|(_, _, policy)| policy)
+            .or(requested_policy)
+            .unwrap_or(WriterPolicy::LegacyScan),
         scanned_files: scan.index.len(),
         stored_files: stored.len(),
         stored_bytes,
@@ -538,6 +618,7 @@ pub fn capture(
         .or_insert_with(|| {
             Arc::new(Mutex::new(Session {
                 root: root.clone(),
+                writer_policy: receipt.writer_policy,
                 read_parent_ignores,
                 blob_dir: blob_dir.clone(),
                 boundaries: Vec::new(),
@@ -552,7 +633,7 @@ pub fn capture(
         return Ok(unavailable("calls_in_flight", detail));
     }
     if initial_generation.map_or(!state.boundaries.is_empty(), |generation| {
-        generation != (state.revision, state.boundaries.len())
+        generation != (state.revision, state.boundaries.len(), state.writer_policy)
     }) {
         return Ok(unavailable(
             "concurrent_calls",
@@ -687,6 +768,7 @@ pub fn call_end(
         changes.push(AttributedChange {
             path: path.to_string(),
             kind,
+            writer: ChangeWriter::Unknown,
             post_hash,
             incomplete: unreadable || scan_blind_to(&before, path) || scan_blind_to(&after, path),
         });
@@ -746,11 +828,12 @@ pub fn plan(session_id: &str, boundary_id: &str) -> Result<Outcome<PlanReceipt>,
     if let Some(detail) = incomplete_attribution(&state, boundary_id) {
         return Ok(unavailable("incomplete_attribution", detail));
     }
-    let Some(planned) = compute_plan(&state, boundary_id, PLAN_BUILTIN)? else {
+    let Some(planned) = compute_plan(&state, boundary_id, PLAN_BUILTIN, &BTreeMap::new())? else {
         return Ok(unknown_boundary(boundary_id));
     };
     Ok(Outcome::Ready(PlanReceipt {
         available: true,
+        session_id: session_id.to_string(),
         boundary_id: boundary_id.to_string(),
         entries: planned.actions.into_iter().map(|a| a.entry).collect(),
         irreversible: planned.irreversible,
@@ -765,6 +848,16 @@ pub fn restore(
     boundary_id: &str,
     only_paths: Option<&[String]>,
 ) -> Result<Outcome<RestoreReceipt>, HostlibError> {
+    restore_with_confirmations(session_id, boundary_id, only_paths, &[])
+}
+
+/// Restore with host-provided confirmations bound to exact observed file states.
+pub fn restore_with_confirmations(
+    session_id: &str,
+    boundary_id: &str,
+    only_paths: Option<&[String]>,
+    confirmed_paths: &[ConfirmedPath],
+) -> Result<Outcome<RestoreReceipt>, HostlibError> {
     validate_session_id(RESTORE_BUILTIN, session_id)?;
     require_non_empty(RESTORE_BUILTIN, "boundary_id", boundary_id)?;
     if only_paths.is_some_and(<[String]>::is_empty) {
@@ -773,6 +866,40 @@ pub fn restore(
             param: "paths",
             message: "must not be empty; omit it to restore every attributed path".to_string(),
         });
+    }
+    let mut confirmations = BTreeMap::new();
+    for confirmed in confirmed_paths {
+        if confirmed.session_id != session_id || confirmed.boundary_id != boundary_id {
+            return Err(HostlibError::InvalidParameter {
+                builtin: RESTORE_BUILTIN,
+                param: "confirmed_paths",
+                message: "confirmation must match the requested session and boundary".to_string(),
+            });
+        }
+        require_non_empty(RESTORE_BUILTIN, "confirmed_paths.path", &confirmed.path)?;
+        if let ObservedFileState::Present { sha256 } = &confirmed.observed {
+            if sha256.len() != 64
+                || !sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(HostlibError::InvalidParameter {
+                    builtin: RESTORE_BUILTIN,
+                    param: "confirmed_paths.observed.sha256",
+                    message: "must be a lowercase 64-character SHA-256 hex digest".to_string(),
+                });
+            }
+        }
+        if confirmations
+            .insert(confirmed.path.as_str(), &confirmed.observed)
+            .is_some()
+        {
+            return Err(HostlibError::InvalidParameter {
+                builtin: RESTORE_BUILTIN,
+                param: "confirmed_paths",
+                message: format!("duplicate path `{}`", confirmed.path),
+            });
+        }
     }
     let Some(session) = find_session(session_id) else {
         return Ok(no_checkpoint(session_id));
@@ -784,7 +911,7 @@ pub fn restore(
     if let Some(detail) = incomplete_attribution(&state, boundary_id) {
         return Ok(unavailable("incomplete_attribution", detail));
     }
-    let Some(planned) = compute_plan(&state, boundary_id, RESTORE_BUILTIN)? else {
+    let Some(planned) = compute_plan(&state, boundary_id, RESTORE_BUILTIN, &confirmations)? else {
         return Ok(unknown_boundary(boundary_id));
     };
     advance_revision(&mut state, RESTORE_BUILTIN)?;
@@ -984,6 +1111,7 @@ fn compute_plan(
     state: &Session,
     boundary_id: &str,
     builtin: &'static str,
+    confirmations: &BTreeMap<&str, &ObservedFileState>,
 ) -> Result<Option<Planned>, HostlibError> {
     let fail = backend(builtin);
     let Some(idx) = state.boundaries.iter().position(|b| b.id == boundary_id) else {
@@ -1036,6 +1164,8 @@ fn compute_plan(
                 entry: PlanEntry {
                     path: path.to_string(),
                     action: "fail",
+                    writer: ChangeWriter::Unknown,
+                    observed: None,
                     reason: Some(error),
                     expected_hash: expected.map(str::to_string),
                     found_hash: None,
@@ -1053,9 +1183,19 @@ fn compute_plan(
     let ignored = ignored_paths(&state.root, &to_delete).map_err(&fail)?;
 
     for (path, expected, found, target) in candidates {
+        let observed = match &found {
+            Some(hash) => ObservedFileState::Present {
+                sha256: hash.clone(),
+            },
+            None => ObservedFileState::Absent,
+        };
+        let confirmed = state.writer_policy == WriterPolicy::RequireKnown
+            && confirmations.get(path.as_str()).copied() == Some(&observed);
         let entry = |action: &'static str, reason: Option<&str>| PlanEntry {
             path: path.clone(),
             action,
+            writer: ChangeWriter::Unknown,
+            observed: Some(observed.clone()),
             reason: reason.map(str::to_string),
             expected_hash: expected.clone(),
             found_hash: found.clone(),
@@ -1079,7 +1219,7 @@ fn compute_plan(
                 guard_hash: None,
                 write: None,
             },
-            _ if found != expected => PlannedAction {
+            _ if found != expected && !confirmed => PlannedAction {
                 entry: entry("refuse", Some("changed outside the session")),
                 guard_hash: None,
                 write: None,
@@ -1087,9 +1227,18 @@ fn compute_plan(
             Target::Absent if ignored.contains(&path) => {
                 skip("ignored by git, not part of the checkpoint tree")
             }
+            _ if state.writer_policy == WriterPolicy::RequireKnown && !confirmed => PlannedAction {
+                entry: entry("refuse", Some("writer is unknown")),
+                guard_hash: None,
+                write: None,
+            },
             Target::Absent => PlannedAction {
                 entry: entry("delete", None),
-                guard_hash: expected.clone(),
+                guard_hash: if confirmed {
+                    found.clone()
+                } else {
+                    expected.clone()
+                },
                 write: None,
             },
             Target::Present { bytes, exec, .. } => PlannedAction {
@@ -1101,7 +1250,11 @@ fn compute_plan(
                     },
                     None,
                 ),
-                guard_hash: expected.clone(),
+                guard_hash: if confirmed {
+                    found.clone()
+                } else {
+                    expected.clone()
+                },
                 write: Some(WritePayload { bytes, exec }),
             },
         };
@@ -1423,7 +1576,23 @@ fn capture_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let session_id = require_string(CAPTURE_BUILTIN, dict, "session_id")?;
     let boundary_id = require_string(CAPTURE_BUILTIN, dict, "boundary_id")?;
     let root = optional_string(CAPTURE_BUILTIN, dict, "root")?.map(PathBuf::from);
-    Ok(to_vm(&capture(&session_id, &boundary_id, root.as_deref())?))
+    let policy = optional_string(CAPTURE_BUILTIN, dict, "writer_policy")?
+        .map(|raw| {
+            serde_json::from_value::<WriterPolicy>(serde_json::Value::String(raw.clone())).map_err(
+                |_| HostlibError::InvalidParameter {
+                    builtin: CAPTURE_BUILTIN,
+                    param: "writer_policy",
+                    message: format!("unknown writer policy `{raw}`"),
+                },
+            )
+        })
+        .transpose()?;
+    Ok(to_vm(&capture_with_writer_policy(
+        &session_id,
+        &boundary_id,
+        root.as_deref(),
+        policy,
+    )?))
 }
 
 fn call_begin_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -1466,10 +1635,30 @@ fn restore_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let session_id = require_string(RESTORE_BUILTIN, dict, "session_id")?;
     let boundary_id = require_string(RESTORE_BUILTIN, dict, "boundary_id")?;
     let paths = crate::value_args::optional_string_list(RESTORE_BUILTIN, dict, "paths")?;
-    Ok(to_vm(&restore(
+    let confirmed_paths = match dict.get("confirmed_paths") {
+        None | Some(VmValue::Nil) => Vec::new(),
+        Some(value) => {
+            let value = harn_vm::llm::vm_value_to_json_strict(value, "confirmed_paths").map_err(
+                |message| HostlibError::InvalidParameter {
+                    builtin: RESTORE_BUILTIN,
+                    param: "confirmed_paths",
+                    message,
+                },
+            )?;
+            serde_json::from_value::<Vec<ConfirmedPath>>(value).map_err(|error| {
+                HostlibError::InvalidParameter {
+                    builtin: RESTORE_BUILTIN,
+                    param: "confirmed_paths",
+                    message: error.to_string(),
+                }
+            })?
+        }
+    };
+    Ok(to_vm(&restore_with_confirmations(
         &session_id,
         &boundary_id,
         paths.as_deref(),
+        &confirmed_paths,
     )?))
 }
 

@@ -25,6 +25,19 @@ A host calls `checkpoint_capture` once per user message, brackets every tool
 and shell call with `checkpoint_call_begin` and `checkpoint_call_end`, and
 passes the tool annotation's side-effect class as `side_effect`.
 
+Hosts using `harness.fs.checkpoint_capture` can require writer evidence by
+setting `writer_policy: "require_known"` on the first capture. They must verify
+that the receipt echoes that policy.
+The policy stays with the session and its forks. A scan detects changed paths
+but cannot identify their writers, so strict restore refuses those paths. The
+default `legacy_scan` policy preserves scan-based behavior for existing hosts.
+Plan entries report the writer and the observed file state. After obtaining a
+person's confirmation, a host can pass `confirmed_paths` to restore as a list
+of `{session_id, boundary_id, path, observed}` records copied from the plan.
+A different session, boundary, or later file change does not match that
+confirmation and is refused. The confirmation is supplied by the host; Harn
+cannot verify that the host actually showed an approval prompt.
+
 ## ACP
 
 `session/workspace_checkpoint` carries the same actions for ACP clients. Params:
