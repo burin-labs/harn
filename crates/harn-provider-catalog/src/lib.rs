@@ -19,6 +19,7 @@ pub mod models_dev;
 pub mod presentation;
 pub mod pricing;
 mod schema;
+pub mod source;
 pub mod taxonomy;
 mod view;
 
