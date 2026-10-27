@@ -337,7 +337,7 @@ async fn dispatch_render(
                 cli_diagnostic!("error: failed to write {}: {error}", path.display());
                 return Err(1);
             }
-            eprintln!("wrote {}", path.display());
+            cli_diagnostic!("wrote {}", path.display());
         }
         None => {
             use std::io::Write as _;

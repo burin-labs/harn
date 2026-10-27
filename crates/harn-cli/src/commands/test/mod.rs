@@ -423,7 +423,7 @@ async fn run_standard_command(
                     command_error(&problems.join("\n"));
                 }
                 if inventory.selected_files.is_empty() {
-                    eprintln!(
+                    cli_diagnostic!(
                         "Package intentionally has no tests: {}",
                         inventory.allow_empty_reason.as_deref().unwrap_or_default()
                     );
@@ -514,7 +514,7 @@ async fn run_user_test_targets(
         }
         match resolved.mode {
             affected::AffectedTestMode::Selected => {
-                eprintln!(
+                cli_diagnostic!(
                     "affected tests: selected {} test file(s) from {} requested target(s)",
                     resolved.files.len(),
                     paths.len()
@@ -528,7 +528,7 @@ async fn run_user_test_targets(
                 &selected_paths
             }
             affected::AffectedTestMode::Full => {
-                eprintln!(
+                cli_diagnostic!(
                     "affected tests: {}; running the complete requested suite",
                     resolved.reason
                 );

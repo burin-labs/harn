@@ -409,7 +409,7 @@ fn emit_get_not_found(name: &str, json: bool, corpus: &SkillCorpus) {
         println!("{}", json_envelope::to_string_pretty(&envelope));
     } else {
         cli_diagnostic!("error: no skill named `{name}`.");
-        eprintln!("hint: run `harn skill list` to see what ships with this binary.");
+        cli_diagnostic!("hint: run `harn skill list` to see what ships with this binary.");
     }
 }
 
@@ -713,7 +713,7 @@ pub(crate) fn run_install(args: &SkillsInstallArgs) {
             }
             Err(error) => {
                 cli_diagnostic!("error: failed to run git: {error}");
-                eprintln!("hint: make sure git is installed and in PATH.");
+                cli_diagnostic!("hint: make sure git is installed and in PATH.");
                 process::exit(1);
             }
         }

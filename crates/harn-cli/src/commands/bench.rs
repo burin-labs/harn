@@ -218,7 +218,7 @@ pub(crate) async fn run_bench(
             Ok(value) => {
                 if let Some(error) = crate::commands::run::return_value_error(&value) {
                     eprint!("{error}");
-                    eprintln!("benchmark aborted on iteration {}", iteration + 1);
+                    cli_diagnostic!("benchmark aborted on iteration {}", iteration + 1);
                     process::exit(1);
                 }
                 let (input_tokens, output_tokens, llm_time_ms, call_count) =
