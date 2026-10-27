@@ -250,7 +250,9 @@ fn junit_temp_path(cwd: &Path, prefix: &str) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id();
-    let target_dir = cwd.join(".harn").join("hostlib-tests");
+    let target_dir = cwd
+        .join(".harn")
+        .join(harn_vm::runtime_paths::HOSTLIB_TESTS_DIR);
     let _ = std::fs::create_dir_all(&target_dir);
     target_dir.join(format!("{prefix}-{pid}-{seq}.xml"))
 }

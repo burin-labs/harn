@@ -385,7 +385,8 @@ fn project_scope(root: &Path) -> String {
 }
 
 fn database_path(root: &Path) -> PathBuf {
-    root.join(".harn").join("session-store.sqlite")
+    root.join(".harn")
+        .join(harn_session_store::SESSION_STORE_DATABASE_FILE)
 }
 
 fn backend_error(builtin: &'static str, error: StoreError) -> HostlibError {

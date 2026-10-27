@@ -542,7 +542,7 @@ fn ttl_ms(ttl_seconds: u64) -> i64 {
 
 fn default_cache_path(backend: CacheBackend) -> PathBuf {
     let root = crate::runtime_paths::state_root(&crate::stdlib::process::runtime_root_base())
-        .join("cache");
+        .join(crate::runtime_paths::CACHE_DIR);
     match backend {
         CacheBackend::Sqlite => root.join("llm.sqlite"),
         CacheBackend::Fs => root.join("llm"),

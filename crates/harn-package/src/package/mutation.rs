@@ -13,7 +13,9 @@ pub(crate) fn with_manifest_write_lock<T>(
             manifest_path.display()
         ))
     })?;
-    let lock_path = project_root.join(".harn/package-manifest.lock");
+    let lock_path = project_root
+        .join(harn_modules::package_snapshot::PACKAGE_STATE_DIR)
+        .join(harn_modules::package_snapshot::PACKAGE_MANIFEST_LOCK_FILE);
     let lock = harn_modules::package_snapshot::open_lock_file(&lock_path)
         .map_err(|error| PackageError::Lockfile(error.to_string()))?;
     harn_flock::lock_with_deadline(

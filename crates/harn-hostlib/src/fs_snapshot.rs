@@ -55,7 +55,11 @@ const LIST_BUILTIN: &str = "hostlib_fs_list_snapshots";
 const DROP_BUILTIN: &str = "hostlib_fs_drop_snapshot";
 
 const MANIFEST_VERSION: u32 = 1;
-const STATE_REL: &[&str] = &[".harn", "state", "snapshots"];
+const STATE_REL: &[&str] = &[
+    ".harn",
+    harn_vm::runtime_paths::HOSTLIB_STATE_DIR,
+    "snapshots",
+];
 
 /// Default cap on the on-disk footprint of one session's snapshot bundle
 /// before the oldest snapshots are evicted. Matches the proposal in

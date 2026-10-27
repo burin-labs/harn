@@ -214,7 +214,7 @@ fn env_filter() -> EnvFilter {
 
 fn log_writer(config: &OrchestratorObservabilityConfig) -> Result<OrchestratorLogWriter, String> {
     let file = if let Some(state_dir) = config.state_dir.as_ref() {
-        let log_dir = state_dir.join("logs");
+        let log_dir = state_dir.join(crate::runtime_paths::LOGS_DIR);
         fs::create_dir_all(&log_dir).map_err(|error| {
             format!(
                 "failed to create orchestrator log dir {}: {error}",

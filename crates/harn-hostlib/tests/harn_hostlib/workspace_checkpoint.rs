@@ -475,6 +475,123 @@ fn second_capture_does_not_store_the_checkpoint_directory() {
 }
 
 #[test]
+fn session_store_state_is_not_attributed_but_user_harn_files_are() {
+    let dir = repo();
+    let root = dir.path();
+    let skills = root.join(".harn/skills");
+    fs::create_dir_all(&skills).unwrap();
+    fs::write(skills.join("custom.md"), "before").unwrap();
+    fs::create_dir_all(root.join(".harn/personas")).unwrap();
+    fs::write(root.join(".harn/personas/custom.md"), "before").unwrap();
+    fs::write(root.join(".harn/session-store.sqlite"), "initial runtime").unwrap();
+    let session = Session::new(root);
+    let capture = session.capture("turn-1");
+    assert_eq!(capture["available"], true);
+    assert_eq!(capture["stored_files"], 2, "{capture}");
+    let attributed = session.call_with("tool-1", Some("workspace_write"), || {
+        fs::create_dir_all(root.join(".harn/agent-run-writers")).unwrap();
+        fs::create_dir_all(root.join(".harn/fs-cas-locks")).unwrap();
+        fs::create_dir_all(root.join(".harn/hostlib")).unwrap();
+        for path in [
+            ".harn/session-store.sqlite",
+            ".harn/session-store.sqlite-wal",
+            ".harn/session-store.sqlite-shm",
+            ".harn/session-store.sqlite-journal",
+            ".harn/session-store.sqlite.harn-init.lock",
+            ".harn/agent-run-writers/project.lock",
+            ".harn/fs-cas-locks/file.lock",
+            ".harn/hostlib/scanner-snapshot.json",
+            ".harn/workers/worker.json",
+            ".harn/receipts/receipt.json",
+            ".harn/hostlib-tests/output",
+            ".harn/orchestrator/state.json",
+            ".harn/skills-cache/pkg/file",
+            ".harn/flow.sqlite-wal",
+            ".harn/personas/activations.json",
+            ".harn/personas/activations.lock",
+        ] {
+            fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+            fs::write(root.join(path), "runtime").unwrap();
+        }
+        fs::write(skills.join("custom.md"), "agent edit").unwrap();
+        fs::write(root.join(".harn/personas/custom.md"), "agent edit").unwrap();
+    });
+    assert_eq!(
+        paths(&attributed, "changes"),
+        [".harn/personas/custom.md", ".harn/skills/custom.md"]
+    );
+    let receipt = session.restore("turn-1");
+    assert_eq!(
+        paths(&receipt, "restored"),
+        [".harn/personas/custom.md", ".harn/skills/custom.md"]
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/personas/custom.md")).unwrap(),
+        "before"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/flow.sqlite-wal")).unwrap(),
+        "runtime"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/personas/activations.lock")).unwrap(),
+        "runtime"
+    );
+    assert_eq!(
+        fs::read_to_string(skills.join("custom.md")).unwrap(),
+        "before"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/session-store.sqlite")).unwrap(),
+        "runtime"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/agent-run-writers/project.lock")).unwrap(),
+        "runtime"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/fs-cas-locks/file.lock")).unwrap(),
+        "runtime"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/hostlib/scanner-snapshot.json")).unwrap(),
+        "runtime"
+    );
+}
+
+#[test]
+fn nested_source_relative_runtime_state_is_not_an_edit() {
+    let dir = repo();
+    let root = dir.path();
+    let nested = root.join("src/.harn");
+    fs::create_dir_all(nested.join("skills")).unwrap();
+    fs::write(nested.join("skills/custom.md"), "before").unwrap();
+    let session = Session::new(root);
+    assert_eq!(session.capture("turn-1")["available"], true);
+    let attributed = session.call_with("tool-1", None, || {
+        fs::create_dir_all(nested.join("memory")).unwrap();
+        fs::write(nested.join("memory/events.jsonl"), "runtime").unwrap();
+        fs::write(nested.join("skills/custom.md"), "agent edit").unwrap();
+    });
+    assert_eq!(
+        paths(&attributed, "changes"),
+        ["src/.harn/skills/custom.md"]
+    );
+    assert_eq!(
+        paths(&session.restore("turn-1"), "restored"),
+        ["src/.harn/skills/custom.md"]
+    );
+    assert_eq!(
+        fs::read_to_string(nested.join("memory/events.jsonl")).unwrap(),
+        "runtime"
+    );
+    assert_eq!(
+        fs::read_to_string(nested.join("skills/custom.md")).unwrap(),
+        "before"
+    );
+}
+
+#[test]
 fn capture_with_a_different_root_is_rejected() {
     let dir = repo();
     let other = repo();

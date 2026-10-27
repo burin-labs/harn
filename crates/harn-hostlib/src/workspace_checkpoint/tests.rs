@@ -1,6 +1,22 @@
 use super::*;
 use std::os::unix::fs::symlink;
 
+#[test]
+fn a_new_runtime_path_is_excluded_by_the_scan_without_a_second_list() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path();
+    stdfs::create_dir_all(root.join(".harn/future-runtime")).unwrap();
+    stdfs::create_dir_all(root.join(".harn/skills")).unwrap();
+    stdfs::write(root.join(".harn/future-runtime/state"), "runtime").unwrap();
+    stdfs::write(root.join(".harn/skills/user.md"), "user").unwrap();
+    let mut declared = crate::workspace_runtime_paths::owned_paths(root);
+    declared.push(root.join(".harn/future-runtime"));
+    let scan = scan_tree_with_exclusions(root, false, declared);
+    assert_eq!(scan.errors, 0);
+    assert!(!scan.index.contains_key(".harn/future-runtime/state"));
+    assert!(scan.index.contains_key(".harn/skills/user.md"));
+}
+
 fn git(dir: &Path, args: &[&str]) {
     let status = Command::new("git")
         .arg("-C")

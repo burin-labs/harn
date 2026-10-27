@@ -62,6 +62,16 @@ async fn acp_workspace_checkpoint_restores_attributed_edit_and_refuses_diverged_
         .handle_incoming_message(call("call_begin", serde_json::json!({"callId": "edit-1"})))
         .await;
     assert_eq!(recv_json(&mut rx).await["result"]["available"], true);
+    // Forking opens the live session store while the workspace call is active.
+    // Its database and lock files must not become edits eligible for restore.
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0", "id": 100, "method": "session/fork",
+            "params": {"sessionId": session_id},
+        }))
+        .await;
+    let fork = recv_response_with_id(&mut rx, 100).await;
+    assert!(fork["result"]["sessionId"].is_string(), "{fork}");
     std::fs::write(root.join("agent.txt"), "agent edited, longer").unwrap();
     std::fs::write(root.join("contested.txt"), "contested by the agent").unwrap();
     server
@@ -88,6 +98,8 @@ async fn acp_workspace_checkpoint_restores_attributed_edit_and_refuses_diverged_
         std::fs::read_to_string(root.join("contested.txt")).unwrap(),
         "contested by a person"
     );
+    assert!(root.join(".harn/session-store.sqlite").is_file());
+    assert!(root.join(".harn/agent-run-writers/project.lock").is_file());
 
     // A malformed path filter is rejected, never widened to "restore everything".
     std::fs::write(root.join("agent.txt"), "edited again").unwrap();

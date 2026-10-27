@@ -99,6 +99,10 @@ the rest of the restore still runs. `restored`, `refused`, and `skipped` are pla
   diff.
 - Symlinks, nested repositories, and tracked files that an ignore rule matches
   are outside the index.
+- Declared Harn runtime state is not a workspace edit. This includes the
+  session database and sidecars, writer locks, checkpoints, and scanner state,
+  including source-relative state in nested directories. Other `.harn` files
+  remain eligible for attribution and restore.
 - Clean tracked content depends on the git objects for the boundary's index
   staying in the object store. Garbage collection can remove them after the
   index moves on.

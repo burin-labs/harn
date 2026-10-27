@@ -281,13 +281,18 @@ fn sha256_label(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
+/// Directory reserved for conditional-write coordination under a state root.
+pub const CONDITIONAL_REPLACE_LOCK_DIRECTORY: &str = "fs-cas-locks";
+
 fn lock_root() -> io::Result<PathBuf> {
     if let Some(root) = scoped_conditional_replace_lock_root() {
         return Ok(root);
     }
     // Standalone interpreters use their working directory. Native execution
     // installs its project/state namespace before entering the interpreter.
-    Ok(std::env::current_dir()?.join(".harn/fs-cas-locks"))
+    Ok(std::env::current_dir()?
+        .join(".harn")
+        .join(CONDITIONAL_REPLACE_LOCK_DIRECTORY))
 }
 
 /// Acquire the canonical-path lock shared by atomic and conditional writes.

@@ -60,7 +60,10 @@ impl MetadataState {
     }
 
     fn at_state_root(base_dir: &Path, state_root: &Path) -> Self {
-        Self::with_metadata_dir(base_dir, state_root.join("metadata"))
+        Self::with_metadata_dir(
+            base_dir,
+            state_root.join(crate::runtime_paths::METADATA_DIR),
+        )
     }
 
     fn with_metadata_dir(base_dir: &Path, metadata_dir: PathBuf) -> Self {

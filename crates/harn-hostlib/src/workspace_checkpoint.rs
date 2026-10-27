@@ -68,7 +68,11 @@ const DROP_BUILTIN: &str = "hostlib_fs_checkpoint_drop";
 
 const ALREADY_AT_BOUNDARY: &str = "already matches the boundary";
 
-const STATE_REL: &[&str] = &[".harn", "state", "checkpoints"];
+const STATE_REL: &[&str] = &[
+    ".harn",
+    harn_vm::runtime_paths::HOSTLIB_STATE_DIR,
+    "checkpoints",
+];
 
 /// Largest dirty or untracked file a boundary stores. Larger files are listed
 /// as unrestorable instead of copied on every turn.
@@ -402,10 +406,13 @@ pub fn capture(
     let mut stored = BTreeMap::new();
     let mut unrestorable = BTreeMap::new();
     let mut stored_bytes = 0u64;
+    let excluded = crate::workspace_runtime_paths::owned_paths(&root);
     for path in dirty {
-        if path.ends_with('/') || absent_tracked.contains(&path) || path.starts_with(".harn/state/")
+        if path.ends_with('/')
+            || absent_tracked.contains(&path)
+            || is_checkpoint_excluded(&root, &root.join(&path), &excluded)
         {
-            continue; // nested repository or already deleted
+            continue; // nested repository, already deleted, or runtime-owned
         }
         let full = root.join(&path);
         let Ok(meta) = stdfs::symlink_metadata(&full) else {
@@ -1021,13 +1028,36 @@ fn is_executable(_meta: &stdfs::Metadata) -> bool {
 // Stat scan
 // ---------------------------------------------------------------------------
 
+fn is_checkpoint_excluded(root: &Path, path: &Path, excluded: &[PathBuf]) -> bool {
+    if excluded.iter().any(|entry| path.starts_with(entry)) {
+        return true;
+    }
+    // Source-relative runtime state can also live in a nested `.harn`.
+    path.ancestors()
+        .take_while(|ancestor| ancestor.starts_with(root))
+        .filter(|ancestor| ancestor.file_name().is_some_and(|name| name == ".harn"))
+        .filter_map(Path::parent)
+        .filter(|parent| *parent != root)
+        .any(|parent| {
+            crate::workspace_runtime_paths::owned_paths(parent)
+                .iter()
+                .any(|entry| path.starts_with(entry))
+        })
+}
+
 /// Stat every regular file in the non-ignored tree under `root`. `.git`,
-/// nested repositories, and Harn's own state directory are excluded.
+/// nested repositories, and Harn's runtime-owned paths are excluded.
 fn scan_tree(root: &Path, read_parent_ignores: bool) -> Scan {
+    let excluded = crate::workspace_runtime_paths::owned_paths(root);
+    scan_tree_with_exclusions(root, read_parent_ignores, excluded)
+}
+
+fn scan_tree_with_exclusions(
+    root: &Path,
+    read_parent_ignores: bool,
+    excluded: Vec<PathBuf>,
+) -> Scan {
     let started = Instant::now();
-    let state_dir: PathBuf = [".harn", "state"]
-        .iter()
-        .fold(root.to_path_buf(), |p, c| p.join(c));
     let walk_root = root.to_path_buf();
     let walker = ignore::WalkBuilder::new(root)
         .hidden(false)
@@ -1036,7 +1066,9 @@ fn scan_tree(root: &Path, read_parent_ignores: bool) -> Scan {
         .parents(read_parent_ignores)
         .follow_links(false)
         .filter_entry(move |entry| {
-            if entry.file_name() == ".git" || entry.path() == state_dir {
+            if entry.file_name() == ".git"
+                || is_checkpoint_excluded(&walk_root, entry.path(), &excluded)
+            {
                 return false;
             }
             let is_dir = entry.file_type().is_some_and(|t| t.is_dir());

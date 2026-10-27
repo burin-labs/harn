@@ -42,7 +42,7 @@ use crate::json_envelope::{self, JsonEnvelope, JsonOutput};
 use crate::package::{load_skills_config, resolve_skills_paths, SkillSourceEntry};
 use crate::skill_loader::canonicalize_cli_dirs;
 
-const SKILLS_CACHE_DIR: &str = ".harn/skills-cache";
+const SKILLS_CACHE_DIR: &str = harn_vm::runtime_paths::DEFAULT_SKILLS_CACHE_PATH;
 
 /// `JsonEnvelope` schemaVersion for `harn skill list --json`.
 pub(crate) const SKILLS_LIST_SCHEMA_VERSION: u32 = 1;

@@ -30,7 +30,7 @@ use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
 
 const LEGACY_STORE_DIR: &str = "session-store";
 const LEGACY_EVENT_FILE_EXT: &str = "jsonl";
-const STORE_DB_FILE: &str = "session-store.sqlite";
+const STORE_DB_FILE: &str = harn_session_store::SESSION_STORE_DATABASE_FILE;
 /// Directory name for state under an explicitly named store root. The
 /// defaulted case goes through `runtime_paths::state_root` instead, which
 /// owns the same name plus the `HARN_STATE_DIR` override.
