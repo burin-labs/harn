@@ -40,6 +40,8 @@ request = { reasoning_none_supported = false }
 ```
 
 The generator derives exact request matches from the catalog and wire IDs.
+Those IDs must be literal names; glob operators and escaping are rejected
+using the same syntax predicate as the capability matcher.
 Do not author `model_match` or `extends` inside a registration.
 Route requests inherit the base request fields and override individual fields.
 Route model fields also inherit the base; each override replaces the entire field,

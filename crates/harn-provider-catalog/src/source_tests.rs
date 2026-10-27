@@ -132,6 +132,48 @@ fn unknown_request_policy_and_authored_matches_are_refused() {
 }
 
 #[test]
+fn registered_catalog_and_wire_ids_cannot_grant_policy_through_glob_syntax() {
+    use crate::capabilities::{CapabilitiesFile, CapabilityRoute, CapabilityRules};
+
+    for (id, wire_model, unintended) in [
+        ("model-{a,b}", None, "model-a"),
+        ("current", Some("model-{a,b}"), "model-a"),
+        (r"model-\a", None, "model-a"),
+        ("current", Some(r"model-\a"), "model-a"),
+    ] {
+        let wire = wire_model
+            .map(|wire: &str| format!("wire_model = {wire:?}\n"))
+            .unwrap_or_default();
+        let source = format!(
+            "[models.{id:?}]\nname = \"Example\"\nprovider = \"example\"\ncontext_window = 100\n{wire}\n[models.{id:?}.registration.request]\nnative_tools = true\n"
+        );
+        match expand_model_registrations(&source) {
+            Err(error) => assert!(error.contains("exact model"), "{error}"),
+            Ok(projection) => {
+                let projection = projection.expect("registration must be reached");
+                let capabilities: CapabilitiesFile =
+                    toml::from_str(&projection.capability_source).unwrap();
+                let rules = CapabilityRules::new(&capabilities, None);
+                let matches = |model| {
+                    rules
+                        .resolve(CapabilityRoute {
+                            provider: "example",
+                            model,
+                            responses_api: false,
+                        })
+                        .matched()
+                };
+                panic!(
+                    "accepted glob-shaped identity {id:?}/{wire_model:?}: literal matched={}, unintended {unintended:?} matched={}",
+                    matches(wire_model.unwrap_or(id)),
+                    matches(unintended)
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn duplicate_authorities_do_not_silently_replace_each_other() {
     for (suffix, expected) in [
         ("\n[models.gateway]\nname = \"Already exists\"\nprovider = \"gateway\"\ncontext_window = 10\n", "already has a model row"),

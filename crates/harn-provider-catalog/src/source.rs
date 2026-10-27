@@ -243,7 +243,7 @@ fn register_request(
         .unwrap_or(id);
     if [id, wire_model]
         .iter()
-        .any(|name| name.contains(['*', '?', '[', ']']))
+        .any(|name| harn_glob::has_name_metacharacters(name))
     {
         return Err(format!("registered request {id} must name an exact model"));
     }
