@@ -224,6 +224,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/user_test_cli/process_egress.rs",
   // Release process smoke must cross the real CLI and its measured host confinement or typed refusal.
   "crates/harn-cli/tests/harn_cli_e2e/process_smoke_cli.rs",
+  // Relative PATH lookup must survive the real child process changing directories.
+  "crates/harn-cli/tests/harn_cli_e2e/relative_path_resolution_cli.rs",
   // Shared checkpoint mutations must retain keys and one initial value across real CLI processes.
   "crates/harn-cli/tests/harn_cli_e2e/checkpoint_concurrency.rs",
   // Durable credential grants and revocation must cross fresh CLI processes.
