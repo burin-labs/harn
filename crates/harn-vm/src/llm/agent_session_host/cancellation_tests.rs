@@ -42,7 +42,12 @@ async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session(
     crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
     crate::agent_sessions::install_journal(session_id, prepared.state).expect("install journal");
     let mut rollback = super::AgentSessionInitRollback::new(session_id.to_string(), true);
-    rollback.fail(None).await;
+    rollback
+        .fail(
+            None,
+            &crate::value::VmError::UndefinedBuiltin("host_pipeline_input".into()),
+        )
+        .await;
 
     assert!(!crate::agent_sessions::exists(session_id));
     assert!(!crate::agent_sessions::has_journal(session_id));
@@ -78,6 +83,18 @@ async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session(
             .pointer("/transcript_event/metadata/visible_reply"),
         Some(&json!(""))
     );
+    assert_eq!(
+        terminals[0]
+            .payload
+            .pointer("/transcript_event/metadata/error/kind"),
+        Some(&json!("undefined_builtin"))
+    );
+    assert_eq!(
+        terminals[0]
+            .payload
+            .pointer("/transcript_event/metadata/error/message"),
+        Some(&json!("Undefined builtin: host_pipeline_input"))
+    );
     let replay =
         crate::agent_session_restore::load_canonical_session_replay_from_store(&*store, session_id)
             .await
@@ -89,6 +106,112 @@ async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session(
         phase: agent_events::AgentTurnPhase::Terminal { reply, outcome }, ..
     } if reply.is_empty() && outcome.kind == agent_events::AgentTerminalKind::RuntimeError)
     ));
+    crate::agent_sessions::reset_session_store();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn initialization_failure_redacts_secret_in_durable_cause() {
+    crate::agent_sessions::reset_session_store();
+    let root = tempfile::tempdir().expect("temp root");
+    let session_id = "init-redaction";
+    let mut options = crate::value::DictMap::new();
+    options.put_str("root", root.path().to_string_lossy().as_ref());
+    let prepared = crate::agent_session_journal::prepare(
+        session_id,
+        &options,
+        "run-init-redaction".to_string(),
+        "turn-init-redaction".to_string(),
+    )
+    .await
+    .expect("prepare journal");
+    crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
+    crate::agent_sessions::install_journal(session_id, prepared.state).expect("install journal");
+    let mut rollback = super::AgentSessionInitRollback::new(session_id.to_string(), true);
+    rollback
+        .fail(
+            None,
+            &crate::value::VmError::Runtime("api_key=sk-probe-secret-do-not-persist".into()),
+        )
+        .await;
+    let store = crate::stdlib::session_store::open_canonical_agent_session(
+        &crate::stdlib::session_store::SessionStoreDir::under_root(root.path()),
+        session_id,
+        None,
+        harn_session_store::SessionType::User,
+    )
+    .await
+    .expect("open canonical session");
+    let events = crate::stdlib::session_store::read_all_events(&store, session_id)
+        .await
+        .expect("read canonical events");
+    let terminal = events
+        .iter()
+        .find(|event| {
+            event.payload.pointer("/transcript_event/kind") == Some(&json!("agent_run_terminal"))
+        })
+        .expect("durable terminal");
+    let error = terminal
+        .payload
+        .pointer("/transcript_event/metadata/error")
+        .expect("typed cause");
+    assert_eq!(error["kind"], "vm_error");
+    assert!(!error.to_string().contains("sk-probe-secret-do-not-persist"));
+    assert!(!terminal
+        .payload
+        .to_string()
+        .contains("sk-probe-secret-do-not-persist"));
+    crate::agent_sessions::reset_session_store();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn failing_prompt_hook_records_its_actual_initialization_cause() {
+    crate::agent_sessions::reset_session_store();
+    crate::orchestration::clear_session_hooks();
+    let root = tempfile::tempdir().expect("temp root");
+    let root_literal = serde_json::to_string(root.path().to_str().unwrap()).unwrap();
+    let source = format!(
+        r#"pipeline main(harness: Harness) {{
+  harness.agent.register_session_hook("user_prompt_submit", {{ _harness, _payload ->
+    throw "prompt hook failed distinctly"
+  }})
+  __host_agent_session_init("hello", nil, {{session_id: "failing-prompt-hook", root: {root_literal}}})
+}}"#
+    );
+    let chunk = crate::compile_source(&source).expect("compile test pipeline");
+    let mut vm = crate::new_vm();
+    crate::stdlib::register_vm_stdlib(&mut vm);
+    let error = vm
+        .execute(&chunk)
+        .await
+        .expect_err("the real prompt hook must fail");
+    assert!(error.to_string().contains("prompt hook failed distinctly"));
+    let store = crate::stdlib::session_store::open_canonical_agent_session(
+        &crate::stdlib::session_store::SessionStoreDir::under_root(root.path()),
+        "failing-prompt-hook",
+        None,
+        harn_session_store::SessionType::User,
+    )
+    .await
+    .expect("open canonical session");
+    let events = crate::stdlib::session_store::read_all_events(&store, "failing-prompt-hook")
+        .await
+        .expect("read canonical events");
+    let terminal = events
+        .iter()
+        .find(|event| {
+            event.payload.pointer("/transcript_event/kind") == Some(&json!("agent_run_terminal"))
+        })
+        .expect("durable terminal");
+    let error = terminal
+        .payload
+        .pointer("/transcript_event/metadata/error/message")
+        .and_then(serde_json::Value::as_str)
+        .expect("typed cause message");
+    assert!(
+        error.contains("prompt hook failed distinctly"),
+        "actual hook cause: {error}"
+    );
+    crate::orchestration::clear_session_hooks();
     crate::agent_sessions::reset_session_store();
 }
 

@@ -169,11 +169,12 @@ pub(crate) async fn initialize(
         // This is an ordinary returned error, so complete the terminal write
         // here. If that write also fails, preserve the claimed journal and
         // lease for an explicit cancellation/shutdown retry.
-        if flush_init_terminal(
+        if flush_init_terminal_with_cause(
             &session_id,
             "failed",
             "session_initialization_failed",
             Some(ctx),
+            Some(&error),
         )
         .await
         .is_ok()
@@ -226,13 +227,33 @@ pub(crate) async fn flush_init_terminal(
     stop_reason: &str,
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
 ) -> Result<crate::llm::agent_session_host::PhysicalUsageSnapshot, VmError> {
+    flush_init_terminal_with_cause(session_id, final_status, stop_reason, ctx, None).await
+}
+
+fn init_failure_cause(cause: &VmError) -> serde_json::Value {
+    serde_json::json!({
+        "category": crate::value::error_to_category(cause).as_str(),
+        "kind": if matches!(cause, VmError::UndefinedBuiltin(_)) { "undefined_builtin" } else { "vm_error" },
+        "message": crate::redact::current_policy().redact_string(&cause.to_string()).into_owned(),
+    })
+}
+
+pub(crate) async fn flush_init_terminal_with_cause(
+    session_id: &str,
+    final_status: &str,
+    stop_reason: &str,
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    cause: Option<&VmError>,
+) -> Result<crate::llm::agent_session_host::PhysicalUsageSnapshot, VmError> {
     let physical_usage =
         crate::llm::agent_session_host::physical_usage_snapshot_for_session(session_id)
             .ok_or_else(|| VmError::Runtime("agent session has no physical usage owner".into()))?;
+    let error = cause.map(init_failure_cause);
     let terminal = crate::agent_events::AgentTerminalOutcome::new(
         crate::agent_events::classify_agent_terminal(final_status, stop_reason, false, None),
         stop_reason,
-    );
+    )
+    .with_error(error.as_ref());
     let event = crate::llm::helpers::transcript_event(
         "agent_run_terminal",
         "assistant",
@@ -242,6 +263,7 @@ pub(crate) async fn flush_init_terminal(
             "final_status": final_status,
             "stop_reason": stop_reason,
             "terminal": terminal,
+            "error": error,
             "visible_reply": "",
             "provider_call_count": physical_usage.dispatched_calls,
             "goal_outcome": serde_json::Value::Null,
