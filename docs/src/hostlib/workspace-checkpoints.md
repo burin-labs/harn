@@ -31,7 +31,7 @@ that the receipt echoes that policy.
 The policy stays with the session and its forks. A scan detects changed paths
 but cannot identify their writers, so strict restore refuses those paths. The
 default `legacy_scan` policy preserves scan-based behavior for existing hosts.
-Plan entries report the writer and the observed file state. After obtaining a
+Plan entries report the writers and the observed file state. After obtaining a
 person's confirmation, a host can pass `confirmed_paths` to restore as a list
 of `{session_id, boundary_id, path, observed}` records copied from the plan.
 A different session, boundary, or later file change does not match that

@@ -183,7 +183,7 @@ pub enum WriterPolicy {
 }
 
 /// Writer evidence for a workspace change.
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[non_exhaustive]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ChangeWriter {
@@ -271,8 +271,8 @@ pub struct PlanEntry {
     pub path: String,
     /// `restore`, `delete`, `recreate`, `refuse`, `skip`, or `fail`.
     pub action: &'static str,
-    /// Writer evidence for this path.
-    pub writer: ChangeWriter,
+    /// Writer evidence for this path since the boundary.
+    pub writers: Vec<ChangeWriter>,
     /// The file state used for a possible user confirmation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observed: Option<ObservedFileState>,
@@ -1121,10 +1121,15 @@ fn compute_plan(
 
     // Last attributed state per path across every call at or after the boundary.
     let mut last: BTreeMap<&str, (Option<&str>, bool)> = BTreeMap::new();
+    let mut writers: BTreeMap<&str, BTreeSet<ChangeWriter>> = BTreeMap::new();
     let mut incomplete_paths: BTreeSet<&str> = BTreeSet::new();
     let mut irreversible = Vec::new();
     for call in state.calls.iter().filter(|c| c.boundary_idx >= idx) {
         for change in &call.changes {
+            writers
+                .entry(change.path.as_str())
+                .or_default()
+                .insert(change.writer.clone());
             last.insert(
                 change.path.as_str(),
                 (change.post_hash.as_deref(), change.incomplete),
@@ -1149,6 +1154,14 @@ fn compute_plan(
     let mut actions = Vec::new();
     let mut candidates = Vec::new();
     for (path, (expected, _)) in last {
+        let mut path_writers: Vec<ChangeWriter> = writers
+            .remove(path)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        if path_writers.is_empty() {
+            path_writers.push(ChangeWriter::Unknown);
+        }
         let loaded = current_hash(&state.root.join(path)).and_then(|found| {
             boundary_target(&state.root, &state.blob_dir, boundary, path)
                 .map(|target| (found, target))
@@ -1159,12 +1172,13 @@ fn compute_plan(
                 expected.map(str::to_string),
                 found,
                 target,
+                path_writers,
             )),
             Err(error) => actions.push(PlannedAction {
                 entry: PlanEntry {
                     path: path.to_string(),
                     action: "fail",
-                    writer: ChangeWriter::Unknown,
+                    writers: path_writers,
                     observed: None,
                     reason: Some(error),
                     expected_hash: expected.map(str::to_string),
@@ -1177,12 +1191,12 @@ fn compute_plan(
     }
     let to_delete: Vec<&str> = candidates
         .iter()
-        .filter(|(_, _, found, target)| found.is_some() && matches!(target, Target::Absent))
+        .filter(|(_, _, found, target, _)| found.is_some() && matches!(target, Target::Absent))
         .map(|(path, ..)| path.as_str())
         .collect();
     let ignored = ignored_paths(&state.root, &to_delete).map_err(&fail)?;
 
-    for (path, expected, found, target) in candidates {
+    for (path, expected, found, target, path_writers) in candidates {
         let observed = match &found {
             Some(hash) => ObservedFileState::Present {
                 sha256: hash.clone(),
@@ -1194,7 +1208,7 @@ fn compute_plan(
         let entry = |action: &'static str, reason: Option<&str>| PlanEntry {
             path: path.clone(),
             action,
-            writer: ChangeWriter::Unknown,
+            writers: path_writers.clone(),
             observed: Some(observed.clone()),
             reason: reason.map(str::to_string),
             expected_hash: expected.clone(),
@@ -1227,11 +1241,16 @@ fn compute_plan(
             Target::Absent if ignored.contains(&path) => {
                 skip("ignored by git, not part of the checkpoint tree")
             }
-            _ if state.writer_policy == WriterPolicy::RequireKnown && !confirmed => PlannedAction {
-                entry: entry("refuse", Some("writer is unknown")),
-                guard_hash: None,
-                write: None,
-            },
+            _ if state.writer_policy == WriterPolicy::RequireKnown
+                && (path_writers.is_empty() || path_writers.contains(&ChangeWriter::Unknown))
+                && !confirmed =>
+            {
+                PlannedAction {
+                    entry: entry("refuse", Some("writer is unknown")),
+                    guard_hash: None,
+                    write: None,
+                }
+            }
             Target::Absent => PlannedAction {
                 entry: entry("delete", None),
                 guard_hash: if confirmed {

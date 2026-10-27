@@ -838,7 +838,10 @@ fn unknown_writer_inside_a_call_window_is_not_overwritten() {
     let receipt = session.restore("turn-1");
     assert_eq!(paths(&receipt, "refused"), ["a.txt"], "{receipt}");
     assert_eq!(read(root, "a.txt"), "a edited by a person, mid-call\n");
-    assert_eq!(plan["entries"][0]["writer"]["kind"], "unknown", "{plan}");
+    assert_eq!(
+        plan["entries"][0]["writers"][0]["kind"], "unknown",
+        "{plan}"
+    );
     assert_eq!(capture["writer_policy"], "require_known", "{capture}");
 }
 
@@ -885,6 +888,36 @@ fn strict_writer_policy_cannot_be_downgraded_and_survives_fork() {
         Some(WriterPolicy::RequireKnown),
     )
     .is_err());
+}
+
+#[test]
+fn strict_plan_keeps_writer_evidence_across_multiple_calls() {
+    let dir = repo();
+    let root = dir.path();
+    let session = Session::new(root);
+    let capture = session.call(
+        "capture",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            ("root", vm_string(&session.root)),
+            ("writer_policy", vm_string("require_known")),
+        ],
+    );
+    assert_eq!(capture["writer_policy"], "require_known", "{capture}");
+    session.call_with("first", None, || {
+        fs::write(root.join("a.txt"), "first unknown edit\n").unwrap();
+    });
+    session.call_with("second", None, || {
+        fs::write(root.join("a.txt"), "second unknown edit\n").unwrap();
+    });
+    let plan = session.plan("turn-1");
+    assert_eq!(
+        plan["entries"][0]["writers"],
+        json!([{ "kind": "unknown" }])
+    );
+    assert_eq!(plan["entries"][0]["action"], "refuse", "{plan}");
+    assert_eq!(paths(&session.restore("turn-1"), "refused"), ["a.txt"]);
+    assert_eq!(read(root, "a.txt"), "second unknown edit\n");
 }
 
 #[test]
