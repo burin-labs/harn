@@ -1,3 +1,5 @@
-- Orchestrator JSON logs now go to stderr instead of stdout. Redirect stderr
-  when consuming those logs. `harn run` reports concise errors by default;
-  pass `--explain` for source excerpts and runtime stack details.
+- Orchestrator JSON logs now go to stderr instead of stdout. `harn run` and
+  `harn bench` report concise errors by default.
+
+  Migration: Redirect stderr when consuming orchestrator JSON logs, and pass
+  `--explain` to recover source excerpts and runtime stack details.

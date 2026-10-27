@@ -40,19 +40,21 @@ pub(crate) async fn run(args: BenchArgs, explain: bool) {
     match args.command {
         Some(BenchCommand::Portable(portable)) => {
             if let Err(error) = portable::run(portable, &args.profile) {
-                eprintln!("error: {error}");
+                harn_vm::events::log_status(&format!("error: {error}"));
                 process::exit(1);
             }
         }
         Some(BenchCommand::Replay(replay)) => {
             if let Err(error) = run_replay_bench(replay) {
-                eprintln!("error: {error}");
+                harn_vm::events::log_status(&format!("error: {error}"));
                 process::exit(1);
             }
         }
         None => {
             let Some(path) = args.file.as_deref() else {
-                eprintln!("error: `harn bench` requires a .harn file or a subcommand");
+                harn_vm::events::log_status(
+                    "error: `harn bench` requires a .harn file or a subcommand",
+                );
                 process::exit(1);
             };
             run_bench(
@@ -75,7 +77,7 @@ pub(crate) async fn run_bench(
     explain: bool,
 ) {
     if iterations == 0 {
-        eprintln!("error: `harn bench` requires at least one iteration");
+        harn_vm::events::log_status("error: `harn bench` requires at least one iteration");
         process::exit(1);
     }
 
@@ -96,7 +98,7 @@ pub(crate) async fn run_bench(
             });
     let file_path = Path::new(path);
     if let Err(error) = package::ensure_dependencies_materialized(file_path) {
-        eprintln!("error: {error}");
+        harn_vm::events::log_status(&format!("error: {error}"));
         process::exit(1);
     }
     let checker = crate::typecheck_imports::checker_with_resolved_imports(
@@ -135,7 +137,7 @@ pub(crate) async fn run_bench(
     let chunk = match crate::compiler_for_source(file_path, &source).compile(&program) {
         Ok(chunk) => chunk,
         Err(error) => {
-            eprintln!("error: compile error: {error}");
+            harn_vm::events::log_status(&format!("error: compile error: {error}"));
             process::exit(1);
         }
     };
@@ -186,11 +188,15 @@ pub(crate) async fn run_bench(
             }
         }
         if let Err(error) = package::install_manifest_triggers(&mut vm, &extensions).await {
-            eprintln!("error: failed to install manifest triggers: {error}");
+            harn_vm::events::log_status(&format!(
+                "error: failed to install manifest triggers: {error}"
+            ));
             process::exit(1);
         }
         if let Err(error) = package::install_manifest_hooks(&mut vm, &extensions).await {
-            eprintln!("error: failed to install manifest hooks: {error}");
+            harn_vm::events::log_status(&format!(
+                "error: failed to install manifest hooks: {error}"
+            ));
             process::exit(1);
         }
 
@@ -229,11 +235,13 @@ pub(crate) async fn run_bench(
                 });
             }
             Err(error) => {
-                let detail = vm.format_runtime_error(&error);
-                eprint!(
-                    "{}",
-                    format_program_error(&error.to_string(), &detail, explain)
+                let brief = format!("benchmark iteration {}: {error}", iteration + 1);
+                let detail = format!(
+                    "{}benchmark aborted on iteration {}\n",
+                    vm.format_runtime_error(&error),
+                    iteration + 1
                 );
+                eprint!("{}", format_program_error(&brief, &detail, explain));
                 process::exit(1);
             }
         }
@@ -250,12 +258,17 @@ pub(crate) async fn run_bench(
     );
     if let Some(json_path) = profile.json_path.as_ref() {
         if let Err(error) = write_bench_json(json_path, path, &runs, aggregate_profile.as_ref()) {
-            eprintln!("warning: failed to write benchmark profile: {error}");
+            harn_vm::events::log_warn(
+                "benchmark",
+                &format!("failed to write benchmark profile: {error}"),
+            );
         }
     }
     if let Some(json_path) = output {
         if let Err(error) = write_bench_json(json_path, path, &runs, aggregate_profile.as_ref()) {
-            eprintln!("error: failed to write benchmark results: {error}");
+            harn_vm::events::log_status(&format!(
+                "error: failed to write benchmark results: {error}"
+            ));
             process::exit(1);
         }
     }
