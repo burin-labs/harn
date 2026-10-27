@@ -52,7 +52,7 @@ jobs:
         if: runner.os == 'Linux'
         id: published-runtime
         timeout-minutes: 10
-        uses: burin-labs/harn/.github/actions/setup-harn@0dfd494224bbeb87592fbcf8a67ea4de0b3434f3
+        uses: burin-labs/harn/.github/actions/setup-harn@389a3aeb579e70d73999d7af6eac7b22a30c7808
         with:
           version: 0.10.180
           cache-dir: ${{ runner.temp }}/published-runtime-cache

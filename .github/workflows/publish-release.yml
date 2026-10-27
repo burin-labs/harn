@@ -419,7 +419,7 @@ jobs:
         id: published-runtime
         timeout-minutes: 10
         # Immutable compatible bootstrap policy, independent of the frozen tag's seed.
-        uses: burin-labs/harn/.github/actions/setup-harn@0dfd494224bbeb87592fbcf8a67ea4de0b3434f3
+        uses: burin-labs/harn/.github/actions/setup-harn@389a3aeb579e70d73999d7af6eac7b22a30c7808
         with:
           version: ${{ needs.detect-drift.outputs.cargo_version }}
           cache-dir: ${{ runner.temp }}/published-runtime-cache
