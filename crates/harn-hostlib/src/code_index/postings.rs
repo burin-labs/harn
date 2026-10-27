@@ -267,15 +267,40 @@ impl<K: Eq + Hash + Clone, H: FilePosting> FilePostings<K, H> {
 
     /// Nominal bytes for live terms and hits, independent of storage layout.
     pub fn estimated_bytes(&self, key_bytes: impl Fn(&K) -> usize) -> usize {
-        self.rows()
-            .into_iter()
-            .map(|(key, hits)| {
+        let row_bytes = |key: &K, count: usize| {
+            if count == 0 {
+                0
+            } else {
                 std::mem::size_of::<K>()
                     + std::mem::size_of::<Vec<H>>()
-                    + hits.len() * std::mem::size_of::<H>()
+                    + count * std::mem::size_of::<H>()
                     + key_bytes(key)
+            }
+        };
+        // Delta files are tombstoned in the base, so their hits are disjoint.
+        // Count directly instead of collecting or cloning the live rows.
+        let base_bytes: usize = self
+            .base
+            .iter()
+            .map(|(key, hits)| {
+                let live = if self.stale.is_empty() {
+                    hits.len()
+                } else {
+                    hits.iter()
+                        .filter(|hit| !self.stale.contains(hit.file()))
+                        .count()
+                };
+                let delta = self.forward.get(key).map_or(0, Vec::len);
+                row_bytes(key, live + delta)
             })
-            .sum()
+            .sum();
+        let new_bytes: usize = self
+            .forward
+            .iter()
+            .filter(|(key, _)| !self.base.contains_key(*key))
+            .map(|(key, hits)| row_bytes(key, hits.len()))
+            .sum();
+        base_bytes + new_bytes
     }
 }
 
