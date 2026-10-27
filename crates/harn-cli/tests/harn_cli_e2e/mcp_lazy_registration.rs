@@ -121,6 +121,11 @@ command = "harn-test-command-that-does-not-exist"
 #[test]
 fn unknown_mcp_server_reports_a_prefixed_error_on_stderr() {
     let temp = TempDir::new().unwrap();
+    fs::write(
+        temp.path().join("harn.toml"),
+        "[package]\nname = \"mcp-status-fixture\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
     let output = harn_e2e_command()
         .current_dir(temp.path())
         .args(["mcp", "status", "missing-server"])

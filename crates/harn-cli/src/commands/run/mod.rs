@@ -325,13 +325,15 @@ pipeline main(harness: Harness) {
     let tmp = match create_eval_temp_file() {
         Ok(tmp) => tmp,
         Err(error) => {
-            eprintln!("error: {error}");
+            harn_vm::events::log_status(&format!("error: {error}"));
             return 1;
         }
     };
     let tmp_path = tmp.path().to_path_buf();
     if let Err(error) = fs::write(&tmp_path, source) {
-        eprintln!("error: failed to write temp file for --resume: {error}");
+        harn_vm::events::log_status(&format!(
+            "error: failed to write temp file for --resume: {error}"
+        ));
         return 1;
     }
     let mut argv = Vec::with_capacity(resume_argv.len() + 1);

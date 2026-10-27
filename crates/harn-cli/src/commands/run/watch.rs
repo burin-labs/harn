@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::path::Path;
-use std::process;
 
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 
@@ -8,8 +7,7 @@ use super::{run_file, CliLlmMockMode, RunProfileOptions};
 
 pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>, explain: bool) {
     let abs_path = std::fs::canonicalize(path).unwrap_or_else(|error| {
-        eprintln!("[harn] error: {error}");
-        process::exit(1);
+        crate::fatal_error(error);
     });
     let watch_dir = abs_path.parent().unwrap_or(Path::new("."));
 
@@ -46,14 +44,12 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>, expl
             }
         })
         .unwrap_or_else(|error| {
-            eprintln!("[harn] error: setting up file watcher: {error}");
-            process::exit(1);
+            crate::fatal_error(format!("setting up file watcher: {error}"));
         });
         watcher
             .watch(watch_dir, RecursiveMode::Recursive)
             .unwrap_or_else(|error| {
-                eprintln!("[harn] error: watching directory: {error}");
-                process::exit(1);
+                crate::fatal_error(format!("watching directory: {error}"));
             });
         watcher
     };

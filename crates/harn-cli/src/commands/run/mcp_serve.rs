@@ -227,8 +227,7 @@ async fn run_server(loaded: LoadedMcpRuntime, mode: RunFileMcpServeMode) {
         }
     };
     if let Err(error) = result {
-        eprintln!("[harn] error: MCP server error: {error}");
-        std::process::exit(1);
+        crate::fatal_error(format!("MCP server error: {error}"));
     }
 }
 
@@ -255,15 +254,12 @@ pub(crate) async fn run_file_mcp_serve(
     mode: RunFileMcpServeMode,
     host_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
 ) {
-    use std::process;
-
     let _environment = super::environment::host_environment_scope(host_boundary);
     let watch = matches!(&mode, RunFileMcpServeMode::Stdio { watch: true });
     let loaded = match load_mcp_runtime(path, card_source).await {
         Ok(runtime) => runtime,
         Err(error) => {
-            eprintln!("[harn] error: {}", error.message);
-            process::exit(error.exit_code);
+            crate::fatal_error_with_code(error.message, error.exit_code);
         }
     };
     if !loaded.diagnostics.is_empty() {
@@ -445,8 +441,7 @@ async fn run_reloadable_stdio(path: &str, loaded: LoadedMcpRuntime) {
         }) {
             Ok(watcher) => watcher,
             Err(error) => {
-                eprintln!("[harn] error: failed to create MCP source watcher: {error}");
-                std::process::exit(1);
+                crate::fatal_error(format!("failed to create MCP source watcher: {error}"));
             }
         };
     // A bare filename has an empty parent, which notify cannot watch.
@@ -455,11 +450,10 @@ async fn run_reloadable_stdio(path: &str, loaded: LoadedMcpRuntime) {
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     if let Err(error) = watcher.watch(watch_root, RecursiveMode::Recursive) {
-        eprintln!(
-            "[harn] error: failed to watch MCP source root {}: {error}",
+        crate::fatal_error(format!(
+            "failed to watch MCP source root {}: {error}",
             watch_root.display()
-        );
-        std::process::exit(1);
+        ));
     }
 
     let LoadedMcpRuntime {
@@ -510,8 +504,7 @@ async fn run_reloadable_stdio(path: &str, loaded: LoadedMcpRuntime) {
         .await;
     drop(watcher);
     if let Err(error) = result {
-        eprintln!("[harn] error: MCP server error: {error}");
-        std::process::exit(1);
+        crate::fatal_error(format!("MCP server error: {error}"));
     }
 }
 

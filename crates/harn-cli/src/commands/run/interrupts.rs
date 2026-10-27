@@ -19,10 +19,10 @@ pub struct RunInterruptTokens {
 }
 
 const FIRST_SIGNAL_MESSAGE: &str =
-    "[harn] signal received, interrupting VM (give it a moment to unwind in-flight async ops; Ctrl-C again to force-exit)...";
+    "signal received, interrupting VM (give it a moment to unwind in-flight async ops; Ctrl-C again to force-exit)...";
 const RUN_TIMEOUT_MESSAGE: &str =
-    "[harn] run timeout reached, interrupting VM and in-flight subprocesses...";
-const RUN_TIMEOUT_HARD_EXIT_MESSAGE: &str = "[harn] run timeout grace elapsed, terminating";
+    "run timeout reached, interrupting VM and in-flight subprocesses...";
+const RUN_TIMEOUT_HARD_EXIT_MESSAGE: &str = "run timeout grace elapsed, terminating";
 const SIGTERM: i32 = 15;
 const SIGKILL: i32 = 9;
 
@@ -62,11 +62,11 @@ pub(super) fn start_run_deadline_watchdog(
         }
         task_timed_out.store(true, Ordering::SeqCst);
         request_vm_interrupt(&tokens, "timeout");
-        eprintln!("{RUN_TIMEOUT_MESSAGE}");
+        harn_vm::events::log_status(RUN_TIMEOUT_MESSAGE);
         tokio::time::sleep(harn_vm::op_interrupt::SUBPROCESS_TERM_GRACE).await;
         if !task_finished.load(Ordering::SeqCst) {
             signal_run_process_cleanups(&tokens, SIGKILL);
-            eprintln!("{RUN_TIMEOUT_HARD_EXIT_MESSAGE}");
+            harn_vm::events::log_status(RUN_TIMEOUT_HARD_EXIT_MESSAGE);
             process::exit(124);
         }
     });
@@ -97,9 +97,9 @@ pub(super) fn install_signal_shutdown_handler() -> RunInterruptTokens {
                 match (sigterm_stream, sigint_stream, sighup_stream) {
                     (Some(t), Some(i), Some(h)) => (t, i, h),
                     _ => {
-                        eprintln!(
-                            "[harn] signal handlers unavailable in this environment; \
-                             continuing without graceful-shutdown interception"
+                        harn_vm::events::log_status(
+                            "signal handlers unavailable in this environment; \
+                             continuing without graceful-shutdown interception",
                         );
                         return;
                     }
@@ -112,12 +112,12 @@ pub(super) fn install_signal_shutdown_handler() -> RunInterruptTokens {
                     _ = sighup.recv() => "SIGHUP",
                 };
                 if seen_signal {
-                    eprintln!("[harn] second signal received, terminating");
+                    harn_vm::events::log_status("second signal received, terminating");
                     process::exit(124);
                 }
                 seen_signal = true;
                 request_vm_interrupt(&tokens_clone, signal_name);
-                eprintln!("{FIRST_SIGNAL_MESSAGE}");
+                harn_vm::events::log_status(FIRST_SIGNAL_MESSAGE);
             }
         }
         #[cfg(not(unix))]
@@ -126,12 +126,12 @@ pub(super) fn install_signal_shutdown_handler() -> RunInterruptTokens {
             loop {
                 let _ = tokio::signal::ctrl_c().await;
                 if seen_signal {
-                    eprintln!("[harn] second signal received, terminating");
+                    harn_vm::events::log_status("second signal received, terminating");
                     process::exit(124);
                 }
                 seen_signal = true;
                 request_vm_interrupt(&tokens_clone, "SIGINT");
-                eprintln!("{FIRST_SIGNAL_MESSAGE}");
+                harn_vm::events::log_status(FIRST_SIGNAL_MESSAGE);
             }
         }
     });
