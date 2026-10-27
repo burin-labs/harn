@@ -117,6 +117,10 @@ jobs:
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     uses: burin-labs/.github/.github/workflows/runner-availability.yml@cd5b9a60ece73b7dcb5923963b86ca7b570cfdad
+    with:
+      # The census and the job must select the same E2E-qualified workers.
+      # General build capacity can be restored independently of E2E quarantine.
+      linux_big_runner_tag: harn-ci-e2e
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -161,12 +165,8 @@ jobs:
     # Main pushes prefer the big self-hosted rung: 24 cores at
     # no cost, and this suite compiles the CLI integration tests before running
     # them.
-    # `online` rather than `idle` is the deliberate part. A main push is not
-    # racing anyone, so waiting for a busy box costs queue time and nothing
-    # else, while routing to a hosted runner on every busy day would quietly
-    # halve the evidence this tier exists to produce. Hosted stays the last
-    # rung for the one case it answers: no self-hosted capacity exists at all,
-    # or self-hosted routing is retired org-wide.
+    # The capacity decision falls back to hosted when the qualified pool is
+    # busy, saturated, unavailable, or cannot be measured.
     #
     # Every other event keeps hosted runners. Pull-request and dispatch runs
     # are watched live by whoever triggered them, and contending with local
@@ -174,7 +174,7 @@ jobs:
     # declined for its per-PR lanes.
     runs-on: >-
       ${{ (needs.e2e-capacity.outputs.route == 'owned'
-        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
+        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-e2e"]'))
         || 'ubuntu-24.04' }}
     # Read `!= 'false'` rather than `== 'true'`. A detector that failed, or
     # was skipped, leaves this empty, and treating an unread decision as "do
