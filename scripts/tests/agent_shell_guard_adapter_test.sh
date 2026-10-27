@@ -691,6 +691,18 @@ if [[ "$heredoc_write" != *'"permissionDecision":"deny"'* ]] \
   printf '%s\n' "$heredoc_write" >&2
   exit 1
 fi
+heredoc_dash="$(
+  standalone_verdict <<'PAYLOAD'
+{"tool_name":"Bash","tool_input":{"command":"cat <<'EOF'\n'\nEOF\ndash -c 'git stash pop'"}}
+PAYLOAD
+)"
+if [[ "$heredoc_dash" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$heredoc_dash" != *'git stash'* ]] \
+  || [[ "$heredoc_dash" == *'policy faulted'* ]]; then
+  echo "the guard missed a nested dash command after a literal heredoc" >&2
+  printf '%s\n' "$heredoc_dash" >&2
+  exit 1
+fi
 heredoc_literal="$(
   standalone_verdict <<'PAYLOAD'
 {"tool_name":"Bash","tool_input":{"command":"cat <<'EOF'\ngit stash pop\nEOF"}}

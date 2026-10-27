@@ -1377,25 +1377,38 @@ fn has_expanding_heredoc(command: string) -> bool {
   return false
 }
 
-fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>) -> dict) -> bool {
-  if command.contains("<<") && !has_expanding_heredoc(command) {
-    // Shell analysis knows which heredoc bodies expand and which text is literal.
-    const scan = command_risk_scan({request: {mode: "shell", command: command}})
-    if scan.execution_semantics?.resolved != true || len(scan.execution_stages ?? []) == 0 {
+/** Inspect executed stages without treating a quoted heredoc's body as shell code. */
+fn quoted_heredoc_writes_stash(
+  command: string,
+  depth: int,
+  alias_lookup: fn(list<string>) -> dict,
+) -> bool {
+  const scan = command_risk_scan({request: {mode: "shell", command: command}})
+  if scan.execution_semantics?.resolved != true || len(scan.execution_stages ?? []) == 0 {
+    return true
+  }
+  for stage in scan.execution_stages ?? [] {
+    const argv: list<string> = stage.argv
+    if xargs_operands_write_stash(argv, alias_lookup) {
       return true
     }
-    for stage in scan.execution_stages ?? [] {
-      const argv: list<string> = stage.argv
-      if xargs_operands_write_stash(argv, alias_lookup) {
-        return true
-      }
-      const launched = launched_argv(argv, 0)
-      if argv_program(launched) == "git"
-        && git_args_write_stash(launched, git_subcommand_args(launched), depth, alias_lookup) {
-        return true
-      }
+    const launched = launched_argv(argv, 0)
+    if argv_program(launched) == "git"
+      && git_args_write_stash(launched, git_subcommand_args(launched), depth, alias_lookup) {
+      return true
     }
-    return false
+    // The scanner can leave a shell launcher such as dash in the stage.
+    const nested = nested_shell_payload(launched)
+    if nested != "" && (depth >= 4 || git_stash_write_in(nested, depth + 1, alias_lookup)) {
+      return true
+    }
+  }
+  return false
+}
+
+fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>) -> dict) -> bool {
+  if command.contains("<<") && !has_expanding_heredoc(command) {
+    return quoted_heredoc_writes_stash(command, depth, alias_lookup)
   }
   // A substitution body is a command line the shell runs, so it gets the same analysis. A body that
   // never closes, or one nested past the depth cap, cannot be proven harmless and is refused.

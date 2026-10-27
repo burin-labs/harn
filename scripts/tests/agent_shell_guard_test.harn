@@ -1343,6 +1343,7 @@ pipeline test_git_stash_writes_inside_command_substitution_are_denied(
     "cat <<\"EOF\"\n'\nEOF\necho `git stash drop`",
     "cat <<'A' <<'B'\n'\nA\n\"\nB\necho \"$(git stash pop)\"",
     "cat <<'EOF'\ntext\nEOF\nprintf x | xargs git stash drop",
+    "cat <<'EOF'\n'\nEOF\ndash -c 'git stash pop'",
   ] {
     assert(!verdict(claude_payload(command)).allow, command + " writes the shared stash list")
   }
@@ -1356,6 +1357,7 @@ pipeline test_git_stash_writes_inside_command_substitution_are_denied(
     "cat <<'EOF'\n'\n$(git stash pop)\nEOF\necho done",
     "cat <<'EOF'\n'\nEOF\necho \"$(git stash list)\"",
     "cat <<'EOF'\ngit stash pop\nEOF",
+    "cat <<'EOF'\n'\nEOF\ndash -c 'git stash list'",
     "cat <<EOF\n$(git rev-parse HEAD)\nEOF",
     "cat <<< '$(git stash pop)'",
     "echo \\$(git stash pop)",
