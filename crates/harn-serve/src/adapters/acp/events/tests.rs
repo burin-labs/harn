@@ -141,7 +141,7 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn standard_session_update_fixtures_match_acp_schema_v0_12_2_discriminators() {
+async fn standard_session_update_fixtures_match_acp_schema_v1_26_0_discriminators() {
     let actual = collect_notifications(standard_fixture_events()).await;
     let expected: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../tests/fixtures/acp/session_update_standard.json"
@@ -155,7 +155,7 @@ async fn standard_session_update_fixtures_match_acp_schema_v0_12_2_discriminator
             .expect("sessionUpdate");
         assert!(
             ACP_SESSION_UPDATE_VARIANTS.contains(&session_update),
-            "{session_update} is not a standard ACP v0.12.2 SessionUpdate"
+            "{session_update} is not a standard ACP v1.26.0 SessionUpdate"
         );
         if session_update == "plan" {
             assert!(notification["params"]["update"].get("entries").is_some());
@@ -1341,7 +1341,9 @@ fn progress_reported_entries_emit_canonical_acp_plan_update() {
     let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
     let entries = serde_json::json!([
         {"content": "Implement progress helper.", "status": "completed", "priority": "high"},
-        {"content": "Run conformance.", "status": "pending"}
+        {"content": "Run conformance.", "status": "pending"},
+        {"content": "Wait for access.", "status": "blocked", "priority": 80,
+         "_meta": {"harn": {"source": "progress"}, "other": {"id": 7}}}
     ]);
 
     sink.handle_event(&AgentEvent::ProgressReported {
@@ -1358,7 +1360,23 @@ fn progress_reported_entries_emit_canonical_acp_plan_update() {
     assert_eq!(payload["params"]["sessionId"], "session-1");
     let update = &payload["params"]["update"];
     assert_eq!(update["sessionUpdate"], "plan");
-    assert_eq!(update["entries"], entries);
+    assert_eq!(update["entries"][0], entries[0]);
+    assert_eq!(update["entries"][1]["priority"], "medium");
+    assert_eq!(update["entries"][1]["status"], "pending");
+    assert_eq!(
+        update["entries"][2]["content"],
+        "[blocked] Wait for access."
+    );
+    assert_eq!(update["entries"][2]["_meta"]["harn"]["source"], "progress");
+    assert_eq!(update["entries"][2]["_meta"]["other"]["id"], 7);
+    assert_eq!(
+        update["entries"][2]["_meta"]["harn"]["originalStatus"],
+        "blocked"
+    );
+    assert_eq!(
+        update["entries"][2]["_meta"]["harn"]["originalPriority"],
+        80
+    );
     for forbidden in ["_meta", "message", "metadata", "replace"] {
         assert!(
             update.get(forbidden).is_none(),
@@ -1368,6 +1386,40 @@ fn progress_reported_entries_emit_canonical_acp_plan_update() {
     assert!(
         rx.try_recv().is_err(),
         "agent_progress entries must emit exactly one ACP notification"
+    );
+}
+
+#[test]
+fn plan_document_projects_non_acp_values_without_losing_their_meaning() {
+    let event = fixture_plan_document_event(harn_vm::llm::plan::normalize_plan_tool_call(
+        harn_vm::llm::plan::UPDATE_PLAN_TOOL,
+        &serde_json::json!({"plan": [
+            {"step": "Wait for access", "status": "blocked", "priority": 80},
+            {"step": "Discard old path", "status": "cancelled"}
+        ]}),
+    ));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+    sink.handle_event(&AgentEvent::PlanDocumentUpdated {
+        session_id: "session-1".to_string(),
+        event: Box::new(event),
+    });
+    let line = rx.try_recv().expect("ACP plan notification");
+    let payload: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let entries = payload["params"]["update"]["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["content"], "[blocked] Wait for access");
+    assert_eq!(entries[0]["status"], "pending");
+    assert_eq!(entries[0]["priority"], "medium");
+    assert_eq!(entries[0]["_meta"]["harn"]["originalStatus"], "blocked");
+    assert_eq!(entries[0]["_meta"]["harn"]["originalPriority"], 80);
+    assert_eq!(entries[1]["content"], "[cancelled] Discard old path");
+    assert_eq!(entries[1]["status"], "pending");
+    assert_eq!(entries[1]["priority"], "medium");
+    assert_eq!(entries[1]["_meta"]["harn"]["originalStatus"], "cancelled");
+    assert_eq!(
+        payload["params"]["update"]["harnPlanDocument"]["_type"],
+        "plan_document"
     );
 }
 

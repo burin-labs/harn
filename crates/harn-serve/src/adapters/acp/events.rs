@@ -424,11 +424,10 @@ impl AgentEventSink for AcpAgentEventSink {
             }
             AgentEvent::PlanDocumentUpdated { session_id, event } => {
                 let document = event.document();
-                let update = serde_json::json!({
-                    "sessionUpdate": "plan",
-                    "entries": harn_vm::llm::plan::plan_document_entries(document),
-                    "harnPlanDocument": document,
-                });
+                let mut update = super::bridge::acp_plan_update(
+                    harn_vm::llm::plan::plan_document_entries(document),
+                );
+                update["harnPlanDocument"] = serde_json::json!(document);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
                     "update": update,

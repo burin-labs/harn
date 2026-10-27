@@ -26,7 +26,7 @@ stdio ACP client/provider in `crates/harn-vm/src/llm/providers/acp.rs` (~0.6k
 non-test) and the orchestrator WebSocket hub in
 `crates/harn-cli/src/commands/orchestrator/listener/acp_hub.rs` (~2.2k). There
 is no `agent-client-protocol` Cargo dependency. Harn advertises
-`agentclientprotocol/agent-client-protocol schema v0.12.2`
+`agentclientprotocol/agent-client-protocol schema v1.26.0`
 (`ACP_SCHEMA_COMPATIBILITY` in `crates/harn-serve/src/adapters/acp/schema.rs`).
 
 An official Rust SDK now exists at
@@ -86,8 +86,8 @@ protocol plumbing:
 
 ### Extension seams that block a naive types wipe
 
-1. **Schema pin drift.** Harn still advertises schema **v0.12.2**. The SDK pins
-   schema **1.5.0**. Field and capability shape changes on the Zed path must be
+1. **Schema pin alignment.** The 2026-08-05 SDK survey found schema **1.5.0**;
+   Harn now profiles **v1.26.0**. Field and capability shapes on the Zed path must be
    proven before deleting Harn's wire model.
 2. **Extension method names.** ACP reserves underscore-prefixed methods for
    extensions. Official `ExtRequest` documents that extension method names must
@@ -180,7 +180,7 @@ when all of the following are true:
 - docs.rs: Agent role, `ClientRequest` including `ForkSessionRequest`, closed
   `SessionUpdate`, `ExtRequest` requiring `_`-prefixed methods, stdio and
   cookbook agent path.
-- Harn sources: `ACP_SCHEMA_COMPATIBILITY` = schema v0.12.2;
+- Harn sources: `ACP_SCHEMA_COMPATIBILITY` = schema v1.26.0;
   `HARN_SESSION_UPDATE_EXTENSIONS` in `schema.rs`; `harn.*` methods in
   `docs/src/mcp-and-acp.md`; `rmcp = "3.1.0"` in `harn-vm` and
   `harn-mcp-compat`.

@@ -57,7 +57,7 @@
     }
   ],
   "matrix": {
-    "version": "v0.12.2",
+    "version": "v1.26.0",
     "family": "session_prompt",
     "case": "typed_terminal_truth",
     "source": {

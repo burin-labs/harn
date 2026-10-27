@@ -1,6 +1,6 @@
 //! ACP capability metadata and prompt content normalization.
 pub const ACP_SCHEMA_COMPATIBILITY: &str =
-    "agentclientprotocol/agent-client-protocol schema v0.12.2";
+    "agentclientprotocol/agent-client-protocol schema v1.26.0";
 
 pub const ACP_SESSION_UPDATE_VARIANTS: &[&str] = &[
     "user_message",

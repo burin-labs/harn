@@ -423,16 +423,16 @@ pub(super) fn generate_round_trip_fixture() -> Result<String, String> {
     )
     .map_err(|error| format!("failed to create plan document fixture: {error}"))?;
     let plan_document = plan_event.document();
+    let mut plan_update = harn_serve::adapters::acp::acp_plan_update(
+        harn_vm::llm::plan::plan_document_entries(plan_document),
+    );
+    plan_update["harnPlanDocument"] = json!(plan_document);
     let plan_session_update = json!({
         "jsonrpc": "2.0",
         "method": "session/update",
         "params": {
             "sessionId": "sess-42",
-            "update": {
-                "sessionUpdate": "plan",
-                "entries": harn_vm::llm::plan::plan_document_entries(plan_document),
-                "harnPlanDocument": plan_document,
-            },
+            "update": plan_update,
         }
     });
     let agent_event = json!({
