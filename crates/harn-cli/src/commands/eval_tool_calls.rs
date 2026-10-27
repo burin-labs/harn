@@ -222,7 +222,7 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
         for result in futures::future::join_all(trials).await {
             match result {
                 Ok(report) => {
-                    eprintln!(
+                    cli_diagnostic!(
                         "{}: {} ({})",
                         case.id,
                         if report.score.passed { "pass" } else { "fail" },
@@ -232,7 +232,7 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
                 }
                 Err(error) => {
                     had_infra_error = true;
-                    eprintln!("{}: error: {error}", case.id);
+                    cli_diagnostic!("{}: error: {error}", case.id);
                 }
             }
         }
@@ -258,7 +258,7 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
         cli_diagnostic!("error: failed to write eval outputs: {error}");
         return 1;
     }
-    eprintln!(
+    cli_diagnostic!(
         "wrote {} and {}",
         output_dir.join("summary.json").display(),
         output_dir.join("per_case.jsonl").display()

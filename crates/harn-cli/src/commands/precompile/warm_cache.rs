@@ -39,14 +39,14 @@ pub(super) fn run(args: &PrecompileArgs) {
             }
             Err(error) => {
                 failed += 1;
-                eprintln!("{}: {error}", source.display());
+                cli_diagnostic!("{}: {error}", source.display());
                 if !args.keep_going {
                     break;
                 }
             }
         }
     }
-    eprintln!(
+    cli_diagnostic!(
         "precompile cache: {prepared} entries, {} modules, {failed} failed",
         compiler.module_count()
     );

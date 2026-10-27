@@ -42,7 +42,7 @@ pub(crate) fn check_or_exit(path: &Path, generated: &str, source: &str, make_tar
         Ok(_) => cli_diagnostic!("error: {} is stale relative to {source}.", path.display()),
         Err(error) => cli_diagnostic!("error: cannot read {}: {error}", path.display()),
     }
-    eprintln!("hint: run `make {make_target}` to regenerate.");
+    cli_diagnostic!("hint: run `make {make_target}` to regenerate.");
     process::exit(1);
 }
 
@@ -53,14 +53,14 @@ pub(crate) fn check_against(out: &Path, rendered: &str, regenerate: &str) -> i32
     match fs::read_to_string(out) {
         Ok(existing) if same_text(&existing, rendered) => 0,
         Ok(_) => {
-            eprintln!(
+            cli_diagnostic!(
                 "{} is out of date; regenerate with `{regenerate}`",
                 out.display()
             );
             1
         }
         Err(_) => {
-            eprintln!(
+            cli_diagnostic!(
                 "{} is missing; generate it with `{regenerate}`",
                 out.display()
             );

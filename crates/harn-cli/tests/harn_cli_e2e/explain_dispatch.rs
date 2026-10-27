@@ -98,6 +98,9 @@ fn single_code_json_repairs_empty_when_no_template_registered() {
 fn unknown_code_exits_two() {
     let harn = run_explain(&["HARN-ZZZ-999"], &[]);
     assert_eq!(harn.exit_code, 2, "harn stderr={}", harn.stderr);
+    assert!(harn.stdout.is_empty(), "harn stdout={}", harn.stdout);
+    assert!(harn.stderr.contains("Unknown Harn diagnostic code"));
+    assert!(harn.stderr.lines().all(|line| line.starts_with("[harn] ")));
 }
 
 #[test]

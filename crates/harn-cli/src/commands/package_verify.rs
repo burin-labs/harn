@@ -51,9 +51,9 @@ pub(crate) fn handle_package_test_inventory(args: PackageTestInventoryArgs) -> R
             inventory.selected_file_count, inventory.discovered_test_count
         );
     } else {
-        eprintln!("Package test discovery failed:");
+        cli_diagnostic!("Package test discovery failed:");
         for problem in &problems {
-            eprintln!("- {problem}");
+            cli_diagnostic!("- {problem}");
         }
     }
     if let Some(path) = args.receipt_out.as_deref() {
