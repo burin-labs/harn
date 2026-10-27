@@ -389,7 +389,11 @@ pub fn __judge_completion_verdict_schema(
   return {
     type: "object",
     properties: properties,
-    required: ["verdict", "detail"],
+    required: if assessments == nil {
+      ["verdict", "detail", "goal_assessment"]
+    } else {
+      ["verdict", "detail"]
+    },
     additionalProperties: false,
   }
 }

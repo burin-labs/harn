@@ -5,13 +5,7 @@ import { __judge_completion_verdict_schema } from "std/agent/judge_verdict"
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn check_assessment(
-  harness: Harness,
-  answer: string,
-  assessment: dict?,
-  expected: string,
-  omit_assessment: bool = false,
-) {
+fn check_assessment(harness: Harness, answer: string, assessment: dict?, expected: string) {
   const reply = {
     verdict: "done",
     detail: "This response may end the turn.",
@@ -24,9 +18,7 @@ fn check_assessment(
       llm_text(answer),
       llm_text(
         json_stringify(
-          if omit_assessment {
-            reply
-          } else if assessment == nil {
+          if assessment == nil {
             reply + {goal_assessment: {kind: "unknown", evidence_refs: []}}
           } else {
             reply + {goal_assessment: assessment}
@@ -59,8 +51,7 @@ fn check_assessment(
 
 pipeline default(harness: Harness) {
   const schema = __judge_completion_verdict_schema(nil, {actions: [{evidence_index: 7}]})
-  assert(schema.properties.goal_assessment != nil, "The judge can report a goal outcome")
-  assert(!schema.required.contains("goal_assessment"), "A missing assessment remains unknown")
+  assert(schema.required.contains("goal_assessment"), "The judge must report an explicit outcome")
   assert_eq(schema.properties.goal_assessment.properties.evidence_refs.items.enum, [7])
   check_assessment(
     harness,
@@ -81,7 +72,6 @@ pipeline default(harness: Harness) {
     "partially_achieved",
   )
   check_assessment(harness, "The answer is 42.", nil, "unknown")
-  check_assessment(harness, "The answer is 42.", nil, "unknown", true)
   check_assessment(harness, "The answer is 42.", {kind: "achieved", evidence_refs: []}, "unknown")
   harness.stdio.println("undeclared goal assessments passed")
 }
