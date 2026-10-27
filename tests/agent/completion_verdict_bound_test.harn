@@ -28,7 +28,10 @@ pipeline test_verdict_schema_keeps_one_tolerant_detail_field(harness: Harness, t
   // `gaps` joined the contract in #8100: a refusal itemizes every gap it holds
   // rather than naming one in `detail`. `detail` stays the one-line summary,
   // which is what the rest of this case pins.
-  assert_eq(schema.properties.keys().sorted(), ["detail", "gap_class", "gaps", "verdict"])
+  assert_eq(
+    schema.properties.keys().sorted(),
+    ["detail", "gap_class", "gaps", "goal_assessment", "verdict"],
+  )
   assert_eq(schema.properties.detail.maxLength, nil)
   assert_eq(schema?.additionalProperties, false)
 }
