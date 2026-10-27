@@ -55,6 +55,142 @@ pub fn greet(name: string, excited: bool = false) -> dict {
 }
 
 #[test]
+fn serve_mcp_code_mode_dispatches_only_server_registered_read_tools() {
+    let temp = TempDir::new().unwrap();
+    fs::write(
+        temp.path().join("server.harn"),
+        r#"
+import { composition_mcp_tools } from "std/composition"
+
+fn main(harness: Harness) {
+  let source = tool_registry()
+  source = tool_define(source, "echo", "Echo a value", {
+    parameters: {value: "string"},
+    annotations: {side_effect_level: "read_only"},
+    handler: {args -> "bound:${args.value}"},
+  })
+  source = tool_define(source, "other", "Read another value", {
+    parameters: {},
+    annotations: {side_effect_level: "read_only"},
+    handler: {_args -> "other dispatched"},
+  })
+  source = tool_define(source, "mutate", "A write operation", {
+    parameters: {},
+    annotations: {side_effect_level: "workspace_write"},
+    handler: {_args -> "write was dispatched"},
+  })
+  source = tool_define(source, "unknown_effect", "Undeclared side effects", {
+    parameters: {},
+    handler: {_args -> "unknown tool was dispatched"},
+  })
+  harness.tools.mcp_tools(composition_mcp_tools(harness, source))
+}
+"#,
+    )
+    .unwrap();
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .args(["serve", "mcp", "server.harn"]);
+    let mut client = StdioJsonRpcClient::spawn("Code Mode MCP server", command);
+    let api = client.request(stable_request(
+        1,
+        "tools/call",
+        json!({"name": "harn.code.generate_harn_api", "arguments": {}}),
+    ));
+    let mut manifest = api["result"]["structuredContent"]["manifest"].clone();
+    assert_eq!(manifest["bindings"].as_array().unwrap().len(), 2, "{api}");
+    assert_eq!(manifest["bindings"][0]["name"], "echo");
+    manifest["bindings"][0]["metadata"]["mock_output"] = json!("fabricated");
+    let called = client.request(stable_request(
+        2,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return echo({value: \"hello\"})",
+            "manifest": manifest,
+            "include_report": true
+        }}),
+    ));
+    assert_ne!(called["result"]["isError"], true, "{called}");
+    let report = &called["result"]["structuredContent"];
+    assert_eq!(report["run"]["result"], "bound:hello", "{called}");
+    assert_eq!(report["child_calls"][0]["tool_name"], "echo", "{called}");
+
+    for (id, name) in [(3, "phantom"), (4, "mutate"), (5, "unknown_effect")] {
+        let denied = client.request(stable_request(
+            id,
+            "tools/call",
+            json!({"name": "harn.code.execute_composition", "arguments": {
+                "snippet": format!("return {name}({{}})"),
+                "manifest": {"bindings": [{"name": name, "binding": name,
+                    "metadata": {"mock_output": "fabricated"}}]}
+            }}),
+        ));
+        assert_eq!(denied["result"]["isError"], true, "{denied}");
+        assert_eq!(
+            denied["result"]["_meta"]["com.harnlang/toolContract"]["applicationError"]["data"]
+                ["error"],
+            "composition_mcp: manifest contains an unregistered binding"
+        );
+    }
+    let searched = client.request(stable_request(
+        6,
+        "tools/call",
+        json!({"name": "harn.code.generate_harn_api", "arguments": {"query": "echo", "limit": 1}}),
+    ));
+    assert_eq!(
+        searched["result"]["structuredContent"]["tool_count"], 1,
+        "{searched}"
+    );
+    assert_eq!(
+        searched["result"]["structuredContent"]["manifest"]["bindings"][0]["name"],
+        "echo"
+    );
+    let narrowed = client.request(stable_request(
+        9,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return other({})",
+            "manifest": searched["result"]["structuredContent"]["manifest"]
+        }}),
+    ));
+    assert_eq!(narrowed["result"]["isError"], true, "{narrowed}");
+    let supplied_tools = client.request(stable_request(
+        7,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return phantom({})", "tools": [{"name": "phantom"}]
+        }}),
+    ));
+    assert_eq!(
+        supplied_tools["result"]["isError"], true,
+        "{supplied_tools}"
+    );
+    assert_eq!(
+        supplied_tools["result"]["_meta"]["com.harnlang/toolContract"]["applicationError"]["data"]
+            ["error"],
+        "composition_mcp: tools are configured by the server"
+    );
+    let supplied_trust = client.request(stable_request(
+        8,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return echo({value: \"hello\"})", "trust_annotations": true
+        }}),
+    ));
+    assert_eq!(
+        supplied_trust["result"]["isError"], true,
+        "{supplied_trust}"
+    );
+    assert_eq!(
+        supplied_trust["result"]["_meta"]["com.harnlang/toolContract"]["applicationError"]["data"]
+            ["error"],
+        "composition_mcp: trust is configured by the server"
+    );
+    client.shutdown_expect_success();
+}
+
+#[test]
 fn serve_mcp_rejects_caught_invalid_catalog_declaration() {
     let temp = TempDir::new().unwrap();
     fs::write(

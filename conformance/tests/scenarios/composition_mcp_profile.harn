@@ -1,27 +1,25 @@
 import { composition_crystallization_input, composition_mcp_tools } from "std/composition"
 
 pipeline main(harness: Harness) {
-  const tools = composition_mcp_tools(harness)
+  const source_tools = tool_define(
+    tool_registry(),
+    "read_file",
+    "Read a file",
+    {
+      parameters: {path: {type: "string", required: true}},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+      handler: { _args -> "profile ok" },
+    },
+  )
+  const tools = composition_mcp_tools(harness, source_tools)
   harness.stdio.println(tool_count(tools))
   const search = tool_find(tools, "harn.code.search_examples")
   const examples = search.handler({query: "read", limit: 1})
   harness.stdio.println(examples[0].language)
-  const source_tools = [
-    {
-      name: "read_file",
-      inputSchema: {type: "object", required: ["path"]},
-      annotations: {kind: "read", side_effect_level: "read_only"},
-      metadata: {mock_output: {text: "profile ok"}},
-    },
-  ]
   const manifest = composition_binding_manifest(source_tools)
   const execute = tool_find(tools, "harn.code.execute_composition")
   const dispatched = execute.handler(
-    {
-      snippet: "return read_file({path: \"README.md\"}).text",
-      manifest: manifest,
-      run_id: "profile-run",
-    },
+    {snippet: "return read_file({path: \"README.md\"})", manifest: manifest, run_id: "profile-run"},
   )
   const report = dispatched.data
   harness.stdio.println(report.ok)
