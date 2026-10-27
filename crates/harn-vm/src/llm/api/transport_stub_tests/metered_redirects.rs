@@ -43,6 +43,120 @@ fn redirect(stream: &mut std::net::TcpStream, location: &str) {
 }
 
 #[test]
+fn host_inference_ceiling_does_not_follow_http_redirects() {
+    for (status, streaming) in [(302, false), (307, true)] {
+        assert_host_ceiling_redirect(status, streaming);
+    }
+}
+
+fn assert_host_ceiling_redirect(status: u16, streaming: bool) {
+    struct ClearCatalog;
+    impl Drop for ClearCatalog {
+        fn drop(&mut self) {
+            crate::llm_config::clear_runtime_catalog_overlay();
+        }
+    }
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let egress = crate::egress::test_support::test_env_guard();
+    egress.set("HARN_EGRESS_ALLOW_LOOPBACK", "1");
+    let _cleanup = Cleanup;
+    let _catalog = ClearCatalog;
+    let _no_host = ScopedEnvVar::remove(super::super::inference_boundary::HOST_BOUNDARY_ENV);
+    let _durable = ScopedEnvVar::set("HARN_LLM_RATE_LIMIT_DURABLE", "0");
+    let targets = Arc::new(AtomicUsize::new(0));
+    let reached_target = targets.clone();
+    let target = spawn_llm_stub_many("bounded redirect target", 2, move |_, stream| {
+        request(stream);
+        reached_target.fetch_add(1, Ordering::SeqCst);
+        let (content_type, body) = if streaming {
+            ("text/event-stream", "data: {\"choices\":[{\"delta\":{\"content\":\"accepted\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}\n\ndata: [DONE]\n\n")
+        } else {
+            (
+                "application/json",
+                r#"{"choices":[{"message":{"role":"assistant","content":"accepted"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"#,
+            )
+        };
+        write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    });
+    let location = format!("http://localhost:{}/redirected", target.addr().port());
+    let sources = Arc::new(AtomicUsize::new(0));
+    let reached_source = sources.clone();
+    let source = spawn_llm_stub_many("bounded redirect source", 4, move |_, stream| {
+        let (start, _) = request(stream);
+        assert!(start.starts_with("POST /v1/chat/completions "));
+        reached_source.fetch_add(1, Ordering::SeqCst);
+        write!(stream, "HTTP/1.1 {status} Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+    });
+    let mut provider = crate::llm_config::provider_config("openai").unwrap();
+    provider.base_url = format!("http://{}/v1", source.addr());
+    provider.base_url_env = None;
+    let mut catalog = crate::llm_config::ProvidersConfig::default();
+    catalog.providers.insert("openai".into(), provider);
+    crate::llm_config::set_runtime_catalog_overlay(Some(catalog));
+    let mut opts = base_opts("openai");
+    opts.model = "gpt-5.6-luna".into();
+    opts.api_key = "synthetic".into();
+    opts.stream = streaming;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    assert_eq!(
+        runtime.block_on(vm_call_llm_full(&opts)).unwrap().text,
+        "accepted"
+    );
+    assert_eq!(
+        sources.load(Ordering::SeqCst),
+        1,
+        "unbounded control reached source"
+    );
+    assert_eq!(
+        targets.load(Ordering::SeqCst),
+        1,
+        "unbounded control followed redirect"
+    );
+    let _host = ScopedEnvVar::set(
+        super::super::inference_boundary::HOST_BOUNDARY_ENV,
+        r#"{"reach":"any_hosted","allow_training_discounts":false}"#,
+    );
+    let result = runtime.block_on(vm_call_llm_full(&opts));
+    assert!(result.is_err(), "bounded call must stop at the redirect");
+    assert_eq!(
+        sources.load(Ordering::SeqCst),
+        2,
+        "bounded call reached the approved source"
+    );
+    assert_eq!(
+        targets.load(Ordering::SeqCst),
+        1,
+        "bounded call never reached the second listener"
+    );
+    drop(_host);
+    opts.inference_boundary = Some(super::super::inference_boundary::InferenceBoundary {
+        reach: super::super::inference_boundary::InferenceReach::AnyHosted,
+        allow_training_discounts: false,
+    });
+    assert!(
+        runtime.block_on(vm_call_llm_full(&opts)).is_err(),
+        "an explicit call ceiling must also stop the redirect"
+    );
+    assert_eq!(sources.load(Ordering::SeqCst), 3);
+    assert_eq!(targets.load(Ordering::SeqCst), 1);
+    opts.inference_boundary = None;
+    assert_eq!(
+        runtime.block_on(vm_call_llm_full(&opts)).unwrap().text,
+        "accepted"
+    );
+    assert_eq!(sources.load(Ordering::SeqCst), 4);
+    assert_eq!(
+        targets.load(Ordering::SeqCst),
+        2,
+        "bounded client must not poison the unbounded cache"
+    );
+}
+
+#[test]
 fn endpoint_specific_data_policy_disables_redirects_without_a_spend_budget() {
     let _env = env_guard();
     let egress = crate::egress::test_support::test_env_guard();
