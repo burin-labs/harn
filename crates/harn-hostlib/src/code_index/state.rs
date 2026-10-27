@@ -866,8 +866,8 @@ impl IndexState {
         None
     }
 
-    /// Estimate the resident memory footprint of every sub-index. Cheap
-    /// order-of-magnitude figure surfaced by the `stats` builtin.
+    /// Nominal live-content bytes across sub-indexes, surfaced by `stats`.
+    /// This is not an allocator or resident-memory measurement.
     pub fn estimated_bytes(&self) -> usize {
         let file_bytes: usize = self
             .files

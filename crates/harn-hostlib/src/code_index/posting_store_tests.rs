@@ -92,6 +92,26 @@ fn restored_postings_answer_like_live_ones_before_and_after_edits() {
 }
 
 #[test]
+fn memory_estimate_tracks_live_content_across_restore_and_edits() {
+    let (mut live_t, mut live_w) = seeded();
+    let (mut restored_t, mut restored_w) = restored(&live_t, &live_w);
+    let estimate = |t: &TrigramIndex, w: &WordIndex| (t.estimated_bytes(), w.estimated_bytes());
+
+    let original = estimate(&live_t, &live_w);
+    assert!(original.0 > 0 && original.1 > 0);
+    assert_eq!(estimate(&restored_t, &restored_w), original);
+
+    edit(&mut live_t, &mut live_w);
+    edit(&mut restored_t, &mut restored_w);
+    let edited = estimate(&live_t, &live_w);
+    assert_ne!(edited, original, "changed content must affect the estimate");
+    assert_eq!(estimate(&restored_t, &restored_w), edited);
+    restored_t.postings.compact();
+    restored_w.postings.compact();
+    assert_eq!(estimate(&restored_t, &restored_w), edited);
+}
+
+#[test]
 fn compaction_preserves_every_read() {
     let (seed_t, seed_w) = seeded();
     let (mut trigrams, mut words) = restored(&seed_t, &seed_w);

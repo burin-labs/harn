@@ -140,15 +140,6 @@ impl<K: Eq + Hash + Clone, H: FilePosting> FilePostings<K, H> {
         rows
     }
 
-    /// Every stored term, including any whose hits are all tombstoned.
-    pub fn keys(&self) -> impl Iterator<Item = &K> {
-        self.base.keys().chain(
-            self.forward
-                .keys()
-                .filter(|key| !self.base.contains_key(*key)),
-        )
-    }
-
     /// Distinct terms with live hits.
     pub fn len(&self) -> usize {
         self.rows().len()
@@ -274,24 +265,17 @@ impl<K: Eq + Hash + Clone, H: FilePosting> FilePostings<K, H> {
         self.base = Arc::new(base);
     }
 
-    pub fn estimated_bytes(&self) -> usize {
-        let map_bytes = |map: &FastMap<K, Vec<H>>| {
-            map.capacity() * (std::mem::size_of::<K>() + std::mem::size_of::<Vec<H>>())
-                + map
-                    .values()
-                    .map(|hits| hits.capacity() * std::mem::size_of::<H>())
-                    .sum::<usize>()
-        };
-        map_bytes(&self.base)
-            + map_bytes(&self.forward)
-            + self.reverse.capacity()
-                * (std::mem::size_of::<FileId>() + std::mem::size_of::<Vec<K>>())
-            + self
-                .reverse
-                .values()
-                .map(|terms| terms.capacity() * std::mem::size_of::<K>())
-                .sum::<usize>()
-            + self.stale.bytes()
+    /// Nominal bytes for live terms and hits, independent of storage layout.
+    pub fn estimated_bytes(&self, key_bytes: impl Fn(&K) -> usize) -> usize {
+        self.rows()
+            .into_iter()
+            .map(|(key, hits)| {
+                std::mem::size_of::<K>()
+                    + std::mem::size_of::<Vec<H>>()
+                    + hits.len() * std::mem::size_of::<H>()
+                    + key_bytes(key)
+            })
+            .sum()
     }
 }
 
@@ -327,10 +311,6 @@ impl FileSet {
 
     fn len(&self) -> usize {
         self.len
-    }
-
-    fn bytes(&self) -> usize {
-        self.bits.capacity() * std::mem::size_of::<u64>()
     }
 }
 
