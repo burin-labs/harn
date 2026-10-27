@@ -94,6 +94,32 @@ fn runtime_error_details_are_opt_in_and_config_explain_still_works() {
         "{detailed_stderr}"
     );
 
+    let bench = |explain: bool| {
+        let mut command = Command::new(binary_path());
+        command.arg("bench");
+        if explain {
+            command.arg("--explain");
+        }
+        command.args(["--iterations", "1"]).arg(&script);
+        command.env("HARN_EVENT_LOG_BACKEND", "memory");
+        command.output().expect("benchmark script")
+    };
+    let bench_short = bench(false);
+    assert!(!bench_short.status.success());
+    let bench_short_error = String::from_utf8_lossy(&bench_short.stderr);
+    assert!(
+        bench_short_error.contains("[harn] error:"),
+        "{bench_short_error}"
+    );
+    assert!(
+        bench_short_error.contains("Division by zero"),
+        "{bench_short_error}"
+    );
+    assert!(!bench_short_error.contains("-->"), "{bench_short_error}");
+    let bench_detail = bench(true);
+    assert!(!bench_detail.status.success());
+    assert!(String::from_utf8_lossy(&bench_detail.stderr).contains("let value = 1 / 0"));
+
     let malformed = write_script(
         tmp.path(),
         "malformed.harn",
@@ -124,6 +150,24 @@ fn runtime_error_details_are_opt_in_and_config_explain_still_works() {
         .expect("explain malformed script");
     assert!(!malformed_detailed.status.success());
     assert!(String::from_utf8_lossy(&malformed_detailed.stderr).contains("-->"));
+
+    let bench_malformed = Command::new(binary_path())
+        .args(["bench", "--iterations", "1"])
+        .arg(&malformed)
+        .output()
+        .expect("benchmark malformed script");
+    assert!(!bench_malformed.status.success());
+    let bench_error = String::from_utf8_lossy(&bench_malformed.stderr);
+    assert!(bench_error.contains("[harn] error:"), "{bench_error}");
+    assert!(bench_error.contains("malformed.harn:"), "{bench_error}");
+    assert!(!bench_error.contains("-->"), "{bench_error}");
+    let bench_malformed_detail = Command::new(binary_path())
+        .args(["bench", "--explain", "--iterations", "1"])
+        .arg(&malformed)
+        .output()
+        .expect("explain malformed benchmark");
+    assert!(!bench_malformed_detail.status.success());
+    assert!(String::from_utf8_lossy(&bench_malformed_detail.stderr).contains("-->"));
 
     let watch_detailed = Command::new(binary_path())
         .args(["watch", "--explain"])

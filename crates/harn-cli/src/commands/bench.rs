@@ -11,9 +11,11 @@ use crate::commands::replay_fixtures::{
     collect_json_files, discover_repo_root, display_path, read_trace_fixture, resolve_selection,
     validate_protocol_fixture_refs,
 };
-use crate::commands::run::{connect_mcp_servers, RunProfileOptions};
+use crate::commands::run::{
+    brief_diagnostic, connect_mcp_servers, format_program_error, parse_source_for_run_with_brief,
+    RunProfileOptions,
+};
 use crate::package;
-use crate::parse_source_file;
 
 mod portable;
 
@@ -34,7 +36,7 @@ struct BenchRun {
 
 type BenchStats = harn_kernel::BenchmarkStatistics;
 
-pub(crate) async fn run(args: BenchArgs) {
+pub(crate) async fn run(args: BenchArgs, explain: bool) {
     match args.command {
         Some(BenchCommand::Portable(portable)) => {
             if let Err(error) = portable::run(portable, &args.profile) {
@@ -58,6 +60,7 @@ pub(crate) async fn run(args: BenchArgs) {
                 args.iterations,
                 crate::run_profile_options(&args.profile),
                 args.output.as_deref(),
+                explain,
             )
             .await;
         }
@@ -69,13 +72,28 @@ pub(crate) async fn run_bench(
     iterations: usize,
     profile: RunProfileOptions,
     output: Option<&Path>,
+    explain: bool,
 ) {
     if iterations == 0 {
         eprintln!("error: `harn bench` requires at least one iteration");
         process::exit(1);
     }
 
-    let (source, program) = parse_source_file(path);
+    let source = fs::read_to_string(path).unwrap_or_else(|error| {
+        harn_vm::events::log_status(&format!("error: reading {path}: {error}"));
+        process::exit(1);
+    });
+    let mut parse_detail = String::new();
+    let mut parse_brief = String::new();
+    let program =
+        parse_source_for_run_with_brief(path, &source, &mut parse_detail, &mut parse_brief)
+            .unwrap_or_else(|| {
+                eprint!(
+                    "{}",
+                    format_program_error(&parse_brief, &parse_detail, explain)
+                );
+                process::exit(1);
+            });
     let file_path = Path::new(path);
     if let Err(error) = package::ensure_dependencies_materialized(file_path) {
         eprintln!("error: {error}");
@@ -87,21 +105,30 @@ pub(crate) async fn run_bench(
     );
     let type_diagnostics = checker.check_with_source(&program, &source);
     let mut had_type_error = false;
+    let mut type_brief = String::new();
+    let mut type_detail = String::new();
     for diag in &type_diagnostics {
         match diag.severity {
             DiagnosticSeverity::Error => {
                 had_type_error = true;
+                if type_brief.is_empty() {
+                    type_brief = brief_diagnostic(path, diag.span.as_ref(), &diag.message);
+                }
                 let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
-                eprint!("{rendered}");
+                type_detail.push_str(&rendered);
             }
             DiagnosticSeverity::Warning => {
-                let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
-                eprint!("{rendered}");
+                let message = brief_diagnostic(path, diag.span.as_ref(), &diag.message);
+                harn_vm::events::log_warn("typecheck", &message);
             }
             DiagnosticSeverity::Info => {}
         }
     }
     if had_type_error {
+        eprint!(
+            "{}",
+            format_program_error(&type_brief, &type_detail, explain)
+        );
         process::exit(1);
     }
 
@@ -202,8 +229,11 @@ pub(crate) async fn run_bench(
                 });
             }
             Err(error) => {
-                eprint!("{}", vm.format_runtime_error(&error));
-                eprintln!("benchmark aborted on iteration {}", iteration + 1);
+                let detail = vm.format_runtime_error(&error);
+                eprint!(
+                    "{}",
+                    format_program_error(&error.to_string(), &detail, explain)
+                );
                 process::exit(1);
             }
         }

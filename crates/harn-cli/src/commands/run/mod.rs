@@ -41,7 +41,8 @@ pub(crate) mod sandbox;
 
 pub(crate) use self::builtin_policy::build_denied_builtins;
 pub(crate) use self::chunk_loading::{
-    compile_or_load_chunk_for_run, compile_or_load_chunk_with_timing, LoadedChunk,
+    brief_diagnostic, compile_or_load_chunk_for_run, compile_or_load_chunk_with_timing,
+    parse_source_for_run_with_brief, LoadedChunk,
 };
 use self::chunk_loading::{parse_source_for_run, typecheck_with_imports, ChunkLoadFailure};
 pub(crate) use self::environment::{EnvironmentPolicyArg, EnvironmentPolicyConfig};
@@ -161,6 +162,19 @@ pub struct RunOutcome {
     pub stdout: String,
     pub stderr: String,
     pub exit_code: i32,
+}
+
+pub(crate) fn format_program_error(brief: &str, detail: &str, explain: bool) -> String {
+    if explain {
+        format!("[harn] {detail}")
+    } else {
+        let summary = brief
+            .lines()
+            .next()
+            .filter(|line| !line.is_empty())
+            .unwrap_or("program error");
+        format!("[harn] error: {summary} (use --explain for details)\n")
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -885,12 +899,7 @@ async fn execute_run_inner_scoped(
                 if let ChunkLoadFailure::Program(brief) | ChunkLoadFailure::Import(_, brief) =
                     &failure
                 {
-                    if !explain {
-                        let brief = brief.lines().next().unwrap_or("program error");
-                        stderr = format!("[harn] error: {brief} (use --explain for details)\n");
-                    } else {
-                        stderr.insert_str(0, "[harn] ");
-                    }
+                    stderr = format_program_error(brief, &stderr, explain);
                 } else {
                     stderr.insert_str(0, "[harn] ");
                 }
@@ -1422,15 +1431,7 @@ async fn execute_run_inner_scoped(
             }
         }
         RunExecution::Failed { brief, detail } => {
-            if explain {
-                stderr.push_str("[harn] ");
-                stderr.push_str(&detail);
-            } else {
-                let summary = brief.lines().next().unwrap_or("runtime error");
-                stderr.push_str(&format!(
-                    "[harn] error: {summary} (use --explain for details)\n"
-                ));
-            }
+            stderr.push_str(&format_program_error(&brief, &detail, explain));
             let main_events = harn_vm::tracing::peek_spans().len() as u64;
             let cpu_ms_total = cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start));
             let profile_rollup = if profile.is_enabled() {

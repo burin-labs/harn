@@ -8,7 +8,7 @@ To add a new subcommand or port an existing one off Rust, see
 machine-readable side of `--json` modes, see the
 [`harn --json` contract](./cli-json-contract.md).
 
-`harn run` reports a short program error on stderr by default. Pass `--explain`
+`harn run` and `harn bench` report short program errors on stderr by default. Pass `--explain`
 to include source excerpts and runtime stack details. The structured `--json`
 error event retains its detailed diagnostic.
 

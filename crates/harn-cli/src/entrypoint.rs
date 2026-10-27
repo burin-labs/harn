@@ -831,7 +831,7 @@ async fn dispatch(subcommand: Command, explain: bool) {
             }
         },
         Command::Repl => commands::repl::run_repl().await,
-        Command::Bench(args) => commands::bench::run(args).await,
+        Command::Bench(args) => commands::bench::run(args, explain).await,
         Command::Precompile(args) => commands::precompile::run(args).await,
         Command::Pack(args) => commands::pack::run(args),
         Command::TestBench(args) => commands::test_bench::run(args.command).await,

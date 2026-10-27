@@ -295,7 +295,7 @@ pub(super) fn parse_source_for_run(
     parse_source_for_run_with_brief(path, source, stderr, &mut String::new())
 }
 
-fn parse_source_for_run_with_brief(
+pub(crate) fn parse_source_for_run_with_brief(
     path: &str,
     source: &str,
     stderr: &mut String,
@@ -351,7 +351,11 @@ fn parse_source_for_run_with_brief(
     }
 }
 
-fn brief_diagnostic(path: &str, span: Option<&harn_lexer::Span>, message: &str) -> String {
+pub(crate) fn brief_diagnostic(
+    path: &str,
+    span: Option<&harn_lexer::Span>,
+    message: &str,
+) -> String {
     let path = harn_parser::diagnostic::normalize_diagnostic_path(path);
     match span {
         Some(span) => format!("{path}:{}:{}: {message}", span.line, span.column),
