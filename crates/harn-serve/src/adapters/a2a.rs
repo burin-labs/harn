@@ -49,7 +49,7 @@ mod transport;
 
 use schema::{derived_agent_name, load_push_configs};
 
-pub use harn_vm::a2a::A2A_PROTOCOL_VERSION;
+pub const A2A_PROTOCOL_VERSION: &str = harn_vm::a2a::A2A_PROTOCOL_VERSION;
 
 const A2A_VERSION_HEADER: &str = "a2a-version";
 const A2A_TRACE_HEADER: &str = "a2a-trace-id";
