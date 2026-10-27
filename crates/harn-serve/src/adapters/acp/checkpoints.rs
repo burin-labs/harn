@@ -197,6 +197,21 @@ impl AcpServer {
             self.send_error(id, -32602, "session/workspace_checkpoint requires action");
             return;
         };
+        if matches!(
+            action.as_str(),
+            "capture" | "call_begin" | "call_end" | "plan" | "restore"
+        ) && checkpoint::root_matches(&session_id, &cwd) == Some(false)
+        {
+            self.send_response(
+                id,
+                serde_json::json!({
+                    "available": false,
+                    "reason": "workspace_root_changed",
+                    "detail": "the checkpoint belongs to a different workspace root",
+                }),
+            );
+            return;
+        }
         let required = |camel: &str, snake: &str| {
             text(camel, snake).ok_or_else(|| {
                 format!("session/workspace_checkpoint action {action} requires {camel}")

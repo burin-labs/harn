@@ -34,6 +34,18 @@ the session's cwd, and the result is the same typed object the `harness.fs`
 method returns. `session/close` drops the session's checkpoint state. The
 server does not bracket tool calls itself: the host that owns the turn calls
 `capture` at each user message and `call_begin` / `call_end` around each call.
+After a session is reanchored, checkpoint actions other than `drop` return
+`{available: false, reason: "workspace_root_changed"}` while their recorded
+root differs from the session's current root.
+
+An ACP client can pass `inheritWorkspaceCheckpoint: true` to `session/fork`.
+The fork response then includes `workspaceCheckpoint`, which reports whether
+the parent's checkpoint history was copied to the new session. An unavailable
+result is explicit and does not prevent the conversation fork. The copy has
+independent checkpoint state and stored files, so restoring it or closing the
+parent does not change the other branch's history. Forks without this option
+do not copy checkpoints. Checkpoint state is still in memory and does not
+survive a server restart.
 
 ## What a boundary stores
 
@@ -77,9 +89,12 @@ A full restore with nothing refused, failed, or unrestorable discards later
 boundaries and their attributions. Otherwise only the restored paths leave the
 attribution, so a retry keeps its guard.
 
-If a directory was unreadable during a call, or a file vanished mid-scan, that
-call's attribution for the affected paths is marked `incomplete` and a restore
-refuses them.
+If the initial scan cannot read the workspace, capture returns
+`incomplete_capture` and records no boundary. If a scan fails during a later
+call, planning and restoring that boundary return `incomplete_attribution`.
+An empty list of observed changes cannot prove that an unreadable directory
+contained no changes. Planning, restoring, and copying checkpoint history
+return `calls_in_flight` while a checkpointed call has no end receipt.
 
 ## Receipt
 

@@ -1,4 +1,43 @@
 use super::*;
+
+#[test]
+fn fork_refuses_when_a_call_starts_and_finishes_during_copy() {
+    let (dir, id) = deleted_in_subdir("fork-race-call");
+    let child = format!("{id}-child");
+    let outcome = fork::fork_session_checked(&id, &child, dir.path(), || {
+        call_begin(&id, "concurrent").unwrap();
+        stdfs::write(dir.path().join("sub/f.txt"), "later edit\n").unwrap();
+        call_end(&id, "concurrent", None).unwrap();
+    })
+    .unwrap();
+    let value = serde_json::to_value(outcome).unwrap();
+    assert_eq!(value["reason"], "source_changed", "{value}");
+    assert!(find_session(&child).is_none());
+    assert!(!session_dir(dir.path(), &child).exists());
+    drop_session(&id);
+}
+
+#[test]
+fn fork_refuses_when_a_restore_changes_the_same_boundary_during_copy() {
+    let (dir, id) = deleted_in_subdir("fork-race-restore");
+    let child = format!("{id}-child");
+    let outcome = fork::fork_session_checked(&id, &child, dir.path(), || {
+        assert!(matches!(
+            restore(&id, "turn-1", None).unwrap(),
+            Outcome::Ready(_)
+        ));
+        assert_eq!(
+            stdfs::read_to_string(dir.path().join("sub/f.txt")).unwrap(),
+            "f original\n"
+        );
+    })
+    .unwrap();
+    let value = serde_json::to_value(outcome).unwrap();
+    assert_eq!(value["reason"], "source_changed", "{value}");
+    assert!(find_session(&child).is_none());
+    assert!(!session_dir(dir.path(), &child).exists());
+    drop_session(&id);
+}
 use std::os::unix::fs::symlink;
 
 #[test]
@@ -73,6 +112,37 @@ fn with_hook(stage: Stage, hook: impl Fn() + 'static) {
 
 fn clear_hook() {
     RESTORE_HOOK.with(|slot| *slot.borrow_mut() = None);
+}
+
+#[test]
+fn restore_and_fork_refuse_while_the_call_end_scan_is_running() {
+    let (dir, id) = deleted_in_subdir("ending");
+    call_begin(&id, "tool-2").unwrap();
+    stdfs::write(dir.path().join("sub/f.txt"), "new contents\n").unwrap();
+    let hook_id = id.clone();
+    let hook_root = dir.path().to_path_buf();
+    CALL_END_HOOK.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(move || {
+            for outcome in [
+                serde_json::to_value(plan(&hook_id, "turn-1").unwrap()).unwrap(),
+                serde_json::to_value(restore(&hook_id, "turn-1", None).unwrap()).unwrap(),
+                serde_json::to_value(fork_session(&hook_id, "ending-child", &hook_root).unwrap())
+                    .unwrap(),
+            ] {
+                assert_eq!(outcome["available"], false, "{outcome}");
+                assert_eq!(outcome["reason"], "calls_in_flight");
+                assert!(outcome["detail"].as_str().unwrap().contains("tool-2"));
+            }
+            assert_eq!(
+                stdfs::read_to_string(hook_root.join("sub/f.txt")).unwrap(),
+                "new contents\n"
+            );
+        }));
+    });
+    call_end(&id, "tool-2", None).unwrap();
+    CALL_END_HOOK.with(|slot| *slot.borrow_mut() = None);
+    assert!(matches!(plan(&id, "turn-1").unwrap(), Outcome::Ready(_)));
+    drop_session(&id);
 }
 
 #[test]

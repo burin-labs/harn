@@ -153,6 +153,36 @@ fn tool_edit_is_attributed_and_restored() {
     assert_eq!(read(root, "a.txt"), "a original\n");
 }
 
+#[test]
+fn corrupt_checkpoint_blob_is_reported_without_overwriting_the_workspace() {
+    let dir = repo();
+    let root = dir.path();
+    std::fs::write(root.join("a.txt"), "dirty baseline\n").unwrap();
+    let s = Session::new(root);
+    assert_eq!(s.capture("turn-1")["available"], true);
+    s.call_with("tool-1", Some("workspace_write"), || {
+        std::fs::write(root.join("a.txt"), "agent edit\n").unwrap();
+    });
+    let blobs = root
+        .join(".harn/state/checkpoints")
+        .join(&s.id)
+        .join("blobs");
+    let blob = std::fs::read_dir(blobs)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    std::fs::write(blob, "corrupt checkpoint\n").unwrap();
+    let receipt = s.restore("turn-1");
+    assert_eq!(paths(&receipt, "failed"), ["a.txt"], "{receipt}");
+    assert!(receipt["failed"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("hash mismatch"));
+    assert_eq!(read(root, "a.txt"), "agent edit\n");
+}
+
 /// A subprocess, not an in-process write, changes the tree: the stat diff must
 /// attribute what a shell command did without seeing the command itself.
 #[test]
@@ -651,7 +681,7 @@ mod unix_permissions {
     }
 
     #[test]
-    fn directory_unreadable_at_call_begin_makes_its_files_incomplete_and_refused() {
+    fn directory_unreadable_at_call_begin_makes_restore_unavailable() {
         if running_as_root() {
             return;
         }
@@ -674,12 +704,66 @@ mod unix_permissions {
         assert_eq!(change["incomplete"], true);
 
         let receipt = s.restore("turn-1");
-        assert_eq!(
-            paths(&receipt, "refused"),
-            ["locked/person.txt"],
-            "{receipt}"
-        );
+        assert_eq!(receipt["available"], false, "{receipt}");
+        assert_eq!(receipt["reason"], "incomplete_attribution");
         assert_eq!(read(root, "locked/person.txt"), "edited later\n");
+    }
+
+    #[test]
+    fn unreadable_directory_in_both_scans_cannot_look_like_an_empty_restore() {
+        if running_as_root() {
+            return;
+        }
+        let dir = repo();
+        let root = dir.path();
+        fs::create_dir(root.join("locked")).unwrap();
+        fs::write(root.join("locked/person.txt"), "original\n").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-q", "-m", "locked"]);
+        let s = Session::new(root);
+        assert_eq!(s.capture("turn-1")["available"], true);
+
+        chmod(&root.join("locked"), 0o000);
+        let attributed = s.call_with("tool-1", None, || {
+            chmod(&root.join("locked"), 0o755);
+            fs::write(root.join("locked/person.txt"), "edited while unseen\n").unwrap();
+            chmod(&root.join("locked"), 0o000);
+        });
+        chmod(&root.join("locked"), 0o755);
+        assert!(
+            attributed["scan_errors"].as_u64().unwrap() > 0,
+            "{attributed}"
+        );
+        assert!(
+            attributed["changes"].as_array().unwrap().is_empty(),
+            "{attributed}"
+        );
+        for receipt in [s.plan("turn-1"), s.restore("turn-1")] {
+            assert_eq!(receipt["available"], false, "{receipt}");
+            assert_eq!(receipt["reason"], "incomplete_attribution");
+            assert!(receipt["detail"].as_str().unwrap().contains("tool-1"));
+        }
+        assert_eq!(read(root, "locked/person.txt"), "edited while unseen\n");
+    }
+
+    #[test]
+    fn incomplete_initial_scan_cannot_create_a_checkpoint() {
+        if running_as_root() {
+            return;
+        }
+        let dir = repo();
+        let root = dir.path();
+        fs::create_dir(root.join("locked")).unwrap();
+        fs::write(root.join("locked/person.txt"), "original\n").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-q", "-m", "locked"]);
+        let s = Session::new(root);
+        chmod(&root.join("locked"), 0o000);
+        let capture = s.capture("turn-1");
+        chmod(&root.join("locked"), 0o755);
+        assert_eq!(capture["available"], false, "{capture}");
+        assert_eq!(capture["reason"], "incomplete_capture");
+        assert_eq!(s.plan("turn-1")["reason"], "no_checkpoint");
     }
 
     #[test]
