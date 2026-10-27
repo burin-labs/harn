@@ -2,40 +2,54 @@ import { read_yaml } from "std/fs"
 
 type ReleaseStep = {id?: string, uses?: string, env?: dict}
 
-type ReleaseWorkflow = {env?: dict, jobs: {publish: {env?: dict, steps: list<ReleaseStep>}}}
+type ReleaseJob = {env?: dict, steps?: list<ReleaseStep>}
+
+type ReleaseWorkflow = {env?: dict, jobs: dict}
 
 type ResolveReceipt = {version: string, asset: string}
 
-fn main(harness: Harness) {
-  require len(argv) == 1, "usage: verify_release_runtime_environment.harn <published-version>"
-  const version = argv[0]
-  const root = path_join(harness.fs.source_dir(), "..")
+fn verify_workflow(
+  harness: Harness,
+  root: string,
+  version: string,
+  filename: string,
+  runtime_job: string,
+  runtime_id: string,
+  runtime_action: string,
+) {
   const workflow: ReleaseWorkflow = schema_expect(
-    read_yaml(harness.fs, path_join(root, ".github/workflows/publish-release.yml")),
+    read_yaml(harness.fs, path_join(root, ".github/workflows", filename)),
     schema_of(ReleaseWorkflow),
   )
   let runtime_step: ReleaseStep? = nil
-  let compiler_step: ReleaseStep? = nil
-  for step in workflow.jobs.publish.steps {
-    if step.id == "published-runtime" {
-      require runtime_step == nil, "publisher runtime step is duplicated"
-      runtime_step = step
-    }
-    if step.uses == "./.github/actions/rust-toolchain" {
-      require compiler_step == nil, "publisher compiler setup is duplicated"
-      compiler_step = step
+  let compiler_count = 0
+  for entry in workflow.jobs.entries() {
+    const job: ReleaseJob = schema_expect(entry.value, schema_of(ReleaseJob))
+    for step in job.steps ?? [] {
+      if entry.key == runtime_job && (step.id == runtime_id || step.uses == runtime_action) {
+        require runtime_step == nil, filename + ": runtime step is duplicated"
+        runtime_step = step
+      }
+      if step.uses == "./.github/actions/rust-toolchain" {
+        require step.env?.HARN_RUSTC_FRONTEND_THREADS == "1",
+          filename
+          + ": compiler setup must retain the stable front end"
+        compiler_count += 1
+      }
     }
   }
-  require runtime_step != nil && compiler_step != nil, "publisher entrypoints were not measured"
-  require compiler_step.env?.HARN_RUSTC_FRONTEND_THREADS == "1",
-    "publisher compiler setup must retain the stable front end"
+  require runtime_step != nil && compiler_count > 0, filename + ": entrypoints were not measured"
+  const job: ReleaseJob = schema_expect(workflow.jobs[runtime_job], schema_of(ReleaseJob))
   let environment: dict = {}
-  for scope in [workflow.env ?? {}, workflow.jobs.publish.env ?? {}, runtime_step.env ?? {}] {
+  for scope in [workflow.env ?? {}, job.env ?? {}, runtime_step.env ?? {}] {
     for entry in scope.entries() {
-      require type_of(entry.value) == "string", "publisher environment must contain string literals"
+      require type_of(entry.value) == "string",
+        filename
+        + ": environment must contain string literals"
       const value = to_string(entry.value)
       require !value.contains("$" + "{{"),
-        "publisher environment expressions need an explicit projection"
+        filename
+        + ": environment expressions need an explicit projection"
       environment[entry.key] = value
     }
   }
@@ -53,13 +67,16 @@ fn main(harness: Harness) {
   const accepted = harness.process.run(
     {program: "sh", args: args, cwd: root, env: environment, timeout_ms: 30000},
   )
-  require accepted.success, "actual publisher environment failed bootstrap: " + accepted.stderr
+  require accepted.success,
+    filename + ": actual runtime environment failed bootstrap: "
+    + accepted.stderr
   const receipt: ResolveReceipt = schema_expect(
     json_parse(accepted.stdout),
     schema_of(ResolveReceipt),
   )
   require receipt.version == version && receipt.asset.ends_with(".tar.xz"),
-    "publisher bootstrap did not resolve the intended published archive"
+    filename
+    + ": bootstrap did not resolve the intended published archive"
   // Intentional unknown fixture, not a production setting. Match the registry's
   // retired_limit_names_are_unknown_at_startup and agent gate fixture convention.
   const unknown_setting = "HARN" + "_UNEXPECTED_RELEASE_RUNTIME_SETTING"
@@ -75,6 +92,21 @@ fn main(harness: Harness) {
       + name
   }
   harness.stdio.println(
-    "PASS: publisher environment reaches pinned bootstrap; old compiler leak refuses",
+    "PASS: " + filename + " reaches pinned bootstrap; old compiler leak refuses",
+  )
+}
+
+fn main(harness: Harness) {
+  require len(argv) == 1, "usage: verify_release_runtime_environment.harn <published-version>"
+  const root = path_join(harness.fs.source_dir(), "..")
+  verify_workflow(harness, root, argv[0], "publish-release.yml", "publish", "published-runtime", "")
+  verify_workflow(
+    harness,
+    root,
+    argv[0],
+    "build-release-binaries.yml",
+    "setup",
+    "",
+    "./.github/actions/setup-harn",
   )
 }

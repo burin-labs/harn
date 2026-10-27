@@ -74,7 +74,7 @@ jobs:
             "$RUNNER_TEMP/published-runtime-receipt.json" "$RUNNER_TEMP/published-runtime-cache" \
             36b0c000132756a91c7c11f1533d97d9db9ea2db 0.10.180
 
-      - name: Exercise the publisher environment through the pinned bootstrap
+      - name: Exercise release workflow environments through the pinned bootstrap
         if: runner.os == 'Linux'
         timeout-minutes: 5
         shell: bash

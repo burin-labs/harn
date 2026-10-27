@@ -119,9 +119,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  # Published binaries come from the stable compiler with no unstable flags;
-  # the parallel front end (scripts/lib/rustc_frontend.sh) is for iteration.
-  HARN_RUSTC_FRONTEND_THREADS: "1"
 
 jobs:
   setup:
@@ -553,8 +550,12 @@ jobs:
             exit 1
           fi
 
+      # Release builds keep the stable serial front end. Scope the setting to
+      # toolchain setup so the pinned bootstrap runtime never inherits it.
       - uses: ./.github/actions/rust-toolchain
         if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
+        env:
+          HARN_RUSTC_FRONTEND_THREADS: "1"
 
       - name: Generate and verify target-independent CLI AOT payload
         if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
@@ -834,6 +835,8 @@ jobs:
 
       - name: Install repo-pinned Rust toolchain and target
         uses: ./.github/actions/rust-toolchain
+        env:
+          HARN_RUSTC_FRONTEND_THREADS: "1"
         with:
           targets: ${{ matrix.target }}
 
@@ -1854,6 +1857,8 @@ jobs:
           packages: ripgrep
           check-command: rg
       - uses: ./.github/actions/rust-toolchain
+        env:
+          HARN_RUSTC_FRONTEND_THREADS: "1"
       # The generated-files lane checks the payload the archives embed.
       - name: Restore the candidate's CLI AOT payload
         uses: ./.github/actions/download-artifact-with-retry
