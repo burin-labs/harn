@@ -1212,7 +1212,7 @@ async fn bridge_progress_and_log_session_updates_namespace_vendor_fields() {
                 update["entries"],
                 serde_json::json!([
                     {"content": "Implement progress helper.", "status": "completed", "priority": "high"},
-                    {"content": "Run conformance.", "status": "pending"}
+                    {"content": "Run conformance.", "status": "pending", "priority": "medium"}
                 ])
             );
             assert!(
