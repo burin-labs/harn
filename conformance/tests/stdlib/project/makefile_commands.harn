@@ -69,11 +69,18 @@ pipeline test(harness: Harness) {
     const dir = path_join(root, item.name)
     harness.fs.mkdir(dir)
     harness.fs.write_text(path_join(dir, "index.js"), "export const KNOWN_SCANNER_INPUT = true;\n")
-    for (file, content) in item.files.iter() {
-      harness.fs.write_text(path_join(dir, file), content)
+    // Preserve Make's precedence when the filesystem aliases case variants.
+    for file in ["Makefile", "makefile", "GNUmakefile"] {
+      const content = item.files[file]
+      if content != nil {
+        harness.fs.write_text(path_join(dir, file), content)
+      }
     }
     if item.unreadable_directory != nil {
       const unreadable = path_join(dir, item.unreadable_directory)
+      if harness.fs.exists(unreadable) {
+        harness.fs.delete(unreadable)
+      }
       harness.fs.mkdir(unreadable)
       assert(harness.fs.stat(unreadable).is_dir)
       assert(

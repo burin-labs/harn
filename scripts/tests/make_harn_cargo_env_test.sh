@@ -463,6 +463,53 @@ if ! grep -Fq "no compatible prebuilt Harn binary" "$tmp_root/auto-fallback-stde
   cat "$tmp_root/auto-fallback-stderr.txt" >&2
   exit 1
 fi
+
+# An explicit runner can refuse its environment before either contract probe.
+# Preserve that cause instead of hiding it behind the compatibility verdict.
+cat > "$fake_bin/harn-probe-refusal" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$FAKE_PROBE_RECORD"
+if [[ "$*" = "host lease run cargo --help" && "$FAKE_PROBE_FAILURE" != help ]]; then
+  exit 0
+fi
+echo "HARN-ENV-001: unknown Harn environment variable HARN_BUILD_JOBS" >&2
+exit 2
+SH
+chmod +x "$fake_bin/harn-probe-refusal"
+for phase in help status; do
+  : > "$record"
+  probe_record="$tmp_root/probe-$phase-record.txt"
+  if HARN_CARGO_LEASE_MODE=required \
+    HARN_CARGO_LEASE_RUNNER="$fake_bin/harn-probe-refusal" \
+    PATH="$fake_bin:/usr/bin:/bin" \
+    CARGO_TARGET_DIR="$target_dir" \
+    FAKE_CARGO_RECORD="$record" \
+    FAKE_PROBE_RECORD="$probe_record" \
+    FAKE_PROBE_FAILURE="$phase" \
+    "$repo_root/scripts/cargo_with_worktree_build_dir.sh" build -p harn-vm \
+      > "$tmp_root/probe-$phase.out" 2> "$tmp_root/probe-$phase.err"; then
+    echo "$phase probe refusal admitted a workload" >&2
+    exit 1
+  fi
+  if ! grep -Fq "HARN-ENV-001: unknown Harn environment variable HARN_BUILD_JOBS" \
+      "$tmp_root/probe-$phase.err" \
+    || [[ -s "$record" ]] \
+    || grep -Fq "host lease run cargo --owner" "$probe_record"; then
+    echo "$phase probe refusal lost its native cause or reached a workload" >&2
+    cat "$tmp_root/probe-$phase.err" "$probe_record" "$record" >&2
+    exit 1
+  fi
+  expected_probe="host lease run cargo --help"
+  if [[ "$phase" = status ]]; then
+    expected_probe="host lease status --host harn-lease-runner-probe --resource-class rust-heavy --json"
+  fi
+  if ! grep -Fxq "$expected_probe" "$probe_record"; then
+    echo "$phase refusal did not reach its probe" >&2
+    cat "$probe_record" >&2
+    exit 1
+  fi
+done
 if ! grep -Fxq \
     "host lease status --host harn-lease-runner-probe --resource-class rust-heavy --json" \
     "$stale_harn_record"; then

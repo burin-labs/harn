@@ -417,6 +417,17 @@ async fn call_harness_process_method(
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
     match method {
+        "find_executable" => {
+            let program = string_arg(args, 0, "HarnessProcess.find_executable")?;
+            if program.is_empty() || program.contains('/') || program.contains('\\') {
+                return Err(VmError::TypeError(
+                    "HarnessProcess.find_executable requires a non-empty bare program name"
+                        .to_string(),
+                ));
+            }
+            Ok(crate::stdlib::process::find_executable_for_spawn(program)
+                .map_or(VmValue::Nil, VmValue::string))
+        }
         "exec" | "exec_at" => {
             let (cwd, command) = if method == "exec_at" {
                 if args.len() < 2 {

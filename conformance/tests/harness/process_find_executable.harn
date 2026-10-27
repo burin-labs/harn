@@ -1,0 +1,50 @@
+fn main(harness: Harness) {
+  const windows = harness.system.platform().os == "windows"
+  const program = windows ? "cmd" : "sh"
+  const command_args = windows ? ["/c", "echo executable-selection-control"] : [
+    "-c",
+    "printf executable-selection-control",
+  ]
+  const selected = harness.process.find_executable(program)
+  assert(selected != nil, "the positive executable lookup must be measured")
+  assert_eq(harness.process.find_executable("__harn_missing_executable_control__"), nil)
+  const invalid = try {
+    harness.process.find_executable("directory/program")
+    false
+  } catch {
+    true
+  }
+  assert(invalid)
+  const tools = tool_define(
+    tool_registry(),
+    "execute_selected_program",
+    "Execute the program selected during preparation",
+    {
+      input_schema: {type: "object", properties: {}, additionalProperties: false},
+      prepare: { _args ->
+        const executable = harness.process.find_executable(program)
+        assert_eq(executable, selected)
+        return {operation: {program: executable, args: command_args}}
+      },
+      handler: { _args ->
+        const result = harness.process.run(tool_invocation_binding().operation)
+        return {
+          schema: "harn.agent_tool_handler_result.v2",
+          outcome: "ok",
+          text: result.stdout,
+          data: result,
+        }
+      },
+    },
+  )
+  const dispatched = harness.tools.dispatch_agent_call(
+    {name: "execute_selected_program", id: "lookup", arguments: {}},
+    tools,
+    {},
+  )
+  assert(dispatched.ok)
+  assert_eq(dispatched.data.exit_code, 0)
+  assert_eq(dispatched.data.stdout.trim(), "executable-selection-control")
+  harness.stdio.println("selected_executable_runs_after_read_only_preparation=true")
+  harness.stdio.println("unresolved_executable_remains_nil=true")
+}

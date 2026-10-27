@@ -129,13 +129,13 @@ lease_runner_keeps_contended_waits_idle() (
     "$candidate" host lease status \
       --host harn-lease-runner-probe \
       --resource-class rust-heavy \
-      --json >/dev/null 2>&1 \
+      --json >/dev/null \
     && [[ -f "$probe_root/host-leases.wake" ]]
 )
 
 lease_runner_is_compatible() {
   local candidate="$1"
-  "$candidate" host lease run cargo --help >/dev/null 2>&1 \
+  "$candidate" host lease run cargo --help >/dev/null \
     && lease_runner_keeps_contended_waits_idle "$candidate"
 }
 
@@ -168,7 +168,7 @@ resolve_lease_runner() {
   # would silently start a second Rust-heavy compile instead of reusing the
   # supplied lease supervisor.
   if [[ -n "${HARN_BIN:-}" && -x "$HARN_BIN" ]] \
-    && lease_runner_is_compatible "$HARN_BIN"; then
+    && lease_runner_is_compatible "$HARN_BIN" 2>/dev/null; then
     printf '%s\n' "$HARN_BIN"
     return
   fi
@@ -183,13 +183,13 @@ resolve_lease_runner() {
   # Windows cannot replace an executable while that same image supervises the
   # Cargo build. Use only an independently installed runner there.
   if [[ "$can_run_target_binary" == "1" && -x "$candidate" ]] \
-    && lease_runner_is_compatible "$candidate"; then
+    && lease_runner_is_compatible "$candidate" 2>/dev/null; then
     printf '%s\n' "$candidate"
     return
   fi
   candidate="$(command -v harn || true)"
   if [[ -n "$candidate" && -x "$candidate" ]] \
-    && lease_runner_is_compatible "$candidate"; then
+    && lease_runner_is_compatible "$candidate" 2>/dev/null; then
     printf '%s\n' "$candidate"
   fi
 }
