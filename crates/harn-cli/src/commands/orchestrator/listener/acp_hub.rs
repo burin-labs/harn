@@ -245,10 +245,7 @@ impl AcpWebSocketHub {
                 {
                     Ok(runtime) => runtime,
                     Err(error) => {
-                        harn_vm::events::log_error(
-                            "orchestrator",
-                            &format!("failed to start ACP WebSocket worker: {error}"),
-                        );
+                        harn_vm::events::log_error("orchestrator", &format!("ACP worker: {error}"));
                         return;
                     }
                 };

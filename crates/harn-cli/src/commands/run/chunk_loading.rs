@@ -34,7 +34,7 @@ pub(crate) enum ChunkLoadFailure {
     PackageMaterialization,
     /// An import failed before the VM started. The typed facts are retained
     /// here so every run-launch projection consumes the same value.
-    Import(ImportFailureDetail, String),
+    Import(Box<ImportFailureDetail>, String),
     /// The program did not parse, typecheck, or compile.
     Program(String),
 }
@@ -206,15 +206,23 @@ pub(crate) fn compile_or_load_chunk_with_timing(
         let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {
             had_type_error = true;
-            if brief.is_empty() {
-                brief = brief_diagnostic(path, diag.span.as_ref(), &diag.message);
+            if !brief.is_empty() {
+                brief.push_str("; ");
             }
+            brief.push_str(&brief_diagnostic(
+                path,
+                diag.span.as_ref(),
+                &format!("{}: {}", diag.code, diag.message),
+            ));
         }
         stderr.push_str(&rendered);
     }
     if let Some(failure) = typecheck.failure {
         stderr.push_str(&failure.rendered);
-        return Err(ChunkLoadFailure::Import(failure.detail, failure.brief));
+        return Err(ChunkLoadFailure::Import(
+            Box::new(failure.detail),
+            failure.brief,
+        ));
     }
     if let Some(t) = timing.as_deref_mut() {
         t.typecheck = typecheck_start.elapsed();
@@ -307,7 +315,14 @@ pub(crate) fn parse_source_for_run_with_brief(
     let tokens = match lexer.tokenize() {
         Ok(tokens) => tokens,
         Err(error) => {
-            *brief = brief_diagnostic(path, Some(&error_span_from_lex(&error)), &error.to_string());
+            *brief = brief_diagnostic(
+                path,
+                Some(&error_span_from_lex(&error)),
+                &format!(
+                    "{}: {error}",
+                    harn_parser::diagnostic::lexer_error_code(&error)
+                ),
+            );
             let diagnostic = harn_parser::diagnostic::render_diagnostic_with_code(
                 source,
                 path,
@@ -331,18 +346,27 @@ pub(crate) fn parse_source_for_run_with_brief(
                 *brief = brief_diagnostic(
                     path,
                     Some(&error_span_from_parse(&error)),
-                    &harn_parser::diagnostic::parser_error_message(&error),
+                    &format!(
+                        "{}: {}",
+                        harn_parser::diagnostic::parser_error_code(&error),
+                        harn_parser::diagnostic::parser_error_message(&error)
+                    ),
                 );
                 render_parse_error(path, source, &error, stderr);
             } else {
                 for error in parser.all_errors() {
-                    if brief.is_empty() {
-                        *brief = brief_diagnostic(
-                            path,
-                            Some(&error_span_from_parse(error)),
-                            &harn_parser::diagnostic::parser_error_message(error),
-                        );
+                    if !brief.is_empty() {
+                        brief.push_str("; ");
                     }
+                    brief.push_str(&brief_diagnostic(
+                        path,
+                        Some(&error_span_from_parse(error)),
+                        &format!(
+                            "{}: {}",
+                            harn_parser::diagnostic::parser_error_code(error),
+                            harn_parser::diagnostic::parser_error_message(error)
+                        ),
+                    ));
                     render_parse_error(path, source, error, stderr);
                 }
             }

@@ -113,14 +113,23 @@ pub(crate) async fn run_bench(
         match diag.severity {
             DiagnosticSeverity::Error => {
                 had_type_error = true;
-                if type_brief.is_empty() {
-                    type_brief = brief_diagnostic(path, diag.span.as_ref(), &diag.message);
+                if !type_brief.is_empty() {
+                    type_brief.push_str("; ");
                 }
+                type_brief.push_str(&brief_diagnostic(
+                    path,
+                    diag.span.as_ref(),
+                    &format!("{}: {}", diag.code, diag.message),
+                ));
                 let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
                 type_detail.push_str(&rendered);
             }
             DiagnosticSeverity::Warning => {
-                let message = brief_diagnostic(path, diag.span.as_ref(), &diag.message);
+                let message = brief_diagnostic(
+                    path,
+                    diag.span.as_ref(),
+                    &format!("{}: {}", diag.code, diag.message),
+                );
                 harn_vm::events::log_warn("typecheck", &message);
             }
             DiagnosticSeverity::Info => {}

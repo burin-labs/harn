@@ -440,7 +440,7 @@ async fn run_reloadable_stdio(path: &str, loaded: LoadedMcpRuntime) {
             }
             Ok(_) => {}
             Err(error) => {
-                harn_vm::events::log_warn("mcp", &format!("source watcher error: {error}"))
+                harn_vm::events::log_warn("mcp", &format!("source watcher error: {error}"));
             }
         }) {
             Ok(watcher) => watcher,

@@ -37,6 +37,46 @@ use crate::package::{self, Manifest};
 
 const MANIFEST_WATCH_DEBOUNCE: Duration = Duration::from_millis(200);
 
+#[inline(never)]
+fn log_startup(config_path: &Path, manifest: &Manifest, role: OrchestratorRole, state_dir: &Path) {
+    harn_vm::events::log_info(
+        "orchestrator",
+        &format!("manifest: {}", config_path.display()),
+    );
+    if let Some(name) = manifest
+        .package
+        .as_ref()
+        .and_then(|package| package.name.as_deref())
+    {
+        harn_vm::events::log_info("orchestrator", &format!("package: {name}"));
+    }
+    harn_vm::events::log_info(
+        "orchestrator",
+        &format!("role: {} ({})", role.as_str(), role.registry_mode()),
+    );
+    if let Some(gap) = role.unproven_isolation() {
+        harn_vm::events::log_warn("orchestrator", gap);
+        tracing::warn!(
+            component = "orchestrator",
+            trace_id = "",
+            role = role.as_str(),
+            "{gap}"
+        );
+    }
+    harn_vm::events::log_info(
+        "orchestrator",
+        &format!("state dir: {}", state_dir.display()),
+    );
+    tracing::info!(
+        component = "orchestrator",
+        trace_id = "",
+        role = role.as_str(),
+        state_dir = %state_dir.display(),
+        manifest = %config_path.display(),
+        "orchestrator starting"
+    );
+}
+
 async fn wait_for_pump_startup(
     pending_pumps: &mut [(String, PumpHandle)],
     inbox_pumps: &mut [(String, PumpHandle)],
@@ -137,46 +177,7 @@ async fn orchestrator_lifecycle(
     let startup_started_at = now_rfc3339();
     let (admin_reload, mut reload_rx) = AdminReloadHandle::channel();
 
-    harn_vm::events::log_info(
-        "orchestrator",
-        &format!("manifest: {}", config_path.display()),
-    );
-    if let Some(name) = manifest
-        .package
-        .as_ref()
-        .and_then(|package| package.name.as_deref())
-    {
-        harn_vm::events::log_info("orchestrator", &format!("package: {name}"));
-    }
-    harn_vm::events::log_info(
-        "orchestrator",
-        &format!(
-            "role: {} ({})",
-            config.role.as_str(),
-            config.role.registry_mode()
-        ),
-    );
-    if let Some(gap) = config.role.unproven_isolation() {
-        harn_vm::events::log_warn("orchestrator", gap);
-        tracing::warn!(
-            component = "orchestrator",
-            trace_id = "",
-            role = config.role.as_str(),
-            "{gap}"
-        );
-    }
-    harn_vm::events::log_info(
-        "orchestrator",
-        &format!("state dir: {}", state_dir.display()),
-    );
-    tracing::info!(
-        component = "orchestrator",
-        trace_id = "",
-        role = config.role.as_str(),
-        state_dir = %state_dir.display(),
-        manifest = %config_path.display(),
-        "orchestrator starting"
-    );
+    log_startup(&config_path, &manifest, config.role, &state_dir);
 
     let workspace_root = manifest_dir.clone();
     let mut vm = config

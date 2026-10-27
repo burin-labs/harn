@@ -168,11 +168,12 @@ pub(crate) fn format_program_error(brief: &str, detail: &str, explain: bool) -> 
     if explain {
         format!("[harn] {detail}")
     } else {
-        let summary = brief
-            .lines()
-            .next()
-            .filter(|line| !line.is_empty())
-            .unwrap_or("program error");
+        let summary = brief.split_whitespace().collect::<Vec<_>>().join(" ");
+        let summary = if summary.is_empty() {
+            "program error"
+        } else {
+            &summary
+        };
         format!("[harn] error: {summary} (use --explain for details)\n")
     }
 }
