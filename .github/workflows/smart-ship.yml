@@ -30,7 +30,7 @@ permissions:
 jobs:
   ship:
     # The shared runner decides which events wake the shepherd.
-    uses: burin-labs/.github/.github/workflows/smart-ship.yml@ef1906f805d8a763008c9bbd580144aadeeb9a82
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@a2501c3d4ea83fb1c2e2512694c6636e4637e657
     with:
       # .github/smart-ship.toml sets which problems are repaired. The repair
       # model's key is a secret of this environment, which admits main only.
