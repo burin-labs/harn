@@ -166,11 +166,9 @@ impl AcpServer {
         };
         let prompt_text = prompt.text.clone();
         if let Some(boundary_id) = prompt.correlation.message_id.as_deref() {
-            if let Some(session) = self.sessions.get_mut(&session_id) {
+            if let Some(session) = self.sessions.get(&session_id) {
                 if session.workspace_checkpoint
-                    && !session
-                        .checkpoint_prompt_ids
-                        .insert(boundary_id.to_string())
+                    && session.checkpoint_prompt_ids.contains(boundary_id)
                 {
                     self.send_prompt_protocol_error(
                         id,
@@ -439,6 +437,15 @@ impl AcpServer {
                 return;
             }
         };
+        if workspace_checkpoint {
+            if let Some(boundary_id) = prompt.correlation.message_id.as_deref() {
+                self.sessions
+                    .get_mut(&session_id)
+                    .expect("admitted session")
+                    .checkpoint_prompt_ids
+                    .insert(boundary_id.to_string());
+            }
+        }
         #[cfg(feature = "hostlib")]
         if workspace_checkpoint {
             if let Some(boundary_id) = prompt.correlation.message_id.as_deref() {

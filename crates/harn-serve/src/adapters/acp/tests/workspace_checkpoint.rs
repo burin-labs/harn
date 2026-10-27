@@ -124,6 +124,14 @@ async fn opted_in_prompt_captures_its_caller_identity_at_admission() {
     }).await;
     assert!(missing["error"]["message"].as_str().unwrap_or_default().contains("messageId"), "{missing}");
     assert!(!reached_host, "missing identity reached the host pipeline");
+    std::fs::remove_file(&pipeline).unwrap();
+    request_tx.send(serde_json::json!({
+        "jsonrpc":"2.0", "id":21, "method":"session/prompt",
+        "params":{"sessionId":session, "messageId":"caller-turn", "prompt":[{"type":"text", "text":"retry"}]},
+    })).unwrap();
+    let rejected = recv_response_with_id(&mut response_rx, 21).await;
+    assert!(rejected["error"]["message"].as_str().unwrap_or_default().contains("Failed to read pipeline"), "{rejected}");
+    std::fs::write(&pipeline, "pipeline default(harness: Harness) { 42 }\n").unwrap();
     request_tx.send(serde_json::json!({
         "jsonrpc":"2.0", "id":2, "method":"session/prompt",
         "params":{"sessionId":session, "messageId":"caller-turn", "prompt":[{"type":"text", "text":"hello"}]},
