@@ -257,11 +257,8 @@ pub(super) fn apply_persisted_push_config_event(
 
 pub(super) fn supported_wire_version() -> &'static str {
     A2A_PROTOCOL_VERSION
-        .match_indices('.')
-        .nth(1)
-        .map_or(A2A_PROTOCOL_VERSION, |(index, _)| {
-            &A2A_PROTOCOL_VERSION[..index]
-        })
+        .rsplit_once('.')
+        .map_or(A2A_PROTOCOL_VERSION, |(version, _)| version)
 }
 
 pub(super) fn accepts_version_header(headers: &HeaderMap) -> bool {
