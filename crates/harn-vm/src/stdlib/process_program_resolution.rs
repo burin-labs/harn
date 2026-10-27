@@ -84,13 +84,13 @@ fn find_program_path(
     };
     for dir in std::env::split_paths(&path_value) {
         let exact = dir.join(program);
-        if is_executable_candidate(&exact) {
-            return Some(exact.display().to_string());
+        if let Some(path) = absolute_executable_candidate(&exact) {
+            return Some(path);
         }
         for ext in &extensions {
             let candidate = dir.join(format!("{program}{ext}"));
-            if is_executable_candidate(&candidate) {
-                return Some(candidate.display().to_string());
+            if let Some(path) = absolute_executable_candidate(&candidate) {
+                return Some(path);
             }
         }
     }
@@ -101,6 +101,15 @@ fn find_program_path(
 /// An unresolved name is not evidence that every candidate was absent.
 pub(crate) fn find_executable_for_spawn(program: &str) -> Option<String> {
     find_program_path(program, &None, false, &[])
+}
+
+/// Bind a PATH entry to the lookup cwd without resolving executable symlinks.
+fn absolute_executable_candidate(candidate: &std::path::Path) -> Option<String> {
+    let absolute = std::path::absolute(candidate).ok()?;
+    if !is_executable_candidate(&absolute) {
+        return None;
+    }
+    Some(absolute.display().to_string())
 }
 
 /// A real file, and (on Unix, where the executable bit is meaningful and

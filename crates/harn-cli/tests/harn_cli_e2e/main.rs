@@ -114,6 +114,8 @@ mod provider_catalog_sources;
 mod provider_dispatch_audit;
 mod provider_option_qualification;
 mod providers_dispatch;
+#[cfg(unix)]
+mod relative_path_resolution_cli;
 mod replay_session_cli;
 mod routes_cli;
 mod routes_graph_dispatch;
