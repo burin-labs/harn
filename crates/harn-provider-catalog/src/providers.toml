@@ -8957,6 +8957,14 @@ cache_write_per_mtok = 1.25
 input_per_mtok = 1.0
 output_per_mtok = 5.0
 
+[models."gpt-6.1-terra".pricing.hosted_tool_fees.file_search]
+per_1k_calls = 2.5
+source_url = "https://developers.openai.com/api/docs/pricing"
+
+[models."gpt-6.1-terra".pricing.hosted_tool_fees.web_search]
+per_1k_calls = 10.0
+source_url = "https://developers.openai.com/api/docs/pricing"
+
 [[models."gpt-6.1-terra".pricing.input_token_bands]]
 input_multiplier = 2.0
 minimum_input_tokens = 272001
@@ -8996,6 +9004,14 @@ cache_write_per_mtok = 2.5
 input_per_mtok = 2.0
 output_per_mtok = 10.0
 
+[models."gpt-6.1-terra".serving_tiers.pricing.hosted_tool_fees.file_search]
+per_1k_calls = 2.5
+source_url = "https://developers.openai.com/api/docs/pricing"
+
+[models."gpt-6.1-terra".serving_tiers.pricing.hosted_tool_fees.web_search]
+per_1k_calls = 10.0
+source_url = "https://developers.openai.com/api/docs/pricing"
+
 [models."gpt-6.1-terra".serving_tiers.request]
 param = "service_tier"
 response_values = [
@@ -9025,6 +9041,14 @@ cache_read_per_mtok = 0.025
 cache_write_per_mtok = 0.625
 input_per_mtok = 0.5
 output_per_mtok = 2.5
+
+[models."gpt-6.1-terra".serving_tiers.pricing.hosted_tool_fees.file_search]
+per_1k_calls = 2.5
+source_url = "https://developers.openai.com/api/docs/pricing"
+
+[models."gpt-6.1-terra".serving_tiers.pricing.hosted_tool_fees.web_search]
+per_1k_calls = 10.0
+source_url = "https://developers.openai.com/api/docs/pricing"
 
 [models."gpt-6.1-terra".serving_tiers.request]
 param = "service_tier"
