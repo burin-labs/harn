@@ -1222,8 +1222,6 @@ impl GrantReceipt {
 pub enum EnvironmentPolicyError {
     /// A host or session inference ceiling was not a closed, valid policy.
     MalformedHostInferenceBoundary,
-    /// Host account confirmations were not a valid closed input.
-    MalformedHostAccountAttestations,
     /// A grant spec had an empty name.
     EmptyName,
     /// An `env` source named an empty variable.
@@ -1270,6 +1268,8 @@ pub enum EnvironmentPolicyError {
     MissingSecret { name: String },
     /// A loader control would fire before trusted sandbox setup executes.
     UnsafeTrustedSetupVariable { variable: String },
+    /// Host account confirmations were not a valid closed input.
+    MalformedHostAccountAttestations,
 }
 
 impl fmt::Display for EnvironmentPolicyError {
