@@ -13,7 +13,8 @@ const A2A_AGENT_CARD_PATHS: &[&str] = &[
     ".well-known/agent.json",
     "agent/card",
 ];
-const A2A_PROTOCOL_VERSION: &str = "0.3.0";
+/// A2A protocol version implemented by Harn's current client and server.
+pub const A2A_PROTOCOL_VERSION: &str = "0.3.0";
 const A2A_JSONRPC_TRANSPORT: &str = "JSONRPC";
 const A2A_PUSH_URL_ENV: &str = "HARN_A2A_PUSH_URL";
 const A2A_PUSH_TOKEN_ENV: &str = "HARN_A2A_PUSH_TOKEN";

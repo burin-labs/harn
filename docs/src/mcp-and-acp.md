@@ -1652,6 +1652,12 @@ uses the shared `harn-serve` dispatch core. Harn keeps this adapter rather than
 adopting the official `a2a-lf` Rust SDK; see
 [ADR 0005](./adr/0005-a2a-keep-bespoke-adapter.md).
 
+Requests may include `A2A-Version: 0.3` as a header or query parameter; an absent
+or empty value also selects 0.3. Conflicting or repeated values are rejected.
+The server rejects unsupported versions before dispatch. JSON-RPC returns error
+code `-32009`; HTTP+JSON returns a 400 problem response listing the supported
+versions. Patch versions do not change protocol compatibility.
+
 ### Running the server
 
 ```bash
