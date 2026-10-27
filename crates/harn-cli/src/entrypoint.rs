@@ -745,7 +745,7 @@ async fn dispatch(subcommand: Command, explain: bool) {
                 commands::run::CliLlmMockMode::Off
             };
             if let Err(error) = commands::playground::run_command(args, llm_mock_mode).await {
-                eprint!("{error}");
+                cli_diagnostic!("{}", error.trim_end());
                 process::exit(1);
             }
         }

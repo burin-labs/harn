@@ -9,7 +9,7 @@ use crate::cli::ScanArgs;
 
 #[cfg(not(feature = "hostlib"))]
 pub(crate) async fn run(_args: ScanArgs) {
-    eprintln!(
+    cli_diagnostic!(
         "`harn scan` requires the `hostlib` feature (default-on); it is unavailable in this build"
     );
     std::process::exit(2);
@@ -23,7 +23,7 @@ pub(crate) async fn run(args: ScanArgs) {
     let plan = match build_plan(&args) {
         Ok(plan) => plan,
         Err(message) => {
-            eprintln!("scan: {message}");
+            cli_diagnostic!("scan: {message}");
             std::process::exit(2);
         }
     };

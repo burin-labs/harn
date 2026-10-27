@@ -8,7 +8,7 @@ use crate::cli::RuleArgs;
 
 #[cfg(not(feature = "hostlib"))]
 pub(crate) async fn run(_args: RuleArgs) {
-    eprintln!(
+    cli_diagnostic!(
         "`harn rule` requires the `hostlib` feature (default-on); it is unavailable in this build"
     );
     std::process::exit(2);
