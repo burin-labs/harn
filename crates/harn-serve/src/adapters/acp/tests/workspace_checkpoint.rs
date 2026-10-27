@@ -107,6 +107,24 @@ async fn opted_in_prompt_captures_its_caller_identity_at_admission() {
         assert_eq!(created["result"]["workspaceCheckpointTracking"], true, "{created}");
     let session = created["result"]["sessionId"].as_str().unwrap().to_string();
     request_tx.send(serde_json::json!({
+        "jsonrpc":"2.0", "id":20, "method":"session/prompt",
+        "params":{"sessionId":session, "prompt":[{"type":"text", "text":"missing identity"}]},
+    })).unwrap();
+    let (missing, reached_host) = harn_clock::test_support::within("missing identity response", async {
+        let mut reached_host = false;
+        loop {
+            let message = recv_json(&mut response_rx).await;
+            if message["method"] == "host/capabilities" {
+                reached_host = true;
+                reply_empty_result(&request_tx, &message);
+            } else if message["id"] == 20 {
+                break (message, reached_host);
+            }
+        }
+    }).await;
+    assert!(missing["error"]["message"].as_str().unwrap_or_default().contains("messageId"), "{missing}");
+    assert!(!reached_host, "missing identity reached the host pipeline");
+    request_tx.send(serde_json::json!({
         "jsonrpc":"2.0", "id":2, "method":"session/prompt",
         "params":{"sessionId":session, "messageId":"caller-turn", "prompt":[{"type":"text", "text":"hello"}]},
     })).unwrap();
@@ -178,6 +196,21 @@ async fn opted_in_prompt_captures_its_caller_identity_at_admission() {
             }
         }).await;
         assert!(ordinary["error"].is_null(), "{ordinary}");
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":21, "method":"session/prompt",
+            "params":{"sessionId":untracked, "prompt":[{"type":"text", "text":"untracked without identity"}]},
+        })).unwrap();
+        let ordinary_without_id = harn_clock::test_support::within("untracked prompt response", async {
+            loop {
+                let message = recv_json(&mut response_rx).await;
+                if message["method"] == "host/capabilities" {
+                    reply_empty_result(&request_tx, &message);
+                } else if message["id"] == 21 {
+                    break message;
+                }
+            }
+        }).await;
+        assert!(ordinary_without_id["error"].is_null(), "{ordinary_without_id}");
         let untracked_plan = harn_hostlib::workspace_checkpoint::plan(&untracked, "ordinary-turn").unwrap();
         assert!(matches!(untracked_plan, harn_hostlib::workspace_checkpoint::Outcome::Unavailable(_)), "{untracked_plan:?}");
         request_tx.send(serde_json::json!({
