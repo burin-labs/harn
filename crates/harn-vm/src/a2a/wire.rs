@@ -60,7 +60,7 @@ impl A2aWireVersion {
         }
     }
 
-    pub fn task_from_send_response<'a>(
+    pub(super) fn task_from_send_response<'a>(
         self,
         value: &'a Value,
     ) -> Result<SendResponse<'a>, A2aClientError> {
@@ -96,7 +96,7 @@ impl A2aWireVersion {
     }
 }
 
-pub enum SendResponse<'a> {
+pub(super) enum SendResponse<'a> {
     Task(&'a Value),
     Message(&'a Value),
 }
