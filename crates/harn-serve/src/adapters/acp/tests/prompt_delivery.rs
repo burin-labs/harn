@@ -11,6 +11,7 @@ const TICKS: usize = 3;
 
 struct DeliveryHarness {
     _dir: tempfile::TempDir,
+    checkpoint_tracking: bool,
     gate: std::path::PathBuf,
     ticks: std::path::PathBuf,
     tx: mpsc::UnboundedSender<serde_json::Value>,
@@ -125,6 +126,7 @@ pipeline default(harness: Harness, task: unknown) {{
         };
         Self {
             _dir: dir,
+            checkpoint_tracking: checkpoint,
             gate,
             ticks,
             tx,
@@ -150,6 +152,8 @@ pipeline default(harness: Harness, task: unknown) {{
         });
         if let Some(delivery) = delivery {
             params["delivery"] = serde_json::json!(delivery);
+        }
+        if delivery.is_some() || self.checkpoint_tracking {
             params["messageId"] = serde_json::json!(format!("m{id}"));
         }
         self.send(serde_json::json!({
