@@ -14,6 +14,12 @@ impl Drop for ClearTrustedManagedCatalog {
 
 fn install_managed_supply_stub_provider(provider: &str, addr: std::net::SocketAddr) {
     let mut overlay = crate::llm_config::ProvidersConfig::default();
+    // These gateway tests exercise physical weight and receipt authority, not
+    // the real Mistral account's unknown training settings.
+    let mut mistral = crate::llm_config::provider_config("mistral").unwrap();
+    mistral.data_controls.as_mut().unwrap().training_default =
+        crate::llm_config::TrainingDefault::DoesNotTrain;
+    overlay.providers.insert("mistral".into(), mistral);
     overlay.providers.insert(
         provider.to_string(),
         crate::llm_config::ProviderDef {
