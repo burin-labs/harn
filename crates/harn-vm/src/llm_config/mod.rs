@@ -9,6 +9,7 @@
 //! selection.
 
 mod catalog;
+mod endpoint_data_controls;
 mod escalation;
 mod loading;
 mod provider_def;
@@ -32,6 +33,7 @@ mod tests;
 mod tool_format_fitness_tests;
 
 pub use catalog::*;
+pub(crate) use endpoint_data_controls::EndpointDataControls;
 pub use escalation::*;
 pub use harn_provider_catalog::config::*;
 pub use loading::*;
