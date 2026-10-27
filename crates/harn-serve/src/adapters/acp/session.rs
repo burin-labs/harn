@@ -6,6 +6,13 @@ impl AcpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) {
+        let workspace_checkpoint = match Self::parse_workspace_checkpoint(params) {
+            Ok(value) => value.unwrap_or(false),
+            Err(message) => {
+                self.send_error(id, -32602, message);
+                return;
+            }
+        };
         let cwd = params
             .get("cwd")
             .and_then(|v| v.as_str())
@@ -56,6 +63,7 @@ impl AcpServer {
         }
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.environment_policy = environment_policy;
+            session.workspace_checkpoint = workspace_checkpoint;
         }
         let session = self
             .session_item_json(&session_id, "live", None)
@@ -66,12 +74,28 @@ impl AcpServer {
             serde_json::json!({
                 "sessionId": session_id,
                 "session": session,
+                "workspaceCheckpointTracking": workspace_checkpoint,
                 "modes": modes::session_mode_state(modes::DEFAULT_MODE_ID),
                 "configOptions": self.config_options_for_session(&session_id, modes::DEFAULT_MODE_ID),
             }),
         );
 
         self.emit_available_commands(&session_id);
+    }
+
+    pub(super) fn parse_workspace_checkpoint(
+        params: &serde_json::Value,
+    ) -> Result<Option<bool>, &'static str> {
+        let value = match params.get("workspaceCheckpoint") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(serde_json::Value::Bool(enabled)) => Some(*enabled),
+            Some(_) => return Err("workspaceCheckpoint must be a boolean"),
+        };
+        #[cfg(not(feature = "hostlib"))]
+        if value == Some(true) {
+            return Err("workspaceCheckpoint requires the hostlib feature");
+        }
+        Ok(value)
     }
 
     /// Parse and launch the `environmentPolicy` block at a runnable session
@@ -715,6 +739,23 @@ impl AcpServer {
                 .sessions
                 .get(&src_id)
                 .is_none_or(|session| session.admission_unavailable);
+            let workspace_checkpoint = self
+                .sessions
+                .get(&src_id)
+                .is_some_and(|session| session.workspace_checkpoint);
+            let checkpoint_prompt_ids = self
+                .sessions
+                .get(&src_id)
+                .map(|session| session.checkpoint_prompt_ids.clone())
+                .unwrap_or_default();
+            let checkpoint_capture_failures = if inherit_checkpoint {
+                self.sessions
+                    .get(&src_id)
+                    .map(|session| session.checkpoint_capture_failures.clone())
+                    .unwrap_or_default()
+            } else {
+                std::collections::HashMap::new()
+            };
             // A fork is the same session lineage: it inherits the parent's
             // environment policy (and thus its grants), not a fresh legacy env.
             let cancellation = self.register_session_cancellation(&new_session_id);
@@ -734,6 +775,9 @@ impl AcpServer {
                     cwd: fork_cwd,
                     project_root,
                     store_scope: scope.clone(),
+                    workspace_checkpoint,
+                    checkpoint_prompt_ids,
+                    checkpoint_capture_failures,
                     cancellation,
                     host_bridge: None,
                     inject_state: concurrent_control.inject_state.clone(),

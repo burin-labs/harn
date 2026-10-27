@@ -50,6 +50,7 @@ async fn acp_session_load_restores_persisted_session_unknown_to_server() {
         .handle_incoming_message(serde_json::json!({
             "jsonrpc":"2.0", "id":1, "method":"session/load", "params": {
                 "sessionId":session_id, "cwd":cwd, "environmentPolicy":{"kind":"isolated"},
+                "workspaceCheckpoint":cfg!(feature = "hostlib"),
             },
         }))
         .await;
@@ -70,6 +71,10 @@ async fn acp_session_load_restores_persisted_session_unknown_to_server() {
     let loaded = recv_json(&mut rx).await;
     assert_eq!(loaded["id"], 1);
     assert_eq!(loaded["result"]["session"]["sessionId"], session_id);
+    assert_eq!(
+        loaded["result"]["workspaceCheckpointTracking"],
+        cfg!(feature = "hostlib")
+    );
     assert_eq!(
         loaded["result"]["session"]["liveState"], "live",
         "the restored session is live and promptable"
@@ -92,6 +97,27 @@ async fn acp_session_load_restores_persisted_session_unknown_to_server() {
     let second = recv_json(&mut rx).await;
     assert_eq!(second["id"], 2);
     assert_eq!(second["result"]["session"]["sessionId"], session_id);
+    assert_eq!(
+        second["result"]["workspaceCheckpointTracking"],
+        cfg!(feature = "hostlib")
+    );
+    #[cfg(feature = "hostlib")]
+    {
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc":"2.0", "id":3, "method":"session/load",
+                "params":{"sessionId":session_id, "workspaceCheckpoint":false},
+            }))
+            .await;
+        let refused = recv_response_with_id(&mut rx, 3).await;
+        assert!(
+            refused["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("cannot change live workspace checkpoint tracking"),
+            "{refused}"
+        );
+    }
     harn_vm::agent_events::clear_session_sinks(&session_id);
 }
 

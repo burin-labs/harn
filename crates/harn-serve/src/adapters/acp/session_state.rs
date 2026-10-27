@@ -7,6 +7,7 @@ impl AcpServer {
         Some(serde_json::json!({
             "sessionId": session_id,
             "session": session_value,
+            "workspaceCheckpointTracking": session.workspace_checkpoint,
             "modes": modes::session_mode_state(&session.current_mode_id),
             "configOptions": self.config_options_for_session(session_id, &session.current_mode_id),
         }))
@@ -204,6 +205,25 @@ impl AcpServer {
         else {
             return;
         };
+        let workspace_checkpoint = match Self::parse_workspace_checkpoint(params) {
+            Ok(value) => value,
+            Err(message) => {
+                self.send_error(id, -32602, message);
+                return;
+            }
+        };
+        if let (Some(requested), Some(live)) =
+            (workspace_checkpoint, self.sessions.get(&session_id))
+        {
+            if requested != live.workspace_checkpoint {
+                self.send_error(
+                    id,
+                    -32602,
+                    "session/load cannot change live workspace checkpoint tracking",
+                );
+                return;
+            }
+        }
 
         // Durable history is not launch authority. A cold load admits a new
         // runnable session, so its host must declare the environment again.
@@ -317,6 +337,12 @@ impl AcpServer {
                     );
                     return;
                 }
+            }
+        }
+
+        if let Some(requested) = workspace_checkpoint {
+            if let Some(session) = self.sessions.get_mut(&session_id) {
+                session.workspace_checkpoint = requested;
             }
         }
 

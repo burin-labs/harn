@@ -148,6 +148,21 @@ impl AcpServer {
             }
         };
         let prompt_text = prompt.text.clone();
+        if let Some(boundary_id) = prompt.correlation.message_id.as_deref() {
+            if let Some(session) = self.sessions.get_mut(&session_id) {
+                if session.workspace_checkpoint
+                    && !session
+                        .checkpoint_prompt_ids
+                        .insert(boundary_id.to_string())
+                {
+                    self.send_prompt_protocol_error(
+                        id,
+                        "messageId was already used by this checkpoint lineage",
+                    );
+                    return;
+                }
+            }
+        }
 
         let candidate_task = if self.concurrent_controls.task_admission.is_some() {
             match TaskPromptTarget::from_params(params) {
@@ -212,13 +227,14 @@ impl AcpServer {
             self.send_prompt_error(id, &message);
             return;
         }
-        let (cwd, project_root, store_scope, environment_policy) =
+        let (cwd, project_root, store_scope, environment_policy, workspace_checkpoint) =
             match self.sessions.get(&session_id) {
                 Some(session) => (
                     session.cwd.clone(),
                     session.project_root.clone(),
                     session.store_scope.clone(),
                     session.environment_policy.clone(),
+                    session.workspace_checkpoint,
                 ),
                 None => {
                     self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
@@ -406,6 +422,34 @@ impl AcpServer {
                 return;
             }
         };
+        #[cfg(feature = "hostlib")]
+        if workspace_checkpoint {
+            if let Some(boundary_id) = prompt.correlation.message_id.as_deref() {
+                let _scope = store_scope.enter();
+                // A failed capture must not prevent the person's prompt running.
+                let capture = harn_hostlib::workspace_checkpoint::capture(
+                    &session_id,
+                    boundary_id,
+                    Some(&cwd),
+                );
+                let failure = match capture {
+                    Ok(harn_hostlib::workspace_checkpoint::Outcome::Ready(_)) => None,
+                    Ok(harn_hostlib::workspace_checkpoint::Outcome::Unavailable(reason)) => {
+                        Some(format!("{}: {}", reason.reason, reason.detail))
+                    }
+                    Err(error) => Some(error.to_string()),
+                };
+                if let Some(failure) = failure {
+                    if let Some(session) = self.sessions.get_mut(&session_id) {
+                        session
+                            .checkpoint_capture_failures
+                            .insert(boundary_id.to_string(), failure);
+                    }
+                }
+            }
+        }
+        #[cfg(not(feature = "hostlib"))]
+        let _ = workspace_checkpoint;
         self.turn_started(&session_id, reply);
         let output = self
             .output

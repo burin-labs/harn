@@ -197,6 +197,25 @@ impl AcpServer {
             self.send_error(id, -32602, "session/workspace_checkpoint requires action");
             return;
         };
+        if matches!(action.as_str(), "plan" | "restore") {
+            if let Some(boundary_id) = text("boundaryId", "boundary_id") {
+                if let Some(detail) = self
+                    .sessions
+                    .get(&session_id)
+                    .and_then(|session| session.checkpoint_capture_failures.get(&boundary_id))
+                {
+                    self.send_response(
+                        id,
+                        serde_json::json!({
+                            "available": false,
+                            "reason": "capture_failed",
+                            "detail": detail,
+                        }),
+                    );
+                    return;
+                }
+            }
+        }
         if matches!(
             action.as_str(),
             "capture" | "call_begin" | "call_end" | "plan" | "restore"

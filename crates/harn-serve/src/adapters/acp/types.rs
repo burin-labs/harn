@@ -466,6 +466,13 @@ pub struct AcpSessionNewParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "environmentPolicy")]
     pub environment_policy: Option<AcpSessionEnvironmentConfig>,
+    /// Capture workspace boundaries for admitted prompts with caller identities.
+    #[serde(
+        default,
+        rename = "workspaceCheckpoint",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workspace_checkpoint: Option<bool>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -481,6 +488,7 @@ impl AcpSessionNewParams {
         Self {
             cwd: Some(cwd.into()),
             environment_policy: Some(environment_policy),
+            workspace_checkpoint: None,
             extra: BTreeMap::new(),
         }
     }
@@ -499,6 +507,12 @@ impl AcpSessionNewParams {
             },
         )
     }
+
+    /// Capture workspace boundaries for admitted prompts with a caller ID.
+    pub fn with_workspace_checkpoint(mut self, enabled: bool) -> Self {
+        self.workspace_checkpoint = Some(enabled);
+        self
+    }
 }
 
 /// `session/new`, `session/load`, and `session/resume` result fields Harn
@@ -509,6 +523,13 @@ pub struct AcpSessionRestoreResult {
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<serde_json::Value>,
+    /// Whether the server enabled automatic workspace checkpoint tracking.
+    #[serde(
+        rename = "workspaceCheckpointTracking",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workspace_checkpoint_tracking: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modes: Option<serde_json::Value>,
     #[serde(
@@ -530,6 +551,13 @@ pub struct AcpSessionLoadParams {
     pub cwd: Option<String>,
     #[serde(rename = "environmentPolicy")]
     pub environment_policy: AcpSessionEnvironmentConfig,
+    /// Capture workspace boundaries for future admitted prompts.
+    #[serde(
+        default,
+        rename = "workspaceCheckpoint",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workspace_checkpoint: Option<bool>,
 }
 
 impl AcpSessionLoadParams {
@@ -541,11 +569,17 @@ impl AcpSessionLoadParams {
             session_id: session_id.into(),
             cwd: None,
             environment_policy,
+            workspace_checkpoint: None,
         }
     }
 
     pub fn with_cwd(mut self, cwd: impl Into<String>) -> Self {
         self.cwd = Some(cwd.into());
+        self
+    }
+
+    pub fn with_workspace_checkpoint(mut self, enabled: bool) -> Self {
+        self.workspace_checkpoint = Some(enabled);
         self
     }
 }
@@ -935,10 +969,12 @@ mod tests {
                 kind: harn_vm::security::EnvironmentPolicyKind::Isolated,
                 grants: Vec::new(),
             }),
+            workspace_checkpoint: Some(true),
             extra: BTreeMap::new(),
         };
         let value = serde_json::to_value(params).unwrap();
         assert_eq!(value["environmentPolicy"]["kind"], "isolated");
+        assert_eq!(value["workspaceCheckpoint"], true);
         assert!(value.get("profile").is_none());
     }
 
