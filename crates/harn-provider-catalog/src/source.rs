@@ -1,6 +1,6 @@
 //! Expand one source model registration into catalog and capability projections.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{de::DeserializeOwned, Deserialize};
 use toml::{Table, Value};
@@ -77,17 +77,16 @@ pub fn expand_model_registrations(
         return Ok(None);
     }
     let mut rules: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    let mut replacements = Vec::new();
+    let mut projections = Vec::new();
     for (id, registration) in registrations {
         let base = catalog["models"][&id]
             .as_table()
             .ok_or_else(|| format!("model {id} must be a table"))?
             .clone();
         register_request(&id, &base, registration.request.clone(), &mut rules)?;
-        register_aliases(&mut catalog, &id, &base, registration.aliases)?;
-        if let Some(selection) = registration.selection {
-            register_selection(&mut catalog, &id, selection)?;
-        }
-        register_supersedes(&mut catalog, &id, registration.supersedes)?;
+        projections.push((id.clone(), registration.aliases, registration.selection));
+        replacements.push((id.clone(), registration.supersedes));
         for (route_id, route) in registration.routes {
             if catalog["models"].get(&route_id).is_some() {
                 return Err(format!(
@@ -111,12 +110,46 @@ pub fn expand_model_registrations(
                 (None, request) => request,
             };
             register_request(&route_id, &model, request, &mut rules)?;
-            register_aliases(&mut catalog, &route_id, &model, route.aliases)?;
-            register_supersedes(&mut catalog, &route_id, route.supersedes)?;
+            projections.push((route_id.clone(), route.aliases, None));
+            replacements.push((route_id.clone(), route.supersedes));
             catalog["models"]
                 .as_table_mut()
                 .expect("models table was read above")
                 .insert(route_id, Value::Table(model));
+        }
+    }
+    for (id, replaced) in replacements {
+        register_supersedes(&mut catalog, &id, replaced)?;
+    }
+    let successors: BTreeMap<String, String> = catalog["models"]
+        .as_table()
+        .expect("models table was read above")
+        .iter()
+        .filter_map(|(id, model)| {
+            model
+                .get("superseded_by")
+                .and_then(Value::as_str)
+                .map(|successor| (id.clone(), successor.into()))
+        })
+        .collect();
+    let mut projections = projections
+        .into_iter()
+        .map(|(id, aliases, selection)| {
+            let depth = replacement_chain(&id, &successors)?.len();
+            Ok((depth, id, aliases, selection))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    // Settle predecessors first so successors can claim their existing projections.
+    projections.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    for (_, id, aliases, selection) in projections {
+        let model_provider = provider(
+            &id,
+            catalog["models"][&id].as_table().expect("registered model"),
+        )?
+        .to_owned();
+        register_aliases(&mut catalog, &id, &model_provider, aliases, &successors)?;
+        if let Some(selection) = selection {
+            register_selection(&mut catalog, &id, selection, &successors)?;
         }
     }
     let providers: Table = rules
@@ -148,6 +181,23 @@ fn register_supersedes(catalog: &mut Value, id: &str, replaced: Vec<String>) -> 
         row.insert("superseded_by".into(), Value::String(id.into()));
     }
     Ok(())
+}
+
+fn replacement_chain<'a>(
+    id: &'a str,
+    successors: &'a BTreeMap<String, String>,
+) -> Result<Vec<&'a str>, String> {
+    let mut chain = Vec::new();
+    let mut seen = BTreeSet::from([id]);
+    let mut current = id;
+    while let Some(next) = successors.get(current) {
+        if !seen.insert(next.as_str()) {
+            return Err(format!("model {id} has a cyclic replacement chain"));
+        }
+        chain.push(next.as_str());
+        current = next;
+    }
+    Ok(chain)
 }
 
 fn decode<T: DeserializeOwned>(value: Value, id: &str) -> Result<T, String> {
@@ -219,23 +269,38 @@ fn register_request(
 fn register_aliases(
     catalog: &mut Value,
     id: &str,
-    model: &Table,
+    provider: &str,
     aliases: Vec<String>,
+    successors: &BTreeMap<String, String>,
 ) -> Result<(), String> {
     if aliases.is_empty() {
         return Ok(());
     }
-    let provider = provider(id, model)?;
     let root = catalog.as_table_mut().expect("catalog is a table");
     let table = root
         .entry("aliases")
         .or_insert_with(|| Value::Table(Table::new()));
     let table = table.as_table_mut().ok_or("aliases must be a table")?;
     for alias in aliases {
-        if alias.trim().is_empty() || alias.trim() != alias || table.contains_key(&alias) {
+        if alias.trim().is_empty() || alias.trim() != alias {
             return Err(format!(
                 "model {id} has an empty, padded or duplicate alias {alias:?}"
             ));
+        }
+        if let Some(existing) = table.get(&alias) {
+            let replaces = match existing.get("id").and_then(Value::as_str) {
+                Some(predecessor)
+                    if existing.get("provider").and_then(Value::as_str) == Some(provider) =>
+                {
+                    replacement_chain(predecessor, successors)?.contains(&id)
+                }
+                _ => false,
+            };
+            if !replaces {
+                return Err(format!(
+                    "model {id} has a duplicate alias {alias:?} without replacing its owner"
+                ));
+            }
         }
         table.insert(
             alias,
@@ -252,6 +317,7 @@ fn register_selection(
     catalog: &mut Value,
     id: &str,
     mut selection: Selection,
+    successors: &BTreeMap<String, String>,
 ) -> Result<(), String> {
     if selection.value.model_id.is_some() {
         return Err(format!("model {id} registration owns its picker model id"));
@@ -277,14 +343,9 @@ fn register_selection(
         .and_then(|dimension| dimension.get_mut("ordered_values"))
         .and_then(Value::as_array_mut)
         .ok_or_else(|| format!("model {id} names an absent or non-model picker dimension"))?;
-    if values.iter().any(|value| {
+    let existing = values.iter().position(|value| {
         value.get("value").and_then(Value::as_str) == Some(selection.value.value.as_str())
-    }) {
-        return Err(format!(
-            "model {id} duplicates picker value {}",
-            selection.value.value
-        ));
-    }
+    });
     let index = match selection.before {
         Some(before) => values
             .iter()
@@ -294,6 +355,18 @@ fn register_selection(
     };
     selection.value.model_id = Some(id.into());
     let value = Value::try_from(selection.value).map_err(|error| error.to_string())?;
+    if let Some(existing) = existing {
+        let predecessor = values[existing].get("model_id").and_then(Value::as_str);
+        if let Some(predecessor) = predecessor {
+            if replacement_chain(predecessor, successors)?.contains(&id) {
+                values[existing] = value;
+                return Ok(());
+            }
+        }
+        return Err(format!(
+            "model {id} duplicates a picker value without replacing its owner"
+        ));
+    }
     values.insert(index, value);
     Ok(())
 }

@@ -40,7 +40,6 @@ fn terra_registration_reaches_packaged_routes_controls_and_picker() {
     assert!(!models
         .iter()
         .any(|model| model["id"] == "gpt-6.1-terra-unserved"));
-    assert!(!models.iter().any(|model| model["id"] == "gpt-6.1-astra"));
     assert!(catalog["aliases"]
         .as_array()
         .unwrap()

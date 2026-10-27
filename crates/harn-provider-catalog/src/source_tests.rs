@@ -135,7 +135,7 @@ fn unknown_request_policy_and_authored_matches_are_refused() {
 fn duplicate_authorities_do_not_silently_replace_each_other() {
     for (suffix, expected) in [
         ("\n[models.gateway]\nname = \"Already exists\"\nprovider = \"gateway\"\ncontext_window = 10\n", "already has a model row"),
-        ("\n[aliases.current-short]\nid = \"previous\"\nprovider = \"direct\"\n", "duplicate alias"),
+        ("\n[aliases.current-short]\nid = \"current\"\nprovider = \"direct\"\n", "duplicate alias"),
     ] {
         let error = expand_model_registrations(&format!("{SOURCE}{suffix}"))
             .err().expect("duplicate authority must fail");
@@ -150,4 +150,57 @@ fn ordinary_catalog_sources_do_not_gain_a_second_projection() {
             .unwrap()
             .is_none()
     );
+}
+
+#[test]
+fn one_successor_registration_replaces_existing_routes_and_picker_slot() {
+    let addition = r#"
+[models.a-successor]
+name = "Successor"
+provider = "direct"
+context_window = 300
+
+[models.a-successor.registration]
+supersedes = ["current"]
+aliases = ["current-short"]
+
+[models.a-successor.registration.routes.gateway-next]
+provider = "gateway"
+supersedes = ["gateway"]
+aliases = ["gateway-short"]
+
+[models.a-successor.registration.selection]
+family = "example"
+dimension = "variant"
+value = { value = "current", label = "Successor", plain_description = "New generation.", relative_cost_hint = 2, relative_speed_hint = 4 }
+"#;
+    let projection = expand_model_registrations(&format!("{SOURCE}{addition}"))
+        .expect("one added registration must replace its predecessor")
+        .unwrap();
+    let parsed =
+        crate::config::parse_config_toml_with_diagnostics(&projection.catalog_source).unwrap();
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let config = parsed.config;
+    assert_eq!(config.aliases["current-short"].id, "a-successor");
+    assert_eq!(config.aliases["gateway-short"].id, "gateway-next");
+    assert_eq!(
+        config.models["current"].superseded_by.as_deref(),
+        Some("a-successor")
+    );
+    assert_eq!(
+        config.models["gateway"].superseded_by.as_deref(),
+        Some("gateway-next")
+    );
+    let values = &config.presentation.families["example"].dimensions[0].ordered_values;
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].model_id.as_deref(), Some("a-successor"));
+    assert_eq!(values[0].label, "Successor");
+    assert_eq!(values[1].model_id.as_deref(), Some("previous"));
+    let unowned = addition
+        .replace("supersedes = [\"current\"]", "")
+        .replace("aliases = [\"current-short\"]", "");
+    let error = expand_model_registrations(&format!("{SOURCE}{unowned}"))
+        .err()
+        .expect("an unrelated model cannot take over an existing picker value");
+    assert!(error.contains("duplicates a picker value"), "{error}");
 }

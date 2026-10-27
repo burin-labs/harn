@@ -27,7 +27,7 @@ value = { value = "current", label = "Current", plain_description = "New model."
 [presentation.families.private]
 label = "Private"
 plain_description = "Choose a private model."
-presets = []
+presets = [{ id = "current", label = "Current", plain_blurb = "Use the current model.", coordinates = { variant = "current" } }]
 
 [[presentation.families.private.dimensions]]
 key = "variant"
