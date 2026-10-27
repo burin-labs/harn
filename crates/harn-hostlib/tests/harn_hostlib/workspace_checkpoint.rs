@@ -974,7 +974,50 @@ fn writer_confirmation_is_bound_to_the_observed_file_state() {
             ),
         ],
     );
-    assert_eq!(paths(&confirmed, "restored"), ["a.txt"], "{confirmed}");
+    assert_eq!(paths(&confirmed, "refused"), ["a.txt"], "{confirmed}");
+    assert_eq!(
+        confirmed["refused"][0]["reason"],
+        "concurrent-safe replacement is unavailable"
+    );
+    assert_eq!(read(root, "a.txt"), "newer unknown edit\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn confirmed_recreation_only_publishes_into_an_absent_path() {
+    let dir = repo();
+    let root = dir.path();
+    let session = Session::new(root);
+    let capture = session.call(
+        "capture",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            ("root", vm_string(&session.root)),
+            ("writer_policy", vm_string("require_known")),
+        ],
+    );
+    assert_eq!(capture["writer_policy"], "require_known", "{capture}");
+    session.call_with("tool-1", None, || {
+        fs::remove_file(root.join("a.txt")).unwrap();
+    });
+    let plan = session.plan("turn-1");
+    assert_eq!(plan["entries"][0]["observed"]["kind"], "absent", "{plan}");
+    let receipt = session.call(
+        "restore",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            (
+                "confirmed_paths",
+                harn_vm::json_to_vm_value(&json!([{
+                    "session_id": session.id.as_str(),
+                    "boundary_id": "turn-1",
+                    "path": "a.txt",
+                    "observed": { "kind": "absent" },
+                }])),
+            ),
+        ],
+    );
+    assert_eq!(paths(&receipt, "restored"), ["a.txt"], "{receipt}");
     assert_eq!(read(root, "a.txt"), "a original\n");
 }
 
@@ -1015,6 +1058,47 @@ fn confirmation_of_an_absent_file_does_not_authorize_a_new_file() {
     );
     assert_eq!(paths(&receipt, "refused"), ["a.txt"], "{receipt}");
     assert_eq!(read(root, "a.txt"), "new file after confirmation\n");
+}
+
+#[test]
+fn strict_restore_does_not_delete_an_existing_file_even_after_confirmation() {
+    let dir = repo();
+    let root = dir.path();
+    let session = Session::new(root);
+    let capture = session.call(
+        "capture",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            ("root", vm_string(&session.root)),
+            ("writer_policy", vm_string("require_known")),
+        ],
+    );
+    assert_eq!(capture["writer_policy"], "require_known", "{capture}");
+    session.call_with("tool-1", None, || {
+        fs::write(root.join("new.txt"), "new content\n").unwrap();
+    });
+    let plan = session.plan("turn-1");
+    let receipt = session.call(
+        "restore",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            (
+                "confirmed_paths",
+                harn_vm::json_to_vm_value(&json!([{
+                    "session_id": session.id.as_str(),
+                    "boundary_id": "turn-1",
+                    "path": "new.txt",
+                    "observed": plan["entries"][0]["observed"],
+                }])),
+            ),
+        ],
+    );
+    assert_eq!(paths(&receipt, "refused"), ["new.txt"], "{receipt}");
+    assert_eq!(
+        receipt["refused"][0]["reason"],
+        "concurrent-safe replacement is unavailable"
+    );
+    assert_eq!(read(root, "new.txt"), "new content\n");
 }
 
 #[test]

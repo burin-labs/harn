@@ -916,6 +916,7 @@ pub fn restore_with_confirmations(
     };
     advance_revision(&mut state, RESTORE_BUILTIN)?;
     let root = state.root.clone();
+    let require_no_replace = state.writer_policy == WriterPolicy::RequireKnown;
     let anchor = open_anchor(&root);
     let selected: Option<BTreeSet<&str>> =
         only_paths.map(|paths| paths.iter().map(String::as_str).collect());
@@ -943,9 +944,13 @@ pub fn restore_with_confirmations(
                 // immediately before writing: the plan may be moments old and
                 // another writer may have moved the file.
                 let step = match &anchor {
-                    Ok(anchor) => {
-                        restore_one(anchor, &entry, &action.guard_hash, action.write.as_ref())
-                    }
+                    Ok(anchor) => restore_one(
+                        anchor,
+                        &entry,
+                        &action.guard_hash,
+                        action.write.as_ref(),
+                        require_no_replace,
+                    ),
                     Err(error) => Err(error.clone()),
                 };
                 match step {
@@ -1251,6 +1256,13 @@ fn compute_plan(
                     write: None,
                 }
             }
+            _ if state.writer_policy == WriterPolicy::RequireKnown && found.is_some() => {
+                PlannedAction {
+                    entry: entry("refuse", Some("concurrent-safe replacement is unavailable")),
+                    guard_hash: None,
+                    write: None,
+                }
+            }
             Target::Absent => PlannedAction {
                 entry: entry("delete", None),
                 guard_hash: if confirmed {
@@ -1260,6 +1272,13 @@ fn compute_plan(
                 },
                 write: None,
             },
+            _ if state.writer_policy == WriterPolicy::RequireKnown && !cfg!(unix) => {
+                PlannedAction {
+                    entry: entry("refuse", Some("concurrent-safe recreation is unavailable")),
+                    guard_hash: None,
+                    write: None,
+                }
+            }
             Target::Present { bytes, exec, .. } => PlannedAction {
                 entry: entry(
                     if found.is_none() {

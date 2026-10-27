@@ -37,6 +37,11 @@ of `{session_id, boundary_id, path, observed}` records copied from the plan.
 A different session, boundary, or later file change does not match that
 confirmation and is refused. The confirmation is supplied by the host; Harn
 cannot verify that the host actually showed an approval prompt.
+Strict restore currently recreates absent files only, using an atomic
+no-replace operation on Unix. It refuses replacement and deletion of existing
+files, even after confirmation, because another writer could change the path
+between a content check and the mutation. Strict recreation is unavailable on
+other platforms.
 
 ## ACP
 

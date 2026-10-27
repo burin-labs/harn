@@ -1,6 +1,6 @@
 - **Workspace checkpoints can require known writer evidence.** Strict
-  sessions refuse to restore scan-only changes until the host confirms the
-  exact observed file state.
+  sessions require confirmation of scan-only changes and currently refuse
+  replacement or deletion of existing files to protect concurrent edits.
 
   Migration: Rust code constructing `CaptureReceipt`, `AttributedChange`,
   `PlanEntry`, or `PlanReceipt` literals must provide their new writer-policy,
