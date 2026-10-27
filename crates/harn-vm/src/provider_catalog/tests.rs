@@ -198,6 +198,29 @@ path = "/health"
     assert!(healthcheck.body.is_none());
 }
 
+#[test]
+fn regional_data_controls_survive_the_published_catalog_roundtrip() {
+    let catalog = artifact_embedded(None, None);
+    let json = serde_json::to_string(&catalog).unwrap();
+    let decoded = serde_json::from_str(&json).unwrap();
+    let config = config_from_artifact(&decoded);
+    let zai = config.providers.get("zai").expect("zai provider");
+    let global = zai.regions.get("global").expect("global endpoint");
+    let policy = global
+        .data_controls
+        .as_ref()
+        .expect("global endpoint policy");
+    assert_eq!(
+        policy.training_default,
+        llm_config::TrainingDefault::DoesNotTrain
+    );
+    assert!(policy
+        .sources
+        .iter()
+        .any(|source| source == "https://chat.z.ai/legal-agreement/terms-of-service"));
+    assert!(zai.regions.get("cn").unwrap().data_controls.is_none());
+}
+
 #[tokio::test]
 async fn runtime_refresh_installs_valid_remote_catalog_overlay() {
     let guard = RuntimeCatalogGuard::new();

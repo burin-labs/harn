@@ -22,6 +22,39 @@ pub fn pricing_clock_now() -> OffsetDateTime {
 
 const MODEL_DEFAULT_UNSET_KEY: &str = "_unset";
 
+fn endpoint_data_controls(
+    provider: &ProviderDef,
+    base_url: &str,
+) -> Option<Option<ModelDataControlsDef>> {
+    if !provider
+        .regions
+        .values()
+        .any(|region| region.data_controls.is_some())
+    {
+        return None;
+    }
+    let mut matches = provider
+        .regions
+        .values()
+        .filter(|region| region.base_url == base_url);
+    let controls = matches
+        .next()
+        .and_then(|region| region.data_controls.clone());
+    Some(if matches.next().is_none() {
+        controls
+    } else {
+        None
+    })
+}
+
+/// Endpoint-specific data promises cannot authorize a redirected request.
+pub(crate) fn has_endpoint_data_controls(base_url: &str) -> bool {
+    effective_config()
+        .providers
+        .values()
+        .any(|provider| matches!(endpoint_data_controls(provider, base_url), Some(Some(_))))
+}
+
 /// Get provider config for resolving base_url, auth, etc.
 pub fn provider_config(name: &str) -> Option<ProviderDef> {
     let mut provider = effective_config().providers.get(name).cloned()?;
@@ -34,6 +67,15 @@ pub fn provider_config(name: &str) -> Option<ProviderDef> {
         provider.region_env = None;
     }
     Some(provider)
+}
+
+/// The outer option distinguishes providers without endpoint facts from an
+/// endpoint-scoped provider whose selected endpoint is unverified.
+pub(crate) fn resolved_endpoint_data_controls(
+    provider: &str,
+) -> Option<Option<ModelDataControlsDef>> {
+    let definition = provider_config(provider)?;
+    endpoint_data_controls(&definition, &super::resolve_base_url(&definition))
 }
 
 /// The posture Harn requests when a caller names none.
@@ -56,11 +98,20 @@ pub fn data_controls_default_posture() -> DataPosture {
 /// from `Some(TrainingDefault::Unspecified)`, which is the stronger claim that
 /// someone looked and the provider publishes no answer.
 pub fn effective_training_default(provider: &str, model_id: &str) -> Option<TrainingDefault> {
+    let definition = provider_config(provider)?;
+    let endpoint_controls =
+        endpoint_data_controls(&definition, &super::resolve_base_url(&definition));
+    if matches!(endpoint_controls, Some(None)) {
+        return None;
+    }
     if let Some(model_controls) = model_catalog_entry(model_id).and_then(|row| row.data_controls) {
         return Some(model_controls.training_default);
     }
-    provider_config(provider)
-        .and_then(|definition| definition.data_controls)
+    if let Some(Some(controls)) = endpoint_controls {
+        return Some(controls.training_default);
+    }
+    definition
+        .data_controls
         .map(|controls| controls.training_default)
 }
 

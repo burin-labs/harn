@@ -16600,6 +16600,12 @@ label = "Global"
 last_verified = "2026-07-09"
 source_url = "https://docs.z.ai/guides/start/quickstart"
 
+[providers.zai.regions.global.data_controls]
+checked_on = "2026-10-27"
+note = "API end-user content is not used to improve services without explicit consent; see Additional Terms for API Services, section 3(b)."
+sources = ["https://chat.z.ai/legal-agreement/terms-of-service"]
+training_default = "does_not_train"
+
 [qc_defaults]
 anthropic = "claude-haiku-5-5"
 cohere = "command-a-plus-05-2026"

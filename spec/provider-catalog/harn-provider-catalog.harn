@@ -103,6 +103,7 @@ pub type HarnProviderCatalogEndpoint = {
 
 pub type HarnProviderCatalogEndpointRegion = {
   base_url: string,
+  data_controls?: HarnProviderCatalogModelDataControls,
   label?: string,
   last_verified?: string,
   notes?: string,

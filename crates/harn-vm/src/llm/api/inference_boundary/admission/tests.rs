@@ -19,6 +19,51 @@ fn request(
 }
 
 #[test]
+fn regional_training_fact_does_not_admit_unverified_endpoints() {
+    let _guard = crate::llm::env_guard();
+    let _host = ScopedEnvVar::remove(super::super::HOST_BOUNDARY_ENV);
+    let _region = ScopedEnvVar::remove("ZAI_REGION");
+    let _endpoint = ScopedEnvVar::remove("ZAI_BASE_URL");
+    let route = request("zai", "glm-5.3", super::super::InferenceReach::AnyHosted);
+    let global = preview_inference_admission(&route);
+    assert_eq!(global.status, InferenceAdmissionStatus::Admitted);
+    assert_eq!(global.training_default.as_deref(), Some("does_not_train"));
+    let strict = preview_inference_admission(&InferenceAdmissionRequest {
+        data_controls: Some(crate::llm_config::DataPosture::StrictestAvailable),
+        ..route.clone()
+    });
+    assert_eq!(strict.status, InferenceAdmissionStatus::Admitted);
+    assert_eq!(
+        strict.data_controls_outcome,
+        Some(DataControlsOutcome::ProviderUnresearched)
+    );
+    {
+        let _cn = ScopedEnvVar::set("ZAI_REGION", "cn");
+        let snapshot = preview_inference_admission(&route);
+        assert_eq!(snapshot.status, InferenceAdmissionStatus::Unknown);
+        assert_eq!(
+            snapshot.governing_rule.as_deref(),
+            Some("inference_boundary.training_unknown")
+        );
+        assert_eq!(snapshot.training_default, None);
+    }
+    for endpoint in [
+        "https://api.z.ai.evil.example/api/paas/v4",
+        "https://api.z.ai/api/paas/v4/",
+        "https://api.z.ai/api/paas/v4/other",
+        "http://api.z.ai/api/paas/v4",
+    ] {
+        let _override = ScopedEnvVar::set("ZAI_BASE_URL", endpoint);
+        let snapshot = preview_inference_admission(&route);
+        assert_eq!(snapshot.status, InferenceAdmissionStatus::Unknown);
+        assert_eq!(
+            snapshot.governing_rule.as_deref(),
+            Some("inference_boundary.training_unknown")
+        );
+    }
+}
+
+#[test]
 fn preview_uses_the_effective_host_meet_and_preserves_missing_facts() {
     let _guard = crate::llm::env_guard();
     let _host = ScopedEnvVar::set(

@@ -2,6 +2,78 @@
 use super::*;
 
 #[test]
+fn unverified_endpoint_is_refused_before_transport() {
+    use crate::llm::api::{
+        preview_inference_admission, InferenceAdmissionRequest, InferenceAdmissionStatus,
+    };
+    use crate::llm_config::RuntimeProviderEndpointOverrides;
+    use std::io::Write;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let _guard = env_guard();
+    let _allow = allow_stubbed_llm_transport();
+    let _cleanup = PrivacyOverrides;
+    let _host = ScopedEnvVar::remove(super::super::inference_boundary::HOST_BOUNDARY_ENV);
+    let count = Arc::new(AtomicUsize::new(0));
+    let reached = count.clone();
+    let server = spawn_llm_stub_many("endpoint privacy", 2, move |_, stream| {
+        super::ollama_openai_compat::read_http_request(stream);
+        reached.fetch_add(1, Ordering::SeqCst);
+        let body = r#"{"choices":[{"message":{"role":"assistant","content":"accepted"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"#;
+        write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    });
+    let endpoint = format!("http://{}/v1", server.addr());
+    let mut overrides = RuntimeProviderEndpointOverrides::single("openai", &endpoint).unwrap();
+    overrides.insert("zai", &endpoint).unwrap();
+    crate::llm_config::set_runtime_provider_endpoint_overrides(overrides);
+    let boundary = super::super::inference_boundary::InferenceBoundary {
+        reach: super::super::inference_boundary::InferenceReach::AnyHosted,
+        allow_training_discounts: false,
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let mut allowed = base_opts("openai");
+    allowed.model = "gpt-5.6-luna".into();
+    allowed.api_key = "synthetic".into();
+    allowed.stream = false;
+    allowed.inference_boundary = Some(boundary);
+    assert_eq!(
+        runtime.block_on(vm_call_llm_full(&allowed)).unwrap().text,
+        "accepted"
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    let mut denied = base_opts("zai");
+    denied.model = "glm-5.3".into();
+    denied.api_key = "synthetic".into();
+    denied.stream = false;
+    denied.inference_boundary = Some(boundary);
+    let preview = preview_inference_admission(&InferenceAdmissionRequest {
+        provider: denied.provider.clone(),
+        model: denied.model.clone(),
+        boundary: Some(boundary),
+        data_controls: None,
+    });
+    assert_eq!(preview.status, InferenceAdmissionStatus::Unknown);
+    let error = runtime.block_on(vm_call_llm_full(&denied)).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("inference_boundary.training_unknown"),
+        "{error}"
+    );
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        1,
+        "the refused route sent nothing"
+    );
+}
+
+#[test]
 fn no_training_ceiling_plans_and_sends_only_required_controls() {
     use crate::llm::api::{
         preview_inference_admission, InferenceAdmissionRequest, InferenceAdmissionStatus,

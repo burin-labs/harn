@@ -197,6 +197,11 @@ pub(crate) fn training_refusal(
     let sources = crate::llm_config::model_data_controls(model)
         .map(|controls| controls.sources)
         .or_else(|| {
+            crate::llm_config::resolved_endpoint_data_controls(provider)
+                .flatten()
+                .map(|controls| controls.sources)
+        })
+        .or_else(|| {
             crate::llm_config::provider_config(provider)
                 .and_then(|definition| definition.data_controls)
                 .map(|controls| controls.sources)
@@ -244,19 +249,34 @@ pub(crate) fn resolve_for_boundary(
     }
     .to_string();
 
-    let declaration = crate::llm_config::provider_config(provider)
-        .and_then(|definition| definition.data_controls);
+    let endpoint_scope = crate::llm_config::resolved_endpoint_data_controls(provider);
+    let declaration = if matches!(endpoint_scope, Some(None)) {
+        None
+    } else {
+        crate::llm_config::provider_config(provider).and_then(|definition| definition.data_controls)
+    };
     // The route's own declaration wins over its provider's, for both the
     // reported posture and the note a host may surface verbatim.
     let route_controls = crate::llm_config::model_data_controls(model);
+    let endpoint_controls = endpoint_scope.clone().flatten();
     let training_default = crate::llm_config::effective_training_default(provider, model);
     let require_training_control = boundary.is_some_and(|boundary| {
         !boundary.allow_training_discounts
             && training_default != Some(TrainingDefault::DoesNotTrain)
     });
-    let route_note = |provider_note: Option<String>| match &route_controls {
-        Some(controls) => controls.note.clone(),
-        None => provider_note,
+    let route_note = |provider_note: Option<String>| {
+        if matches!(endpoint_scope, Some(None)) {
+            return None;
+        }
+        route_controls
+            .as_ref()
+            .map(|controls| controls.note.clone())
+            .or_else(|| {
+                endpoint_controls
+                    .as_ref()
+                    .map(|controls| controls.note.clone())
+            })
+            .unwrap_or(provider_note)
     };
 
     if posture == DataPosture::Default && !require_training_control {

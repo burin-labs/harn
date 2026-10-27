@@ -92,6 +92,7 @@ export interface HarnProviderEndpoint {
 
 export interface HarnProviderEndpointRegion {
   base_url: string
+  data_controls?: HarnModelDataControls
   label?: string
   source_url?: string
   last_verified?: string

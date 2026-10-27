@@ -222,31 +222,39 @@ pub(crate) fn shared_utility_client() -> &'static reqwest::Client {
 
 pub(crate) fn streaming_client_for_base_url(base_url: &str) -> reqwest::Client {
     static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
-    let metered = admission::bounds_dispatch();
+    let restrict_redirects =
+        admission::bounds_dispatch() || crate::llm_config::has_endpoint_data_controls(base_url);
     cached_client_for_base_url(
         "streaming",
         base_url,
-        metered,
+        restrict_redirects,
         &CLIENTS,
         reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(30))
-            .redirect(inference_redirect_policy("llm_streaming_redirect", metered))
+            .redirect(inference_redirect_policy(
+                "llm_streaming_redirect",
+                restrict_redirects,
+            ))
             .pool_max_idle_per_host(4),
     )
 }
 
 pub(crate) fn blocking_client_for_base_url(base_url: &str) -> reqwest::Client {
     static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
-    let metered = admission::bounds_dispatch();
+    let restrict_redirects =
+        admission::bounds_dispatch() || crate::llm_config::has_endpoint_data_controls(base_url);
     cached_client_for_base_url(
         "blocking",
         base_url,
-        metered,
+        restrict_redirects,
         &CLIENTS,
         reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(30))
             .timeout(std::time::Duration::from_mins(2))
-            .redirect(inference_redirect_policy("llm_blocking_redirect", metered))
+            .redirect(inference_redirect_policy(
+                "llm_blocking_redirect",
+                restrict_redirects,
+            ))
             .pool_max_idle_per_host(4),
     )
 }
@@ -266,11 +274,12 @@ pub(crate) fn utility_client_for_base_url(base_url: &str) -> reqwest::Client {
     )
 }
 
-fn inference_redirect_policy(surface: &'static str, metered: bool) -> reqwest::redirect::Policy {
-    if metered {
-        // A redirect is another HTTP dispatch outside the admitted request.
-        // Return the original response so ordinary error/accounting handling
-        // retains the reservation when the provider supplies no usage.
+fn inference_redirect_policy(
+    surface: &'static str,
+    restrict_redirects: bool,
+) -> reqwest::redirect::Policy {
+    if restrict_redirects {
+        // A redirect escapes the admitted spend or endpoint-specific data policy.
         reqwest::redirect::Policy::none()
     } else {
         crate::egress::redirect_policy(surface, 10)
@@ -280,7 +289,7 @@ fn inference_redirect_policy(surface: &'static str, metered: bool) -> reqwest::r
 fn cached_client_for_base_url(
     kind: &str,
     base_url: &str,
-    metered: bool,
+    restrict_redirects: bool,
     cache: &OnceLock<Mutex<BTreeMap<String, reqwest::Client>>>,
     builder: reqwest::ClientBuilder,
 ) -> reqwest::Client {
@@ -288,7 +297,7 @@ fn cached_client_for_base_url(
         .into_iter()
         .collect::<Vec<_>>();
     let key = format!(
-        "{kind};metered={metered};{}",
+        "{kind};restrict_redirects={restrict_redirects};{}",
         crate::egress::ssrf_client_cache_key(&allow_hosts)
     );
     let clients = cache.get_or_init(|| Mutex::new(BTreeMap::new()));
