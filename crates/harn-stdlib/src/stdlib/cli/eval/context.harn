@@ -116,6 +116,10 @@ fn __format_float_6(value: any) -> string {
   } else {
     f
   }
+  // Keep the scaled integer inside the signed integer range.
+  if abs_f >= 9000000000000.0 {
+    return to_string(f)
+  }
   const scaled = to_int(round(abs_f * 1000000.0)) ?? 0
   const whole = scaled / 1000000
   const frac = scaled - whole * 1000000

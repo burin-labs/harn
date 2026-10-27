@@ -626,6 +626,8 @@ aggregate exact total is null unless every run has a measured cost;
 `total_known_cost_usd` sums the known amounts, and `cost_measured_runs` and
 `cost_unmeasured_runs` show coverage. Observed costs must be finite and
 non-negative; a known lower bound cannot exceed an exact cost.
+If the known subtotal exceeds the floating-point range, evaluation fails before
+writing report artifacts.
 For one release, `--report-version 1` emits the deprecated v1 JSON format for
 existing consumers. V1 substitutes zero for missing costs and its numeric total
 can therefore be incomplete; migrate to v2 for coverage and exact totals.

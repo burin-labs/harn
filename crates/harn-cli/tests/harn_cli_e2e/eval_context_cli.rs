@@ -165,3 +165,69 @@ async fn context_report_rejects_negative_cost_before_writing() {
     assert_eq!(result, 1);
     assert!(!output.exists());
 }
+
+#[tokio::test]
+async fn context_report_preserves_large_finite_cost_and_rejects_overflow() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let source =
+        fs::read_to_string(workspace_root().join("examples/evals/context-engineering-smoke.json"))
+            .unwrap();
+    let mut manifest: serde_json::Value = serde_json::from_str(&source).unwrap();
+    for task in manifest["tasks"].as_array_mut().unwrap() {
+        task["observed"]["cost_usd"] = serde_json::json!(0.0);
+    }
+    manifest["tasks"][0]["observed"]["cost_usd"] = serde_json::json!(1e303);
+    let manifest_path = tmp.path().join("manifest.json");
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    for version in [1, 2] {
+        let output = tmp.path().join(format!("large-{version}"));
+        let result = harn_cli::commands::eval_context::run(EvalContextArgs {
+            manifest: manifest_path.clone(),
+            output: Some(output.clone()),
+            json: false,
+            report_version: version,
+        })
+        .await;
+        assert_eq!(result, 0);
+        let summary: serde_json::Value =
+            serde_json::from_slice(&fs::read(output.join("summary.json")).unwrap()).unwrap();
+        let total = summary["aggregate"]["total_cost_usd"]
+            .as_f64()
+            .expect("finite total");
+        assert!((total / 1e303 - 3.0).abs() < 1e-12);
+        let schema: serde_json::Value = serde_json::from_slice(
+            &fs::read(workspace_root().join(format!(
+                "spec/schemas/context-eval-report.v{version}.schema.json"
+            )))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(jsonschema::draft202012::new(&schema)
+            .unwrap()
+            .is_valid(&summary));
+        let markdown = fs::read_to_string(output.join("summary.md")).unwrap();
+        let shown = markdown
+            .lines()
+            .find_map(|line| line.strip_prefix("- cost USD: "))
+            .expect("cost line")
+            .parse::<f64>()
+            .expect("numeric cost");
+        assert_eq!(shown, total);
+    }
+
+    manifest["tasks"][0]["observed"]["cost_usd"] = serde_json::json!(f64::MAX);
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let output = tmp.path().join("overflow");
+    let result = harn_cli::commands::eval_context::run(EvalContextArgs {
+        manifest: manifest_path,
+        output: Some(output.clone()),
+        json: false,
+        report_version: 2,
+    })
+    .await;
+    assert_eq!(result, 1);
+    assert!(
+        !output.exists(),
+        "overflow must fail before writing artifacts"
+    );
+}

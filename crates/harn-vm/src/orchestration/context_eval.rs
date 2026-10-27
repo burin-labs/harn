@@ -468,7 +468,7 @@ pub fn evaluate_context_eval_manifest_v2(
     let total_runs = runs.len();
     let passed_runs = runs.iter().filter(|run| run.passed).count();
     let failed_runs = total_runs.saturating_sub(passed_runs);
-    let aggregate = aggregate_runs(&runs);
+    let aggregate = aggregate_runs(&runs)?;
     Ok(ContextEvalReportV2 {
         type_name: CONTEXT_EVAL_REPORT_V2_TYPE.to_string(),
         schema_version: CONTEXT_EVAL_REPORT_VERSION,
@@ -1080,13 +1080,27 @@ fn error_recovery_count(events: &[ContextEvalToolEvent]) -> usize {
         .count()
 }
 
-fn aggregate_runs(runs: &[ContextEvalRunReportV2]) -> ContextEvalAggregateV2 {
+fn aggregate_runs(runs: &[ContextEvalRunReportV2]) -> Result<ContextEvalAggregateV2, VmError> {
     let total = runs.len();
     let mean_final_correctness = mean(total, runs.iter().map(|run| run.final_correctness.score));
     let mean_tool_call_quality = mean(total, runs.iter().map(|run| run.tool_call_quality.score));
     let cost_measured_runs = runs.iter().filter(|run| run.cost_usd.is_some()).count();
-    let total_known_cost_usd = round6(runs.iter().filter_map(|run| run.known_cost_usd).sum());
-    ContextEvalAggregateV2 {
+    let total_known_cost_usd =
+        runs.iter()
+            .filter_map(|run| run.known_cost_usd)
+            .try_fold(0.0_f64, |sum, cost| {
+                let total = sum + cost;
+                if total.is_finite() {
+                    Ok(total)
+                } else {
+                    Err(VmError::Runtime(
+                        "context eval total known cost exceeds the supported numeric range"
+                            .to_string(),
+                    ))
+                }
+            })?;
+    let total_known_cost_usd = round6(total_known_cost_usd);
+    Ok(ContextEvalAggregateV2 {
         mean_final_correctness,
         mean_tool_call_quality,
         total_latency_ms: runs.iter().map(|run| run.latency_ms).sum(),
@@ -1098,7 +1112,7 @@ fn aggregate_runs(runs: &[ContextEvalRunReportV2]) -> ContextEvalAggregateV2 {
         cost_unmeasured_runs: total - cost_measured_runs,
         total_compaction_count: runs.iter().map(|run| run.compaction_count).sum(),
         total_error_recovery_count: runs.iter().map(|run| run.error_recovery_count).sum(),
-    }
+    })
 }
 
 fn mode_kind(mode: &ContextEvalMode) -> String {
@@ -1250,7 +1264,11 @@ fn round4(value: f64) -> f64 {
 }
 
 fn round6(value: f64) -> f64 {
-    (value * 1_000_000.0).round() / 1_000_000.0
+    if value.abs() > f64::MAX / 1_000_000.0 {
+        value
+    } else {
+        (value * 1_000_000.0).round() / 1_000_000.0
+    }
 }
 
 pub fn context_eval_default_output_dir() -> PathBuf {
@@ -1350,9 +1368,9 @@ mod tests {
             known_cost_usd: cost_usd,
             ..Default::default()
         };
-        let empty = aggregate_runs(&[]);
+        let empty = aggregate_runs(&[]).unwrap();
         assert_eq!(empty.total_cost_usd, None);
-        let missing = aggregate_runs(&[run(None)]);
+        let missing = aggregate_runs(&[run(None)]).unwrap();
         assert_eq!(
             (
                 missing.total_cost_usd,
@@ -1361,7 +1379,7 @@ mod tests {
             ),
             (None, 0, 1)
         );
-        let zero = aggregate_runs(&[run(Some(0.0))]);
+        let zero = aggregate_runs(&[run(Some(0.0))]).unwrap();
         assert_eq!(
             (
                 zero.total_cost_usd,
@@ -1370,7 +1388,7 @@ mod tests {
             ),
             (Some(0.0), 1, 0)
         );
-        let mixed = aggregate_runs(&[run(Some(0.25)), run(None)]);
+        let mixed = aggregate_runs(&[run(Some(0.25)), run(None)]).unwrap();
         assert_eq!(
             (
                 mixed.total_cost_usd,
@@ -1383,7 +1401,8 @@ mod tests {
         let partial = aggregate_runs(&[ContextEvalRunReportV2 {
             known_cost_usd: Some(0.125),
             ..Default::default()
-        }]);
+        }])
+        .unwrap();
         assert_eq!(
             (partial.total_cost_usd, partial.total_known_cost_usd),
             (None, 0.125)
