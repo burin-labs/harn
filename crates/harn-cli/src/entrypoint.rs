@@ -32,7 +32,14 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
             ) {
                 error.exit();
             }
-            error.exit();
+            let message = error.to_string();
+            let message = if raw_args.iter().any(|arg| arg == "--explain") {
+                message.trim_end()
+            } else {
+                message.lines().next().unwrap_or("invalid arguments")
+            };
+            harn_vm::events::log_status(message);
+            std::process::exit(error.exit_code());
         }
     };
 

@@ -151,3 +151,20 @@ fn fatal_command_error_survives_disabled_logs_and_keeps_its_exit_code() {
     assert!(stderr.starts_with("[harn] error:"), "{stderr}");
     assert!(stderr.contains("malformed"), "{stderr}");
 }
+
+#[test]
+fn argument_errors_are_short_unless_explained() {
+    for explain in [false, true] {
+        let mut command = harn_e2e_command();
+        if explain {
+            command.arg("--explain");
+        }
+        let output = command.arg("--not-a-real-option").output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.starts_with("[harn] error:"), "{stderr}");
+        assert!(stderr.contains("--not-a-real-option"), "{stderr}");
+        assert_eq!(stderr.contains("Usage:"), explain, "{stderr}");
+    }
+}
