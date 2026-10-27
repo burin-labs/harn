@@ -1377,15 +1377,16 @@ fn has_expanding_heredoc(command: string) -> bool {
   return false
 }
 
-/** Inspect executed stages without treating a quoted heredoc's body as shell code. */
-fn quoted_heredoc_writes_stash(
+/** Inspect the shared scanner's executed stages, including nested substitutions. */
+fn executed_stages_write_stash(
   command: string,
   depth: int,
   alias_lookup: fn(list<string>) -> dict,
+  require_resolved: bool,
 ) -> bool {
   const scan = command_risk_scan({request: {mode: "shell", command: command}})
   if scan.execution_semantics?.resolved != true || len(scan.execution_stages ?? []) == 0 {
-    return true
+    return require_resolved
   }
   for stage in scan.execution_stages ?? [] {
     const argv: list<string> = stage.argv
@@ -1407,8 +1408,12 @@ fn quoted_heredoc_writes_stash(
 }
 
 fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>) -> dict) -> bool {
-  if command.contains("<<") && !has_expanding_heredoc(command) {
-    return quoted_heredoc_writes_stash(command, depth, alias_lookup)
+  const literal_heredoc = command.contains("<<") && !has_expanding_heredoc(command)
+  if executed_stages_write_stash(command, depth, alias_lookup, literal_heredoc) {
+    return true
+  }
+  if literal_heredoc {
+    return false
   }
   // A substitution body is a command line the shell runs, so it gets the same analysis. A body that
   // never closes, or one nested past the depth cap, cannot be proven harmless and is refused.

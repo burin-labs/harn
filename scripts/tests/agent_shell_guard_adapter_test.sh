@@ -679,6 +679,29 @@ if [[ -n "$git_read" ]]; then
   exit 1
 fi
 
+commented_substitution="$(
+  standalone_verdict <<'PAYLOAD'
+{"tool_name":"Bash","tool_input":{"command":"echo \"$( # )\ngit stash drop\n)\""}}
+PAYLOAD
+)"
+if [[ "$commented_substitution" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$commented_substitution" != *'git stash'* ]] \
+  || [[ "$commented_substitution" == *'policy faulted'* ]]; then
+  echo "the guard missed a stash write after a shell comment in a substitution" >&2
+  printf '%s\n' "$commented_substitution" >&2
+  exit 1
+fi
+commented_read="$(
+  standalone_verdict <<'PAYLOAD'
+{"tool_name":"Bash","tool_input":{"command":"echo \"$( # )\ngit stash list\n)\""}}
+PAYLOAD
+)"
+if [[ -n "$commented_read" ]]; then
+  echo "the guard rejected a read-only stash substitution after a shell comment" >&2
+  printf '%s\n' "$commented_read" >&2
+  exit 1
+fi
+
 heredoc_write="$(
   standalone_verdict <<'PAYLOAD'
 {"tool_name":"Bash","tool_input":{"command":"cat <<'EOF'\n'\nEOF\necho \"$(git stash pop)\""}}

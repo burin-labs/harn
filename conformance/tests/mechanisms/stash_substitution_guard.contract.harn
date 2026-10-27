@@ -1,0 +1,29 @@
+// A comment delimiter inside a substitution must not hide an executed stash
+// mutation. Read-only substitutions remain available.
+import {
+  UNMEASURED_MAKE_TARGETS,
+  decision,
+  worktree_admission_census,
+} from "../../../scripts/agent_shell_guard"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn payload(command: string) -> string {
+  return json_stringify({tool_name: "Bash", tool_input: {command: command}})
+}
+
+pipeline default(harness: Harness) {
+  const census = worktree_admission_census("1", "/workspace\t")
+  const write = decision(
+    payload("echo \"$( # )\ngit stash drop\n)\""),
+    census,
+    UNMEASURED_MAKE_TARGETS,
+  )
+  const read = decision(
+    payload("echo \"$( # )\ngit stash list\n)\""),
+    census,
+    UNMEASURED_MAKE_TARGETS,
+  )
+  contract_effect(harness.stdio, "trigger_stash_mutation_is_denied", !write.allow)
+  contract_effect(harness.stdio, "effect_denial_names_stash", write.reason.contains("git stash"))
+  contract_negative(harness.stdio, "negative_read_only_substitution_is_not_denied", !read.allow)
+}

@@ -1,0 +1,3 @@
+trigger_stash_mutation_is_denied=true
+effect_denial_names_stash=true
+negative_read_only_substitution_is_not_denied=true

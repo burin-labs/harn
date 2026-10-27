@@ -1329,6 +1329,8 @@ pipeline test_git_stash_writes_inside_command_substitution_are_denied(
     "echo $(echo $(git stash drop))",
     "x=`git stash drop`",
     "echo \"$(git stash pop)\"",
+    "echo \"$( # )\ngit stash drop\n)\"",
+    "cat <( # )\ngit stash pop\n)",
     "cat <(git stash pop)",
     "tee >(git stash drop) < /dev/null",
     "echo $((1 + $(git stash pop; echo 1)))",
@@ -1350,6 +1352,8 @@ pipeline test_git_stash_writes_inside_command_substitution_are_denied(
   for command in [
     "echo $(git rev-parse HEAD)",
     "echo $(git stash list)",
+    "echo \"$( # )\ngit stash list\n)\"",
+    "echo \"$(printf '%s' '# )')\"",
     "echo `git stash show`",
     "diff <(git show a) <(git show b)",
     "echo '$(git stash pop)'",
