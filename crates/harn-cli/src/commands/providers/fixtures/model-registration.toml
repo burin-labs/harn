@@ -1,0 +1,37 @@
+[models."private/current"]
+name = "Current private model"
+provider = "private"
+context_window = 16384
+capabilities = ["tools", "thinking"]
+
+[models."private/current".registration]
+aliases = ["current-private"]
+
+[models."private/current".registration.request]
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+reasoning_effort_levels = ["none", "low"]
+
+[models."private/current".registration.routes."private/current-copy"]
+provider = "private"
+model = { name = "Current private model copy", wire_model = "current-copy-wire" }
+request = { thinking_modes = ["effort"], reasoning_effort_supported = true, reasoning_none_supported = false, reasoning_effort_levels = ["low"] }
+
+[models."private/current".registration.selection]
+family = "private"
+dimension = "variant"
+before = "old"
+value = { value = "current", label = "Current", plain_description = "New model.", relative_cost_hint = 2, relative_speed_hint = 4 }
+
+[presentation.families.private]
+label = "Private"
+plain_description = "Choose a private model."
+presets = [{ id = "current", label = "Current", plain_blurb = "Use the current model.", coordinates = { variant = "current" } }]
+
+[[presentation.families.private.dimensions]]
+key = "variant"
+label = "Model"
+plain_description = "Choose a private model."
+kind = "model"
+ordered_values = [{ value = "old", label = "Old", plain_description = "Old model.", relative_cost_hint = 3, relative_speed_hint = 3, model_id = "private/fast" }]

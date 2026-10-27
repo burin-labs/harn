@@ -52,6 +52,8 @@ mod retirement_tests;
 #[cfg(test)]
 mod schema_shape_tests;
 #[cfg(test)]
+mod terra_registration_tests;
+#[cfg(test)]
 mod tests_parity_provenance;
 #[cfg(test)]
 mod tool_capability_tests;

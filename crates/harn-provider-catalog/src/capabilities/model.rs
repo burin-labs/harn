@@ -180,7 +180,7 @@ provider_defaults! {
     #[serde(default)]
     pub file_upload_wire_format: Option<String>,
     /// Provider-specific reasoning request shape for OpenAI-compatible
-    /// transports. Known values are `openrouter` and `enabled`.
+    /// transports. See [`ProviderRule::reasoning_wire_format`].
     #[serde(default)]
     pub reasoning_wire_format: Option<String>,
     #[serde(default)]

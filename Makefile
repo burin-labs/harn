@@ -1149,7 +1149,7 @@ check-trigger-quickref:
 	@echo "    Harn trigger quickref OK."
 
 # Regenerate the provider/model capability matrix from capabilities.toml.
-gen-provider-matrix: gen-provider-catalog
+gen-provider-matrix:
 	$(HARN_CMD) provider catalog matrix
 
 # CI guard: fail if the provider matrix docs drift from capabilities.toml.
@@ -1159,7 +1159,7 @@ check-provider-matrix: check-provider-catalog
 	@echo "    Harn provider matrix OK."
 
 # Regenerate provider support recommendations from catalog/capabilities/notes.
-gen-provider-support: gen-provider-catalog
+gen-provider-support:
 	$(HARN_CMD) provider catalog support
 
 # CI guard: fail if provider support markdown or JSON drift.
@@ -1170,7 +1170,10 @@ check-provider-support: check-provider-catalog
 
 # Regenerate the checked-in provider/model catalog JSON, schema, and downstream bindings.
 gen-provider-catalog:
-	$(HARN_CMD) provider catalog generate
+	@$(HARN_BIN_ASSIGN) || exit 1; \
+	"$$harn_bin" provider catalog generate && \
+	"$$harn_bin" provider catalog matrix && \
+	"$$harn_bin" provider catalog support
 
 # CI guard: fail if checked-in provider/model catalog artifacts drift.
 check-provider-catalog:
