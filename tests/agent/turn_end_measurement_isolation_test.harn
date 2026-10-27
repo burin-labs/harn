@@ -41,9 +41,25 @@ pipeline test_grading_done_cannot_override_turn_end_continue(harness: Harness) {
     harness.llm,
     [
       llm_text("First completion proposal. ##DONE##"),
-      llm_text("{\"verdict\":\"continue\",\"detail\":\"One product task remains.\"}"),
+      llm_text(
+        json_stringify(
+          {
+            verdict: "continue",
+            detail: "One product task remains.",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      ),
       llm_text("Second completion proposal. ##DONE##"),
-      llm_text("{\"verdict\":\"done\",\"detail\":\"The product task is complete.\"}"),
+      llm_text(
+        json_stringify(
+          {
+            verdict: "done",
+            detail: "The product task is complete.",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      ),
     ],
     { ->
       const session_id = "grading-done-turn-end-continue-" + harness.random.uuid()
@@ -80,7 +96,15 @@ pipeline test_grading_continue_cannot_override_turn_end_done(harness: Harness) {
     harness.llm,
     [
       llm_text("Complete response. ##DONE##"),
-      llm_text("{\"verdict\":\"done\",\"detail\":\"The product task is complete.\"}"),
+      llm_text(
+        json_stringify(
+          {
+            verdict: "done",
+            detail: "The product task is complete.",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      ),
     ],
     { ->
       const session_id = "grading-continue-turn-end-done-" + harness.random.uuid()

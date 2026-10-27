@@ -87,9 +87,14 @@ fn __judge_done_with_gap(gap_class: string?) -> dict {
   const detail =
     "Median is implemented across lexer, AST, parser, and aggregation logic. The required verifier passed all 3 tests with 0 failures."
   const body = if gap_class == nil {
-    {verdict: "done", detail: detail}
+    {verdict: "done", detail: detail, goal_assessment: {kind: "unknown", evidence_refs: []}}
   } else {
-    {verdict: "done", detail: detail, gap_class: gap_class}
+    {
+      verdict: "done",
+      detail: detail,
+      gap_class: gap_class,
+      goal_assessment: {kind: "unknown", evidence_refs: []},
+    }
   }
   return {text: json_stringify(body)}
 }
@@ -257,6 +262,7 @@ pipeline test_a_reask_that_names_a_real_gap_is_believed(harness: Harness, task: 
           {
             verdict: "continue",
             detail: "the vendored directory was modified",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
             gap_class: "unmet_manner_clause",
           },
         ),

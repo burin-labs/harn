@@ -145,11 +145,25 @@ pipeline test_unsteered_run_prompt_is_unchanged_and_still_vetoed(harness: Harnes
     [
       llm_text("Nothing was implemented, but I am calling it finished. ##DONE##"),
       {
-        text: "{\"verdict\":\"continue\",\"detail\":\"The implementation is absent."
-          + " Implement the bounded improvement.\",\"gap_class\":\"missing_artifact\"}",
+        text: json_stringify(
+          {
+            verdict: "continue",
+            detail: "The implementation is absent. Implement the bounded improvement.",
+            gap_class: "missing_artifact",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
       },
       llm_text("Implemented the improvement, its test, and the changelog. ##DONE##"),
-      {text: "{\"verdict\":\"done\",\"detail\":\"The implementation and its test are present.\"}"},
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The implementation and its test are present.",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      },
     ],
     { ->
       const session = "steer-obligations-control-" + harness.random.uuid()
