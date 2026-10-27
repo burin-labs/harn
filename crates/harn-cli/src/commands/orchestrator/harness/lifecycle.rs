@@ -82,7 +82,7 @@ pub(super) async fn orchestrator_task(
     )
     .await
     {
-        eprintln!("[harn] orchestrator harness error: {error}");
+        harn_vm::events::log_status(&format!("error: orchestrator harness: {error}"));
     }
 }
 
@@ -564,7 +564,7 @@ async fn orchestrator_lifecycle(
     // The listener has been accepting connections since it bound; this gates the
     // readiness *signal*, not request serving.
     listener.mark_ready();
-    eprintln!("[harn] HTTP listener ready on {}", listener.url());
+    harn_vm::events::log_status(&format!("HTTP listener ready on {}", listener.url()));
     tracing::info!(
         component = "orchestrator",
         trace_id = "",

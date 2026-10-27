@@ -54,6 +54,11 @@ pub(crate) fn write_stderr_log(bytes: &[u8]) {
     crate::host_stdio::write_bytes(crate::host_stdio::HostStdioStream::Stderr, bytes);
 }
 
+/// Write an unconditional status signal for a supervising process.
+pub fn log_status(message: &str) {
+    write_stderr_log(format!("{HARN_LOG_PREFIX}{message}\n").as_bytes());
+}
+
 impl EventSink for StderrSink {
     fn emit_log(&self, event: &LogEvent) {
         if !stderr_level_enabled(event.level) {

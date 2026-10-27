@@ -90,6 +90,22 @@ async fn orchestrator_json_logs_stay_on_stderr() {
     );
 }
 
+#[tokio::test]
+async fn orchestrator_readiness_survives_disabled_logs() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "harn.toml",
+        "[package]\nname = \"log-fixture\"\n",
+    );
+    let mut process =
+        OrchestratorProcess::spawn(&temp, &[("HARN_LOG_LEVEL", "off"), ("RUST_LOG", "off")]);
+    let listener = process.wait_for_listener_url().await;
+    assert!(listener.starts_with("http://"), "{listener}");
+    let stderr = process.terminate_gracefully().await;
+    assert!(!stderr.contains("[harn] INFO"), "{stderr}");
+}
+
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum SnapshotStatus {
