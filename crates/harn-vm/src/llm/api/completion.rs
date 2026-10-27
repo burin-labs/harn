@@ -68,6 +68,7 @@ pub(crate) async fn vm_call_completion_full(
         crate::llm_config::DataControlDialect::OpenAiSse,
         crate::llm_config::DataPosture::Default,
         boundary,
+        Some(&opts.api_key),
         super::data_controls::ControlDelivery::Unsupported,
     );
     let boundary_rule = super::inference_boundary::preflight(

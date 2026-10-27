@@ -111,6 +111,9 @@ pub struct DataControlsReceipt {
     /// `Some(TrainingDefault::Unspecified)`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub training_default: Option<TrainingDefault>,
+    /// This no-training fact relies on the host's credential-bound confirmation.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub account_confirmation_applied: bool,
     /// The registry's `control_scope` for this provider, absent when the
     /// provider is unresearched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -243,6 +246,7 @@ pub(crate) fn resolve(
         dialect,
         posture,
         None,
+        None,
         ControlDelivery::Written,
     )
 }
@@ -255,6 +259,7 @@ pub(crate) fn resolve_for_boundary(
     dialect: DataControlDialect,
     posture: DataPosture,
     boundary: Option<super::inference_boundary::InferenceBoundary>,
+    credential: Option<&str>,
     control_delivery: ControlDelivery,
 ) -> DataControlsPlan {
     let requested_posture = match posture {
@@ -297,10 +302,27 @@ pub(crate) fn resolve_for_boundary(
     };
     let endpoint_controls = endpoint_scope.clone().verified();
     let selected_training = crate::llm_config::effective_training_default(provider, model);
+    let account_confirmed = trusted.as_ref().is_some_and(|facts| {
+        super::inference_boundary::account::confirmed(
+            provider,
+            credential,
+            facts.no_training_requirements(),
+        )
+    });
     let training_default = match &trusted {
+        Some(_) if account_confirmed => {
+            crate::llm_config::execution_training_restrictions(provider, model)
+                .into_iter()
+                .fold(
+                    Some(TrainingDefault::DoesNotTrain),
+                    |current, restriction| intersect_training_facts(current, Some(restriction)),
+                )
+        }
         Some(facts) => intersect_training_facts(facts.training_default, selected_training),
         None => selected_training,
     };
+    let account_confirmation_applied =
+        account_confirmed && training_default == Some(TrainingDefault::DoesNotTrain);
     let require_training_control = boundary.is_some_and(|boundary| {
         !boundary.allow_training_discounts
             && training_default != Some(TrainingDefault::DoesNotTrain)
@@ -333,6 +355,7 @@ pub(crate) fn resolve_for_boundary(
                 provider: provider.to_string(),
                 model: model.to_string(),
                 training_default,
+                account_confirmation_applied,
                 control_scope: declaration.as_ref().map(|entry| entry.control_scope),
                 applied: Vec::new(),
                 note: route_note(declaration.and_then(|entry| entry.note)),
@@ -352,6 +375,7 @@ pub(crate) fn resolve_for_boundary(
                 provider: provider.to_string(),
                 model: model.to_string(),
                 training_default,
+                account_confirmation_applied,
                 control_scope: None,
                 applied: Vec::new(),
                 note: route_note(None),
@@ -402,6 +426,7 @@ pub(crate) fn resolve_for_boundary(
             provider: provider.to_string(),
             model: model.to_string(),
             training_default,
+            account_confirmation_applied,
             control_scope: Some(declaration.control_scope),
             applied,
             note: route_note(declaration.note),

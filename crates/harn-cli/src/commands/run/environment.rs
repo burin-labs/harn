@@ -80,6 +80,7 @@ pub(crate) struct EnvironmentPolicyConfig {
     grants: Vec<GrantSpec>,
     // Launch reports the canonical sanitized error; its source text is unused.
     host_inference_boundary: Result<Option<harn_vm::llm::api::InferenceBoundary>, ()>,
+    host_account_attestations: Result<Vec<harn_vm::llm::api::ProviderAccountAttestation>, ()>,
 }
 
 impl Default for EnvironmentPolicyConfig {
@@ -88,6 +89,8 @@ impl Default for EnvironmentPolicyConfig {
             kind: EnvironmentPolicyKind::Inherited,
             grants: Vec::new(),
             host_inference_boundary: harn_vm::llm::api::InferenceBoundary::capture_process()
+                .map_err(|_| ()),
+            host_account_attestations: harn_vm::llm::api::capture_process_attestations()
                 .map_err(|_| ()),
         }
     }
@@ -120,13 +123,15 @@ impl EnvironmentPolicyConfig {
             grants,
             host_inference_boundary: harn_vm::llm::api::InferenceBoundary::capture_process()
                 .map_err(|_| ()),
+            host_account_attestations: harn_vm::llm::api::capture_process_attestations()
+                .map_err(|_| ()),
         })
     }
 
     /// A malformed captured ceiling must reach the normal setup-error path
     /// without first probing a provider during CLI configuration seeding.
     pub(crate) fn bootstrap_permitted(&self) -> bool {
-        self.host_inference_boundary.is_ok()
+        self.host_inference_boundary.is_ok() && self.host_account_attestations.is_ok()
     }
 
     /// Resolve the configuration into a runtime [`SessionEnvironment`], snapshotting each
@@ -138,10 +143,17 @@ impl EnvironmentPolicyConfig {
         let host = self.host_inference_boundary.as_ref().map_err(|_| {
             harn_vm::security::EnvironmentPolicyError::MalformedHostInferenceBoundary
         })?;
+        let attestations = self.host_account_attestations.as_ref().map_err(|_| {
+            harn_vm::security::EnvironmentPolicyError::MalformedHostAccountAttestations
+        })?;
         SessionEnvironment::launch(self.kind, self.grants.clone(), &|var| {
             std::env::var(var).ok()
         })
-        .map(|environment| environment.with_host_inference_boundary(*host))
+        .map(|environment| {
+            environment
+                .with_host_inference_boundary(*host)
+                .with_host_account_attestations(attestations.clone())
+        })
     }
 }
 
@@ -300,9 +312,10 @@ pub(crate) fn host_environment_scope(
 
 pub(crate) fn process_host_environment_scope(
 ) -> Result<harn_vm::stdlib::process::SessionEnvironmentGuard, String> {
-    Ok(host_environment_scope(
-        harn_vm::llm::api::InferenceBoundary::capture_process()?,
-    ))
+    Ok(
+        host_environment_scope(harn_vm::llm::api::InferenceBoundary::capture_process()?)
+            .with_host_account_attestations(harn_vm::llm::api::capture_process_attestations()?),
+    )
 }
 
 /// One line naming a launched environment policy for the run's

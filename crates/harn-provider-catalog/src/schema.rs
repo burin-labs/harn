@@ -83,6 +83,7 @@ pub fn schema_value() -> Value {
                     "control_scope": {"enum": ["per_request", "account", "none"]},
                     "retention_default": {"enum": ["retained", "not_retained", "abuse_monitoring_only", "unspecified"]},
                     "training_default": {"enum": ["trains", "does_not_train", "unspecified"]},
+                    "no_training_requires": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": crate::no_training_requirement_values()}},
                     "checked_on": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
                     "sources": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^https://"}},
                     "note": {"type": "string"},

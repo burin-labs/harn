@@ -49,6 +49,23 @@ pub(crate) struct TrustedDataControls {
     pub training_default: Option<TrainingDefault>,
 }
 
+impl TrustedDataControls {
+    /// Only provider-level terms for this verified, unscoped route can be
+    /// established by account confirmation; model and region terms win.
+    pub(crate) fn no_training_requirements(&self) -> &[super::NoTrainingRequirement] {
+        if self.model.is_none()
+            && matches!(self.endpoint, EndpointDataControls::Unscoped)
+            && self.training_default == Some(TrainingDefault::Unspecified)
+        {
+            self.provider
+                .as_ref()
+                .map_or(&[], |controls| controls.no_training_requires.as_slice())
+        } else {
+            &[]
+        }
+    }
+}
+
 pub(crate) fn trusted_local_runtime(provider: &str) -> Option<bool> {
     let config = super::trusted_policy_config();
     let trusted = config.providers.get(provider)?;

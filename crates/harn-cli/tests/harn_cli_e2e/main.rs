@@ -110,6 +110,7 @@ mod precompiled_interfaces;
 mod predicate_contract;
 #[cfg(target_os = "macos")]
 mod process_smoke_cli;
+mod provider_account_confirmation;
 mod provider_catalog_sources;
 mod provider_dispatch_audit;
 mod provider_option_qualification;

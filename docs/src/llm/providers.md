@@ -1522,6 +1522,30 @@ Native adapters can't credit controls they don't apply. Every allowed live call
 includes the governing rule and the catalog
 locality and open-weight declarations in its data-controls receipt.
 
+### Account-dependent no-training terms
+
+Some provider terms depend on settings Harn cannot read from the provider. The
+admission preview reports the required account facts. For Gemini, billing must
+be enabled and Contributor Tier sharing must be disabled. Confirm each setting
+for the project associated with the selected API key; an unknown setting does
+not establish no-training behavior. A confirmation is a user assertion, not a
+provider verification, and must be replaced if the key or project settings change.
+
+The trusted launcher can create a credential-bound record without putting the
+key in command arguments:
+
+```sh
+harn provider attest-account --provider gemini --billing-enabled true --contributor-sharing-enabled false
+```
+
+The command resolves the selected credential and emits a record containing its
+fingerprint, not the credential. The launcher supplies a JSON array of these
+records through `HARN_PROVIDER_ACCOUNT_ATTESTATIONS_JSON` before `harn run`,
+or installs them with `SessionEnvironment::with_host_account_attestations`.
+Only a matching credential and verified route can use the confirmation; project
+restrictions still apply. The runtime does not expose this launch input to the
+script or ordinary child processes. A malformed launch input is refused.
+
 ## Provider resolution order
 
 When you call `harness.llm.call()` or start an `agent_loop(harness, ...)`, Harn resolves the

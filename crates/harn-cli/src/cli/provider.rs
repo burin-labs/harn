@@ -12,8 +12,10 @@ pub(crate) struct ProviderArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ProviderCommand {
-    /// Preview inference admission without network calls or credentials.
+    /// Preview inference admission without network calls.
     Admission(ProviderAdmissionArgs),
+    /// Bind user-confirmed account settings to the selected credential.
+    AttestAccount(ProviderAttestAccountArgs),
     /// Inspect provider/model capability metadata.
     Capabilities(ProviderCapabilitiesArgs),
     /// Validate and generate provider/model catalog artifacts, or print the
@@ -78,6 +80,19 @@ pub(crate) struct ProviderAdmissionArgs {
     /// data_controls. The result reports admitted, denied, or unknown.
     #[arg(long)]
     pub request: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProviderAttestAccountArgs {
+    /// Provider whose credential identifies this account.
+    #[arg(long)]
+    pub provider: String,
+    /// Whether billing is enabled for the selected credential's project.
+    #[arg(long, value_parser = clap::value_parser!(bool))]
+    pub billing_enabled: Option<bool>,
+    /// Whether Contributor Tier data sharing is enabled for the project.
+    #[arg(long, value_parser = clap::value_parser!(bool))]
+    pub contributor_sharing_enabled: Option<bool>,
 }
 
 #[derive(Debug, Args)]
