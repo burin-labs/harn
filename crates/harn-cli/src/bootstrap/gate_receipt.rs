@@ -125,25 +125,9 @@ fn write_from_args(args: &[String]) -> Result<(), String> {
         return Err("tested Git head does not match the named remote PR head".into());
     }
     let output = Path::new(&args[0]);
-    let parent = output
-        .parent()
-        .ok_or_else(|| "source gate receipt path has no parent".to_owned())?;
-    fs::create_dir_all(parent).map_err(|error| {
-        format!(
-            "cannot create receipt directory {}: {error}",
-            parent.display()
-        )
-    })?;
-    let temporary = output.with_extension("json.tmp");
     let bytes = serde_json::to_vec_pretty(&receipt)
         .map_err(|error| format!("cannot encode source gate receipt: {error}"))?;
-    fs::write(&temporary, bytes).map_err(|error| {
-        format!(
-            "cannot write source gate receipt {}: {error}",
-            temporary.display()
-        )
-    })?;
-    fs::rename(&temporary, output).map_err(|error| {
+    harn_vm::atomic_io::atomic_write(output, &bytes).map_err(|error| {
         format!(
             "cannot publish source gate receipt {}: {error}",
             output.display()
