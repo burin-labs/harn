@@ -50,16 +50,17 @@ fn scoped_agent_socket_preserves_the_existing_namespaced_loopback_families() {
         "agent alone admits Unix sockets only"
     );
     policy.process_sandbox.allow_tcp_loopback = true;
+    policy.process_sandbox.ssh_agent_socket = None;
     assert!(namespaced_loopback_grant(&policy));
     assert_eq!(
         socket_families(&policy),
         7,
-        "the agent grant must preserve IPv4 and IPv6 loopback sockets"
+        "loopback-only positive control"
     );
-    policy.process_sandbox.ssh_agent_socket = None;
+    policy.process_sandbox.ssh_agent_socket = Some("/host/agent.sock".into());
     assert_eq!(
         socket_families(&policy),
         7,
-        "loopback-only positive control"
+        "the agent grant must preserve IPv4 and IPv6 loopback sockets"
     );
 }
