@@ -75,6 +75,12 @@ export function observerRefusal(error, fallback) {
   return {reason, line: ['CONSUMER_OBSERVER', `reason=${reason}`, ...fields].join(' ')};
 }
 
+function cleanupReadFailed(error) {
+  const reason = observerRefusal(error, 'unclassified').reason;
+  return reason === 'unclassified' || reason === 'github_read_unavailable'
+    || reason === 'observer_census_unmeasured' || reason.endsWith('_read_refused');
+}
+
 /** Normalize once. Unknown fields cannot silently alter the ownership contract.
  * @param {unknown} value
  * @returns {ObserverContext} */
@@ -1048,7 +1054,7 @@ export async function sweepOwnedChildren(token, expected, fetchRecord = fetch, e
     // A run can change state between the bounded status censuses.
     for (const run of census) runs.set(run.id, run);
   }
-  const total = {scanned:runs.size, declarations:0, discovered:0, owned:0, terminal:0, cancelled:0, pending:0, refused:0, retained:0};
+  const total = {scanned:runs.size, declarations:0, discovered:0, owned:0, terminal:0, cancelled:0, pending:0, refused:0, retained:0, errors:0};
   const contexts = new Map();
   for (const candidate of runs.values()) {
     if (!candidate.display_title?.startsWith('Consumer observer ')) continue;
@@ -1067,8 +1073,9 @@ export async function sweepOwnedChildren(token, expected, fetchRecord = fetch, e
       const context = observerContext(receipt?.observer);
       if (observerRunName(context) !== candidate.display_title) refuse('dispatch_declaration_mismatch');
       contexts.set(JSON.stringify(context), context);
-    } catch {
+    } catch (error) {
       total.refused += 1;
+      if (cleanupReadFailed(error)) total.errors += 1;
     }
   }
   for (const context of contexts.values()) {
@@ -1076,8 +1083,9 @@ export async function sweepOwnedChildren(token, expected, fetchRecord = fetch, e
     try {
       const result = await reconcileStoppedObserver(token, context, expected, fetchRecord, extract, wait, now);
       for (const key of Object.keys(result)) total[key] += result[key];
-    } catch {
+    } catch (error) {
       total.refused += 1;
+      if (cleanupReadFailed(error)) total.errors += 1;
     }
   }
   return total;
@@ -1110,7 +1118,7 @@ async function reconcileChildren(token, context, expected, fetchRecord, extract,
   const runs = await githubChildCensus(token, expected.repository, expected.workflow,
     parent.created_at, fetchRecord);
   const matching = runs.filter(run => run.display_title === observerRunName(observer));
-  const result = { discovered: matching.length, owned: 0, terminal: 0, cancelled: 0, pending: matching.length === 0 ? 1 : 0, refused: 0, retained: 0 };
+  const result = { discovered: matching.length, owned: 0, terminal: 0, cancelled: 0, pending: matching.length === 0 ? 1 : 0, refused: 0, retained: 0, errors: 0 };
   for (const candidate of matching) {
     try {
       const runId = String(candidate.id);
@@ -1154,6 +1162,7 @@ async function reconcileChildren(token, context, expected, fetchRecord, extract,
       });
       if (response.status !== 202) {
         result.refused += 1;
+        result.errors += 1;
         continue;
       }
       result.cancelled += 1;
@@ -1169,10 +1178,11 @@ async function reconcileChildren(token, context, expected, fetchRecord, extract,
         }
       }
       if (!settled) result.pending += 1;
-    } catch {
+    } catch (error) {
       // A failed read, invalid custody, or superseded attempt is visible as a
       // refusal. It cannot turn a partial ownership reading into a safe zero.
       result.refused += 1;
+      if (cleanupReadFailed(error)) result.errors += 1;
     }
   }
   // Dispatch can have been in flight when the parent ended. A fresh complete

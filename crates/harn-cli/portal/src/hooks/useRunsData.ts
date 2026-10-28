@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 
 import { fetchRuns } from "../lib/api"
-import type { PortalPagination, PortalStats, RunSummary } from "../types"
+import { errorMessage } from "../lib/query"
+import type { PortalPagination } from "../types"
 
 export type RunStatusFilter = "all" | "active" | "completed" | "failed"
 export type RunSortOrder = "newest" | "oldest" | "duration"
@@ -26,67 +27,21 @@ const DEFAULT_PAGINATION: PortalPagination = {
   has_next: false,
 }
 
-export function useRunsData(args: UseRunsDataArgs) {
-  const [stats, setStats] = useState<PortalStats | null>(null)
-  const [runs, setRuns] = useState<RunSummary[]>([])
-  const [filteredCount, setFilteredCount] = useState(0)
-  const [pagination, setPagination] = useState<PortalPagination>(DEFAULT_PAGINATION)
-  const [loading, setLoading] = useState(false)
-  const [lastError, setLastError] = useState<string | null>(null)
-  const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null)
-
-  const loadRuns = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await fetchRuns({
-        q: args.q,
-        workflow: args.workflow,
-        status: args.status,
-        sort: args.sort,
-        page: args.page,
-        pageSize: args.pageSize,
-        skill: args.skill,
-      })
-      setStats(data.stats)
-      setRuns(data.runs)
-      setFilteredCount(data.filtered_count)
-      setPagination(data.pagination)
-      setLastRefreshAt(Date.now())
-      setLastError(null)
-    } catch (error) {
-      setLastError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setLoading(false)
-    }
-  }, [args.page, args.pageSize, args.q, args.sort, args.status, args.workflow, args.skill])
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      void loadRuns()
-    })
-  }, [loadRuns])
-
-  useEffect(() => {
-    if (!args.poll) {
-      return
-    }
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "hidden") {
-        return
-      }
-      void loadRuns()
-    }, 15000)
-    return () => window.clearInterval(interval)
-  }, [args.poll, loadRuns])
-
+export function useRunsData({ poll, ...params }: UseRunsDataArgs) {
+  const query = useQuery({
+    queryKey: ["runs", params],
+    queryFn: () => fetchRuns(params),
+    placeholderData: keepPreviousData,
+    refetchInterval: poll ? 15000 : false,
+  })
   return {
-    stats,
-    runs,
-    filteredCount,
-    pagination,
-    loading,
-    lastError,
-    lastRefreshAt,
-    loadRuns,
+    stats: query.data?.stats ?? null,
+    runs: query.data?.runs ?? [],
+    filteredCount: query.data?.filtered_count ?? 0,
+    pagination: query.data?.pagination ?? DEFAULT_PAGINATION,
+    loading: query.isFetching,
+    lastError: errorMessage(query.error),
+    lastRefreshAt: query.dataUpdatedAt || null,
+    loadRuns: () => query.refetch(),
   }
 }
