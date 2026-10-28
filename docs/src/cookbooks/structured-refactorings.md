@@ -87,6 +87,19 @@ A refusal (`visibility_required`, `destination_conflict`, `import_cycle`, ...)
 writes nothing and lists the blocking locations in `sites`. Fix those, then
 repeat the call without `dry_run`.
 
+A `visibility_required` refusal also names the narrowest level that would
+unblock the move in `required_visibility`. To let the move make that change
+itself, pass `allow_visibility_widening` with the widest level you accept:
+Rust takes `pub(super)`, `pub(crate)` or `pub`, TypeScript/JavaScript takes
+`export`. The move then widens exactly the declarations that block it, each to
+the narrowest level that reaches the modules using it, and lists every change
+in `widened` (`path`, `line`, `from`, `to`). A required level above your
+allowance still refuses, and so does a blocker the move cannot place exactly:
+a constructor or pattern of a struct with hidden fields, a `pub(in ...)` path,
+a decorated TypeScript declaration, or a private field or method the move
+matches by name alone (it is widened only when its owning type appears in the
+moved code and no other member in the module shares its name).
+
 ## Recipe — extract a function
 
 Pull an expression, a run of statements, or a closure body out of a function.

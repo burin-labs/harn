@@ -1,3 +1,4 @@
+import { AgentCompletionSignal, agent_completion_signal } from "std/agent/completion_signal"
 import { agent_completion_adjudicator_declared } from "std/agent/judge"
 import {
   AgentToolDispatch,
@@ -38,16 +39,6 @@ pub type AgentNextToolClaim = {tool_name: string}
 
 fn __default_done_sentinel(opts: any) {
   return opts?.done_sentinel
-}
-
-fn __sentinel_hit(text: string | list, sentinel: any, parsed_done_marker: string | list) {
-  if sentinel == nil {
-    return false
-  }
-  if parsed_done_marker != nil && parsed_done_marker != "" {
-    return contains(parsed_done_marker, sentinel)
-  }
-  return contains(text, sentinel)
 }
 
 fn __post_turn_callback_verdict(opts: dict?, payload: dict) {
@@ -828,7 +819,7 @@ fn __post_turn_verdict_result(
   _opts: any,
   verdict: dict,
   feedback_kind: string = "post_turn",
-) {
+) -> dict? {
   if verdict.kind == "stop" {
     const stop_reason = "post_turn_stop"
     return {
@@ -888,11 +879,16 @@ fn __post_turn_verdict_result(
   return nil
 }
 
-fn __post_turn_with_narrowing(outcome: any, narrowing: any) {
+fn __post_turn_with_narrowing(
+  outcome: dict,
+  narrowing: dict?,
+  completion_signal: AgentCompletionSignal,
+) -> dict {
+  const signalled = outcome + {completion_signal: completion_signal}
   if narrowing == nil {
-    return outcome
+    return signalled
   }
-  return outcome + {narrowing: narrowing}
+  return signalled + {narrowing: narrowing}
 }
 
 /**
@@ -977,7 +973,7 @@ fn __arbitrate_stalled_toolless_turn(
   verdict: dict,
   text: string?,
   iteration: int,
-) {
+) -> dict {
   const verdict_stops = verdict?.kind == "stop"
     || (verdict?.kind == "rich" && (verdict?.stop ?? false))
   if verdict_stops {
@@ -1047,6 +1043,7 @@ pub fn agent_compute_post_turn(
   const text = llm_result?.text ?? ""
   const sentinel_text = llm_result?.raw_text ?? text
   const parsed_done_marker = llm_result?.parsed_done_marker
+  const completion_signal = agent_completion_signal(sentinel_text, sentinel, parsed_done_marker)
   const dispatch_results = __dispatch_results_list(dispatch)
   const successful_tool_names = __successful_tool_names(dispatch)
   const rejected_tool_names = __rejected_tool_names(dispatch)
@@ -1085,14 +1082,10 @@ pub fn agent_compute_post_turn(
     prior_turn_next_tool_claim: opts?._next_tool_claim,
     text: text,
     visible_text: text,
-    // `text`/`visible_text` are the PROJECTION: the parser has already removed
-    // completion markers and structural tags from them. Anything deciding
-    // whether the model declared completion must read `raw_text` instead —
-    // it is the same string the sentinel detector below reads, so host
-    // completion checks and the loop's own detector cannot disagree about
-    // what the turn said. Projection is for display; raw is for semantics.
+    // Keep response bytes for evidence; completion_signal owns recognition.
     raw_text: sentinel_text,
     parsed_done_marker: parsed_done_marker,
+    completion_signal: completion_signal,
   }
   __host_fire_session_hook("post_turn", payload)
   agent_session_apply_reminder_post_turn(harness.agent, session.session_id, iteration)
@@ -1110,16 +1103,18 @@ pub fn agent_compute_post_turn(
   // turn: the next model turn must see the dispatch result before completion.
   const rejected_tool_attempt = opts?._turn_tool_call_feedback ?? false
   if !has_tool_calls && !rejected_tool_attempt
-    && __sentinel_hit(sentinel_text, sentinel, parsed_done_marker) {
+    && completion_signal.declared {
     return __post_turn_with_narrowing(
       __completion_result(opts, payload, "sentinel", verdict),
       narrowing,
+      completion_signal,
     )
   }
   if __stop_after_successful_tools(opts, dispatch) {
     return __post_turn_with_narrowing(
       __completion_result(opts, payload, "natural", verdict) + {turn_end_judge_due: false},
       narrowing,
+      completion_signal,
     )
   }
   // Every claimant for a stalled toolless turn is arbitrated in one place, so
@@ -1128,17 +1123,19 @@ pub fn agent_compute_post_turn(
     return __post_turn_with_narrowing(
       __arbitrate_stalled_toolless_turn(harness, session, opts, payload, verdict, text, iteration),
       narrowing,
+      completion_signal,
     )
   }
   const verdict_result = __post_turn_verdict_result(harness.agent, session, opts, verdict)
   if verdict_result != nil {
-    return __post_turn_with_narrowing(verdict_result, narrowing)
+    return __post_turn_with_narrowing(verdict_result, narrowing, completion_signal)
   }
   const {loop_until_done = false, daemon = false} = opts ?? {}
   if !has_tool_calls && !loop_until_done && !daemon {
     return __post_turn_with_narrowing(
       __completion_result(opts, payload, "natural", verdict),
       narrowing,
+      completion_signal,
     )
   }
   // Only turns that dispatched tools, or emitted nothing at all, reach here —
@@ -1155,6 +1152,7 @@ pub fn agent_compute_post_turn(
   return __post_turn_with_narrowing(
     {kind: "continue", turn_end_judge_due: false, nudged_this_turn: confirmation_nudged},
     narrowing,
+    completion_signal,
   )
 }
 

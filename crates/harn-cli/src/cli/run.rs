@@ -55,7 +55,8 @@ pub(crate) struct RunArgs {
     /// Deny specific builtins as a comma-separated list.
     #[arg(long, conflicts_with = "allow")]
     pub deny: Option<String>,
-    /// Allow only the listed builtins as a comma-separated list.
+    /// Allow only the listed builtins as a comma-separated list. Pure builtins,
+    /// which declare no effects, stay callable.
     #[arg(long, conflicts_with = "deny")]
     pub allow: Option<String>,
     /// Load every project trigger and hook handler before the entry script runs.

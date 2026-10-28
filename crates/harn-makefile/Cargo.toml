@@ -1,0 +1,16 @@
+[package]
+name = "harn-makefile"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Static Makefile declarations and command facts shared by Harn project scanners"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+shell-words = "1.1"
+
+[lints]
+workspace = true

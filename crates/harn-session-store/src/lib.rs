@@ -39,6 +39,9 @@ pub mod store;
 pub mod task;
 pub mod wal_watch;
 
+/// Default database name inside a session-store state directory.
+pub const SESSION_STORE_DATABASE_FILE: &str = "session-store.sqlite";
+
 pub use boundary::{
     CanonicalHistoryBoundaries, CanonicalHistoryPosition, CanonicalSessionBoundary,
     CANONICAL_HISTORY_BOUNDARIES_SCHEMA, CANONICAL_SESSION_BOUNDARY_SCHEMA,

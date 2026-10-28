@@ -149,6 +149,10 @@ pub enum SandboxMechanismAvailability {
     /// The mechanism is attached, but it does not hold the child to every
     /// dimension the profile requires; `unconfined` names them.
     DoesNotConfine,
+    /// The mechanism is present, but a host prerequisite that keeps this
+    /// process's own state from confined children is not met;
+    /// `host_protection_gap` names it.
+    HostProtectionUnavailable,
 }
 
 impl SandboxMechanismAvailability {
@@ -157,6 +161,9 @@ impl SandboxMechanismAvailability {
         match self {
             Self::AbsentOnHost => "is not available on this host",
             Self::DoesNotConfine => "does not confine every requested dimension",
+            Self::HostProtectionUnavailable => {
+                "cannot protect this process from confined children on this host"
+            }
         }
     }
 
@@ -164,6 +171,44 @@ impl SandboxMechanismAvailability {
         match self {
             Self::AbsentOnHost => "absent_on_host",
             Self::DoesNotConfine => "does_not_confine",
+            Self::HostProtectionUnavailable => "host_protection_unavailable",
+        }
+    }
+}
+
+/// The host prerequisite that left a present mechanism unable to protect the
+/// spawning process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum HostProtectionGap {
+    /// System Integrity Protection allows unrestricted DTrace, which is the
+    /// case whenever SIP is disabled. XNU then shows this process's launch
+    /// environment to confined children.
+    UnrestrictedDtrace,
+    /// The kernel is a development kernel, which skips the same redaction.
+    DevelopmentKernel,
+    /// The kernel's integrity configuration could not be read, so the
+    /// protection cannot be confirmed.
+    KernelConfigurationUnreadable,
+}
+
+impl HostProtectionGap {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::UnrestrictedDtrace => "unrestricted_dtrace",
+            Self::DevelopmentKernel => "development_kernel",
+            Self::KernelConfigurationUnreadable => "kernel_configuration_unreadable",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::UnrestrictedDtrace => "System Integrity Protection allows unrestricted DTrace",
+            Self::DevelopmentKernel => "this host runs a development kernel",
+            Self::KernelConfigurationUnreadable => {
+                "the kernel's integrity configuration could not be read"
+            }
         }
     }
 }
@@ -221,6 +266,10 @@ pub struct SandboxMechanismUnavailable {
     /// name every required dimension; older producers leave that list empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unconfined: Vec<ConfinementDimension>,
+    /// Set with [`SandboxMechanismAvailability::HostProtectionUnavailable`]:
+    /// which host prerequisite was not met.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_protection_gap: Option<HostProtectionGap>,
 }
 
 impl SandboxMechanismUnavailable {
@@ -246,6 +295,23 @@ impl SandboxMechanismUnavailable {
             profile,
             requirement,
             unconfined: Vec::new(),
+            host_protection_gap: None,
+        }
+    }
+
+    /// A present mechanism whose host cannot meet `gap`.
+    pub fn host_protection_unavailable(
+        mechanism: SandboxMechanism,
+        gap: HostProtectionGap,
+        profile: SandboxProfile,
+    ) -> Self {
+        Self {
+            host_protection_gap: Some(gap),
+            ..Self::new(
+                mechanism,
+                SandboxMechanismAvailability::HostProtectionUnavailable,
+                profile,
+            )
         }
     }
 
@@ -271,6 +337,9 @@ impl SandboxMechanismUnavailable {
                 "unconfined",
                 VmValue::strings(self.unconfined.iter().map(|dimension| dimension.as_str())),
             );
+        }
+        if let Some(gap) = self.host_protection_gap {
+            cause.put_str("host_protection_gap", gap.as_str());
         }
         cause.put_bool("selector_honored", self.requirement.selector_is_honored());
 
@@ -311,6 +380,15 @@ impl std::fmt::Display for SandboxMechanismUnavailable {
             SandboxMechanismAvailability::DoesNotConfine => format!(
                 "{} does not confine {dimensions}",
                 self.mechanism.display_name(),
+            ),
+            SandboxMechanismAvailability::HostProtectionUnavailable => format!(
+                "{} is present but cannot keep this process's environment from confined \
+                 children, because {}",
+                self.mechanism.display_name(),
+                self.host_protection_gap.map_or(
+                    "a host prerequisite is not met",
+                    HostProtectionGap::display_name
+                ),
             ),
         };
         let requirement = match self.requirement {

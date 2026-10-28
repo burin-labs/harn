@@ -23,7 +23,7 @@ pub(crate) fn resolve_worker_tenant_scope(
             } else {
                 current_dir.join(base_dir)
             };
-            base_dir.join(".harn/orchestrator")
+            base_dir.join(harn_vm::runtime_paths::DEFAULT_ORCHESTRATOR_PATH)
         }
     };
     let store = harn_vm::TenantStore::load(&state_root)?;

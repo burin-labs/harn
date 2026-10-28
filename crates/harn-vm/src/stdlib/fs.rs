@@ -331,7 +331,10 @@ fn glob_matches(
     cancel: Option<&AtomicBool>,
 ) -> Result<Vec<String>, VmError> {
     let mut builder = globset::GlobSetBuilder::new();
-    let glob = globset::Glob::new(pattern)
+    // `*` stays within one path segment, as in a shell; `**` crosses them.
+    let glob = globset::GlobBuilder::new(pattern)
+        .literal_separator(true)
+        .build()
         .map_err(|e| VmError::Thrown(VmValue::string(format!("glob: {e}"))))?;
     builder.add(glob);
     let set = builder

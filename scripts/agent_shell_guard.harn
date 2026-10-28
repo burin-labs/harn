@@ -1314,12 +1314,7 @@ fn substitution_bodies(command: string, quotes_literal: bool) -> dict {
   return {ok: true, bodies: bodies}
 }
 
-/**
- * Whether a heredoc with an unquoted delimiter is opened anywhere in the text. The shell expands
- * `$(...)` and backticks in such a body and treats apostrophes there as plain bytes, so quote
- * tracking cannot decide what runs. Quote context of the `<<` itself is ignored: that only widens
- * the refusal.
- */
+/** The shared shell scanner does not yet expose every expansion in an unquoted heredoc. */
 fn has_expanding_heredoc(command: string) -> bool {
   let index = command.index_of("<<")
   while index >= 0 {
@@ -1337,12 +1332,49 @@ fn has_expanding_heredoc(command: string) -> bool {
         return true
       }
     }
-    const rest = command.substring(index + 2)
-    const next = rest.index_of("<<")
+    const next = command.substring(index + 2).index_of("<<")
     if next < 0 {
       return false
     }
     index = index + 2 + next
+  }
+  return false
+}
+
+/** Inspect the shared scanner's executed stages, including nested substitutions. */
+fn executed_stages_write_stash(
+  command: string,
+  depth: int,
+  alias_lookup: fn(GitAliasContext) -> dict,
+  builtin_lookup: fn(string) -> list<string>,
+  require_resolved: bool,
+) -> bool {
+  const scan = command_risk_scan({request: {mode: "shell", command: command}})
+  if scan.execution_semantics?.resolved != true || len(scan.execution_stages ?? []) == 0 {
+    return require_resolved
+  }
+  for stage in scan.execution_stages ?? [] {
+    const argv: list<string> = stage.argv
+    if xargs_operands_write_stash(argv, alias_lookup, builtin_lookup) {
+      return true
+    }
+    const launched = launched_argv(argv, 0)
+    if argv_program(launched) == "git"
+      && git_args_write_stash(
+        launched,
+        git_subcommand_args(launched),
+        depth,
+        alias_lookup,
+        builtin_lookup,
+      ) {
+      return true
+    }
+    // The scanner can leave a shell launcher such as dash in the stage.
+    const nested = nested_shell_payload(launched)
+    if nested != ""
+      && (depth >= 4 || git_stash_write_in(nested, depth + 1, alias_lookup, builtin_lookup)) {
+      return true
+    }
   }
   return false
 }
@@ -1370,6 +1402,13 @@ fn git_stash_write_in(
       return []
     }
     return builtin_lookup(program)
+  }
+  const literal_heredoc = command.contains("<<") && !has_expanding_heredoc(command)
+  if executed_stages_write_stash(command, depth, lookup, builtins, literal_heredoc) {
+    return true
+  }
+  if literal_heredoc {
+    return false
   }
   const substitutions = substitution_bodies(command, !has_expanding_heredoc(command))
   if !substitutions.ok || (len(substitutions.bodies) > 0 && depth >= 4) {
@@ -1410,6 +1449,112 @@ fn git_stash_write_in(
   return false
 }
 
+/** Tree-sitter reports UTF-8 byte offsets; Harn substring indexes characters. */
+fn character_offset_at_byte(text: string, target: int) -> int {
+  let bytes = 0
+  for index in range(0, len(text)) {
+    if bytes == target {
+      return index
+    }
+    bytes = bytes + len(bytes_from_string(text.substring(index, index + 1)))
+    if bytes > target {
+      return -1
+    }
+  }
+  return if bytes == target {
+    len(text)
+  } else {
+    -1
+  }
+}
+
+/** Validate a capture before removing any text from the command. */
+fn heredoc_capture(command: string, found: dict, previous: int) -> dict {
+  const start_capture = found.captures?.start
+  const start = start_capture?.text
+  const body_capture = found.captures?.body
+  const body = body_capture?.text
+  const range = body_capture?.range
+  const redirect = found.captures?.redirect
+  if type_of(start) != "string" || type_of(body) != "string" || type_of(range) != "dict"
+    || type_of(start_capture?.range) != "dict"
+    || type_of(redirect?.text) != "string"
+    || type_of(redirect?.range) != "dict" {
+    return {ok: false}
+  }
+  const begin = character_offset_at_byte(command, redirect.range.start_byte)
+  const end = character_offset_at_byte(command, redirect.range.end_byte)
+  const body_begin = character_offset_at_byte(command, range.start_byte)
+  const body_end = character_offset_at_byte(command, range.end_byte)
+  const delimiter_begin = character_offset_at_byte(command, start_capture.range.start_byte)
+  const delimiter_end = character_offset_at_byte(command, start_capture.range.end_byte)
+  if begin < previous || end < begin || body_begin < begin || body_end < body_begin
+    || body_end > end
+    || delimiter_begin < begin
+    || delimiter_end < delimiter_begin
+    || delimiter_end > body_begin
+    || command.substring(begin, end) != redirect.text
+    || command.substring(delimiter_begin, delimiter_end) != start
+    || command.substring(body_begin, body_end) != body
+    || command.substring(delimiter_end, body_begin).trim() != "" {
+    return {ok: false}
+  }
+  return {ok: true, begin: begin, end: end, start: start, body: body}
+}
+
+/**
+ * Retry a heredoc denial with syntax-owned body boundaries. Outside each body, normal shell
+ * quotes apply; inside an expanding body, quote characters are data and substitutions still run.
+ * Any incomplete parse or unexpected capture keeps the original denial.
+ */
+fn heredoc_stash_write(
+  command: string,
+  alias_lookup: fn(GitAliasContext) -> dict,
+  builtin_lookup: fn(string) -> list<string>,
+  parse: fn(string, string) -> dict,
+) -> bool {
+  const redirects = parse(command, "(heredoc_redirect) @redirect")
+  const bodies = parse(
+    command,
+    "(heredoc_redirect (heredoc_start) @start (heredoc_body) @body) @redirect",
+  )
+  if redirects.result != "ok" || redirects.had_errors != false || redirects.truncated != false
+    || bodies.result != "ok"
+    || bodies.had_errors != false
+    || bodies.truncated != false
+    || redirects.match_count == 0
+    || redirects.match_count != bodies.match_count
+    || len(redirects.matches) != redirects.match_count
+    || len(bodies.matches) != bodies.match_count {
+    return true
+  }
+  let sanitized = ""
+  let previous = 0
+  for found in bodies.matches {
+    const capture = heredoc_capture(command, found, previous)
+    if !capture.ok {
+      return true
+    }
+    sanitized = sanitized + command.substring(previous, capture.begin)
+    previous = capture.end
+    // Any quoted delimiter suppresses expansion for the whole heredoc.
+    if !capture.start.contains("'") && !capture.start.contains("\"")
+      && !capture.start.contains("\\") {
+      const substitutions = substitution_bodies(capture.body, false)
+      if !substitutions.ok {
+        return true
+      }
+      for nested in substitutions.bodies {
+        if git_stash_write_in(nested, 1, alias_lookup, builtin_lookup) {
+          return true
+        }
+      }
+    }
+  }
+  sanitized = sanitized + command.substring(previous)
+  return git_stash_write_in(sanitized, 0, alias_lookup, builtin_lookup)
+}
+
 /**
  * Refuse `git stash` forms that write the stash list.
  *
@@ -1422,8 +1567,16 @@ pub fn git_stash_violation(
   command: string,
   alias_lookup: fn(GitAliasContext) -> dict = NO_CONFIG_ALIASES,
   builtin_lookup: fn(string) -> list<string> = NO_GIT_BUILTINS,
+  parse: fn(string, string) -> dict = { source, query -> {} },
 ) -> string {
   if !git_stash_write_in(command, 0, alias_lookup, builtin_lookup) {
+    return ""
+  }
+  // A resolved executed stage is authoritative, including a substitution whose shell comments
+  // make the fallback delimiter scanner ambiguous. Only retry a denial the scanner did not prove.
+  if command.contains("<<")
+    && !executed_stages_write_stash(command, 0, alias_lookup, builtin_lookup, false)
+    && !heredoc_stash_write(command, alias_lookup, builtin_lookup, parse) {
     return ""
   }
   return "`git stash` is refused: the stash list is shared by every linked worktree, so a pop can apply "
@@ -1718,6 +1871,7 @@ pub fn decision(
   make_targets: MakeTargetCensus,
   alias_lookup: fn(GitAliasContext) -> dict = NO_CONFIG_ALIASES,
   builtin_lookup: fn(string) -> list<string> = NO_GIT_BUILTINS,
+  parse: fn(string, string) -> dict = { source, query -> {} },
 ) -> ShellGuardDecision {
   let parsed = nil
   try {
@@ -1808,7 +1962,7 @@ pub fn decision(
   if make_owned != "" {
     return {allow: false, reason: make_owned}
   }
-  const stash = git_stash_violation(command, alias_lookup, builtin_lookup)
+  const stash = git_stash_violation(command, alias_lookup, builtin_lookup, parse)
   if stash != "" {
     return {allow: false, reason: stash}
   }
@@ -1834,6 +1988,7 @@ fn main(harness: Harness) {
     make_target_census_from_env(harness.env),
     { context -> git_config_aliases_for(harness.process, harness.env, harness.system, context) },
     { program -> git_builtin_commands(harness.process, harness.env, harness.system, program) },
+    { source, query -> harness.ast.search({source: source, language: "bash", query: query}) },
   )
   if verdict.allow {
     return nil

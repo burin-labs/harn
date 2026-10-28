@@ -119,3 +119,18 @@ pipeline default(task) {
         "side-effecting iterable must not get an autofix"
     );
 }
+
+#[test]
+fn test_no_fix_for_empty_if_with_piped_condition() {
+    // `x |> f` calls `f`; removing the block would drop the call.
+    let source =
+        "pipeline default(task) {\n  const x = 1\n  if x |> side_effect { }\n  log(x)\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        diags
+            .iter()
+            .filter(|d| d.rule == "empty-block")
+            .all(|d| d.fix.is_none()),
+        "a piped condition must not get an autofix: {diags:?}"
+    );
+}

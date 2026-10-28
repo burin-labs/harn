@@ -95,6 +95,34 @@ if [[ -n "$allowed" ]]; then
   exit 1
 fi
 
+# Exercise the syntax parser under the real hook's restricted builtin grants.
+# A denial must name the stash rule so a fault or deadline cannot pass as proof.
+heredoc_literal="$(
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"printf '\''%s'\'' '\''$(git stash drop)'\''\ncat <<EOF\nhello\nEOF"}}' \
+    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+)"
+if [[ -n "$heredoc_literal" ]]; then
+  echo "adapter refused a literal substitution outside an expanding heredoc" >&2
+  printf '%s\n' "$heredoc_literal" >&2
+  exit 1
+fi
+for heredoc_payload in \
+  '{"tool_name":"Bash","tool_input":{"command":"cat <<EOF\n'\''`git stash drop`'\''\nEOF"}}' \
+  '{"tool_name":"Bash","tool_input":{"command":"cat <<EOF\n$( # )\ngit stash drop\n)\nEOF"}}' \
+  '{"tool_name":"Bash","tool_input":{"command":"cat <<EOF | git stash drop\nhello\nEOF"}}' \
+  '{"tool_name":"Bash","tool_input":{"command":"printf é; cat <<EOF\n$(git stash drop)\nEOF"}}'; do
+  heredoc_denied="$(
+    printf '%s' "$heredoc_payload" \
+      | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+  )"
+  if [[ "$heredoc_denied" != *'"permissionDecision":"deny"'* ]] \
+    || [[ "$heredoc_denied" != *'git stash'* ]]; then
+    echo "adapter did not refuse an executed heredoc or pipeline stash mutation" >&2
+    printf '%s\n' "$heredoc_denied" >&2
+    exit 1
+  fi
+done
+
 discarded_blocked="$(
   printf '%s' \
     '{"tool_name":"Bash","tool_input":{"command":"make test | tail -20"}}' \
@@ -455,7 +483,7 @@ standalone_resolved="$(
 )"
 if [[ "$standalone_resolved" != *'HOOK-ARG=run'* ]] \
   || [[ "$standalone_resolved" != *'HOOK-ARG=--standalone'* ]] \
-  || [[ "$standalone_resolved" != *'HOOK-ARG=--allow=command_risk_scan'* ]] \
+  || [[ "$standalone_resolved" != *'HOOK-ARG=--allow=bytes_from_string,command_risk_scan,hostlib_ast_search,lowercase,range'* ]] \
   || [[ "$standalone_resolved" != *"HOOK-ARG=$order_root/scripts/agent_shell_guard.harn"* ]]; then
   echo "adapter did not select the attested standalone runtime" >&2
   printf '%s\n' "$standalone_resolved" >&2
@@ -704,6 +732,64 @@ if [[ "$untrusted_verdict" != *'"permissionDecision":"deny"'* ]] \
   || [[ "$untrusted_verdict" == *'policy faulted'* ]]; then
   echo "the guard did not refuse an unmeasured Git alias" >&2
   printf '%s\n' "$untrusted_verdict" >&2
+  exit 1
+fi
+
+commented_substitution="$(
+  standalone_verdict <<'PAYLOAD'
+{"tool_name":"Bash","tool_input":{"command":"echo \"$( # )\ngit stash drop\n)\""}}
+PAYLOAD
+)"
+if [[ "$commented_substitution" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$commented_substitution" != *'git stash'* ]] \
+  || [[ "$commented_substitution" == *'policy faulted'* ]]; then
+  echo "the guard missed a stash write after a shell comment in a substitution" >&2
+  printf '%s\n' "$commented_substitution" >&2
+  exit 1
+fi
+commented_read="$(
+  standalone_verdict <<'PAYLOAD'
+{"tool_name":"Bash","tool_input":{"command":"echo \"$( # )\ngit stash list\n)\""}}
+PAYLOAD
+)"
+if [[ -n "$commented_read" ]]; then
+  echo "the guard rejected a read-only stash substitution after a shell comment" >&2
+  printf '%s\n' "$commented_read" >&2
+  exit 1
+fi
+
+heredoc_write="$(
+  standalone_verdict <<'PAYLOAD'
+{"tool_name":"Bash","tool_input":{"command":"cat <<'EOF'\n'\nEOF\necho \"$(git stash pop)\""}}
+PAYLOAD
+)"
+if [[ "$heredoc_write" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$heredoc_write" != *'git stash'* ]] \
+  || [[ "$heredoc_write" == *'policy faulted'* ]]; then
+  echo "the guard missed an executed stash write after a literal heredoc" >&2
+  printf '%s\n' "$heredoc_write" >&2
+  exit 1
+fi
+heredoc_dash="$(
+  standalone_verdict <<'PAYLOAD'
+{"tool_name":"Bash","tool_input":{"command":"cat <<'EOF'\n'\nEOF\ndash -c 'git stash pop'"}}
+PAYLOAD
+)"
+if [[ "$heredoc_dash" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$heredoc_dash" != *'git stash'* ]] \
+  || [[ "$heredoc_dash" == *'policy faulted'* ]]; then
+  echo "the guard missed a nested dash command after a literal heredoc" >&2
+  printf '%s\n' "$heredoc_dash" >&2
+  exit 1
+fi
+heredoc_literal="$(
+  standalone_verdict <<'PAYLOAD'
+{"tool_name":"Bash","tool_input":{"command":"cat <<'EOF'\ngit stash pop\nEOF"}}
+PAYLOAD
+)"
+if [[ -n "$heredoc_literal" ]]; then
+  echo "the guard treated literal heredoc text as an executed command" >&2
+  printf '%s\n' "$heredoc_literal" >&2
   exit 1
 fi
 

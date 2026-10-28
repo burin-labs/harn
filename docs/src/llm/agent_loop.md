@@ -78,6 +78,7 @@ top-level keys before `v0.8`).
 | `output` | any | Schema-checked terminal JSON when an `output` contract is set. An eligible exhausted wrap-up can retain valid partial data without changing the failed terminal status or admitting publication. |
 | `output_valid` | bool | Whether the terminal answer satisfies the declared JSON contract. Natural completion permits one repair; an attempted wrap-up permits no repair or reuse of older JSON. Valid partial data does not establish completion. |
 | `provider_call_count` | int | Session-owned count of physical provider dispatches. Measured zero is emitted explicitly. Transport, schema, and provider failures after dispatch count; cache/replay hits and routes rejected before dispatch do not. Uncaught loop errors expose the same field on `AgentLoopTerminalError`; it is `nil` only when the session ledger itself is unavailable. The same transport-boundary measurement feeds `llm_call`'s `usage.provider_call_count`, so the two surfaces report one number for one event. |
+| `goal_outcome` | `AgentGoalOutcome` or nil | Assessment of the requested outcome: `achieved`, `partially_achieved`, `not_achieved`, or `unknown`, with a reason, evidence identity, requirement counts and pending names. Declared requirements own the assessment when present. Otherwise the existing completion judge must return a typed `goal_assessment` citing current observations, or explicitly report `unknown`. Unsupported assessments and runs without an assessment yield `unknown`. Finalization derives the outcome from the latest completion receipt and final publication admission, then preserves it in terminal transcript metadata and the `harn.agent_terminal.v1` checkpoint. Admission exits before the loop record nil. Ending naturally or honestly refusing a request does not establish success. No additional judge call is made. |
 | `llm` | dict | LLM execution metrics — see below |
 | `tools` | dict | Tool invocation summary — see below |
 | `deferred_user_messages` | list | Queued human messages deferred until agent yield/completion |
@@ -1272,8 +1273,23 @@ The callback receives:
   prior_turn_next_tool_claim: dict | nil,
   text: string,
   visible_text: string,
+  raw_text: string,
+  parsed_done_marker: string | nil,
+  completion_signal: AgentCompletionSignal,
 }
 ```
+
+`completion_signal` is the loop's typed marker decision. Its `declared` field
+answers whether the configured sentinel was emitted. Its `source` is
+`parsed_done_marker`, `raw_text`, or `disabled`. A nonempty parsed done block
+owns the decision even when the raw response contains the sentinel elsewhere.
+Completion evidence supplied to adjudicators carries this same record.
+Consumers read it instead of searching projected or raw text again. A declared
+marker proposes completion; it does not establish that the task succeeded.
+
+For a response outside a running loop, `agent_completion_signal` from
+`std/agent/completion_signal` applies the same rule to raw text, the configured
+sentinel, and the parser's optional done-marker value.
 
 Each `tool_results` entry has:
 

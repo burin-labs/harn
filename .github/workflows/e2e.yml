@@ -101,81 +101,12 @@ jobs:
           EVENT_LABEL: ${{ github.event.label.name }}
         run: bash scripts/ci/e2e_pull_request_reason.sh
 
-  # Where the main-push runs are allowed to land. Read for its `capacity`
-  # counts rather than its per-lane booleans: those booleans go false both when
-  # the fleet is switched off and when it is merely busy. The counts let
-  # `scripts/ci/runner_capacity.sh` tell those apart: a pool with carriers but
-  # none idle routes hosted by name (#9086) rather than queueing behind it.
-  #
-  # Same-repository events only. A fork pull request cannot read the
-  # release-app credentials this probe needs, and it is not eligible for owned
-  # capacity anyway, so the probe is skipped rather than failed for it. Every
-  # pull request lands on a hosted runner regardless, which is what the
-  # routing expression below already falls through to.
-  runner-availability:
-    if: >
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@cd5b9a60ece73b7dcb5923963b86ca7b570cfdad
-    secrets:
-      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
-  # Say where this suite is about to land, and name a hosted fallback when the
-  # census cannot be read. The routing expression below reads this job's route
-  # output instead of the census, so a census outage sends the suite hosted by
-  # name instead of failing the expression or reading as an empty pool.
-  e2e-capacity:
-    name: Name the E2E runner capacity decision
-    needs: [changes, runner-availability]
-    # `!cancelled()` rather than the default, because both `needs` are skipped
-    # on the events that do not have them: `changes` on a push, and
-    # `runner-availability` on a fork pull request. A skipped dependency would
-    # otherwise skip this job and, through it, the suite.
-    if: >
-      !cancelled() && (
-      github.event_name == 'push' ||
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && needs.changes.outputs.should_run != 'false'))
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      route: ${{ steps.decision.outputs.route }}
-      fallback: ${{ steps.decision.outputs.fallback }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Decide where the slow E2E suite lands
-        id: decision
-        run: bash scripts/ci/runner_capacity.sh
-        env:
-          CAPACITY_LABEL: E2E_RUNNER_CAPACITY
-          CAPACITY_ROUTED_EVENT: push
-          EVENT_NAME: ${{ github.event_name }}
-          SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
-          RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
-
   e2e:
     name: Slow E2E suite
-    needs: [changes, runner-availability, e2e-capacity]
-    # Main pushes prefer the big self-hosted rung: 24 cores at
-    # no cost, and this suite compiles the CLI integration tests before running
-    # them.
-    # `online` rather than `idle` is the deliberate part. A main push is not
-    # racing anyone, so waiting for a busy box costs queue time and nothing
-    # else, while routing to a hosted runner on every busy day would quietly
-    # halve the evidence this tier exists to produce. Hosted stays the last
-    # rung for the one case it answers: no self-hosted capacity exists at all,
-    # or self-hosted routing is retired org-wide.
-    #
-    # Every other event keeps hosted runners. Pull-request and dispatch runs
-    # are watched live by whoever triggered them, and contending with local
-    # work on a shared box to serve them is the trade this repository already
-    # declined for its per-PR lanes.
-    runs-on: >-
-      ${{ (needs.e2e-capacity.outputs.route == 'owned'
-        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
-        || 'ubuntu-24.04' }}
+    needs: [changes]
+    # Namespace confinement needs a scoped AppArmor grant; shared owned
+    # runners cannot safely grant this authority to arbitrary PR code.
+    runs-on: ubuntu-8core
     # Read `!= 'false'` rather than `== 'true'`. A detector that failed, or
     # was skipped, leaves this empty, and treating an unread decision as "do
     # not run" is exactly the silence this workflow is being fixed for. The

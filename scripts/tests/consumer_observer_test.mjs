@@ -272,7 +272,8 @@ test('the same reconciler cancels only receipt-owned live children of an ended e
     workflow_run: { id: Number(runId), head_sha: headSha },
   });
   const configured = { repository: expected.repository, workflow: expected.workflow };
-  const run = async ({ latest = child, parentReading = endedParent, missing = false, runs = [child], archiveReceipt = receipt, settlesAfter = 0, appeared = [] } = {}) => {
+  const run = async ({ latest = child, parentReading = endedParent, missing = false, runs = [child], archiveReceipt = receipt,
+    settlesAfter = 0, appeared = [], now = 1100, jobFailure = false } = {}) => {
     const calls = [];
     const waits = [];
     let cancelled = false;
@@ -297,6 +298,15 @@ test('the same reconciler cancels only receipt-owned live children of an ended e
         total_count: missing ? 0 : 1,
         artifacts: missing ? [] : [metadata(502, `consumer-observer-${context.dispatch_nonce}`, '73', child.head_sha)],
       }) };
+      if (endpoint.pathname.endsWith('/runs/73/attempts/1/jobs')) {
+        if (jobFailure) return {ok:false,status:401};
+        return {ok:true,json:async()=>({total_count:1,jobs:[{
+          id:91,run_id:73,run_attempt:1,head_sha:child.head_sha,status:'in_progress',conclusion:null,
+          created_at:new Date(1000*1000).toISOString(),started_at:new Date(1010*1000).toISOString(),
+          completed_at:null,runner_id:1,runner_name:'private-worker',
+          steps:[{status:'in_progress',conclusion:null,started_at:new Date(1010*1000).toISOString()}],
+        }]})};
+      }
       if (endpoint.pathname.endsWith('/runs/73')) return { ok: true, json: async () => cancelled && ++cancellationRead > settlesAfter
         ? { ...latest, status: 'completed', conclusion: 'cancelled' } : latest };
       if (endpoint.pathname.endsWith('/zip')) return { ok: true, arrayBuffer: async () => bytes };
@@ -304,11 +314,11 @@ test('the same reconciler cancels only receipt-owned live children of an ended e
     };
     const result = await reconcileOwnedChildren('fixture-read', context, configured, fetchRecord,
       (_, filename) => filename === 'consumer-observer.json' ? context : archiveReceipt,
-      async milliseconds => { waits.push(milliseconds); });
+      async milliseconds => { waits.push(milliseconds); }, () => now);
     return { result, calls, waits };
   };
   const positive = await run();
-  assert.deepEqual(positive.result, { discovered: 1, owned: 1, terminal: 1, cancelled: 1, pending: 0, refused: 0 });
+  assert.deepEqual(positive.result, { discovered: 1, owned: 1, terminal: 1, cancelled: 1, pending: 0, refused: 0, retained: 0 });
   assert.equal(positive.calls.filter(call => call.method === 'POST').length, 1);
   for (const control of [
     { missing: true }, { latest: { ...child, run_attempt: 2 } },
@@ -324,6 +334,16 @@ test('the same reconciler cancels only receipt-owned live children of an ended e
   const complete = await run({ latest: { ...child, status: 'completed', conclusion: 'success' } });
   assert.equal(complete.result.terminal, 1);
   assert.equal(complete.calls.filter(call => call.method === 'POST').length, 0);
+  const failedObserver = {...endedParent,conclusion:'failure'};
+  const preserved = await run({parentReading:failedObserver});
+  assert.deepEqual(preserved.result,{discovered:1,owned:1,terminal:0,cancelled:0,pending:1,refused:0,retained:1});
+  assert.equal(preserved.calls.filter(call => call.method === 'POST').length,0,
+    'an ended failed observer cannot discard a live measurement within its budget');
+  const expired = await run({parentReading:failedObserver,now:8210});
+  assert.equal(expired.result.cancelled,1,'fresh job execution exceeding the original budget permits cleanup');
+  const incomplete = await run({parentReading:failedObserver,jobFailure:true});
+  assert.equal(incomplete.calls.filter(call => call.method === 'POST').length,0,'an unreadable timeout census grants no cancellation');
+  assert.equal(incomplete.result.refused,1);
   const settling = await run({ settlesAfter: 2 });
   assert.equal(settling.result.terminal, 1);
   assert.deepEqual(settling.waits, [5000, 5000]);

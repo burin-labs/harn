@@ -657,25 +657,23 @@ mod stage_summary_tests {
             native_qualification_profile, worktree_sandbox_for_host,
         };
         use harn_vm::process_sandbox::{
-            SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
-            SandboxRequirement,
+            HostProtectionGap, SandboxMechanism, SandboxMechanismUnavailable,
         };
-        let refusal = SandboxMechanismUnavailable {
-            schema: SandboxMechanismUnavailable::SCHEMA.to_string(),
-            mechanism: SandboxMechanism::MacosSandboxExec,
-            availability: SandboxMechanismAvailability::AbsentOnHost,
-            profile: harn_vm::orchestration::SandboxProfile::OsHardened,
-            requirement: SandboxRequirement::Profile,
-            unconfined: vec![],
-        };
+        // The hosted macOS shape: SIP off, so the refusal carries a host gap.
+        let refusal = SandboxMechanismUnavailable::host_protection_unavailable(
+            SandboxMechanism::MacosSandboxExec,
+            HostProtectionGap::UnrestrictedDtrace,
+            harn_vm::orchestration::SandboxProfile::OsHardened,
+        );
         let unsupported = serde_json::json!({
             "confines_processes": false,
             "os_hardened_refusal": harn_vm::value::json::vm_value_to_json(&refusal.thrown_value()),
         });
         let compatible = worktree_sandbox_for_host(unsupported.clone(), "ci");
-        assert!(
-            compatible.is_some(),
-            "compatibility checks must retain a measured refusal"
+        assert_eq!(
+            compatible.map(|refusal| refusal.host_protection_gap),
+            Some(Some(HostProtectionGap::UnrestrictedDtrace)),
+            "compatibility checks must retain the measured refusal and its host gap"
         );
         let required = std::panic::catch_unwind(|| {
             worktree_sandbox_for_host(unsupported, native_qualification_profile())

@@ -123,7 +123,7 @@ async fn run_bridge_mock_host(args: ConformanceHelperBridgeMockHostArgs) -> Resu
     }
     if !errors.is_empty() {
         for error in errors {
-            eprintln!("ERROR: {error}");
+            cli_diagnostic!("ERROR: {error}");
         }
         return Err("bridge mock host observed protocol errors".to_string());
     }

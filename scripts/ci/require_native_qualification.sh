@@ -13,6 +13,30 @@ native_qualification_unmeasured() {
   jq -nc --arg stage "$1" '{kind:"harn.release.native_qualification",status:"unmeasured",stage:$stage,pending_count:null,failed_count:null}'
 }
 
+# Watch is only an observation aid; the caller's exact run and job census owns proof.
+release_watch_run() {
+  local repo=$1 id=$2 attempt diagnostic status
+  [[ "$id" =~ ^[0-9]+$ ]] || return 1
+  diagnostic=$(mktemp)
+  for attempt in 1 2 3; do
+    status=0
+    gh run watch "$id" --repo "$repo" --exit-status > /dev/null 2> "$diagnostic" || status=$?
+    if (( status == 0 )) || [[ ! -s "$diagnostic" ]]; then
+      rm -f "$diagnostic"
+      return 0
+    fi
+    # A permanent HTTP refusal takes precedence over incidental transient numbers.
+    if grep -Eq 'HTTP 4[0-9][0-9](:|[[:space:]])' "$diagnostic" ||
+      ! grep -Eq '^failed to get run: HTTP (500|502|503|504):' "$diagnostic" ||
+      (( attempt == 3 )); then
+      rm -f "$diagnostic"
+      return 1
+    fi
+    printf 'Release observation interrupted; retrying the same run %s (%s/3).\n' "$id" "$attempt" >&2
+    sleep 5
+  done
+}
+
 require_native_platform() {
   local repo=$1 source=$2 policy=$3 workflow name metadata pages runs selected id attempt run jobs verdict revision discovery
   workflow=$(jq -r .workflow_path <<< "$policy")
@@ -54,7 +78,10 @@ require_native_platform() {
   revision=$(jq -r .head_sha <<< "$selected")
   if [[ ${WAIT_FOR_FULL_SUITE:-false} == true && $(jq -r .status <<< "$selected") != completed ]]; then
     # The final API records, rather than watch's exit status, decide proof.
-    gh run watch "$id" --repo "$repo" --exit-status || true
+    if ! release_watch_run "$repo" "$id"; then
+      native_qualification_unmeasured "$name:watch"
+      return 1
+    fi
   fi
   if ! run=$(gh api "repos/$repo/actions/runs/$id/attempts/$attempt") ||
     ! jq -e --arg repo "$repo" --arg source "$source" --arg revision "$revision" --arg path "$workflow" --argjson id "$id" --argjson attempt "$attempt" --argjson workflow "$(jq .id <<< "$metadata")" '

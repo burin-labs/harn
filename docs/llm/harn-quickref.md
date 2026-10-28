@@ -1058,6 +1058,11 @@ schema_of(T))` validates a value you already hold. Both return `Result<T,
 returns a dynamic value. Unknown fields pass. See "Decode at the boundary"
 in `docs/src/error-handling.md`.
 
+For a `bytes` target, `json_decode` restores the `{"$bytes_b64":"..."}` envelope
+written by `json_stringify`, including byte fields in records, lists and maps.
+`json_parse` preserves that envelope as an ordinary dict; `schema_parse` validates
+native Harn values rather than decoding the byte envelope.
+
 Use `jq(value, expr)` for a jq-like stream query; it always returns a
 list. Use `jq_first(value, expr)` when you expect one value or `nil`.
 Supported v1 forms include `.`, `.foo.bar`, `.[2]`, `.[2:5]`,
@@ -3585,6 +3590,11 @@ query_stringify([{key: "name", value: "ali ce"}])
 
 - `http_get/post/put/patch/delete/request` return
   `{status, headers, body, ok}` for outbound HTTP calls.
+- Request bodies preserve raw `bytes` or UTF-8 strings. `response_type: "bytes"`
+  adds `body_bytes` and leaves `body` empty; the default `"text"` mode decodes
+  UTF-8. Both modes enforce `max_response_bytes` while buffering.
+- Mock call records expose the text preview as `body` and exact provided request
+  bytes as `body_bytes`; private-input filtering applies before recording.
 - `harness.net.download(url, dst_path, options?)` streams a response body to disk and
   returns `{bytes_written, status, headers, ok}`.
 - `http_stream_open/read/info/close` expose pull-based response streaming;
@@ -3598,7 +3608,9 @@ query_stringify([{key: "name", value: "ali ce"}])
 - `http_post/put/patch` accept either `(url, body, options?)` or `(url, options)`
   when the request is driven entirely by options such as `multipart`.
 - `multipart` accepts a list of part dicts with `name` plus one of `value`,
-  `value_base64`, or `path`, along with optional `filename` and `content_type`.
+  `value_base64`, or `path`, along with optional `filename`, `content_type` and
+  `headers`. Use the dedicated fields for `Content-Type` and
+  `Content-Disposition`; invalid or duplicate part headers refuse before sending.
 - Default retries cover `408`, `429`, `500`, `502`, `503`, and `504` for
   idempotent methods only. `Retry-After` is honored on `429` / `503`.
 - `http_mock(method, url_pattern, response)` can script multiple responses

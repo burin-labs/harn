@@ -20,6 +20,8 @@ mkdir -p "$checkout/scripts/lib" "$checkout/.cargo"
 cp "$repo_root/scripts/sccache_rustc_wrapper.rs" "$checkout/scripts/"
 cp "$repo_root/scripts/lib/"*.sh "$checkout/scripts/lib/"
 cp "$repo_root/scripts/cargo_with_worktree_build_dir.sh" "$checkout/scripts/"
+cp "$repo_root/scripts/dev_setup.sh" "$checkout/scripts/"
+cp "$repo_root/Makefile" "$checkout/"
 cp "$repo_root/rust-toolchain.toml" "$checkout/" 2>/dev/null || true
 printf '[package]\nname = "fixture"\nversion = "0.0.0"\nedition = "2021"\n[workspace]\n' >"$checkout/Cargo.toml"
 mkdir -p "$checkout/src" && printf 'fn main() {}\n' >"$checkout/src/main.rs"
@@ -62,12 +64,61 @@ if (cd "$checkout" && HARN_CARGO_LEASE_MODE=off ./scripts/cargo_with_worktree_bu
   >"$tmp_root/stale.log" 2>&1; then
   fail "a stale wrapper path was accepted"
 fi
-grep -q 'make setup' "$tmp_root/stale.log" || fail "the stale refusal named no remedy"
+grep -q 'make refresh-cargo-wrapper' "$tmp_root/stale.log" || fail "the stale refusal named no remedy"
 [[ ! -e "$stale" ]] || fail "a stale wrapper path was fabricated"
 
 # 3. A wrapper dev setup does not manage is never touched.
 write_config "$tmp_root/elsewhere/sccache"
 harn_restore_configured_sccache_wrapper "$checkout" || fail "an unmanaged wrapper path was refused"
 [[ ! -e "$tmp_root/elsewhere" ]] || fail "an unmanaged wrapper path was created"
+
+# 4. The public narrow command builds the current wrapper in the configured
+#    storage without entering full setup, then real Cargo executes that input.
+refresh_storage="$tmp_root/refresh-storage"
+refreshed=$(harn_sccache_wrapper_path "$checkout" "$refresh_storage")
+current_key=$(basename "$(dirname "$refreshed")")
+stale_key="${current_key%-*}-$(printf '%064d' 0)"
+old="$refresh_storage/sccache-wrapper/$stale_key/$(basename "$refreshed")"
+mkdir -p "$(dirname "$old")"
+printf 'old wrapper bytes\n' > "$old"
+chmod +x "$old"
+write_config "$refreshed"
+cp "$checkout/.cargo/config.toml" "$tmp_root/refresh-expected"
+write_config "$old"
+(cd "$checkout" && make refresh-cargo-wrapper) > "$tmp_root/refresh.log" 2>&1 || {
+  cat "$tmp_root/refresh.log" >&2
+  fail "the public wrapper refresh command failed"
+}
+cmp -s "$checkout/.cargo/config.toml" "$tmp_root/refresh-expected" || fail "refresh changed unrelated config"
+[[ -x "$refreshed" ]] || fail "refresh did not produce an executable"
+[[ "$(cat "$old")" == 'old wrapper bytes' ]] || fail "refresh replaced old artifact"
+[[ ! -e "$checkout/.git" && ! -e "$checkout/.codex" ]] || fail "refresh entered full setup"
+printf 'fn main() { println!("reached refreshed compiler"); }\n' > "$checkout/src/main.rs"
+if ! (cd "$checkout" && HARN_CARGO_LEASE_MODE=off ./scripts/cargo_with_worktree_build_dir.sh build --quiet) \
+  > "$tmp_root/refreshed-build.log" 2>&1; then
+  cat "$tmp_root/refreshed-build.log" >&2
+  fail "real Cargo could not use the refreshed wrapper"
+fi
+echo "sccache wrapper refresh: real producer and Cargo path reached"
+
+# Setup's explicit storage root may be relative to the checkout.
+relative_storage=relative-refresh-storage
+relative_current=$(harn_sccache_wrapper_path "$checkout" "$relative_storage")
+relative_old="$relative_storage/sccache-wrapper/$stale_key/$(basename "$relative_current")"
+write_config "$relative_current"
+cp "$checkout/.cargo/config.toml" "$tmp_root/relative-expected"
+write_config "$relative_old"
+(cd "$checkout" && make refresh-cargo-wrapper) > "$tmp_root/relative-refresh.log" 2>&1 || {
+  cat "$tmp_root/relative-refresh.log" >&2
+  fail "relative wrapper refresh failed"
+}
+cmp -s "$checkout/.cargo/config.toml" "$tmp_root/relative-expected" || fail "relative config changed"
+[[ -x "$checkout/$relative_current" ]] || fail "relative wrapper built outside checkout"
+if ! (cd "$checkout" && HARN_CARGO_LEASE_MODE=off ./scripts/cargo_with_worktree_build_dir.sh build --quiet) \
+  > "$tmp_root/relative-build.log" 2>&1; then
+  cat "$tmp_root/relative-build.log" >&2
+  fail "real Cargo could not use the relative wrapper"
+fi
+echo "sccache wrapper refresh: relative storage and real Cargo path reached"
 
 echo "sccache wrapper restore: ok"

@@ -10,6 +10,14 @@ compile_error!(
      without hostlib, embed `harn-serve` or `harn-vm` instead."
 );
 
+// Preserve formatted command diagnostics while sending them through the
+// same sink as the runtime's status messages.
+macro_rules! cli_diagnostic {
+    ($($arg:tt)*) => {
+        crate::exit::log_cli_diagnostic(&format!($($arg)*))
+    };
+}
+
 pub mod acp;
 mod bootstrap;
 pub mod cli;
@@ -89,12 +97,24 @@ static BROKEN_PIPE_PANIC_HOOK: Once = Once::new();
 
 #[cfg(feature = "hostlib")]
 pub(crate) fn install_default_hostlib(vm: &mut harn_vm::Vm) {
+    install_hostlib_with_handles(vm, &default_hostlib_handles());
+}
+
+/// Fresh hostlib handles carrying the CLI's Harn reference resolver.
+#[cfg(feature = "hostlib")]
+pub(crate) fn default_hostlib_handles() -> harn_hostlib::DefaultHostlibHandles {
+    harn_hostlib::DefaultHostlibHandles::new(Some(harn_serve::harn_reference_resolver()))
+}
+
+/// [`install_default_hostlib`] around handles the caller retains, so state
+/// such as the code index is shared by every VM they are installed into.
+#[cfg(feature = "hostlib")]
+pub(crate) fn install_hostlib_with_handles(
+    vm: &mut harn_vm::Vm,
+    handles: &harn_hostlib::DefaultHostlibHandles,
+) {
     let embed = crate::local_embed::resolve_embed_capability();
-    let _ = harn_hostlib::install_default_with_embed_and_harn_reference_resolver(
-        vm,
-        embed,
-        Some(harn_serve::harn_reference_resolver()),
-    );
+    let _ = harn_hostlib::install_default_with_embed_and_handles(vm, embed, handles);
     // The `rules` capability lives in its own crate (it depends on
     // `harn-rules`, which depends on `harn-hostlib`, so it can't ship inside
     // `install_default`). Wire it in alongside the defaults.
@@ -120,7 +140,7 @@ pub fn run() {
 
     #[cfg(target_os = "linux")]
     if let Err(error) = commands::serve::confine_before_runtime(&raw_args) {
-        eprintln!("error: {error}");
+        cli_diagnostic!("error: {error}");
         process::exit(1);
     }
 
@@ -144,11 +164,14 @@ pub fn run() {
             // reach the configured collector. No-op when OTel is not
             // configured.
             if let Err(error) = harn_vm::events::shutdown_otel_sink() {
-                eprintln!("[harn] OTel exporter shutdown failed: {error}");
+                harn_vm::events::log_warn(
+                    "telemetry",
+                    &format!("OTel exporter shutdown failed: {error}"),
+                );
             }
         })
         .unwrap_or_else(|error| {
-            eprintln!("failed to start CLI runtime thread: {error}");
+            cli_diagnostic!("error: failed to start CLI runtime thread: {error}");
             process::exit(1);
         });
 

@@ -1,7 +1,10 @@
 import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
-import { __agent_loop_resolve_verified_policy_stop } from "std/agent/loop_terminal"
+import {
+  __agent_loop_resolve_verified_policy_stop,
+  __agent_loop_terminal_verification_from_assessment,
+} from "std/agent/loop_terminal"
 import "std/agent/loop_tool_calls"
 import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
@@ -77,7 +80,7 @@ pub fn __agent_loop_finalize(harness: Harness, message: any, session: dict, stat
     state.final_status,
     state.stop_reason,
     if state.abandonment == nil {
-      state.terminal_verification
+      __agent_loop_terminal_verification_from_assessment(state.terminal_assessment)
     } else {
       nil
     },
@@ -218,6 +221,7 @@ pub fn __agent_loop_finalize(harness: Harness, message: any, session: dict, stat
       error: terminal_error,
       suspension: __agent_loop_suspension_record(suspend_result),
       adaptive_budget: adaptive_budget,
+      completion_assessment: state.terminal_assessment,
       publication_admitted: publication_admitted,
     },
   )

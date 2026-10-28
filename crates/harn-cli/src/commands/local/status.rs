@@ -44,7 +44,7 @@ pub(crate) async fn run(args: LocalStatusArgs, base_dir: &Path) -> Result<(), St
     for provider in local_provider_ids(None) {
         match snapshot_provider(&provider, base_dir).await {
             Ok(snapshot) => snapshots.push(snapshot),
-            Err(error) => eprintln!("warning: failed to snapshot {provider}: {error}"),
+            Err(error) => cli_diagnostic!("warning: failed to snapshot {provider}: {error}"),
         }
     }
 

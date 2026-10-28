@@ -26,9 +26,13 @@ pipeline default(harness: Harness) {
     harness.llm,
     [
       llm_text("<user_response>ready</user_response>\n<done>##DONE##</done>"),
-      llm_text("{\"verdict\":\"continue\",\"detail\":\"State the answer once more.\"}"),
+      llm_text(
+        "{\"verdict\":\"continue\",\"detail\":\"State the answer once more.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
+      ),
       llm_text("<user_response>ready</user_response>\n<done>##DONE##</done>"),
-      llm_text("{\"verdict\":\"done\",\"detail\":\"The reply is the requested word.\"}"),
+      llm_text(
+        "{\"verdict\":\"done\",\"detail\":\"The reply is the requested word.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
+      ),
     ],
     { ->
       const result = agent_loop(

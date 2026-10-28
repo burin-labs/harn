@@ -530,12 +530,47 @@ impl AcpServer {
                 profile_turn: 0,
                 environment_policy: harn_vm::security::SessionEnvironment::inherited()
                     .with_host_inference_boundary(self.host_inference_boundary),
+                workspace_warm_root: None,
             },
         );
         #[cfg(feature = "hostlib")]
         if let Some(session) = self.sessions.get(&session_id) {
             harn_hostlib::fs::configure_session_root(&session_id, &session.project_root);
         }
+        self.sync_session_workspace_warm(&session_id);
         Ok(())
+    }
+
+    /// Keep the runtime configurator's warm for a session on its current
+    /// project root: release a root the session moved off, then warm the
+    /// current one once. Called on admission and after a re-anchor;
+    /// [`Self::release_session_workspace_warm`] is its counterpart on close.
+    pub(super) fn sync_session_workspace_warm(&mut self, session_id: &str) {
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return;
+        };
+        if session.workspace_warm_root.as_ref() == Some(&session.project_root) {
+            return;
+        }
+        if let Some(previous) = session.workspace_warm_root.take() {
+            self.runtime_configurator
+                .release_session_workspace(&previous);
+        }
+        // A root the process cannot read would only warm an empty index.
+        let readable = harn_vm::process_sandbox::current_process_confinement()
+            .is_none_or(|confinement| confinement.covers(&session.project_root));
+        if readable {
+            session.workspace_warm_root = Some(session.project_root.clone());
+            self.runtime_configurator
+                .warm_session_workspace(&session.project_root);
+        }
+    }
+
+    /// Release what [`Self::sync_session_workspace_warm`] asked for, for a
+    /// session that has left the session table.
+    pub(super) fn release_session_workspace_warm(&self, session: &Session) {
+        if let Some(root) = &session.workspace_warm_root {
+            self.runtime_configurator.release_session_workspace(root);
+        }
     }
 }

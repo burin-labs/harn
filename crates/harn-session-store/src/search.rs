@@ -232,13 +232,20 @@ pub(crate) fn redacted_search_document(
     meta: &SessionMeta,
     event: &StoredEvent,
 ) -> String {
-    redacted_search_document_parts(
-        redactor,
+    let (title, cwd, model, project_scope) = search_metadata(meta);
+    redacted_search_document_parts(redactor, title, cwd, model, project_scope, event)
+}
+
+/// The session fields every search document embeds. A metadata update that
+/// leaves these unchanged leaves every indexed document unchanged.
+pub(crate) fn search_metadata(
+    meta: &SessionMeta,
+) -> (Option<&str>, Option<&str>, Option<&str>, Option<&str>) {
+    (
         meta.title.as_deref(),
         meta.cwd.as_deref(),
         meta.model.as_deref(),
         meta.project_scope.as_deref(),
-        event,
     )
 }
 

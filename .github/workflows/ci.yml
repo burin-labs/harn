@@ -304,6 +304,16 @@ jobs:
               - 'scripts/bootstrap-harn.*'
               - 'scripts/tests/bootstrap_harn_seed_test.sh'
               - 'scripts/tests/runtime_install_test.harn'
+              - 'scripts/verify_published_harn_runtime.sh'
+              - 'scripts/verify_release_runtime_environment.harn'
+              - 'scripts/publish*.harn'
+              - 'scripts/stage_release_tools.sh'
+              - 'scripts/tests/publish_plan_test.harn'
+              - 'scripts/tests/publish_recovery_test.harn'
+              - 'scripts/verify_publish_workspace_plan.harn'
+              - 'scripts/lib/published_release_correction.sh'
+              - 'scripts/lib/candidate_archive_contract.sh'
+              - 'scripts/lib/sha256.sh'
               - 'crates/harn-stdlib/src/stdlib/runtime/**'
               - '.harn-bootstrap-version'
             # Everything that can move release semantics out of agreement with
@@ -1757,7 +1767,13 @@ jobs:
         if: matrix.kind == 'audit'
         with:
           node-version: "22"
-          cache-dependency-path: tree-sitter-harn/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            tree-sitter-harn/package-lock.json
+      - name: Install source audit dependencies
+        if: matrix.kind == 'audit'
+        timeout-minutes: 5
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Set up the stock TypeScript fixture runtime
         if: matrix.kind == 'audit-scripts'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -2248,6 +2264,11 @@ jobs:
         env:
           PROTOCOL_SYMBOL_GUARD_BASE: HEAD^1
         run: make check-protocol-symbol-removals
+      - name: Check provider catalog schema version
+        if: always()
+        env:
+          CATALOG_SCHEMA_GUARD_BASE: HEAD^1
+        run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/check_provider_catalog_schema_version.harn'
       # The contract that keeps the three refusals above reachable from a pull
       # request is itself a policy check, and the expensive sweep that also
       # runs it is push-only. Running it only there would mean a re-added
@@ -2636,8 +2657,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.vscode == 'true'
     # The LSP test launches the shared CLI as harn-lsp. Rust changes require
-    # this run's verified artifact; editor-only changes use the published
-    # workspace version because the native server did not change.
+    # this run's verified artifact; editor-only changes use the repository's
+    # published bootstrap runtime pin because the native server did not change.
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     permissions:
@@ -2673,23 +2694,12 @@ jobs:
           "$RUNNER_TEMP/harn-cli"
           "$GITHUB_SHA"
           "$GITHUB_ENV"
-      - name: Resolve the published workspace version
-        if: needs.changes.outputs.rust != 'true'
-        id: harn-version
-        shell: bash
-        run: |
-          set -euo pipefail
-          source scripts/lib/release_version.sh
-          workspace_version="$(cargo metadata --locked --no-deps --format-version 1 \
-            | jq -er '[.packages[] | select(.name == "harn-cli") | .version] | unique | if length == 1 then .[0] else error("expected one harn-cli version") end')"
-          version="$(release_published_version_for_workspace "$workspace_version")"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Install pinned Harn release
         if: needs.changes.outputs.rust != 'true'
         id: harn
         uses: ./.github/actions/setup-harn
         with:
-          version: ${{ steps.harn-version.outputs.version }}
+          version-file: .harn-bootstrap-version
       - run: npm test
         working-directory: editors/vscode
         env:
@@ -2744,23 +2754,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Resolve the published workspace version
-        id: harn-version
-        shell: bash
-        run: |
-          source scripts/lib/release_version.sh
-          workspace_version="$(cargo metadata --locked --no-deps --format-version 1 \
-            | jq -er '[.packages[] | select(.name == "harn-cli") | .version] | unique | if length == 1 then .[0] else error("expected one harn-cli version") end')"
-          version="$(release_published_version_for_workspace "$workspace_version")" || {
-            echo "::error::Workspace version $workspace_version has no stable published projection"
-            exit 1
-          }
-          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Install pinned Harn release
         id: harn
         uses: ./.github/actions/setup-harn
         with:
-          version: ${{ steps.harn-version.outputs.version }}
+          version-file: .harn-bootstrap-version
       - name: Check documentation contracts
         env:
           HARN_BIN: ${{ steps.harn.outputs.path }}
@@ -2837,6 +2835,10 @@ jobs:
 
   setup-harn-action:
     name: Setup Harn action (${{ matrix.os }})
+    permissions:
+      contents: read
+      pull-requests: read
+      attestations: read
     needs: [changes]
     if: needs.changes.outputs.setup_action == 'true'
     strategy:
@@ -2889,6 +2891,13 @@ jobs:
     outputs:
       sha: ${{ steps.read.outputs.sha }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
       - name: Mint the consumer read credential
         id: token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -2898,17 +2907,14 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           permission-contents: read
-      - name: Read the consumer's default-branch head
+          permission-pull-requests: read
+      - name: Pin the selected consumer source
         id: read
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           CONSUMER: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
-        run: |
-          set -euo pipefail
-          branch="$(gh api "repos/$CONSUMER" --jq .default_branch)"
-          sha="$(gh api "repos/$CONSUMER/commits/$branch" --jq .sha)"
-          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::the consumer's head is not a 40-hex commit"; exit 1; }
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          PULL_REQUEST_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/ci/consumer-pin.mjs
 
   consumer-check:
     name: Consumer check

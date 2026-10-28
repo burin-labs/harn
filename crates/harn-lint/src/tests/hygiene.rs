@@ -184,3 +184,15 @@ fn test_let_then_return_autofix() {
         "expected temporary binding to be removed, got: {fixed}"
     );
 }
+
+#[test]
+fn test_let_then_return_autofix_keeps_parenthesized_operand() {
+    let source = "pipeline default(task) {\n  fn total(price, tax, qty) {\n    const total = (price + tax) * qty\n    return total\n  }\n  log(total(1, 2, 3))\n}";
+    let diags = lint_source(source);
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains("return (price + tax) * qty"),
+        "expected the grouped operand to survive, got: {fixed}"
+    );
+    harn_parser::parse_source(&fixed).expect("reparse after fix");
+}

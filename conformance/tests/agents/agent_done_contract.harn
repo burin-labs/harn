@@ -15,13 +15,13 @@ pipeline default(harness: Harness) {
         "Implemented two page-cache tests.\n\nDone claim:\n- requested work: add five page-cache tests\n- evidence: fetch and cached-fetch tests pass\n- files changed: tests/unit/page_cache_extra_test.cpp\n- not done: none\n##DONE##",
       ),
       llm_text(
-        "{\"verdict\":\"continue\",\"detail\":\"Add the missing LRU eviction, dirty flush, and pinned-page prevention tests.\"}",
+        "{\"verdict\":\"continue\",\"detail\":\"Add the missing LRU eviction, dirty flush, and pinned-page prevention tests.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
       ),
       llm_text(
         "Added the LRU eviction, dirty flush, and pinned-page prevention cases.\n\nDone claim:\n- requested work: add five page-cache tests\n- evidence: all five page-cache test cases pass in the target suite\n- files changed: tests/unit/page_cache_extra_test.cpp\n- not done: none\n##DONE##",
       ),
       llm_text(
-        "{\"verdict\":\"done\",\"detail\":\"All five requested cases are named and the target suite passes.\"}",
+        "{\"verdict\":\"done\",\"detail\":\"All five requested cases are named and the target suite passes.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
       ),
     ],
     { ->

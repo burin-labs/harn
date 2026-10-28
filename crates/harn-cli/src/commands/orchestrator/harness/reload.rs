@@ -69,11 +69,14 @@ pub(super) async fn handle_reload_request(
                 }),
             )
             .await?;
-            eprintln!(
-                "[harn] manifest reload ({source}) applied: +{} ~{} -{}",
-                summary.added.len(),
-                summary.modified.len(),
-                summary.removed.len()
+            harn_vm::events::log_info(
+                "orchestrator",
+                &format!(
+                    "manifest reload ({source}) applied: +{} ~{} -{}",
+                    summary.added.len(),
+                    summary.modified.len(),
+                    summary.removed.len()
+                ),
             );
             if let Some(response_tx) = request.response_tx {
                 let _ = response_tx.send(serde_json::to_value(&summary).map_err(|error| {
@@ -82,7 +85,10 @@ pub(super) async fn handle_reload_request(
             }
         }
         Err(error) => {
-            eprintln!("[harn] manifest reload ({source}) failed: {error}");
+            harn_vm::events::log_warn(
+                "orchestrator",
+                &format!("manifest reload ({source}) failed: {error}"),
+            );
             append_manifest_event(
                 ctx.event_log,
                 "reload_failed",
@@ -213,9 +219,12 @@ pub(super) async fn reload_manifest(
         for handle in previous_handles {
             let connector = handle.lock().await;
             if let Err(error) = connector.shutdown(Duration::from_secs(5)).await {
-                eprintln!(
-                    "[harn] connector {} reload shutdown warning: {error}",
-                    connector.provider_id().as_str()
+                harn_vm::events::log_warn(
+                    "orchestrator",
+                    &format!(
+                        "connector {} reload shutdown: {error}",
+                        connector.provider_id().as_str()
+                    ),
                 );
             }
         }

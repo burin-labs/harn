@@ -103,7 +103,16 @@ fn gate_observing(observed: string, reason: string) {
 }
 
 fn judge_refusing(gap_class: string, detail: string) {
-  return {text: json_stringify({verdict: "continue", detail: detail, gap_class: gap_class})}
+  return {
+    text: json_stringify(
+      {
+        verdict: "continue",
+        detail: detail,
+        gap_class: gap_class,
+        goal_assessment: {kind: "unknown", evidence_refs: []},
+      },
+    ),
+  }
 }
 
 fn completion_receipts(events: list) {

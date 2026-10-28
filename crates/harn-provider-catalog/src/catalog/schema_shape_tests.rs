@@ -8,13 +8,13 @@ use serde_json::{json, Value};
 
 use super::{artifact_embedded, schema_value, ProviderCatalogArtifact};
 
-// v13 adds `portal_defaults`, each provider's setup-UI default model.
-const ROOT_FIELDS_V13: &str = "
+// v14 adds regional endpoint data controls without changing root or model fields.
+const ROOT_FIELDS_V14: &str = "
     aliases families generated_by models portal_defaults providers qc_defaults
     routing_routes schema schema_version variants
 ";
 
-const MODEL_FIELDS_V13: &str = "
+const MODEL_FIELDS_V14: &str = "
     aliases api_dialect architecture availability avoid_as_reviewer_for batch
     benchmarks blurb capability_tags complementary_with completion_review
     context_window current_snapshot data_controls deprecation display_name
@@ -37,7 +37,7 @@ fn fields(value: &Value) -> Result<BTreeSet<String>, String> {
 
 fn pinned_fields(version: u64) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
     let (root, model) = match version {
-        13 => (ROOT_FIELDS_V13, MODEL_FIELDS_V13),
+        14 => (ROOT_FIELDS_V14, MODEL_FIELDS_V14),
         other => {
             return Err(format!(
                 "catalog schema version {other} has no field-set pin"
@@ -124,7 +124,7 @@ fn check_shape(artifact: &Value, schema: &Value) -> Result<(), String> {
 fn serialized_catalog_fields_are_pinned_to_schema_version() {
     let artifact = serde_json::to_value(artifact_embedded(None, None)).expect("serialize catalog");
     let schema = schema_value();
-    check_shape(&artifact, &schema).expect("current catalog shape matches version 12");
+    check_shape(&artifact, &schema).expect("current catalog shape matches version 14");
 
     let mut new_rust_field = artifact.clone();
     new_rust_field["models"][0]["future_required"] = json!(true);

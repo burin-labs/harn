@@ -161,12 +161,17 @@ impl AgentSessionInitRollback {
         self.armed = false;
     }
 
-    pub(super) async fn fail(&mut self, ctx: Option<&crate::vm::AsyncBuiltinCtx>) {
-        if let Err(error) = super::live_transcript_journal::flush_init_terminal(
+    pub(super) async fn fail(
+        &mut self,
+        ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+        cause: &crate::value::VmError,
+    ) {
+        if let Err(error) = super::live_transcript_journal::flush_init_terminal_with_cause(
             &self.session_id,
             "failed",
             "session_initialization_failed",
             ctx,
+            Some(cause),
         )
         .await
         {
@@ -277,6 +282,7 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
             super::live_transcript_journal::TerminalAccounting {
                 provider_call_count,
                 adaptive_budget: None,
+                goal_outcome: None,
             },
         ))
         .await?;

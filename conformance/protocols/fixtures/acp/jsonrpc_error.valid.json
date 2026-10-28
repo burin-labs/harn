@@ -29,7 +29,7 @@
     }
   ],
   "matrix": {
-    "version": "v0.12.2",
+    "version": "v1.26.0",
     "family": "jsonrpc",
     "case": "error_response_success",
     "source": {

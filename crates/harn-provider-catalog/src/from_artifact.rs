@@ -127,6 +127,7 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
                     id.clone(),
                     llm_config::ProviderRegionDef {
                         base_url: region.base_url.clone(),
+                        data_controls: region.data_controls.clone(),
                         label: region.label.clone(),
                         source_url: region.source_url.clone(),
                         last_verified: region.last_verified.clone(),

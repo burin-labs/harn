@@ -236,15 +236,16 @@ impl RunSandboxScope {
     }
 }
 
+pub(crate) const NO_SANDBOX_WARNING: &str =
+    "[harn] warning: harn run --no-sandbox disables filesystem, process, and egress sandbox defaults\n";
+
 pub(super) fn install_run_sandbox_scope(
     options: &RunSandboxOptions,
     workspace_root: &Path,
     stderr: &mut String,
 ) -> RunSandboxScope {
     if !options.enabled {
-        stderr.push_str(
-            "warning: harn run --no-sandbox disables filesystem, process, and egress sandbox defaults\n",
-        );
+        stderr.push_str(NO_SANDBOX_WARNING);
         return RunSandboxScope::disabled();
     }
 

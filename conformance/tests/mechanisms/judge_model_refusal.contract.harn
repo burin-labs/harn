@@ -112,7 +112,9 @@ fn configured_case(harness: Harness) {
     harness.llm,
     [
       llm_text("I finished the task. ##DONE##"),
-      llm_text("{\"verdict\":\"done\",\"detail\":\"The task is complete.\"}"),
+      llm_text(
+        "{\"verdict\":\"done\",\"detail\":\"The task is complete.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
+      ),
     ],
     { ->
       const session = "contract-judge-configured-" + harness.random.uuid()
@@ -144,7 +146,9 @@ fn catalog_role_case(harness: Harness) {
     harness.llm,
     [
       llm_text("I finished the task. ##DONE##"),
-      llm_text("{\"verdict\":\"done\",\"detail\":\"The task is complete.\"}"),
+      llm_text(
+        "{\"verdict\":\"done\",\"detail\":\"The task is complete.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
+      ),
     ],
     { ->
       const session = "contract-judge-catalog-role-" + harness.random.uuid()

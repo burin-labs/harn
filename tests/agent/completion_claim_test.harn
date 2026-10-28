@@ -275,9 +275,25 @@ pipeline test_unavailable_tool_keeps_the_actual_judge_prompt_byte_identical(
     harness.llm,
     [
       llm_done(),
-      {text: json_stringify({verdict: "done", detail: "The answer is complete."})},
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The answer is complete.",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      },
       llm_done(),
-      {text: json_stringify({verdict: "done", detail: "The answer is complete."})},
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The answer is complete.",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      },
     ],
     { ->
       const absent: AgentSpec = {
@@ -349,7 +365,15 @@ pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, tas
           },
         ],
       },
-      {text: json_stringify({verdict: "done", detail: "The cited edit satisfies the task."})},
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The cited edit satisfies the task.",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      },
       {
         text:
           "<user_response>Implemented the requested edit and verified it.</user_response>\n<done>FINISHED</done>",

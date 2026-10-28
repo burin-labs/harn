@@ -52,6 +52,11 @@ impl PrecompiledInterface {
     /// The entry's module graph when preparing this interface built one, so
     /// the caller need not build the same graph again. `None` when a stored
     /// interface was reused without building a graph.
+    pub fn module_graph(&self) -> Option<&harn_modules::ModuleGraph> {
+        self.module_graph.as_ref()
+    }
+
+    /// As [`Self::module_graph`], moving the graph out of this interface.
     pub fn take_module_graph(&mut self) -> Option<harn_modules::ModuleGraph> {
         self.module_graph.take()
     }

@@ -296,6 +296,7 @@ fn value_shape_for(name: &str) -> EnvironmentValueShape {
         "HARN_OTEL_SAMPLE_RATIO" => EnvironmentValueShape::UnitInterval,
         "HARN_ALLOW_TOOLCHAIN_MISMATCH"
         | "HARN_BYTECODE_CACHE"
+        | "HARN_DISABLE_CODE_INDEX_WARM"
         | "HARN_DISPATCH_GENERATION_DEBUG"
         | "HARN_FLIGHT_RECORDER"
         | harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV

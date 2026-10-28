@@ -107,6 +107,10 @@ pub(crate) struct TopItem {
     /// The declaration including an `export` wrapper or decorators.
     pub range: Range<usize>,
     pub exported: bool,
+    /// Rust: the module path a `pub(super)` or `pub(in ...)` item is visible
+    /// in, relative to its module. Such an item is not crate-wide, so it is
+    /// not `exported`; `None` for crate-wide, private, and non-Rust items.
+    pub restricted: Option<String>,
     /// TS interfaces and type aliases import with `type`.
     pub type_like: bool,
     /// Whether the item can be moved (functions, types, constants).

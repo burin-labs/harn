@@ -108,11 +108,17 @@ harn_export_cargo_build_dir_for_target() {
 # hash and host triple, so the same function that dev setup uses to build it
 # can rebuild it in place, and the Cargo entry points do exactly that.
 
+# Digest the bytes that identify a wrapper source or private source snapshot.
+harn_sccache_wrapper_source_digest() (
+  digest=$(shasum -a 256 < "$1") || exit $?
+  printf '%s\n' "${digest%% *}"
+)
+
 # Print the wrapper path for `root`'s wrapper source under `storage`.
 harn_sccache_wrapper_path() (
   root="$1"
   storage="$2"
-  source_hash=$(shasum -a 256 < "$root/scripts/sccache_rustc_wrapper.rs" | awk '{print $1}') || exit $?
+  source_hash=$(harn_sccache_wrapper_source_digest "$root/scripts/sccache_rustc_wrapper.rs") || exit $?
   host_triple=$(rustc -vV | sed -n 's/^host: //p')
   if [ -z "$host_triple" ]; then
     echo "error: rustc did not report a host triple for the sccache wrapper" >&2
@@ -133,9 +139,23 @@ harn_build_sccache_wrapper() (
   wrapper_path=$(harn_sccache_wrapper_path "$root" "$storage") || exit $?
   if [ ! -x "$wrapper_path" ]; then
     mkdir -p "$(dirname "$wrapper_path")" || exit $?
-    temporary_path="$wrapper_path.tmp.$$"
-    rustc --edition=2021 -C strip=symbols "$root/scripts/sccache_rustc_wrapper.rs" \
+    temporary_path=$(mktemp "$wrapper_path.tmp.XXXXXX") || exit $?
+    source_snapshot="$temporary_path.sccache_rustc_wrapper.rs"
+    trap 'rm -f "$temporary_path" "$source_snapshot"' EXIT
+    source_key=${wrapper_path%/*}
+    source_key=${source_key##*-}
+    cp "$root/scripts/sccache_rustc_wrapper.rs" "$source_snapshot" || exit $?
+    if [ "$(harn_sccache_wrapper_source_digest "$source_snapshot")" != "$source_key" ]; then
+      echo "error: compiler-cache wrapper source changed before compilation" >&2
+      exit 1
+    fi
+    rustc --edition=2021 --crate-name sccache_rustc_wrapper -C strip=symbols "$source_snapshot" \
       -o "$temporary_path" || exit $?
+    if [ "$(harn_sccache_wrapper_source_digest "$root/scripts/sccache_rustc_wrapper.rs")" != "$source_key" ] \
+      || [ "$(harn_sccache_wrapper_source_digest "$source_snapshot")" != "$source_key" ]; then
+      echo "error: compiler-cache wrapper source changed during compilation; not publishing" >&2
+      exit 1
+    fi
     # A same-filesystem hard link publishes the complete executable atomically
     # and never replaces a live wrapper, including on Windows. A concurrent
     # publisher may win first; its source-addressed artifact is equivalent.
@@ -145,7 +165,6 @@ harn_build_sccache_wrapper() (
       echo "error: failed to publish the sccache wrapper" >&2
       exit 1
     fi
-    rm -f "$temporary_path"
   fi
   printf '%s\n' "$wrapper_path"
 )
@@ -169,7 +188,7 @@ harn_restore_configured_sccache_wrapper() {
   _harn_expected=$(harn_sccache_wrapper_path "$_harn_workspace" "$_harn_storage") || return $?
   if [ "$_harn_expected" != "$_harn_wrapper" ]; then
     echo "error: the rustc wrapper .cargo/config.toml names is missing: $_harn_wrapper" >&2
-    echo "       it was built from an older wrapper source; run \`make setup\` to regenerate the config" >&2
+    echo "       it was built from an older wrapper source; run \`make refresh-cargo-wrapper\` to refresh only that input" >&2
     return 1
   fi
   echo "note: rebuilding the missing rustc wrapper .cargo/config.toml names: $_harn_wrapper" >&2

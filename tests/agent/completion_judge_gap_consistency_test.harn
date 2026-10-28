@@ -130,7 +130,15 @@ pipeline test_done_with_no_gap_field_at_all_still_accepts(harness: Harness, task
     harness.llm,
     [
       llm_done(),
-      {text: json_stringify({verdict: "done", detail: "The greeting was printed."})},
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The greeting was printed.",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      },
       llm_done(),
     ],
     { ->

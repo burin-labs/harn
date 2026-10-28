@@ -7,8 +7,8 @@
   "properties": {
     "mode": {
       "type": "string",
-      "enum": ["built", "refreshed"],
-      "description": "`refreshed` reconciled the live index against disk; `built` walked, read, and parsed the whole workspace."
+      "enum": ["built", "refreshed", "restored"],
+      "description": "`refreshed` reconciled the live index against disk; `restored` loaded this root's on-disk snapshot and reconciled it against disk; `built` walked, read, and parsed the whole workspace."
     },
     "files_indexed": { "type": "integer", "minimum": 0, "description": "Files in the index after the call." },
     "files_skipped": { "type": "integer", "minimum": 0, "description": "Files the walk offered that could not be ingested." },

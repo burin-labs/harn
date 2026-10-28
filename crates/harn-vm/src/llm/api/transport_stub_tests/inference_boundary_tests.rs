@@ -2,6 +2,330 @@
 use super::*;
 
 #[test]
+fn project_privacy_facts_and_endpoint_cannot_widen_host_ceiling() {
+    use crate::llm::api::{
+        preview_inference_admission, InferenceAdmissionRequest, InferenceAdmissionStatus,
+    };
+    use crate::llm_config::{
+        DataControlDef, DataControlDialect, DataControlEffect, DataControlLocation,
+        DataControlValue, ProvidersConfig, TrainingDefault,
+    };
+    use std::io::Write;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    };
+
+    struct ClearTrustedCatalog;
+    impl Drop for ClearTrustedCatalog {
+        fn drop(&mut self) {
+            crate::llm_config::clear_runtime_catalog_overlay();
+        }
+    }
+    let _guard = env_guard();
+    let _allow = allow_stubbed_llm_transport();
+    let _cleanup = PrivacyOverrides;
+    let _trusted_cleanup = ClearTrustedCatalog;
+    let _host = ScopedEnvVar::remove(super::super::inference_boundary::HOST_BOUNDARY_ENV);
+    let count = Arc::new(AtomicUsize::new(0));
+    let reached = count.clone();
+    let models = Arc::new(Mutex::new(Vec::new()));
+    let sent_models = models.clone();
+    let server = spawn_llm_stub_many("host privacy authority", 2, move |_, stream| {
+        let (_, body) = super::ollama_openai_compat::read_http_request(stream);
+        sent_models.lock().unwrap().push(body["model"].clone());
+        reached.fetch_add(1, Ordering::SeqCst);
+        let body = r#"{"choices":[{"message":{"role":"assistant","content":"accepted"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"#;
+        write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    });
+    let redirected_count = Arc::new(AtomicUsize::new(0));
+    let redirected_reached = redirected_count.clone();
+    let redirected = spawn_llm_stub("project redirect", move |_| {
+        redirected_reached.fetch_add(1, Ordering::SeqCst);
+    });
+    let mut provider = crate::llm_config::provider_config("openai").unwrap();
+    provider.base_url = format!("http://{}/v1", server.addr());
+    provider.base_url_env = None;
+    provider.data_controls.as_mut().unwrap().training_default = TrainingDefault::DoesNotTrain;
+    let mut host = ProvidersConfig::default();
+    host.providers.insert("openai".into(), provider.clone());
+    crate::llm_config::set_runtime_catalog_overlay(Some(host));
+    let boundary = super::super::inference_boundary::InferenceBoundary {
+        reach: super::super::inference_boundary::InferenceReach::AnyHosted,
+        allow_training_discounts: false,
+    };
+    let mut opts = base_opts("openai");
+    opts.model = "gpt-5.6-luna".into();
+    opts.api_key = "synthetic".into();
+    opts.stream = false;
+    opts.inference_boundary = Some(boundary);
+    let preview = || {
+        preview_inference_admission(&InferenceAdmissionRequest {
+            provider: opts.provider.clone(),
+            model: opts.model.clone(),
+            boundary: Some(boundary),
+            data_controls: None,
+        })
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    assert_eq!(preview().status, InferenceAdmissionStatus::Admitted);
+    assert_eq!(
+        runtime.block_on(vm_call_llm_full(&opts)).unwrap().text,
+        "accepted"
+    );
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        1,
+        "positive control reached the host endpoint"
+    );
+    let mut overridden = opts.clone();
+    overridden.provider_overrides = Some(serde_json::json!({"model": "project-overridden-model"}));
+    assert!(
+        runtime.block_on(vm_call_llm_full(&overridden)).is_err(),
+        "model override must not change the admitted route; sent {:?}",
+        models.lock().unwrap()
+    );
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        1,
+        "model override sent no request"
+    );
+
+    let mut project = provider.clone();
+    project.base_url = format!("http://{}/v1", redirected.addr());
+    let mut overlay = ProvidersConfig::default();
+    overlay.providers.insert("openai".into(), project);
+    crate::llm_config::set_user_overrides(Some(overlay));
+    assert_eq!(
+        preview().status,
+        InferenceAdmissionStatus::Unknown,
+        "redirect cannot inherit the host endpoint's promise"
+    );
+    assert!(runtime.block_on(vm_call_llm_full(&opts)).is_err());
+    assert_eq!(
+        redirected_count.load(Ordering::SeqCst),
+        0,
+        "redirect sent no request"
+    );
+
+    crate::llm_config::clear_user_overrides();
+    provider.data_controls.as_mut().unwrap().training_default = TrainingDefault::Unspecified;
+    let mut host = ProvidersConfig::default();
+    host.providers.insert("openai".into(), provider.clone());
+    crate::llm_config::set_runtime_catalog_overlay(Some(host));
+    assert_eq!(
+        preview().status,
+        InferenceAdmissionStatus::Unknown,
+        "host has no no-training promise"
+    );
+    provider.data_controls.as_mut().unwrap().training_default = TrainingDefault::DoesNotTrain;
+    let mut overlay = ProvidersConfig::default();
+    overlay.providers.insert("openai".into(), provider);
+    crate::llm_config::set_user_overrides(Some(overlay));
+    assert_eq!(
+        preview().status,
+        InferenceAdmissionStatus::Unknown,
+        "project cannot invent a no-training promise"
+    );
+    assert!(runtime.block_on(vm_call_llm_full(&opts)).is_err());
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        1,
+        "forged fact sent no request"
+    );
+
+    crate::llm_config::clear_user_overrides();
+    let mut fake_control = crate::llm_config::provider_config("openai").unwrap();
+    fake_control
+        .data_controls
+        .as_mut()
+        .unwrap()
+        .request_controls
+        .push(DataControlDef {
+            location: DataControlLocation::Body,
+            name: "invented_no_training".into(),
+            value: DataControlValue::Bool(true),
+            effect: DataControlEffect::Training,
+            applies_to: vec![DataControlDialect::OpenAiSse],
+            caveat: None,
+        });
+    let mut overlay = ProvidersConfig::default();
+    overlay.providers.insert("openai".into(), fake_control);
+    crate::llm_config::set_user_overrides(Some(overlay));
+    let decision = preview();
+    assert_eq!(decision.status, InferenceAdmissionStatus::Unknown);
+    assert!(
+        !decision.training_control_planned,
+        "project control is not host evidence"
+    );
+    assert!(runtime.block_on(vm_call_llm_full(&opts)).is_err());
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        1,
+        "invented control sent no request"
+    );
+
+    crate::llm_config::clear_user_overrides();
+    let mut trusted_provider = crate::llm_config::provider_config("openai").unwrap();
+    trusted_provider
+        .data_controls
+        .as_mut()
+        .unwrap()
+        .training_default = TrainingDefault::DoesNotTrain;
+    let mut host = ProvidersConfig::default();
+    host.providers.insert("openai".into(), trusted_provider);
+    crate::llm_config::set_runtime_catalog_overlay(Some(host));
+    assert_eq!(
+        preview().status,
+        InferenceAdmissionStatus::Admitted,
+        "trusted model remains admissible"
+    );
+    let mut remapped =
+        crate::llm_config::model_catalog_entry_for_route("openai", &opts.model).unwrap();
+    remapped.wire_model = Some("project-remapped-model".into());
+    let mut project = ProvidersConfig::default();
+    project.models.insert(opts.model.clone(), remapped);
+    crate::llm_config::set_user_overrides(Some(project));
+    assert_eq!(
+        preview().status,
+        InferenceAdmissionStatus::Unknown,
+        "project cannot attach trusted facts to a different wire model"
+    );
+    assert!(runtime.block_on(vm_call_llm_full(&opts)).is_err());
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        1,
+        "remapped model sent no request"
+    );
+
+    crate::llm_config::clear_user_overrides();
+    let open_weight = super::super::inference_boundary::InferenceBoundary {
+        reach: super::super::inference_boundary::InferenceReach::HostedOpenWeight,
+        allow_training_discounts: true,
+    };
+    let weight_request = InferenceAdmissionRequest {
+        provider: opts.provider.clone(),
+        model: opts.model.clone(),
+        boundary: Some(open_weight),
+        data_controls: None,
+    };
+    assert_ne!(
+        preview_inference_admission(&weight_request).status,
+        InferenceAdmissionStatus::Admitted
+    );
+    let mut model =
+        crate::llm_config::model_catalog_entry_for_route("openai", &opts.model).unwrap();
+    model.open_weight = Some(true);
+    let mut project = ProvidersConfig::default();
+    project.models.insert(opts.model.clone(), model);
+    crate::llm_config::set_user_overrides(Some(project));
+    assert_ne!(
+        preview_inference_admission(&weight_request).status,
+        InferenceAdmissionStatus::Admitted,
+        "project cannot invent open-weight evidence"
+    );
+
+    crate::llm_config::clear_user_overrides();
+    let mut project_provider = crate::llm_config::provider_config("openai").unwrap();
+    project_provider.local_runtime = crate::llm_config::provider_config("ollama")
+        .unwrap()
+        .local_runtime;
+    let mut project = ProvidersConfig::default();
+    project.providers.insert("openai".into(), project_provider);
+    crate::llm_config::set_user_overrides(Some(project));
+    let local_request = InferenceAdmissionRequest {
+        provider: opts.provider.clone(),
+        model: opts.model.clone(),
+        boundary: Some(super::super::inference_boundary::InferenceBoundary {
+            reach: super::super::inference_boundary::InferenceReach::LocalOnly,
+            allow_training_discounts: false,
+        }),
+        data_controls: None,
+    };
+    assert_ne!(
+        preview_inference_admission(&local_request).status,
+        InferenceAdmissionStatus::Admitted,
+        "project cannot relabel a hosted provider as local"
+    );
+}
+
+#[test]
+fn unverified_endpoint_is_refused_before_transport() {
+    use crate::llm::api::{
+        preview_inference_admission, InferenceAdmissionRequest, InferenceAdmissionStatus,
+    };
+    use crate::llm_config::RuntimeProviderEndpointOverrides;
+    use std::io::Write;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let _guard = env_guard();
+    let _allow = allow_stubbed_llm_transport();
+    let _cleanup = PrivacyOverrides;
+    let _host = ScopedEnvVar::remove(super::super::inference_boundary::HOST_BOUNDARY_ENV);
+    let count = Arc::new(AtomicUsize::new(0));
+    let reached = count.clone();
+    let server = spawn_llm_stub_many("endpoint privacy", 2, move |_, stream| {
+        super::ollama_openai_compat::read_http_request(stream);
+        reached.fetch_add(1, Ordering::SeqCst);
+        let body = r#"{"choices":[{"message":{"role":"assistant","content":"accepted"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"#;
+        write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    });
+    let endpoint = format!("http://{}/v1", server.addr());
+    let _trusted_endpoint = TrustedTestEndpoint::install("openai", &endpoint);
+    let mut overrides = RuntimeProviderEndpointOverrides::single("openai", &endpoint).unwrap();
+    overrides.insert("zai", &endpoint).unwrap();
+    crate::llm_config::set_runtime_provider_endpoint_overrides(overrides);
+    let boundary = super::super::inference_boundary::InferenceBoundary {
+        reach: super::super::inference_boundary::InferenceReach::AnyHosted,
+        allow_training_discounts: false,
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let mut allowed = base_opts("openai");
+    allowed.model = "gpt-5.6-luna".into();
+    allowed.api_key = "synthetic".into();
+    allowed.stream = false;
+    allowed.inference_boundary = Some(boundary);
+    assert_eq!(
+        runtime.block_on(vm_call_llm_full(&allowed)).unwrap().text,
+        "accepted"
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    let mut denied = base_opts("zai");
+    denied.model = "glm-5.3".into();
+    denied.api_key = "synthetic".into();
+    denied.stream = false;
+    denied.inference_boundary = Some(boundary);
+    let preview = preview_inference_admission(&InferenceAdmissionRequest {
+        provider: denied.provider.clone(),
+        model: denied.model.clone(),
+        boundary: Some(boundary),
+        data_controls: None,
+    });
+    assert_eq!(preview.status, InferenceAdmissionStatus::Unknown);
+    let error = runtime.block_on(vm_call_llm_full(&denied)).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("inference_boundary.training_unknown"),
+        "{error}"
+    );
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        1,
+        "the refused route sent nothing"
+    );
+}
+
+#[test]
 fn no_training_ceiling_plans_and_sends_only_required_controls() {
     use crate::llm::api::{
         preview_inference_admission, InferenceAdmissionRequest, InferenceAdmissionStatus,
@@ -30,9 +354,10 @@ fn no_training_ceiling_plans_and_sends_only_required_controls() {
         };
         write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
     });
+    let endpoint = format!("http://{}", server.addr());
+    let _trusted_endpoint = TrustedTestEndpoint::install("openrouter", &endpoint);
     crate::llm_config::set_runtime_provider_endpoint_overrides(
-        RuntimeProviderEndpointOverrides::single("openrouter", format!("http://{}", server.addr()))
-            .unwrap(),
+        RuntimeProviderEndpointOverrides::single("openrouter", endpoint).unwrap(),
     );
     let boundary = super::super::inference_boundary::InferenceBoundary {
         reach: super::super::inference_boundary::InferenceReach::AnyHosted,
@@ -96,6 +421,23 @@ fn no_training_ceiling_plans_and_sends_only_required_controls() {
             assert_eq!(receipt.applied.len(), 1);
         }
     }
+
+    for override_field in [
+        serde_json::json!({"models": ["other/closed-model"]}),
+        serde_json::json!({"fallbacks": [{"model": "other/closed-model"}]}),
+    ] {
+        opts.provider_overrides = Some(override_field);
+        assert!(
+            runtime.block_on(vm_call_llm_full(&opts)).is_err(),
+            "bounded route must not delegate to an unadmitted fallback model"
+        );
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            3,
+            "fallback override sent no request"
+        );
+    }
+    opts.provider_overrides = None;
 
     let _without_host = ScopedEnvVar::remove(super::super::inference_boundary::HOST_BOUNDARY_ENV);
     opts.data_controls = Some(DataPosture::Default);
@@ -235,6 +577,26 @@ fn no_training_ceiling_plans_and_sends_only_required_controls() {
         .expect("same listener remains live after refusals");
     assert_eq!(result.text, "accepted");
     assert_eq!(counter.load(Ordering::SeqCst), 5);
+}
+
+/// The listener stands in for the catalog endpoint, not a project redirect.
+struct TrustedTestEndpoint;
+
+impl TrustedTestEndpoint {
+    fn install(provider: &str, endpoint: &str) -> Self {
+        let mut definition = crate::llm_config::provider_config(provider).unwrap();
+        definition.base_url = endpoint.to_string();
+        let mut trusted = crate::llm_config::ProvidersConfig::default();
+        trusted.providers.insert(provider.to_string(), definition);
+        crate::llm_config::set_runtime_catalog_overlay(Some(trusted));
+        Self
+    }
+}
+
+impl Drop for TrustedTestEndpoint {
+    fn drop(&mut self) {
+        crate::llm_config::clear_runtime_catalog_overlay();
+    }
 }
 
 struct PrivacyOverrides;

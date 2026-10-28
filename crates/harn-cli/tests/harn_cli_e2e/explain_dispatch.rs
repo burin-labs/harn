@@ -98,6 +98,47 @@ fn single_code_json_repairs_empty_when_no_template_registered() {
 fn unknown_code_exits_two() {
     let harn = run_explain(&["HARN-ZZZ-999"], &[]);
     assert_eq!(harn.exit_code, 2, "harn stderr={}", harn.stderr);
+    assert!(harn.stdout.is_empty(), "harn stdout={}", harn.stdout);
+    assert!(harn.stderr.contains("Unknown Harn diagnostic code"));
+    assert!(harn.stderr.lines().all(|line| line.starts_with("[harn] ")));
+}
+
+#[test]
+fn malformed_invariant_source_uses_the_cli_diagnostic_sink() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("broken.harn");
+    for invalid_source in ["fn broken( {", "\"unterminated"] {
+        std::fs::write(&source, invalid_source).unwrap();
+        let path = source.to_str().unwrap();
+        let brief = run_explain(&["--invariant", "fs.writes", "broken", path], &[]);
+        assert_ne!(brief.exit_code, 0);
+        assert!(brief.stdout.is_empty(), "{}", brief.stdout);
+        assert!(
+            brief.stderr.starts_with("[harn] error:"),
+            "{}",
+            brief.stderr
+        );
+        assert_eq!(brief.stderr.lines().count(), 1, "{}", brief.stderr);
+        assert!(brief.stderr.contains("--explain"), "{}", brief.stderr);
+
+        let detailed = run_explain(
+            &["--explain", "--invariant", "fs.writes", "broken", path],
+            &[],
+        );
+        assert_ne!(detailed.exit_code, 0);
+        assert!(detailed.stdout.is_empty(), "{}", detailed.stdout);
+        assert!(
+            detailed.stderr.starts_with("[harn] "),
+            "{}",
+            detailed.stderr
+        );
+        assert!(
+            detailed.stderr.contains(invalid_source),
+            "{}",
+            detailed.stderr
+        );
+        assert!(detailed.stderr.lines().count() > 1, "{}", detailed.stderr);
+    }
 }
 
 #[test]

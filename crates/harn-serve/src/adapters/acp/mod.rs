@@ -52,7 +52,7 @@ pub fn is_supported_session_mode(mode_id: &str) -> bool {
     modes::is_known(mode_id)
 }
 use bridge::AcpBridge;
-pub use bridge::AcpOutput;
+pub use bridge::{acp_plan_update, AcpOutput};
 pub use confinement::{confine_acp_server_process, AcpServerConfinement};
 pub use execute::PromptExecutionError as AcpPromptExecutionError;
 use live_clients::{
@@ -651,6 +651,19 @@ pub trait AcpRuntimeConfigurator: Send + Sync {
     ) -> harn_vm::llm_config::RuntimeProviderEndpointOverrides {
         Default::default()
     }
+
+    /// Start warming host-owned caches for a session that just opened over
+    /// `project_root`, so its first prompt does not pay for them.
+    ///
+    /// Called once per admitted session, before any prompt, and only when
+    /// process confinement covers `project_root`. It must return without
+    /// waiting on the warm and must not change capability or sandbox policy.
+    fn warm_session_workspace(&self, _project_root: &std::path::Path) {}
+
+    /// A session that [`Self::warm_session_workspace`] was called for has
+    /// closed. Called once per such session, so a host can release what it
+    /// keeps for `project_root` once no open session needs it.
+    fn release_session_workspace(&self, _project_root: &std::path::Path) {}
 }
 
 #[derive(Clone, Default)]
@@ -691,6 +704,14 @@ impl AcpRuntimeConfigurator for EndpointOverrideRuntimeConfigurator {
         &self,
     ) -> harn_vm::llm_config::RuntimeProviderEndpointOverrides {
         self.endpoints.clone()
+    }
+
+    fn warm_session_workspace(&self, project_root: &std::path::Path) {
+        self.inner.warm_session_workspace(project_root);
+    }
+
+    fn release_session_workspace(&self, project_root: &std::path::Path) {
+        self.inner.release_session_workspace(project_root);
     }
 }
 

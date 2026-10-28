@@ -35,7 +35,7 @@ pub(in crate::commands::test) async fn run_parallel_conformance_tests(
         .unwrap_or_else(|error| command_error(&format!("create worker session root: {error}")));
 
     if !options.json {
-        eprintln!("harn conformance: running {workers} process-isolated worker(s)");
+        cli_diagnostic!("harn conformance: running {workers} process-isolated worker(s)");
     }
     let started = std::time::Instant::now();
     let mut children = Vec::with_capacity(workers);

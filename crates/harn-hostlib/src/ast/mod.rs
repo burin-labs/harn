@@ -45,6 +45,7 @@ mod fuzzy;
 mod health;
 mod imports;
 mod insert_at_anchor;
+mod insert_containers;
 pub(crate) mod java;
 mod language;
 mod member_insertion;

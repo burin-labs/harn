@@ -90,11 +90,20 @@ fn judge_done_with_gap(gap_class: string?) -> dict {
   } else {
     {verdict: "done", detail: detail, gap_class: gap_class}
   }
-  return {text: json_stringify(body)}
+  return {text: json_stringify(body + {goal_assessment: {kind: "unknown", evidence_refs: []}})}
 }
 
 fn judge_refusing(gap_class: string, detail: string) -> dict {
-  return {text: json_stringify({verdict: "continue", detail: detail, gap_class: gap_class})}
+  return {
+    text: json_stringify(
+      {
+        verdict: "continue",
+        detail: detail,
+        gap_class: gap_class,
+        goal_assessment: {kind: "unknown", evidence_refs: []},
+      },
+    ),
+  }
 }
 
 fn completion_receipts(events: list) {

@@ -16,24 +16,24 @@ publish = false
 ignored = ["serde_json", "sha2"]
 
 [dependencies]
-harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.180" }
-harn-modules = { path = "../harn-modules", version = "=0.10.180" }
-harn-parser = { path = "../harn-parser", version = "=0.10.180" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.180" }
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.181" }
+harn-modules = { path = "../harn-modules", version = "=0.10.181" }
+harn-parser = { path = "../harn-parser", version = "=0.10.181" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.181" }
 # AOT generation targets the distributed CLI surface; opt into `full` + otel
 # explicitly so library crates can stay lean by default (#6416).
-harn-vm = { path = "../harn-vm", version = "=0.10.180", default-features = false, features = [
+harn-vm = { path = "../harn-vm", version = "=0.10.181", default-features = false, features = [
     "full",
     "otel",
 ] }
-harn-runtime = { path = "../harn-runtime", version = "=0.10.180", features = ["full"] }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.181", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
 toml = "1.1"
 
 [dev-dependencies]
-harn-modules = { path = "../harn-modules", version = "=0.10.180", features = ["bundled-stdlib"] }
+harn-modules = { path = "../harn-modules", version = "=0.10.181", features = ["bundled-stdlib"] }
 tempfile = "3"
 
 [lints]

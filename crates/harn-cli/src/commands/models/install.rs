@@ -17,15 +17,17 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
             print_setup_plan(&plan);
             return;
         }
-        eprintln!(
+        cli_diagnostic!(
             "harn models install currently knows how to pull Ollama models and print setup steps \
              for known local servers; '{}' resolved to provider '{}'.",
-            args.model, resolved.provider
+            args.model,
+            resolved.provider
         );
-        eprintln!("For this provider, start the server yourself and verify it with:");
-        eprintln!(
+        cli_diagnostic!("For this provider, start the server yourself and verify it with:");
+        cli_diagnostic!(
             "  harn provider ready {} --model {}",
-            resolved.provider, args.model
+            resolved.provider,
+            args.model
         );
         std::process::exit(1);
     }
@@ -38,8 +40,8 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
         } else {
             "Install Ollama from https://ollama.com"
         };
-        eprintln!("ollama is not installed.");
-        eprintln!("{hint}");
+        cli_diagnostic!("ollama is not installed.");
+        cli_diagnostic!("{hint}");
         std::process::exit(1);
     }
 
@@ -61,7 +63,7 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
             if io::stdin().lock().read_line(&mut buf).is_err()
                 || !matches!(buf.trim(), "y" | "Y" | "yes")
             {
-                eprintln!("aborted");
+                cli_diagnostic!("aborted");
                 std::process::exit(1);
             }
         }
@@ -76,7 +78,7 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
     let mut child = match command.spawn() {
         Ok(c) => c,
         Err(error) => {
-            eprintln!("failed to spawn ollama: {error}");
+            cli_diagnostic!("failed to spawn ollama: {error}");
             std::process::exit(1);
         }
     };
@@ -90,12 +92,12 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
     let status = match child.wait().await {
         Ok(s) => s,
         Err(error) => {
-            eprintln!("failed to wait for ollama: {error}");
+            cli_diagnostic!("failed to wait for ollama: {error}");
             std::process::exit(1);
         }
     };
     if !status.success() {
-        eprintln!("ollama pull exited {status}");
+        cli_diagnostic!("ollama pull exited {status}");
         std::process::exit(status.code().unwrap_or(1));
     }
     println!("\nPulled {}", resolved.id);

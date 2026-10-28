@@ -16,7 +16,7 @@ pub(in crate::http) fn build_http_download_response(
 pub(in crate::http) fn build_http_response(
     status: i64,
     headers: crate::value::DictMap,
-    body: String,
+    body: impl Into<super::ResponseBody>,
     final_url: &str,
     private_filter: &crate::session_inputs::OutputFilter,
 ) -> VmValue {
@@ -32,7 +32,16 @@ pub(in crate::http) fn build_http_response(
         })
         .collect();
     result.put("headers", VmValue::dict(headers));
-    result.put_str("body", private_filter.redact(&body));
+    match body.into() {
+        super::ResponseBody::Text(body) => result.put_str("body", private_filter.redact(&body)),
+        super::ResponseBody::Bytes(body) => {
+            result.put_str("body", "");
+            result.put(
+                "body_bytes",
+                VmValue::Bytes(Arc::new(private_filter.redact_bytes(&body).into_owned())),
+            );
+        }
+    }
     result.put_str("final_url", private_filter.redact(final_url));
     result.put_bool("ok", (200..300).contains(&(status as u16)));
     VmValue::dict(result)

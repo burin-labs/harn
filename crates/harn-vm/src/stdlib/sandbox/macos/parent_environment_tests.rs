@@ -114,15 +114,11 @@ fn confined_child_cannot_read_the_hosts_launch_environment() {
         let refusal = error
             .sandbox_mechanism_unavailable()
             .expect("typed mechanism refusal");
+        // The refusal names the prerequisite that failed, not a missing binary.
         assert_eq!(
-            refusal.mechanism,
-            super::super::SandboxMechanism::MacosSandboxExec
+            *refusal,
+            Backend::filesystem_unavailable(SandboxProfile::OsHardened)
         );
-        assert_eq!(
-            refusal.availability,
-            super::super::SandboxMechanismAvailability::AbsentOnHost
-        );
-        assert_eq!(refusal.profile, SandboxProfile::OsHardened);
         assert!(!marker.exists(), "refused child must never start");
         println!("unsupported host refusal reached; child did not start");
         return;

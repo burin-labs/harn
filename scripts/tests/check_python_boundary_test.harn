@@ -51,6 +51,23 @@ pipeline test_allowlist_exact_and_prefix_rules(harness: Harness, task: unknown) 
   assert_eq(python_boundary_rule_for("scripts/_bench_cli_cold_start.py").allowed, false)
   assert_eq(python_boundary_rule_for("scripts/verify_tree_sitter_parse.py").allowed, false)
   assert_eq(python_boundary_rule_for("scripts/new_orchestration.py").allowed, false)
+  const target_gc_rule = python_boundary_rule_for(
+    "scripts/tests/prune_stale_targets_reader_test.py",
+  )
+  assert_eq(target_gc_rule.allowed, true)
+  assert_eq(target_gc_rule.owner, "Target-cache collector")
+  assert_eq(python_boundary_rule_for("scripts/tests/other_target_gc.py").allowed, false)
+  assert_eq(
+    embedded_python_rule_for(
+      "Makefile",
+      "python3 ./scripts/tests/prune_stale_targets_reader_test.py",
+    ).allowed,
+    true,
+  )
+  assert_eq(
+    embedded_python_rule_for("Makefile", "python3 ./scripts/tests/other_target_gc.py").allowed,
+    false,
+  )
   assert_eq(
     python_boundary_rule_for("personas/smart_ship/fixtures/python/run_tests.py").allowed,
     true,

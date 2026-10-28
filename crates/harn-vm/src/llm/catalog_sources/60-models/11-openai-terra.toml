@@ -1,0 +1,79 @@
+# Live 2026-10-27: six direct efforts, Responses tools and result round trip,
+# strict JSON, streaming, image controls, a nonzero cache hit, Fast/Flex and Pro.
+[models."gpt-6.1-terra"]
+name = "GPT-6.1 Terra"
+display_name = "GPT-6.1 Terra"
+blurb = "Fast reasoning for everyday coding and tool use at a lower cost than Sol."
+provider = "openai"
+operations = ["text_generation"]
+logical_model = "gpt-6.1-terra"
+equivalence_group = "gpt-6.1-terra"
+context_window = 1050000
+released = "2026-10-26"
+open_weight = false
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.05, cache_write_per_mtok = 1.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+tier = "mid"
+strengths = ["coding", "tool_use", "reasoning", "vision", "long_context"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }, latency = "lower and more consistent latency", reliability = "provider can downgrade to standard service", unsuitable_workloads = ["batch"] },
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", pricing = { input_per_mtok = 0.50, output_per_mtok = 2.50, cache_read_per_mtok = 0.025, cache_write_per_mtok = 0.625, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }, latency = "slower and variable synchronous latency", reliability = "best-effort availability", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, status = "ga", latency = "additional reasoning can take longer", unsuitable_workloads = ["interactive_chat"], note = "Responses-only; live response echoed reasoning.mode=pro. Token expansion has not been benchmarked." },
+]
+
+[models."gpt-6.1-terra".registration]
+aliases = ["terra61"]
+supersedes = ["gpt-5.6-terra"]
+
+[models."gpt-6.1-terra".registration.request]
+native_tools = true
+preferred_tool_format = "native"
+vision_supported = true
+prompt_caching = true
+responses_api = true
+reasoning_tools_require_responses = true
+requires_completion_tokens = true
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+reasoning_disable_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh", "max"]
+temperature_supported = false
+top_p_supported = false
+
+[models."gpt-6.1-terra".registration.selection]
+family = "openai-gpt-6"
+dimension = "variant"
+before = "sol"
+value = { value = "terra", label = "Terra", plain_description = "Fast reasoning and tool use for everyday coding.", relative_cost_hint = 2, relative_speed_hint = 4 }
+
+# Gateway tool round trips, strict JSON, streaming and red/blue image controls
+# passed. OpenRouter uses nested reasoning; Vercel uses reasoning_effort.
+[models."gpt-6.1-terra".registration.routes."openai/gpt-6.1-terra"]
+provider = "openrouter"
+supersedes = ["openai/gpt-5.6-terra"]
+model = { name = "GPT-6.1 Terra (via OpenRouter)", served_variant = "openrouter", api_dialect = "openai_chat", serving_tiers = [], reasoning_modes = [], pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.05, cache_write_per_mtok = 1.25, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] } }
+request = { responses_api = false, reasoning_tools_require_responses = false, reasoning_wire_format = "openrouter" }
+
+[models."gpt-6.1-terra".registration.routes."openai/gpt-6.1-terra-pro"]
+provider = "openrouter"
+supersedes = ["openai/gpt-5.6-terra-pro"]
+model = { name = "GPT-6.1 Terra Pro (via OpenRouter)", display_name = "GPT-6.1 Terra Pro", blurb = "Extra reasoning for difficult work; expect more tokens and longer responses.", served_variant = "openrouter_pro", api_dialect = "openai_chat", serving_tiers = [], reasoning_modes = [], pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.05, cache_write_per_mtok = 1.25, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] } }
+request = { responses_api = false, reasoning_tools_require_responses = false, reasoning_wire_format = "openrouter", reasoning_none_supported = false, reasoning_disable_supported = false, reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"] }
+
+# Both nested and scalar none requests returned reasoning tokens. Do not claim
+# an off switch from HTTP 200 alone; invalid scalar effort is rejected with 400.
+[models."gpt-6.1-terra".registration.routes."vercel/openai/gpt-6.1-terra"]
+provider = "vercel_ai_gateway"
+model = { name = "GPT-6.1 Terra (Vercel AI Gateway)", wire_model = "openai/gpt-6.1-terra", served_variant = "vercel-ai-gateway", api_dialect = "openai_chat", serving_tiers = [], reasoning_modes = [], pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.05, cache_write_per_mtok = 1.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] } }
+request = { responses_api = false, reasoning_tools_require_responses = false, reasoning_wire_format = "openai", reasoning_none_supported = false, reasoning_disable_supported = false, reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"] }
+
+[models."gpt-6.1-terra".registration.routes."vercel/openai/gpt-6.1-terra-fast"]
+provider = "vercel_ai_gateway"
+model = { name = "GPT-6.1 Terra Fast (Vercel AI Gateway)", display_name = "GPT-6.1 Terra Fast", blurb = "Fast service for everyday coding, at a premium over standard Terra.", wire_model = "openai/gpt-6.1-terra-fast", served_variant = "vercel-ai-gateway-fast", api_dialect = "openai_chat", serving_tiers = [], reasoning_modes = [], pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] } }
+request = { responses_api = false, reasoning_tools_require_responses = false, reasoning_wire_format = "openai", reasoning_none_supported = false, reasoning_disable_supported = false, reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"] }

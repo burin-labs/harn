@@ -167,7 +167,7 @@ async fn aggregate_report(args: &EvalPromptArgs) -> Result<PromptReport, i32> {
     let template_path = match fs::canonicalize(&args.file) {
         Ok(p) => p,
         Err(error) => {
-            eprintln!(
+            cli_diagnostic!(
                 "error: cannot resolve template path {}: {error}",
                 args.file.display()
             );
@@ -177,7 +177,7 @@ async fn aggregate_report(args: &EvalPromptArgs) -> Result<PromptReport, i32> {
     let template_source = match fs::read_to_string(&template_path) {
         Ok(s) => s,
         Err(error) => {
-            eprintln!("error: failed to read {}: {error}", template_path.display());
+            cli_diagnostic!("error: failed to read {}: {error}", template_path.display());
             return Err(1);
         }
     };
@@ -185,19 +185,21 @@ async fn aggregate_report(args: &EvalPromptArgs) -> Result<PromptReport, i32> {
     let fleet = match resolve_fleet(args, &template_path) {
         Ok(f) => f,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return Err(2);
         }
     };
     if fleet.is_empty() {
-        eprintln!("error: fleet is empty — supply `--fleet <models>` or `--fleet-name <name>`");
+        cli_diagnostic!(
+            "error: fleet is empty — supply `--fleet <models>` or `--fleet-name <name>`"
+        );
         return Err(2);
     }
 
     let bindings = match load_bindings(args.bindings.as_deref()) {
         Ok(b) => b,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return Err(1);
         }
     };
@@ -224,7 +226,7 @@ async fn aggregate_report(args: &EvalPromptArgs) -> Result<PromptReport, i32> {
         ) {
             Ok(context_eval) => report.context_eval = Some(context_eval),
             Err(error) => {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
                 return Err(1);
             }
         }
@@ -289,7 +291,7 @@ async fn dispatch_render(
     let report_json = match serde_json::to_string(report) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to serialise PromptReport for dispatch: {error}");
+            cli_diagnostic!("error: failed to serialise PromptReport for dispatch: {error}");
             return Err(1);
         }
     };
@@ -332,10 +334,10 @@ async fn dispatch_render(
     match out_file {
         Some(path) => {
             if let Err(error) = fs::write(path, &outcome.stdout) {
-                eprintln!("error: failed to write {}: {error}", path.display());
+                cli_diagnostic!("error: failed to write {}: {error}", path.display());
                 return Err(1);
             }
-            eprintln!("wrote {}", path.display());
+            cli_diagnostic!("wrote {}", path.display());
         }
         None => {
             use std::io::Write as _;
@@ -552,15 +554,17 @@ async fn execute_runs(
         }
         if !mock_active && !render.auth_available {
             if fail_on_unauthorized {
-                eprintln!(
+                cli_diagnostic!(
                     "error: provider `{}` (for `{}`) has no credentials configured",
-                    render.provider, render.selector,
+                    render.provider,
+                    render.selector,
                 );
                 return Err(1);
             }
-            eprintln!(
+            cli_diagnostic!(
                 "warn: provider `{}` (for `{}`) unauthenticated — skipping run",
-                render.provider, render.selector,
+                render.provider,
+                render.selector,
             );
             runs.insert(
                 render.selector.clone(),
@@ -587,7 +591,7 @@ async fn execute_runs(
     let outputs = match invoke_harn_script(&script).await {
         Ok(out) => out,
         Err(err) => {
-            eprintln!("error: run-mode harn script failed: {err}");
+            cli_diagnostic!("error: run-mode harn script failed: {err}");
             return Err(1);
         }
     };
@@ -749,7 +753,7 @@ async fn execute_judge(
 ) -> Result<JudgeReport, i32> {
     let judge_template_body = match judge_template {
         Some(path) => fs::read_to_string(path).map_err(|error| {
-            eprintln!(
+            cli_diagnostic!(
                 "error: failed to read judge template {}: {error}",
                 path.display()
             );
@@ -803,7 +807,7 @@ async fn execute_judge(
     let verdict = match invoke_harn_script(&script).await {
         Ok(out) => out.trim().to_string(),
         Err(err) => {
-            eprintln!("error: judge-mode harn script failed: {err}");
+            cli_diagnostic!("error: judge-mode harn script failed: {err}");
             return Err(1);
         }
     };

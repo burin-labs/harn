@@ -75,7 +75,18 @@ pipeline test_malformed_judge_terminates_with_a_typed_reason(harness: Harness, t
 pipeline test_well_formed_judge_run_is_unchanged(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
-    [llm_done(), {text: json_stringify({verdict: "done", detail: "The greeting was returned."})}],
+    [
+      llm_done(),
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The greeting was returned.",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      },
+    ],
     { ->
       const session = "judge-wellformed-" + harness.random.uuid()
       const captured = agent_capture_events(
@@ -101,7 +112,15 @@ pipeline test_a_recovered_judge_reply_still_completes(harness: Harness, task: un
     [
       llm_done(),
       {text: MALFORMED_JUDGE_REPLY},
-      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The greeting was returned.",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      },
     ],
     { ->
       const session = "judge-recovered-" + harness.random.uuid()

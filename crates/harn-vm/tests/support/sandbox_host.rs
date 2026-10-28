@@ -41,12 +41,16 @@ pub fn worktree_sandbox_for_host(
     let refusal: SandboxMechanismUnavailable =
         serde_json::from_value(status["os_hardened_refusal"]["sandbox_mechanism"].clone())
             .expect("an unsupported host must report its typed refusal");
-    // Hardened dimension gaps do not belong to the Worktree fallback refusal.
-    Some(SandboxMechanismUnavailable::new(
-        refusal.mechanism,
-        refusal.availability,
-        vm::orchestration::SandboxProfile::Worktree,
-    ))
+    // Hardened dimension gaps do not belong to the Worktree fallback refusal;
+    // the host-protection gap is a host fact and does.
+    Some(SandboxMechanismUnavailable {
+        host_protection_gap: refusal.host_protection_gap,
+        ..SandboxMechanismUnavailable::new(
+            refusal.mechanism,
+            refusal.availability,
+            vm::orchestration::SandboxProfile::Worktree,
+        )
+    })
 }
 
 pub fn unavailable_worktree_sandbox() -> Option<SandboxMechanismUnavailable> {

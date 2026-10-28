@@ -450,7 +450,7 @@ fn trusted_catalog_keys() -> Result<BTreeMap<String, ed25519_dalek::VerifyingKey
 
 fn default_refresh_cache_dir() -> PathBuf {
     crate::runtime_paths::state_root(&crate::stdlib::process::runtime_root_base())
-        .join("cache")
+        .join(crate::runtime_paths::CACHE_DIR)
         .join(REMOTE_CACHE_DIR)
 }
 

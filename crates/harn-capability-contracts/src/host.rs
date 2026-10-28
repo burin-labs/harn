@@ -439,6 +439,13 @@ capability_method!(
 );
 
 capability_method!(
+    process_find_executable,
+    "harness.process.find_executable",
+    ["host.read@const=executable-selection"],
+    "__cap_process_find_executable(program: string) -> string?",
+    "Read the executable selected for a bare program name without spawning it; nil means unresolved."
+);
+capability_method!(
     process_run,
     "harness.process.run",
     ["process.write@arg0.program", "process.write@arg0.command"],

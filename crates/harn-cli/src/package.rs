@@ -21,7 +21,7 @@ pub fn load_runtime_extensions(anchor: &std::path::Path) -> RuntimeExtensions {
     match try_load_runtime_extensions(anchor) {
         Ok(extensions) => extensions,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             std::process::exit(crate::exit::RUN_SETUP_FAILURE);
         }
     }

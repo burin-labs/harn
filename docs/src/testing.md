@@ -614,11 +614,23 @@ fn smoke_manifest() -> ContextEvalManifest {
 }
 ```
 
-When ingesting `harn.context_eval.report.v1` reports from hosted systems or
+When ingesting `harn.context_eval.report.v2` reports from hosted systems or
 downstream UIs, name the `ContextEvalReport` contract (and its nested
 `ContextEvalRunReport` / `ContextEvalCorrectness` / `ContextEvalToolQuality`
-cases) instead of `dict`; `spec/schemas/context-eval-report.v1.schema.json`
+cases) instead of `dict`; `spec/schemas/context-eval-report.v2.schema.json`
 remains the language-neutral schema for the same shape.
+
+Run `cost_usd` is null when the exact cost was not measured. An observation
+may supply `known_cost_usd` as a lower bound for a partially priced run. The
+aggregate exact total is null unless every run has a measured cost;
+`total_known_cost_usd` sums the known amounts, and `cost_measured_runs` and
+`cost_unmeasured_runs` show coverage. Observed costs must be finite and
+non-negative; a known lower bound cannot exceed an exact cost.
+If the known subtotal exceeds the floating-point range, evaluation fails before
+writing report artifacts.
+For one release, `--report-version 1` emits the deprecated v1 JSON format for
+existing consumers. V1 substitutes zero for missing costs and its numeric total
+can therefore be incomplete; migrate to v2 for coverage and exact totals.
 
 ```harn
 import { ContextEvalReport } from "std/context/eval"

@@ -102,6 +102,7 @@ impl Workspace {
                                 name: text::text(left, source).to_string(),
                                 range: child.byte_range(),
                                 exported: true,
+                                restricted: None,
                                 type_like: false,
                                 movable: false,
                             });
@@ -248,6 +249,7 @@ fn push_item(model: &mut FileModel, outer: Node<'_>, definition: Node<'_>, sourc
             name: text::text(name, source).to_string(),
             range: outer.byte_range(),
             exported: true,
+            restricted: None,
             type_like: false,
             movable: true,
         });

@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/conformance/protocols/acp-session-update.schema.json",
-  "title": "Harn ACP v0.12.2 adapter profile",
-  "description": "Pinned Harn adapter profile derived from agentclientprotocol/agent-client-protocol schema v0.12.2 plus Harn-advertised ACP extensions.",
+  "title": "Harn ACP v1.26.0 adapter profile",
+  "description": "Pinned Harn adapter profile derived from agentclientprotocol/agent-client-protocol schema v1.26.0 plus Harn-advertised ACP extensions.",
   "x-harn-provenance": {
     "protocol": "acp",
-    "upstream_version": "v0.12.2",
-    "upstream_source_url": "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/v0.12.2/schema/schema.json",
+    "upstream_version": "v1.26.0",
+    "upstream_source_url": "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/schema-v1.26.0/schema/v1/schema.json",
     "upstream_spec_url": "https://agentclientprotocol.com/protocol/schema",
-    "retrieved_at": "2026-05-08",
-    "refresh_command": "curl -fsSL https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/v0.12.2/schema/schema.json",
+    "retrieved_at": "2026-10-27",
+    "refresh_command": "curl -fsSL https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/schema-v1.26.0/schema/v1/schema.json",
     "profile_note": "The profile roots the ACP request, response, session/update notification, and Harn extension notification shapes this adapter emits or accepts."
   },
   "oneOf": [
@@ -577,15 +577,27 @@
       "additionalProperties": true,
       "properties": {
         "sessionUpdate": { "const": "plan" },
-        "entries": { "type": "array" }
+        "entries": { "type": "array", "items": { "$ref": "#/$defs/PlanEntry" } }
+      }
+    },
+    "PlanEntry": {
+      "type": "object",
+      "required": ["content", "priority", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "content": { "type": "string" },
+        "priority": { "enum": ["high", "medium", "low"] },
+        "status": { "enum": ["pending", "in_progress", "completed"] },
+        "_meta": { "type": ["object", "null"] }
       }
     },
     "CurrentModeUpdate": {
       "type": "object",
-      "required": ["sessionUpdate", "modeId"],
+      "required": ["sessionUpdate", "currentModeId"],
       "additionalProperties": true,
       "properties": {
         "sessionUpdate": { "const": "current_mode_update" },
+        "currentModeId": { "type": "string", "minLength": 1 },
         "modeId": { "type": "string", "minLength": 1 }
       }
     },

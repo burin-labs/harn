@@ -145,6 +145,7 @@ fn canonical_init_result(
     insert_missing(object, "unpriced_calls", serde_json::json!(0));
     insert_missing(object, "usage_unknown_calls", serde_json::json!(0));
     insert_missing(object, "provider_call_count", serde_json::json!(0));
+    insert_missing(object, "goal_outcome", serde_json::Value::Null);
     insert_missing(object, "started_at", serde_json::json!(super::now_id()));
     insert_missing(object, "daemon_state", serde_json::Value::Null);
     insert_missing(object, "daemon_snapshot_path", serde_json::Value::Null);

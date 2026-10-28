@@ -32,6 +32,12 @@ Heavy setup phases are fingerprinted under `.codex/dev-setup/`, so rerunning
 the script in an already prepared checkout is normally a fast no-op. Set
 `HARN_DEV_SETUP_FORCE=1` to refresh every phase.
 
+To refresh an existing source-addressed compiler-cache wrapper after pulling
+wrapper changes, run `make refresh-cargo-wrapper`. This builds the wrapper
+from the current checkout and updates only its existing Cargo configuration
+entry. Hook settings, target paths, cache policy and dependency seeds stay
+unchanged; missing or unmanaged configuration requires separate setup.
+
 Codex app-managed worktrees use the tracked local environment config at
 `.codex/environments/environment.toml`, which delegates to this same setup
 script.

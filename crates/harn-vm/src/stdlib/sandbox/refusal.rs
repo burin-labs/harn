@@ -434,7 +434,8 @@ pub(crate) fn path_is_denied(candidate: &Path, denied: &[PathBuf]) -> bool {
 }
 
 pub use crate::value::{
-    SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable, SandboxRequirement,
+    HostProtectionGap, SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
+    SandboxRequirement,
 };
 
 use crate::value::NO_OS_SANDBOX;

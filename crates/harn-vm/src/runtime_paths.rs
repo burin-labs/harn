@@ -20,6 +20,95 @@ const NEXTEST_ATTEMPT_ID_ENV: &str = "NEXTEST_ATTEMPT_ID";
 /// Directory name of the default run root, `<base>/.harn-runs`.
 pub const DEFAULT_RUN_DIR_NAME: &str = ".harn-runs";
 
+/// Names of runtime-owned entries inside a state root. User-authored entries,
+/// such as `skills`, are deliberately not included.
+pub const CHECKPOINTS_DIR: &str = "checkpoints";
+pub const HOSTLIB_STATE_DIR: &str = "state";
+pub const METADATA_DIR: &str = "metadata";
+pub const EVENTS_DIR: &str = "events";
+pub const WORKFLOWS_DIR: &str = "workflows";
+pub const WORKTREES_DIR: &str = "worktrees";
+pub const CACHE_DIR: &str = "cache";
+pub const MEMORY_DIR: &str = "memory";
+pub const LOCAL_DIR: &str = "local";
+pub const POOLS_DIR: &str = "pools";
+pub const LOGS_DIR: &str = "logs";
+pub const WORKERS_DIR: &str = "workers";
+pub const RECEIPTS_DIR: &str = "receipts";
+pub const HOSTLIB_TESTS_DIR: &str = "hostlib-tests";
+pub const DEFAULT_ORCHESTRATOR_PATH: &str = ".harn/orchestrator";
+pub const DEFAULT_SKILLS_CACHE_PATH: &str = ".harn/skills-cache";
+pub const DEFAULT_FLOW_DATABASE_PATH: &str = ".harn/flow.sqlite";
+pub const STORE_FILE: &str = "store.json";
+pub const EVENTS_DATABASE: &str = "events.sqlite";
+pub const RATE_LIMIT_DATABASE: &str = "rate-limits.sqlite";
+pub const LLM_RATE_LIMIT_DATABASE: &str = "llm-rate-limits.sqlite";
+pub const RUNTIME_STATE_DIRECTORIES: &[&str] = &[
+    HOSTLIB_STATE_DIR,
+    CHECKPOINTS_DIR,
+    METADATA_DIR,
+    EVENTS_DIR,
+    WORKFLOWS_DIR,
+    WORKTREES_DIR,
+    crate::conditional_replace::CONDITIONAL_REPLACE_LOCK_DIRECTORY,
+    CACHE_DIR,
+    MEMORY_DIR,
+    LOCAL_DIR,
+    POOLS_DIR,
+    LOGS_DIR,
+    WORKERS_DIR,
+    RECEIPTS_DIR,
+    HOSTLIB_TESTS_DIR,
+    crate::tenant::TENANT_REGISTRY_DIR,
+    harn_modules::package_snapshot::PACKAGE_GENERATIONS_DIR,
+    harn_modules::package_snapshot::LEGACY_PACKAGES_DIR,
+];
+pub const RUNTIME_STATE_FILES: &[&str] = &[
+    STORE_FILE,
+    harn_modules::package_snapshot::PACKAGE_CURRENT_FILE,
+    harn_modules::package_snapshot::PACKAGE_PUBLICATION_LOCK_FILE,
+    harn_modules::package_snapshot::PACKAGE_INSTALL_LOCK_FILE,
+    harn_modules::package_snapshot::PACKAGE_MANIFEST_LOCK_FILE,
+    harn_modules::package_snapshot::PROJECT_MUTATION_LOCK_FILE,
+];
+pub const RUNTIME_STATE_DATABASES: &[&str] = &[
+    EVENTS_DATABASE,
+    RATE_LIMIT_DATABASE,
+    LLM_RATE_LIMIT_DATABASE,
+];
+
+/// Concrete entries owned by the runtime, including SQLite's sidecars.
+pub fn owned_state_paths(state_root: &Path) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = RUNTIME_STATE_DIRECTORIES
+        .iter()
+        .chain(RUNTIME_STATE_FILES)
+        .map(|name| state_root.join(name))
+        .collect();
+    for name in RUNTIME_STATE_DATABASES {
+        paths.extend(harn_sqlite::database_runtime_paths(&state_root.join(name)));
+    }
+    paths.extend(harn_session_store::sqlite::session_store_runtime_paths(
+        &state_root.join(harn_session_store::SESSION_STORE_DATABASE_FILE),
+    ));
+    paths
+}
+
+/// Runtime outputs whose default location is relative to the project root.
+pub fn owned_project_paths(root: &Path) -> Vec<PathBuf> {
+    let activation = root.join(harn_modules::package_snapshot::PERSONA_ACTIVATION_DIR);
+    let mut paths = vec![
+        root.join(DEFAULT_RUN_DIR_NAME),
+        root.join(DEFAULT_ORCHESTRATOR_PATH),
+        root.join(DEFAULT_SKILLS_CACHE_PATH),
+        activation.join(harn_modules::package_snapshot::PERSONA_ACTIVATION_FILE),
+        activation.join(harn_modules::package_snapshot::PERSONA_ACTIVATION_LOCK_FILE),
+    ];
+    paths.extend(harn_sqlite::database_runtime_paths(
+        &root.join(DEFAULT_FLOW_DATABASE_PATH),
+    ));
+    paths
+}
+
 pub(crate) const SELF_IGNORE_CONTENTS: &str = "# Created by Harn; safe to delete.\n*\n";
 
 /// Give a Harn-owned directory inside someone's checkout a `.gitignore` that
@@ -192,7 +281,7 @@ fn worktree_root_value(
                 base_dir.join(candidate)
             }
         }
-        _ => state_root_value(base_dir, state_env_value, nextest_root).join("worktrees"),
+        _ => state_root_value(base_dir, state_env_value, nextest_root).join(WORKTREES_DIR),
     }
 }
 
@@ -204,7 +293,7 @@ pub fn worktree_root(base_dir: &Path) -> PathBuf {
         .is_none_or(|value| value.trim().is_empty())
     {
         if let Some(root) = crate::persistent_state::current_persistent_state_root() {
-            return root.join("worktrees");
+            return root.join(WORKTREES_DIR);
         }
     }
     worktree_root_value(
@@ -216,15 +305,15 @@ pub fn worktree_root(base_dir: &Path) -> PathBuf {
 }
 
 pub fn store_path(base_dir: &Path) -> PathBuf {
-    state_root(base_dir).join("store.json")
+    state_root(base_dir).join(STORE_FILE)
 }
 
 pub fn checkpoint_dir(base_dir: &Path) -> PathBuf {
-    state_root(base_dir).join("checkpoints")
+    state_root(base_dir).join(CHECKPOINTS_DIR)
 }
 
 pub fn metadata_dir(base_dir: &Path) -> PathBuf {
-    state_root(base_dir).join("metadata")
+    state_root(base_dir).join(METADATA_DIR)
 }
 
 pub fn event_log_dir(base_dir: &Path) -> PathBuf {
@@ -243,17 +332,17 @@ pub fn event_log_sqlite_path(base_dir: &Path) -> PathBuf {
 /// through [`state_root`] and therefore let an absolute `HARN_STATE_DIR`
 /// discard the caller's path entirely.
 pub fn event_log_dir_at_state_root(state_root: &Path) -> PathBuf {
-    state_root.join("events")
+    state_root.join(EVENTS_DIR)
 }
 
 /// Sqlite event-log path under an already-resolved state root. See
 /// [`event_log_dir_at_state_root`].
 pub fn event_log_sqlite_path_at_state_root(state_root: &Path) -> PathBuf {
-    state_root.join("events.sqlite")
+    state_root.join(EVENTS_DATABASE)
 }
 
 pub fn workflow_dir(base_dir: &Path) -> PathBuf {
-    state_root(base_dir).join("workflows")
+    state_root(base_dir).join(WORKFLOWS_DIR)
 }
 
 fn state_root_value(

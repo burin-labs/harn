@@ -90,6 +90,19 @@ setup-rust:
 setup-bootstrap:
 	HARN_DEV_SETUP_PROFILE=bootstrap HARN_DEV_TARGET_WORKTREE_PATH="$(CURDIR)" ./scripts/dev_setup.sh
 
+.PHONY: refresh-cargo-wrapper
+# Refresh only the already-configured source-addressed compiler-cache wrapper.
+refresh-cargo-wrapper:
+	./scripts/dev_setup.sh --refresh-cargo-wrapper
+
+.PHONY: test-cargo-wrapper-refresh
+test-cargo-wrapper-refresh:
+	bash ./scripts/tests/cargo_wrapper_refresh_test.sh
+
+.PHONY: test-cargo-wrapper-refresh-native
+test-cargo-wrapper-refresh-native:
+	./scripts/tests/sccache_wrapper_restore_test.sh
+
 # Install the pinned browser-Wasm toolchain outside the checkout so every
 # worktree keeps its mutable build products private while reusing one immutable
 # tool binary. wasm-pack installs the matching wasm-bindgen test runner.
@@ -592,7 +605,7 @@ lint-harn-trees:
 	$(HARN_CMD) lint --strict tests && \
 	$(HARN_CMD) lint --strict bench && \
 	$(HARN_CMD) lint --strict crates/harn-cli/assets/demo && \
-	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals crates/harn-serve/src/adapters/api/tests/fixtures; \
+	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals crates/harn-serve/src/adapters/api/tests/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures; \
 	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
 
 lint-harn-stdlib-metadata:
@@ -628,7 +641,7 @@ STDLIB_HARN_DIR := crates/harn-stdlib/src/stdlib
 # historically outside the fmt-harn gate. Keeping them in the
 # gate avoids the "I edited persona X and pre-commit reformatted three
 # unrelated files" surprise from accumulated drift.
-EXTRA_HARN_DIRS := personas tests examples evals crates/harn-cli/assets/demo crates/harn-vm/src/llm/rate_limit/fixtures crates/harn-serve/src/adapters/api/tests/fixtures
+EXTRA_HARN_DIRS := personas tests examples evals crates/harn-cli/assets/demo crates/harn-vm/src/llm/rate_limit/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures crates/harn-serve/src/adapters/api/tests/fixtures
 EXTRA_HARN_FIND := find $(EXTRA_HARN_DIRS) -type d -name .harn -prune -o -type f -name '*.harn' -print0 2>/dev/null
 
 fmt-harn-fix:
@@ -760,6 +773,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/release_ship_root_harn_bin_test.sh
 	./scripts/tests/release_ship_tag_selector_test.sh
 	./scripts/tests/release_tag_main_ancestry_test.sh
+	bash ./scripts/tests/published_harn_runtime_test.sh
 	./scripts/tests/candidate_manifest_test.sh
 	./scripts/tests/release_promotion_plan_test.sh
 	bash ./scripts/tests/release_promotion_source_test.sh
@@ -821,6 +835,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/build_revision_workflow_test.sh
 	bash ./scripts/tests/fetch_release_base_test.sh
 	./scripts/tests/dev_setup_profile_test.sh
+	$(MAKE) test-cargo-wrapper-refresh
 	./scripts/tests/sync_diagnostics_catalog_test.sh
 	./scripts/tests/sign_local_macos_test.sh
 	./scripts/tests/bench_vm_startup_test.sh
@@ -832,6 +847,8 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/release_gate_stale_out_dir_test.sh
 	./scripts/tests/release_gate_docs_proof_test.sh
 	./scripts/tests/prune_stale_targets_test.sh
+	bash ./scripts/tests/prune_stale_targets_lock_test.sh
+	python3 ./scripts/tests/prune_stale_targets_reader_test.py
 	./scripts/tests/prune_stale_targets_retention_test.sh
 	./scripts/tests/prune_stale_targets_host_policy_test.sh
 	bash ./scripts/tests/prune_stale_targets_pressure_test.sh
@@ -853,6 +870,10 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 test-rust-lint-lane-cache:
 	./scripts/tests/rust_lint_lane_cache_test.sh
 
+.PHONY: test-sccache-rustc-wrapper
+test-sccache-rustc-wrapper:
+	./scripts/tests/sccache_rustc_wrapper_test.sh
+
 test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	@if [ -z "$(strip $(HARN_BIN))" ] || [ ! -x "$(HARN_BIN)" ]; then \
 		echo "test-pr-gate-post-warm-integrations requires an executable HARN_BIN" >&2; \
@@ -861,8 +882,8 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/cargo_target_seed_reuse_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
-	./scripts/tests/sccache_rustc_wrapper_test.sh
-	./scripts/tests/sccache_wrapper_restore_test.sh
+	$(MAKE) test-sccache-rustc-wrapper
+	$(MAKE) test-cargo-wrapper-refresh-native
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/ci_preemption_recover_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/check_harn_syntax_sensitive_scans_performance_test.sh
@@ -1130,7 +1151,7 @@ check-trigger-quickref:
 	@echo "    Harn trigger quickref OK."
 
 # Regenerate the provider/model capability matrix from capabilities.toml.
-gen-provider-matrix: gen-provider-catalog
+gen-provider-matrix:
 	$(HARN_CMD) provider catalog matrix
 
 # CI guard: fail if the provider matrix docs drift from capabilities.toml.
@@ -1140,7 +1161,7 @@ check-provider-matrix: check-provider-catalog
 	@echo "    Harn provider matrix OK."
 
 # Regenerate provider support recommendations from catalog/capabilities/notes.
-gen-provider-support: gen-provider-catalog
+gen-provider-support:
 	$(HARN_CMD) provider catalog support
 
 # CI guard: fail if provider support markdown or JSON drift.
@@ -1151,7 +1172,10 @@ check-provider-support: check-provider-catalog
 
 # Regenerate the checked-in provider/model catalog JSON, schema, and downstream bindings.
 gen-provider-catalog:
-	$(HARN_CMD) provider catalog generate
+	@$(HARN_BIN_ASSIGN) || exit 1; \
+	"$$harn_bin" provider catalog generate && \
+	"$$harn_bin" provider catalog matrix && \
+	"$$harn_bin" provider catalog support
 
 # CI guard: fail if checked-in provider/model catalog artifacts drift.
 check-provider-catalog:

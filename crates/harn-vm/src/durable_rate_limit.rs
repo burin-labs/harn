@@ -209,7 +209,8 @@ fn parse_state_path(options: &crate::value::DictMap) -> Result<PathBuf, VmError>
         ),
         Some(VmValue::Nil) | None => {
             let base = crate::stdlib::process::runtime_root_base();
-            Ok(crate::runtime_paths::state_root(&base).join("rate-limits.sqlite"))
+            Ok(crate::runtime_paths::state_root(&base)
+                .join(crate::runtime_paths::RATE_LIMIT_DATABASE))
         }
         Some(other) => Err(VmError::Runtime(format!(
             "durable_rate_limit_acquire: state_path must be a string or nil (got {})",

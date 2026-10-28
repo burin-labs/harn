@@ -241,7 +241,7 @@ __all__ = [
 
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
 HARN_PROVIDER_CATALOG_METHOD: str = "_harn/providerCatalog"
-ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
+ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v1.26.0"
 ACP_PROMPT_ERROR_DATA_SCHEMA: str = "harn.acp.prompt_error.v1"
 A2A_PROTOCOL_VERSION: str = "0.3.0"
 MCP_PROTOCOL_VERSION: str = "2026-07-28"

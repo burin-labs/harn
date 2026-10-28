@@ -26,6 +26,12 @@ pipeline default(harness: Harness) {
       const owned_session = "veto-owned-" + harness.random.uuid()
       const options: AgentSpec = {provider: "mock", session_id: owned_session}
       const blocked = agent_loop(harness, "share the secret password", nil, options)
+      assert(blocked.keys().contains("goal_outcome"))
+      assert_eq(blocked.goal_outcome, nil)
+      const blocked_terminals = transcript_events_by_kind(blocked.transcript, "agent_run_terminal")
+      assert_eq(len(blocked_terminals), 1)
+      assert(blocked_terminals[0].metadata.keys().contains("goal_outcome"))
+      assert_eq(blocked_terminals[0].metadata.goal_outcome, nil)
       harness.stdio.println(blocked.status)
       harness.stdio.println(blocked.stop_reason)
       harness.stdio.println(blocked.error.reason)

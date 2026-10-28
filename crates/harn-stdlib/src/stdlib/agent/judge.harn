@@ -30,9 +30,11 @@ pub import {
   agent_completion_review_should_skip_llm,
   agent_verify_completion_judge_cap,
 } from "std/agent/completion_review"
+import { agent_completion_signal } from "std/agent/completion_signal"
 pub import { CompletionVerificationStop } from "std/agent/completion_verification"
 import { __judge_invoke_closure } from "std/agent/completion_verification"
 import { agent_feedback_emit } from "std/agent/feedback"
+import { CompletionGoalAssessment } from "std/agent/goal_assessment"
 import { __goal_judge_system } from "std/agent/goal_contract"
 import { __agent_goal_projection } from "std/agent/goal_projection"
 pub import {
@@ -120,6 +122,8 @@ pub type CompletionDirectiveReceipt = {
   feedback_delivery: CompletionFeedbackDelivery,
   projection: CompletionEvidenceProjectionStats,
   pending_tool_batch_effect_count: int,
+  gap_count: int,
+  gaps_unattributed: int,
   repeated_verified_criteria: list<string>,
   // The gap the model judge named, and — when an adjudication was overruled —
   // WHAT overruled it. `trigger` names whichever adjudicator ANSWERED, not the
@@ -133,6 +137,7 @@ pub type CompletionDirectiveReceipt = {
   admission?: CompletionJudgeAdmission?,
   checkpoint?: dict?,
   requirements?: CompletionRequirementReport?,
+  goal_assessment?: CompletionGoalAssessment?,
   completion_claim?: CompletionClaim,
   precheck?: CompletionPrecheckResult?,
 }
@@ -276,6 +281,8 @@ fn __judge_payload(
     visible_text: text,
     last_text: text,
     raw_text: raw_text == "" ? text : raw_text,
+    completion_signal: opts?._completion_signal
+      ?? agent_completion_signal(raw_text == "" ? text : raw_text, opts?.done_sentinel),
     transcript: transcript,
     judge_evidence: evidence_serialized,
     judge_evidence_packet: evidence_packet,
@@ -642,6 +649,7 @@ fn __judge_invoke_structured(
     admission: ran.admission,
     typed_checkpoint: checkpoint,
     requirement_report: requirement_report,
+    goal_assessment: decoded.goal_assessment,
   }
 }
 
@@ -913,6 +921,11 @@ fn __judge_directive(
       nil
     },
     completion_claim: payload?.completion_claim,
+    goal_assessment: if ledger.required_count == 0 && ledger.pending_count == 0 {
+      verdict.goal_assessment
+    } else {
+      nil
+    },
   }
   return {
     action: action,

@@ -8,7 +8,7 @@
 
 use crate::orchestration::SandboxProfile;
 use crate::stdlib::sandbox::{
-    sandbox_rejection, SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
+    sandbox_rejection, HostProtectionGap, SandboxMechanism, SandboxMechanismUnavailable,
 };
 use crate::value::VmError;
 
@@ -18,12 +18,17 @@ const CS_RESTRICT: u32 = 0x0000_0800;
 const CSR_ALLOW_UNRESTRICTED_DTRACE: u32 = 0x0020;
 
 pub(super) fn available() -> bool {
+    gap().is_none()
+}
+
+/// The prerequisite this host fails, if any.
+pub(super) fn gap() -> Option<HostProtectionGap> {
     // XNU explicitly bypasses environment redaction on development kernels
     // and when unrestricted DTrace is enabled. Do not report protection there.
     let mut development: libc::c_int = -1;
     let mut size = std::mem::size_of_val(&development);
     let mut integrity_config: u32 = 0;
-    (unsafe {
+    let read = (unsafe {
         libc::sysctlbyname(
             c"kern.development".as_ptr(),
             (&raw mut development).cast(),
@@ -33,21 +38,30 @@ pub(super) fn available() -> bool {
         )
     }) == 0
         && size == std::mem::size_of_val(&development)
-        && unsafe { csr_get_active_config(&raw mut integrity_config) } == 0
-        && supported_configuration(development, integrity_config)
+        && unsafe { csr_get_active_config(&raw mut integrity_config) } == 0;
+    if !read {
+        return Some(HostProtectionGap::KernelConfigurationUnreadable);
+    }
+    configuration_gap(development, integrity_config)
 }
 
-fn supported_configuration(development: libc::c_int, integrity_config: u32) -> bool {
-    development == 0 && integrity_config & CSR_ALLOW_UNRESTRICTED_DTRACE == 0
+fn configuration_gap(development: libc::c_int, integrity_config: u32) -> Option<HostProtectionGap> {
+    if development != 0 {
+        Some(HostProtectionGap::DevelopmentKernel)
+    } else if integrity_config & CSR_ALLOW_UNRESTRICTED_DTRACE != 0 {
+        Some(HostProtectionGap::UnrestrictedDtrace)
+    } else {
+        None
+    }
 }
 
 pub(super) fn protect(profile: SandboxProfile) -> Result<(), VmError> {
-    if !available() {
+    if let Some(gap) = gap() {
         // This prerequisite protects host secrets. A warn/off fallback must
         // never turn its failure into an unconfined child.
-        return Err(SandboxMechanismUnavailable::new(
+        return Err(SandboxMechanismUnavailable::host_protection_unavailable(
             SandboxMechanism::MacosSandboxExec,
-            SandboxMechanismAvailability::AbsentOnHost,
+            gap,
             profile,
         )
         .into_error());
@@ -95,10 +109,24 @@ mod tests {
 
     #[test]
     fn kernel_configuration_must_hold_the_parent_environment_boundary() {
-        assert!(supported_configuration(0, 0));
-        assert!(supported_configuration(0, 0x10));
-        assert!(!supported_configuration(-1, 0));
-        assert!(!supported_configuration(1, 0));
-        assert!(!supported_configuration(0, CSR_ALLOW_UNRESTRICTED_DTRACE));
+        assert_eq!(configuration_gap(0, 0), None);
+        assert_eq!(configuration_gap(0, 0x10), None);
+        assert_eq!(
+            configuration_gap(-1, 0),
+            Some(HostProtectionGap::DevelopmentKernel)
+        );
+        assert_eq!(
+            configuration_gap(1, 0),
+            Some(HostProtectionGap::DevelopmentKernel)
+        );
+        // `csrutil disable` sets every bit, including unrestricted DTrace.
+        assert_eq!(
+            configuration_gap(0, 0x7f),
+            Some(HostProtectionGap::UnrestrictedDtrace)
+        );
+        assert_eq!(
+            configuration_gap(0, CSR_ALLOW_UNRESTRICTED_DTRACE),
+            Some(HostProtectionGap::UnrestrictedDtrace)
+        );
     }
 }

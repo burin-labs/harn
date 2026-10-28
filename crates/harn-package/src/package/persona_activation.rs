@@ -16,10 +16,10 @@ use super::{load_root_persona_catalog, resolve_discoverable_persona_in_root, Dis
 const ACTIVATION_SCHEMA_VERSION: u32 = 2;
 const LEGACY_ACTIVATION_SCHEMA_VERSION: u32 = 1;
 const ACTIVATION_RECEIPT_SCHEMA_VERSION: u32 = 2;
-const ACTIVATION_DIR: &str = ".harn/personas";
-const ACTIVATION_FILE: &str = "activations.json";
-const ACTIVATION_LOCK_FILE: &str = "activations.lock";
-const PROJECT_MUTATION_LOCK_FILE: &str = ".harn/project-mutation.lock";
+use harn_modules::package_snapshot::{
+    PERSONA_ACTIVATION_DIR as ACTIVATION_DIR, PERSONA_ACTIVATION_FILE as ACTIVATION_FILE,
+    PERSONA_ACTIVATION_LOCK_FILE as ACTIVATION_LOCK_FILE,
+};
 
 // A project mutation can include a complete package install. The activation
 // ledger lock only protects one small JSON read-modify-write.
@@ -33,7 +33,9 @@ pub struct ProjectMutationLock {
 pub fn acquire_project_mutation_lock(
     project_root: &Path,
 ) -> Result<ProjectMutationLock, PersonaActivationError> {
-    let lock_path = project_root.join(PROJECT_MUTATION_LOCK_FILE);
+    let lock_path = project_root
+        .join(harn_modules::package_snapshot::PACKAGE_STATE_DIR)
+        .join(harn_modules::package_snapshot::PROJECT_MUTATION_LOCK_FILE);
     fs::create_dir_all(lock_path.parent().unwrap_or(project_root))
         .map_err(|source| io_error("create", &lock_path, source))?;
     let file = open_lock_file(&lock_path)?;

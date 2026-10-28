@@ -1,0 +1,77 @@
+// Trigger: the completion judge accepts a final response without declared criteria.
+// Effect: goal achievement remains distinct from permission to end the turn.
+// Negative: unknown or unsupported assessments cannot establish success.
+import { __judge_completion_verdict_schema } from "std/agent/judge_verdict"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn check_assessment(harness: Harness, answer: string, assessment: dict?, expected: string) {
+  const reply = {
+    verdict: "done",
+    detail: "This response may end the turn.",
+    gap_class: "none",
+    gaps: [],
+  }
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(answer),
+      llm_text(
+        json_stringify(
+          if assessment == nil {
+            reply + {goal_assessment: {kind: "unknown", evidence_refs: []}}
+          } else {
+            reply + {goal_assessment: assessment}
+          },
+        ),
+      ),
+    ],
+    fn() {
+      const result = agent_loop(
+        harness,
+        "Answer all parts of the question.",
+        nil,
+        {
+          provider: "mock",
+          max_iterations: 2,
+          loop_until_done: true,
+          final_wrapup: false,
+          turn_end_condition: {provider: "mock", max_invocations: 1},
+        },
+      )
+      assert_eq(len(harness.llm.mock_calls()), 2, "One actor call and one existing judge call")
+      assert_eq(result.status, "done", "Goal assessment must not create another stopping policy")
+      assert_eq(result.goal_outcome.kind, expected)
+      const terminals = transcript_events_by_kind(result.transcript, "agent_run_terminal")
+      assert_eq(len(terminals), 1)
+      assert_eq(terminals[0].metadata.goal_outcome, result.goal_outcome)
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  const schema = __judge_completion_verdict_schema(nil, {actions: [{evidence_index: 7}]})
+  assert(schema.required.contains("goal_assessment"), "The judge must report an explicit outcome")
+  assert_eq(schema.properties.goal_assessment.properties.evidence_refs.items.enum, [7])
+  check_assessment(
+    harness,
+    "The answer is 42.",
+    {kind: "achieved", evidence_refs: [-1]},
+    "achieved",
+  )
+  check_assessment(
+    harness,
+    "I cannot answer the question with the available information.",
+    {kind: "not_achieved", evidence_refs: [-1]},
+    "not_achieved",
+  )
+  check_assessment(
+    harness,
+    "I answered the first part; the second part needs unavailable information.",
+    {kind: "partially_achieved", evidence_refs: [-1]},
+    "partially_achieved",
+  )
+  check_assessment(harness, "The answer is 42.", nil, "unknown")
+  check_assessment(harness, "The answer is 42.", {kind: "achieved", evidence_refs: []}, "unknown")
+  harness.stdio.println("undeclared goal assessments passed")
+}

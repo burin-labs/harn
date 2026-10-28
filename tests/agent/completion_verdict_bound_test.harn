@@ -3,8 +3,8 @@
 // The completion judge decides one thing — finish or keep going — but it has
 // to say so inside whatever output envelope the judge model actually has.
 // Small and cheap models have a reliable output budget of only a few hundred
-// tokens, so the schema asks for one discriminant and one brief detail instead
-// of several prose fields and arrays. The schema cannot reject a longer detail,
+// tokens, so the schema asks for one discriminant, one brief detail, and a
+// typed outcome assessment. The schema cannot reject a longer detail,
 // though: some provider dialects cannot express that limit, and the reader
 // already owns the tolerant clamp. That clamp marks what it cuts, because a
 // silently amputated instruction reads exactly like a complete one (#8074).
@@ -28,7 +28,10 @@ pipeline test_verdict_schema_keeps_one_tolerant_detail_field(harness: Harness, t
   // `gaps` joined the contract in #8100: a refusal itemizes every gap it holds
   // rather than naming one in `detail`. `detail` stays the one-line summary,
   // which is what the rest of this case pins.
-  assert_eq(schema.properties.keys().sorted(), ["detail", "gap_class", "gaps", "verdict"])
+  assert_eq(
+    schema.properties.keys().sorted(),
+    ["detail", "gap_class", "gaps", "goal_assessment", "verdict"],
+  )
   assert_eq(schema.properties.detail.maxLength, nil)
   assert_eq(schema?.additionalProperties, false)
 }
@@ -38,7 +41,7 @@ pipeline test_verdict_schema_carries_one_discriminant_and_one_detail(
   task: unknown,
 ) {
   const schema = __judge_completion_verdict_schema()
-  assert_eq(schema.required.sorted(), ["detail", "verdict"])
+  assert_eq(schema.required.sorted(), ["detail", "goal_assessment", "verdict"])
   assert_eq(schema.properties.verdict.enum.sorted(), ["continue", "done"])
   assert_eq(schema.properties.detail.type, "string")
   // A judge that returns an empty detail records a decision with no audit

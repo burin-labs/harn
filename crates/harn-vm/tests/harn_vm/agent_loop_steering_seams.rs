@@ -761,7 +761,7 @@ pipeline main(harness: Harness, task: unknown) {{
     [
       llm_text("I will compare the detail string with == and add the test."),
       llm_text("Reverted the implementation, test, and changelog. No typed code exists, so I am reporting that and stopping as asked. ##DONE##"),
-      {{text: "{{\"verdict\":\"done\",\"detail\":\"The run answered the steered question.\"}}"}},
+      {{text: json_stringify({{verdict: "done", detail: "The run answered the steered question.", goal_assessment: {{kind: "unknown", evidence_refs: []}}}})}},
     ],
     {{ ->
       const session = "{session_id}"
@@ -1118,7 +1118,7 @@ import {{ llm_text, with_llm_script }} from "std/testing"
 
 const STEER = "CHANGE OF PLAN: abandon the file listing entirely. Do not run any more tools."
 const OBJECTIVE = "Reply with exactly the single word BRAVO."
-const DONE_VERDICT = "{{\"verdict\":\"done\",\"detail\":\"The run replied BRAVO as the operator asked.\"}}"
+const DONE_VERDICT = json_stringify({{verdict: "done", detail: "The run replied BRAVO as the operator asked.", goal_assessment: {{kind: "unknown", evidence_refs: []}}}})
 
 pipeline main(harness: Harness, task: unknown) {{
   with_llm_script(

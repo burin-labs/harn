@@ -42,7 +42,7 @@ use crate::json_envelope::{self, JsonEnvelope, JsonOutput};
 use crate::package::{load_skills_config, resolve_skills_paths, SkillSourceEntry};
 use crate::skill_loader::canonicalize_cli_dirs;
 
-const SKILLS_CACHE_DIR: &str = ".harn/skills-cache";
+const SKILLS_CACHE_DIR: &str = harn_vm::runtime_paths::DEFAULT_SKILLS_CACHE_PATH;
 
 /// `JsonEnvelope` schemaVersion for `harn skill list --json`.
 pub(crate) const SKILLS_LIST_SCHEMA_VERSION: u32 = 1;
@@ -267,7 +267,7 @@ pub(crate) fn run_get(args: &SkillsGetArgs) {
 /// agents and CI can review the active corpus offline.
 pub(crate) fn run_dump(args: &SkillsDumpArgs) {
     if !args.all {
-        eprintln!(
+        cli_diagnostic!(
             "error: `harn skill dump` requires `--all`. \
              Pass `--all` to write every canonical skill."
         );
@@ -281,7 +281,7 @@ pub(crate) fn run_dump(args: &SkillsDumpArgs) {
         .unwrap_or_else(|| PathBuf::from("skills"));
 
     if let Err(error) = fs::create_dir_all(&out_dir) {
-        eprintln!("error: failed to create {}: {error}", out_dir.display());
+        cli_diagnostic!("error: failed to create {}: {error}", out_dir.display());
         process::exit(1);
     }
 
@@ -291,13 +291,13 @@ pub(crate) fn run_dump(args: &SkillsDumpArgs) {
     for skill in skills {
         let skill_dir = out_dir.join(skill.name);
         if let Err(error) = fs::create_dir_all(&skill_dir) {
-            eprintln!("error: failed to create {}: {error}", skill_dir.display());
+            cli_diagnostic!("error: failed to create {}: {error}", skill_dir.display());
             process::exit(1);
         }
 
         let dest = skill_dir.join("SKILL.md");
         if dest.exists() && !args.force {
-            eprintln!(
+            cli_diagnostic!(
                 "error: {} already exists. Pass --force to overwrite.",
                 dest.display()
             );
@@ -307,7 +307,7 @@ pub(crate) fn run_dump(args: &SkillsDumpArgs) {
         // Byte-for-byte mirror the active canonical source so dumped
         // copies stay diff-stable against their origin.
         if let Err(error) = fs::write(&dest, skill.source) {
-            eprintln!("error: failed to write {}: {error}", dest.display());
+            cli_diagnostic!("error: failed to write {}: {error}", dest.display());
             process::exit(1);
         }
         written.push(dest);
@@ -323,7 +323,7 @@ fn resolve_skill_corpus_or_exit() -> SkillCorpus {
     match resolve_skill_corpus_from_env() {
         Ok(corpus) => corpus,
         Err(error) => {
-            eprintln!("error: failed to load HARN_SKILLS_DIR: {error}");
+            cli_diagnostic!("error: failed to load HARN_SKILLS_DIR: {error}");
             process::exit(1);
         }
     }
@@ -408,8 +408,8 @@ fn emit_get_not_found(name: &str, json: bool, corpus: &SkillCorpus) {
         }));
         println!("{}", json_envelope::to_string_pretty(&envelope));
     } else {
-        eprintln!("error: no skill named `{name}`.");
-        eprintln!("hint: run `harn skill list` to see what ships with this binary.");
+        cli_diagnostic!("error: no skill named `{name}`.");
+        cli_diagnostic!("hint: run `harn skill list` to see what ships with this binary.");
     }
 }
 
@@ -514,7 +514,7 @@ pub(crate) fn run_inspect(args: &SkillsInspectArgs) {
     let skill = match discovery.fetch(&args.name) {
         Ok(skill) => skill,
         Err(err) => {
-            eprintln!("error: {err}");
+            cli_diagnostic!("error: {err}");
             process::exit(1);
         }
     };
@@ -524,7 +524,7 @@ pub(crate) fn run_inspect(args: &SkillsInspectArgs) {
         println!(
             "{}",
             serde_json::to_string_pretty(&json).unwrap_or_else(|error| {
-                eprintln!("error: failed to serialize skill: {error}");
+                cli_diagnostic!("error: failed to serialize skill: {error}");
                 process::exit(1);
             })
         );
@@ -612,7 +612,7 @@ pub(crate) fn run_match(args: &SkillsMatchArgs) {
         println!(
             "{}",
             serde_json::to_string_pretty(&out).unwrap_or_else(|error| {
-                eprintln!("error: failed to serialize match results: {error}");
+                cli_diagnostic!("error: failed to serialize match results: {error}");
                 process::exit(1);
             })
         );
@@ -640,7 +640,7 @@ pub(crate) fn run_match(args: &SkillsMatchArgs) {
 pub(crate) fn run_install(args: &SkillsInstallArgs) {
     let cache_root = PathBuf::from(SKILLS_CACHE_DIR);
     if let Err(error) = fs::create_dir_all(&cache_root) {
-        eprintln!("error: failed to create {SKILLS_CACHE_DIR}: {error}");
+        cli_diagnostic!("error: failed to create {SKILLS_CACHE_DIR}: {error}");
         process::exit(1);
     }
 
@@ -651,7 +651,7 @@ pub(crate) fn run_install(args: &SkillsInstallArgs) {
     let (dest_name, dest_dir) = if let Some(namespace) = args.namespace.as_deref() {
         let dir = cache_root.join(namespace);
         if let Err(error) = fs::create_dir_all(&dir) {
-            eprintln!("error: failed to create {}: {error}", dir.display());
+            cli_diagnostic!("error: failed to create {}: {error}", dir.display());
             process::exit(1);
         }
         (namespace.to_string(), dir)
@@ -688,7 +688,7 @@ pub(crate) fn run_install(args: &SkillsInstallArgs) {
 
     if is_local {
         if let Err(error) = copy_dir_all(&local_candidate, &install_dir) {
-            eprintln!("error: failed to copy from {spec}: {error}");
+            cli_diagnostic!("error: failed to copy from {spec}: {error}");
             process::exit(1);
         }
     } else {
@@ -708,12 +708,12 @@ pub(crate) fn run_install(args: &SkillsInstallArgs) {
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                eprintln!("error: git clone failed: {stderr}");
+                cli_diagnostic!("error: git clone failed: {stderr}");
                 process::exit(1);
             }
             Err(error) => {
-                eprintln!("error: failed to run git: {error}");
-                eprintln!("hint: make sure git is installed and in PATH.");
+                cli_diagnostic!("error: failed to run git: {error}");
+                cli_diagnostic!("hint: make sure git is installed and in PATH.");
                 process::exit(1);
             }
         }
@@ -748,14 +748,14 @@ pub(crate) fn run_new(args: &SkillsNewArgs) {
     if dest.exists() {
         if args.force {
             if let Err(error) = fs::remove_dir_all(&dest) {
-                eprintln!(
+                cli_diagnostic!(
                     "error: failed to clear existing skill at {}: {error}",
                     dest.display()
                 );
                 process::exit(1);
             }
         } else {
-            eprintln!(
+            cli_diagnostic!(
                 "error: {} already exists. Pass --force to overwrite.",
                 dest.display()
             );
@@ -763,7 +763,7 @@ pub(crate) fn run_new(args: &SkillsNewArgs) {
         }
     }
     if let Err(error) = fs::create_dir_all(&dest) {
-        eprintln!("error: failed to create {}: {error}", dest.display());
+        cli_diagnostic!("error: failed to create {}: {error}", dest.display());
         process::exit(1);
     }
 
@@ -798,7 +798,7 @@ the full reference.\n",
     );
     let skill_path = dest.join("SKILL.md");
     if let Err(error) = fs::write(&skill_path, skill_md) {
-        eprintln!("error: failed to write {}: {error}", skill_path.display());
+        cli_diagnostic!("error: failed to write {}: {error}", skill_path.display());
         process::exit(1);
     }
 
@@ -838,7 +838,7 @@ pub(crate) fn run_validate(args: &SkillsValidateArgs) {
                         .with_details(serde_json::json!({"path": path}));
                 println!("{}", json_envelope::to_string_pretty(&envelope));
             } else {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
             }
             process::exit(1);
         }
@@ -860,7 +860,7 @@ pub(crate) fn run_validate(args: &SkillsValidateArgs) {
             }));
             println!("{}", json_envelope::to_string_pretty(&envelope));
         } else {
-            eprintln!("error: {message}");
+            cli_diagnostic!("error: {message}");
         }
         process::exit(1);
     }
@@ -897,7 +897,7 @@ pub(crate) fn run_validate(args: &SkillsValidateArgs) {
     println!("short: {}", payload.short);
     println!("files: {} bundled file(s)", payload.bundled_files.len());
     if !skill.unknown_fields.is_empty() {
-        eprintln!(
+        cli_diagnostic!(
             "warning: unknown frontmatter field(s): {}",
             skill.unknown_fields.join(", "),
         );
@@ -1203,7 +1203,7 @@ fn update_skills_lock(
         out.push_str("\n\n");
     }
     if let Err(error) = fs::write(&lock_path, out) {
-        eprintln!("warning: failed to update {}: {error}", lock_path.display());
+        cli_diagnostic!("warning: failed to update {}: {error}", lock_path.display());
     }
 }
 

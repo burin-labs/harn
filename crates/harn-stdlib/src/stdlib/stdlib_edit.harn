@@ -672,7 +672,13 @@ pub fn edit_inline(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params
  * (`target_file` also works). `dry_run` returns the planned edits without
  * writing. The declaration moves with its attributes or decorators and the
  * comment block directly above it; `comments_left_behind` lists comment
- * blocks separated from it by a blank line, which stay. Refusals
+ * blocks separated from it by a blank line, which stay. A move that would
+ * leave a declaration unreachable refuses with `visibility_required` and
+ * names the narrowest fix in `required_visibility`; pass
+ * `allow_visibility_widening` (`pub(super)`, `pub(crate)`, `pub`, or `export`
+ * for TypeScript) to let the move widen exactly the blocking declarations, each
+ * to the narrowest level that works within that allowance, and read `widened`
+ * for what changed. Refusals
  * (`no_match`, `ambiguous_symbol`, `unsupported_language`, `syntax_error`,
  * `destination_conflict`, `visibility_required`, `import_cycle`,
  * `nested_import`, `not_top_level`, `error`)
@@ -704,6 +710,8 @@ pub fn edit_move_decl(code_index: HarnessCodeIndex, params: dict?) {
     created_destination: payload?.created_destination ?? false,
     touched_files: payload?.touched_files ?? [],
     sites: payload?.sites ?? [],
+    widened: payload?.widened ?? [],
+    required_visibility: payload?.required_visibility,
     comments_left_behind: payload?.comments_left_behind ?? [],
     occurrences_replaced: payload?.occurrences_replaced ?? 0,
     call_sites_updated: payload?.call_sites_updated ?? 0,

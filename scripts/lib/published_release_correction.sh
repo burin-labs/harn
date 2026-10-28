@@ -6,6 +6,7 @@ release_require_published_correction() (
   set -euo pipefail
   local repository="${1:?repository required}" tag="${2:?tag required}" source="${3:?source required}"
   local scratch release manifest index run attempt digest verified
+  local authenticated_index="${4:-}"
   # Closed GitHub release-app actor, not a display-name or commit-author claim.
   local publisher='{"id":278545796,"login":"harn-release-bot[bot]","type":"Bot"}'
   local library_dir
@@ -103,5 +104,10 @@ release_require_published_correction() (
       $statement.predicate.sourceCommit == $source and $statement.predicate.version == $version and
       ($statement.predicate.workflow.runId | tostring) == $run and
       ($statement.predicate.workflow.runAttempt | tostring) == $attempt)
-  ' <<< "$verified" >/dev/null
+  ' <<< "$verified" >/dev/null || return 1
+  # Consumers of the authenticated archive inventory must use these exact
+  # verified bytes rather than making another mutable release metadata read.
+  if [[ -n "$authenticated_index" ]]; then
+    cp "$index" "$authenticated_index"
+  fi
 )

@@ -7,12 +7,12 @@ use harn_vm::text::truncate_end;
 
 pub(crate) fn run_viz(file: &str, output: Option<&str>) {
     let source = fs::read_to_string(file).unwrap_or_else(|error| {
-        eprintln!("error: failed to read {file}: {error}");
+        cli_diagnostic!("error: failed to read {file}: {error}");
         process::exit(1);
     });
 
     let mermaid = render_source_to_mermaid(&source).unwrap_or_else(|error| {
-        eprintln!("error: failed to visualize {file}: {error}");
+        cli_diagnostic!("error: failed to visualize {file}: {error}");
         process::exit(1);
     });
 
@@ -21,7 +21,7 @@ pub(crate) fn run_viz(file: &str, output: Option<&str>) {
             let _ = fs::create_dir_all(parent);
         }
         fs::write(path, mermaid).unwrap_or_else(|error| {
-            eprintln!("error: failed to write {path}: {error}");
+            cli_diagnostic!("error: failed to write {path}: {error}");
             process::exit(1);
         });
     } else {

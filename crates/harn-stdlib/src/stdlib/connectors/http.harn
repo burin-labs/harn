@@ -34,6 +34,7 @@ pub type ConnectorHttpSuccess = {
   status: int,
   headers: dict<string, string>,
   body: string,
+  body_bytes?: bytes,
   final_url?: string,
   json?: any,
   retry_after_ms?: int,
@@ -46,6 +47,7 @@ pub type ConnectorHttpFailure = {
   status?: int,
   headers?: dict<string, string>,
   body?: string,
+  body_bytes?: bytes,
   category?: string,
   retryable?: bool,
   retry_after_ms?: int,
@@ -293,7 +295,8 @@ fn __connector_http_error_from_exception(error: any, options: dict) {
     || contains(lowered, "url must start")
     || contains(lowered, "invalid method")
     || contains(lowered, "invalid header")
-    || contains(lowered, "mutually exclusive") {
+    || contains(lowered, "mutually exclusive")
+    || contains(lowered, "response_type must") {
     category = "invalid_request"
     retryable = false
   } else if contains(lowered, "max_response_bytes") {
@@ -313,7 +316,7 @@ fn __connector_http_error_from_exception(error: any, options: dict) {
   )
 }
 
-fn __connector_http_error_envelope(response: any, error: dict) {
+fn __connector_http_error_envelope(response: any, error: dict, options: dict) {
   let envelope = {ok: false, error: error}
   const status = response?.status ?? error?.status
   if status != nil {
@@ -324,6 +327,9 @@ fn __connector_http_error_envelope(response: any, error: dict) {
   }
   if error?.body != nil {
     envelope["body"] = error.body
+  }
+  if response?.body_bytes != nil && !(options.redact_error_body ?? false) {
+    envelope["body_bytes"] = response.body_bytes
   }
   if error?.category != nil {
     envelope["category"] = error.category
@@ -353,6 +359,9 @@ fn __connector_http_success_envelope(clock: HarnessClock, response: dict?) {
     status: response.status,
     headers: response.headers ?? {},
     body: response.body ?? "",
+  }
+  if response?.body_bytes != nil {
+    envelope["body_bytes"] = response.body_bytes
   }
   if response?.final_url != nil {
     envelope["final_url"] = response.final_url
@@ -480,10 +489,10 @@ pub fn connector_http_request(
       const error_retryable = error.retryable ?? false
       const can_retry = retry_allowed && error_retryable && attempt + 1 < retry_policy.max_attempts
       if !can_retry {
-        return __connector_http_error_envelope(nil, error)
+        return __connector_http_error_envelope(nil, error, opts)
       }
       if !__connector_http_sleep_before_retry(clock, retry_policy, attempt, nil) {
-        return __connector_http_error_envelope(nil, error)
+        return __connector_http_error_envelope(nil, error, opts)
       }
       attempt = attempt + 1
       continue
@@ -495,6 +504,7 @@ pub fn connector_http_request(
         response,
         __connector_http_error_from_response(clock, response, opts, false)
           + {category: "rate_limit", retry_after_ms: quota_delay},
+        opts,
       )
     }
     if quota_delay != nil && quota_delay > 0 {
@@ -515,7 +525,7 @@ pub fn connector_http_request(
     }
     const error = __connector_http_error_from_response(clock, response, opts, should_retry)
     if !should_retry || attempt + 1 >= retry_policy.max_attempts {
-      return __connector_http_error_envelope(response, error)
+      return __connector_http_error_envelope(response, error, opts)
     }
     if !__connector_http_sleep_before_retry(
       clock,
@@ -524,7 +534,7 @@ pub fn connector_http_request(
       retry_after_ms,
       quota_delay ?? 0,
     ) {
-      return __connector_http_error_envelope(response, error)
+      return __connector_http_error_envelope(response, error, opts)
     }
     attempt = attempt + 1
   }
@@ -537,6 +547,7 @@ pub fn connector_http_request(
       provider: opts?.provider,
       operation: opts?.operation,
     },
+    opts,
   )
 }
 
@@ -558,11 +569,11 @@ pub fn connector_http_json(
   if !(response.ok ?? false) {
     return response
   }
-  if trim(to_string(response.body ?? "")) == "" {
-    return response + {json: nil}
-  }
   const parsed = try {
-    json_parse(response.body)
+    const body = response.body_bytes != nil ? bytes_to_string(response.body_bytes) : to_string(
+      response.body ?? "",
+    )
+    trim(body) == "" ? nil : json_parse(body)
   }
   if is_ok(parsed) {
     return response + {json: unwrap(parsed)}
@@ -578,5 +589,5 @@ pub fn connector_http_json(
       operation: opts?.operation,
     },
   )
-  return __connector_http_error_envelope(response, error)
+  return __connector_http_error_envelope(response, error, opts)
 }

@@ -1,6 +1,10 @@
 name: Consumer observer cleanup
 
 on:
+  # Revisit preserved children after the one-shot completion listener returns.
+  schedule:
+    - cron: '8,23,38,53 * * * *'
+  workflow_dispatch:
   # Trusted default-branch code authenticates same-repository custody; artifacts
   # are bounded JSON data, never downloaded checkout or executable source.
   workflow_run: # zizmor: ignore[dangerous-triggers] exact parent identity and private receipts authorize cleanup
@@ -15,7 +19,10 @@ jobs:
   reconcile:
     name: Reconcile owned consumer children
     # CI owns a consumer child only through its pull request consumer check.
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.status == 'completed' && (github.event.workflow_run.name != 'CI' || github.event.workflow_run.event == 'pull_request')
+    if: >-
+      github.event_name == 'schedule'
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.status == 'completed' && (github.event.workflow_run.name != 'CI' || github.event.workflow_run.event == 'pull_request'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -25,6 +32,7 @@ jobs:
       # workflow's untrusted checkout or artifact as executable source.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/heads/main
           persist-credentials: false
       - name: Mint exact parent and consumer action authority
         id: token

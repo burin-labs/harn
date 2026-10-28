@@ -1,9 +1,6 @@
 use harn_builtin_meta::CapabilityId;
 
-use super::{
-    active_backend_available, active_backend_name, ActiveBackend, SandboxBackend,
-    SandboxMechanismAvailability, SandboxMechanismUnavailable,
-};
+use super::{active_backend_available, active_backend_name, ActiveBackend, SandboxBackend};
 use crate::orchestration::{current_execution_policy, CapabilityPolicy, SandboxProfile};
 use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
@@ -112,13 +109,7 @@ fn confinement_for<B: SandboxBackend>(policy: &CapabilityPolicy) -> VmValue {
         // Spawn checks the enforcement row before preparing the backend.
         // Preserve its policy-dependent dimensions on unconfined platforms.
         super::enforcement::refusal_for_mechanism(mechanism_name, policy)
-            .unwrap_or_else(|| {
-                SandboxMechanismUnavailable::new(
-                    mechanism,
-                    SandboxMechanismAvailability::AbsentOnHost,
-                    SandboxProfile::OsHardened,
-                )
-            })
+            .unwrap_or_else(|| B::filesystem_unavailable(SandboxProfile::OsHardened))
             .thrown_value()
     };
     let mut dict = std::collections::BTreeMap::new();
@@ -133,7 +124,7 @@ fn confinement_for<B: SandboxBackend>(policy: &CapabilityPolicy) -> VmValue {
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "sandbox_confinement() -> {schema: string, backend: string, mechanism: string, confines_processes: bool, os_hardened_refusal: {category: string, message: string, source: string, sandbox_mechanism: {schema: string, mechanism: string, availability: string, profile: string, requirement: string, selector_honored: bool, unconfined: list<string>?}}?}",
+    sig = "sandbox_confinement() -> {schema: string, backend: string, mechanism: string, confines_processes: bool, os_hardened_refusal: {category: string, message: string, source: string, sandbox_mechanism: {schema: string, mechanism: string, availability: string, profile: string, requirement: string, selector_honored: bool, unconfined: list<string>?, host_protection_gap: string?}}?}",
     category = "sandbox"
 )]
 fn sandbox_confinement_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

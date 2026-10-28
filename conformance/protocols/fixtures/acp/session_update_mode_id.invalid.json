@@ -1,0 +1,22 @@
+{
+  "name": "acp.session_update.mode_missing_current_mode_id",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "invalid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": { "sessionId": "s", "update": { "sessionUpdate": "current_mode_update", "modeId": "architect" } }
+    }
+  ],
+  "matrix": {
+    "version": "v1.26.0",
+    "family": "session_update_mode",
+    "case": "negative",
+    "source": {
+      "kind": "official_example",
+      "url": "https://agentclientprotocol.com/protocol/session-modes"
+    }
+  }
+}

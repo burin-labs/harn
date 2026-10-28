@@ -5,7 +5,7 @@ import {
   ci_linux_lane_policy_errors,
   cli_producer_hosted_ceiling_minutes,
   consumer_canary_errors,
-  e2e_elastic_capacity_errors,
+  e2e_hosted_runner_errors,
   landlock_incapable_runner_errors,
   producer_admission_expression,
   producer_cache_save_reserve_minutes,
@@ -233,23 +233,35 @@ pipeline test_public_runner_policy_checks_reusable_workflow_call_defaults(
 }
 
 @test
-pipeline test_e2e_paid_override_fails_when_the_capacity_step_is_gone(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_e2e_hosted_route_rejects_the_old_owned_route(harness: Harness, task: unknown) {
   const invalid = {jobs: {e2e: {"runs-on": gha_expression(E2E_SWITCH_ROUTE)}}}
-  const errors = e2e_elastic_capacity_errors(invalid)
-  assert(errors.any(fn(error) { contains(error, "Decide where the slow E2E suite lands") }))
+  assert(e2e_hosted_runner_errors(invalid).count > 0)
+  assert(e2e_hosted_runner_errors({jobs: {}}).count > 0)
 }
 
 @test
-pipeline test_e2e_capacity_accepts_owned_or_standard_hosted_routing(
+pipeline test_e2e_paid_exception_is_bound_to_the_exact_job_and_runner(
   harness: Harness,
   task: unknown,
 ) {
-  const valid = e2e_workflow(gha_expression(E2E_SWITCH_ROUTE), {})
-  assert_eq(e2e_elastic_capacity_errors(valid), [])
+  const valid = {jobs: {e2e: {"runs-on": "ubuntu-8core"}}}
+  assert_eq(e2e_hosted_runner_errors(valid), [])
   assert_eq(public_repository_runner_errors({"e2e.yml": valid}, {targets: []}), [])
+  assert(public_repository_runner_errors({"other.yml": valid}, {targets: []}).count > 0)
+  assert(
+    public_repository_runner_errors(
+      {"e2e.yml": {jobs: {other: {"runs-on": "ubuntu-8core"}}}},
+      {targets: []},
+    ).count
+      > 0,
+  )
+  assert(
+    public_repository_runner_errors(
+      {"e2e.yml": {jobs: {e2e: {"runs-on": gha_expression("'ubuntu-8core'")}}}},
+      {targets: []},
+    ).count
+      > 0,
+  )
 }
 
 fn consumer_canary_workflow(extra: list) -> dict {
@@ -308,24 +320,29 @@ pipeline test_consumer_canary_accepts_checkout_mint_and_script(harness: Harness,
 }
 
 @test
-pipeline test_consumer_failure_upload_has_only_the_canonical_descriptor(harness: Harness) {
+pipeline test_consumer_observer_uploads_have_only_the_canonical_descriptors(harness: Harness) {
   const workflow = read_yaml(harness.fs, "../../.github/workflows/consumer-canary.yml", nil)
-  const uploads = workflow.jobs.consumers.steps.filter(
-    fn(step: dict) -> bool { return step?.name == "Preserve the measured observer failure" },
-  )
-  assert_eq(len(uploads), 1)
-  const upload = uploads[0]
-  assert_eq(consumer_canary_errors(consumer_canary_workflow([upload])), [])
-  for invalid in [
-    upload + {with: upload.with + {path: "consumer-private-report"}},
-    upload + {with: upload.with + {name: "consumer-private-report"}},
-    upload + {uses: "actions/upload-artifact@v7"},
-    upload + {env: {PRIVATE_DATA: "consumer-log"}},
-    upload + {run: "cat consumer.log"},
-    upload + {if: "always()"},
-    upload + {with: upload.with + {path: upload.with.path.replace("observe-4", "observe-5")}},
+  for name in [
+    "Preserve the measured observer failure",
+    "Preserve the consumer observation checkpoint",
   ] {
-    assert(len(consumer_canary_errors(consumer_canary_workflow([invalid]))) > 0)
+    const uploads = workflow.jobs.consumers.steps.filter(
+      fn(step: dict) -> bool { return step?.name == name },
+    )
+    assert_eq(len(uploads), 1)
+    const upload = uploads[0]
+    assert_eq(consumer_canary_errors(consumer_canary_workflow([upload])), [])
+    for invalid in [
+      upload + {with: upload.with + {path: "consumer-private-report"}},
+      upload + {with: upload.with + {name: "consumer-private-report"}},
+      upload + {uses: "actions/upload-artifact@v7"},
+      upload + {env: {PRIVATE_DATA: "consumer-log"}},
+      upload + {run: "cat consumer.log"},
+      upload + {if: "always()"},
+      upload + {with: upload.with + {path: upload.with.path.replace("observe-4", "observe-5")}},
+    ] {
+      assert(len(consumer_canary_errors(consumer_canary_workflow([invalid]))) > 0)
+    }
   }
 }
 

@@ -1,7 +1,9 @@
 import {
   RepoPlan,
   Symbol,
+  container_shape,
   index_clone,
+  insert_query,
   oracle_control,
   prepare_repo,
   run_symbol,
@@ -134,4 +136,100 @@ pipeline test_setup_files_widen_the_oracle(harness: Harness) {
   const prepared = prepare_repo(harness, repo, work)
   assert_eq(prepared.ok, true)
   assert_eq(harness.fs.read_text(prepared.root + "/extra.cfg"), "pub fn\n")
+}
+
+type InsertCase = {name: string, shape: string, content: string}
+
+/**
+ * An insert of `item` into `path` through the probe's query; the response is the raw builtin result.
+ */
+fn dry_insert(ast: HarnessAst, path: string, language: string, item: InsertCase) -> dict {
+  return ast.insert_at_anchor(
+    {
+      path: path,
+      query: insert_query(language, item.name, item.shape),
+      position: "last_child",
+      content: item.content,
+      dry_run: true,
+    },
+  )
+}
+
+/** The insert query must pick one container; the old shape matched every class in the file. */
+pipeline test_insert_query_names_exactly_one_container(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("precise-qualify-insert-")
+  const source = "class A {}\nclass B {}\nabstract class C {}\ninterface D {}\ninterface E {}\n"
+  harness.fs.write_text(root + "/a.ts", source)
+  const ts_cases: list<InsertCase> = [
+    {name: "A", shape: "body", content: "m(): number {}"},
+    {name: "C", shape: "body", content: "m(): number {}"},
+    {name: "D", shape: "definition", content: "m(): number"},
+  ]
+  for item in ts_cases {
+    const res = dry_insert(harness.ast, root + "/a.ts", "typescript", item)
+    assert_eq(res.result, "applied", item.name + ": " + to_string(res.details ?? ""))
+    // Everything else is byte-for-byte what it was.
+    for other in ["A", "B", "C", "D", "E"].filter({ name -> name != item.name }) {
+      assert(to_string(res.preview).contains(other + " {}"), item.name + " insert touched " + other)
+    }
+  }
+  const java = harness.fs.mkdtemp_in_workspace("precise-qualify-insert-")
+  harness.fs.write_text(java + "/A.java", "class A {}\nclass B {}\ninterface I {}\nenum E { X; }\n")
+  const java_cases: list<InsertCase> = [
+    {name: "A", shape: "body", content: "int m() { return 0; }"},
+    {name: "E", shape: "body", content: "int m() { return 0; }"},
+    {name: "I", shape: "definition", content: "default int m() { return 0; }"},
+  ]
+  for item in java_cases {
+    const res = dry_insert(harness.ast, java + "/A.java", "java", item)
+    assert_eq(res.result, "applied", item.name + ": " + to_string(res.details ?? ""))
+  }
+}
+
+/** A trait or interface is a definition; a struct's members live in its impl. */
+pipeline test_a_trait_definition_is_an_insert_target(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("precise-qualify-insert-")
+  const source =
+    "pub trait Shape {\n    fn area(&self) -> f64;\n}\n\npub struct Square(f64);\n\nimpl Square {\n    pub fn side(&self) -> f64 {\n        self.0\n    }\n}\n"
+  harness.fs.write_text(root + "/lib.rs", source)
+  assert_eq(container_shape("rust", "pub trait Shape {", "Shape"), "definition")
+  assert_eq(container_shape("rust", "pub struct Square(f64);", "Square"), "body")
+  assert_eq(container_shape("typescript", "export interface Named {", "Named"), "definition")
+  assert_eq(container_shape("typescript", "export class Named {", "Named"), "body")
+  const method = "fn added(&self) -> u8 {\n    0\n}"
+  const trait_res = harness.ast.insert_at_anchor(
+    {
+      path: root + "/lib.rs",
+      query: insert_query("rust", "Shape", "definition"),
+      position: "last_child",
+      content: method,
+      dry_run: true,
+    },
+  )
+  assert_eq(trait_res.result, "applied", to_string(trait_res.details))
+  assert(trait_res.preview.index_of("fn added") < trait_res.preview.index_of("pub struct Square"))
+  // The inherent-impl query still lands in the impl.
+  const impl_res = harness.ast.insert_at_anchor(
+    {
+      path: root + "/lib.rs",
+      query: insert_query("rust", "Square", "body"),
+      position: "last_child",
+      content: method,
+      dry_run: true,
+    },
+  )
+  assert_eq(impl_res.result, "applied", to_string(impl_res.details))
+  assert(impl_res.preview.index_of("fn added") > impl_res.preview.index_of("impl Square"))
+  // A trait name has no inherent impl: the refusal lists the containers to retry.
+  const miss = harness.ast.insert_at_anchor(
+    {
+      path: root + "/lib.rs",
+      query: insert_query("rust", "Shape", "body"),
+      position: "last_child",
+      content: method,
+      dry_run: true,
+    },
+  )
+  assert_eq(miss.result, "no_match")
+  assert_eq(miss.candidates.map({ c -> c.kind + ":" + c.name }), ["trait:Shape", "impl:Square"])
 }

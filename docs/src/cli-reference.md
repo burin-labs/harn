@@ -1,11 +1,16 @@
 # CLI reference
 
-All commands available in the `harn` CLI.
+Reference for the most-used commands. Run `harn --help` or `harn <cmd> --help`
+for the full list; `spec/cli-surface.txt` is the generated inventory.
 
 To add a new subcommand or port an existing one off Rust, see
 [Extending the CLI in `.harn`](./cli-extending-in-harn.md). For the
 machine-readable side of `--json` modes, see the
 [`harn --json` contract](./cli-json-contract.md).
+
+`harn run` and `harn bench` report short program errors on stderr by default. Pass `--explain`
+to include source excerpts and runtime stack details. The structured `--json`
+error event retains its detailed diagnostic.
 
 ## Durable provider allowance
 
@@ -34,6 +39,17 @@ Unknown pricing is refused before transport. An ordinary reopen can't change
 stored limits. Authorized host updates use `MachineSpendQuota::update_policy`
 and leave a durable audit receipt.
 
+An optional top-level `stop_on_unknown_usage = true` also refuses a new
+reservation while any attempt in the scope is unsettled or has no measured
+usage. This serializes provider attempts across processes and retains the
+refusal after a crash or an unpriced response. The first opener fixes this
+setting for the scope; a later opener with a different value is refused.
+Measured zero is settled usage. The lifetime receipt distinguishes
+`lifetime_unsettled_attempts` from `lifetime_unpriced_attempts`; the existing
+unknown count includes both. While the strict policy refuses new attempts,
+the effective budget query returns zero even if the receipt shows unused
+allowance. The default is `false`.
+
 Keep the policy and ledger outside an agent's writable roots. A host embedding
 Harn can install the same allowance through `MachineSpendQuota::scope`.
 
@@ -48,7 +64,7 @@ write a durable receipt before changing the named session's ceiling.
 `session/set_config_option` budget changes use the same audit ledger. A failed
 audit write refuses the change. Session changes never raise the machine limits;
 use `MachineSpendQuota::update_policy` for an approved machine-policy change.
-Ledger schema version 3 preserves existing reservations and policy history;
+Ledger schema version 4 preserves existing reservations and policy history;
 older Harn versions refuse to open the upgraded ledger.
 
 ## harn self
@@ -116,7 +132,7 @@ harn run --resume .harn/workers/worker_...json
 | `-e <code>` | Evaluate inline code instead of a file |
 | `--resume <handle-or-snapshot>` | Cold-restore a suspended top-level agent from its persisted worker snapshot |
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
-| `--allow <builtins>` | Allow only specific builtins (comma-separated) |
+| `--allow <builtins>` | Allow only specific builtins (comma-separated). Pure builtins such as `range` and `lowercase` declare no effects and stay callable. |
 | `--eager-project-handlers` | Load every project trigger and hook handler module during startup |
 | `--project-triggers` | Register manifest triggers and reconcile their durable state for this run |
 | `--standalone` | Run without loading ambient project configuration, skills, handlers, state roots, or manifest-derived authority |
@@ -3606,13 +3622,19 @@ compaction, or limited tool disclosure. The local runner does not call an LLM;
 it scores whether each mode exposes enough deterministic context for the task
 and writes:
 
-- `summary.json`: a `harn.context_eval.report.v1` aggregate report
+- `summary.json`: a `harn.context_eval.report.v2` aggregate report
 - `per_run.jsonl`: one machine-readable record per task/mode run
 - `summary.md`: a compact human-readable table
 
 The report schema is checked into
-`spec/schemas/context-eval-report.v1.schema.json` so hosted evaluators,
+`spec/schemas/context-eval-report.v2.schema.json` so hosted evaluators,
 dashboards, and downstream products can ingest the same local artifacts.
+Unmeasured run costs and incomplete totals are null; the aggregate includes a
+known subtotal and measured and unmeasured run counts. `--report-version 1`
+emits the deprecated v1 JSON format for one release, where missing costs are
+represented as zero and the numeric total can be incomplete.
+`--report-version` accepts `1` or `2` and defaults to `2`. The Markdown
+summary always shows whether cost coverage is incomplete.
 
 ### harn eval prompt
 

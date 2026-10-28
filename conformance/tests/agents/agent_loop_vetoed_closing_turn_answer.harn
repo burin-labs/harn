@@ -22,7 +22,9 @@ fn run_nothing_accepted(harness: Harness) {
     harness.llm,
     [
       llm_text("The only draft, and the adjudicator rejects it. ##DONE##"),
-      llm_text("{\"verdict\":\"continue\",\"detail\":\"Evidence is incomplete.\"}"),
+      llm_text(
+        "{\"verdict\":\"continue\",\"detail\":\"Evidence is incomplete.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
+      ),
     ],
     { ->
       const result = agent_loop(
@@ -63,7 +65,9 @@ fn run_earlier_accepted(harness: Harness) {
     [
       llm_text("Accepted progress report."),
       llm_text("Closing draft the adjudicator rejects. ##DONE##"),
-      llm_text("{\"verdict\":\"continue\",\"detail\":\"Evidence is incomplete.\"}"),
+      llm_text(
+        "{\"verdict\":\"continue\",\"detail\":\"Evidence is incomplete.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
+      ),
     ],
     { ->
       const result = agent_loop(
@@ -109,7 +113,9 @@ fn run_marker_still_reaches_the_model(harness: Harness) {
     harness.llm,
     [
       llm_text("First draft, which the adjudicator rejects. ##DONE##"),
-      llm_text("{\"verdict\":\"continue\",\"detail\":\"Evidence is incomplete.\"}"),
+      llm_text(
+        "{\"verdict\":\"continue\",\"detail\":\"Evidence is incomplete.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
+      ),
       llm_text("Second draft, written after the directive."),
     ],
     { ->

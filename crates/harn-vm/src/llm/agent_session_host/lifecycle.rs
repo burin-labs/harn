@@ -373,7 +373,7 @@ async fn host_agent_session_init(
             Ok(result)
         }
         Err(error) => {
-            init_rollback.fail(Some(&ctx)).await;
+            init_rollback.fail(Some(&ctx), &error).await;
             Err(error)
         }
     }
@@ -471,6 +471,12 @@ pub(super) async fn host_agent_session_finalize(
         Some(run_id) => cancellation::AgentSessionFinalization::take_retry(&session_id, run_id)?,
         None => cancellation::AgentSessionFinalization::take(&session_id)?,
     };
+    let completion_assessment = super::goal_outcome::Assessment::read(opt_json(
+        finalization
+            .session_mut()
+            .finalization_status(&supplied_status),
+        "completion_assessment",
+    ))?;
     let (status_dict, mut finalization_stage) = finalization
         .session_mut()
         .begin_finalization(supplied_status);
@@ -572,6 +578,7 @@ pub(super) async fn host_agent_session_finalize(
     let published =
         crate::agent_sessions::settle_assistant_publication(&session_id, publication_admitted)
             .map_err(VmError::Runtime)?;
+    let goal_outcome = super::goal_outcome::project(completion_assessment, publication_admitted);
     if finalization_stage < super::AgentFinalizationStage::TranscriptMarkerWritten {
         if let Some(dir) = session.transcript_dir.as_deref() {
             crate::llm::agent_session_transcript::append_finalized_marker(
@@ -682,6 +689,7 @@ pub(super) async fn host_agent_session_finalize(
         live_transcript_journal::TerminalAccounting {
             provider_call_count: session.provider_call_count,
             adaptive_budget: adaptive_budget.as_ref(),
+            goal_outcome: Some(&goal_outcome),
         },
     )
     .await?;
@@ -754,7 +762,12 @@ pub(super) async fn host_agent_session_finalize(
         .map(vm_to_json)
         .unwrap_or(serde_json::Value::Null);
 
-    emit_event(&terminal_outcome.checkpoint(&session_id, &canonical_status, &stop_reason));
+    emit_event(&terminal_outcome.checkpoint(
+        &session_id,
+        &canonical_status,
+        &stop_reason,
+        &goal_outcome,
+    ));
     // The trace event log never carried tool or loop-lifecycle facts (#5997),
     // so the summary reads them from the same session state that produces
     // `tools` and `llm` below. Deriving both projections from one owner is
@@ -776,6 +789,7 @@ pub(super) async fn host_agent_session_finalize(
         "acp_stop_reason": acp_stop_reason,
         "terminal_class": terminal_class,
         "terminal": terminal_outcome.to_json(),
+        "goal_outcome": goal_outcome,
         "error": terminal_error,
         "text": visible_text,
         "visible_text": visible_text,

@@ -14,7 +14,6 @@ use super::{
     ManifestContext, PackageError,
 };
 
-const LEGACY_PACKAGES_DIR: &str = ".harn/packages";
 const STAGING_PREFIX: &str = ".staging-";
 const GENERATION_PREFIX: &str = "generation-";
 const PACKAGE_INSTALL_LOCK_TIMEOUT: Duration = Duration::from_mins(30);
@@ -288,7 +287,10 @@ pub(crate) fn dependency_package_snapshot(
 }
 
 pub(crate) fn acquire_package_install_lock(ctx: &ManifestContext) -> Result<File, PackageError> {
-    let path = ctx.dir.join(".harn").join("package-install.lock");
+    let path = ctx
+        .dir
+        .join(harn_modules::package_snapshot::PACKAGE_STATE_DIR)
+        .join(harn_modules::package_snapshot::PACKAGE_INSTALL_LOCK_FILE);
     let file = open_lock_file(&path).map_err(|error| PackageError::Lockfile(error.to_string()))?;
     harn_flock::lock_with_deadline(
         &file,
@@ -337,7 +339,10 @@ fn publish_pointer_and_collect(
 }
 
 fn remove_legacy_packages_dir(ctx: &ManifestContext) -> Result<(), PackageError> {
-    let path = ctx.dir.join(LEGACY_PACKAGES_DIR);
+    let path = ctx
+        .dir
+        .join(harn_modules::package_snapshot::PACKAGE_STATE_DIR)
+        .join(harn_modules::package_snapshot::LEGACY_PACKAGES_DIR);
     match fs::symlink_metadata(&path) {
         Ok(metadata) if metadata.file_type().is_symlink() || metadata.is_file() => {
             fs::remove_file(&path)

@@ -7,10 +7,13 @@ use std::path::PathBuf;
 use tree_sitter::{Node, Tree};
 
 use super::text::{self, Edit};
+use super::widen::{self, Declared};
 use super::{
     Binding, FileModel, ImportRequest, ListStatement, ModuleRef, QualifiedRewrite, Shape, Site,
     TopItem,
 };
+
+mod receiver;
 
 /// A Cargo package: its directory (workspace-relative, `""` at the root)
 /// and the identifier other crates use for its library.
@@ -236,7 +239,9 @@ impl Workspace {
                         model.items.push(TopItem {
                             name: text::text(name, source).to_string(),
                             range: child.byte_range(),
-                            exported: is_public(child, source),
+                            exported: restriction(visibility(child, source)).is_none(),
+                            restricted: restriction(visibility(child, source))
+                                .filter(|path| path != "self"),
                             type_like: false,
                             movable: kind != "mod_item" && kind != "macro_definition",
                         });
@@ -436,54 +441,87 @@ impl Workspace {
         Ok(Some(QualifiedRewrite { edit, import: None }))
     }
 
-    /// Private fields and methods of the source module the moved item reads.
+    /// Name matches remain blockers unless the member is unique and every
+    /// use has its owning type, proved by [`receiver::uses_resolve_to`].
     pub(crate) fn private_members_used(
         &self,
         rel: &str,
         source: &str,
         tree: &Tree,
         members: &BTreeSet<String>,
-    ) -> Vec<Site> {
-        let mut sites = Vec::new();
+        item: Node<'_>,
+        modules: (&ModuleRef, &ModuleRef),
+    ) -> Vec<Declared> {
+        let mut found: Vec<(Node<'_>, String, Option<String>)> = Vec::new();
         for child in text::members(tree.root_node()) {
-            let candidates: Vec<Node<'_>> = match child.kind() {
-                "struct_item" => child
-                    .child_by_field_name("body")
-                    .map(|body| {
-                        text::members(body)
-                            .into_iter()
-                            .filter(|f| f.kind() == "field_declaration")
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                "impl_item" if child.child_by_field_name("trait").is_none() => child
-                    .child_by_field_name("body")
-                    .map(|body| {
-                        text::members(body)
-                            .into_iter()
-                            .filter(|f| f.kind() == "function_item")
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                _ => Vec::new(),
+            let (candidates, owner): (Vec<Node<'_>>, Option<Node<'_>>) = match child.kind() {
+                "struct_item" => (
+                    child
+                        .child_by_field_name("body")
+                        .map(|body| {
+                            text::members(body)
+                                .into_iter()
+                                .filter(|f| f.kind() == "field_declaration")
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    child.child_by_field_name("name"),
+                ),
+                "impl_item" if child.child_by_field_name("trait").is_none() => (
+                    child
+                        .child_by_field_name("body")
+                        .map(|body| {
+                            text::members(body)
+                                .into_iter()
+                                .filter(|f| f.kind() == "function_item")
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    // An impl family name alone does not prove applicability.
+                    child.child_by_field_name("type").filter(|ty| {
+                        ty.kind() == "type_identifier"
+                            && child.child_by_field_name("type_parameters").is_none()
+                            && !text::members(child)
+                                .into_iter()
+                                .any(|part| part.kind() == "where_clause")
+                    }),
+                ),
+                _ => (Vec::new(), None),
             };
+            let owner = owner.map(|node| text::text(node, source).to_string());
             for member in candidates {
-                let Some(name) = member.child_by_field_name("name") else {
-                    continue;
-                };
-                let name = text::text(name, source);
-                if members.contains(name) && !is_public(member, source) {
-                    sites.push(Site::at(
-                        rel,
-                        source,
-                        member.start_byte(),
-                        "declaration",
-                        format!(
-                            "`{name}` is private to the source module but the moved item uses it"
-                        ),
-                    ));
+                if let Some(name) = member.child_by_field_name("name") {
+                    let name = text::text(name, source).to_string();
+                    if members.contains(&name) {
+                        found.push((member, name, owner.clone()));
+                    }
                 }
             }
+        }
+        let mut sites = Vec::new();
+        for (member, name, owner) in &found {
+            let hidden = match restriction(visibility(*member, source)) {
+                None => false,
+                Some(path) => path == "self" || !widen::sees(&path, modules.0, modules.1),
+            };
+            if !hidden {
+                continue;
+            }
+            let unique = found.iter().filter(|(_, other, _)| other == name).count() == 1;
+            let proven = unique
+                && owner
+                    .as_ref()
+                    .is_some_and(|o| receiver::uses_resolve_to(item, source, *member, o));
+            let reason = if proven {
+                format!("`{name}` is private to the source module but the moved item uses it")
+            } else {
+                format!(
+                    "cannot prove that the moved `{name}` use refers to this private declaration"
+                )
+            };
+            let mut blocker = declared(rel, source, *member, reason);
+            blocker.placeable &= proven;
+            sites.push(blocker);
         }
         sites
     }
@@ -544,7 +582,7 @@ impl Workspace {
     pub(crate) fn module_declaration(
         &mut self,
         dest_rel: &str,
-        public: bool,
+        visibility: &str,
     ) -> Result<(String, String), String> {
         let ctx = self
             .file_ctx(dest_rel)
@@ -578,8 +616,8 @@ impl Workspace {
                 "parent module file `{parent_file}` for `{dest_rel}` does not exist"
             ));
         }
-        let visibility = if public { "pub " } else { "" };
-        Ok((parent_file, format!("{visibility}mod {name};")))
+        let gap = if visibility.is_empty() { "" } else { " " };
+        Ok((parent_file, format!("{visibility}{gap}mod {name};")))
     }
 }
 
@@ -607,10 +645,20 @@ pub(crate) fn module_declaration_edit(source: &str, tree: &Tree, line: &str) -> 
     }
 }
 
-/// Fields of the moved struct not visible crate-wide, in declaration order,
-/// each with the module path its visibility names (`self` when private).
-/// Tuple fields are named by index.
-pub(crate) fn hidden_fields(item: Node<'_>, source: &str) -> Vec<(String, String)> {
+/// A field of the moved struct that is not visible crate-wide.
+pub(crate) struct HiddenField {
+    /// The field name; tuple fields are named by index.
+    pub name: String,
+    /// The module path its visibility names (`self` when private).
+    pub path: String,
+    /// The existing visibility modifier.
+    pub modifier: Option<Range<usize>>,
+    /// Where a modifier is inserted when there is none.
+    pub at: usize,
+}
+
+/// Fields of the moved struct not visible crate-wide, in declaration order.
+pub(crate) fn hidden_fields(item: Node<'_>, source: &str) -> Vec<HiddenField> {
     let mut hidden = Vec::new();
     let Some(body) = (item.kind() == "struct_item")
         .then(|| item.child_by_field_name("body"))
@@ -628,22 +676,33 @@ pub(crate) fn hidden_fields(item: Node<'_>, source: &str) -> Vec<(String, String
                     restriction(visibility(field, source)),
                     field.child_by_field_name("name"),
                 ) {
-                    hidden.push((text::text(name, source).to_string(), path));
+                    hidden.push(HiddenField {
+                        name: text::text(name, source).to_string(),
+                        path,
+                        modifier: visibility_node(field).map(|node| node.byte_range()),
+                        at: field.start_byte(),
+                    });
                 }
             }
         }
         "ordered_field_declaration_list" => {
             let mut index = 0;
-            let mut modifier = None;
+            let mut modifier: Option<Node<'_>> = None;
             let mut cursor = body.walk();
             for child in body.named_children(&mut cursor) {
                 match child.kind() {
-                    "visibility_modifier" => modifier = Some(text::text(child, source)),
+                    "visibility_modifier" => modifier = Some(child),
                     "attribute_item" => {}
                     kind if kind.contains("comment") => {}
                     _ => {
-                        if let Some(path) = restriction(modifier) {
-                            hidden.push((index.to_string(), path));
+                        let text_of = modifier.map(|node| text::text(node, source));
+                        if let Some(path) = restriction(text_of) {
+                            hidden.push(HiddenField {
+                                name: index.to_string(),
+                                path,
+                                modifier: modifier.map(|node| node.byte_range()),
+                                at: child.start_byte(),
+                            });
                         }
                         index += 1;
                         modifier = None;
@@ -700,7 +759,7 @@ pub(crate) fn field_reads(
     fields: &[String],
     breaks: &dyn Fn(&str) -> bool,
     skip: Option<&Range<usize>>,
-) -> Vec<Site> {
+) -> Vec<(Site, Option<String>)> {
     let broken: Vec<&str> = fields
         .iter()
         .map(String::as_str)
@@ -724,8 +783,13 @@ pub(crate) fn field_reads(
     });
     let names: Vec<&str> = names.iter().map(String::as_str).collect();
     let mut sites = Vec::new();
-    let mut report = |at: Node<'_>, why: String| {
-        sites.push(Site::at(rel, source, at.start_byte(), "reference", why));
+    // The field a plain read names; a constructor or pattern needs every
+    // field, so it names none.
+    let mut report = |at: Node<'_>, field: Option<&str>, why: String| {
+        sites.push((
+            Site::at(rel, source, at.start_byte(), "reference", why),
+            field.map(str::to_string),
+        ));
     };
     text::walk(tree.root_node(), |node| {
         if skip.is_some_and(|skip| text::covers(skip, &node.byte_range())) {
@@ -747,6 +811,7 @@ pub(crate) fn field_reads(
             if broken.contains(&name) {
                 report(
                     field,
+                    Some(name),
                     format!("reads the field `{name}`, which the destination would hide"),
                 );
             }
@@ -761,6 +826,7 @@ pub(crate) fn field_reads(
                 if pair[0].kind() == "." && broken.contains(&name) {
                     report(
                         pair[1],
+                        Some(name),
                         format!("reads the field `{name}`, which the destination would hide"),
                     );
                 }
@@ -769,7 +835,10 @@ pub(crate) fn field_reads(
                 }) {
                     report(
                         pair[0],
-                        format!("builds or matches `{owner}`, whose field `{hidden}` the destination would hide"),
+                        None,
+                        format!(
+                            "builds or matches `{owner}`, whose field `{hidden}` the destination would hide"
+                        ),
                     );
                 }
             }
@@ -786,7 +855,10 @@ pub(crate) fn field_reads(
             if names_type(path, source, &names) {
                 report(
                     path,
-                    format!("builds or matches `{owner}`, whose field `{hidden}` the destination would hide"),
+                    None,
+                    format!(
+                        "builds or matches `{owner}`, whose field `{hidden}` the destination would hide"
+                    ),
                 );
             }
         }
@@ -874,18 +946,48 @@ pub(crate) fn free_names(
     (names, members)
 }
 
-fn is_public(node: Node<'_>, source: &str) -> bool {
-    visibility(node, source)
-        .is_some_and(|v| v.starts_with("pub") && v.replace(' ', "") != "pub(self)")
+fn visibility<'a>(node: Node<'_>, source: &'a str) -> Option<&'a str> {
+    visibility_node(node).map(|c| text::text(c, source))
 }
 
-fn visibility<'a>(node: Node<'_>, source: &'a str) -> Option<&'a str> {
+fn visibility_node(node: Node<'_>) -> Option<Node<'_>> {
     let mut cursor = node.walk();
     let found = node
         .children(&mut cursor)
-        .find(|c| c.kind() == "visibility_modifier")
-        .map(|c| text::text(c, source));
+        .find(|c| c.kind() == "visibility_modifier");
     found
+}
+
+/// A declaration whose visibility a move may need to widen. A modifier that
+/// restricts to a path (`pub(in ...)`) is not placed exactly, so it refuses.
+pub(crate) fn declared(rel: &str, source: &str, node: Node<'_>, reason: String) -> Declared {
+    let modifier = visibility_node(node);
+    let from = modifier.map_or("private".to_string(), |m| {
+        text::text(m, source).replace(' ', "")
+    });
+    Declared {
+        site: Site::at(rel, source, node.start_byte(), "declaration", reason),
+        path: rel.to_string(),
+        modifier: modifier.map(|m| m.byte_range()),
+        at: node.start_byte(),
+        placeable: !from.starts_with("pub(in"),
+        restriction: restriction(modifier.map(|m| text::text(m, source))),
+        from,
+    }
+}
+
+/// The top-level item spanning exactly `range`, as a [`Declared`].
+pub(crate) fn declared_item(
+    rel: &str,
+    source: &str,
+    tree: &Tree,
+    range: &Range<usize>,
+    reason: String,
+) -> Option<Declared> {
+    text::members(tree.root_node())
+        .into_iter()
+        .find(|child| child.byte_range() == *range)
+        .map(|node| declared(rel, source, node, reason))
 }
 
 /// The qualifying path in front of `node` and its segments: the `path` of

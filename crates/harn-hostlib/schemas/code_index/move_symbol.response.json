@@ -79,6 +79,24 @@
     "conflicts": { "type": "array", "maxItems": 0, "description": "Always empty: a move never shadows. Kept for the shared envelope." },
     "match_count": { "type": "integer", "minimum": 0, "description": "Edits across every touched file." },
     "sites": { "$ref": "#/$defs/sites", "description": "Locations that block a `destination_conflict`, `visibility_required`, `import_cycle`, or `nested_import` refusal." },
+    "widened": {
+      "type": "array",
+      "description": "Declarations the move widened under `allow_visibility_widening`, with the line in the file before the edit. A new Rust module whose `mod` line needs more than private visibility for a widened item is listed too (`from: \"private\"`). Empty otherwise.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 },
+          "from": { "type": "string", "description": "`private`, `unexported`, or the restricted visibility as written." },
+          "to": { "type": "string", "enum": ["pub(super)", "pub(crate)", "pub", "export"] }
+        },
+        "required": ["path", "line", "from", "to"]
+      }
+    },
+    "required_visibility": {
+      "type": ["string", "null"],
+      "description": "On a `visibility_required` refusal, the narrowest level that would unblock every fixable blocker; null when none is fixable by widening."
+    },
     "comments_left_behind": { "$ref": "#/$defs/sites", "description": "Comment blocks above the item but separated from it by a blank line; they stay in the source." },
     "warnings": {
       "type": "array",

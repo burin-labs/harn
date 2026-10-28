@@ -324,7 +324,9 @@ pipeline default(harness: Harness) {
     harness.llm,
     [
       llm_text("The requested edit is complete."),
-      llm_text("{\"verdict\":\"done\",\"detail\":\"The edit result is explicit.\"}"),
+      llm_text(
+        "{\"verdict\":\"done\",\"detail\":\"The edit result is explicit.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
+      ),
     ],
     { ->
       agent_loop(

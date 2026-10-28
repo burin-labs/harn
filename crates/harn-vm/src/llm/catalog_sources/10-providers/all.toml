@@ -653,6 +653,12 @@ label = "Global"
 source_url = "https://docs.z.ai/guides/start/quickstart"
 last_verified = "2026-07-09"
 
+[providers.zai.regions.global.data_controls]
+training_default = "does_not_train"
+checked_on = "2026-10-27"
+sources = ["https://chat.z.ai/legal-agreement/terms-of-service"]
+note = "API end-user content is not used to improve services without explicit consent; see Additional Terms for API Services, section 3(b)."
+
 [providers.zai.regions.cn]
 base_url = "https://open.bigmodel.cn/api/paas/v4"
 label = "China"

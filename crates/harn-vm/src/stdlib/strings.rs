@@ -742,8 +742,7 @@ fn indent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
         // Don't pad blank lines — matches Python's textwrap.indent
         // default behavior so callers don't get trailing whitespace
         // on empty lines.
-        let visible = line.trim_end_matches('\n');
-        if !visible.is_empty() {
+        if !line.trim().is_empty() {
             out.push_str(&prefix);
         }
         out.push_str(line);

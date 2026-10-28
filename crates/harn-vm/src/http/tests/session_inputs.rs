@@ -1,6 +1,143 @@
 use super::*;
 use crate::session_inputs::{InputKind, InputLifetime, InputSpec, InputUsage};
 
+#[test]
+fn mock_recordings_retain_the_request_filter_after_the_private_session_closes() {
+    reset_http_state();
+    let session = crate::agent_sessions::open_or_create(None).unwrap();
+    let parts = {
+        let _session = crate::agent_sessions::enter_current_session(session.clone());
+        crate::session_inputs::put(
+            &session,
+            InputSpec {
+                name: "RECORD_CANARY".into(),
+                kind: InputKind::Secret,
+                lifetime: InputLifetime::Session,
+                usage: InputUsage::SessionTools,
+            },
+            "private-record-fixture".into(),
+            false,
+            0,
+        )
+        .unwrap();
+        let mut body = vec![0, 255];
+        body.extend_from_slice(b"public-private-record-fixture-tail");
+        let mut options = crate::value::DictMap::new();
+        options.insert("body".into(), VmValue::Bytes(Arc::new(body)));
+        super::super::client::parse_http_request_parts("POST", &options).unwrap()
+    };
+    assert!(crate::agent_sessions::close(&session));
+    let registry = HttpMockRegistry::default();
+    let url = "https://example.test/closed-session-recording";
+    registry.register("POST", url, vec![HttpMockResponse::new(200, "ok").into()]);
+    let response = super::super::client::harness_mocks::consume_http_mock(
+        Some(&registry),
+        "POST",
+        url,
+        &parts,
+    )
+    .expect("the prepared request must reach the recorder");
+    assert_eq!(response.status, 200);
+    let calls = registry.calls_value(false);
+    assert_eq!(calls.len(), 1);
+    let body = calls[0].as_dict().unwrap()["body_bytes"]
+        .as_bytes()
+        .unwrap();
+    assert!(body.starts_with(&[0, 255]) && body.ends_with(b"-tail"));
+    assert!(!body
+        .windows(b"private-record-fixture".len())
+        .any(|window| window == b"private-record-fixture"));
+    reset_http_state();
+}
+
+#[tokio::test]
+async fn explicit_binary_responses_apply_the_current_private_input_filter() {
+    reset_http_state();
+    let session = crate::agent_sessions::open_or_create(None).unwrap();
+    let _session = crate::agent_sessions::enter_current_session(session.clone());
+    crate::session_inputs::put(
+        &session,
+        InputSpec {
+            name: "BYTE_CANARY".into(),
+            kind: InputKind::Secret,
+            lifetime: InputLifetime::Session,
+            usage: InputUsage::SessionTools,
+        },
+        "private-byte-fixture".into(),
+        false,
+        0,
+    )
+    .unwrap();
+    let url = "https://example.test/private-byte-response";
+    push_http_mock(
+        "GET",
+        url,
+        vec![HttpMockResponse::new(
+            200,
+            "public-private-byte-fixture-tail",
+        )],
+    );
+    let options =
+        crate::value::json::json_to_vm_value(&serde_json::json!({"response_type":"bytes"}));
+    let response = vm_execute_http_request("GET", url, options.as_dict().unwrap())
+        .await
+        .unwrap();
+    let body = response.as_dict().unwrap()["body_bytes"]
+        .as_bytes()
+        .unwrap();
+    let text = std::str::from_utf8(body).unwrap();
+    assert!(text.starts_with("public-") && text.ends_with("-tail"));
+    assert!(!text.contains("private-byte-fixture"));
+    let mut raw = vec![0, 255];
+    raw.extend_from_slice(b"public-private-byte-fixture-tail");
+    raw.push(254);
+    let request_body = raw.clone();
+    let binary = super::super::client::build_http_response(
+        200,
+        crate::value::DictMap::new(),
+        super::super::client::ResponseBody::Bytes(raw),
+        url,
+        &crate::session_inputs::OutputFilter::capture(),
+    );
+    let raw = binary.as_dict().unwrap()["body_bytes"].as_bytes().unwrap();
+    assert!(raw.starts_with(&[0, 255]) && raw.ends_with(&[254]));
+    assert!(!raw
+        .windows(b"private-byte-fixture".len())
+        .any(|window| window == b"private-byte-fixture"));
+    push_http_mock("POST", url, vec![HttpMockResponse::new(200, "ok")]);
+    let mut options = crate::value::DictMap::new();
+    options.insert("body".into(), VmValue::Bytes(Arc::new(request_body)));
+    vm_execute_http_request("POST", url, &options)
+        .await
+        .unwrap();
+    let snapshots = super::super::http_mock_calls_snapshot();
+    assert_eq!(snapshots.len(), 2);
+    assert!(!snapshots[1]
+        .body
+        .as_ref()
+        .unwrap()
+        .contains("private-byte-fixture"));
+    let calls = super::super::mock::http_mock_calls_value(false);
+    let recorded = calls[1].as_dict().unwrap()["body_bytes"]
+        .as_bytes()
+        .unwrap();
+    assert!(recorded.starts_with(&[0, 255]) && recorded.ends_with(&[254]));
+    assert!(!recorded
+        .windows(b"private-byte-fixture".len())
+        .any(|window| window == b"private-byte-fixture"));
+    for sensitive in [true, false] {
+        let calls = super::super::mock::http_mock_calls_value(sensitive);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(
+            calls[1].as_dict().unwrap()["body_bytes"].as_bytes(),
+            Some(recorded)
+        );
+        assert!(!calls[1].display().contains("private-byte-fixture"));
+    }
+    assert!(crate::agent_sessions::close(&session));
+    reset_http_state();
+}
+
 #[tokio::test]
 async fn signed_session_input_headers_stay_private_in_mock_recordings() {
     use crate::security::{EnvironmentPolicyKind, LauncherEnvironment};

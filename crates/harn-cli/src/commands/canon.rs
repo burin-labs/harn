@@ -26,7 +26,7 @@ async fn check(args: CanonCheckArgs) -> i32 {
     let plan_json = match serde_json::to_string(&plan) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("canon: failed to serialize check plan: {error}");
+            cli_diagnostic!("canon: failed to serialize check plan: {error}");
             return 70;
         }
     };

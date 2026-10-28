@@ -1,0 +1,112 @@
+import { read_yaml } from "std/fs"
+
+type ReleaseStep = {id?: string, uses?: string, env?: dict}
+
+type ReleaseJob = {env?: dict, steps?: list<ReleaseStep>}
+
+type ReleaseWorkflow = {env?: dict, jobs: dict}
+
+type ResolveReceipt = {version: string, asset: string}
+
+fn verify_workflow(
+  harness: Harness,
+  root: string,
+  version: string,
+  filename: string,
+  runtime_job: string,
+  runtime_id: string,
+  runtime_action: string,
+) {
+  const workflow: ReleaseWorkflow = schema_expect(
+    read_yaml(harness.fs, path_join(root, ".github/workflows", filename)),
+    schema_of(ReleaseWorkflow),
+  )
+  let runtime_step: ReleaseStep? = nil
+  let compiler_count = 0
+  for entry in workflow.jobs.entries() {
+    const job: ReleaseJob = schema_expect(entry.value, schema_of(ReleaseJob))
+    for step in job.steps ?? [] {
+      if entry.key == runtime_job && (step.id == runtime_id || step.uses == runtime_action) {
+        require runtime_step == nil, filename + ": runtime step is duplicated"
+        runtime_step = step
+      }
+      if step.uses == "./.github/actions/rust-toolchain" {
+        require step.env?.HARN_RUSTC_FRONTEND_THREADS == "1",
+          filename
+          + ": compiler setup must retain the stable front end"
+        compiler_count += 1
+      }
+    }
+  }
+  require runtime_step != nil && compiler_count > 0, filename + ": entrypoints were not measured"
+  const job: ReleaseJob = schema_expect(workflow.jobs[runtime_job], schema_of(ReleaseJob))
+  let environment: dict = {}
+  for scope in [workflow.env ?? {}, job.env ?? {}, runtime_step.env ?? {}] {
+    for entry in scope.entries() {
+      require type_of(entry.value) == "string",
+        filename
+        + ": environment must contain string literals"
+      const value = to_string(entry.value)
+      require !value.contains("$" + "{{"),
+        filename
+        + ": environment expressions need an explicit projection"
+      environment[entry.key] = value
+    }
+  }
+  const scratch = harness.fs.mkdtemp_in_workspace("release-runtime-env-")
+  const args = [
+    path_join(root, "scripts/bootstrap-harn.sh"),
+    "resolve",
+    "--version",
+    version,
+    "--cache-dir",
+    path_join(scratch, "cache"),
+    "--install-dir",
+    path_join(scratch, "bin"),
+  ]
+  const accepted = harness.process.run(
+    {program: "sh", args: args, cwd: root, env: environment, timeout_ms: 30000},
+  )
+  require accepted.success,
+    filename + ": actual runtime environment failed bootstrap: "
+    + accepted.stderr
+  const receipt: ResolveReceipt = schema_expect(
+    json_parse(accepted.stdout),
+    schema_of(ResolveReceipt),
+  )
+  require receipt.version == version && receipt.asset.ends_with(".tar.xz"),
+    filename
+    + ": bootstrap did not resolve the intended published archive"
+  // Intentional unknown fixture, not a production setting. Match the registry's
+  // retired_limit_names_are_unknown_at_startup and agent gate fixture convention.
+  const unknown_setting = "HARN" + "_UNEXPECTED_RELEASE_RUNTIME_SETTING"
+  for name in ["HARN_RUSTC_FRONTEND_THREADS", unknown_setting] {
+    let refused_environment = environment + {}
+    refused_environment[name] = "1"
+    const refused = harness.process.run(
+      {program: "sh", args: args, cwd: root, env: refused_environment, timeout_ms: 30000},
+    )
+    require refused.exit_code == 2 && refused.stderr.contains("HARN-ENV-001")
+      && refused.stderr.contains(name),
+      "unexpected setting did not reach its expected runtime refusal: "
+      + name
+  }
+  harness.stdio.println(
+    "PASS: " + filename + " reaches pinned bootstrap; old compiler leak refuses",
+  )
+}
+
+fn main(harness: Harness) {
+  require len(argv) == 1, "usage: verify_release_runtime_environment.harn <published-version>"
+  const root = path_join(harness.fs.source_dir(), "..")
+  verify_workflow(harness, root, argv[0], "publish-release.yml", "publish", "published-runtime", "")
+  verify_workflow(
+    harness,
+    root,
+    argv[0],
+    "build-release-binaries.yml",
+    "setup",
+    "",
+    "./.github/actions/setup-harn",
+  )
+}

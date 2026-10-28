@@ -5,6 +5,7 @@ import {
   command_wait_normalize,
 } from "std/agent/command_ledger"
 import { AgentLoopFailure } from "std/agent/failure_types"
+import { CompletionDirectiveReceipt } from "std/agent/judge"
 import { __agent_loop_await_turn } from "std/agent/loop_await_turn"
 import "std/agent/loop_call_budget"
 import "std/agent/loop_call_resolution"
@@ -28,6 +29,7 @@ import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
 import { __agent_loop_turn_setup } from "std/agent/loop_turn_setup"
 import {
+  __agent_stall_resume_edit_history,
   __agent_stall_validate_checkpoint,
   __agent_stall_verification_dispatch,
   agent_stall_initial_checkpoint,
@@ -93,7 +95,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       throw "agent_loop: stall checkpoint belongs to a different session"
     }
     __agent_stall_validate_checkpoint(stall_checkpoint)
-    let stall_state = stall_checkpoint.state
+    let stall_state = __agent_stall_resume_edit_history(stall_checkpoint.state)
     let stall_enabled_seen = false
     let stall_prev_dispatch = stall_checkpoint.dispatch
     let stall_hard_stop_rescues = 0
@@ -113,7 +115,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     opts = __agent_loop_apply_deadline(opts, budget, loop_start_ms)
     const __reserve_cfg = agent_stall_repair_config(opts?.stall_diagnostics)
     let terminal_write_unverified = false
-    let terminal_verification = nil
+    let terminal_assessment: CompletionDirectiveReceipt? = nil
     let made_source_write = false
     // One owner of the three terminal grant allowances (verification, recovery,
     // terminal reporting) and of how many of each this run has left.
@@ -279,7 +281,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           turn_opts,
         )
         if len(tool_calls) > 0 {
-          terminal_verification = nil
+          terminal_assessment = nil
         }
         __purpose_label_publish(harness.agent, session, projected, iteration_index, tool_calls)
         const parse_feedback = __agent_loop_record_parse_feedback(
@@ -426,7 +428,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             iteration_index + 1,
             raw_text,
           )
-          terminal_verification = __agent_loop_terminal_verification_from_directive(stall_verdict)
+          terminal_assessment = stall_verdict?.receipt
           turn_end_judge_invocations += __turn_end_judge_hit(stall_verdict)
           verify_completion_judge_invocations += __completion_judge_hit(stall_verdict)
           feedback_history = stall_verdict?.feedback_history ?? feedback_history
@@ -660,9 +662,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
               visible_text,
               iteration_index + 1,
             )
-            terminal_verification = __agent_loop_terminal_verification_from_directive(
-              governor_verdict,
-            )
+            terminal_assessment = governor_verdict?.receipt
             turn_end_judge_invocations += __turn_end_judge_hit(governor_verdict)
             verify_completion_judge_invocations += __completion_judge_hit(governor_verdict)
             feedback_history = governor_verdict?.feedback_history ?? feedback_history
@@ -1091,7 +1091,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             opts: opts,
             stall_state: stall_state,
             stop_reason: stop_reason,
-            terminal_verification: terminal_verification,
+            terminal_assessment: terminal_assessment,
             terminal_write_unverified: terminal_write_unverified,
             turns_since_loop_progress: turns_since_loop_progress,
             turns_since_progress: turns_since_progress,
@@ -1115,7 +1115,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         opts = post_turn_state.opts
         stall_state = post_turn_state.stall_state
         stop_reason = post_turn_state.stop_reason
-        terminal_verification = post_turn_state.terminal_verification
+        terminal_assessment = post_turn_state.terminal_assessment
         terminal_write_unverified = post_turn_state.terminal_write_unverified
         turns_since_loop_progress = post_turn_state.turns_since_loop_progress
         turns_since_progress = post_turn_state.turns_since_progress
@@ -1136,7 +1136,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           stop_reason: stop_reason,
           reserve_cfg: __reserve_cfg,
           terminal_write_unverified: terminal_write_unverified,
-          terminal_verification: terminal_verification,
+          terminal_assessment: terminal_assessment,
           made_source_write: made_source_write,
           call_budget: call_budget,
           verify_attempts: verify_attempts,
@@ -1166,7 +1166,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       final_status = terminal_boundary.final_status
       stop_reason = terminal_boundary.stop_reason
       terminal_write_unverified = terminal_boundary.terminal_write_unverified
-      terminal_verification = terminal_boundary.terminal_verification
+      terminal_assessment = terminal_boundary.terminal_assessment
       stall_state = terminal_boundary.stall_state
       call_budget = terminal_boundary.call_budget
       verify_attempts = terminal_boundary.verify_attempts
@@ -1193,7 +1193,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       loop_start_ms: loop_start_ms,
       suspend_result: suspend_result,
       terminal_error: terminal_error,
-      terminal_verification: terminal_verification,
+      terminal_assessment: terminal_assessment,
       abandonment: abandonment,
       audit_background_tasks: audit_background_tasks,
       budget: budget,

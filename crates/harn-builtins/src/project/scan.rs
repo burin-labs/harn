@@ -830,13 +830,12 @@ fn apply_config_tier(
         evidence.dockerfile_commands = parse_dockerfile_commands(&dockerfile);
     }
 
-    if let Some(makefile) = read_first_existing_text(dir, &["GNUmakefile", "Makefile", "makefile"])
-    {
-        evidence.makefile_targets = parse_makefile_targets(&makefile);
-        for key in ["build", "test"] {
-            if evidence.makefile_targets.iter().any(|target| target == key) {
-                push_unique(build_commands, format!("make {key}"));
+    if let Ok(Some((_, makefile))) = harn_makefile::read_default(dir) {
+        for target in harn_makefile::parse(&makefile) {
+            if matches!(target.name.as_str(), "build" | "test") {
+                push_unique(build_commands, target.command);
             }
+            evidence.makefile_targets.push(target.name);
         }
     }
 
@@ -972,36 +971,6 @@ fn parse_dockerfile_commands(dockerfile: &str) -> Vec<String> {
     }
 
     commands
-}
-
-fn parse_makefile_targets(makefile: &str) -> Vec<String> {
-    let mut targets = Vec::new();
-    for line in makefile.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty()
-            || trimmed.starts_with('#')
-            || trimmed.starts_with('.')
-            || trimmed.contains(":=")
-            || trimmed.contains("?=")
-            || trimmed.contains("+=")
-            || trimmed.contains('=')
-        {
-            continue;
-        }
-        let Some((target, _rest)) = trimmed.split_once(':') else {
-            continue;
-        };
-        if target.contains('%') || target.contains(' ') || target.is_empty() {
-            continue;
-        }
-        if target
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-        {
-            push_unique(&mut targets, target.to_string());
-        }
-    }
-    targets
 }
 
 fn maybe_dir_suffix(dir: &Path, name: &str) -> String {

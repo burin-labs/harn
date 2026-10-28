@@ -16,7 +16,7 @@ pub(crate) fn render(args: &ProviderToolProbeArgs) -> i32 {
             0
         }
         Err(error) => {
-            eprintln!("{error}");
+            cli_diagnostic!("error: {error}");
             1
         }
     }

@@ -18,6 +18,14 @@ run_id="${CANDIDATE_RUN_ID:?candidate run required}"
 expected_sha="${EXPECTED_SOURCE_SHA:?source required}"
 completed_child="${COMPLETED_CONSUMER_RUN_ID:-}"
 repair_pull="${CONSUMER_PULL_REQUEST:-}"
+standalone="${STANDALONE_HARN:-false}"
+[[ "$standalone" == true || "$standalone" == false ]] || exit 1
+if [[ "$standalone" == true ]]; then
+  [[ "$repository" == burin-labs/harn && -z "$completed_child" && -z "$repair_pull" ]] || {
+    echo '::error::Standalone publication cannot claim consumer qualification.' >&2
+    exit 1
+  }
+fi
 [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ &&
    "$run_id" =~ ^[1-9][0-9]*$ && "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || {
   echo '::error::Invalid repository or candidate run identity.' >&2
@@ -26,6 +34,10 @@ repair_pull="${CONSUMER_PULL_REQUEST:-}"
 run="$(gh api "repos/$repository/actions/runs/$run_id")"
 requires_attached_consumer=false
 requires_consumer_repair=false
+if [[ "$standalone" == true ]]; then
+  CANDIDATE_RUN_ATTEMPT="$(jq -er .run_attempt <<< "$run")" \
+    node "$script_dir/ci/qualify-release-producer.mjs" >&2 || exit 1
+fi
 if [[ -n "$repair_pull" ]]; then
   [[ "$repair_pull" =~ ^[1-9][0-9]*$ && -z "$completed_child" ]] || {
     echo '::error::Consumer repair requires one pull request and no attached-child substitution.' >&2
@@ -48,12 +60,12 @@ if [[ -n "$completed_child" ]]; then
   }
   requires_attached_consumer=true
 fi
-sha="$(jq -er --arg repository "$repository" --arg run_id "$run_id" --arg attached "$requires_attached_consumer" --arg repair "$requires_consumer_repair" '
+sha="$(jq -er --arg repository "$repository" --arg run_id "$run_id" --arg attached "$requires_attached_consumer" --arg repair "$requires_consumer_repair" --arg standalone "$standalone" '
   select((.id | tostring) == $run_id
     and .repository.full_name == $repository
     and .head_repository.full_name == $repository
     and .path == ".github/workflows/build-release-binaries.yml"
-    and ($repair == "true" or (.status == "completed" and
+    and ($repair == "true" or $standalone == "true" or (.status == "completed" and
       (.conclusion == "success" or ($attached == "true" and .conclusion == "failure"))))
     and (.event == "merge_group" or
       ((.event == "push" or .event == "workflow_dispatch") and .head_branch == "main")))
@@ -103,5 +115,6 @@ fi
   echo "run_id=$run_id"
   echo "requires_attached_consumer=$requires_attached_consumer"
   echo "requires_consumer_repair=$requires_consumer_repair"
+  echo "standalone_harn=$standalone"
   echo "producer_attempt=$(jq -r '.run_attempt // ""' <<< "$run")"
 } >> "${GITHUB_OUTPUT:?output required}"

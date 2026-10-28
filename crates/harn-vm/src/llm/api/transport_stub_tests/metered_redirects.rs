@@ -5,6 +5,9 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+type InferenceClientFactory =
+    fn(&str, Option<&super::super::inference_boundary::ApprovedWireRoute>) -> reqwest::Client;
+
 fn quota(path: &std::path::Path, limit: i64) -> MachineSpendQuota {
     MachineSpendQuota::open(
         path,
@@ -43,6 +46,174 @@ fn redirect(stream: &mut std::net::TcpStream, location: &str) {
 }
 
 #[test]
+fn host_inference_ceiling_does_not_follow_http_redirects() {
+    for (status, streaming) in [(302, false), (307, true)] {
+        assert_host_ceiling_redirect(status, streaming);
+    }
+}
+
+fn assert_host_ceiling_redirect(status: u16, streaming: bool) {
+    struct ClearCatalog;
+    impl Drop for ClearCatalog {
+        fn drop(&mut self) {
+            crate::llm_config::clear_runtime_catalog_overlay();
+        }
+    }
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let egress = crate::egress::test_support::test_env_guard();
+    egress.set("HARN_EGRESS_ALLOW_LOOPBACK", "1");
+    let _cleanup = Cleanup;
+    let _catalog = ClearCatalog;
+    let _no_host = ScopedEnvVar::remove(super::super::inference_boundary::HOST_BOUNDARY_ENV);
+    let _durable = ScopedEnvVar::set("HARN_LLM_RATE_LIMIT_DURABLE", "0");
+    let targets = Arc::new(AtomicUsize::new(0));
+    let reached_target = targets.clone();
+    let target = spawn_llm_stub_many("bounded redirect target", 2, move |_, stream| {
+        request(stream);
+        reached_target.fetch_add(1, Ordering::SeqCst);
+        let (content_type, body) = if streaming {
+            ("text/event-stream", "data: {\"choices\":[{\"delta\":{\"content\":\"accepted\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}\n\ndata: [DONE]\n\n")
+        } else {
+            (
+                "application/json",
+                r#"{"choices":[{"message":{"role":"assistant","content":"accepted"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"#,
+            )
+        };
+        write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    });
+    let location = format!("http://localhost:{}/redirected", target.addr().port());
+    let sources = Arc::new(AtomicUsize::new(0));
+    let reached_source = sources.clone();
+    let source = spawn_llm_stub_many("bounded redirect source", 4, move |_, stream| {
+        let (start, _) = request(stream);
+        assert!(start.starts_with("POST /v1/chat/completions "));
+        reached_source.fetch_add(1, Ordering::SeqCst);
+        write!(stream, "HTTP/1.1 {status} Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+    });
+    let mut provider = crate::llm_config::provider_config("openai").unwrap();
+    provider.base_url = format!("http://{}/v1", source.addr());
+    provider.base_url_env = None;
+    let mut catalog = crate::llm_config::ProvidersConfig::default();
+    catalog.providers.insert("openai".into(), provider);
+    crate::llm_config::set_runtime_catalog_overlay(Some(catalog));
+    let mut opts = base_opts("openai");
+    opts.model = "gpt-5.6-luna".into();
+    opts.api_key = "synthetic".into();
+    opts.stream = streaming;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    assert_eq!(
+        runtime.block_on(vm_call_llm_full(&opts)).unwrap().text,
+        "accepted"
+    );
+    assert_eq!(
+        sources.load(Ordering::SeqCst),
+        1,
+        "unbounded control reached source"
+    );
+    assert_eq!(
+        targets.load(Ordering::SeqCst),
+        1,
+        "unbounded control followed redirect"
+    );
+    let _host = ScopedEnvVar::set(
+        super::super::inference_boundary::HOST_BOUNDARY_ENV,
+        r#"{"reach":"any_hosted","allow_training_discounts":false}"#,
+    );
+    let result = runtime.block_on(vm_call_llm_full(&opts));
+    assert!(result.is_err(), "bounded call must stop at the redirect");
+    assert_eq!(
+        sources.load(Ordering::SeqCst),
+        2,
+        "bounded call reached the approved source"
+    );
+    assert_eq!(
+        targets.load(Ordering::SeqCst),
+        1,
+        "bounded call never reached the second listener"
+    );
+    drop(_host);
+    opts.inference_boundary = Some(super::super::inference_boundary::InferenceBoundary {
+        reach: super::super::inference_boundary::InferenceReach::AnyHosted,
+        allow_training_discounts: false,
+    });
+    assert!(
+        runtime.block_on(vm_call_llm_full(&opts)).is_err(),
+        "an explicit call ceiling must also stop the redirect"
+    );
+    assert_eq!(sources.load(Ordering::SeqCst), 3);
+    assert_eq!(targets.load(Ordering::SeqCst), 1);
+    opts.inference_boundary = None;
+    assert_eq!(
+        runtime.block_on(vm_call_llm_full(&opts)).unwrap().text,
+        "accepted"
+    );
+    assert_eq!(sources.load(Ordering::SeqCst), 4);
+    assert_eq!(
+        targets.load(Ordering::SeqCst),
+        2,
+        "bounded client must not poison the unbounded cache"
+    );
+}
+
+#[test]
+fn endpoint_specific_data_policy_disables_redirects_without_a_spend_budget() {
+    let _env = env_guard();
+    let egress = crate::egress::test_support::test_env_guard();
+    egress.set("HARN_EGRESS_ALLOW_LOOPBACK", "1");
+    let _cleanup = Cleanup;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        for factory in [
+            crate::llm::blocking_client_for_base_url as InferenceClientFactory,
+            crate::llm::streaming_client_for_base_url,
+        ] {
+            let followed = Arc::new(AtomicUsize::new(0));
+            let count = followed.clone();
+            let source = spawn_llm_stub_many("endpoint policy redirect", 5, move |_, stream| {
+                let (start, body) = request(stream);
+                if start.starts_with("POST /redirected ") {
+                    assert_eq!(body, b"synthetic content");
+                    count.fetch_add(1, Ordering::SeqCst);
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                    )
+                    .unwrap();
+                } else {
+                    write!(stream, "HTTP/1.1 307 Temporary Redirect\r\nLocation: /redirected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                }
+            });
+            let base = format!("http://{}", source.addr());
+            let url = format!("{base}/start");
+            assert_eq!(factory(&base, None).post(&url).body("synthetic content").send().await.unwrap().status(), 200);
+            assert_eq!(followed.load(Ordering::SeqCst), 1);
+            let overlay = format!(
+                concat!(
+                    "[providers.fixture.regions.safe]\nbase_url = \"{base}\"\n",
+                    "[providers.fixture.regions.safe.data_controls]\n",
+                    "training_default = \"does_not_train\"\nchecked_on = \"2026-10-27\"\n",
+                    "sources = [\"https://example.com/policy\"]\n"
+                ),
+                base = base
+            );
+            crate::llm_config::set_user_overrides(Some(toml::from_str(&overlay).unwrap()));
+            assert_eq!(factory(&base, None).post(&url).body("synthetic content").send().await.unwrap().status(), 307);
+            assert_eq!(followed.load(Ordering::SeqCst), 1);
+            crate::llm_config::clear_user_overrides();
+            assert_eq!(factory(&base, None).post(&url).body("synthetic content").send().await.unwrap().status(), 200);
+            assert_eq!(followed.load(Ordering::SeqCst), 2);
+        }
+    });
+}
+
+#[test]
 fn metered_inference_clients_isolate_redirect_policy_in_both_cache_directions() {
     let _env = env_guard();
     let egress = crate::egress::test_support::test_env_guard();
@@ -57,7 +228,7 @@ fn metered_inference_clients_isolate_redirect_policy_in_both_cache_directions() 
         let temp = tempfile::tempdir().unwrap();
         let quota = quota(&temp.path().join("spend.sqlite"), 2_000_000);
         for factory in [
-            crate::llm::blocking_client_for_base_url as fn(&str) -> reqwest::Client,
+            crate::llm::blocking_client_for_base_url as InferenceClientFactory,
             crate::llm::streaming_client_for_base_url,
         ] {
             for cross_host in [false, true] {
@@ -97,15 +268,21 @@ fn metered_inference_clients_isolate_redirect_policy_in_both_cache_directions() 
                 let url = format!("http://{}/start", source.addr());
                 // Warm the ordinary cache first, then prove the metered client
                 // neither reuses it nor poisons a later ordinary lookup.
-                assert_eq!(factory(&url).get(&url).send().await.unwrap().status(), 200);
+                assert_eq!(
+                    factory(&url, None).get(&url).send().await.unwrap().status(),
+                    200
+                );
                 assert_eq!(destinations.load(Ordering::SeqCst), 1);
                 let status = quota
-                    .scope(async { factory(&url).get(&url).send().await.unwrap().status() })
+                    .scope(async { factory(&url, None).get(&url).send().await.unwrap().status() })
                     .await
                     .unwrap();
                 assert_eq!(status, 302);
                 assert_eq!(destinations.load(Ordering::SeqCst), 1);
-                assert_eq!(factory(&url).get(&url).send().await.unwrap().status(), 200);
+                assert_eq!(
+                    factory(&url, None).get(&url).send().await.unwrap().status(),
+                    200
+                );
                 assert_eq!(destinations.load(Ordering::SeqCst), 2);
             }
         }
@@ -141,7 +318,7 @@ fn host_budget_without_a_machine_quota_also_refuses_redirects() {
         let budget = crate::llm::ConservativeLlmBudget::new(1.0).unwrap();
         let status = budget
             .scope(async {
-                crate::llm::blocking_client_for_base_url(&url)
+                crate::llm::blocking_client_for_base_url(&url, None)
                     .get(&url)
                     .send()
                     .await

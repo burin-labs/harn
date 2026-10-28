@@ -1,3 +1,4 @@
+import { CompletionDirectiveReceipt } from "std/agent/judge"
 import { __judge_tool_descriptor } from "std/agent/judge_evidence"
 import { CompletionVerificationState } from "std/agent/judge_internals"
 import "std/agent/loop_call_budget"
@@ -112,21 +113,25 @@ const __AGENT_LOOP_AUDITED_NATURAL_REASONS: list<string> = [
  * @effects: []
  * @errors: []
  */
-pub fn __agent_loop_terminal_verification_from_directive(directive: dict) -> dict? {
-  if directive?.action != "accept" && directive?.action != "stop_verified" {
+pub fn __agent_loop_terminal_verification_from_assessment(
+  receipt: CompletionDirectiveReceipt?,
+) -> dict? {
+  guard receipt != nil else {
     return nil
   }
-  const receipt = directive?.receipt
-  const verification = receipt?.verification
-  const requirements = receipt?.requirements
+  if receipt.action != "accept" && receipt.action != "stop_verified" {
+    return nil
+  }
+  const verification = receipt.verification
+  const requirements = receipt.requirements
   if verification?.oracle_expected != true
     || verification?.observed != "passed"
     || trim(to_string(verification?.command ?? "")) == ""
-    || trim(to_string(receipt?.evidence_id ?? "")) == ""
+    || trim(receipt.evidence_id) == ""
     || requirements == nil
     || requirements.pending_count != 0
-    || receipt?.pending_tool_batch_effect_count != 0
-    || receipt?.gap_count != 0 {
+    || receipt.pending_tool_batch_effect_count != 0
+    || receipt.gap_count != 0 {
     return nil
   }
   return {evidence_id: receipt.evidence_id, command: verification.command, observed: "passed"}
@@ -330,7 +335,7 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
   let verify_completion_judge_invocations = state.verify_completion_judge_invocations
   let verify_completion_judge_vetoes = state.verify_completion_judge_vetoes
   let feedback_history = state?.feedback_history ?? {}
-  let terminal_verification = state?.terminal_verification
+  let terminal_assessment = state?.terminal_assessment
   let current_max = state.current_max
   let budget_exhausted_emitted = state.budget_exhausted_emitted
   let budget_decisions = state.budget_decisions
@@ -398,7 +403,7 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
       state.iteration,
     )
     feedback_history = terminal_verdict?.feedback_history ?? feedback_history
-    terminal_verification = __agent_loop_terminal_verification_from_directive(terminal_verdict)
+    terminal_assessment = terminal_verdict?.receipt
     verify_completion_judge_invocations += __completion_judge_hit(terminal_verdict)
     if __completion_directive_stops(terminal_verdict) {
       return state
@@ -410,7 +415,7 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
           stall_state: stall_state,
           verify_completion_judge_invocations: verify_completion_judge_invocations,
           feedback_history: feedback_history,
-          terminal_verification: terminal_verification,
+          terminal_assessment: terminal_assessment,
         }
     }
     if terminal_verdict.action == "accept" {
@@ -433,7 +438,7 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
           stall_state: stall_state,
           verify_completion_judge_invocations: verify_completion_judge_invocations,
           feedback_history: feedback_history,
-          terminal_verification: terminal_verification,
+          terminal_assessment: terminal_assessment,
         }
     }
     verify_attempts = verify_attempts + 1
@@ -480,7 +485,7 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
           current_max: current_max,
           budget_exhausted_emitted: budget_exhausted_emitted,
           feedback_history: feedback_history,
-          terminal_verification: terminal_verification,
+          terminal_assessment: terminal_assessment,
         }
     }
     stop_reason = reserve_kind + "_failed"
@@ -502,7 +507,7 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
       budget_decisions: budget_decisions,
       terminal_error: terminal_error,
       feedback_history: feedback_history,
-      terminal_verification: terminal_verification,
+      terminal_assessment: terminal_assessment,
     }
 }
 

@@ -173,6 +173,36 @@ pub fn validate_data_controls_audit(
     result.unverified_count = queued.len();
 
     for (id, provider) in &config.providers {
+        let mut endpoints = BTreeSet::new();
+        for (region_id, region) in &provider.regions {
+            let Some(controls) = &region.data_controls else {
+                continue;
+            };
+            let endpoint = region.base_url.as_str();
+            if !endpoint.starts_with("https://") || endpoint.is_empty() {
+                result.errors.push(format!(
+                    "provider {id} region {region_id} data_controls requires an HTTPS endpoint"
+                ));
+            }
+            if !endpoints.insert(endpoint)
+                || provider
+                    .regions
+                    .values()
+                    .filter(|other| other.base_url == endpoint)
+                    .count()
+                    != 1
+            {
+                result.errors.push(format!(
+                    "provider {id} region {region_id} data_controls has an ambiguous endpoint"
+                ));
+            }
+            validate_evidence(
+                &format!("{id}.regions.{region_id}"),
+                &controls.checked_on,
+                &controls.sources,
+                &mut result,
+            );
+        }
         let Some(controls) = &provider.data_controls else {
             if !queued.contains(id.as_str()) {
                 result.errors.push(format!(
@@ -193,21 +223,7 @@ fn validate_declaration(
     controls: &DataControlsDef,
     result: &mut DataControlsAuditValidation,
 ) {
-    parse_date(
-        &format!("providers.{id}.data_controls.checked_on"),
-        &controls.checked_on,
-        result,
-    );
-    if controls.sources.is_empty()
-        || controls
-            .sources
-            .iter()
-            .any(|source| !source.starts_with("https://"))
-    {
-        result.errors.push(format!(
-            "provider {id} data_controls must cite at least one HTTPS documentation source"
-        ));
-    }
+    validate_evidence(id, &controls.checked_on, &controls.sources, result);
 
     // Direction coherence. A row that claims a per-request control must name
     // one, and a row that claims none must not smuggle one in. Without this
@@ -243,6 +259,24 @@ fn validate_declaration(
                 control.name
             ));
         }
+    }
+}
+
+fn validate_evidence(
+    id: &str,
+    checked_on: &str,
+    sources: &[String],
+    result: &mut DataControlsAuditValidation,
+) {
+    parse_date(
+        &format!("providers.{id}.data_controls.checked_on"),
+        checked_on,
+        result,
+    );
+    if sources.is_empty() || sources.iter().any(|source| !source.starts_with("https://")) {
+        result.errors.push(format!(
+            "provider {id} data_controls must cite at least one HTTPS documentation source"
+        ));
     }
 }
 

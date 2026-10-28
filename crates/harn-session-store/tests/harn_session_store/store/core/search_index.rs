@@ -593,3 +593,108 @@ async fn sqlite_rebuilds_a_missing_search_index_on_reopen() {
     assert_eq!(response.hits.len(), 1);
     assert_eq!(response.hits[0].session_id, "rebuild-session");
 }
+
+/// Counts every document the store embeds, so a test can see whether a
+/// write re-indexed the session.
+struct CountingEmbedder {
+    inner: LexicalEmbedder,
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl Embedder for CountingEmbedder {
+    fn embed(&self, text: &str) -> Vec<f32> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.embed(text)
+    }
+    fn dim(&self) -> usize {
+        self.inner.dim()
+    }
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+}
+
+/// Every turn end records spend through `update`. Re-embedding the whole
+/// session there made a stopped turn's reply wait on work proportional to its
+/// transcript.
+#[tokio::test]
+async fn sqlite_update_reindexes_only_when_an_indexed_field_changes() {
+    let embedder = Arc::new(CountingEmbedder {
+        inner: LexicalEmbedder::default(),
+        calls: Default::default(),
+    });
+    let hooks = StoreHooks {
+        embedder: embedder.clone(),
+        ..StoreHooks::default()
+    };
+    let dir = TempDir::new().expect("tempdir");
+    let store = fresh_sqlite(hooks, &dir);
+    let session = store
+        .create(CreateSession {
+            id: Some("reindex-scope".into()),
+            project_scope: Some("project-alpha".into()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create session");
+    for index in 0..20 {
+        store
+            .append(
+                &session.id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    json!({"text": format!("row {index}")}),
+                ),
+            )
+            .await
+            .expect("append event");
+    }
+
+    embedder.calls.store(0, Ordering::SeqCst);
+    let spent = store
+        .update(
+            &session.id,
+            UpdateSession {
+                usage_cost_usd_micros: Some(2_500),
+                ..UpdateSession::default()
+            },
+        )
+        .await
+        .expect("record spend");
+    assert_eq!(spent.usage_cost_usd_micros, 2_500);
+    assert_eq!(
+        embedder.calls.load(Ordering::SeqCst),
+        0,
+        "a spend-only update changes no indexed document"
+    );
+
+    let titled = store
+        .update(
+            &session.id,
+            UpdateSession {
+                title: Some("renamed release session".into()),
+                ..UpdateSession::default()
+            },
+        )
+        .await
+        .expect("rename");
+    assert_eq!(titled.usage_cost_usd_micros, 2_500);
+    assert_eq!(
+        embedder.calls.load(Ordering::SeqCst),
+        20,
+        "a title change re-indexes every event"
+    );
+    let search = store
+        .search(SearchQuery {
+            query: "renamed release session".into(),
+            mode: SearchMode::Fts,
+            filter: SearchFilter {
+                project_scope: Some("project-alpha".into()),
+                ..SearchFilter::default()
+            },
+            limit: None,
+        })
+        .await
+        .expect("search renamed title");
+    assert_eq!(search.hits.len(), 20);
+}

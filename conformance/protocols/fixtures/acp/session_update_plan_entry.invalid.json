@@ -1,0 +1,32 @@
+{
+  "name": "acp.session_update.invalid_plan_entries",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "invalid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": { "sessionId": "s", "update": { "sessionUpdate": "plan", "entries": [{ "content": "a", "status": "pending" }] } }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": { "sessionId": "s", "update": { "sessionUpdate": "plan", "entries": [{ "content": "a", "status": "blocked", "priority": "medium" }] } }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": { "sessionId": "s", "update": { "sessionUpdate": "plan", "entries": [{ "content": "a", "status": "pending", "priority": 80 }] } }
+    }
+  ],
+  "matrix": {
+    "version": "v1.26.0",
+    "family": "session_update_plan",
+    "case": "negative",
+    "source": {
+      "kind": "official_example",
+      "url": "https://agentclientprotocol.com/protocol/agent-plan"
+    }
+  }
+}

@@ -27,12 +27,12 @@ pub(crate) fn run(path: &Path, output: Option<&Path>) -> i32 {
     let modules = match collect_doc_modules(path) {
         Ok(modules) => modules,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
     if modules.is_empty() {
-        eprintln!(
+        cli_diagnostic!(
             "error: no public (`pub`) symbols found under {}",
             path.display()
         );
@@ -43,11 +43,11 @@ pub(crate) fn run(path: &Path, output: Option<&Path>) -> i32 {
     match output {
         Some(out) => {
             if let Err(error) = harn_vm::atomic_io::atomic_write(out, rendered.as_bytes()) {
-                eprintln!("error: failed to write {}: {error}", out.display());
+                cli_diagnostic!("error: failed to write {}: {error}", out.display());
                 return 1;
             }
             let symbols: usize = modules.iter().map(|module| module.symbols.len()).sum();
-            eprintln!(
+            cli_diagnostic!(
                 "Wrote {symbols} symbol(s) from {} module(s) to {}",
                 modules.len(),
                 out.display()

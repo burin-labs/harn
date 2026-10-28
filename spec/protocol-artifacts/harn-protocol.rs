@@ -20,7 +20,7 @@ pub const HARN_EXTERNAL_ACTION_RECEIPT_SCHEMA: &str = "harn.external_action_rece
 
 /// Upstream ACP schema version Harn tracks.
 pub const ACP_SCHEMA_COMPATIBILITY: &str =
-    "agentclientprotocol/agent-client-protocol schema v0.12.2";
+    "agentclientprotocol/agent-client-protocol schema v1.26.0";
 
 /// JSON-RPC method for `_harn/agentEvent` extension notifications.
 pub const HARN_AGENT_EVENT_METHOD: &str = "_harn/agentEvent";

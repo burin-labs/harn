@@ -7,7 +7,14 @@ mod gate_receipt;
 const INTERNAL_EXECUTABLE_PATH_COMMAND: &str = "__internal-executable-path";
 
 pub(crate) fn args_after_pre_runtime_command() -> Vec<String> {
-    let raw_args: Vec<String> = env::args().collect();
+    // `env::args()` panics on a non-UTF-8 argument; report it instead.
+    let raw_args: Vec<String> = match env::args_os().map(|arg| arg.into_string()).collect() {
+        Ok(args) => args,
+        Err(arg) => {
+            cli_diagnostic!("error: argument `{}` is not valid UTF-8", arg.display());
+            process::exit(2);
+        }
+    };
     if handle_pre_runtime_command(&raw_args) {
         process::exit(0);
     }
@@ -32,7 +39,7 @@ fn handle_pre_runtime_command(raw_args: &[String]) -> bool {
             true
         }
         Err(error) => {
-            eprintln!("error: failed to resolve current executable path: {error}");
+            cli_diagnostic!("error: failed to resolve current executable path: {error}");
             process::exit(1);
         }
     }
@@ -63,7 +70,7 @@ fn dispatch_namespace_helper(raw_args: &[String]) {
     // The success type is uninhabited: a launch that worked has replaced this
     // process, so the only reachable arm is the failure one.
     let Err(error) = crate::commands::netns_launch::run(invocation.args);
-    eprintln!("error: {error}");
+    cli_diagnostic!("error: {error}");
     process::exit(1);
 }
 

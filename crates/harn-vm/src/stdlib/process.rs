@@ -734,7 +734,9 @@ mod credential_presence;
 #[path = "process_program_resolution.rs"]
 mod program_resolution;
 pub(crate) use credential_presence::{session_env_presence, SessionEnvPresenceError};
-pub(crate) use program_resolution::{resolve_program_path, resolve_program_path_for_spawn};
+pub(crate) use program_resolution::{
+    find_executable_for_spawn, resolve_program_path, resolve_program_path_for_spawn,
+};
 
 /// Shared synchronous spawn-and-capture core used by `harness.process.run` and
 /// the `exec_opts`/`exec_at_opts` internal builtins. Honors cwd, an env

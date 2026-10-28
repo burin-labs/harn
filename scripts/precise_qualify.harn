@@ -22,9 +22,11 @@
  * that makes the oracle cover files the repository's own configs skip) and
  * oracle commands. Arms:
  * `rename_symbol` on each backend, `change_signature` (one appended
- * parameter), `move_symbol` (top-level declarations into a sibling file),
- * `insert_method` (`ast.insert_at_anchor` as the last member of a class or
- * inherent impl) and `find_references` (the by-name graph query), which is
+ * parameter), `move_symbol` (top-level declarations into a sibling file) and
+ * `move_symbol:widen` (the same move with `allow_visibility_widening`, so only
+ * this arm may add visibility),
+ * `insert_method` (`ast.insert_at_anchor` as the last member of a class, an
+ * inherent impl, a trait or an interface) and `find_references` (the by-name graph query), which is
  * judged against a verified rename of the same symbol. Wall times come from
  * one long-lived process, so only the first language-server call in each
  * repository is cold.
@@ -107,6 +109,7 @@ const ALL_ARMS = [
   "rename_symbol:language_server",
   "change_signature",
   "move_symbol",
+  "move_symbol:widen",
   "insert_method",
 ]
 
@@ -116,6 +119,7 @@ const FUNCTION_ARMS = [
   "rename_symbol:language_server",
   "change_signature",
   "move_symbol",
+  "move_symbol:widen",
 ]
 
 const TYPE_ARMS = [
@@ -123,6 +127,7 @@ const TYPE_ARMS = [
   "rename_symbol:syntax_tree",
   "rename_symbol:language_server",
   "move_symbol",
+  "move_symbol:widen",
   "insert_method",
 ]
 
@@ -333,30 +338,94 @@ fn moved_path(language: string, path: string) -> string {
   }
 }
 
-fn insert_query(language: string, name: string) -> string {
-  if language == "rust" {
-    return "(impl_item !trait type: [(type_identifier) @name (generic_type type: (type_identifier) @name)] body: (declaration_list) @anchor (#eq? @name \""
-      + name
-      + "\"))"
+/**
+ * How a type declares its members: `definition` for a Rust trait or an interface,
+ * whose members are signatures or defaults, and `body` for a class, enum, record or
+ * the inherent impl of a struct. The declaration line's keyword decides.
+ */
+pub fn container_shape(language: string, declaration: string, name: string) -> string {
+  const keyword = if language == "rust" {
+    "trait"
+  } else {
+    "interface"
   }
-  if language == "java" {
-    return "[(class_declaration name: (identifier) @name body: (class_body) @anchor) (enum_declaration name: (identifier) @name body: (enum_body) @anchor) (record_declaration name: (identifier) @name body: (class_body) @anchor)] (#eq? @name \""
-      + name
-      + "\")"
+  return if declaration.contains(keyword + " " + name) {
+    "definition"
+  } else {
+    "body"
   }
-  return "[(class_declaration name: (type_identifier) @name body: (class_body) @anchor) (abstract_class_declaration name: (type_identifier) @name body: (class_body) @anchor)] (#eq? @name \""
-    + name
-    + "\")"
 }
 
-fn inserted_method(language: string) -> string {
+/** Every `#eq?` sits inside its own pattern, so it filters that alternative and no other. */
+pub fn insert_query(language: string, name: string, shape: string) -> string {
+  const same = " (#eq? @name \"" + name + "\")"
+  if language == "rust" {
+    if shape == "definition" {
+      return "(trait_item name: (type_identifier) @name body: (declaration_list) @anchor" + same
+        + ")"
+    }
+    return "(impl_item !trait type: [(type_identifier) @name (generic_type type: (type_identifier) @name)] body: (declaration_list) @anchor"
+      + same
+      + ")"
+  }
+  if language == "java" {
+    if shape == "definition" {
+      return "(interface_declaration name: (identifier) @name body: (interface_body) @anchor" + same
+        + ")"
+    }
+    return "[(class_declaration name: (identifier) @name body: (class_body) @anchor" + same
+      + ") (enum_declaration name: (identifier) @name body: (enum_body) @anchor"
+      + same
+      + ") (record_declaration name: (identifier) @name body: (class_body) @anchor"
+      + same
+      + ")]"
+  }
+  if shape == "definition" {
+    return "(interface_declaration name: (type_identifier) @name body: (_) @anchor" + same + ")"
+  }
+  return "[(class_declaration name: (type_identifier) @name body: (class_body) @anchor" + same
+    + ") (abstract_class_declaration name: (type_identifier) @name body: (class_body) @anchor"
+    + same
+    + ")]"
+}
+
+fn inserted_method(language: string, shape: string) -> string {
   if language == "rust" {
     return "#[allow(dead_code)]\nfn qp_inserted(&self) -> u8 {\n    0\n}"
   }
   if language == "java" {
-    return "int qpInserted() {\n    return 0;\n}"
+    return if shape == "definition" {
+      "default int qpInserted() {\n    return 0;\n}"
+    } else {
+      "int qpInserted() {\n    return 0;\n}"
+    }
   }
-  return "qpInserted(): number {\n  return 0;\n}"
+  return if shape == "definition" {
+    "qpInserted(): number"
+  } else {
+    "qpInserted(): number {\n  return 0;\n}"
+  }
+}
+
+/** The text of the line the symbol is declared on; empty when it cannot be read. */
+fn declaration_line(fs: HarnessFs, root: string, symbol: Symbol) -> string {
+  const text = try {
+    fs.read_text(root + "/" + symbol.path)
+  }
+  if is_err(text) {
+    return ""
+  }
+  const lines = unwrap(text).split("\n")
+  return lines[symbol.line - 1] ?? ""
+}
+
+/** The widest visibility the widen arm allows: crate-wide for Rust, an export for TypeScript. */
+fn widening_level(language: string) -> string {
+  return if language == "rust" {
+    "pub(crate)"
+  } else {
+    "export"
+  }
 }
 
 /** One edit request per arm; `dry_run` is added by the caller. */
@@ -393,7 +462,13 @@ fn edit_call(
       )
     }
   }
-  if arm == "move_symbol" {
+  if arm == "move_symbol" || arm == "move_symbol:widen" {
+    // Only the widen arm passes the allowance; the plain arm measures the default refusal.
+    const widening = if arm == "move_symbol:widen" {
+      {allow_visibility_widening: widening_level(language)}
+    } else {
+      {}
+    }
     return { dry_run ->
       harness.code_index.move_symbol(
         {
@@ -403,17 +478,19 @@ fn edit_call(
           kind: symbol.kind,
           to_path: moved_path(language, symbol.path),
           dry_run: dry_run,
-        },
+        }
+          + widening,
       )
     }
   }
+  const shape = container_shape(language, declaration_line(harness.fs, root, symbol), symbol.name)
   return { dry_run ->
     harness.ast.insert_at_anchor(
       {
         path: root + "/" + symbol.path,
-        query: insert_query(language, symbol.name),
+        query: insert_query(language, symbol.name, shape),
         position: "last_child",
-        content: inserted_method(language),
+        content: inserted_method(language, shape),
         dry_run: dry_run,
       },
     )
@@ -528,7 +605,7 @@ fn arms_for(plan: Plan, symbol: Symbol) -> list<string> {
   }
   // move_symbol only moves top-level declarations; a member is out of its domain.
   return base.filter(
-    { arm -> enabled.contains(arm) && (arm != "move_symbol" || symbol.container == "") },
+    { arm -> enabled.contains(arm) && (!arm.starts_with("move_symbol") || symbol.container == "") },
   )
     .to_list()
 }

@@ -14,6 +14,7 @@ pub(super) fn prepare<'a>(
     tool_id: &'a str,
     tool_args: &'a serde_json::Value,
     session_id: &'a str,
+    audience: crate::tool_registry::ToolAudience,
 ) -> std::pin::Pin<
     Box<impl std::future::Future<Output = Result<Option<Arc<PreparedInvocation>>, VmValue>> + 'a>,
 > {
@@ -21,7 +22,7 @@ pub(super) fn prepare<'a>(
         crate::agent_sessions::scope_current_tool_call(
             tool_id.to_string(),
             crate::llm::agent_tool_preparation::prepare(
-                ctx, tools, tool_name, tool_args, session_id,
+                ctx, tools, tool_name, tool_args, session_id, audience,
             ),
         )
         .await

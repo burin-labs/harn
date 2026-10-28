@@ -38,13 +38,13 @@ pub(crate) fn run_validate(args: &ProvidersValidateArgs) -> Result<(), String> {
         );
     } else {
         for warning in &warnings {
-            eprintln!("warning: {warning}");
+            cli_diagnostic!("warning: {warning}");
         }
         for error in &validation.errors {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
         }
         for error in &validation.schema_errors {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
         }
         if validation.errors.is_empty() && validation.schema_errors.is_empty() {
             println!("provider catalog validation OK");
@@ -62,7 +62,7 @@ pub(crate) fn run_export(args: &ProvidersExportArgs) -> Result<(), String> {
     let overlay = load_overlay(args.overlay.as_deref())?;
     let capabilities = load_capabilities_overlay(args.capabilities_overlay.as_deref())?;
     for warning in &overlay.diagnostics {
-        eprintln!("warning: {warning}");
+        cli_diagnostic!("warning: {warning}");
     }
     // Export from the embedded catalog only (plus any explicit `--overlay` /
     // `--capabilities-overlay`) so the checked-in artifacts are a pure
@@ -75,7 +75,7 @@ pub(crate) fn run_export(args: &ProvidersExportArgs) -> Result<(), String> {
             return Ok(());
         }
         for path in drift {
-            eprintln!("error: generated artifact is stale or missing: {path}");
+            cli_diagnostic!("error: generated artifact is stale or missing: {path}");
         }
         return Err("provider catalog artifacts drifted".to_string());
     }

@@ -247,6 +247,7 @@ fn __approval_naming_no_gap() -> dict {
         verdict: "done",
         detail: "Median is implemented across lexer, AST, parser, and aggregation logic, "
           + "and the required verifier passed.",
+        goal_assessment: {kind: "unknown", evidence_refs: []},
         gaps: [],
       },
     ),

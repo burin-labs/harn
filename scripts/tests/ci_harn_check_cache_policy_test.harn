@@ -69,6 +69,45 @@ fn save_step() -> dict {
 }
 
 @test
+pipeline test_harn_check_cache_download_uses_the_retry_owner_before_changing_source(
+  harness: Harness,
+) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/harn-check-cache-refresh.yml")
+  const steps = workflow.jobs.refresh.steps
+  let download_index = -1
+  let checkout_index = -1
+  for {index, value: step} in steps.enumerate() {
+    if step?.name == "Download shared Harn binary" {
+      assert_eq(download_index, -1, "the CLI has one download owner")
+      download_index = index
+    }
+    if step?.name == "Check out the commit the binary was built from" {
+      checkout_index = index
+    }
+  }
+  assert(download_index >= 0 && checkout_index >= 0, "both stages must be present")
+  const download = steps[download_index]
+  assert_eq(download.uses, "./.github/actions/download-artifact-with-retry")
+  assert_eq(download.with["artifact-ids"], gha_expression("steps.cli.outputs.artifact_id"))
+  assert_eq(download.with["run-id"], gha_expression("steps.cli.outputs.run_id"))
+  assert_eq(download.with.path, gha_expression("runner.temp"))
+  assert_eq(download.with["skip-decompress"], "true")
+  assert(download_index < checkout_index, "load this commit's retry action before checkout")
+  const action = read_yaml(
+    harness.fs,
+    "../../.github/actions/download-artifact-with-retry/action.yml",
+  )
+  const attempts = action.runs.steps.filter(
+    { step -> to_string(step?.uses ?? "").starts_with("actions/download-artifact@") },
+  )
+    .to_list()
+  assert(len(attempts) > 0, "the shared action must actually download the artifact")
+  for attempt in attempts {
+    assert_eq(attempt.with["artifact-ids"], gha_expression("inputs.artifact-ids"))
+  }
+}
+
+@test
 pipeline test_harn_check_cache_shipped_actions_and_writers_pass(harness: Harness, task: unknown) {
   assert_eq(
     harn_check_cache_action_errors(shipped_restore(harness.fs), shipped_save(harness.fs)),

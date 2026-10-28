@@ -926,3 +926,6 @@ fn rust_move_into_the_parent_keeps_child_readers() {
     let result = fixture.mv("Wrap", "src/a/model.rs", "src/a/mod.rs");
     assert_eq!(tag(&result), "applied", "{result:?}");
 }
+
+#[path = "move_symbol_widen_tests.rs"]
+mod widening;

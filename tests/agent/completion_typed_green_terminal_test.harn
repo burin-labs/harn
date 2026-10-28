@@ -43,10 +43,16 @@ fn __judge_calls(events: unknown) -> int {
 }
 
 /** A judge that refuses. Scripted so a call that happens is visible as a veto. */
-fn __judge_refuses(detail: string) -> dict {
-  return {
-    text: json_stringify({verdict: "continue", detail: detail, gap_class: "missing_artifact"}),
+fn __judge_refuses(detail: string, has_ledger: bool = false) -> dict {
+  const verdict = {verdict: "continue", detail: detail, gap_class: "missing_artifact"}
+  // Declared requirements use their own report and do not offer the
+  // ledger-free goal assessment in the judge schema.
+  const body = if has_ledger {
+    verdict
+  } else {
+    verdict + {goal_assessment: {kind: "unknown", evidence_refs: []}}
   }
+  return {text: json_stringify(body)}
 }
 
 /** A gate that reports exactly the reading the case is about. */
@@ -372,7 +378,7 @@ pipeline test_an_open_ledger_row_still_blocks_the_terminal(harness: Harness, tas
   const captured = __run(
     harness,
     "typed-green-open-ledger",
-    [llm_done(), __judge_refuses("not there yet"), llm_done()],
+    [llm_done(), __judge_refuses("not there yet", true), llm_done()],
     {verify_completion: __gate_reporting(true, "verified_after_write", "passed")}
       + __completion_judge_with_open_ledger(),
   )
@@ -458,9 +464,9 @@ fn __refusing_run_to_cap(harness: Harness, label: string, judge_cfg: dict) {
     label,
     [
       llm_done(),
-      __judge_refuses("not there yet"),
+      __judge_refuses("not there yet", judge_cfg?.requirement_contract != nil),
       llm_done(),
-      __judge_refuses("still not"),
+      __judge_refuses("still not", judge_cfg?.requirement_contract != nil),
       llm_done(),
       llm_done(),
       llm_done(),

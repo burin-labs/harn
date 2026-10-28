@@ -20,7 +20,7 @@ const HarnAgentEventMethod = "_harn/agentEvent"
 const HarnProviderCatalogMethod = "_harn/providerCatalog"
 
 // ACPSchemaCompatibility is the upstream ACP schema version Harn tracks.
-const ACPSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
+const ACPSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v1.26.0"
 
 // ACPPromptErrorDataSchema identifies typed session/prompt JSON-RPC error data.
 const ACPPromptErrorDataSchema = "harn.acp.prompt_error.v1"

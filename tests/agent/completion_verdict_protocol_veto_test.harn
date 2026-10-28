@@ -25,11 +25,21 @@ import { AgentSpec } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
 // A veto that asks only for wire format. Nothing about it names work.
-const FORMATTING_VETO =
-  "{\"verdict\":\"continue\",\"detail\":\"Return a final response with the done marker on its own line.\"}"
+const FORMATTING_VETO = json_stringify(
+  {
+    verdict: "continue",
+    detail: "Return a final response with the done marker on its own line.",
+    goal_assessment: {kind: "unknown", evidence_refs: []},
+  },
+)
 
-const APPROVAL =
-  "{\"verdict\":\"done\",\"detail\":\"The report names the changed file and the passing verifier.\"}"
+const APPROVAL = json_stringify(
+  {
+    verdict: "done",
+    detail: "The report names the changed file and the passing verifier.",
+    goal_assessment: {kind: "unknown", evidence_refs: []},
+  },
+)
 
 // The substantive answer, repeated verbatim. It never carries a marker.
 const FINAL_TEXT = "Added the eviction path in src/cache.rs; the focused test passes."

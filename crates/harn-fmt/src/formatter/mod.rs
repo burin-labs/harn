@@ -119,7 +119,13 @@ impl<'a> Formatter<'a> {
         reason = "node spans come from the lexer on char boundaries"
     )]
     pub(crate) fn source_slice(&self, node: &SNode) -> &str {
-        &self.source[node.span.start..node.span.end]
+        // A parenthesized expression's span includes its parentheses; the
+        // literal callers want only the literal, so drop redundant grouping.
+        let mut text = self.source[node.span.start..node.span.end].trim();
+        while let Some(inner) = text.strip_prefix('(').and_then(|t| t.strip_suffix(')')) {
+            text = inner.trim();
+        }
+        text
     }
 
     /// Inner lines of a block — does NOT include opening/closing braces.

@@ -13,7 +13,9 @@ use harn_lexer::{FixEdit, Lexer, Span, StringSegment, Token, TokenKind};
 
 use crate::ast_json::structural_projection;
 use crate::interpolation;
-use crate::operators::{operand_needs_parens, OperandSide, OperatorGrammar, Precedence};
+use crate::operators::{
+    is_parenthesized, operand_needs_parens, OperandSide, OperatorGrammar, Precedence,
+};
 use crate::operators::{RANGE_EXCLUSIVE, RANGE_INCLUSIVE};
 use crate::{visit, Node, Parser, SNode, REMOVED_RANGE_KEYWORD};
 
@@ -181,7 +183,9 @@ fn parenthesize(
     edits: &mut Vec<FixEdit>,
 ) {
     if !operand_needs_parens(parent, Precedence::of_node(&operand.node), side)
-        || is_parenthesized(source, operand.span)
+        || source
+            .get(operand.span.start..operand.span.end)
+            .is_some_and(is_parenthesized)
     {
         return;
     }
@@ -233,17 +237,6 @@ fn respell_range(
             "",
         ));
     }
-}
-
-/// Whether the text around `span` is a `(` ... `)` pair enclosing exactly it.
-fn is_parenthesized(source: &str, span: Span) -> bool {
-    let before = source
-        .get(..span.start)
-        .and_then(|text| text.trim_end().chars().next_back());
-    let after = source
-        .get(span.end..)
-        .and_then(|text| text.trim_start().chars().next());
-    before == Some('(') && after == Some(')')
 }
 
 fn insertion(offset: usize, text: &str) -> FixEdit {

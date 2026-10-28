@@ -36,7 +36,7 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             if has_progress_entries(entries) {
                 sink.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": super::super::bridge::plan_update(entries.clone()),
+                    "update": super::super::bridge::acp_plan_update(entries.clone()),
                 }));
             } else if let Some(message) = message {
                 sink.write_notification(serde_json::json!({

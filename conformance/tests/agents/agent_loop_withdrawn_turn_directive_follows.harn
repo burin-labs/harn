@@ -51,7 +51,15 @@ fn run_case(harness: Harness, label: string, standing_body: string, vetoes: int)
     script = script
       + [
         llm_text("Closing draft ${index + 1}. ##DONE##"),
-        llm_text(json_stringify({verdict: "continue", detail: REJECTION})),
+        llm_text(
+          json_stringify(
+            {
+              verdict: "continue",
+              detail: REJECTION,
+              goal_assessment: {kind: "unknown", evidence_refs: []},
+            },
+          ),
+        ),
       ]
   }
   script.push(llm_text("Working on it after the directive."))

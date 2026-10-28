@@ -1,0 +1,47 @@
+/**
+ * Cargo removes only versionless dev dependencies from published manifests.
+ * Metadata normalizes both an omitted version and an explicit "*" to req="*".
+ */
+pub fn publish_dev_dependency_is_retained(manifest: dict, workspace: dict, dep: dict) -> bool {
+  const alias = dep?.rename ?? dep.name
+  const table = if dep?.target == nil {
+    manifest.get("dev-dependencies")
+  } else {
+    manifest.get("target")?.get(dep.target)?.get("dev-dependencies")
+  }
+  require type_of(table) == "dict" && table.keys().contains(alias),
+    "Cargo dev dependency is missing from its source manifest: "
+    + to_string(alias)
+  let spec = table.get(alias)
+  if type_of(spec) == "dict" && spec.get("workspace") == true {
+    spec = workspace.get("workspace")?.get("dependencies")?.get(alias)
+    require spec != nil, "Cargo workspace dependency is missing: " + to_string(alias)
+  }
+  if type_of(spec) == "string" {
+    require spec != "", "Cargo dependency version is empty"
+    return true
+  }
+  require type_of(spec) == "dict", "Cargo dependency must be a version or table"
+  if spec.get("version") == nil {
+    return false
+  }
+  require type_of(spec.get("version")) == "string" && spec.get("version") != "",
+    "Cargo dependency version must be a nonempty string"
+  return true
+}
+
+pub fn publish_metadata_with_manifest_dependencies(fs: HarnessFs, meta: dict) -> dict {
+  const workspace = toml_parse(fs.read_text(path_join(meta.workspace_root, "Cargo.toml")))
+  let packages: list<dict> = []
+  for package in meta.packages {
+    const manifest = toml_parse(fs.read_text(package.manifest_path))
+    let dependencies: list<dict> = []
+    for dep in package.dependencies {
+      const retained = dep.kind != "dev"
+        || publish_dev_dependency_is_retained(manifest, workspace, dep)
+      dependencies = dependencies + [dep + {publish_retained: retained}]
+    }
+    packages = packages + [package + {dependencies: dependencies}]
+  }
+  return meta + {packages: packages}
+}

@@ -51,9 +51,14 @@ fn __conversion_count(events: unknown) -> int {
 
 fn __judge_says(gap_class: string?, detail: string) -> dict {
   const body = if gap_class == nil {
-    {verdict: "continue", detail: detail}
+    {verdict: "continue", detail: detail, goal_assessment: {kind: "unknown", evidence_refs: []}}
   } else {
-    {verdict: "continue", detail: detail, gap_class: gap_class}
+    {
+      verdict: "continue",
+      detail: detail,
+      gap_class: gap_class,
+      goal_assessment: {kind: "unknown", evidence_refs: []},
+    }
   }
   return {text: json_stringify(body)}
 }

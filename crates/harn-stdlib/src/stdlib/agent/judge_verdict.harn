@@ -7,6 +7,11 @@ import {
   completion_requirement_report,
 } from "std/agent/completion_requirements"
 import {
+  CompletionGoalAssessment,
+  __completion_goal_assessment_read,
+  __completion_goal_assessment_schema,
+} from "std/agent/goal_assessment"
+import {
   COMPLETION_JUDGE_GAP_CLASSES,
   CompletionJudgeGapClass,
   __completion_judge_gap_class,
@@ -53,6 +58,7 @@ pub type CompletionJudgeVerdict = {
   // below keys on.
   gap_declared: bool,
   requirement_report?: CompletionRequirementReport?,
+  goal_assessment?: CompletionGoalAssessment?,
 }
 
 /**
@@ -376,11 +382,18 @@ pub fn __judge_completion_verdict_schema(
   const assessments = completion_requirement_assessments_schema(contract, evidence_packet)
   if assessments != nil {
     properties = properties + {requirement_report: assessments}
+  } else {
+    properties = properties
+      + {goal_assessment: __completion_goal_assessment_schema(evidence_packet ?? {})}
   }
   return {
     type: "object",
     properties: properties,
-    required: ["verdict", "detail"],
+    required: if assessments == nil {
+      ["verdict", "detail", "goal_assessment"]
+    } else {
+      ["verdict", "detail"]
+    },
     additionalProperties: false,
   }
 }
@@ -439,6 +452,11 @@ pub fn __judge_completion_verdict_read(
     gap_class: __completion_judge_gap_class(result?.gap_class),
     gaps: __judge_completion_gaps_read(result, completion_requirement_ids(contract)),
     gap_declared: gap_declared,
+    goal_assessment: if contract == nil || len(contract.requirements) == 0 {
+      __completion_goal_assessment_read(result?.goal_assessment, evidence_packet)
+    } else {
+      nil
+    },
     requirement_report: completion_requirement_report(
       contract,
       result?.requirement_report,

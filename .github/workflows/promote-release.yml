@@ -49,6 +49,16 @@ on:
         required: false
         default: ''
         type: string
+      standalone_harn:
+        description: Publish qualified Harn archives independently of downstream adoption; does not qualify or dispatch consumer repairs.
+        required: false
+        default: false
+        type: boolean
+      inspect_publication_only:
+        description: Inspect an existing draft through the normal release App without publication or downstream work; requires standalone_harn.
+        required: false
+        default: false
+        type: boolean
   # Privileged `workflow_run` is intentional: the resolver executes trusted
   # main code and validates the producer before candidate source is read.
   workflow_run: # zizmor: ignore[dangerous-triggers] promotes only main push runs of this repository
@@ -85,7 +95,14 @@ jobs:
       requires_attached_consumer: ${{ steps.source.outputs.requires_attached_consumer }}
       requires_consumer_repair: ${{ steps.source.outputs.requires_consumer_repair }}
       producer_attempt: ${{ steps.source.outputs.producer_attempt }}
+      standalone_harn: ${{ steps.source.outputs.standalone_harn }}
     steps:
+      - name: Require standalone inspection scope
+        if: inputs.inspect_publication_only && !inputs.standalone_harn
+        shell: bash
+        run: |
+          echo "::error::Publication inspection requires standalone_harn."
+          exit 2
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
@@ -98,6 +115,7 @@ jobs:
           EXPECTED_SOURCE_SHA: ${{ inputs.candidate_sha || github.event.workflow_run.head_sha }}
           COMPLETED_CONSUMER_RUN_ID: ${{ inputs.completed_consumer_run_id }}
           CONSUMER_PULL_REQUEST: ${{ inputs.consumer_pull_request }}
+          STANDALONE_HARN: ${{ inputs.standalone_harn && 'true' || 'false' }}
         run: bash scripts/resolve-release-promotion-source.sh
 
   plan:
@@ -121,6 +139,7 @@ jobs:
       requires_attached_consumer: ${{ needs.resolve.outputs.requires_attached_consumer }}
       requires_consumer_repair: ${{ needs.resolve.outputs.requires_consumer_repair }}
       producer_attempt: ${{ needs.resolve.outputs.producer_attempt }}
+      standalone_harn: ${{ needs.resolve.outputs.standalone_harn }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -144,6 +163,7 @@ jobs:
           SOURCE_DIRECTORY: release-source
           RECOVERY: ${{ github.event_name == 'workflow_dispatch' }}
           CONSUMER_PULL_REQUEST: ${{ inputs.consumer_pull_request }}
+          STANDALONE_HARN: ${{ needs.resolve.outputs.standalone_harn }}
         run: |
           set -euo pipefail
           # shellcheck source=scripts/lib/release_version.sh
@@ -218,7 +238,10 @@ jobs:
             exit 1
           fi
           requires_rehearsal=false
-          if [[ "${REQUIRES_CONSUMER_REPAIR:-false}" == true ]]; then
+          if [[ "${STANDALONE_HARN:-false}" == true ]]; then
+            [[ "${RECOVERY:-false}" == true ]] || exit 1
+            echo '::notice::Standalone Harn publication requires source and archive qualification; downstream acceptance remains separate.'
+          elif [[ "${REQUIRES_CONSUMER_REPAIR:-false}" == true ]]; then
             [[ "${RECOVERY:-false}" == true && "${CONSUMER_PULL_REQUEST:-}" =~ ^[1-9][0-9]*$ ]] || exit 1
             requires_rehearsal=true
             echo "::notice::Verified candidate archives require a fresh observer-owned consumer repair measurement."
@@ -282,7 +305,7 @@ jobs:
       CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
 
   authorize:
-    name: Require measured consumer completion
+    name: Require publication qualification
     needs: [plan, consumer-rehearsal]
     if: always() && needs.plan.result == 'success' && needs.plan.outputs.promote == 'true'
     runs-on: ubuntu-24.04
@@ -291,7 +314,7 @@ jobs:
       contents: read
       actions: read
     outputs:
-      ready: ${{ steps.authorize.outputs.ready }}
+      ready: ${{ steps.authorize.outputs.ready || steps.standalone.outputs.ready }}
       original_context: ${{ steps.original-context.outputs.context }}
       consumer_repair: ${{ steps.consumer-repair.outputs.repair_request }}
     steps:
@@ -381,6 +404,7 @@ jobs:
           CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
         run: node scripts/ci/consumer-observer-read-parent.mjs
       - name: Require the owning rehearsal result
+        if: needs.plan.outputs.standalone_harn != 'true'
         id: authorize
         env:
           SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
@@ -399,6 +423,10 @@ jobs:
           PRODUCER_ATTEMPT: ${{ needs.plan.outputs.producer_attempt }}
           CONSUMER_PULL: ${{ inputs.consumer_pull_request }}
         run: bash scripts/authorize-release-rehearsal.sh
+      - name: Admit standalone Harn publication
+        if: needs.plan.outputs.standalone_harn == 'true'
+        id: standalone
+        run: echo 'ready=true' >> "$GITHUB_OUTPUT"
 
   promote:
     name: Promote
@@ -410,13 +438,15 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@839fa59d13d4693055c47a35b3bc5c1aff05c105
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@8f70b7c856dec371c1f7342c1616b912fa017a80
     with:
       sha: ${{ needs.plan.outputs.source_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}
       tag: ${{ needs.plan.outputs.tag }}
       original-consumer-context: ${{ needs.authorize.outputs.original_context }}
       consumer-repair: ${{ needs.authorize.outputs.consumer_repair }}
+      standalone-harn: ${{ needs.plan.outputs.standalone_harn == 'true' }}
+      inspect-only: ${{ inputs.inspect_publication_only || false }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -427,7 +457,7 @@ jobs:
   repin:
     name: Repin consumers
     needs: [plan, promote]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' && needs.plan.outputs.standalone_harn != 'true' && !inputs.inspect_publication_only }}
     permissions:
       contents: read
     uses: burin-labs/.github/.github/workflows/repin.yml@39720fce0707c8852cfe8787c028db393f0ce6ae
@@ -441,7 +471,7 @@ jobs:
   container:
     name: Publish container
     needs: [plan, promote]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' && !inputs.inspect_publication_only }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -550,7 +580,7 @@ jobs:
   open-development-bump:
     name: Open post-publication development bump
     needs: [plan, promote]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' && !inputs.inspect_publication_only }}
     permissions:
       contents: read
       pull-requests: read

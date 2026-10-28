@@ -399,6 +399,7 @@ impl AcpServer {
         session.project_root = next_project_root;
         #[cfg(feature = "hostlib")]
         harn_hostlib::fs::configure_session_root(session_id, &session.project_root);
+        self.sync_session_workspace_warm(session_id);
         Ok(())
     }
 
@@ -537,6 +538,14 @@ impl AcpServer {
             let Some(src_id) = src_id else {
                 self.send_error(id, -32602, "Missing session_id");
                 return;
+            };
+            let inherit_checkpoint = match params.get("inheritWorkspaceCheckpoint") {
+                None => false,
+                Some(serde_json::Value::Bool(value)) => *value,
+                Some(_) => {
+                    self.send_error(id, -32602, "inheritWorkspaceCheckpoint must be a boolean");
+                    return;
+                }
             };
             if let Err(error) = self.prompt_admission(&src_id) {
                 self.send_error(id, -32602, &error);
@@ -715,6 +724,8 @@ impl AcpServer {
             let fork_cwd = harn_vm::agent_sessions::workspace_anchor(&new_session_id)
                 .map(|anchor| anchor.primary)
                 .unwrap_or(src_cwd);
+            #[cfg(feature = "hostlib")]
+            let checkpoint_root = fork_cwd.clone();
             let project_root = session_project_root_for_cwd(&fork_cwd);
             self.track_known_session(&new_session_id);
             self.sessions.insert(
@@ -735,21 +746,40 @@ impl AcpServer {
                     admission_unavailable,
                     profile_turn: 0,
                     environment_policy: child_environment,
+                    workspace_warm_root: None,
                 },
             );
+            self.sync_session_workspace_warm(&new_session_id);
             self.emit_session_info_update(&new_session_id, &info);
             self.emit_available_commands(&new_session_id);
-            self.send_response(
-            id,
-            serde_json::json!({
+            let mut response = serde_json::json!({
                 "sessionId": new_session_id,
                 "state": "forked",
                 "parent_id": src_id,
                 "canonicalBoundary": source_boundary,
                 "modes": modes::session_mode_state(&parent_mode_id),
                 "configOptions": self.config_options_for_session(&new_session_id, &parent_mode_id),
-            }),
-        );
+            });
+            if inherit_checkpoint {
+                #[cfg(feature = "hostlib")]
+                let checkpoint = match harn_hostlib::workspace_checkpoint::fork_session(
+                    &src_id,
+                    &new_session_id,
+                    &checkpoint_root,
+                ) {
+                    Ok(outcome) => {
+                        serde_json::to_value(outcome).expect("checkpoint result serializes")
+                    }
+                    Err(error) => {
+                        serde_json::json!({"available": false, "reason": "fork_failed", "detail": error.to_string()})
+                    }
+                };
+                #[cfg(not(feature = "hostlib"))]
+                let checkpoint =
+                    serde_json::json!({"available": false, "reason": "hostlib_unavailable"});
+                response["workspaceCheckpoint"] = checkpoint;
+            }
+            self.send_response(id, response);
         })
     }
 

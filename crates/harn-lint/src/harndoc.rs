@@ -20,6 +20,9 @@ pub(crate) struct LegacyCommentTok {
     pub(crate) end_byte: usize,
     pub(crate) is_line: bool,
     pub(crate) is_doc: bool,
+    /// False for a comment trailing code on its first line (`x = 1 // why`),
+    /// which documents that code rather than the item below it.
+    pub(crate) starts_line: bool,
     pub(crate) text: String,
 }
 
@@ -31,6 +34,9 @@ pub(crate) fn collect_comment_tokens(source: &str) -> Vec<LegacyCommentTok> {
     };
     let mut out = Vec::new();
     for tok in tokens.iter().cloned() {
+        let starts_line = source
+            .get(line_start_byte(source, tok.span.start)..tok.span.start)
+            .is_some_and(|prefix| prefix.trim().is_empty());
         match tok.kind {
             harn_lexer::TokenKind::LineComment { text, is_doc } => {
                 out.push(LegacyCommentTok {
@@ -40,6 +46,7 @@ pub(crate) fn collect_comment_tokens(source: &str) -> Vec<LegacyCommentTok> {
                     end_byte: tok.span.end,
                     is_line: true,
                     is_doc,
+                    starts_line,
                     text,
                 });
             }
@@ -56,6 +63,7 @@ pub(crate) fn collect_comment_tokens(source: &str) -> Vec<LegacyCommentTok> {
                     end_byte: tok.span.end,
                     is_line: false,
                     is_doc,
+                    starts_line,
                     text,
                 });
             }
@@ -86,6 +94,11 @@ fn migratable_run_above<'c>(
         // A canonical `/** */` doc block is already correct; it stops the
         // walk and is never collected for rewriting.
         if !tok.is_line && tok.is_doc {
+            break;
+        }
+        // A trailing comment shares its line with code; rewriting it would
+        // replace that code with a doc block.
+        if !tok.starts_line {
             break;
         }
         walked.push(*tok);

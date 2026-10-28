@@ -539,6 +539,8 @@
     "mailbox_receive",
     "mailbox_send",
     "mailbox_try_receive",
+    "makefile_filenames",
+    "makefile_parse",
     "managed_daemon_wait",
     "markdown_parse",
     "max",

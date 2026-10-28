@@ -167,23 +167,23 @@ pub(crate) async fn connect_mcp_servers(
         let spec = match preparation.prepare(spec).await {
             Ok(spec) => spec,
             Err(error) => {
-                eprintln!(
-                    "warning: mcp: failed to prepare '{}': {}",
-                    server.name, error
+                harn_vm::events::log_warn(
+                    "mcp",
+                    &format!("mcp: failed to prepare '{}': {}", server.name, error),
                 );
                 continue;
             }
         };
         match harn_vm::connect_mcp_server_from_json(&spec).await {
             Ok(handle) => {
-                eprintln!("[harn] mcp: connected to '{}'", server.name);
+                harn_vm::events::log_info("mcp", &format!("connected to '{}'", server.name));
                 harn_vm::mcp_install_active(&server.name, handle.clone());
                 mcp_dict.insert(server.name.clone(), harn_vm::VmValue::mcp_client(handle));
             }
             Err(error) => {
-                eprintln!(
-                    "warning: mcp: failed to connect to '{}': {}",
-                    server.name, error
+                harn_vm::events::log_warn(
+                    "mcp",
+                    &format!("mcp: failed to connect to '{}': {}", server.name, error),
                 );
             }
         }
@@ -217,9 +217,9 @@ impl harn_vm::McpServerPreparation for ManifestMcpPreparation {
         let resolved_auth = match mcp::resolve_auth_for_server(server).await {
             Ok(resolution) => resolution,
             Err(error) => {
-                eprintln!(
-                    "warning: mcp: failed to load auth for '{}': {}",
-                    server.name, error
+                harn_vm::events::log_warn(
+                    "mcp",
+                    &format!("mcp: failed to load auth for '{}': {}", server.name, error),
                 );
                 AuthResolution::None
             }

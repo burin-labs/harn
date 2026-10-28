@@ -24,6 +24,7 @@ use std::sync::{Arc, Once};
 use std::time::{Duration, UNIX_EPOCH};
 use tempfile::TempDir;
 use x509_parser::prelude::{FromDer, X509Certificate};
+mod binary_bodies;
 mod session_inputs;
 
 fn expect_bool(value: VmValue) -> bool {
@@ -83,7 +84,8 @@ fn harness_http_mocks_follow_the_harness_across_threads_without_leaking() {
             "POST",
             "https://api.example.test/jobs",
             crate::value::DictMap::new(),
-            Some("{}".to_string()),
+            Some(b"{}".to_vec()),
+            &crate::session_inputs::OutputFilter::capture(),
         )
     })
     .join()
@@ -850,11 +852,15 @@ async fn ssrf_guard_block_private_off_permits_capture_server() {
 /// the builder stops writing would read as present and typed.
 #[test]
 fn response_builders_write_exactly_their_declared_shapes() {
-    fn field_names(ty: harn_builtin_meta::Ty) -> Vec<String> {
+    fn field_names(ty: harn_builtin_meta::Ty, include_optional: bool) -> Vec<String> {
         let harn_builtin_meta::Ty::Shape(fields) = ty else {
             panic!("response shapes must stay closed records");
         };
-        let mut names: Vec<_> = fields.iter().map(|field| field.name.to_string()).collect();
+        let mut names: Vec<_> = fields
+            .iter()
+            .filter(|field| include_optional || !field.optional)
+            .map(|field| field.name.to_string())
+            .collect();
         names.sort_unstable();
         names
     }
@@ -877,12 +883,23 @@ fn response_builders_write_exactly_their_declared_shapes() {
     );
     assert_eq!(
         written(response),
-        field_names(harn_builtin_meta::shapes::HTTP_RESPONSE)
+        field_names(harn_builtin_meta::shapes::HTTP_RESPONSE, false)
+    );
+    let binary = super::client::build_http_response(
+        200,
+        crate::value::DictMap::new(),
+        super::client::ResponseBody::Bytes(vec![0, 255]),
+        "u",
+        &crate::session_inputs::OutputFilter::capture(),
+    );
+    assert_eq!(
+        written(binary),
+        field_names(harn_builtin_meta::shapes::HTTP_RESPONSE, true)
     );
     let download =
         super::client::build_http_download_response(200, crate::value::DictMap::new(), 0);
     assert_eq!(
         written(download),
-        field_names(harn_builtin_meta::shapes::HTTP_DOWNLOAD_RESPONSE)
+        field_names(harn_builtin_meta::shapes::HTTP_DOWNLOAD_RESPONSE, false)
     );
 }

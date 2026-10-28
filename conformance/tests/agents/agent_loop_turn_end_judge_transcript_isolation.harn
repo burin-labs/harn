@@ -12,7 +12,9 @@ pipeline default(harness: Harness) {
     harness.llm,
     [
       llm_text("<user_response>isolated final answer</user_response>"),
-      llm_text("{\"verdict\":\"done\",\"detail\":\"The task is complete.\"}"),
+      llm_text(
+        "{\"verdict\":\"done\",\"detail\":\"The task is complete.\",\"goal_assessment\":{\"kind\":\"unknown\",\"evidence_refs\":[]}}",
+      ),
     ],
     { ->
       const session = "turn-end-judge-isolation-" + harness.random.uuid()

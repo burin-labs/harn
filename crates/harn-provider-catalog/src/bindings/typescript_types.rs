@@ -5,7 +5,7 @@
 //! `bindings.rs`; this file is the literal text they emit, and nothing else.
 
 pub(super) const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalog {
-  schema_version: 13
+  schema_version: __HARN_CATALOG_SCHEMA_VERSION__
   schema: string
   generated_by: string
   providers: HarnCatalogProvider[]
@@ -94,6 +94,7 @@ export interface HarnProviderEndpoint {
 
 export interface HarnProviderEndpointRegion {
   base_url: string
+  data_controls?: HarnModelDataControls
   label?: string
   source_url?: string
   last_verified?: string

@@ -134,6 +134,17 @@ Type mapping:
 | array | list |
 | object | dict |
 
+`json_stringify` represents bytes as `{"$bytes_b64":"..."}` with standard base64.
+`json_decode` restores bytes when the target Harn schema specifies `bytes`,
+including nested record, list, map and union values. It rejects malformed base64,
+non-string payloads and extra envelope fields. Empty bytes have an empty base64
+payload. `json_parse` leaves the envelope as a dict, and native schema checks do
+not reinterpret it as bytes.
+
+Byte schemas export an object with one required `$bytes_b64` string field and
+no additional properties. JSON Schema marks the string with
+`contentEncoding: "base64"`; OpenAPI uses `format: "byte"`.
+
 ### Canonical schema format
 
 The canonical schema is a plain Harn dict. The validator also accepts compatible
@@ -823,7 +834,7 @@ builtins were deleted.
 | `harness.fs.status(path, access?)` | path: string, access: `"read"`/`"write"`/`"delete"` (default `"read"`) | dict | Structured path visibility probe. Returns statuses such as `present_file`, `present_dir`, `present_other`, `missing`, `scope_denied`, `read_only_denied`, or `stat_error` without collapsing sandbox scope denial into absence |
 | `harness.fs.list_dir(path?)` | path: string (default `"."`) | list | List directory contents as sorted list of file names. Throws on failure |
 | `harness.fs.walk(path, options?)` | path: string, options: dict | list or handle dict | Recursively list files/directories, honoring the project ignore stack. Options: `ignore_policy` (`none`, `builtin`, `project`; default `project`), `max_depth`, `follow_symlinks`, `background`. Dotfiles are always listed; hidden-file filtering is a separate axis from the ignore stack |
-| `harness.fs.glob(pattern, base_or_options?, options?)` | pattern: string, base: string or options: dict | list or handle dict | Match files under a base directory, honoring the project ignore stack. Options: `ignore_policy` (`none`, `builtin`, `project`; default `project`), `background`. Dotfiles are always matched |
+| `harness.fs.glob(pattern, base_or_options?, options?)` | pattern: string, base: string or options: dict | list or handle dict | Match files under a base directory, honoring the project ignore stack. `*` matches within one path segment; `**` crosses directories. Options: `ignore_policy` (`none`, `builtin`, `project`; default `project`), `background`. Dotfiles are always matched |
 | `harness.fs.find_text(root, pattern, options?)` | root: string, pattern: string, options: dict | list, bool, int, or handle dict | Search files under a root and return `{path, line, col, column, text}` hits. Options: `mode` (`hits`, `exists`, `count`), `preset` (`default`, `source`), `ignore_policy` (`none`, `builtin`, `project`; default `project`), `include`, `exclude`, `max_depth`, `max_filesize`/`max_file_size`, `threads`, `parallel`, `follow_symlinks`, `include_hidden`, `case_sensitive`/`case_insensitive`, `fixed_strings`, `max_matches`, `background` |
 | `harness.fs.find_evidence(roots, patterns, options?)` | roots: list, patterns: list, options: dict | receipt or handle dict | Walk labeled roots once for labeled literal patterns. Returns deterministic path-relative hits and settled per-root status. Options: `preset`, `ignore_policy` (`none`, `builtin`, `project`; default `project`), `include`, `exclude`, `max_depth`, `max_filesize`/`max_file_size`, `threads`, `follow_symlinks`, `include_hidden`, ASCII `case_insensitive`, `max_matches`, `max_matches_per_root`, `background` |
 | `harness.fs.mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
@@ -844,6 +855,7 @@ builtins were deleted.
 | `harness.env.get_or(name, default)` | name: string, default: any | string or default | Read environment variable, or return `default` when unset. One-line replacement for the common `let v = harness.env.get(K); if v { v } else { default }` pattern |
 | `harness.clock.timestamp()` | none | float | Unix timestamp in seconds with sub-second precision |
 | `harness.clock.elapsed()` | none | int | Milliseconds since VM startup |
+| `harness.process.find_executable(program)` | program: non-empty bare name | string or nil | Read the executable selection used by the process launcher without running it. Returns nil when unresolved. |
 | `harness.process.exec(cmd, args...)` | cmd: string, args: strings | dict | Execute argv and return stdout/stderr plus status metadata and `success` |
 | `harness.process.exec_at(dir, cmd, args...)` | dir: string, cmd: string, args: strings | dict | Execute argv inside a specific directory |
 | `harness.process.shell(cmd)` | cmd: string | dict | Execute a user-authored shell command |
@@ -865,6 +877,14 @@ builtins were deleted.
 | `harness.fs.project_root()` | none | string or nil | Nearest ancestor directory containing `harn.toml` |
 | `harness.fs.runtime_paths()` | none | `{execution_root: string, asset_root: string, state_root: string, run_root: string, worktree_root: string}` | Resolved runtime path model. `state_root` / `run_root` / `worktree_root` honor `HARN_STATE_DIR` / `HARN_RUN_DIR` / `HARN_WORKTREE_DIR`, so ask here instead of writing `.harn` by hand |
 | `harness.clock.date_iso()` | none | string | Current UTC time in ISO 8601 format |
+
+`find_executable` searches the parent process's current `PATH` and, on Windows,
+`PATHEXT`, through the same selector the sandboxed process launcher uses. It
+accepts names such as `python3`, not paths. It reads file metadata without
+running a version probe or changing runtime state, so tool preparation can use
+it. A selected file does not prove that it can start, has a particular version,
+or passes a verifier; those facts require execution. Nil means unresolved,
+including an unavailable search path or unreadable candidate.
 
 When the OS cannot start an argv-style process, `harness.process.exec`
 throw `{error: "io_error", kind, message, category: "environment"}`. `kind`
@@ -1270,12 +1290,32 @@ pipeline summarize(harness: Harness) {
 
 ## HTTP
 
+Request bodies accept UTF-8 strings or raw `bytes`. Set `response_type: "bytes"`
+to receive a buffered body in `body_bytes`; `body` is then an empty string.
+The default `response_type: "text"` returns UTF-8 text in `body` and omits
+`body_bytes`. Other response types fail before a request. `max_response_bytes`
+limits both modes, including responses without a declared content length.
+
+Multipart parts accept `headers` alongside `name`, `value`/`value_base64`/`path`,
+`filename`, and `content_type`. `Content-Type` and `Content-Disposition` use
+those dedicated fields; duplicate or invalid part headers fail before sending.
+Named-input output filtering applies to both text and byte responses.
+HTTP mock call records retain the text preview in `body` and the exact request
+bytes in `body_bytes` when a body was provided. Private-input filtering applies
+before either view is recorded. The Rust `HttpMockCallSnapshot` exposes the text
+preview in `body`; `body_bytes` is available in Harn mock call records.
+
+`connector_http_request` carries byte bodies through successful and failed
+responses. `redact_error_body: true` also removes bytes from failures.
+`connector_http_json` decodes explicit byte responses as UTF-8 JSON and reports
+invalid JSON for non-UTF-8 data.
+
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `harness.net.get(url, options?)` | url: string, options: dict | dict | GET request |
-| `harness.net.post(url, body, options?)` | url: string, body: string, options: dict | dict | POST request |
-| `harness.net.put(url, body, options?)` | url: string, body: string, options: dict | dict | PUT request |
-| `harness.net.patch(url, body, options?)` | url: string, body: string, options: dict | dict | PATCH request |
+| `harness.net.post(url, body, options?)` | url: string, body: string or bytes, options: dict | dict | POST request |
+| `harness.net.put(url, body, options?)` | url: string, body: string or bytes, options: dict | dict | PUT request |
+| `harness.net.patch(url, body, options?)` | url: string, body: string or bytes, options: dict | dict | PATCH request |
 | `harness.net.delete(url, options?)` | url: string, options: dict | dict | DELETE request |
 | `harness.net.request(method, url, options?)` | method: string, url: string, options: dict | dict | Generic HTTP request |
 | `harness.net.download(url, dst_path, options?)` | url: string, dst_path: string, options: dict | dict | Stream a response body to a file |
@@ -2237,7 +2277,7 @@ harness.llm.mock_clear()
 LLM provider endpoints, model aliases, inference rules, and default parameters
 are configured via a TOML file. The VM searches for config in this order:
 
-1. Built-in defaults for 44 providers, from hosted APIs (Anthropic, OpenAI,
+1. Built-in defaults for every cataloged provider, from hosted APIs (Anthropic, OpenAI,
    Gemini, Bedrock, Azure OpenAI, Vertex) to local servers (Ollama,
    llama.cpp, MLX, vLLM, TGI). See the
    [provider capability matrix](./provider-matrix.md).

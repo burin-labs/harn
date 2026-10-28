@@ -236,7 +236,7 @@ impl CodeIndexCapability {
             workspace_root,
         )? {
             Restored::Absent => Ok(false),
-            Restored::Published { needs_persist } => {
+            Restored::Published { needs_persist, .. } => {
                 if needs_persist {
                     warm::WarmCoordinator::persist_in_background(&self.warm, self.index.clone());
                 }
@@ -276,6 +276,13 @@ impl CodeIndexCapability {
         self.warm.take_and_join_builder();
         self.warm.wait_until_idle();
     }
+
+    /// True when no background warm, rebuild, restore, or snapshot write is
+    /// in flight for this capability, so a host can release it without
+    /// stranding work that later callers would otherwise join.
+    pub fn is_idle(&self) -> bool {
+        self.warm.is_idle()
+    }
 }
 
 /// What [`restore_shared`] did.
@@ -284,7 +291,11 @@ enum Restored {
     Absent,
     /// The reconciled index is live. `needs_persist` when reconciliation
     /// changed it, so the snapshot on disk is now stale.
-    Published { needs_persist: bool },
+    Published {
+        needs_persist: bool,
+        outcome: RefreshOutcome,
+        files_indexed: usize,
+    },
 }
 
 /// Body of [`CodeIndexCapability::restore_from_disk`], shared with the
@@ -338,9 +349,14 @@ fn restore_shared(
                 "code-index snapshot restored and reconciled",
             );
             let needs_persist = !outcome.is_noop() || outcome.files_touched_only > 0;
+            let files_indexed = state.files.len();
             let mut guard = index.lock().expect("code_index mutex poisoned");
             *guard = Some(state);
-            Ok(Restored::Published { needs_persist })
+            Ok(Restored::Published {
+                needs_persist,
+                outcome,
+                files_indexed,
+            })
         }
         None => Ok(Restored::Absent),
     }

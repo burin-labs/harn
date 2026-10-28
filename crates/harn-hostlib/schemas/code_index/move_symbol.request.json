@@ -31,6 +31,11 @@
       "enum": ["Function", "Type", "Field", "EnumCase", "Module"],
       "description": "Symbol-graph node kind that narrows the seed."
     },
+    "allow_visibility_widening": {
+      "type": "string",
+      "enum": ["pub(super)", "pub(crate)", "pub", "export"],
+      "description": "The widest visibility the move may add to unblock itself; omit to refuse instead (the default). Rust takes `pub(super)`, `pub(crate)` or `pub`; TypeScript/JavaScript takes `export`; Python has no levels and rejects the parameter. When the declarations that block the move need a level no wider than this, each is widened to the narrowest level that reaches the modules that use it, and `widened` lists every change. A blocker the engine cannot place exactly (a constructor or pattern of a struct with hidden fields, a `pub(in ...)` path, a decorated TypeScript declaration, a private member matched by name whose owning type the moved code does not name or whose name is shared) still refuses."
+    },
     "dry_run": {
       "type": "boolean",
       "description": "Plan and validate every edit, return them under `result: \"dry_run\"`, and write nothing. Defaults to false."

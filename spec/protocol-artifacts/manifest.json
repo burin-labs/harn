@@ -477,7 +477,7 @@
     "promptResultExtensionFields": [
       "terminal"
     ],
-    "schemaCompatibility": "agentclientprotocol/agent-client-protocol schema v0.12.2",
+    "schemaCompatibility": "agentclientprotocol/agent-client-protocol schema v1.26.0",
     "sessionUpdateVariants": [
       "user_message",
       "user_message_chunk",
@@ -950,11 +950,11 @@
       "provenance": {
         "profile_note": "The profile roots the ACP request, response, session/update notification, and Harn extension notification shapes this adapter emits or accepts.",
         "protocol": "acp",
-        "refresh_command": "curl -fsSL https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/v0.12.2/schema/schema.json",
-        "retrieved_at": "2026-05-08",
-        "upstream_source_url": "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/v0.12.2/schema/schema.json",
+        "refresh_command": "curl -fsSL https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/schema-v1.26.0/schema/v1/schema.json",
+        "retrieved_at": "2026-10-27",
+        "upstream_source_url": "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/schema-v1.26.0/schema/v1/schema.json",
         "upstream_spec_url": "https://agentclientprotocol.com/protocol/schema",
-        "upstream_version": "v0.12.2"
+        "upstream_version": "v1.26.0"
       },
       "source": "conformance/protocols/schemas/acp-session-update.schema.json"
     },

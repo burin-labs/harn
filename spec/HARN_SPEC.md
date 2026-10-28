@@ -7331,6 +7331,17 @@ from argv; quoted program text remains an argument. Literal nested shell
 payloads are expanded into their executed stages. Consumers must check the
 same `shell_io_complete` flag before treating the I/O facts as complete.
 
+For POSIX shell-mode requests, `shell_source_groups` preserves source chain
+groups and pipeline stages before
+nested-shell expansion. Each stage has decoded `source_argv` and unwrapped
+`argv`. Assignment-only stages remain present with empty `argv`; outer
+assignments on `sh -c` remain attached to that shell invocation. This lets
+policy distinguish an executable's environment from literal argument text.
+These are source facts, not expanded execution or environment values. Consumers
+must check `execution_semantics` and handle dynamic or unsupported syntax
+conservatively rather than interpreting an empty projection as a safe command.
+The field is null for argv mode and other or unknown shell dialects.
+
 ## Workspace manifest (`harn.toml`)
 
 Harn projects declare a workspace manifest at the project root named
@@ -7817,8 +7828,8 @@ The module exposes:
 | `macro_pass_at_1(rows)` | Computes the uniform-case-weighted mean pass rate over decided cases |
 | `reliability_breakdown(rows)` | Returns all-pass, flaky, all-fail, and no-decision fractions plus raw case counts |
 | `pass_caret_k(rows)` / `pass_at_k(rows)` | Computes strict pass^k over decided cases |
-| `paired_case_deltas(baseline, current)` | Pairs decided rows by case and compatible fingerprint, returning current-minus-baseline pass-rate deltas |
-| `paired_delta_report(baseline, current, resamples?, seed?)` | Reports paired bootstrap delta and `status`, where `improved` requires CI lower bound `> 0`, `regression` requires current macro below `baseline - sigma`, and all other results are `inconclusive` |
+| `paired_case_deltas(baseline, current)` | Pairs the first decided row per nonempty case name and compatible fingerprint, preserving current-arm order and returning current-minus-baseline pass-rate deltas |
+| `paired_delta_report(baseline, current, resamples?, seed?)` | Computes all statistics on that same paired cohort; `improved` requires CI lower bound `> 0`, `regression` requires current macro below `baseline - sigma`, and all other results are `inconclusive` |
 | `regression_gate(baseline, current, k?)` | Fails when current macro pass@1 is below `baseline - k * sigma` |
 | `skip_rate(rows)` / `timeout_rate(rows)` | Mean per-row skip and timeout fractions |
 | `worst_group(rows)` | Lowest macro pass@1 group |
@@ -8651,7 +8662,7 @@ The following environment variables configure runtime behavior:
 | Variable | Description |
 |---|---|
 | `HARN_LLM_PROVIDER` | Override the default LLM provider. Any configured provider is accepted. Built-in names include `anthropic` (default), `openai`, `openrouter`, `huggingface`, `ollama`, `local`, and `mock`. |
-| `HARN_LLM_TIMEOUT` | LLM request timeout in seconds. Default `120`. |
+| `HARN_LLM_TIMEOUT` | LLM request timeout in seconds. Default `120`, unless the model catalog sets `stream_timeout`. |
 | `HARN_LLM_FIRST_TOKEN_TIMEOUT` | Maximum seconds a provider stream may take to produce its first chunk. Defaults to four times `HARN_LLM_IDLE_TIMEOUT`, with a minimum of `120`. |
 | `HARN_LLM_IDLE_TIMEOUT` | Maximum seconds between provider stream chunks after streaming begins. Default `30`; `idle_timeout_ms` overrides it for an individual call. |
 | `HARN_STATE_DIR` | Override the runtime state root used for store, checkpoint, metadata, session-store, and default worktree state. Relative values resolve from the active project/runtime root. |
@@ -8720,8 +8731,6 @@ be addressed in future versions.
 - **No runtime interface enforcement**: Interface satisfaction is checked
   at compile-time only. Passing an untyped value to an interface-typed
   parameter is not caught at runtime.
-
-### Runtime
 
 ### Syntax limitations
 

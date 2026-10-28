@@ -21,7 +21,7 @@ pub(crate) enum FlowCommand {
 #[derive(Debug, Args)]
 pub(crate) struct FlowReplayAuditArgs {
     /// SQLite Flow store path.
-    #[arg(long, value_name = "PATH", default_value = ".harn/flow.sqlite")]
+    #[arg(long, value_name = "PATH", default_value = harn_vm::runtime_paths::DEFAULT_FLOW_DATABASE_PATH)]
     pub store: PathBuf,
     /// Repo root used to discover current `invariants.harn` predicates.
     #[arg(
@@ -60,7 +60,7 @@ pub(crate) enum FlowShipCommand {
 #[derive(Debug, Args)]
 pub(crate) struct FlowShipWatchArgs {
     /// SQLite Flow store path.
-    #[arg(long, value_name = "PATH", default_value = ".harn/flow.sqlite")]
+    #[arg(long, value_name = "PATH", default_value = harn_vm::runtime_paths::DEFAULT_FLOW_DATABASE_PATH)]
     pub store: PathBuf,
     /// Repo root used to discover current `invariants.harn` predicates.
     #[arg(
@@ -105,7 +105,7 @@ pub(crate) struct FlowArchivistScanArgs {
     #[arg(long, value_name = "PATH")]
     pub manifest: Option<PathBuf>,
     /// SQLite Flow store path used for shadow evaluation.
-    #[arg(long, value_name = "PATH", default_value = ".harn/flow.sqlite")]
+    #[arg(long, value_name = "PATH", default_value = harn_vm::runtime_paths::DEFAULT_FLOW_DATABASE_PATH)]
     pub store: PathBuf,
     /// Number of recent atom days to include in shadow evaluation.
     #[arg(long = "shadow-days", value_name = "DAYS", default_value_t = 30)]

@@ -255,24 +255,37 @@ pub(super) fn apply_persisted_push_config_event(
     }
 }
 
-/// Soft-deprecation observer for the legacy `a2a-version` request header.
-///
-/// A2A 0.3.0 negotiates protocol version through AgentCard discovery, not via
-/// request headers. We no longer reject requests carrying `a2a-version`; we
-/// just log a warning so we can spot residual client usage during the
-/// deprecation window. Slated for full removal one minor cycle after v0.7.x.
-pub(super) fn log_legacy_version_header(headers: &HeaderMap) {
-    if let Some(version) = headers
-        .get(A2A_VERSION_HEADER)
-        .and_then(|value| value.to_str().ok())
-    {
-        tracing::warn!(
-            target: "harn_serve::a2a",
-            requested_version = %version,
-            supported_version = %A2A_PROTOCOL_VERSION,
-            "a2a-version request header is deprecated; clients should negotiate via AgentCard discovery"
-        );
+pub(super) fn supported_wire_version() -> &'static str {
+    A2A_PROTOCOL_VERSION
+        .rsplit_once('.')
+        .map_or(A2A_PROTOCOL_VERSION, |(version, _)| version)
+}
+
+pub(super) fn accepts_version_header(headers: &HeaderMap) -> bool {
+    let all_values = headers.get_all(A2A_VERSION_HEADER);
+    let mut values = all_values.iter();
+    let Some(value) = values.next() else {
+        return true;
+    };
+    if values.next().is_some() {
+        return false;
     }
+    let Ok(value) = value.to_str() else {
+        return false;
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return true;
+    }
+    let parts: Vec<_> = value.split('.').collect();
+    if !(2..=3).contains(&parts.len())
+        || parts
+            .iter()
+            .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return false;
+    }
+    format!("{}.{}", parts[0], parts[1]) == supported_wire_version()
 }
 
 pub(super) fn return_immediately(params: &JsonValue) -> bool {

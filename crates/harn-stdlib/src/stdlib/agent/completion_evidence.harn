@@ -1,6 +1,7 @@
 import { CompletionClaim } from "std/agent/completion_claim"
 // std/agent/completion_evidence — typed, bounded terminal evidence contracts.
 import { CompletionRequirementEvidenceRecord } from "std/agent/completion_requirements"
+import { AgentCompletionSignal } from "std/agent/completion_signal"
 import { CompletionVerificationState } from "std/agent/judge_internals"
 import { CompletionObligations } from "std/agent/obligations"
 import {
@@ -177,6 +178,7 @@ pub type CompletionEvidenceSnapshot = {
   visible_text: string,
   last_text: string,
   raw_text: string,
+  completion_signal: AgentCompletionSignal,
   transcript: string,
   judge_evidence: string,
   judge_evidence_packet: CompletionEvidencePacket,

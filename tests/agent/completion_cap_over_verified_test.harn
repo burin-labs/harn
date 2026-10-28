@@ -57,6 +57,7 @@ fn __always_refuses() -> dict {
       {
         verdict: "continue",
         detail: "Not yet convinced the work is finished.",
+        goal_assessment: {kind: "unknown", evidence_refs: []},
         gap_class: "unmet_manner_clause",
       },
     ),

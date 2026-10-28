@@ -13,6 +13,92 @@ impl Drop for Cleanup {
     }
 }
 
+#[test]
+fn completion_rejects_project_invented_no_training_fact() {
+    struct ClearCatalog;
+    impl Drop for ClearCatalog {
+        fn drop(&mut self) {
+            crate::llm_config::clear_runtime_catalog_overlay();
+        }
+    }
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let _cleanup = Cleanup;
+    let _catalog = ClearCatalog;
+    let requests = Arc::new(AtomicUsize::new(0));
+    let seen = requests.clone();
+    let server = spawn_llm_stub_many("completion privacy authority", 2, move |_, stream| {
+        read_http_request(stream);
+        seen.fetch_add(1, Ordering::SeqCst);
+        let response = r#"{"choices":[{"text":"accepted","finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}"#;
+        write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{response}", response.len()).unwrap();
+    });
+    let mut provider = crate::llm_config::provider_config("openai").unwrap();
+    provider.base_url = format!("http://{}/v1", server.addr());
+    provider.base_url_env = None;
+    provider.completion_endpoint = Some("/completions".into());
+    provider.data_controls.as_mut().unwrap().training_default =
+        crate::llm_config::TrainingDefault::DoesNotTrain;
+    let mut host = crate::llm_config::ProvidersConfig::default();
+    host.providers.insert("openai".into(), provider.clone());
+    crate::llm_config::set_runtime_catalog_overlay(Some(host));
+    let mut opts = base_opts("openai");
+    opts.model = "gpt-5.6-luna".into();
+    opts.api_key = "synthetic".into();
+    opts.stream = false;
+    opts.inference_boundary = Some(crate::llm::api::InferenceBoundary {
+        reach: crate::llm::api::InferenceReach::AnyHosted,
+        allow_training_discounts: false,
+    });
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    assert_eq!(
+        runtime
+            .block_on(vm_call_completion_full(&opts, "prefix", None))
+            .unwrap()
+            .text,
+        "accepted"
+    );
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        1,
+        "trusted route reached the listener"
+    );
+    let mut overridden = opts.clone();
+    overridden.provider_overrides = Some(serde_json::json!({"model": "project-overridden-model"}));
+    assert!(
+        runtime
+            .block_on(vm_call_completion_full(&overridden, "prefix", None))
+            .is_err(),
+        "completion cannot replace its admitted model"
+    );
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        1,
+        "model override sent no completion request"
+    );
+    provider.data_controls.as_mut().unwrap().training_default =
+        crate::llm_config::TrainingDefault::Unspecified;
+    let mut host = crate::llm_config::ProvidersConfig::default();
+    host.providers.insert("openai".into(), provider.clone());
+    crate::llm_config::set_runtime_catalog_overlay(Some(host));
+    provider.data_controls.as_mut().unwrap().training_default =
+        crate::llm_config::TrainingDefault::DoesNotTrain;
+    let mut project = crate::llm_config::ProvidersConfig::default();
+    project.providers.insert("openai".into(), provider);
+    crate::llm_config::set_user_overrides(Some(project));
+    assert!(runtime
+        .block_on(vm_call_completion_full(&opts, "prefix", None))
+        .is_err());
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        1,
+        "forged fact sent no completion request"
+    );
+}
+
 fn assert_completion_fixture(endpoint: Option<&str>) {
     let _env = env_guard();
     let _transport = allow_stubbed_llm_transport();

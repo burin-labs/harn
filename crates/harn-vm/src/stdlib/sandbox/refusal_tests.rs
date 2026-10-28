@@ -9,7 +9,8 @@
 
 use super::unavailable;
 use super::{
-    SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable, SandboxRequirement,
+    HostProtectionGap, SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
+    SandboxRequirement,
 };
 use crate::orchestration::SandboxProfile;
 use crate::value::{ErrorCategory, VmValue};
@@ -254,4 +255,38 @@ mod mechanism {
         assert_eq!(refusal.mechanism, ProcessSandboxMechanism::Unknown);
         assert!(refusal.reason.is_empty());
     }
+}
+
+/// A present `sandbox-exec` on a host that fails the environment-protection
+/// prerequisite must say which prerequisite, not that the binary is missing.
+#[test]
+fn host_protection_refusal_names_the_unmet_prerequisite() {
+    let refusal = SandboxMechanismUnavailable::host_protection_unavailable(
+        SandboxMechanism::MacosSandboxExec,
+        HostProtectionGap::UnrestrictedDtrace,
+        SandboxProfile::OsHardened,
+    );
+    let message = refusal.to_string();
+    assert!(
+        !message.contains("is not available on this host"),
+        "a present mechanism must not read as absent: {message}"
+    );
+    assert!(
+        message.contains("System Integrity Protection allows unrestricted DTrace"),
+        "{message}"
+    );
+    let VmValue::Dict(dict) = refusal.thrown_value() else {
+        panic!("a caught sandbox refusal must be a dict");
+    };
+    let Some(VmValue::Dict(cause)) = dict.get("sandbox_mechanism") else {
+        panic!("a caught sandbox refusal must carry its typed cause");
+    };
+    let cause_string = |key: &str| match cause.get(key) {
+        Some(VmValue::String(value)) => value.to_string(),
+        other => panic!("{key} must be a string, got {other:?}"),
+    };
+    assert_eq!(cause_string("availability"), "host_protection_unavailable");
+    assert_eq!(cause_string("host_protection_gap"), "unrestricted_dtrace");
+    let wire = serde_json::to_value(&refusal).expect("refusal serializes");
+    assert_eq!(wire["host_protection_gap"], "unrestricted_dtrace");
 }

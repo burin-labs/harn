@@ -414,7 +414,7 @@ fn schema_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 fn json_decode_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 2, "json_decode")?;
     match json_parse_impl(&args[..1], out) {
-        Ok(parsed) => Ok(schema::schema_result_value(&parsed, &args[1], true)),
+        Ok(parsed) => Ok(schema::schema_decode_json_value(&parsed, &args[1], true)),
         Err(VmError::Thrown(thrown)) => {
             let message = match &thrown {
                 VmValue::Dict(dict) => dict

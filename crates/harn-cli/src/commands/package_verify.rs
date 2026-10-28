@@ -51,9 +51,9 @@ pub(crate) fn handle_package_test_inventory(args: PackageTestInventoryArgs) -> R
             inventory.selected_file_count, inventory.discovered_test_count
         );
     } else {
-        eprintln!("Package test discovery failed:");
+        cli_diagnostic!("Package test discovery failed:");
         for problem in &problems {
-            eprintln!("- {problem}");
+            cli_diagnostic!("- {problem}");
         }
     }
     if let Some(path) = args.receipt_out.as_deref() {
@@ -1352,7 +1352,7 @@ pub(crate) fn print_connector_report(report: &ConnectorCheckReport) {
         );
     }
     for warning in &report.warnings {
-        eprintln!("warning: {warning}");
+        cli_diagnostic!("warning: {warning}");
     }
 }
 

@@ -370,6 +370,14 @@ pub(crate) fn effective_config() -> Arc<ProvidersConfig> {
     })
 }
 
+/// Host and verified catalog facts exclude package-scoped routing overrides.
+pub(crate) fn trusted_policy_config() -> Arc<ProvidersConfig> {
+    let runtime_overlay = runtime_catalog_overlay()
+        .read()
+        .expect("runtime catalog overlay poisoned");
+    effective_config_snapshot(load_config_snapshot(), runtime_overlay.as_ref(), None)
+}
+
 fn effective_config_snapshot(
     base: &Arc<ProvidersConfig>,
     runtime_overlay: Option<&ProvidersConfig>,

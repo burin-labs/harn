@@ -246,6 +246,20 @@ publication.
 Read the failing job before choosing a retry. Keep the commit, run ID, and
 candidate manifest attached to the release record.
 
+Transient observer read failures retry against the same consumer run within
+its original budget. Credential renewal keeps the run, start time, deadline,
+and any server-requested backoff. The `consumer-observer-checkpoint-<attempt>-<source>`
+artifact records the last observation and next action. Unknown timing is
+`null`; a checkpoint never supplies a product verdict or publication permission.
+After an observer fails, cleanup preserves a live child unless the parent was
+explicitly cancelled or a fresh authenticated job census proves a timeout.
+An unreadable census refuses cancellation and reports pending or refused work.
+The same cleanup workflow revisits live children every fifteen minutes, so work
+preserved by a completion listener is checked again after its deadline. A
+scheduled run discovers live children first, then authenticates their original
+receipts and parent attempts through the same cancellation gate. Scheduling can
+be delayed by GitHub; it does not extend a release's observation budget.
+
 Promotion reports a stuck release on its own. When main's stable version is
 still unpublished four hours after its version commit, every later promotion
 run fails and one `[Release] vX.Y.Z is unpublished on main` issue opens. Close
@@ -313,6 +327,21 @@ second release controller. Retired Fleet launchers and candidate-build input
 tuples aren't recovery entry points for these workflows.
 
 ## Check downstream convergence
+
+For standalone Harn publication, dispatch the existing promoter with
+`candidate_run_id`, `candidate_sha`, and `standalone_harn=true`. This explicit
+manual mode requires the same exact-source full-suite CI, native qualification,
+successful build/smoke/audit stages, retained archives, signatures and
+attestations. It independently authenticates the original producing attempt
+and manifest ID/digest before verification and again before publication.
+Missing, failed, expired or mismatched Harn proof refuses publication.
+
+Standalone publication does not dispatch a consumer repair or consumer repins,
+and cannot combine with either consumer recovery selector. It creates the
+normal stable tag and latest GitHub release, which start crate publication;
+the existing container and development-bump jobs also follow publication.
+It does not claim consumer compatibility or adoption. Record and complete those
+separate obligations through the owning consumer workflows.
 
 Promotion's `repin` job dispatches the registered consumers' own update
 workflows. For the fleet-owned bump adapters that is one dispatch: the

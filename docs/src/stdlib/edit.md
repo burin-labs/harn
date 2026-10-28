@@ -340,8 +340,8 @@ The explicit `HarnessAst` argument owns the structural read/write operation
 | `result` | When |
 |---|---|
 | `applied` | The splice landed; the file is updated unless `dry_run`. |
-| `no_match` | The query produced zero anchors. |
-| `ambiguous` | The query matched more than one node; tighten with a `(#eq? @name "…")` predicate. |
+| `no_match` | The query produced zero anchors. `candidates` lists every container (impl, trait, class, interface, ...) in the file as `{path, line, kind, name}` to aim a retry at. |
+| `ambiguous` | The query matched more than one node; tighten with a `(#eq? @name "…")` predicate. `candidates` lists the container around each match. |
 | `invalid_query` | Tree-sitter rejected the query string. |
 | `invalid_anchor` | The anchor cannot host the requested position (e.g. `first_child` on a leaf node). |
 | `unsupported_language` | The file extension did not resolve to a tree-sitter grammar. |
@@ -1133,7 +1133,7 @@ All require the `tools:deterministic` capability.
 | `edit_reorder_parameters` | `symbol_ref`, `order` (permutation of param indices) | rust, python, ts/tsx |
 | `edit_change_return_type` | `path`, `symbol`, `new_type` | rust, python, ts/tsx, go |
 | `edit_inline` | `path`, `symbol` (zero-param, single-`return` body) | rust, python, ts/tsx, js/jsx, go |
-| `edit_move_decl` | `code_index` first; `path`, `symbol`, `to_path` (or `target_file`), `dry_run?` | rust, python, ts/tsx, js/jsx (returns `code_index.move_symbol`'s tagged result) |
+| `edit_move_decl` | `code_index` first; `path`, `symbol`, `to_path` (or `target_file`), `dry_run?`, `allow_visibility_widening?` | rust, python, ts/tsx, js/jsx (returns `code_index.move_symbol`'s tagged result) |
 
 The three parameter refactorings take `harness.code_index` instead of the
 `fs`/`random`/`ast` handles: they are thin wrappers over

@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  attestations: read
 
 jobs:
   install:
@@ -20,13 +21,14 @@ jobs:
       - name: Verify the stage-zero seed boundary
         run: sh scripts/tests/bootstrap_harn_seed_test.sh
       - name: Run deterministic setup-action tests
-        # The pinned bootstrap release predates positional multi-target tests.
-        run: sh scripts/bootstrap-harn.sh --seed-command test --test-path scripts/tests/runtime_install_test.harn
+        run: sh scripts/bootstrap-harn.sh --seed-command test scripts/tests/runtime_install_test.harn
       - name: Install a published Harn release
         id: harn
         uses: ./.github/actions/setup-harn
         with:
-          version: 0.10.28
+          # Keep the XZ target independent of the seed pin: reverting to a
+          # gzip-only seed must fail this real installation.
+          version: 0.10.180
           max-attempts: "3"
           retry-delay-seconds: "1"
       - name: Verify installed release and receipt outputs
@@ -38,10 +40,144 @@ jobs:
           HARN_RECEIPT: ${{ steps.harn.outputs.receipt }}
         run: |
           set -euo pipefail
-          test "$HARN_VERSION" = "0.10.28"
+          test "$HARN_VERSION" = "0.10.180"
           [[ "$HARN_CHECKSUM" =~ ^[0-9a-f]{64}$ ]]
           test -x "$HARN_PATH" || [[ "$RUNNER_OS" = "Windows" && -f "$HARN_PATH" ]]
           "$HARN_PATH" run -e 'const r = json_parse(harness.env.get("HARN_RECEIPT")); require r.schema_version == "harn-bootstrap-v1" && r.binary_path == harness.env.get("HARN_PATH"), "invalid setup receipt"'
           harn --version
           harn-lsp --version
           harn-dap --version
+
+      - name: Install the published registry orchestration runtime
+        if: runner.os == 'Linux'
+        id: published-runtime
+        timeout-minutes: 10
+        uses: burin-labs/harn/.github/actions/setup-harn@389a3aeb579e70d73999d7af6eac7b22a30c7808
+        with:
+          version: 0.10.180
+          cache-dir: ${{ runner.temp }}/published-runtime-cache
+          install-dir: ${{ runner.temp }}/published-runtime-bin
+
+      - name: Verify actual published runtime provenance
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUNTIME_RECEIPT: ${{ steps.published-runtime.outputs.receipt }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin refs/tags/v0.10.180:refs/tags/v0.10.180
+          printf '%s\n' "$RUNTIME_RECEIPT" > "$RUNNER_TEMP/published-runtime-receipt.json"
+          bash scripts/verify_published_harn_runtime.sh \
+            "$RUNNER_TEMP/published-runtime-receipt.json" "$RUNNER_TEMP/published-runtime-cache" \
+            36b0c000132756a91c7c11f1533d97d9db9ea2db 0.10.180
+
+      - name: Exercise release workflow environments through the pinned bootstrap
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        shell: bash
+        env:
+          RUNTIME_PATH: ${{ steps.published-runtime.outputs.path }}
+          RUNTIME_VERSION: ${{ steps.published-runtime.outputs.version }}
+        run: |
+          # Match bootstrap-harn.sh's existing installer execution profile.
+          "$RUNTIME_PATH" run --standalone --no-sandbox \
+            scripts/verify_release_runtime_environment.harn -- "$RUNTIME_VERSION"
+
+      - name: Plan the frozen published workspace with the actual registry runtime
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        shell: bash
+        env:
+          RUNTIME_PATH: ${{ steps.published-runtime.outputs.path }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse 'v0.10.180^{commit}')" = 36b0c000132756a91c7c11f1533d97d9db9ea2db
+          source_root=$(mktemp -d "$RUNNER_TEMP/publish-plan-source.XXXXXX")
+          git archive v0.10.180 -- Cargo.toml Cargo.lock rust-toolchain.toml crates tree-sitter-harn bench |
+            tar -x -C "$source_root"
+          (cd "$source_root" && cargo metadata --format-version 1 --no-deps --locked --offline) > "$RUNNER_TEMP/publish-plan-metadata.json"
+          "$RUNTIME_PATH" test scripts/tests/publish_plan_test.harn
+          "$RUNTIME_PATH" test scripts/tests/publish_recovery_test.harn
+          git fetch --no-tags origin b1a459fa820e620787b87846c685d6eb29405564
+          refusal_baseline=$(mktemp -d "$RUNNER_TEMP/publish-refusal-baseline.XXXXXX")
+          mkdir "$refusal_baseline/tests"
+          git show b1a459fa820e620787b87846c685d6eb29405564:scripts/publish.harn > "$refusal_baseline/publish.harn"
+          git show b1a459fa820e620787b87846c685d6eb29405564:scripts/publish_plan.harn > "$refusal_baseline/publish_plan.harn"
+          cp scripts/tests/publish_recovery_test.harn "$refusal_baseline/tests/"
+          if "$RUNTIME_PATH" test "$refusal_baseline/tests/publish_recovery_test.harn" \
+            --filter test_publish_recovery_refuses_registry_read_error_before_writes \
+            --json-out "$refusal_baseline/result.json"; then
+            echo "error: original publisher did not reproduce the read-refusal failure" >&2
+            exit 1
+          fi
+          "$RUNTIME_PATH" run --standalone --no-sandbox -e '
+            const report = json_parse(harness.fs.read_text(argv[0]));
+            require report.summary.total == 1 && report.summary.failed == 1
+              && report.summary.skipped == 0 && report.summary.timed_out == 0,
+              "baseline did not execute exactly one failing refusal control";
+            const failure = report.cases[0];
+            require failure.name == "test_publish_recovery_refuses_registry_read_error_before_writes"
+              && failure.outcome == "failed" && failure.message.contains("expected  0")
+              && failure.message.contains("actual    1"),
+              "baseline did not reproduce the unexpected publish callback";
+          ' -- "$refusal_baseline/result.json"
+          git fetch --no-tags origin 6ea6aeb00549a195e159a0cdb72f8124523a43a8
+          git show 6ea6aeb00549a195e159a0cdb72f8124523a43a8:scripts/publish.harn > "$refusal_baseline/publish.harn"
+          git show 6ea6aeb00549a195e159a0cdb72f8124523a43a8:scripts/publish_plan.harn > "$refusal_baseline/publish_plan.harn"
+          if "$RUNTIME_PATH" test "$refusal_baseline/tests/publish_recovery_test.harn" \
+            --filter test_publish_recovery_does_not_reconcile_away_a_permanent_publish_refusal \
+            --json-out "$refusal_baseline/mixed-result.json"; then
+            echo "error: original publisher did not reproduce the mixed-diagnostic refusal failure" >&2
+            exit 1
+          fi
+          "$RUNTIME_PATH" run --standalone --no-sandbox -e '
+            const report = json_parse(harness.fs.read_text(argv[0]));
+            require report.summary.total == 1 && report.summary.failed == 1
+              && report.summary.skipped == 0 && report.summary.timed_out == 0,
+              "baseline did not execute exactly one failing mixed-diagnostic control";
+            const failure = report.cases[0];
+            require failure.name == "test_publish_recovery_does_not_reconcile_away_a_permanent_publish_refusal"
+              && failure.outcome == "failed" && failure.message.contains("assert(!receipt.ok)"),
+              "baseline did not reproduce the false publication-success assertion";
+          ' -- "$refusal_baseline/mixed-result.json"
+          baseline=$(mktemp -d "$RUNNER_TEMP/publish-plan-baseline.XXXXXX")
+          git show v0.10.180:scripts/publish_plan.harn > "$baseline/publish_plan.harn"
+          cp scripts/verify_publish_workspace_plan.harn "$baseline/"
+          cp scripts/publish_manifest.harn "$baseline/"
+          cp scripts/publish.harn "$baseline/"
+          if "$RUNTIME_PATH" run --standalone --no-sandbox "$baseline/verify_publish_workspace_plan.harn" -- \
+            "$RUNNER_TEMP/publish-plan-metadata.json" 0.10.180 > "$baseline/result.log" 2>&1; then
+            echo "error: original planner did not reproduce the frozen workspace failure" >&2
+            exit 1
+          fi
+          grep -F 'workspace publish dependency cycle includes: harn-builtins' "$baseline/result.log"
+          git fetch --no-tags origin 90d82dfdffa6dcfd0964485b65c50abd0e7ab5c9
+          git show 90d82dfdffa6dcfd0964485b65c50abd0e7ab5c9:scripts/publish_plan.harn > "$baseline/publish_plan.harn"
+          if "$RUNTIME_PATH" run --standalone --no-sandbox "$baseline/verify_publish_workspace_plan.harn" -- \
+            "$RUNNER_TEMP/publish-plan-metadata.json" 0.10.180 > "$baseline/versioned-dev.log" 2>&1; then
+            echo "error: blanket dev exclusion did not reproduce the frozen package ordering failure" >&2
+            exit 1
+          fi
+          grep -F 'frozen Cargo package requires builtin-registry before builtin-macros' "$baseline/versioned-dev.log"
+          git fetch --no-tags origin 6e95f471786c28ade33a191ee7dea1e4fcb6e187
+          old_policy=$(mktemp -d "$RUNNER_TEMP/publish-stage-old-policy.XXXXXX")
+          git archive 6e95f471786c28ade33a191ee7dea1e4fcb6e187 -- \
+            scripts .markdownlint.jsonc .markdownlintignore package.json package-lock.json |
+            tar -x -C "$old_policy"
+          old_tools="$RUNNER_TEMP/publish-stage-old-tools"
+          bash "$old_policy/scripts/stage_release_tools.sh" "$old_tools"
+          if (cd "$source_root" && HARN_BIN="$RUNTIME_PATH" bash "$old_tools/publish.sh" --help) > "$RUNNER_TEMP/old-stage.log" 2>&1; then
+            echo "error: old staging did not reproduce the missing publisher module" >&2
+            exit 1
+          fi
+          grep -F "error[HARN-MOD-001]: unresolved import './publish_manifest.harn'" "$RUNNER_TEMP/old-stage.log"
+          staged_tools="$RUNNER_TEMP/publish-plan-staged-tools"
+          bash scripts/stage_release_tools.sh "$staged_tools"
+          cp scripts/verify_publish_workspace_plan.harn "$staged_tools/"
+          (cd "$source_root" && HARN_BIN="$RUNTIME_PATH" bash "$staged_tools/publish.sh" --help) > "$RUNNER_TEMP/staged-publisher-help.log"
+          grep -F 'usage: harn run --no-sandbox scripts/publish.harn' "$RUNNER_TEMP/staged-publisher-help.log"
+          (cd "$source_root" && "$RUNTIME_PATH" run --standalone --no-sandbox "$staged_tools/verify_publish_workspace_plan.harn" -- \
+            "$RUNNER_TEMP/publish-plan-metadata.json" 0.10.180)

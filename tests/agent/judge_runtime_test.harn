@@ -465,7 +465,15 @@ pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(
         tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "WRITE_ARG_MARKER"}}],
       },
       llm_done(),
-      {text: "{\"verdict\":\"done\",\"detail\":\"The write and verification are sufficient.\"}"},
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The write and verification are sufficient.",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      },
     ],
     { ->
       const session = "judge-projection-prompt-" + harness.random.uuid()
@@ -615,6 +623,7 @@ pipeline test_completion_judge_transports_veto_and_repair_from_compact_packet(
             verdict: "continue",
             detail:
               "Deletion behavior is not exercised; replace the hollow negative with a behavior-sensitive test.",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
           },
         ),
       },
@@ -742,8 +751,16 @@ pipeline test_completion_judge_refuses_when_terminal_reserve_exhausts_deadline(
 
 pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, task: unknown) {
   const judge_response = {
-    text:
-      "```json\n{\"verdict\":\"continue\",\"detail\":\"Run `harn test tests/agent/judge_runtime_test.harn` now because verification is missing.\"}\n```",
+    text: "```json\n"
+      + json_stringify(
+        {
+          verdict: "continue",
+          detail:
+            "Run `harn test tests/agent/judge_runtime_test.harn` now because verification is missing.",
+          goal_assessment: {kind: "unknown", evidence_refs: []},
+        },
+      )
+      + "\n```",
   }
   with_llm_script(
     harness.llm,
@@ -784,7 +801,14 @@ pipeline test_completion_judge_accepts_then_clamps_overlong_detail(
   assert(len(detail) > 1000)
   with_llm_script(
     harness.llm,
-    [llm_done(), {text: json_stringify({verdict: "done", detail: detail})}],
+    [
+      llm_done(),
+      {
+        text: json_stringify(
+          {verdict: "done", detail: detail, goal_assessment: {kind: "unknown", evidence_refs: []}},
+        ),
+      },
+    ],
     { ->
       const session = "judge-overlong-detail-" + harness.random.uuid()
       const opts: AgentSpec = {
@@ -1213,7 +1237,15 @@ pipeline test_a_polled_background_verifier_reaches_the_judge_as_verification(
             tool_calls: [{id: "poll-1", name: "poll_command", arguments: {handle_id: "bg-1"}}],
           },
           llm_done(),
-          {text: json_stringify({verdict: "done", detail: "The suite passed under the handle."})},
+          {
+            text: json_stringify(
+              {
+                verdict: "done",
+                detail: "The suite passed under the handle.",
+                goal_assessment: {kind: "unknown", evidence_refs: []},
+              },
+            ),
+          },
         ],
         { ->
           const session = "judge-async-verify-" + harness.random.uuid()

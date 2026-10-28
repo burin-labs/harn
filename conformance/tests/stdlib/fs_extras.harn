@@ -8,6 +8,7 @@ pipeline test(harness: Harness, task: unknown) {
   harness.fs.write_text(path_join(root, "a.txt"), "alpha\nbeta\ngamma\n")
   harness.fs.write_text(path_join(root, "b.txt"), "one\ntwo\n")
   harness.fs.write_text(path_join(root, "sub", "c.md"), "deeper\n")
+  harness.fs.write_text(path_join(root, "sub", "d.txt"), "nested\n")
   // read_lines splits without the trailing empty line
   const lines = harness.fs.read_lines(path_join(root, "a.txt"))
   harness.stdio.log(len(lines))
@@ -17,15 +18,17 @@ pipeline test(harness: Harness, task: unknown) {
   harness.fs.rename(path_join(root, "b.txt"), path_join(root, "renamed.txt"))
   harness.stdio.log(harness.fs.exists(path_join(root, "b.txt")))
   harness.stdio.log(harness.fs.exists(path_join(root, "renamed.txt")))
-  // glob "*.txt" only finds top-level .txt files (a.txt and renamed.txt)
+  // `*` stays within one segment: "*.txt" finds a.txt and renamed.txt only
   const txts = harness.fs.glob("*.txt", root)
   harness.stdio.log(len(txts))
+  // `**` crosses segments and also finds sub/d.txt
+  harness.stdio.log(len(harness.fs.glob("**/*.txt", root)))
   // glob "**/*.md" finds the nested md
   const mds = harness.fs.glob("**/*.md", root)
   harness.stdio.log(len(mds))
   // walk_dir returns dicts with path/is_dir/depth
   const walked = harness.fs.walk(root)
-  // 1 root dir + a.txt + renamed.txt + sub dir + sub/c.md = 5 entries
+  // 1 root dir + a.txt + renamed.txt + sub dir + sub/c.md + sub/d.txt = 6 entries
   harness.stdio.log(len(walked))
   harness.fs.delete(root)
 }

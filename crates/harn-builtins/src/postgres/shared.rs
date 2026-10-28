@@ -57,6 +57,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use sha2::{Digest, Sha256};
 
+use harn_vm_core::value::recursion::guard_recursion;
 use harn_vm_core::value::VmValue;
 
 use super::PoolRecord;
@@ -80,7 +81,7 @@ impl PoolKey {
     /// even when the options dict is identical, so the two never alias.
     ///
     /// The options dict is folded into the key in a canonical, order-independent
-    /// way (sorted keys; values stringified). This is intentionally a superset
+    /// way (sorted keys and type-tagged values). This is intentionally a superset
     /// of the options `build_pool` actually consults: hashing *every* provided
     /// option is conservatively safe (it can only ever cause two calls that
     /// differ in some exotic/no-op option to NOT share — never the reverse), and
@@ -91,11 +92,11 @@ impl PoolKey {
         replica_urls: &[String],
         options: Option<&harn_vm_core::value::DictMap>,
         single_connection: bool,
-    ) -> Self {
+    ) -> Option<Self> {
         let mut hasher = Sha256::new();
         // Domain separator + version, so the key scheme can evolve without
         // silently colliding with a future variant.
-        hasher.update(b"harn-pg-shared-pool-key\x01");
+        hasher.update(b"harn-pg-shared-pool-key\x02");
         hasher.update(b"single_connection:");
         hasher.update([u8::from(single_connection)]);
         hasher.update(b"\x00primary:");
@@ -107,22 +108,11 @@ impl PoolKey {
         }
         hasher.update(b"\x00options:");
         if let Some(options) = options {
-            // BTreeMap iterates in sorted key order already, but be explicit:
-            // collect into a BTreeMap of canonical (key -> display) so the
-            // serialization is deterministic regardless of insertion order.
-            let canonical: BTreeMap<&str, String> = options
-                .iter()
-                .map(|(key, value)| (key.as_str(), canonical_option_value(value)))
-                .collect();
-            hasher.update((canonical.len() as u64).to_le_bytes());
-            for (key, value) in canonical {
-                hash_len_prefixed(&mut hasher, key.as_bytes());
-                hash_len_prefixed(&mut hasher, value.as_bytes());
-            }
+            hash_option_dict(&mut hasher, options)?;
         } else {
             hasher.update(0u64.to_le_bytes());
         }
-        PoolKey(hex::encode(hasher.finalize()))
+        Some(PoolKey(hex::encode(hasher.finalize())))
     }
 }
 
@@ -133,41 +123,65 @@ fn hash_len_prefixed(hasher: &mut Sha256, bytes: &[u8]) {
     hasher.update(bytes);
 }
 
-/// Canonical, deterministic stringification of an option value for the key.
-///
-/// Nested lists/dicts (e.g. `replicas`, `circuit_breaker`) are recursively
-/// serialized so two structurally-identical option dicts produce the same key
-/// and two different ones do not.
-fn canonical_option_value(value: &VmValue) -> String {
+fn hash_option_dict(hasher: &mut Sha256, dict: &harn_vm_core::value::DictMap) -> Option<()> {
+    let sorted: BTreeMap<&str, &VmValue> = dict.iter().map(|(k, v)| (k.as_str(), v)).collect();
+    hasher.update((sorted.len() as u64).to_le_bytes());
+    for (key, value) in sorted {
+        hash_len_prefixed(hasher, key.as_bytes());
+        hash_option_value(hasher, value)?;
+    }
+    Some(())
+}
+
+// Opaque values cannot be compared safely by their display text. Leave those
+// pools unshared instead of risking reuse with a different configuration.
+fn hash_option_value(hasher: &mut Sha256, value: &VmValue) -> Option<()> {
     match value {
+        VmValue::Int(value) => {
+            hasher.update([0]);
+            hasher.update(value.to_le_bytes());
+        }
+        VmValue::Float(value) => {
+            hasher.update([1]);
+            hasher.update(value.to_bits().to_le_bytes());
+        }
+        VmValue::Decimal(value) => {
+            hasher.update([2]);
+            hash_len_prefixed(hasher, value.to_string().as_bytes());
+        }
+        VmValue::String(value) => {
+            hasher.update([3]);
+            hash_len_prefixed(hasher, value.as_str().as_bytes());
+        }
+        VmValue::Bytes(value) => {
+            hasher.update([4]);
+            hash_len_prefixed(hasher, value.as_slice());
+        }
+        VmValue::Bool(value) => {
+            hasher.update([5, u8::from(*value)]);
+        }
+        VmValue::Nil => hasher.update([6]),
         VmValue::List(items) => {
-            let mut out = String::from("[");
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
+            hasher.update([7]);
+            hasher.update((items.len() as u64).to_le_bytes());
+            guard_recursion(|| {
+                for item in items.iter() {
+                    hash_option_value(hasher, item)?;
                 }
-                out.push_str(&canonical_option_value(item));
-            }
-            out.push(']');
-            out
+                Some(())
+            })?;
         }
         VmValue::Dict(dict) => {
-            // Sort keys for order-independence.
-            let sorted: BTreeMap<&harn_vm_core::value::HarnStr, &VmValue> = dict.iter().collect();
-            let mut out = String::from("{");
-            for (i, (key, val)) in sorted.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                out.push_str(key.as_str());
-                out.push('=');
-                out.push_str(&canonical_option_value(val));
-            }
-            out.push('}');
-            out
+            hasher.update([8]);
+            guard_recursion(|| hash_option_dict(hasher, dict))?;
         }
-        other => other.display(),
+        VmValue::Duration(value) => {
+            hasher.update([9]);
+            hasher.update(value.to_le_bytes());
+        }
+        _ => return None,
     }
+    Some(())
 }
 
 type SharedRegistry = Mutex<HashMap<PoolKey, Arc<PoolRecord>>>;
@@ -307,6 +321,7 @@ mod tests {
             ("application_name", s("svc")),
             ("max_connections", VmValue::Int(5)),
         ]);
+        assert!(PoolKey::new(URL_A, &[], Some(&o1), false).is_some());
         assert_eq!(
             PoolKey::new(URL_A, &[], Some(&o1), false),
             PoolKey::new(URL_A, &[], Some(&o2), false)
@@ -323,6 +338,33 @@ mod tests {
             PoolKey::new(URL_A, &[], Some(&o1), false),
             PoolKey::new(URL_A, &[], Some(&o2), false)
         );
+    }
+
+    #[test]
+    fn pool_key_distinguishes_option_value_types() {
+        let number = opts(&[("max_connections", VmValue::Int(2))]);
+        let text = opts(&[("max_connections", s("2"))]);
+        assert_ne!(
+            PoolKey::new(URL_A, &[], Some(&number), false),
+            PoolKey::new(URL_A, &[], Some(&text), false)
+        );
+    }
+
+    #[test]
+    fn pool_key_distinguishes_nested_option_shapes() {
+        let single = opts(&[("extra", VmValue::list(vec![s("a,b")]))]);
+        let pair = opts(&[("extra", VmValue::list(vec![s("a"), s("b")]))]);
+        assert_ne!(
+            PoolKey::new(URL_A, &[], Some(&single), false),
+            PoolKey::new(URL_A, &[], Some(&pair), false)
+        );
+    }
+
+    #[test]
+    fn opaque_nested_options_are_not_shared() {
+        let opaque = VmValue::list(vec![VmValue::task_handle("task")]);
+        let options = opts(&[("extra", opaque)]);
+        assert!(PoolKey::new(URL_A, &[], Some(&options), false).is_none());
     }
 
     /// A differing application_name yields a different key.
@@ -367,7 +409,7 @@ mod tests {
     /// The key never retains the plaintext password (it is a SHA-256 hex digest).
     #[test]
     fn key_does_not_leak_plaintext_credentials() {
-        let key = PoolKey::new(URL_A_DIFF_PW, &[], None, false);
+        let key = PoolKey::new(URL_A_DIFF_PW, &[], None, false).unwrap();
         assert!(!key.0.contains("HUNTER2"));
         assert_eq!(key.0.len(), 64); // 32-byte SHA-256, hex-encoded.
         assert!(key.0.chars().all(|c| c.is_ascii_hexdigit()));
@@ -387,7 +429,8 @@ mod tests {
             &[],
             None,
             true,
-        );
+        )
+        .unwrap();
         assert!(get(&key).is_none());
     }
 }

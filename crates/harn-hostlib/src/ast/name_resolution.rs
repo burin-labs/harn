@@ -22,13 +22,15 @@
 //! Callers decide what to do with a low-confidence finding; this module only
 //! refuses to overstate one.
 
+use std::collections::HashSet;
+
 use harn_vm::VmValue;
 use tree_sitter::{Node, Tree};
 
 use crate::tools::args::{build_dict, str_value};
 
 use super::language::Language;
-use super::undefined_names::node_text;
+use super::undefined_names::{bind_rust_use_tree, node_text};
 
 /// How far single-file name resolution can be trusted for a language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,6 +155,16 @@ pub(super) fn assess(tree: &Tree, source: &str, language: Language) -> Resolutio
 /// Constructs that can supply bindings absent from the parsed source. Reads
 /// demote confidence; mutations must refuse before persisting their plan.
 pub(crate) fn binding_defeaters(tree: &Tree, source: &str, language: Language) -> Vec<Defeater> {
+    binding_defeaters_at(tree.root_node(), source, language)
+}
+
+/// Bindings supplied outside a subtree still affect the names it uses.
+pub(crate) fn binding_defeaters_at(
+    node: Node<'_>,
+    source: &str,
+    language: Language,
+) -> Vec<Defeater> {
+    let root = source_root(node);
     let mut defeaters: Vec<Defeater> = Vec::new();
     let mut note = |d: Defeater| {
         if !defeaters.contains(&d) {
@@ -164,10 +176,12 @@ pub(crate) fn binding_defeaters(tree: &Tree, source: &str, language: Language) -
     // may never have been collected, which turns every name they would have
     // bound into a spurious undefined-name finding. A file that does not parse
     // cleanly cannot support a confident reading.
-    if tree.root_node().has_error() {
+    if root.has_error() {
         note(Defeater::SyntaxError);
     }
-    scan(tree.root_node(), source, language, &mut note);
+    walk_nodes(root, &mut |node| {
+        scan_node(node, source, language, &mut note);
+    });
     defeaters
 }
 
@@ -216,10 +230,17 @@ const RUBY_DYNAMIC_CALLS: &[&str] = &[
     "attr_writer",
 ];
 
-fn scan(root: Node<'_>, source: &str, language: Language, note: &mut impl FnMut(Defeater)) {
+fn source_root(mut node: Node<'_>) -> Node<'_> {
+    while let Some(parent) = node.parent() {
+        node = parent;
+    }
+    node
+}
+
+fn walk_nodes(root: Node<'_>, visit: &mut impl FnMut(Node<'_>)) {
     let mut cursor = root.walk();
     loop {
-        scan_node(cursor.node(), source, language, note);
+        visit(cursor.node());
         if cursor.goto_first_child() {
             continue;
         }
@@ -349,20 +370,15 @@ const RUST_ITEMLESS_STD_MACROS: &[&str] = &[
     "writeln",
 ];
 
-/// Built-in and tool attributes, which configure an item without expanding
-/// into new ones. `derive` adds trait impls, which bind no new name in scope.
+/// Built-in attributes that preserve the decorated declaration. Expansion
+/// wrappers (`derive` and `cfg_attr`) inspect their arguments separately.
 /// `path` is absent because it changes which file a module loads.
 const RUST_INERT_ATTRIBUTES: &[&str] = &[
     "allow",
     "automatically_derived",
-    "cfg",
-    "cfg_attr",
-    "clippy",
     "cold",
     "deny",
     "deprecated",
-    "derive",
-    "diagnostic",
     "doc",
     "expect",
     "export_name",
@@ -375,21 +391,60 @@ const RUST_INERT_ATTRIBUTES: &[&str] = &[
     "no_mangle",
     "non_exhaustive",
     "repr",
-    "rustfmt",
     "should_panic",
-    "test",
     "track_caller",
     "used",
     "warn",
 ];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RustAttributeEffect {
+    Inert,
+    Conditional,
+    Opaque,
+}
+
+/// A declaration behind an unknown configuration cannot authorize a write.
+pub(crate) fn rust_declaration_is_unconditional(node: Node<'_>, source: &str) -> bool {
+    let mut up = Some(node);
+    while let Some(scope) = up {
+        let mut previous = scope.prev_named_sibling();
+        while let Some(prefix) = previous {
+            match prefix.kind() {
+                "attribute_item"
+                    if rust_attribute_effect_at(prefix, source) != RustAttributeEffect::Inert =>
+                {
+                    return false;
+                }
+                "attribute_item" | "line_comment" | "block_comment" => {}
+                _ => break,
+            }
+            previous = prefix.prev_named_sibling();
+        }
+        for container in [Some(scope), scope.child_by_field_name("body")]
+            .into_iter()
+            .flatten()
+        {
+            let mut cursor = container.walk();
+            if container.named_children(&mut cursor).any(|child| {
+                child.kind() == "inner_attribute_item"
+                    && rust_attribute_effect_at(child, source) != RustAttributeEffect::Inert
+            }) {
+                return false;
+            }
+        }
+        up = scope.parent();
+    }
+    true
+}
 
 /// Whether a Rust macro invocation or attribute can expand into bindings the
 /// parse cannot see.
 ///
 /// Only an invocation in item or statement position can declare an item or a
 /// call-site `let` that sibling code sees; one nested in an expression expands
-/// to that expression. Attributes other than the inert set may rewrite the
-/// item they decorate.
+/// to that expression. Opaque attributes may rewrite their item; conditional
+/// attributes separately constrain whether a declaration is present.
 fn rust_expansion_may_bind(node: Node<'_>, source: &str) -> bool {
     match node.kind() {
         "macro_invocation" => {
@@ -402,15 +457,145 @@ fn rust_expansion_may_bind(node: Node<'_>, source: &str) -> bool {
             in_statement_position && !rust_itemless_std_macro(node, source)
         }
         "attribute_item" | "inner_attribute_item" => {
-            let path = node
-                .named_child(0)
-                .and_then(|attribute| attribute.named_child(0))
-                .map_or("", |path| node_text(path, source));
-            let root = path.split("::").next().unwrap_or(path);
-            !RUST_INERT_ATTRIBUTES.contains(&root)
+            rust_attribute_effect_at(node, source) == RustAttributeEffect::Opaque
         }
         _ => false,
     }
+}
+
+fn rust_attribute_effect_at(node: Node<'_>, source: &str) -> RustAttributeEffect {
+    let Some(attribute) = node.named_child(0) else {
+        return RustAttributeEffect::Opaque;
+    };
+    let Some(path) = attribute.named_child(0) else {
+        return RustAttributeEffect::Opaque;
+    };
+    rust_attribute_effect(
+        node,
+        source,
+        node_text(path, source),
+        attribute.child_by_field_name("arguments"),
+    )
+}
+
+fn rust_attribute_effect(
+    site: Node<'_>,
+    source: &str,
+    path: &str,
+    arguments: Option<Node<'_>>,
+) -> RustAttributeEffect {
+    // An imported procedural attribute can replace even `derive` or `test`.
+    // Prove the binding before trusting either its spelling or arguments.
+    let (prefix, name) = path.split_once("::").unwrap_or(("", path));
+    if !rust_macro_path_is_unshadowed(site, source, prefix, name) {
+        return RustAttributeEffect::Opaque;
+    }
+    match path {
+        "cfg" | "test" => RustAttributeEffect::Conditional,
+        "derive" => {
+            // Custom derives may append arbitrary items, including a local
+            // type that shadows the receiver owner. Only unshadowed builtins
+            // establish the narrower trait-implementation-only guarantee.
+            const BUILTIN_DERIVES: &[&str] = &[
+                "Clone",
+                "Copy",
+                "Debug",
+                "Default",
+                "Eq",
+                "Hash",
+                "Ord",
+                "PartialEq",
+                "PartialOrd",
+            ];
+            let Some(parts) = rust_attribute_arguments(arguments) else {
+                return RustAttributeEffect::Opaque;
+            };
+            let mut expect_name = true;
+            for part in parts {
+                if expect_name && part.kind() == "identifier" {
+                    let name = node_text(part, source);
+                    if !BUILTIN_DERIVES.contains(&name)
+                        || !rust_macro_path_is_unshadowed(site, source, "", name)
+                    {
+                        return RustAttributeEffect::Opaque;
+                    }
+                    expect_name = false;
+                } else if !expect_name && part.kind() == "," {
+                    expect_name = true;
+                } else {
+                    return RustAttributeEffect::Opaque;
+                }
+            }
+            RustAttributeEffect::Inert
+        }
+        "cfg_attr" => {
+            let Some(parts) = rust_attribute_arguments(arguments) else {
+                return RustAttributeEffect::Opaque;
+            };
+            let mut groups = parts.split(|part| part.kind() == ",");
+            // Do not guess a project's active configuration. Every possible
+            // generated attribute must preserve the same binding guarantee.
+            if groups.next().is_none_or(|predicate| predicate.is_empty()) {
+                return RustAttributeEffect::Opaque;
+            }
+            let mut seen = false;
+            let mut effect = RustAttributeEffect::Inert;
+            for group in groups {
+                if group.is_empty() {
+                    continue;
+                }
+                seen = true;
+                let path = node_text(group[0], source);
+                let arguments = match group.get(1) {
+                    Some(node) if node.kind() == "token_tree" && group.len() == 2 => Some(*node),
+                    _ if matches!(path, "derive" | "cfg_attr") => {
+                        return RustAttributeEffect::Opaque;
+                    }
+                    _ => None,
+                };
+                if group[0].kind() != "identifier"
+                    || group.get(1).is_some_and(|node| node.kind() == "::")
+                {
+                    return RustAttributeEffect::Opaque;
+                }
+                match rust_attribute_effect(site, source, path, arguments) {
+                    RustAttributeEffect::Opaque => return RustAttributeEffect::Opaque,
+                    RustAttributeEffect::Conditional => effect = RustAttributeEffect::Conditional,
+                    RustAttributeEffect::Inert => {}
+                }
+            }
+            if seen {
+                effect
+            } else {
+                RustAttributeEffect::Opaque
+            }
+        }
+        _ => {
+            if RUST_INERT_ATTRIBUTES.contains(&path)
+                || path.split_once("::").is_some_and(|(prefix, _)| {
+                    matches!(prefix, "clippy" | "rustfmt" | "diagnostic")
+                })
+            {
+                RustAttributeEffect::Inert
+            } else {
+                RustAttributeEffect::Opaque
+            }
+        }
+    }
+}
+
+fn rust_attribute_arguments(arguments: Option<Node<'_>>) -> Option<Vec<Node<'_>>> {
+    let arguments = arguments?;
+    let count = arguments.child_count();
+    if count < 2 || arguments.child(0)?.kind() != "(" || arguments.child(count - 1)?.kind() != ")" {
+        return None;
+    }
+    Some(
+        (1..count - 1)
+            .filter_map(|index| arguments.child(index))
+            .filter(|node| !matches!(node.kind(), "line_comment" | "block_comment"))
+            .collect(),
+    )
 }
 
 /// Whether a Rust `macro_invocation` names an itemless `std` macro, bare or
@@ -421,10 +606,52 @@ pub(crate) fn rust_itemless_std_macro(invocation: Node<'_>, source: &str) -> boo
     };
     let path = node_text(path, source);
     let (prefix, name) = path.rsplit_once("::").unwrap_or(("", path));
-    matches!(
-        prefix.trim_start_matches("::"),
-        "" | "std" | "core" | "alloc"
-    ) && RUST_ITEMLESS_STD_MACROS.contains(&name)
+    let prefix = prefix.trim_start_matches("::");
+    matches!(prefix, "" | "std" | "core" | "alloc")
+        && RUST_ITEMLESS_STD_MACROS.contains(&name)
+        && rust_macro_path_is_unshadowed(invocation, source, prefix, name)
+}
+
+fn rust_macro_path_is_unshadowed(
+    invocation: Node<'_>,
+    source: &str,
+    prefix: &str,
+    name: &str,
+) -> bool {
+    let root = source_root(invocation);
+    let binding = if prefix.is_empty() { name } else { prefix };
+    let mut shadowed = false;
+    // Without macro resolution, a competing binding anywhere in the file
+    // defeats the standard-library spelling proof.
+    walk_nodes(root, &mut |node| match node.kind() {
+        "macro_definition" if prefix.is_empty() => {
+            shadowed |= node
+                .child_by_field_name("name")
+                .is_some_and(|name| node_text(name, source) == binding);
+        }
+        "mod_item" | "extern_crate_declaration" if !prefix.is_empty() => {
+            shadowed |= ["name", "alias"].into_iter().any(|field| {
+                node.child_by_field_name(field)
+                    .is_some_and(|name| node_text(name, source) == binding)
+            });
+        }
+        "use_declaration" => {
+            let mut bindings = HashSet::new();
+            if let Some(argument) = node.child_by_field_name("argument") {
+                bind_rust_use_tree(argument, source, &mut bindings);
+            }
+            shadowed |= bindings.contains(binding);
+            walk_nodes(node, &mut |part| shadowed |= part.kind() == "use_wildcard");
+        }
+        "attribute_item" | "inner_attribute_item" if prefix.is_empty() => {
+            shadowed |= node
+                .named_child(0)
+                .and_then(|attribute| attribute.named_child(0))
+                .is_some_and(|path| node_text(path, source) == "macro_use");
+        }
+        _ => {}
+    });
+    !shadowed
 }
 
 /// The bare callee name of a call node, or `None` when the callee is anything
@@ -561,6 +788,22 @@ mod tests {
         for source in [
             "fn f() { binding_macro::bind!(); Reading() }\n",
             "#[binding_macro::bind]\nfn f() { Reading() }\n",
+            "fn f() { macro_rules! assert { () => { let Reading = 1; }; } assert!(); Reading }\n",
+            "use other::assert; fn f() { assert!(); Reading() }\n",
+            "use other::{bind as assert}; fn f() { assert!(); Reading() }\n",
+            "use other::std::{self}; fn f() { std::assert!(); Reading() }\n",
+            "mod std {} fn f() { std::assert!(); Reading() }\n",
+            "#[macro_use] extern crate other; fn f() { assert!(); Reading() }\n",
+            "#[derive(binding_macro::Install)] struct Marker; fn f() { Reading() }\n",
+            "use binding_macro::Debug; #[derive(Debug)] struct Marker; fn f() { Reading() }\n",
+            "#[derive(Clone::Debug)] struct Marker; fn f() { Reading() }\n",
+            "#[allow::install] fn f() { Reading() }\n",
+            "#[cfg_attr(all(), binding_macro::install)] fn f() { Reading() }\n",
+            "#[cfg_attr(all(), derive(binding_macro::Install))] struct Marker; fn f() { Reading() }\n",
+            "#[cfg_attr(all(), cfg_attr(all(), binding_macro::install))] fn f() { Reading() }\n",
+            "use binding_macro::install as test; #[test] fn f() { Reading() }\n",
+            "use binding_macro::install as derive; #[derive(Debug)] struct Marker; fn f() { Reading() }\n",
+            "use binding_macro::install as derive; #[cfg_attr(all(), derive(Debug))] struct Marker; fn f() { Reading() }\n",
         ] {
             let resolution = assess_source(source, Language::Rust);
             assert!(!resolution.is_complete());
@@ -570,7 +813,8 @@ mod tests {
 
     #[test]
     fn itemless_rust_macros_and_inert_attributes_keep_resolution_complete() {
-        let source = "#![allow(dead_code)]\n#[derive(Debug, Clone)]\npub struct Reading;\n\
+        let source = "#![allow(dead_code)]\nuse std::{io::{self}, fmt as fmt_alias};\nuse std::assert_eq as check;\n#[derive(Debug, Clone)]\npub struct Reading;\n\
+            #[cfg_attr(all(), allow(dead_code), cfg_attr(all(), derive(Debug, Clone)))]\nstruct Marker;\n\
             #[cfg(test)]\nmod tests {\n    #[test]\n    fn t() { assert_eq!(1, 1); println!(\"{}\", 2); }\n}\n\
             fn f() -> String { let v = vec![1]; std::format!(\"{v:?}\") }\n\
             fn g() -> usize { my_crate::count!(a, b) + 1 }\n";

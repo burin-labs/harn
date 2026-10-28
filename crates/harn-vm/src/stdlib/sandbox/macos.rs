@@ -60,6 +60,22 @@ impl SandboxBackend for Backend {
         Self::available() && parent_environment::available()
     }
 
+    fn filesystem_unavailable(profile: SandboxProfile) -> super::SandboxMechanismUnavailable {
+        let mechanism = Self::filesystem_mechanism();
+        match parent_environment::gap() {
+            Some(gap) if Self::available() => {
+                super::SandboxMechanismUnavailable::host_protection_unavailable(
+                    mechanism, gap, profile,
+                )
+            }
+            _ => super::SandboxMechanismUnavailable::new(
+                mechanism,
+                super::SandboxMechanismAvailability::AbsentOnHost,
+                profile,
+            ),
+        }
+    }
+
     fn confine_current_process(
         policy: &CapabilityPolicy,
     ) -> Result<super::SandboxMechanism, VmError> {

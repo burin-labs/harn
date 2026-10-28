@@ -26,6 +26,7 @@ for source in \
   release_audit_contract.json \
   release_contract.env \
   verify_release_tag_main_ancestry.sh \
+  verify_published_harn_runtime.sh \
   release_metadata.harn \
   release_changelog_fold.harn \
   render_release_notes.harn \
@@ -34,6 +35,7 @@ for source in \
   npm_ci_with_retry.sh \
   publish.sh \
   publish.harn \
+  publish_manifest.harn \
   publish_plan.harn \
   cargo_with_worktree_build_dir.sh \
   harn_bin.sh

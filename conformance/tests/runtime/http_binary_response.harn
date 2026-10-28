@@ -1,0 +1,94 @@
+import { connector_http_json, connector_http_request } from "std/connectors/shared"
+
+fn main(harness: Harness) {
+  const recorder_url = "https://example.test/binary-recording"
+  harness.testing.http_mock("POST", recorder_url, {status: 200, body: "ok"})
+  for encoded in ["ff", "fe"] {
+    const response = harness.net.post(recorder_url, bytes_from_hex(encoded))
+    assert(response.status == 200)
+  }
+  const recorded = harness.testing.http_mock_calls()
+  assert(len(recorded) == 2 && recorded[0].body == recorded[1].body)
+  assert(recorded[0].body_bytes != nil && recorded[1].body_bytes != nil)
+  assert(bytes_to_hex(recorded[0].body_bytes) == "ff")
+  assert(bytes_to_hex(recorded[1].body_bytes) == "fe")
+  for path in ["text", "bytes"] {
+    harness.testing.http_mock(
+      "GET",
+      "https://example.test/${path}",
+      {status: 200, body: "hello", headers: {}},
+    )
+  }
+  const text = harness.net.get("https://example.test/text")
+  assert(text.body == "hello" && text.body_bytes == nil)
+  const binary = harness.net.get("https://example.test/bytes", {response_type: "bytes"})
+  assert(binary.body == "" && binary.body_bytes != nil)
+  assert(bytes_to_hex(binary.body_bytes) == "68656c6c6f")
+  const carried = connector_http_request(
+    harness.clock,
+    harness.net,
+    "GET",
+    "https://example.test/bytes",
+    {response_type: "bytes"},
+  )
+  assert(carried.ok && carried.body_bytes != nil && bytes_to_string(carried.body_bytes) == "hello")
+  harness.testing.http_mock(
+    "GET",
+    "https://example.test/failure",
+    {status: 400, body: "private-fixture-body", headers: {}},
+  )
+  const failed = connector_http_request(
+    harness.clock,
+    harness.net,
+    "GET",
+    "https://example.test/failure",
+    {response_type: "bytes"},
+  )
+  assert(
+    !failed.ok && failed.body_bytes != nil
+      && bytes_to_string(failed.body_bytes) == "private-fixture-body",
+  )
+  const redacted = connector_http_request(
+    harness.clock,
+    harness.net,
+    "GET",
+    "https://example.test/failure",
+    {response_type: "bytes", redact_error_body: true},
+  )
+  const diagnostic = json_stringify(redacted)
+  assert(diagnostic.starts_with("{") && diagnostic.contains("category"))
+  assert(redacted.body_bytes == nil && !diagnostic.contains("private-fixture-body"))
+  harness.testing.http_mock(
+    "GET",
+    "https://example.test/json",
+    {status: 200, body: "{\"value\":1}", headers: {}},
+  )
+  const json = connector_http_json(
+    harness.clock,
+    harness.net,
+    "GET",
+    "https://example.test/json",
+    {response_type: "bytes"},
+  )
+  assert(json.ok && json.json.value == 1)
+  const before_calls = len(harness.testing.http_mock_calls())
+  assert(before_calls > 0)
+  harness.testing.http_mock(
+    "GET",
+    "https://example.test/invalid",
+    {status: 200, body: "must-not-fire", headers: {}},
+  )
+  const invalid = connector_http_request(
+    harness.clock,
+    harness.net,
+    "GET",
+    "https://example.test/invalid",
+    {response_type: "private-fixture-mode", retry: {max_attempts: 3}},
+  )
+  assert(
+    !invalid.ok && invalid.error.category == "invalid_request" && invalid.error.retryable == false,
+  )
+  assert(!json_stringify(invalid).contains("private-fixture-mode"))
+  assert(len(harness.testing.http_mock_calls()) == before_calls)
+  harness.stdio.println("binary HTTP responses retain typed data and redaction")
+}

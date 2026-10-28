@@ -347,6 +347,7 @@ fn __refusal_quoting(quote: string) -> dict {
       {
         verdict: "continue",
         detail: "the ready queue is not sorted",
+        goal_assessment: {kind: "unknown", evidence_refs: []},
         gaps: [
           {
             criterion: "ready queue is sorted lexicographically",
@@ -391,7 +392,18 @@ pipeline test_the_decision_path_executes_end_to_end(harness: Harness, task: unkn
   const run = __run_judge(
     harness,
     "loop-reaches-judge",
-    [llm_done(), {text: json_stringify({verdict: "done", detail: "the work is finished"})}],
+    [
+      llm_done(),
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "the work is finished",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      },
+    ],
   )
   const invoked = run.result?.completion_judge?.invocations ?? 0
   assert(
@@ -414,7 +426,15 @@ pipeline test_a_refusal_quoting_absent_evidence_is_reasked_once(harness: Harness
     [
       llm_done(),
       __refusal_quoting("queue = append(queue, name) // invented, not in any packet"),
-      {text: json_stringify({verdict: "done", detail: "re-read the evidence; it is sorted"})},
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "re-read the evidence; it is sorted",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      },
       llm_done(),
     ],
   )
@@ -440,6 +460,7 @@ fn __refusal_naming(criterion: string) -> dict {
       {
         verdict: "continue",
         detail: "missing final summary and marker",
+        goal_assessment: {kind: "unknown", evidence_refs: []},
         gaps: [
           {
             criterion: criterion,
@@ -461,7 +482,11 @@ pipeline test_a_refusal_naming_the_done_sentinel_is_reasked_once(harness: Harnes
       __refusal_naming("write a brief summary, then emit ##DONE## on its own final line"),
       {
         text: json_stringify(
-          {verdict: "done", detail: "the summary is present; the work is verified"},
+          {
+            verdict: "done",
+            detail: "the summary is present; the work is verified",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
         ),
       },
       llm_done(),
@@ -486,7 +511,15 @@ pipeline test_a_refusal_not_naming_the_sentinel_is_not_reasked(harness: Harness,
       llm_done(),
       __refusal_naming("write a brief summary of what changed"),
       llm_done(),
-      {text: json_stringify({verdict: "done", detail: "the summary is now present"})},
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "the summary is now present",
+            goal_assessment: {kind: "unknown", evidence_refs: []},
+          },
+        ),
+      },
     ],
   )
   assert(
