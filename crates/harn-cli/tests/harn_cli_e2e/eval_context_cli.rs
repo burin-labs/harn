@@ -130,6 +130,88 @@ async fn context_cost_coverage_survives_cli_artifacts_and_v1_projection() {
 }
 
 #[tokio::test]
+async fn context_cost_subtotal_requires_observed_evidence() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let source = fs::read(workspace_root().join("examples/evals/context-engineering-smoke.json"))
+        .expect("smoke manifest");
+    let schema: serde_json::Value = serde_json::from_slice(
+        &fs::read(workspace_root().join("spec/schemas/context-eval-report.v2.schema.json"))
+            .expect("report schema"),
+    )
+    .expect("schema JSON");
+    let validator = jsonschema::draft202012::new(&schema).expect("compile report schema");
+
+    for (case, cost, lower_bound, expected) in [
+        ("missing", None, None, serde_json::Value::Null),
+        ("measured-zero", Some(0.0), None, serde_json::json!(0.0)),
+        ("partial-zero", None, Some(0.0), serde_json::json!(0.0)),
+        (
+            "partial-positive",
+            None,
+            Some(0.125),
+            serde_json::json!(0.375),
+        ),
+    ] {
+        let mut manifest: serde_json::Value = serde_json::from_slice(&source).unwrap();
+        for task in manifest["tasks"].as_array_mut().unwrap() {
+            let observed = task["observed"].as_object_mut().unwrap();
+            observed.remove("cost_usd");
+            observed.remove("known_cost_usd");
+        }
+        if let Some(value) = cost {
+            manifest["tasks"][0]["observed"]["cost_usd"] = serde_json::json!(value);
+        }
+        if let Some(value) = lower_bound {
+            manifest["tasks"][0]["observed"]["known_cost_usd"] = serde_json::json!(value);
+        }
+        let manifest_path = tmp.path().join(format!("{case}.json"));
+        let output = tmp.path().join(case);
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let exit = harn_cli::commands::eval_context::run(EvalContextArgs {
+            manifest: manifest_path,
+            output: Some(output.clone()),
+            json: false,
+            report_version: 2,
+        })
+        .await;
+        assert_eq!(exit, 0, "{case} report should be produced");
+        let report: serde_json::Value =
+            serde_json::from_slice(&fs::read(output.join("summary.json")).unwrap()).unwrap();
+        let actual = report["aggregate"]
+            .get("total_known_cost_usd")
+            .expect("subtotal is present even when unknown");
+        assert_eq!(*actual, expected, "{case} subtotal must preserve evidence");
+        assert!(
+            validator.is_valid(&report),
+            "{case} must satisfy the v2 schema"
+        );
+        if case == "missing" {
+            let markdown = fs::read_to_string(output.join("summary.md")).unwrap();
+            assert!(
+                markdown.contains("no known subtotal"),
+                "an absent subtotal must be identified rather than displayed as zero"
+            );
+            let legacy_output = tmp.path().join("missing-v1");
+            let exit = harn_cli::commands::eval_context::run(EvalContextArgs {
+                manifest: tmp.path().join("missing.json"),
+                output: Some(legacy_output.clone()),
+                json: false,
+                report_version: 1,
+            })
+            .await;
+            assert_eq!(
+                exit, 0,
+                "the deprecated v1 projection must still be available"
+            );
+            let legacy: serde_json::Value =
+                serde_json::from_slice(&fs::read(legacy_output.join("summary.json")).unwrap())
+                    .unwrap();
+            assert_eq!(legacy["aggregate"]["total_cost_usd"], 0.0);
+        }
+    }
+}
+
+#[tokio::test]
 async fn context_report_rejects_unsupported_version_before_writing() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let output = tmp.path().join("report");

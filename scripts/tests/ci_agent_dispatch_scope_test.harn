@@ -1,0 +1,27 @@
+import { read_yaml } from "std/fs"
+import { filter_matches_paths } from "../gh_check_state.harn"
+
+type PathFilters = dict<string, list<string>>
+
+@test
+pipeline test_agent_dispatch_changes_select_the_premerge_stack_gate(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const filter = ci.jobs.changes.steps.filter({ step -> step?.id == "surface_filter" }).to_list()[0]
+  const filters = schema_expect(yaml_parse(filter.with.filters), schema_of(PathFilters))
+  const paths = filters["full_suite"] ?? []
+  const dispatch_patterns = [
+    "crates/harn-vm/src/llm/agent_host_primitives.rs",
+    "crates/harn-vm/src/llm/agent_host_primitives/**",
+  ]
+  const without_dispatch = paths.filter({ path -> !dispatch_patterns.contains(path) }).to_list()
+  for path in [
+    "crates/harn-vm/src/llm/agent_host_primitives.rs",
+    "crates/harn-vm/src/llm/agent_host_primitives/denial_results.rs",
+  ] {
+    assert(harness.fs.exists("../../${path}"))
+    assert(filter_matches_paths(paths, [path]))
+    assert(!filter_matches_paths(without_dispatch, [path]))
+  }
+  assert(!filter_matches_paths(paths, ["crates/harn-lexer/src/lib.rs"]))
+  assert(ci.jobs["stack-frames"].if.contains("needs.changes.outputs.post_merge_tier != 'true'"))
+}

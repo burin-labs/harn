@@ -51,7 +51,7 @@
         "total_input_tokens": { "type": "integer", "minimum": 0 },
         "total_output_tokens": { "type": "integer", "minimum": 0 },
         "total_cost_usd": { "type": ["number", "null"], "minimum": 0 },
-        "total_known_cost_usd": { "type": "number", "minimum": 0 },
+        "total_known_cost_usd": { "type": ["number", "null"], "minimum": 0 },
         "cost_measured_runs": { "type": "integer", "minimum": 0 },
         "cost_unmeasured_runs": { "type": "integer", "minimum": 0 },
         "total_compaction_count": { "type": "integer", "minimum": 0 },

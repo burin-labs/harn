@@ -623,9 +623,10 @@ remains the language-neutral schema for the same shape.
 Run `cost_usd` is null when the exact cost was not measured. An observation
 may supply `known_cost_usd` as a lower bound for a partially priced run. The
 aggregate exact total is null unless every run has a measured cost;
-`total_known_cost_usd` sums the known amounts, and `cost_measured_runs` and
-`cost_unmeasured_runs` show coverage. Observed costs must be finite and
-non-negative; a known lower bound cannot exceed an exact cost.
+`total_known_cost_usd` sums the known amounts and is null when none was
+observed, including for an empty report. An observed zero remains zero.
+`cost_measured_runs` and `cost_unmeasured_runs` show coverage. Observed costs
+must be finite and non-negative; a known lower bound cannot exceed an exact cost.
 If the known subtotal exceeds the floating-point range, evaluation fails before
 writing report artifacts.
 For one release, `--report-version 1` emits the deprecated v1 JSON format for

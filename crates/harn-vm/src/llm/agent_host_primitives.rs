@@ -1049,7 +1049,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
             None,
             reason,
         );
-        let denied = deny_tool_call(
+        let denied = Box::pin(deny_tool_call(
             Some(&ctx),
             &session_id,
             &tool_name,
@@ -1058,7 +1058,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
             denial,
             false,
             DenialEvidence::new(None, None),
-        )
+        ))
         .await;
         let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
         return Ok(json_to_vm_value(&denied));
@@ -1178,7 +1178,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
             Some((decision.terminal_denial(), Some(decision.receipt)))
         });
     if let Some((denial, receipt)) = final_denial {
-        let denied = deny_tool_call(
+        let denied = Box::pin(deny_tool_call(
             Some(&ctx),
             &session_id,
             &tool_name,
@@ -1187,7 +1187,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
             denial,
             false,
             DenialEvidence::new(receipt, None).with_operation(approval_args.as_ref()),
-        )
+        ))
         .await;
         return Ok(json_to_vm_value(&attach_hook_reminder_audit(
             denied,
