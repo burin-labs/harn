@@ -132,6 +132,8 @@ enum GuardianConfinement {
 #[derive(Deserialize, Serialize)]
 struct GuardianCommandRequest {
     #[serde(default)]
+    cleanup_receipt_fd: Option<i32>,
+    #[serde(default)]
     payload_stdin: bool,
     program: Vec<u8>,
     args: Vec<Vec<u8>>,
@@ -190,10 +192,7 @@ pub(crate) fn prepare_guardian(
     payload_spec.configure_process_group = false;
     payload_spec.owner_death = super::OwnerDeathPolicy::None;
     #[cfg(target_os = "linux")]
-    let pinned = super::program_lookup::pinned_verifier(
-        &payload_spec,
-        &[RULESET_FD, completion_receipt::RECEIPT_FD],
-    )?;
+    let pinned = super::program_lookup::pinned_verifier(&payload_spec, &[RULESET_FD])?;
     #[cfg(target_os = "linux")]
     let (prepared, confinement) = {
         let (command, env_closed, confinement) = harn_vm::process_sandbox::command_for_reexec(
@@ -243,15 +242,13 @@ pub(crate) fn prepare_guardian(
     // from the session's resolved set; sending the mode instead dropped that
     // clear in transfer, and the guardian's own environment reached the child
     // behind the explicit entries.
-    let request = GuardianCommandRequest::from_command(
+    let mut request = GuardianCommandRequest::from_command(
         &payload,
         prepared.env_cleared,
         cleanup_token.clone(),
         confinement.as_ref().map(TransferredConfinement::request),
         spec.use_stdin,
     );
-    #[cfg(target_os = "linux")]
-    let mut request = request;
     #[cfg(target_os = "linux")]
     if let Some(pinned) = pinned.as_ref() {
         if payload.get_program() != std::ffi::OsStr::new(&pinned.program) {
@@ -263,9 +260,6 @@ pub(crate) fn prepare_guardian(
             .map_err(ProcessError::Spawn)?;
         request.pinned_verifier_descriptors = pinned.descriptors.numbers();
     }
-    let request = serde_json::to_vec(&request)
-        .map_err(|error| ProcessError::Spawn(format!("encode guardian request: {error}")))?;
-
     let executable = std::env::current_exe()
         .map_err(|error| ProcessError::Spawn(format!("resolve guardian executable: {error}")))?;
     harn_vm::op_interrupt::initialize_process_owner_group_journal(&cleanup_token)
@@ -301,9 +295,13 @@ pub(crate) fn prepare_guardian(
     };
     #[cfg(not(target_os = "linux"))]
     let witness = None;
-    let cleanup_receipt = completion_receipt::prepare(&mut guardian).map_err(|error| {
-        ProcessError::Spawn(format!("create guardian cleanup receipt: {error}"))
-    })?;
+    let (cleanup_receipt, receipt_fd) =
+        completion_receipt::prepare(&mut guardian).map_err(|error| {
+            ProcessError::Spawn(format!("create guardian cleanup receipt: {error}"))
+        })?;
+    request.cleanup_receipt_fd = Some(receipt_fd);
+    let request = serde_json::to_vec(&request)
+        .map_err(|error| ProcessError::Spawn(format!("encode guardian request: {error}")))?;
     Ok(PreparedGuardian {
         cleanup_receipt,
         command: guardian,
@@ -473,6 +471,7 @@ impl GuardianCommandRequest {
         payload_stdin: bool,
     ) -> Self {
         Self {
+            cleanup_receipt_fd: None,
             payload_stdin,
             pinned_verifier_descriptors: Vec::new(),
             confinement,
@@ -646,10 +645,10 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     if std::env::var(MODE_ENV).as_deref() != Ok(PIPE_MODE) {
         return Err(io::Error::other("guardian request pipe is not active"));
     }
-    let mut cleanup_receipt = completion_receipt::inherited_writer()?;
     let raw = read_request()?;
     let request: GuardianCommandRequest = serde_json::from_slice(&raw)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let receipt_fd = request.cleanup_receipt_fd;
     // SAFETY: this is the re-executed guardian's private host request pipe.
     // The prepared parent launch retained the owning transfers through exec;
     // their named descriptors now belong exclusively to this startup process.
@@ -668,6 +667,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
             return Err(error);
         }
     };
+    let mut cleanup_receipt = completion_receipt::inherited_writer(receipt_fd)?;
     let _journal_cleanup = OwnerJournalCleanup(cleanup_token.clone());
     configure_child_reaper()?;
     let mut payload = match payload_command.spawn() {

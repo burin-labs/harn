@@ -15,20 +15,19 @@ impl PreparedCommand {
             if let Some(GuardianConfinement::Bubblewrap { descriptors }) = &request.confinement {
                 numbers.extend(descriptors.iter().copied());
             }
-            let reserved = if matches!(
+            let mut reserved = request.cleanup_receipt_fd.into_iter().collect::<Vec<_>>();
+            if matches!(
                 &request.confinement,
                 Some(
                     GuardianConfinement::BeforeExec { ruleset: true, .. }
                         | GuardianConfinement::AfterNamespace { ruleset: true }
                 )
             ) {
-                &[RULESET_FD, completion_receipt::RECEIPT_FD][..]
-            } else {
-                &[completion_receipt::RECEIPT_FD][..]
-            };
+                reserved.push(RULESET_FD);
+            }
             // SAFETY: the caller supplies exclusive startup custody. Validate
             // all transferred and reserved roles before adopting any handle.
-            unsafe { harn_vm::process_sandbox::DescriptorTransfer::inherited(numbers, reserved)? }
+            unsafe { harn_vm::process_sandbox::DescriptorTransfer::inherited(numbers, &reserved)? }
         };
         #[cfg(not(target_os = "linux"))]
         if !request.pinned_verifier_descriptors.is_empty() {

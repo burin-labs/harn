@@ -1,35 +1,33 @@
 use super::*;
 use std::os::fd::{AsRawFd, FromRawFd};
 
-pub(super) const RECEIPT_FD: i32 = 198;
 const MAX_RECEIPT_BYTES: u64 = 64 * 1024;
 const MAX_CHILDREN: usize = 128;
 
 /// Only the guardian inherits the writer; the payload closes it on exec.
-pub(crate) fn prepare(command: &mut Command) -> io::Result<ReceiptReader> {
+pub(crate) fn prepare(command: &mut Command) -> io::Result<(ReceiptReader, i32)> {
     let (reader, writer) = io::pipe()?;
+    let receipt_fd = writer.as_raw_fd();
     unsafe {
         command.pre_exec(move || {
             let fd = writer.as_raw_fd();
-            if fd != RECEIPT_FD && libc::dup2(fd, RECEIPT_FD) < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            if libc::fcntl(RECEIPT_FD, libc::F_SETFD, 0) < 0 {
+            if libc::fcntl(fd, libc::F_SETFD, 0) < 0 {
                 return Err(io::Error::last_os_error());
             }
             Ok(())
         });
     }
-    Ok(ReceiptReader(Some(harn_parser::runtime_stack::spawn(
-        move || {
+    Ok((
+        ReceiptReader(Some(harn_parser::runtime_stack::spawn(move || {
             let mut bytes = Vec::new();
             reader.take(MAX_RECEIPT_BYTES + 1).read_to_end(&mut bytes)?;
             if bytes.len() as u64 > MAX_RECEIPT_BYTES {
                 return Err(io::Error::other("guardian cleanup receipt exceeded limit"));
             }
             serde_json::from_slice(&bytes).map_err(io::Error::other)
-        },
-    ))))
+        }))),
+        receipt_fd,
+    ))
 }
 
 pub(crate) struct ReceiptReader(
@@ -46,12 +44,15 @@ impl ReceiptReader {
     }
 }
 
-pub(super) fn inherited_writer() -> io::Result<std::fs::File> {
-    if unsafe { libc::fcntl(RECEIPT_FD, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+pub(super) fn inherited_writer(fd: Option<i32>) -> io::Result<std::fs::File> {
+    let fd = fd
+        .filter(|fd| *fd >= 3)
+        .ok_or_else(|| io::Error::other("guardian cleanup receipt descriptor missing"))?;
+    if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
         return Err(io::Error::last_os_error());
     }
     // SAFETY: the private parent launch transferred this descriptor exclusively.
-    Ok(unsafe { std::fs::File::from_raw_fd(RECEIPT_FD) })
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
 }
 
 pub(super) fn write(
@@ -90,4 +91,65 @@ pub(super) fn refuse_survivors(
         std::process::id(),
         survivors.join(", ")
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_receipt_is_unavailable_and_descriptor_is_reserved_until_spawn() {
+        let mut command = Command::new("unspawned");
+        let (reader, fd) = prepare(&mut command).unwrap();
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        assert!(flags >= 0);
+        assert_ne!(flags & libc::FD_CLOEXEC, 0);
+        drop(command);
+        let receipt = reader.finish();
+        assert!(!receipt.census.complete());
+        assert_eq!(receipt.census.scanned_processes, 0);
+    }
+
+    #[test]
+    fn bounded_receipt_retains_omission_evidence() {
+        let mut report = harn_vm::op_interrupt::ProcessCleanupReport::default();
+        for pid in 1..=MAX_CHILDREN + 1 {
+            report
+                .children
+                .push(harn_vm::op_interrupt::ProcessCleanupChild::new(
+                    pid as u32,
+                    None,
+                    1,
+                    Some("x".repeat(4096)),
+                ));
+        }
+        let mut file = tempfile::tempfile().unwrap();
+        write(&mut file, &report).unwrap();
+        assert!(file.metadata().unwrap().len() <= MAX_RECEIPT_BYTES);
+        use std::io::Seek;
+        file.rewind().unwrap();
+        let receipt: harn_vm::op_interrupt::ProcessCleanupReport =
+            serde_json::from_reader(file).unwrap();
+        assert_eq!(receipt.children.len(), MAX_CHILDREN);
+        assert_eq!(receipt.omitted_children, 1);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn receipt_alias_is_refused_before_any_descriptor_is_adopted() {
+        let (_reader, writer) = io::pipe().unwrap();
+        let fd = writer.as_raw_fd();
+        let mut request = GuardianCommandRequest::from_command(
+            &Command::new("unused"),
+            false,
+            "token".into(),
+            None,
+            false,
+        );
+        request.cleanup_receipt_fd = Some(fd);
+        request.pinned_verifier_descriptors.push(fd);
+        // SAFETY: the invalid alias must be rejected before taking ownership.
+        assert!(unsafe { PreparedCommand::from_inherited_request(request) }.is_err());
+        assert!(unsafe { libc::fcntl(fd, libc::F_GETFD) } >= 0);
+    }
 }

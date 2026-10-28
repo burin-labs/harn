@@ -9,11 +9,15 @@ fn real_completed_background_cancel_replays_guardian_cleanup_receipt() {
     let python = python3().expect("the process fixture requires Python 3");
     let script = r#"
 import errno, os, signal
-try:
-    os.write(198, b'forged cleanup receipt')
-    raise AssertionError('payload inherited guardian receipt writer')
-except OSError as error:
-    assert error.errno == errno.EBADF
+for name in os.listdir('/dev/fd'):
+    fd = int(name)
+    if fd <= 2: continue
+    try:
+        os.fstat(fd)
+    except OSError as error:
+        assert error.errno == errno.EBADF
+        continue
+    raise AssertionError('payload inherited an extra descriptor')
 r, w = os.pipe()
 pid = os.fork()
 if pid == 0:
