@@ -491,6 +491,34 @@ version = "0.1.0"
     fs::write(root.join(MANIFEST), &manifest).unwrap();
     install_packages_in(workspace.env(), false, None, false).unwrap();
     assert_eq!(fs::read_to_string(&lock_path).unwrap(), original_lock);
+    let cache = archive_cache_dir_in(workspace.env(), &entry.source, &checksum).unwrap();
+    let cached_rule = cache.join("rules/no_todo.harn");
+    let expected_rule = fs::read(&cached_rule).unwrap();
+    fs::write(&cached_rule, "corrupt cached rule").unwrap();
+    fs::remove_dir_all(current_packages_dir(root)).unwrap();
+    let error = install_packages_in(workspace.env(), true, None, true).unwrap_err();
+    assert!(
+        error.to_string().contains("content hash mismatch"),
+        "{error}"
+    );
+    assert_eq!(fs::read(&cached_rule).unwrap(), b"corrupt cached rule");
+    let original_archive = fs::read(&archive_path).unwrap();
+    fs::write(package_root.join("rules/no_todo.harn"), "untrusted source").unwrap();
+    write_tar_gz_package_archive(&package_root, &archive_path);
+    let error = install_packages_in(workspace.env(), true, None, false).unwrap_err();
+    assert!(
+        error.to_string().contains("content hash mismatch"),
+        "{error}"
+    );
+    assert_eq!(fs::read(&cached_rule).unwrap(), b"corrupt cached rule");
+    assert_eq!(fs::read_to_string(&lock_path).unwrap(), original_lock);
+    fs::write(&archive_path, original_archive).unwrap();
+    assert_eq!(
+        install_packages_in(workspace.env(), true, None, false).unwrap(),
+        1
+    );
+    assert_eq!(fs::read(&cached_rule).unwrap(), expected_rule);
+    assert_eq!(fs::read_to_string(&lock_path).unwrap(), original_lock);
     fs::remove_dir_all(current_packages_dir(root)).unwrap();
     fs::remove_file(&archive_path).unwrap();
     let reinstalled = install_packages_in(workspace.env(), true, None, true).unwrap();

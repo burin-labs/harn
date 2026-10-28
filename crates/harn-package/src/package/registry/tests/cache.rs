@@ -88,6 +88,67 @@ fn frozen_install_ignores_interrupted_cache_metadata_writes() {
 }
 
 #[test]
+fn frozen_install_recovers_a_corrupt_git_cache_from_the_locked_source() {
+    let (_repo_tmp, repo, _branch) = create_git_package_repo();
+    let project_tmp = tempfile::tempdir().unwrap();
+    let root = project_tmp.path();
+    let workspace = TestWorkspace::new(root);
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+    fs::write(
+        root.join(MANIFEST),
+        format!(
+            "[package]\nname = \"workspace\"\nversion = \"0.1.0\"\n\n[dependencies]\nacme-lib = {{ git = \"{git}\", rev = \"v1.0.0\" }}\n"
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        install_packages_in(workspace.env(), false, None, false).unwrap(),
+        1
+    );
+    let lock_before = fs::read(root.join(LOCK_FILE)).unwrap();
+    let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+    let entry = lock.find("acme-lib").unwrap();
+    let cache = git_cache_dir_in(
+        workspace.env(),
+        &entry.source,
+        entry.commit.as_deref().unwrap(),
+    )
+    .unwrap();
+    let expected = fs::read(cache.join("lib.harn")).unwrap();
+    let corrupt = b"corrupted package content\n";
+    fs::write(cache.join("lib.harn"), corrupt).unwrap();
+    fs::remove_dir_all(current_packages_dir(root)).unwrap();
+
+    let error = install_packages_in(workspace.env(), true, None, true).unwrap_err();
+    assert!(
+        error.to_string().contains("content hash mismatch"),
+        "{error}"
+    );
+    assert_eq!(fs::read(cache.join("lib.harn")).unwrap(), corrupt);
+    assert_eq!(fs::read(root.join(LOCK_FILE)).unwrap(), lock_before);
+
+    let unavailable = repo.with_extension("unavailable");
+    fs::rename(&repo, &unavailable).unwrap();
+    assert!(install_packages_in(workspace.env(), true, None, false).is_err());
+    assert_eq!(fs::read(cache.join("lib.harn")).unwrap(), corrupt);
+    assert_eq!(fs::read(root.join(LOCK_FILE)).unwrap(), lock_before);
+    fs::rename(&unavailable, &repo).unwrap();
+
+    assert_eq!(
+        install_packages_in(workspace.env(), true, None, false).unwrap(),
+        1
+    );
+    assert_eq!(fs::read(cache.join("lib.harn")).unwrap(), expected);
+    assert_eq!(
+        fs::read(current_packages_dir(root).join("acme-lib/lib.harn")).unwrap(),
+        expected
+    );
+    assert_eq!(fs::read(root.join(LOCK_FILE)).unwrap(), lock_before);
+    verify_package_cache_in(workspace.env(), false).unwrap();
+}
+
+#[test]
 fn package_cache_verify_detects_tampering_even_with_stale_marker() {
     let (_repo_tmp, repo, _branch) = create_git_package_repo();
     let project_tmp = tempfile::tempdir().unwrap();

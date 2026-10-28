@@ -1,804 +1,268 @@
-export type RunSummary = {
-  path: string
-  id: string
-  workflow_name: string
-  status: string
-  last_stage_node_id: string | null
-  failure_summary: string | null
-  started_at: string
-  finished_at: string | null
-  duration_ms: number | null
-  stage_count: number
-  child_run_count: number
-  call_count: number
-  input_tokens: number
-  output_tokens: number
-  models: string[]
-  updated_at_ms: number
-  skills: string[]
-}
-
-export type PortalStats = {
-  total_runs: number
-  completed_runs: number
-  active_runs: number
-  failed_runs: number
-  avg_duration_ms: number
-}
-
-export type TrustRecord = {
-  schema: string
-  record_id: string
-  agent: string
-  action: string
-  approver: string | null
-  outcome: "success" | "failure" | "denied" | "timeout"
-  trace_id: string
-  autonomy_tier: "shadow" | "suggest" | "act_with_approval" | "act_auto"
-  timestamp: string
-  cost_usd: number | null
-  chain_index: number
-  previous_hash: string | null
-  entry_hash: string
-  metadata: Record<string, unknown>
-}
-
-export type TrustTraceGroup = {
-  trace_id: string
-  records: TrustRecord[]
-}
-
-export type TrustAgentSummary = {
-  agent: string
-  total: number
-  success_rate: number
-  mean_cost_usd: number | null
-  tier_distribution: Record<string, number>
-  outcome_distribution: Record<string, number>
-}
-
-export type TrustChainReport = {
-  topic: string
-  total: number
-  verified: boolean
-  root_hash: string | null
-  broken_at_event_id: number | null
-  errors: string[]
-}
-
-export type PortalTrustGraphResponse = {
-  records: TrustRecord[]
-  groups: TrustTraceGroup[] | null
-  summary: TrustAgentSummary[]
-  chain: TrustChainReport
-  topics: string[]
-}
-
-export type PortalListResponse = {
-  stats: PortalStats
-  filtered_count: number
-  pagination: PortalPagination
-  runs: RunSummary[]
-}
-
-export type PortalPagination = {
-  page: number
-  page_size: number
-  total_pages: number
-  total_runs: number
-  has_previous: boolean
-  has_next: boolean
-}
-
-export type PortalMeta = {
-  workspace_root: string
-  run_dir: string
-}
-
-export type PersonaManifestSummary = {
-  name: string
-  version: string | null
-  description: string
-  entry_workflow: string
-  tools: string[]
-  capabilities: string[]
-  autonomy_tier: string
-  receipt_policy: string
-  triggers: string[]
-  schedules: string[]
-  model_policy: Record<string, unknown>
-  budget: Record<string, unknown>
-  handoffs: string[]
-  context_packs: string[]
-  evals: string[]
-  manifest_path: string
-}
-
-export type PersonaLifecycleState =
-  | "inactive"
-  | "starting"
-  | "idle"
-  | "running"
-  | "paused"
-  | "draining"
-  | "failed"
-  | "disabled"
-
-export type PersonaLease = {
-  id: string
-  holder: string
-  work_key: string
-  acquired_at_ms: number
-  expires_at_ms: number
-}
-
-export type PersonaAssignmentStatus = {
-  work_key: string
-  lease_id: string
-  holder: string
-  acquired_at: string
-  expires_at: string
-}
-
-export type PersonaBudgetStatus = {
-  daily_usd: number | null
-  hourly_usd: number | null
-  run_usd: number | null
-  max_tokens: number | null
-  spent_today_usd: number
-  spent_this_hour_usd: number
-  spent_last_run_usd: number
-  tokens_today: number
-  remaining_today_usd: number | null
-  remaining_hour_usd: number | null
-  exhausted: boolean
-  reason: string | null
-  last_receipt_id: string | null
-}
-
-export type PersonaQueuedWork = {
-  work_key: string
-  provider: string
-  kind: string
-  queued_at: string
-  reason: string
-  source_event_id: string | null
-  metadata: Record<string, string>
-}
-
-export type PersonaHandoffInboxItem = {
-  work_key: string
-  handoff_id: string | null
-  handoff_kind: string | null
-  source_persona: string | null
-  task: string | null
-  queued_at: string
-  reason: string
-}
-
-export type PersonaValueReceipt = {
-  kind: string
-  run_id: string | null
-  occurred_at: string
-  paid_cost_usd: number
-  avoided_cost_usd: number
-  deterministic_steps: number
-  llm_steps: number
-  metadata: unknown
-}
-
-export type PersonaStatus = {
-  name: string
-  template_ref: string | null
-  state: PersonaLifecycleState
-  entry_workflow: string
-  role: string
-  current_assignment: PersonaAssignmentStatus | null
-  last_run: string | null
-  next_scheduled_run: string | null
-  active_lease: PersonaLease | null
-  budget: PersonaBudgetStatus
-  last_error: string | null
-  queued_events: number
-  queued_work: PersonaQueuedWork[]
-  handoff_inbox: PersonaHandoffInboxItem[]
-  value_receipts: PersonaValueReceipt[]
-  disabled_events: number
-  paused_event_policy: string
-}
-
-export type PortalHighlightKeywords = {
-  keyword: string[]
-  literal: string[]
-  built_in: string[]
-}
-
-export type PortalLlmProviderOption = {
-  name: string
-  base_url: string
-  base_url_env: string | null
-  auth_style: string
-  auth_envs: string[]
-  auth_configured: boolean
-  viable: boolean
-  local: boolean
-  models: string[]
-  aliases: string[]
-  default_model: string
-}
-
-export type PortalLlmOptions = {
-  preferred_provider: string | null
-  preferred_model: string | null
-  providers: PortalLlmProviderOption[]
-}
-
-export type PortalInsight = {
-  label: string
-  value: string
-  detail: string
-}
-
-export type PortalCostSummary = {
-  total_cost_usd: number
-  call_count: number
-  input_tokens: number
-  output_tokens: number
-}
-
-export type PortalCostTrendPoint = {
-  date: string
-  pipeline: string
-  cost_usd: number
-  call_count: number
-  input_tokens: number
-  output_tokens: number
-}
-
-export type PortalProviderCostBreakdown = {
-  provider: string
-  model: string
-  cost_usd: number
-  call_count: number
-  input_tokens: number
-  output_tokens: number
-}
-
-export type PortalCostReport = {
-  summary: PortalCostSummary
-  trend: PortalCostTrendPoint[]
-  provider_breakdown: PortalProviderCostBreakdown[]
-}
-
-export type PortalStageDebug = {
-  call_count: number
-  input_tokens: number
-  output_tokens: number
-  consumed_artifact_ids: string[]
-  produced_artifact_ids: string[]
-  selected_artifact_ids: string[]
-  worker_id: string | null
-  error: string | null
-  model_policy: string | null
-  auto_compact: string | null
-  output_visibility: string | null
-  context_policy: string | null
-  retry_policy: string | null
-  capability_policy: string | null
-  input_contract: string | null
-  output_contract: string | null
-  prompt: string | null
-  system_prompt: string | null
-  rendered_context: string | null
-}
-
-export type PortalStage = {
-  id: string
-  node_id: string
-  kind: string
-  status: string
-  outcome: string
-  branch: string | null
-  started_at: string
-  finished_at: string | null
-  duration_ms: number | null
-  artifact_count: number
-  attempt_count: number
-  verification_summary: string | null
-  debug: PortalStageDebug
-}
-
-export type PortalSpan = {
-  span_id: number
-  parent_id: number | null
-  kind: string
-  name: string
-  start_ms: number
-  duration_ms: number
-  end_ms: number
-  label: string
-  lane: number
-  depth: number
-  metadata: Record<string, unknown>
-}
-
-export type PortalActivityAuditLayer = {
-  name: string
-  status: string
-  metadata?: Record<string, unknown>
-}
-
-export type PortalActivityAudit = {
-  reason?: string
-  kind?: string
-  status: string
-  layers: PortalActivityAuditLayer[]
-  receipt_uri?: string
-}
-
-export type PortalActivity = {
-  label: string
-  kind: string
-  started_offset_ms: number
-  duration_ms: number
-  stage_node_id: string | null
-  call_id: string | null
-  summary: string
-  audit?: PortalActivityAudit
-}
-
-export type PortalTransition = {
-  from_node_id: string | null
-  to_node_id: string
-  branch: string | null
-  consumed_count: number
-  produced_count: number
-}
-
-export type PortalCheckpoint = {
-  reason: string
-  ready_count: number
-  completed_count: number
-  last_stage_id: string | null
-}
-
-export type PortalArtifact = {
-  id: string
-  kind: string
-  title: string
-  source: string | null
-  stage: string | null
-  estimated_tokens: number | null
-  lineage_count: number
-  preview: string
-}
-
-export type PortalPolicySummary = {
-  tools: string[]
-  capabilities: string[]
-  workspace_roots: string[]
-  side_effect_level: string | null
-  recursion_limit: number | null
-  tool_arg_constraints: string[]
-  validation_valid: boolean | null
-  validation_errors: string[]
-  validation_warnings: string[]
-  reachable_nodes: string[]
-}
-
-export type PortalReplayAssertion = {
-  node_id: string
-  expected_status: string
-  expected_outcome: string
-  expected_branch: string | null
-  required_artifact_kinds: string[]
-  visible_text_contains: string | null
-}
-
-export type PortalReplaySummary = {
-  fixture_id: string
-  source_run_id: string
-  created_at: string
-  expected_status: string
-  stage_assertions: PortalReplayAssertion[]
-}
-
-export type PortalTranscriptMessage = {
-  role: string
-  content: string
-}
-
-export type PortalTranscriptStep = {
-  call_id: string
-  span_id: number | null
-  iteration: number
-  call_index: number
-  model: string
-  provider: string | null
-  kept_messages: number
-  added_messages: number
-  total_messages: number
-  input_tokens: number | null
-  output_tokens: number | null
-  system_prompt: string | null
-  added_context: PortalTranscriptMessage[]
-  response_text: string | null
-  thinking: string | null
-  tool_calls: string[]
-  summary: string
-}
-
-export type PortalTemplateBranch = {
-  kind: string
-  template_uri: string
-  line: number
-  col: number
-  branch_id: string
-  branch_label: string | null
-}
-
-export type PortalTemplateRender = {
-  template_uri: string
-  template_revision_hash: string
-  rendered_bytes: number
-  provider: string
-  model: string
-  family: string
-  capabilities: Record<string, unknown>
-  branches: PortalTemplateBranch[]
-  span_id: number | null
-  timestamp: string | null
-}
-
-export type PortalStorySection = {
-  title: string
-  scope: string
-  role: string
-  source: string
-  text: string
-  preview: string
-}
-
-export type PortalChildRun = {
-  worker_name: string
-  status: string
-  started_at: string
-  finished_at: string | null
-  run_id: string | null
-  run_path: string | null
-  task: string
-}
-
-export type RunDeliverableSummary = {
-  id: string
-  text: string
-  status: string
-  note: string | null
-}
-
-export type RunTaskLedgerSummary = {
-  root_task: string
-  rationale: string
-  deliverables: RunDeliverableSummary[]
-  observations: string[]
-  blocking_count: number
-}
-
-export type RunPlannerRound = {
-  stage_id: string
-  node_id: string
-  stage_kind: string
-  status: string
-  outcome: string
-  iteration_count: number
-  llm_call_count: number
-  tool_execution_count: number
-  tool_rejection_count: number
-  intervention_count: number
-  compaction_count: number
-  tools_used: string[]
-  successful_tools: string[]
-  ledger_done_rejections: number
-  task_ledger: RunTaskLedgerSummary | null
-  research_facts: string[]
-}
-
-export type RunWorkerLineage = {
-  worker_id: string
-  worker_name: string
-  parent_stage_id: string | null
-  task: string
-  status: string
-  session_id: string | null
-  parent_session_id: string | null
-  run_id: string | null
-  run_path: string | null
-  snapshot_path: string | null
-}
-
-export type RunActionGraphNode = {
-  id: string
-  label: string
-  kind: string
-  status: string
-  outcome: string
-  trace_id: string | null
-  stage_id: string | null
-  node_id: string | null
-  worker_id: string | null
-  run_id: string | null
-  run_path: string | null
-  metadata: Record<string, unknown>
-}
-
-export type RunActionGraphEdge = {
-  from_id: string
-  to_id: string
-  kind: string
-  label: string | null
-}
-
-export type RunVerificationOutcome = {
-  stage_id: string
-  node_id: string
-  status: string
-  passed: boolean | null
-  summary: string | null
-}
-
-export type RunTranscriptPointer = {
-  id: string
-  label: string
-  kind: string
-  location: string
-  path: string | null
-  available: boolean
-}
-
-export type DaemonEvent = {
-  daemon_id: string
-  name: string
-  kind: "spawned" | "triggered" | "snapshotted" | "resumed" | "stopped"
-  timestamp: string
-  persist_path: string
-  payload_summary: string | null
-}
-
-export type RunObservability = {
-  schema_version: number
-  planner_rounds: RunPlannerRound[]
-  research_fact_count: number
-  action_graph_nodes: RunActionGraphNode[]
-  action_graph_edges: RunActionGraphEdge[]
-  worker_lineage: RunWorkerLineage[]
-  verification_outcomes: RunVerificationOutcome[]
-  transcript_pointers: RunTranscriptPointer[]
-  daemon_events: DaemonEvent[]
-}
-
-export type PortalExecutionSummary = {
-  cwd: string | null
-  repo_path: string | null
-  worktree_path: string | null
-  branch: string | null
-  adapter: string | null
-}
-
-export type PortalSkillTimelineEntry = {
-  name: string
-  description: string
-  activated_iteration: number
-  deactivated_iteration: number | null
-  score: number | null
-  reason: string
-  allowed_tools: string[]
-  scope: string
-}
-
-export type PortalSkillMatchCandidate = {
-  name: string
-  score: number
-  reason: string
-  activated: boolean
-}
-
-export type PortalSkillMatchEvent = {
-  iteration: number
-  strategy: string
-  reassess: boolean
-  working_files: string[]
-  candidates: PortalSkillMatchCandidate[]
-}
-
-export type PortalToolLoadEvent = {
-  query: string
-  strategy: string
-  mode: string
-  tool_use_id: string | null
-  promoted: string[]
-  references: string[]
-  iteration: number | null
-  scope: string
-}
-
-export type PortalFlightRecording = {
-  schema_version: number
-  execution_id: string
-  format: string
-  path: string | null
-  content_hash: string
-  byte_length: number
-  retained_events: number
-  dropped_events: number
-  value_policy: "omitted"
-}
-
-export type PortalEvidenceGap = {
-  component: string
-  code: string
-  message: string
-}
-
-export type PortalRunView = {
-  evidence: {
-    schema_version: number
-    execution_id: string | null
-    flight_recording: PortalFlightRecording | null
-    gaps: PortalEvidenceGap[]
-  }
-}
-
-export type PortalRunDetail = {
-  summary: RunSummary
-  view: PortalRunView
-  task: string
-  workflow_id: string
-  parent_run_id: string | null
-  root_run_id: string | null
-  policy_summary: PortalPolicySummary
-  replay_summary: PortalReplaySummary | null
-  execution: unknown
-  insights: PortalInsight[]
-  stages: PortalStage[]
-  spans: PortalSpan[]
-  activities: PortalActivity[]
-  transitions: PortalTransition[]
-  checkpoints: PortalCheckpoint[]
-  artifacts: PortalArtifact[]
-  execution_summary: PortalExecutionSummary | null
-  transcript_steps: PortalTranscriptStep[]
-  template_renders: PortalTemplateRender[]
-  story: PortalStorySection[]
-  child_runs: PortalChildRun[]
-  observability: RunObservability
-  skill_timeline: PortalSkillTimelineEntry[]
-  skill_match_events: PortalSkillMatchEvent[]
-  tool_load_events: PortalToolLoadEvent[]
-  active_skills: string[]
-}
-
-export type PortalRunDiff = {
-  left_path: string
-  right_path: string
-  identical: boolean
-  status_changed: boolean
-  left_status: string
-  right_status: string
-  stage_diffs: Array<{
-    node_id: string
-    change: string
-    details: string[]
-  }>
-  tool_diffs: Array<{
-    tool_name: string
-    args_hash: string
-    result_changed: boolean
-    left_result: string | null
-    right_result: string | null
-  }>
-  observability_diffs: Array<{
-    section: string
-    label: string
-    details: string[]
-  }>
-  transition_count_delta: number
-  artifact_count_delta: number
-  checkpoint_count_delta: number
-}
-
-export type PortalLaunchTarget = {
-  path: string
-  group: string
-}
-
-export type PortalLaunchTargetList = {
-  targets: PortalLaunchTarget[]
-}
-
-export type PortalLaunchJob = {
-  id: string
-  mode: string
-  target_label: string
-  status: string
-  started_at: string
-  finished_at: string | null
-  exit_code: number | null
-  logs: string
-  discovered_run_paths: string[]
-  workspace_dir: string | null
-  transcript_path: string | null
-}
-
-export type PortalLaunchJobList = {
-  jobs: PortalLaunchJob[]
-}
-
-export type PortalDlqAttempt = {
-  attempt: number
-  at: string
-  status: string
-  error: string | null
-}
-
-export type PortalDlqEntry = {
-  id: string
-  event_id: string
-  trigger_id: string
-  binding_id: string
-  binding_key: string
-  binding_version: number | null
-  provider: string
-  event_kind: string
-  failed_at: string
-  failed_at_ms: number
-  last_error: string
-  error_class: string
-  retry_count: number
-  state: string
-  headers: Record<string, string>
-  payload: unknown
-  event: unknown
-  attempt_history: PortalDlqAttempt[]
-  predicate_trace: unknown[]
-}
-
-export type PortalDlqGroup = {
-  error_class: string
-  count: number
-  newest_failed_at: string | null
-}
-
-export type PortalDlqAlert = {
-  trigger_id: string
-  error_class: string
-  count: number
-  window_seconds: number
-  threshold_entries: number
-  destinations: string[]
-}
-
-export type PortalDlqAlertConfig = {
-  trigger_id: string
-  destinations: string[]
-  threshold_entries: number | null
-  threshold_percent: number | null
-}
-
-export type PortalDlqListResponse = {
-  total: number
-  entries: PortalDlqEntry[]
-  groups: PortalDlqGroup[]
-  alerts: PortalDlqAlert[]
-  alert_configs: PortalDlqAlertConfig[]
-}
-
-export type PortalDlqBulkResponse = {
-  operation: string
-  dry_run: boolean
-  matched_count: number
-  accepted_count: number
-  skipped_count: number
-  rate_limit_per_second: number
-  jobs: PortalLaunchJob[]
-  entries: PortalDlqEntry[]
-}
+// Generated by `make gen-portal-types` from the portal DTOs in
+// crates/harn-cli/src/commands/portal. Do not edit by hand.
+
+export type JsonValue = unknown
+
+export type AutonomyTier = "shadow" | "suggest" | "act_with_approval" | "act_auto";
+
+export type DaemonEvent = { daemon_id: string, name: string, kind: DaemonEventKind, timestamp: string, persist_path: string, payload_summary: string | null, };
+
+export type DaemonEventKind = "spawned" | "triggered" | "snapshotted" | "resumed" | "stopped";
+
+export type EnvironmentPolicyKind = "inherited" | "isolated" | "granted";
+
+export type FlightValuePolicy = "omitted";
+
+export type GrantAudience = "session" | "in_process";
+
+export type GrantReceipt = { name: string, source_kind: string, exposed_as_env?: string, for_command?: string, 
+/**
+ * `in_process` when no child could see the exposure. Omitted for the
+ * default session audience, so a record written before audiences
+ * existed reads back as what it was.
+ */
+exposed_to?: GrantAudience, };
+
+export type PersonaAssignmentStatus = { work_key: string, lease_id: string, holder: string, acquired_at: string, expires_at: string, };
+
+export type PersonaBudgetStatus = { daily_usd: number | null, hourly_usd: number | null, run_usd: number | null, max_tokens: number | null, spent_today_usd: number, spent_this_hour_usd: number, spent_last_run_usd: number, tokens_today: number, remaining_today_usd: number | null, remaining_hour_usd: number | null, exhausted: boolean, reason: string | null, last_receipt_id: string | null, };
+
+export type PersonaHandoffInboxItem = { work_key: string, handoff_id: string | null, handoff_kind: string | null, source_persona: string | null, task: string | null, queued_at: string, reason: string, };
+
+export type PersonaLease = { id: string, holder: string, work_key: string, acquired_at_ms: number, expires_at_ms: number, };
+
+export type PersonaLifecycleState = "inactive" | "starting" | "idle" | "running" | "paused" | "draining" | "failed" | "disabled";
+
+export type PersonaQueuedWork = { work_key: string, provider: string, kind: string, queued_at: string, reason: string, source_event_id: string | null, metadata: { [key in string]: string }, };
+
+export type PersonaStatus = { name: string, template_ref: string | null, state: PersonaLifecycleState, entry_workflow: string, role: string, current_assignment: PersonaAssignmentStatus | null, last_run: string | null, next_scheduled_run: string | null, active_lease: PersonaLease | null, budget: PersonaBudgetStatus, last_error: string | null, queued_events: number, queued_work: Array<PersonaQueuedWork>, handoff_inbox: Array<PersonaHandoffInboxItem>, value_receipts: Array<PersonaValueReceipt>, disabled_events: number, paused_event_policy: string, };
+
+export type PersonaValueEventKind = "run_started" | "run_completed" | "accepted_outcome" | "frontier_escalation" | "deterministic_execution" | "promotion_savings" | "approval_wait";
+
+export type PersonaValueReceipt = { kind: PersonaValueEventKind, run_id: string | null, occurred_at: string, paid_cost_usd: number, avoided_cost_usd: number, deterministic_steps: number, llm_steps: number, metadata: JsonValue, };
+
+export type PortalActivity = { label: string, kind: string, started_offset_ms: number, duration_ms: number, stage_node_id: string | null, call_id: string | null, summary: string, 
+/**
+ * Captured `tool_call_audit` payload joined by `call_id`, when the
+ * underlying middleware stack attached one. `None` keeps the
+ * activity row visually clean for spans that never went through
+ * `with_required_reason` / `with_audit_log` / etc.
+ */
+audit?: PortalActivityAudit, };
+
+export type PortalActivityAudit = { 
+/**
+ * User-facing one-liner pulled from `audit.summary`
+ * (ACP `title` / OpenAI `summary_text` convention). Renders as a
+ * chip below the tool name.
+ */
+reason?: string, 
+/**
+ * Optional ACP-style classification (`read`, `search`, etc.) from
+ * `audit.kind` or the typed receipt.
+ */
+kind?: string, 
+/**
+ * Receipt status (`ok` / `error` / `consent_denied` / etc.) when a
+ * `ToolCallReceipt` was attached.
+ */
+status: string, 
+/**
+ * Dispatch-order layer chain (outer-to-inner) extracted from
+ * `audit.layers`. Powers the tooltip on hover.
+ */
+layers: Array<PortalActivityAuditLayer>, 
+/**
+ * Pointer to a persisted receipt (`file://` for local sinks or a
+ * pre-signed cloud URL). Passed through unchanged — the portal
+ * never rewrites it.
+ */
+receipt_uri?: string, };
+
+export type PortalActivityAuditLayer = { name: string, status: string, metadata?: JsonValue, };
+
+export type PortalArtifact = { id: string, kind: string, title: string, source: string | null, stage: string | null, estimated_tokens: number | null, lineage_count: number, preview: string, };
+
+export type PortalCheckpoint = { reason: string, ready_count: number, completed_count: number, last_stage_id: string | null, };
+
+export type PortalChildRun = { worker_name: string, status: string, started_at: string, finished_at: string | null, run_id: string | null, run_path: string | null, task: string, };
+
+export type PortalCostReport = { summary: PortalCostSummary, trend: Array<PortalCostTrendPoint>, provider_breakdown: Array<PortalProviderCostBreakdown>, };
+
+export type PortalCostSummary = { total_cost_usd: number, call_count: number, input_tokens: number, output_tokens: number, };
+
+export type PortalCostTrendPoint = { date: string, pipeline: string, cost_usd: number, call_count: number, input_tokens: number, output_tokens: number, };
+
+export type PortalDlqAlert = { trigger_id: string, error_class: string, count: number, window_seconds: number, threshold_entries: number, destinations: Array<string>, };
+
+export type PortalDlqAlertConfig = { trigger_id: string, destinations: Array<string>, threshold_entries: number | null, threshold_percent: number | null, };
+
+export type PortalDlqAttempt = { attempt: number, at: string, status: string, error: string | null, };
+
+export type PortalDlqBulkResponse = { operation: string, dry_run: boolean, matched_count: number, accepted_count: number, skipped_count: number, rate_limit_per_second: number, jobs: Array<PortalLaunchJob>, entries: Array<PortalDlqEntry>, };
+
+export type PortalDlqEntry = { id: string, event_id: string, trigger_id: string, binding_id: string, binding_key: string, binding_version: number | null, provider: string, event_kind: string, failed_at: string, failed_at_ms: number, last_error: string, error_class: string, retry_count: number, state: string, headers: { [key in string]: string }, payload: JsonValue, event: JsonValue, attempt_history: Array<PortalDlqAttempt>, predicate_trace: Array<JsonValue>, };
+
+export type PortalDlqGroup = { error_class: string, count: number, newest_failed_at: string | null, };
+
+export type PortalDlqListResponse = { total: number, entries: Array<PortalDlqEntry>, groups: Array<PortalDlqGroup>, alerts: Array<PortalDlqAlert>, alert_configs: Array<PortalDlqAlertConfig>, };
+
+export type PortalEvidenceGap = { 
+/**
+ * Stable evidence component, for example `flight_recording`.
+ */
+component: string, 
+/**
+ * Stable machine-readable failure code.
+ */
+code: string, 
+/**
+ * Redacted diagnostic detail for operators.
+ */
+message: string, };
+
+export type PortalExecutionSummary = { cwd: string | null, repo_path: string | null, worktree_path: string | null, branch: string | null, adapter: string | null, };
+
+export type PortalFlightRecording = { schema_version: number, execution_id: string, format: string, 
+/**
+ * Local locator for the recording payload. Public projections omit it;
+ * local hosts may opt in when they can actually open the artifact.
+ */
+path: string | null, content_hash: string, byte_length: number, retained_events: number, dropped_events: number, value_policy: FlightValuePolicy, };
+
+export type PortalHighlightKeywords = { keyword: Array<string>, literal: Array<string>, built_in: Array<string>, };
+
+export type PortalInsight = { label: string, value: string, detail: string, };
+
+export type PortalLaunchJob = { id: string, mode: string, target_label: string, status: string, started_at: string, finished_at: string | null, exit_code: number | null, logs: string, discovered_run_paths: Array<string>, workspace_dir: string | null, transcript_path: string | null, };
+
+export type PortalLaunchJobList = { jobs: Array<PortalLaunchJob>, };
+
+export type PortalLaunchTarget = { path: string, group: string, };
+
+export type PortalLaunchTargetList = { targets: Array<PortalLaunchTarget>, };
+
+export type PortalListResponse = { stats: PortalStats, filtered_count: number, pagination: PortalPagination, runs: Array<RunSummary>, };
+
+export type PortalLlmOptions = { preferred_provider: string | null, preferred_model: string | null, providers: Array<PortalLlmProviderOption>, };
+
+export type PortalLlmProviderOption = { name: string, base_url: string, base_url_env: string | null, auth_style: string, auth_envs: Array<string>, auth_configured: boolean, viable: boolean, local: boolean, models: Array<string>, aliases: Array<string>, default_model: string, };
+
+export type PortalMeta = { workspace_root: string, run_dir: string, };
+
+export type PortalPagination = { page: number, page_size: number, total_pages: number, total_runs: number, has_previous: boolean, has_next: boolean, };
+
+export type PortalPolicySummary = { tools: Array<string>, capabilities: Array<string>, workspace_roots: Array<string>, side_effect_level: string | null, recursion_limit: number | null, tool_arg_constraints: Array<string>, validation_valid: boolean | null, validation_errors: Array<string>, validation_warnings: Array<string>, reachable_nodes: Array<string>, };
+
+export type PortalProviderCostBreakdown = { provider: string, model: string, cost_usd: number, call_count: number, input_tokens: number, output_tokens: number, };
+
+export type PortalReplayAssertion = { node_id: string, expected_status: string, expected_outcome: string, expected_branch: string | null, required_artifact_kinds: Array<string>, visible_text_contains: string | null, };
+
+export type PortalReplaySummary = { fixture_id: string, source_run_id: string, created_at: string, expected_status: string, stage_assertions: Array<PortalReplayAssertion>, };
+
+export type PortalRunDetail = { summary: RunSummary, view: { evidence: RunEvidence }, task: string, workflow_id: string, parent_run_id: string | null, root_run_id: string | null, policy_summary: PortalPolicySummary, replay_summary: PortalReplaySummary | null, execution: RunExecution | null, insights: Array<PortalInsight>, stages: Array<PortalStage>, spans: Array<PortalSpan>, activities: Array<PortalActivity>, transitions: Array<PortalTransition>, checkpoints: Array<PortalCheckpoint>, artifacts: Array<PortalArtifact>, execution_summary: PortalExecutionSummary | null, transcript_steps: Array<PortalTranscriptStep>, template_renders: Array<PortalTemplateRender>, story: Array<PortalStorySection>, child_runs: Array<PortalChildRun>, observability: RunObservability, skill_timeline: Array<PortalSkillTimelineEntry>, skill_match_events: Array<PortalSkillMatchEvent>, tool_load_events: Array<PortalToolLoadEvent>, active_skills: Array<string>, };
+
+export type PortalRunDiff = { left_path: string, right_path: string, identical: boolean, status_changed: boolean, left_status: string, right_status: string, stage_diffs: Array<RunStageDiff>, tool_diffs: Array<ToolCallDiff>, observability_diffs: Array<RunObservabilityDiff>, transition_count_delta: number, artifact_count_delta: number, checkpoint_count_delta: number, };
+
+export type PortalSkillMatchCandidate = { name: string, score: number, reason: string, activated: boolean, };
+
+export type PortalSkillMatchEvent = { iteration: number, strategy: string, reassess: boolean, working_files: Array<string>, candidates: Array<PortalSkillMatchCandidate>, };
+
+export type PortalSkillTimelineEntry = { name: string, description: string, activated_iteration: number, deactivated_iteration: number | null, score: number | null, reason: string, allowed_tools: Array<string>, scope: string, };
+
+export type PortalSpan = { span_id: number, parent_id: number | null, kind: string, name: string, start_ms: number, duration_ms: number, end_ms: number, label: string, lane: number, depth: number, metadata: { [key in string]: JsonValue }, };
+
+export type PortalStage = { id: string, node_id: string, kind: string, status: string, outcome: string, branch: string | null, started_at: string, finished_at: string | null, duration_ms: number | null, artifact_count: number, attempt_count: number, verification_summary: string | null, debug: PortalStageDebug, };
+
+export type PortalStageDebug = { call_count: number, input_tokens: number, output_tokens: number, consumed_artifact_ids: Array<string>, produced_artifact_ids: Array<string>, selected_artifact_ids: Array<string>, worker_id: string | null, error: string | null, model_policy: string | null, auto_compact: string | null, output_visibility: string | null, context_policy: string | null, retry_policy: string | null, capability_policy: string | null, input_contract: string | null, output_contract: string | null, prompt: string | null, system_prompt: string | null, rendered_context: string | null, };
+
+export type PortalStats = { total_runs: number, completed_runs: number, active_runs: number, failed_runs: number, avg_duration_ms: number, };
+
+export type PortalStorySection = { title: string, scope: string, role: string, source: string, text: string, preview: string, };
+
+export type PortalTemplateBranch = { kind: string, template_uri: string, line: number, col: number, branch_id: string, branch_label: string | null, };
+
+export type PortalTemplateRender = { template_uri: string, template_revision_hash: string, rendered_bytes: number, provider: string, model: string, family: string, capabilities: { [key in string]: JsonValue }, branches: Array<PortalTemplateBranch>, span_id: number | null, timestamp: string | null, };
+
+export type PortalToolLoadEvent = { query: string, strategy: string, mode: string, tool_use_id: string | null, promoted: Array<string>, references: Array<string>, iteration: number | null, scope: string, };
+
+export type PortalTranscriptMessage = { role: string, content: string, };
+
+export type PortalTranscriptStep = { call_id: string, span_id: number | null, iteration: number, call_index: number, model: string, provider: string | null, kept_messages: number, added_messages: number, total_messages: number, input_tokens: number | null, output_tokens: number | null, system_prompt: string | null, added_context: Array<PortalTranscriptMessage>, response_text: string | null, thinking: string | null, tool_calls: Array<string>, summary: string, };
+
+export type PortalTransition = { from_node_id: string | null, to_node_id: string, branch: string | null, consumed_count: number, produced_count: number, };
+
+export type PortalTrustGraphResponse = { records: Array<TrustRecord>, groups: Array<TrustTraceGroup> | null, summary: Array<TrustAgentSummary>, chain: TrustChainReport, topics: Array<string>, };
+
+export type RunActionGraphEdge = { from_id: string, to_id: string, kind: string, label: string | null, };
+
+export type RunActionGraphNode = { id: string, label: string, kind: string, status: string, outcome: string, trace_id: string | null, stage_id: string | null, node_id: string | null, worker_id: string | null, run_id: string | null, run_path: string | null, metadata: { [key in string]: JsonValue }, };
+
+export type RunDeliverableSummary = { id: string, text: string, status: string, note: string | null, };
+
+export type RunEvidence = { schema_version: number, execution_id: string | null, flight_recording: PortalFlightRecording | null, 
+/**
+ * Evidence requested for this execution that could not be made durable.
+ * A saved gap is preferable to silently presenting a partial record as
+ * complete evidence.
+ */
+gaps: Array<PortalEvidenceGap>, };
+
+export type RunExecution = { cwd: string | null, project_root: string | null, source_dir: string | null, env: { [key in string]: string }, adapter: string | null, repo_path: string | null, worktree_path: string | null, branch: string | null, base_ref: string | null, cleanup: string | null, 
+/**
+ * The environment policy active for this run.
+ */
+environment_policy: EnvironmentPolicyKind, 
+/**
+ * Non-secret receipts for the session-scoped environment grants this run
+ * launched under. Each receipt records the grant name, its source kind,
+ * and its optional process-environment target — never the credential value. See
+ * [`crate::security::GrantReceipt`]. `#[serde(default)]` on the struct
+ * loads pre-grants records with an empty vec.
+ */
+grants: Array<GrantReceipt>, 
+/**
+ * Every environment variable name this run's child processes could see.
+ * Names only, never values. The policy kind says how the set was chosen;
+ * this says what it actually was, which is the part a reader auditing a
+ * run needs. `#[serde(default)]` on the struct loads older records with
+ * an empty vec, which reads as unrecorded rather than as empty.
+ */
+admitted_environment: Array<string>, };
+
+export type RunObservability = { schema_version: number, planner_rounds: Array<RunPlannerRound>, research_fact_count: number, action_graph_nodes: Array<RunActionGraphNode>, action_graph_edges: Array<RunActionGraphEdge>, worker_lineage: Array<RunWorkerLineage>, verification_outcomes: Array<RunVerificationOutcome>, transcript_pointers: Array<RunTranscriptPointer>, daemon_events: Array<DaemonEvent>, };
+
+export type RunObservabilityDiff = { section: string, label: string, details: Array<string>, };
+
+export type RunPlannerRound = { stage_id: string, node_id: string, stage_kind: string, status: string, outcome: string, iteration_count: number, llm_call_count: number, tool_execution_count: number, tool_rejection_count: number, intervention_count: number, compaction_count: number, native_text_tool_fallback_count: number, native_text_tool_fallback_rejection_count: number, empty_completion_retry_count: number, tools_used: Array<string>, successful_tools: Array<string>, ledger_done_rejections: number, task_ledger: RunTaskLedgerSummary | null, research_facts: Array<string>, };
+
+export type RunStageDiff = { node_id: string, change: string, details: Array<string>, };
+
+export type RunSummary = { path: string, id: string, workflow_name: string, status: string, last_stage_node_id: string | null, failure_summary: string | null, started_at: string, finished_at: string | null, duration_ms: number | null, stage_count: number, child_run_count: number, call_count: number, input_tokens: number, output_tokens: number, models: Array<string>, updated_at_ms: number, 
+/**
+ * Skill names that were activated at any point during this run.
+ * Used by the portal list filter `skill=<name>`.
+ */
+skills: Array<string>, };
+
+export type RunTaskLedgerSummary = { root_task: string, rationale: string, deliverables: Array<RunDeliverableSummary>, observations: Array<string>, blocking_count: number, };
+
+export type RunTranscriptArtifactDescriptor = { schema_version: string, artifact_kind: string, run_id: string, session_id: string | null, path: string, relative_path: string | null, sha256: string, byte_len: number, event_count: number, first_event_type: string | null, first_event_id: string | null, last_event_type: string | null, last_event_id: string | null, complete: boolean, terminal_status: string | null, effective_tool_format: string | null, tool_schema_hash: string | null, };
+
+export type RunTranscriptPointer = { id: string, label: string, kind: string, location: string, path: string | null, available: boolean, verification_status: string, verification_error: string | null, descriptor: RunTranscriptArtifactDescriptor | null, };
+
+export type RunVerificationOutcome = { stage_id: string, node_id: string, status: string, passed: boolean | null, summary: string | null, };
+
+export type RunWorkerLineage = { worker_id: string, worker_name: string, parent_stage_id: string | null, task: string, status: string, session_id: string | null, parent_session_id: string | null, run_id: string | null, run_path: string | null, snapshot_path: string | null, };
+
+export type ToolCallDiff = { tool_name: string, args_hash: string, result_changed: boolean, left_result: string | null, right_result: string | null, };
+
+export type TrustAgentSummary = { agent: string, total: number, success_rate: number, mean_cost_usd: number | null, tier_distribution: { [key in string]: number }, outcome_distribution: { [key in string]: number }, };
+
+export type TrustChainReport = { topic: string, total: number, verified: boolean, root_hash: string | null, broken_at_event_id: number | null, errors: Array<string>, };
+
+export type TrustOutcome = "success" | "failure" | "denied" | "timeout";
+
+export type TrustRecord = { schema: string, record_id: string, agent: string, action: string, approver: string | null, outcome: TrustOutcome, trace_id: string, autonomy_tier: AutonomyTier, timestamp: string, cost_usd: number | null, chain_index: number, previous_hash: string | null, entry_hash: string, metadata: { [key in string]: JsonValue }, };
+
+export type TrustTraceGroup = { trace_id: string, records: Array<TrustRecord>, };

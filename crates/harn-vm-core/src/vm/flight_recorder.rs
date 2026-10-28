@@ -49,13 +49,15 @@ pub struct FlightRecording {
     Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
+#[derive(ts_rs::TS)]
 pub enum FlightValuePolicy {
     /// Runtime values, arguments, results, and stack contents are never stored.
     #[default]
     Omitted,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema, ts_rs::TS)]
+#[ts(rename = "PortalFlightRecording")]
 pub struct FlightRecordingArtifact {
     pub schema_version: u32,
     pub execution_id: String,

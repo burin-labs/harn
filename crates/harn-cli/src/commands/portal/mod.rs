@@ -12,6 +12,7 @@ mod run_analysis;
 mod skill_events;
 mod state;
 mod transcript;
+mod ts_bindings;
 mod util;
 
 use std::collections::HashMap;
@@ -23,6 +24,11 @@ use tokio::sync::Mutex;
 
 use self::router::build_router;
 use self::state::PortalState;
+
+/// Render the portal's TypeScript API types; see [`ts_bindings`].
+pub(crate) fn render_ts_types() -> String {
+    ts_bindings::render()
+}
 
 pub(crate) async fn run_portal(
     dir: &str,

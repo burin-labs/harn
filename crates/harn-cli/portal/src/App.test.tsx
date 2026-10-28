@@ -1,9 +1,11 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { QueryClientProvider } from "@tanstack/react-query"
 import { IntlProvider } from "react-intl"
 import { MemoryRouter } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { createQueryClient } from "./lib/query"
 import { App } from "./App"
 import { RunsPage } from "./pages/RunsPage"
 
@@ -196,9 +198,9 @@ describe("App", () => {
 
     render(
       <MemoryRouter initialEntries={["/runs?page=1.5&page_size=37&status=bogus&sort=weird"]}>
-        <IntlProvider locale="en">
+        <QueryClientProvider client={createQueryClient()}><IntlProvider locale="en">
           <RunsPage poll={false} />
-        </IntlProvider>
+        </IntlProvider></QueryClientProvider>
       </MemoryRouter>,
     )
 
@@ -291,9 +293,9 @@ describe("App", () => {
 
     render(
       <MemoryRouter initialEntries={["/runs"]}>
-        <IntlProvider locale="en">
+        <QueryClientProvider client={createQueryClient()}><IntlProvider locale="en">
           <App />
-        </IntlProvider>
+        </IntlProvider></QueryClientProvider>
       </MemoryRouter>,
     )
 
@@ -383,9 +385,9 @@ describe("App", () => {
 
     render(
       <MemoryRouter initialEntries={["/dlq"]}>
-        <IntlProvider locale="en">
+        <QueryClientProvider client={createQueryClient()}><IntlProvider locale="en">
           <App />
-        </IntlProvider>
+        </IntlProvider></QueryClientProvider>
       </MemoryRouter>,
     )
 

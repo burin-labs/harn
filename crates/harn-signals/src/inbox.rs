@@ -748,22 +748,18 @@ fn write_document(path: &Path, state: InboxSnapshot) -> Result<(), SignalsError>
         path: path.to_path_buf(),
         message: source.to_string(),
     })?;
-    let temp = path.with_file_name(format!(
-        ".{INBOX_FILE}.{}.{}.tmp",
-        std::process::id(),
-        uuid::Uuid::new_v4().simple()
-    ));
-    let written = (|| {
-        let mut file = open_private(&temp)?;
-        file.write_all(&bytes)
-            .and_then(|()| file.sync_all())
-            .map_err(|source| SignalsError::io(&temp, source))?;
-        fs::rename(&temp, path).map_err(|source| SignalsError::io(path, source))
-    })();
-    if written.is_err() {
-        let _ = fs::remove_file(&temp);
-    }
-    written
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temp = tempfile::Builder::new()
+        .prefix(&format!(".{INBOX_FILE}."))
+        .suffix(".tmp")
+        .tempfile_in(dir)
+        .map_err(|source| SignalsError::io(dir, source))?;
+    temp.write_all(&bytes)
+        .and_then(|()| temp.as_file().sync_all())
+        .map_err(|source| SignalsError::io(temp.path(), source))?;
+    temp.persist(path)
+        .map(|_| ())
+        .map_err(|error| SignalsError::io(path, error.error))
 }
 
 /// Remove what a killed process left: a temporary inbox file whose rename
