@@ -1818,6 +1818,7 @@ harn signals fire
 harn signals fire --action
 harn signals fire --cwd
 harn signals fire --event
+harn signals fire --event-id
 harn signals fire --expires-in
 harn signals fire --json
 harn signals fire --key
@@ -1825,6 +1826,7 @@ harn signals fire --kind
 harn signals fire --producer
 harn signals fire --provider
 harn signals fire --repo
+harn signals fire --session
 harn signals fire --severity
 harn signals fire --signature
 harn signals fire --source-url
