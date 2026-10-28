@@ -173,3 +173,25 @@ pipeline test_release_smoke_runs_on_the_candidate_archives(harness: Harness) {
     ),
   )
 }
+
+@test
+pipeline test_residual_audit_checks_out_the_candidate_source(harness: Harness) {
+  const caller = load(harness.fs, "build-release-binaries.yml")
+  const audit = caller.jobs["release-residual-audit"]
+  const checkout = (audit?.steps ?? []).find(
+    { step -> to_string(step?.uses ?? "").starts_with("actions/checkout@") },
+  )
+  assert_eq(
+    checkout?.with?.ref,
+    "$" + "{{ needs.setup.outputs.candidate_source_sha }}",
+    "the audited checkout must match the candidate even when the policy commit differs",
+  )
+  const restore = step_named(audit, "Verify the candidate Harn binary")
+  assert_eq(restore?.env?.CANDIDATE_SOURCE_SHA, checkout?.with?.ref)
+  assert(to_string(restore?.run ?? "").contains("restore-candidate"))
+  assert(to_string(restore?.run ?? "").contains("\"$CANDIDATE_SOURCE_SHA\""))
+  assert_eq(
+    step_named(audit, "Run the release residual audit")?.run,
+    "./scripts/release_gate.sh audit --residual-only",
+  )
+}
