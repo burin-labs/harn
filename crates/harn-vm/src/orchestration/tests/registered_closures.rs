@@ -327,8 +327,7 @@ pub fn register(agent: HarnessAgent) {
 }"#,
         )
         .unwrap();
-        let mut registration_vm = crate::new_vm();
-        crate::stdlib::register_vm_stdlib(&mut registration_vm);
+        let mut registration_vm = crate::test_support::vm_with_stdlib();
         let leaf_exports = registration_vm
             .load_module_exports(&dir.path().join("leaf.harn"))
             .await
@@ -363,8 +362,7 @@ pub fn register(agent: HarnessAgent) {
             Some(registration_vm)
         };
 
-        let mut vm = crate::new_vm();
-        crate::stdlib::register_vm_stdlib(&mut vm);
+        let mut vm = crate::test_support::vm_with_stdlib();
         vm.register_async_builtin("__test_fire_reminders", |ctx, _args| async move {
             let report = crate::llm::reminder_providers::evaluate_and_inject(
                 Some(&ctx),
