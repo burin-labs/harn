@@ -18,29 +18,11 @@ use test_util::stdio_jsonrpc::StdioJsonRpcClient;
 
 mod publication;
 use publication::write_export_fixture;
+mod protocol;
+pub(super) use protocol::stable_request;
+use protocol::PROTOCOL_VERSION;
 
 const PROCESS_READY_TIMEOUT: Duration = Duration::from_mins(1);
-const PROTOCOL_VERSION: &str = "2026-07-28";
-
-fn stable_meta(capabilities: JsonValue) -> JsonValue {
-    json!({
-        "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
-        "io.modelcontextprotocol/clientInfo": {
-            "name": "harn-e2e-client",
-            "version": "1.0.0"
-        },
-        "io.modelcontextprotocol/clientCapabilities": capabilities,
-    })
-}
-
-pub(super) fn stable_request(id: u64, method: &str, mut params: JsonValue) -> JsonValue {
-    params["_meta"] = stable_meta(json!({
-        "elicitation": {"form": {}, "url": {}},
-        "roots": {},
-        "sampling": {},
-    }));
-    json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
-}
 
 #[test]
 fn serve_mcp_code_mode_dispatches_only_server_registered_read_tools() {
@@ -91,7 +73,10 @@ fn main(harness: Harness) {
       if visible == nil { throw "MCP-only fixture missing" }
       const alias = before_forgery_tool + {tools: [visible + {handler: hidden.handler}]}
       const alias_attempt = agent_dispatch_tool_call(harness.tools, {name: "mcp_only", arguments: {value: "forged"}}, alias, {_composition_mcp: true})
-      const result = {allowed: attempt.ok, alias_allowed: alias_attempt.ok}
+      const altered_schema = before_forgery_tool + {components: {schemas: {MessageValue: {type: "integer"}}}}
+      const schema_attempt = agent_dispatch_tool_call(harness.tools, {name: "mcp_only", arguments: {value: 7}}, altered_schema, {_composition_mcp: true})
+      const schema_valid = agent_dispatch_tool_call(harness.tools, {name: "mcp_only", arguments: {value: "published"}}, altered_schema, {_composition_mcp: true})
+      const result = {allowed: attempt.ok, alias_allowed: alias_attempt.ok, schema_allowed: schema_attempt.ok, schema_error_category: schema_attempt.error_category, schema_valid: schema_valid.ok}
       return agent_tool_handler_result(to_string(result), result)
     },
   })
@@ -178,6 +163,19 @@ fn main(harness: Harness) {
     );
     assert_eq!(
         nested_forgery["result"]["structuredContent"]["result"]["data"]["alias_allowed"], false,
+        "{nested_forgery}"
+    );
+    assert_eq!(
+        nested_forgery["result"]["structuredContent"]["result"]["data"]["schema_allowed"], false,
+        "{nested_forgery}"
+    );
+    assert_eq!(
+        nested_forgery["result"]["structuredContent"]["result"]["data"]["schema_error_category"],
+        "schema_validation",
+        "{nested_forgery}"
+    );
+    assert_eq!(
+        nested_forgery["result"]["structuredContent"]["result"]["data"]["schema_valid"], true,
         "{nested_forgery}"
     );
     let mcp_only = client.request(stable_request(

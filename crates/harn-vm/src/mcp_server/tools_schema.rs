@@ -8,7 +8,7 @@ use super::defs::McpToolDef;
 /// Executable MCP handlers bound to one immutable prepared catalog.
 pub struct McpToolSet {
     definitions: Vec<McpToolDef>,
-    prepared: crate::tool_registry::PreparedToolCatalog,
+    prepared: Arc<crate::tool_registry::PreparedToolCatalog>,
     published_entries: BTreeMap<String, Arc<DictMap>>,
 }
 
@@ -38,13 +38,17 @@ impl McpToolSet {
         let prepared = crate::tool_registry::PreparedToolCatalog::prepare(catalog)?;
         Ok(Self {
             definitions,
-            prepared,
+            prepared: Arc::new(prepared),
             published_entries: BTreeMap::new(),
         })
     }
 
     pub(crate) fn prepared(&self) -> &crate::tool_registry::PreparedToolCatalog {
         &self.prepared
+    }
+
+    pub(crate) fn prepared_catalog(&self) -> Arc<crate::tool_registry::PreparedToolCatalog> {
+        Arc::clone(&self.prepared)
     }
 
     pub(crate) fn published_entries(&self) -> &BTreeMap<String, Arc<DictMap>> {
@@ -101,7 +105,7 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<McpToolSet, VmEr
     }
     Ok(McpToolSet {
         definitions,
-        prepared,
+        prepared: Arc::new(prepared),
         published_entries,
     })
 }

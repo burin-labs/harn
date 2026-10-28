@@ -155,6 +155,32 @@ mod workflow_authoring_eval;
 mod workflow_cli;
 mod workflow_patch_cli;
 
+const _: (&str, fn()) = (
+    required_pr_e2e::CASES[22],
+    durable_spend_policy::strict_scope_refuses_a_new_process_after_unpriced_provider_usage,
+);
+
+const _: (&str, fn()) = (
+    required_pr_e2e::CASES[23],
+    durable_spend_policy::agent_spend_guard_actor_unknown,
+);
+const _: (&str, fn()) = (
+    required_pr_e2e::CASES[24],
+    durable_spend_policy::agent_spend_guard_actor_permissive,
+);
+const _: (&str, fn()) = (
+    required_pr_e2e::CASES[25],
+    durable_spend_policy::agent_spend_guard_judge_unknown,
+);
+const _: (&str, fn()) = (
+    required_pr_e2e::CASES[26],
+    durable_spend_policy::agent_spend_guard_judge_permissive,
+);
+const _: (&str, fn()) = (
+    required_pr_e2e::CASES[27],
+    durable_spend_policy::agent_spend_guard_transcript_control,
+);
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 const _: [(&str, fn()); 2] = [
     (

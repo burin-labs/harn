@@ -95,6 +95,34 @@ if [[ -n "$allowed" ]]; then
   exit 1
 fi
 
+# Exercise the syntax parser under the real hook's restricted builtin grants.
+# A denial must name the stash rule so a fault or deadline cannot pass as proof.
+heredoc_literal="$(
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"printf '\''%s'\'' '\''$(git stash drop)'\''\ncat <<EOF\nhello\nEOF"}}' \
+    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+)"
+if [[ -n "$heredoc_literal" ]]; then
+  echo "adapter refused a literal substitution outside an expanding heredoc" >&2
+  printf '%s\n' "$heredoc_literal" >&2
+  exit 1
+fi
+for heredoc_payload in \
+  '{"tool_name":"Bash","tool_input":{"command":"cat <<EOF\n'\''`git stash drop`'\''\nEOF"}}' \
+  '{"tool_name":"Bash","tool_input":{"command":"cat <<EOF\n$( # )\ngit stash drop\n)\nEOF"}}' \
+  '{"tool_name":"Bash","tool_input":{"command":"cat <<EOF | git stash drop\nhello\nEOF"}}' \
+  '{"tool_name":"Bash","tool_input":{"command":"printf é; cat <<EOF\n$(git stash drop)\nEOF"}}'; do
+  heredoc_denied="$(
+    printf '%s' "$heredoc_payload" \
+      | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+  )"
+  if [[ "$heredoc_denied" != *'"permissionDecision":"deny"'* ]] \
+    || [[ "$heredoc_denied" != *'git stash'* ]]; then
+    echo "adapter did not refuse an executed heredoc or pipeline stash mutation" >&2
+    printf '%s\n' "$heredoc_denied" >&2
+    exit 1
+  fi
+done
+
 discarded_blocked="$(
   printf '%s' \
     '{"tool_name":"Bash","tool_input":{"command":"make test | tail -20"}}' \
@@ -455,7 +483,7 @@ standalone_resolved="$(
 )"
 if [[ "$standalone_resolved" != *'HOOK-ARG=run'* ]] \
   || [[ "$standalone_resolved" != *'HOOK-ARG=--standalone'* ]] \
-  || [[ "$standalone_resolved" != *'HOOK-ARG=--allow=command_risk_scan'* ]] \
+  || [[ "$standalone_resolved" != *'HOOK-ARG=--allow=bytes_from_string,command_risk_scan,hostlib_ast_search,lowercase,range'* ]] \
   || [[ "$standalone_resolved" != *"HOOK-ARG=$order_root/scripts/agent_shell_guard.harn"* ]]; then
   echo "adapter did not select the attested standalone runtime" >&2
   printf '%s\n' "$standalone_resolved" >&2
