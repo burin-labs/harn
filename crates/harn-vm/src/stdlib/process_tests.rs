@@ -7,6 +7,10 @@
 use super::*;
 use crate::orchestration::RunExecutionRecord;
 
+#[cfg(unix)]
+#[path = "process_agent_env_tests.rs"]
+mod agent_env;
+
 #[test]
 fn refused_script_read_emits_names_only_to_embedded_event_sink() {
     use crate::security::session_environment::{EnvironmentPolicyKind, SessionEnvironment};
