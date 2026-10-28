@@ -5,6 +5,7 @@ set -eEuo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 bash "$root/scripts/tests/consumer_observation_policy_test.sh"
 node --test "$root/scripts/tests/consumer_observer_test.mjs" "$root/scripts/tests/consumer_observer_cleanup_test.mjs" "$root/scripts/tests/consumer_observer_terminal_test.mjs" "$root/scripts/tests/consumer_observer_dispatch_test.mjs" "$root/scripts/tests/consumer_observer_window_test.mjs" "$root/scripts/tests/consumer_observer_retirement_test.mjs" "$root/scripts/tests/consumer_observation_budget_test.mjs" "$root/scripts/tests/consumer_observer_budget_entry_test.mjs" "$root/scripts/tests/release_producer_readiness_test.mjs"
+node --test "$root/scripts/tests/consumer_pin_test.mjs"
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/harn-consumer-canary.XXXXXX")
 export RUNNER_TEMP="$scratch"
 trap 'rm -rf "$scratch"' EXIT
