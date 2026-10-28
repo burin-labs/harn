@@ -57,12 +57,13 @@ For `a2a://host[:port]/path` routes, the dispatcher:
   discovery fallbacks for older Harn A2A servers
 - defaults to HTTPS-only discovery + dispatch; cleartext HTTP is rejected unless
   the trigger binding explicitly sets `allow_cleartext = true`
-- selects the AgentCard `url` when `preferredTransport` is `JSONRPC`, or a
-  JSON-RPC entry from `additionalInterfaces`; `supportedInterfaces` remains a
-  read-only legacy fallback for peers that have not cut over yet
+- selects a supported JSON-RPC entry from the Agent Card's
+  `supportedInterfaces`, including its protocol version and tenant; for 0.3
+  cards it also accepts `preferredTransport` and `additionalInterfaces`
 - treats the URI path as the `target_agent` label that propagates into the
   outbound envelope and the action graph
-- sends the `TriggerEvent` envelope over `message/send`; when dispatch runs
+- sends the `TriggerEvent` envelope over `message/send` for 0.3 or `SendMessage`
+  for 1.0; when dispatch runs
   inside an active agent session, the current RFC 8693 actor chain is included
   as `message.metadata.actor_chain`
 - returns either the inline agent result (when the peer completes
@@ -193,9 +194,8 @@ event back to the original event id.
 
 ## Current MVP limits
 
-- `a2a://...` currently uses the single-shot `message/send` path only; push
-  callbacks, streaming chunk accumulation, and remote cancel/resubscribe stay
-  deferred
+- `a2a://...` uses a single message request; streaming chunk accumulation and
+  remote cancel/resubscribe stay deferred
 - worker consumers use polling claim/ack/TTL semantics today through
   `harn orchestrator queue drain`; there is not yet a long-running dedicated
   worker daemon mode

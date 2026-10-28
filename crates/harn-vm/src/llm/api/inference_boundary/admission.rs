@@ -46,6 +46,12 @@ pub struct InferenceAdmissionSnapshot {
     pub open_weight: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub training_default: Option<String>,
+    /// Account settings the trusted provider terms require for no training.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_account_facts: Vec<crate::llm_config::NoTrainingRequirement>,
+    /// Whether this admission used a matching host confirmation.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub account_confirmation_applied: bool,
     /// A control the selected chat transport can apply, not an assertion that
     /// this preview sent a request or applied a control to live traffic.
     pub training_control_planned: bool,
@@ -87,7 +93,7 @@ pub const DATA_CONTROLS_TRAINING_REFUSED_RULE: &str = "data_controls.training_re
 
 /// Schema projections of the owning request and snapshot types for embedders
 /// and the host-binding generator. No hand-maintained field list is involved.
-pub fn inference_admission_schemas() -> [(&'static str, serde_json::Value); 2] {
+pub fn inference_admission_schemas() -> [(&'static str, serde_json::Value); 3] {
     [
         (
             "InferenceAdmissionRequest",
@@ -99,11 +105,16 @@ pub fn inference_admission_schemas() -> [(&'static str, serde_json::Value); 2] {
             serde_json::to_value(schemars::schema_for!(InferenceAdmissionSnapshot))
                 .expect("snapshot schema encodes"),
         ),
+        (
+            "ProviderAccountAttestation",
+            serde_json::to_value(schemars::schema_for!(super::ProviderAccountAttestation))
+                .expect("account confirmation schema encodes"),
+        ),
     ]
 }
 
-/// Resolve a preview without provider I/O or credential resolution. The
-/// endpoint itself and control values never enter the returned snapshot.
+/// Resolve a preview without provider I/O. When a host supplies an account
+/// confirmation, resolve the selected credential only to match that fact.
 pub fn preview_inference_admission(
     request: &InferenceAdmissionRequest,
 ) -> InferenceAdmissionSnapshot {
@@ -117,6 +128,8 @@ pub fn preview_inference_admission(
         local_runtime: None,
         open_weight: None,
         training_default: None,
+        required_account_facts: Vec::new(),
+        account_confirmation_applied: false,
         training_control_planned: false,
         data_posture: request
             .data_controls
@@ -158,12 +171,27 @@ pub fn preview_inference_admission(
     snapshot.open_weight = evidence.open_weight;
     // Preview uses default API routing, including models requiring Responses.
     // Live preflight also checks an explicitly selected API mode.
+    if snapshot.effective_boundary.is_some() {
+        snapshot.required_account_facts =
+            crate::llm_config::trusted_data_controls(&request.provider, &request.model)
+                .no_training_requirements()
+                .to_vec();
+    }
+    let credential = if snapshot.effective_boundary.is_some()
+        && super::account::has_attestations()
+        && !snapshot.required_account_facts.is_empty()
+    {
+        crate::llm::resolve_api_key(&request.provider).ok()
+    } else {
+        None
+    };
     let controls = chat_controls(
         &request.provider,
         &request.model,
         snapshot.data_posture,
         snapshot.effective_boundary,
         super::super::options::LlmApiMode::ChatCompletions,
+        credential.as_deref(),
     );
     // The plan's own posture, not the requested one: a transport that cannot
     // carry per-request controls sends `default` whatever was asked.
@@ -173,6 +201,7 @@ pub fn preview_inference_admission(
     .unwrap_or(DataPosture::Default);
     snapshot.data_controls_outcome = Some(controls.receipt.outcome);
     snapshot.data_controls_note = controls.receipt.note.clone();
+    snapshot.account_confirmation_applied = controls.receipt.account_confirmation_applied;
     snapshot.training_default =
         controls
             .receipt

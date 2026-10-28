@@ -33,7 +33,7 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 /// A committed worktree with a.txt, b.txt, c.txt, d.txt, and a binary blob.
-fn repo() -> TempDir {
+pub(super) fn repo() -> TempDir {
     let dir = TempDir::new().unwrap();
     let root = dir.path();
     git(root, &["init", "-q"]);
@@ -137,7 +137,9 @@ fn tool_edit_is_attributed_and_restored() {
     let dir = repo();
     let root = dir.path();
     let s = Session::new(root);
-    assert_eq!(s.capture("turn-1")["available"], true);
+    let capture = s.capture("turn-1");
+    assert_eq!(capture["available"], true);
+    assert_eq!(capture["writer_policy"], "legacy_scan");
 
     let attributed = s.call_with("tool-1", Some("workspace_write"), || {
         fs::write(root.join("a.txt"), "a edited by the agent\n").unwrap();
@@ -812,6 +814,333 @@ fn writer_inside_a_call_window_is_attributed_to_the_call_but_later_edits_are_ref
     let receipt = s.restore("turn-1");
     assert_eq!(paths(&receipt, "refused"), ["a.txt"]);
     assert_eq!(read(root, "a.txt"), "a edited after the call\n");
+}
+
+#[test]
+fn unknown_writer_inside_a_call_window_is_not_overwritten() {
+    let dir = repo();
+    let root = dir.path();
+    let session = Session::new(root);
+    let capture = session.call(
+        "capture",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            ("root", vm_string(&session.root)),
+            ("writer_policy", vm_string("require_known")),
+        ],
+    );
+    assert_eq!(capture["available"], true, "{capture}");
+    session.call_with("tool-1", None, || {
+        fs::write(root.join("a.txt"), "a edited by a person, mid-call\n").unwrap();
+    });
+
+    let plan = session.plan("turn-1");
+    let receipt = session.restore("turn-1");
+    assert_eq!(paths(&receipt, "refused"), ["a.txt"], "{receipt}");
+    assert_eq!(read(root, "a.txt"), "a edited by a person, mid-call\n");
+    assert_eq!(
+        plan["entries"][0]["writers"][0]["kind"], "unknown",
+        "{plan}"
+    );
+    assert_eq!(capture["writer_policy"], "require_known", "{capture}");
+}
+
+#[test]
+fn strict_writer_policy_cannot_be_downgraded_and_survives_fork() {
+    use harn_hostlib::workspace_checkpoint::{
+        capture_with_writer_policy, fork_session, WriterPolicy,
+    };
+    let dir = repo();
+    let root = dir.path();
+    let source = Session::new(root);
+    let target = Session::new(root);
+    let capture = source.call(
+        "capture",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            ("root", vm_string(&source.root)),
+            ("writer_policy", vm_string("require_known")),
+        ],
+    );
+    assert_eq!(capture["writer_policy"], "require_known", "{capture}");
+    source.call_with("tool-1", None, || {
+        fs::write(root.join("a.txt"), "unknown writer\n").unwrap();
+    });
+    assert!(capture_with_writer_policy(
+        &source.id,
+        "turn-2",
+        Some(root),
+        Some(WriterPolicy::LegacyScan),
+    )
+    .is_err());
+    assert_eq!(source.capture("turn-2")["writer_policy"], "require_known");
+    let fork = serde_json::to_value(fork_session(&source.id, &target.id, root).unwrap()).unwrap();
+    assert_eq!(fork["available"], true, "{fork}");
+    let receipt = target.restore("turn-1");
+    assert_eq!(paths(&receipt, "refused"), ["a.txt"], "{receipt}");
+    assert_eq!(read(root, "a.txt"), "unknown writer\n");
+    let legacy = Session::new(root);
+    assert_eq!(legacy.capture("legacy")["writer_policy"], "legacy_scan");
+    assert!(capture_with_writer_policy(
+        &legacy.id,
+        "later",
+        Some(root),
+        Some(WriterPolicy::RequireKnown),
+    )
+    .is_err());
+}
+
+#[test]
+fn strict_plan_keeps_writer_evidence_across_multiple_calls() {
+    let dir = repo();
+    let root = dir.path();
+    let session = Session::new(root);
+    let capture = session.call(
+        "capture",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            ("root", vm_string(&session.root)),
+            ("writer_policy", vm_string("require_known")),
+        ],
+    );
+    assert_eq!(capture["writer_policy"], "require_known", "{capture}");
+    session.call_with("first", None, || {
+        fs::write(root.join("a.txt"), "first unknown edit\n").unwrap();
+    });
+    session.call_with("second", None, || {
+        fs::write(root.join("a.txt"), "second unknown edit\n").unwrap();
+    });
+    let plan = session.plan("turn-1");
+    assert_eq!(
+        plan["entries"][0]["writers"],
+        json!([{ "kind": "unknown" }])
+    );
+    assert_eq!(plan["entries"][0]["action"], "refuse", "{plan}");
+    assert_eq!(paths(&session.restore("turn-1"), "refused"), ["a.txt"]);
+    assert_eq!(read(root, "a.txt"), "second unknown edit\n");
+}
+
+#[test]
+fn writer_confirmation_is_bound_to_the_observed_file_state() {
+    let dir = repo();
+    let root = dir.path();
+    let session = Session::new(root);
+    let capture = session.call(
+        "capture",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            ("root", vm_string(&session.root)),
+            ("writer_policy", vm_string("require_known")),
+        ],
+    );
+    assert_eq!(capture["writer_policy"], "require_known", "{capture}");
+    session.call_with("tool-1", None, || {
+        fs::write(root.join("a.txt"), "first unknown edit\n").unwrap();
+    });
+    let first = session.plan("turn-1");
+    let observed = first["entries"][0]["observed"].clone();
+    assert_eq!(observed["kind"], "present", "{first}");
+    fs::write(root.join("a.txt"), "newer unknown edit\n").unwrap();
+    let stale = session.call(
+        "restore",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            (
+                "confirmed_paths",
+                harn_vm::json_to_vm_value(&json!([{
+                    "session_id": session.id.as_str(),
+                    "boundary_id": "turn-1",
+                    "path": "a.txt",
+                    "observed": observed,
+                }])),
+            ),
+        ],
+    );
+    assert_eq!(paths(&stale, "refused"), ["a.txt"], "{stale}");
+    assert_eq!(read(root, "a.txt"), "newer unknown edit\n");
+    let latest = session.plan("turn-1");
+    let confirmed = session.call(
+        "restore",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            (
+                "confirmed_paths",
+                harn_vm::json_to_vm_value(&json!([{
+                    "session_id": session.id.as_str(),
+                    "boundary_id": "turn-1",
+                    "path": "a.txt",
+                    "observed": latest["entries"][0]["observed"],
+                }])),
+            ),
+        ],
+    );
+    assert_eq!(paths(&confirmed, "refused"), ["a.txt"], "{confirmed}");
+    assert_eq!(
+        confirmed["refused"][0]["reason"],
+        "concurrent-safe replacement is unavailable"
+    );
+    assert_eq!(read(root, "a.txt"), "newer unknown edit\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn confirmed_recreation_only_publishes_into_an_absent_path() {
+    let dir = repo();
+    let root = dir.path();
+    let session = Session::new(root);
+    let capture = session.call(
+        "capture",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            ("root", vm_string(&session.root)),
+            ("writer_policy", vm_string("require_known")),
+        ],
+    );
+    assert_eq!(capture["writer_policy"], "require_known", "{capture}");
+    session.call_with("tool-1", None, || {
+        fs::remove_file(root.join("a.txt")).unwrap();
+    });
+    let plan = session.plan("turn-1");
+    assert_eq!(plan["entries"][0]["observed"]["kind"], "absent", "{plan}");
+    let receipt = session.call(
+        "restore",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            (
+                "confirmed_paths",
+                harn_vm::json_to_vm_value(&json!([{
+                    "session_id": session.id.as_str(),
+                    "boundary_id": "turn-1",
+                    "path": "a.txt",
+                    "observed": { "kind": "absent" },
+                }])),
+            ),
+        ],
+    );
+    assert_eq!(paths(&receipt, "restored"), ["a.txt"], "{receipt}");
+    assert_eq!(read(root, "a.txt"), "a original\n");
+}
+
+#[test]
+fn confirmation_of_an_absent_file_does_not_authorize_a_new_file() {
+    let dir = repo();
+    let root = dir.path();
+    let session = Session::new(root);
+    let capture = session.call(
+        "capture",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            ("root", vm_string(&session.root)),
+            ("writer_policy", vm_string("require_known")),
+        ],
+    );
+    assert_eq!(capture["writer_policy"], "require_known", "{capture}");
+    session.call_with("tool-1", None, || {
+        fs::remove_file(root.join("a.txt")).unwrap();
+    });
+    let plan = session.plan("turn-1");
+    assert_eq!(plan["entries"][0]["observed"]["kind"], "absent", "{plan}");
+    fs::write(root.join("a.txt"), "new file after confirmation\n").unwrap();
+    let receipt = session.call(
+        "restore",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            (
+                "confirmed_paths",
+                harn_vm::json_to_vm_value(&json!([{
+                    "session_id": session.id.as_str(),
+                    "boundary_id": "turn-1",
+                    "path": "a.txt",
+                    "observed": { "kind": "absent" },
+                }])),
+            ),
+        ],
+    );
+    assert_eq!(paths(&receipt, "refused"), ["a.txt"], "{receipt}");
+    assert_eq!(read(root, "a.txt"), "new file after confirmation\n");
+}
+
+#[test]
+fn strict_restore_does_not_delete_an_existing_file_even_after_confirmation() {
+    let dir = repo();
+    let root = dir.path();
+    let session = Session::new(root);
+    let capture = session.call(
+        "capture",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            ("root", vm_string(&session.root)),
+            ("writer_policy", vm_string("require_known")),
+        ],
+    );
+    assert_eq!(capture["writer_policy"], "require_known", "{capture}");
+    session.call_with("tool-1", None, || {
+        fs::write(root.join("new.txt"), "new content\n").unwrap();
+    });
+    let plan = session.plan("turn-1");
+    let receipt = session.call(
+        "restore",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            (
+                "confirmed_paths",
+                harn_vm::json_to_vm_value(&json!([{
+                    "session_id": session.id.as_str(),
+                    "boundary_id": "turn-1",
+                    "path": "new.txt",
+                    "observed": plan["entries"][0]["observed"],
+                }])),
+            ),
+        ],
+    );
+    assert_eq!(paths(&receipt, "refused"), ["new.txt"], "{receipt}");
+    assert_eq!(
+        receipt["refused"][0]["reason"],
+        "concurrent-safe replacement is unavailable"
+    );
+    assert_eq!(read(root, "new.txt"), "new content\n");
+}
+
+#[test]
+fn malformed_or_duplicate_confirmations_do_not_restore() {
+    use harn_hostlib::workspace_checkpoint::{
+        restore_with_confirmations, ConfirmedPath, ObservedFileState,
+    };
+    let dir = repo();
+    let root = dir.path();
+    let session = Session::new(root);
+    session.capture("turn-1");
+    session.call_with("tool-1", None, || {
+        fs::write(root.join("a.txt"), "do not overwrite\n").unwrap();
+    });
+    let malformed = ConfirmedPath {
+        session_id: session.id.clone(),
+        boundary_id: "turn-1".into(),
+        path: "a.txt".into(),
+        observed: ObservedFileState::Present {
+            sha256: "not-a-hash".into(),
+        },
+    };
+    assert!(restore_with_confirmations(&session.id, "turn-1", None, &[malformed]).is_err());
+    let duplicate = ConfirmedPath {
+        session_id: session.id.clone(),
+        boundary_id: "turn-1".into(),
+        path: "a.txt".into(),
+        observed: ObservedFileState::Absent,
+    };
+    assert!(restore_with_confirmations(
+        &session.id,
+        "turn-1",
+        None,
+        &[duplicate.clone(), duplicate.clone()],
+    )
+    .is_err());
+    let wrong_boundary = ConfirmedPath {
+        boundary_id: "another-turn".into(),
+        ..duplicate
+    };
+    assert!(restore_with_confirmations(&session.id, "turn-1", None, &[wrong_boundary]).is_err());
+    assert_eq!(read(root, "a.txt"), "do not overwrite\n");
 }
 
 #[cfg(unix)]

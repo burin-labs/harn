@@ -5015,6 +5015,16 @@ public enum HarnInferenceAdmissionDataPosture: String, Codable, Sendable, CaseIt
     ].map { Self(rawValue: $0)! }
 }
 
+public enum HarnNoTrainingRequirement: String, Codable, Sendable, CaseIterable {
+    case billingEnabled = "billing_enabled"
+    case contributorSharingDisabled = "contributor_sharing_disabled"
+
+    public static let allCases: [Self] = [
+        "billing_enabled",
+        "contributor_sharing_disabled",
+    ].map { Self(rawValue: $0)! }
+}
+
 public enum HarnInferenceAdmissionDataControlsOutcome: String, Codable, Sendable, CaseIterable {
     case notRequested = "not_requested"
     case applied = "applied"
@@ -5084,6 +5094,7 @@ public struct HarnInferenceAdmissionSnapshot: Codable, Sendable, Equatable {
     public let status: HarnInferenceAdmissionStatus
     public let trainingControlPlanned: Bool
     public let dataPosture: HarnInferenceAdmissionDataPosture
+    public let accountConfirmationApplied: Bool?
     public let dataControlsNote: String?
     public let dataControlsOutcome: HarnInferenceAdmissionDataControlsOutcome?
     public let dataControlsRefusal: HarnInferenceAdmissionDataControlsRefusal?
@@ -5091,6 +5102,7 @@ public struct HarnInferenceAdmissionSnapshot: Codable, Sendable, Equatable {
     public let governingRule: String?
     public let localRuntime: Bool?
     public let openWeight: Bool?
+    public let requiredAccountFacts: [HarnNoTrainingRequirement]?
     public let trainingDefault: String?
 
     enum CodingKeys: String, CodingKey {
@@ -5100,6 +5112,7 @@ public struct HarnInferenceAdmissionSnapshot: Codable, Sendable, Equatable {
         case status
         case trainingControlPlanned = "training_control_planned"
         case dataPosture = "data_posture"
+        case accountConfirmationApplied = "account_confirmation_applied"
         case dataControlsNote = "data_controls_note"
         case dataControlsOutcome = "data_controls_outcome"
         case dataControlsRefusal = "data_controls_refusal"
@@ -5107,7 +5120,22 @@ public struct HarnInferenceAdmissionSnapshot: Codable, Sendable, Equatable {
         case governingRule = "governing_rule"
         case localRuntime = "local_runtime"
         case openWeight = "open_weight"
+        case requiredAccountFacts = "required_account_facts"
         case trainingDefault = "training_default"
+    }
+}
+
+public struct HarnProviderAccountAttestation: Codable, Sendable, Equatable {
+    public let provider: String
+    public let credentialFingerprint: String
+    public let billingEnabled: Bool?
+    public let contributorSharingEnabled: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case credentialFingerprint = "credential_fingerprint"
+        case billingEnabled = "billing_enabled"
+        case contributorSharingEnabled = "contributor_sharing_enabled"
     }
 }
 public struct HarnCanonicalSessionBoundary: Codable, Sendable, Equatable {

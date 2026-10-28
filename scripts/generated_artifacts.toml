@@ -427,6 +427,7 @@ outputs = [
   "spec/protocol-artifacts/schemas/plan-document-v1.schema.json",
   "spec/protocol-artifacts/schemas/inference-admission-request.schema.json",
   "spec/protocol-artifacts/schemas/inference-admission-snapshot.schema.json",
+  "spec/protocol-artifacts/schemas/provider-account-attestation.schema.json",
   "spec/protocol-artifacts/schemas/canonical-history-boundaries.schema.json",
 ]
 sources = [
@@ -446,7 +447,7 @@ sources = [
   "crates/harn-vm/src/tool_registry/",
   "crates/harn-vm/src/llm/api/inference_boundary/",
   "crates/harn-vm/src/llm/api/inference_boundary.rs",
-  "crates/harn-vm/src/llm_config/data_controls.rs",
+  "crates/harn-provider-catalog/src/data_controls.rs",
 ]
 ci = true
 make_all = true

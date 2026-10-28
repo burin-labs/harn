@@ -578,6 +578,8 @@ async fn push_delivery_loads_mtls_client_cert_and_key() {
     thread.join().expect("mtls server thread");
 }
 
+mod client_v1;
+mod client_v1_messages;
 mod protocol;
 mod session_health;
 mod sink_lifecycle;

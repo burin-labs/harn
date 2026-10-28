@@ -102,6 +102,8 @@ pub struct CatalogProviderDataControls {
     pub control_scope: llm_config::DataControlScope,
     pub retention_default: llm_config::RetentionDefault,
     pub training_default: llm_config::TrainingDefault,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub no_training_requires: Vec<llm_config::NoTrainingRequirement>,
     pub checked_on: String,
     pub sources: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -137,6 +139,7 @@ impl CatalogProviderDataControls {
             control_scope: definition.control_scope,
             retention_default: definition.retention_default,
             training_default: definition.training_default,
+            no_training_requires: definition.no_training_requires.clone(),
             checked_on: definition.checked_on.clone(),
             sources: definition.sources.clone(),
             note: definition.note.clone(),
@@ -171,6 +174,7 @@ impl CatalogProviderDataControls {
             control_scope: self.control_scope,
             retention_default: self.retention_default,
             training_default: self.training_default,
+            no_training_requires: self.no_training_requires.clone(),
             checked_on: self.checked_on.clone(),
             sources: self.sources.clone(),
             note: self.note.clone(),

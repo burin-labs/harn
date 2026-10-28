@@ -110,6 +110,8 @@ fn main(harness: Harness) {
         exit: child.exit_code,
         host_floor_present: harness.env.get("HARN_INFERENCE_BOUNDARY_JSON") != nil,
         floor_withheld: !child.stdout.contains("HARN_INFERENCE_BOUNDARY_JSON="),
+        account_hidden: harness.env.get("HARN_PROVIDER_ACCOUNT_ATTESTATIONS_JSON") == nil,
+        account_withheld: !child.stdout.contains("HARN_PROVIDER_ACCOUNT_ATTESTATIONS_JSON="),
         sentinel_retained: child.stdout.contains("UNRELATED_SENTINEL=retained"),
       })
     },
@@ -127,6 +129,7 @@ fn main(harness: Harness) {
             "HARN_INFERENCE_BOUNDARY_JSON",
             r#"{"reach":"local_only","allow_training_discounts":false}"#,
         )
+        .env("HARN_PROVIDER_ACCOUNT_ATTESTATIONS_JSON", "[]")
         .env("UNRELATED_SENTINEL", "retained");
     let mut client = StdioJsonRpcClient::spawn("script MCP child audience", command);
     let response = client.request(stable_request(
@@ -142,6 +145,8 @@ fn main(harness: Harness) {
     assert_eq!(receipt["exit"], 0, "{receipt}");
     assert_eq!(receipt["host_floor_present"], true, "{receipt}");
     assert_eq!(receipt["floor_withheld"], true, "{receipt}");
+    assert_eq!(receipt["account_hidden"], true, "{receipt}");
+    assert_eq!(receipt["account_withheld"], true, "{receipt}");
     assert_eq!(receipt["sentinel_retained"], true, "{receipt}");
     client.shutdown_expect_success();
 }

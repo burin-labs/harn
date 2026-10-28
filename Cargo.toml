@@ -130,8 +130,7 @@ opt-level = 0
 # Native host orchestration no longer contains the interpreter. On four
 # pinned cores, leaving Core optimized while lowering this crate saved
 # 90-157s across build, packaging, and the longest CLI proof consumer.
-# Both paired runs passed the owning audit and performance gates; see
-# bench/hosted-native-opt-level-9112.json.
+# Both paired runs passed the owning audit and performance gates.
 [profile.ci-cli.package.harn-vm]
 opt-level = 0
 

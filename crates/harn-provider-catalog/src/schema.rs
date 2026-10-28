@@ -76,39 +76,7 @@ pub fn schema_value() -> Value {
                 },
                 "additionalProperties": false
             },
-            "data_controls": {
-                "type": "object",
-                "required": ["control_scope", "retention_default", "training_default", "checked_on", "sources"],
-                "properties": {
-                    "control_scope": {"enum": ["per_request", "account", "none"]},
-                    "retention_default": {"enum": ["retained", "not_retained", "abuse_monitoring_only", "unspecified"]},
-                    "training_default": {"enum": ["trains", "does_not_train", "unspecified"]},
-                    "checked_on": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
-                    "sources": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^https://"}},
-                    "note": {"type": "string"},
-                    "request_controls": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "required": ["location", "name", "value_kind", "value", "effect"],
-                            "properties": {
-                                "location": {"enum": ["body", "header"]},
-                                "name": {"type": "string", "minLength": 1},
-                                "value_kind": {"enum": ["bool", "string"]},
-                                "value": {"type": "string"},
-                                "effect": {"enum": ["retention", "training"]},
-                                "applies_to": {
-                                    "type": "array",
-                                    "items": {"enum": llm_config::DataControlDialect::ALL}
-                                },
-                                "caveat": {"type": "string"}
-                            },
-                            "additionalProperties": false
-                        }
-                    }
-                },
-                "additionalProperties": false
-            },
+            "data_controls": data_controls_schema(),
             "local_runtime": {
                 "type": "object",
                 "required": ["kind", "wire_protocol", "stop"],
@@ -765,6 +733,45 @@ pub fn schema_value() -> Value {
 // one json! expression keeps every definition's temporaries on the same stack.
 // Kept out of `schema_value`: every literal in that one `json!` grows its stack
 // frame, which the stack-frame budget caps.
+// Keep this schema in its own frame: expanding it inside the root json! macro
+// grows the root's stack use even though the emitted schema is unchanged.
+fn data_controls_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["control_scope", "retention_default", "training_default", "checked_on", "sources"],
+        "properties": {
+            "control_scope": {"enum": ["per_request", "account", "none"]},
+            "retention_default": {"enum": ["retained", "not_retained", "abuse_monitoring_only", "unspecified"]},
+            "training_default": {"enum": ["trains", "does_not_train", "unspecified"]},
+            "no_training_requires": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": crate::no_training_requirement_values()}},
+            "checked_on": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+            "sources": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^https://"}},
+            "note": {"type": "string"},
+            "request_controls": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["location", "name", "value_kind", "value", "effect"],
+                    "properties": {
+                        "location": {"enum": ["body", "header"]},
+                        "name": {"type": "string", "minLength": 1},
+                        "value_kind": {"enum": ["bool", "string"]},
+                        "value": {"type": "string"},
+                        "effect": {"enum": ["retention", "training"]},
+                        "applies_to": {
+                            "type": "array",
+                            "items": {"enum": llm_config::DataControlDialect::ALL}
+                        },
+                        "caveat": {"type": "string"}
+                    },
+                    "additionalProperties": false
+                }
+            }
+        },
+        "additionalProperties": false
+    })
+}
+
 fn portal_defaults_property() -> Value {
     json!({"type": "object", "additionalProperties": {"$ref": "#/$defs/portal_default"}})
 }

@@ -35,7 +35,7 @@ afterAll(async () => {
 
 describe("documentation assets in the real Vite dev server", () => {
   it.each([
-    ["dev/perf/code-index-9712.json", "application/json"],
+    ["orchestrator/observability-dashboard.json", "application/json"],
     ["cookbooks/assets/model-job-openai-proof.png", "image/png"],
     ["orchestrator/assets/dlq-management.svg", "image/svg+xml"],
   ])("serves %s at its published URL with native MIME and exact bytes", async (path, mime) => {
@@ -45,12 +45,12 @@ describe("documentation assets in the real Vite dev server", () => {
     const bytes = Buffer.from(await response.arrayBuffer())
     expect(bytes.equals(readFileSync(join(REPO_ROOT, "docs/src", path)))).toBe(true)
     if (mime === "application/json") {
-      expect(JSON.parse(bytes.toString("utf8")).structural_trials.length).toBeGreaterThan(0)
+      expect(JSON.parse(bytes.toString("utf8")).panels.length).toBeGreaterThan(0)
     }
   })
 
   it("uses Vite's conditional GET cache handling", async () => {
-    const url = `${origin}/dev/perf/code-index-9712.json`
+    const url = `${origin}/orchestrator/observability-dashboard.json`
     const first = await fetch(url, { headers: { Accept: "application/json" } })
     expect(first.status).toBe(200)
     await first.arrayBuffer()

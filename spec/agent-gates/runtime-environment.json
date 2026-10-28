@@ -1,5 +1,22 @@
 [
   {
+    "default": "absent means no account confirmations; malformed input refuses the launch",
+    "evidence": "CLI product tests exercise matching and mismatched credentials, malformed input, and withholding from scripts and child processes.",
+    "expiry": "2026-12-31",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_PROVIDER_ACCOUNT_ATTESTATIONS_JSON",
+    "reachability": "yes",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/api/inference_boundary/account.rs",
+        "reader": "HOST_ACCOUNT_ATTESTATIONS_ENV"
+      }
+    ],
+    "reason": "Retain the launcher-owned account confirmations and review the environment seam after hosts project it end to end.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "absent in standalone Harn; malformed supplied grant refuses inference",
     "evidence": "The source-built mechanism contract and route tests exercise a supplied host grant, including malformed input and pre-dispatch refusal.",
     "expiry": "2026-12-31",

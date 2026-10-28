@@ -15,6 +15,10 @@
           "type": "string",
           "minLength": 1
         },
+        "session_id": {
+          "type": "string",
+          "minLength": 1
+        },
         "entries": {
           "type": "array",
           "items": {
@@ -37,6 +41,35 @@
               "reason": {
                 "type": "string"
               },
+              "writers": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "properties": {"kind": {"const": "unknown"}},
+                  "required": ["kind"],
+                  "additionalProperties": false
+                }
+              },
+              "observed": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {"kind": {"const": "absent"}},
+                    "required": ["kind"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {"const": "present"},
+                      "sha256": {"type": "string"}
+                    },
+                    "required": ["kind", "sha256"],
+                    "additionalProperties": false
+                  }
+                ]
+              },
               "expected_hash": {
                 "type": "string"
               },
@@ -46,7 +79,8 @@
             },
             "required": [
               "path",
-              "action"
+              "action",
+              "writers"
             ],
             "additionalProperties": false
           }
@@ -78,6 +112,7 @@
       "required": [
         "available",
         "boundary_id",
+        "session_id",
         "entries",
         "irreversible"
       ],
@@ -95,7 +130,9 @@
             "git_unavailable",
             "index_not_writable_as_tree",
             "no_checkpoint",
-            "unknown_boundary"
+            "unknown_boundary",
+            "calls_in_flight",
+            "incomplete_attribution"
           ]
         },
         "detail": {

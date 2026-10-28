@@ -218,3 +218,19 @@ pub(crate) fn journal_store(id: &str) -> Option<crate::stdlib::canonical_store::
             .map(crate::agent_session_journal::JournalState::store)
     })
 }
+
+/// Inspect a live journal in the requested state directory without opening a store.
+pub(crate) fn with_journal_in_state_dir<R>(
+    state_dir: &std::path::Path,
+    inspect: impl FnOnce(&crate::agent_session_journal::JournalState) -> R,
+) -> Option<R> {
+    super::SESSIONS.with(|sessions| {
+        sessions
+            .try_borrow()
+            .ok()?
+            .values()
+            .filter_map(|state| state.transcript_journal.as_ref())
+            .find(|journal| journal.state_dir().as_path() == state_dir)
+            .map(inspect)
+    })
+}

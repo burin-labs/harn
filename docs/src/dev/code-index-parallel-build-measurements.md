@@ -6,8 +6,8 @@ The baseline is `main` after the generation storage of #9790. The candidate
 reads, hashes, tokenizes, and parses files on a bounded pool of worker threads,
 installs each file's facts on one publisher in walk order, and builds trigram
 postings in one pass on a separate thread. The
-[complete trial record](perf/code-index-9744.json) keeps every trial, both
-binary digests, and per-phase timings.
+Every trial, both
+binary digests, and per-phase timings were recorded.
 
 ## Workload and controls
 

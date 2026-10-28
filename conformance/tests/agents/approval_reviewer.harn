@@ -206,7 +206,7 @@ pipeline default(harness: Harness) {
   // assertion below passes vacuously.
   const unreviewed = agent_dispatch_tool_call(
     harness.tools,
-    {id: "c1", name: "run", arguments: {command: "cat .env"}},
+    {id: "c1", name: "run", arguments: {command: "echo hi"}},
     tools,
     {approval_policy: asking_policy},
   )
@@ -214,25 +214,18 @@ pipeline default(harness: Harness) {
     unreviewed.ok == false,
     "CONTROL: with no reviewer the ask must die unanswered, or this whole test is vacuous",
   )
-  // This refusal is NOT an approval decision, and the disjunction that used to
-  // stand here said it was. The call reads `.env`, so the deny-by-default
-  // sensitive-path guard refuses it before any approval rule is consulted and
-  // before the ask could reach a bridge. Every deny used to be reported as
-  // `approval_policy` regardless of which rule decided, which is what made the
-  // old expectation look right. Now that a refusal names its own rule the gate
-  // is exact, so this control pins it instead of accepting a family: a posture
-  // change cannot move a decision that posture never took part in, and a
-  // change that DID route this through approval would now be caught here.
+  // Use an ordinary ask. A sensitive-path deny is a ceiling, so it cannot
+  // exercise reviewer grants, declines, malformed answers, or failures.
   assert(
-    unreviewed.denial.gate == "sensitive_path",
-    "CONTROL: the sensitive-path guard must be what refused, got: ${unreviewed.denial.gate}",
+    unreviewed.denial.gate == "approval_unavailable",
+    "CONTROL: the unanswered ask must be what refused, got: ${unreviewed.denial.gate}",
   )
   // 1. The same call, the same policy, WITH a granting reviewer: it proceeds.
   //    Paired against the control above, this isolates the reviewer as the only
   //    thing that changed.
   const granted = agent_dispatch_tool_call(
     harness.tools,
-    {id: "c2", name: "run", arguments: {command: "cat .env"}},
+    {id: "c2", name: "run", arguments: {command: "echo hi"}},
     tools,
     {approval_policy: asking_policy, approval_reviewer: granting_reviewer()},
   )
@@ -243,7 +236,7 @@ pipeline default(harness: Harness) {
   // 2. A reviewer that considers it and says no leaves the call refused.
   const denied = agent_dispatch_tool_call(
     harness.tools,
-    {id: "c3", name: "run", arguments: {command: "cat ~/.ssh/id_rsa"}},
+    {id: "c3", name: "run", arguments: {command: "echo hi"}},
     tools,
     {approval_policy: asking_policy, approval_reviewer: denying_reviewer()},
   )
@@ -253,7 +246,7 @@ pipeline default(harness: Harness) {
   //    ever passes, every buggy reviewer in the fleet became a rubber stamp.
   const sloppy = agent_dispatch_tool_call(
     harness.tools,
-    {id: "c4", name: "run", arguments: {command: "cat .env"}},
+    {id: "c4", name: "run", arguments: {command: "echo hi"}},
     tools,
     {approval_policy: asking_policy, approval_reviewer: sloppy_reviewer()},
   )
@@ -266,7 +259,7 @@ pipeline default(harness: Harness) {
   //    having attempted one.
   const raised = agent_dispatch_tool_call(
     harness.tools,
-    {id: "c5", name: "run", arguments: {command: "cat .env"}},
+    {id: "c5", name: "run", arguments: {command: "echo hi"}},
     tools,
     {approval_policy: asking_policy, approval_reviewer: raising_reviewer()},
   )
@@ -288,7 +281,7 @@ pipeline default(harness: Harness) {
   const yolo_policy = {floor: {never_grant: ["credential_exfiltration"]}}
   const yolo = agent_dispatch_tool_call(
     harness.tools,
-    {id: "c7", name: "run", arguments: {command: "cat .env"}},
+    {id: "c7", name: "run", arguments: {command: "echo hi"}},
     tools,
     {approval_policy: asking_policy, approval_reviewer: approval_allow_all_reviewer(yolo_policy)},
   )

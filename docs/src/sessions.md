@@ -66,7 +66,8 @@ the "one-shot" call shape.
 | Function | Returns | Notes |
 |---|---|---|
 | `harness.agent.open(id?: string, opts?: dict)` | `string` | Idempotent. `nil` mints a UUIDv7. `opts` may include `workspace_anchor` and `workspace_policy: {default_mount_mode}`. `{parent, actor?}` opens a delegated child of an existing `parent` session; `actor` pushes an `act` hop onto the parent's actor chain (starting from origin `anonymous` when the parent has none), so the child's provider requests carry its lineage. `actor` without `parent` is refused. |
-| `harness.agent.exists(id)` | `bool` | Safe on unknown ids. |
+| `harness.agent.exists(id)` | `bool` | Checks the in-memory session table. Safe on unknown ids. |
+| `harness.agent.session_store_presence(id, opts?)` | `dict` | Bounded durable journal lookup through an already-owned store. Returns `present` with `has_events`, `missing`, `absent`, or `unavailable`; errors remain errors. |
 | `harness.agent.current_id()` | `string` or `nil` | Returns the innermost active session id for the current execution, or `nil` outside any active session. |
 | `harness.agent.length(id)` | `int` | Message count. Errors if `id` doesn't exist. |
 | `harness.agent.snapshot(id)` | `dict` or `nil` | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `actor_chain`, `scratchpad`, `scratchpad_version`, `parent_id`, `child_ids`, and `branched_at_event_index`. |
@@ -95,6 +96,13 @@ the "one-shot" call shape.
 | `harness.agent.add_root(id, root, opts?)` / `harness.agent.remove_root(id, root)` | `dict` | Mount or unmount additional workspace roots. `add_root` returns `{ok, mounted_at?, error?}` and defaults `mount_mode` from the session workspace policy. |
 | `harness.agent.list_roots(id)` | `dict` | Returns `{primary, additional}` for the session's current mounted roots. |
 | `harness.agent.close(id, status?)` | `nil` | Evicts immediately and records an `agent_session_closed` event. `status` may be a string reason or a dict such as `{reason: "timeout"}`. |
+
+`session_store_presence` does not open or create a store. A live run with the
+same store root supplies the owning connection. If no owner is available, or a
+legacy journal would need inspection, the result is `unavailable`; use the
+existing session-store read path when a definitive answer is required. A
+missing store returns `absent` and a missing ID in an owned store returns
+`missing`. Tenant mismatches and read failures are errors, not absence.
 
 ### Canonical ACP forks
 

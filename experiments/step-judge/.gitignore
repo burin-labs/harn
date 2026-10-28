@@ -1,6 +1,3 @@
-# Each experiment run lands under results/<timestamp>/. Only the
-# trimmed snapshots under results/main-grid-*/ are tracked (per-cell
-# summary.json + REPORT.md). transcript_events.jsonl and workspace
-# dirs would balloon the repo.
-results/*
-!results/main-grid-*
+# Each experiment run lands under results/<timestamp>/ and stays local;
+# transcript_events.jsonl and workspace dirs would balloon the repo.
+results/

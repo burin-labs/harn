@@ -251,7 +251,12 @@ async fn drain_bridge_injections_for_checkpoint(
     for injection in queued {
         match injection {
             crate::bridge::QueuedTranscriptInjection::User(message) => {
-                crate::agent_sessions::inject_message(
+                bridge.user_injection_stage(
+                    session_id,
+                    &message.message_id,
+                    crate::bridge::UserInjectionStage::Before,
+                );
+                let result = crate::agent_sessions::inject_message(
                     session_id,
                     json_to_vm(&serde_json::json!({
                         "role": "user",
@@ -264,8 +269,17 @@ async fn drain_bridge_injections_for_checkpoint(
                         // rather than be re-inferred from transcript position.
                         "injectedMode": message.mode.as_str(),
                     })),
-                )
-                .map_err(VmError::Runtime)?;
+                );
+                bridge.user_injection_stage(
+                    session_id,
+                    &message.message_id,
+                    if result.is_ok() {
+                        crate::bridge::UserInjectionStage::Delivered
+                    } else {
+                        crate::bridge::UserInjectionStage::Failed
+                    },
+                );
+                result.map_err(VmError::Runtime)?;
                 let goal = accepted_steer_goal(session_id, &message.message_id);
                 if goal.is_some() {
                     crate::agent_sessions::retire_goal_pins(session_id)

@@ -557,6 +557,12 @@ async fn dispatch(subcommand: Command, explain: bool) {
         }
         Command::Local(args) => commands::local::run(args).await,
         Command::Provider(args) => match args.command {
+            ProviderCommand::AttestAccount(attestation) => {
+                if let Err(error) = commands::inference_admission::attest(attestation) {
+                    eprintln!("{error}");
+                    process::exit(2);
+                }
+            }
             ProviderCommand::Admission(admission) => {
                 if let Err(error) = commands::inference_admission::run(admission) {
                     fatal_error_with_code(error, 2);
