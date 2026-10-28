@@ -574,6 +574,7 @@ fn __agent_host_command_request_common(base_request: dict, args: dict, options: 
   }
   for key in [
     "background",
+    "hard_timeout_ms",
     "background_after_ms",
     "progress_interval_ms",
     "progress_max_inline_bytes",
@@ -979,6 +980,7 @@ pub fn agent_command_tools(
             capture: {type: "object", required: false},
             max_inline_bytes: {type: "integer", required: false},
             background: {type: "boolean", required: false},
+            hard_timeout_ms: {type: "integer", required: false},
             background_after_ms: {type: "integer", required: false},
             progress_interval_ms: {type: "integer", required: false},
             progress_max_inline_bytes: {type: "integer", required: false},

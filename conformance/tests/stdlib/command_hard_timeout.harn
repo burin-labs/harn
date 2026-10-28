@@ -1,0 +1,22 @@
+import { command_run } from "std/command"
+
+pipeline default(harness: Harness) {
+  harness.testing.clear()
+  harness.testing.respond(
+    "tools",
+    "run_command",
+    {status: "running", handle_id: "hto-hard-timeout", timed_out: false},
+  )
+  const result = command_run(
+    harness.tools,
+    ["sleep", "30"],
+    {background: true, hard_timeout_ms: 1500},
+  )
+  const calls = harness.testing.calls()
+  require len(calls) == 1
+  require calls[0].method == "run_command"
+  require calls[0].args[0].hard_timeout_ms == 1500
+  require calls[0].args[0].background == true
+  require result.handle_id == "hto-hard-timeout"
+  harness.stdio.println("ok")
+}

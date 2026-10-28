@@ -132,12 +132,22 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let env_remove = optional_string_list(NAME, &map, "env_remove")?.unwrap_or_default();
     let stdin = optional_string(NAME, &map, "stdin")?;
     let timeout = optional_timeout(NAME, &map, "timeout_ms")?;
+    let hard_timeout_ms = optional_u64(NAME, &map, "hard_timeout_ms")?;
     let capture = parse_capture(&map)?;
     let sandbox_profile = optional_string(NAME, &map, "sandbox_profile")?;
     let sandbox_scope = parse_sandbox_scope(&map)?;
     let env_mode = optional_env_mode(NAME, &map, !env.is_empty())?;
     let background = optional_bool(NAME, &map, "background")?.unwrap_or(false);
     let background_after_ms = optional_u64(NAME, &map, "background_after_ms")?;
+    if hard_timeout_ms == Some(0)
+        || (hard_timeout_ms.is_some() && !background && background_after_ms.is_none())
+    {
+        return Err(HostlibError::InvalidParameter {
+            builtin: NAME,
+            param: "hard_timeout_ms",
+            message: "must be positive and requires a background command".to_string(),
+        });
+    }
     let progress_interval_ms = optional_u64(NAME, &map, "progress_interval_ms")?;
     let progress_max_interval_ms = optional_u64(NAME, &map, "progress_max_interval_ms")?;
     let progress_max_inline_bytes = optional_u64(NAME, &map, "progress_max_inline_bytes")?
@@ -217,6 +227,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 env_remove,
                 capture,
                 session_id: session_id.clone(),
+                hard_timeout: hard_timeout_ms.map(Duration::from_millis),
                 progress_interval: progress_interval_ms.map(Duration::from_millis),
                 progress_max_interval: progress_max_interval_ms.map(Duration::from_millis),
                 progress_max_inline_bytes,

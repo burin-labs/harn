@@ -1669,6 +1669,11 @@ and `max_inline_bytes`. Shell execution is enabled only when the spec
 explicitly sets `{mode: "shell", command: "..."}`. Shell mode uses the host
 default shell unless the spec or options provide `shell` or `shell_id`.
 
+Background commands may set `hard_timeout_ms` to a positive lifetime in
+milliseconds. When it expires, Harn cancels the process tree and publishes a
+timed-out result with cleanup evidence. `timeout_ms` remains the foreground
+limit and does not bound an auto-backgrounded command.
+
 Retry and classification stay generic. Harnesses provide domain-specific
 closures instead of teaching stdlib about a release, repository, package
 manager, or host:
