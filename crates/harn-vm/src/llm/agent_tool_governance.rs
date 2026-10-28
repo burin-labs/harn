@@ -68,7 +68,9 @@ pub(super) fn validate_registered_input(
     arguments: &serde_json::Value,
     audience: crate::tool_registry::ToolAudience,
 ) -> Result<(), String> {
-    if audience == crate::tool_registry::ToolAudience::Mcp {
+    if audience == crate::tool_registry::ToolAudience::Mcp
+        || crate::mcp_server::is_served_composition()
+    {
         return crate::mcp_server::composition_catalog(name)
             .map_err(|error| error.to_string())?
             .validate_input(name, arguments)
@@ -322,7 +324,8 @@ mod tests {
     #[tokio::test]
     async fn mcp_dispatch_requires_an_explicit_registry() {
         let entry = crate::schema::json_to_vm_value(&serde_json::json!({
-            "name": "anything", "governance": {"audiences": ["mcp"]}
+            "name": "anything", "governance": {"audiences": ["mcp"]},
+            "parameters": {"value": {"type": "string", "required": true}}
         }));
         let VmValue::Dict(published) = &entry else {
             panic!("fixture must be a dictionary");
@@ -335,10 +338,22 @@ mod tests {
                 validate_registered_input(
                     Some(&allowed),
                     "anything",
-                    &serde_json::json!({}),
+                    &serde_json::json!({"value": "published"}),
                     crate::tool_registry::ToolAudience::Mcp,
                 )
                 .expect("published catalog entry validates");
+                let conflicting =
+                    registry(vec![crate::schema::json_to_vm_value(&serde_json::json!({
+                        "name": "anything",
+                        "parameters": {"value": {"type": "integer", "required": true}}
+                    }))]);
+                validate_registered_input(
+                    Some(&conflicting),
+                    "anything",
+                    &serde_json::json!({"value": "published"}),
+                    crate::tool_registry::ToolAudience::Agent,
+                )
+                .expect("served scope ignores caller schema regardless of audience hint");
                 let missing = crate::mcp_server::composition_catalog("missing")
                     .expect_err("an unpublished name has no validation authority");
                 assert!(matches!(

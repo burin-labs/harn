@@ -18,29 +18,11 @@ use test_util::stdio_jsonrpc::StdioJsonRpcClient;
 
 mod publication;
 use publication::write_export_fixture;
+mod protocol;
+pub(super) use protocol::stable_request;
+use protocol::PROTOCOL_VERSION;
 
 const PROCESS_READY_TIMEOUT: Duration = Duration::from_mins(1);
-const PROTOCOL_VERSION: &str = "2026-07-28";
-
-fn stable_meta(capabilities: JsonValue) -> JsonValue {
-    json!({
-        "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
-        "io.modelcontextprotocol/clientInfo": {
-            "name": "harn-e2e-client",
-            "version": "1.0.0"
-        },
-        "io.modelcontextprotocol/clientCapabilities": capabilities,
-    })
-}
-
-pub(super) fn stable_request(id: u64, method: &str, mut params: JsonValue) -> JsonValue {
-    params["_meta"] = stable_meta(json!({
-        "elicitation": {"form": {}, "url": {}},
-        "roots": {},
-        "sampling": {},
-    }));
-    json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
-}
 
 #[test]
 fn serve_mcp_code_mode_dispatches_only_server_registered_read_tools() {
