@@ -455,7 +455,7 @@ fn landlock_profile_for(
     // descendants, which is the containment the grant claims. An older kernel
     // cannot express it, so the grant is refused there rather than issued
     // half-enforced.
-    super::ssh_agent::validate(policy)?;
+    super::enforcement::validate_ssh_agent(policy)?;
     let scope_unix_paths =
         policy.process_sandbox.ssh_agent_socket.is_some() && !policy_allows_network(policy);
     if scope_unix_paths && support.abi() < ABI::V9 {

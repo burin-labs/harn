@@ -9,14 +9,14 @@ use crate::agent_events::{AgentTerminalKind, AgentTerminalOutcome};
 
 use crate::harness_net::NetPolicyDecision;
 use crate::orchestration::{
-    PolicyAuthorityRequest, PolicyEvaluation, PolicyMatchedRule, ProcessSandboxPreset,
-    SOURCE_NET_POLICY,
+    PolicyAuthorityRequest, PolicyEvaluation, PolicyMatchedRule, SOURCE_NET_POLICY,
 };
 
 use super::evidence::{
     approval_batch, diagnostic, fingerprint, persist_terminally, policy_evidence,
     receipted_requirements, requirement_attenuates,
 };
+use super::policy::{normalize_policy, policy_requirements};
 use super::*;
 
 #[async_trait]
@@ -854,127 +854,6 @@ pub(super) fn plan_from_intent(mut intent: RunIntent) -> RunAuthorityPlanV1 {
         interactivity: intent.interactivity,
         startup_deadline_at_ms: intent.startup_deadline_at_ms,
         receipt_uri: intent.receipt_uri,
-    }
-}
-
-fn normalize_policy(policy: &mut crate::orchestration::CapabilityPolicy) {
-    sort_dedup(&mut policy.tools);
-    sort_dedup(&mut policy.workspace_roots);
-    sort_dedup(&mut policy.read_only_roots);
-    for operations in policy.capabilities.values_mut() {
-        sort_dedup(operations);
-    }
-    sort_dedup(&mut policy.process_sandbox.read_roots);
-    sort_dedup(&mut policy.process_sandbox.write_roots);
-    sort_dedup(&mut policy.process_sandbox.unix_socket_roots);
-    if let Some(presets) = policy.process_sandbox.presets.as_mut() {
-        presets.sort();
-        presets.dedup();
-    }
-}
-
-fn sort_dedup(values: &mut Vec<String>) {
-    values.sort();
-    values.dedup();
-}
-
-fn policy_requirements(
-    policy: &crate::orchestration::CapabilityPolicy,
-) -> Vec<AuthorityRequirement> {
-    let mut requirements = Vec::new();
-    requirements.extend(
-        policy
-            .read_only_roots
-            .iter()
-            .cloned()
-            .map(|root| AuthorityRequirement::FilesystemRead { root }),
-    );
-    requirements.extend(
-        policy
-            .workspace_roots
-            .iter()
-            .cloned()
-            .map(|root| AuthorityRequirement::FilesystemWrite { root }),
-    );
-    requirements.extend(
-        policy
-            .process_sandbox
-            .read_roots
-            .iter()
-            .cloned()
-            .map(|root| AuthorityRequirement::ProcessReadRoot { root }),
-    );
-    requirements.extend(
-        policy
-            .process_sandbox
-            .write_roots
-            .iter()
-            .cloned()
-            .map(|root| AuthorityRequirement::ProcessWriteRoot { root }),
-    );
-    requirements.extend(
-        policy
-            .process_sandbox
-            .unix_socket_roots
-            .iter()
-            .cloned()
-            .map(|root| AuthorityRequirement::ProcessUnixSocketRoot { root }),
-    );
-    let presets = policy.process_sandbox.effective_presets();
-    let presets = if presets.is_empty() {
-        vec!["none".to_string()]
-    } else {
-        presets
-            .into_iter()
-            .map(preset_name)
-            .map(str::to_string)
-            .collect()
-    };
-    requirements.extend(
-        presets
-            .into_iter()
-            .map(|preset| AuthorityRequirement::ProcessSandbox {
-                profile: policy.sandbox_profile.as_str().to_string(),
-                preset,
-            }),
-    );
-    requirements.extend(
-        policy
-            .tools
-            .iter()
-            .cloned()
-            .map(|pattern| AuthorityRequirement::Tool { pattern }),
-    );
-    for (capability, operations) in &policy.capabilities {
-        let operations = if operations.is_empty() {
-            vec!["*".to_string()]
-        } else {
-            operations.clone()
-        };
-        requirements.extend(operations.into_iter().map(|operation| {
-            AuthorityRequirement::HostCapability {
-                capability: capability.clone(),
-                operation,
-            }
-        }));
-    }
-    if let Some(level) = &policy.side_effect_level {
-        requirements.push(AuthorityRequirement::SideEffectCeiling {
-            level: level.clone(),
-        });
-    }
-    if let Some(depth) = policy.recursion_limit {
-        requirements.push(AuthorityRequirement::RecursionLimit { depth });
-    }
-    requirements
-}
-
-fn preset_name(preset: ProcessSandboxPreset) -> &'static str {
-    match preset {
-        ProcessSandboxPreset::SystemRuntime => "system_runtime",
-        ProcessSandboxPreset::DeveloperToolchains => "developer_toolchains",
-        ProcessSandboxPreset::PackageManagerConfig => "package_manager_config",
-        ProcessSandboxPreset::UserTemp => "user_temp",
     }
 }
 

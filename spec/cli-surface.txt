@@ -1590,6 +1590,7 @@ harn run --allow
 harn run --allow-http-read
 harn run --allow-process-loopback
 harn run --allow-process-network
+harn run --allow-ssh-agent
 harn run --allow-unsigned
 harn run --approve-risky
 harn run --as-job
@@ -2080,6 +2081,7 @@ harn time run
 harn time run --allow-http-read
 harn time run --allow-process-loopback
 harn time run --allow-process-network
+harn time run --allow-ssh-agent
 harn time run --eager-project-handlers
 harn time run --environment-policy
 harn time run --grant

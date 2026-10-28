@@ -1,7 +1,9 @@
-use super::{sandbox_rejection, CapabilityPolicy};
+#[cfg(target_os = "linux")]
+use crate::stdlib::sandbox;
+use crate::stdlib::sandbox::{sandbox_rejection, CapabilityPolicy};
 use crate::VmError;
 
-pub(super) fn validate(policy: &CapabilityPolicy) -> Result<(), VmError> {
+pub(in crate::stdlib::sandbox) fn validate(policy: &CapabilityPolicy) -> Result<(), VmError> {
     let Some(socket) = &policy.process_sandbox.ssh_agent_socket else {
         return Ok(());
     };
@@ -17,7 +19,8 @@ pub(super) fn validate(policy: &CapabilityPolicy) -> Result<(), VmError> {
             ));
         }
         #[cfg(target_os = "linux")]
-        if !super::policy_allows_network(policy) && !super::linux::ssh_agent_path_scope_available()
+        if !sandbox::policy_allows_network(policy)
+            && !sandbox::linux::ssh_agent_path_scope_available()
         {
             return Err(sandbox_rejection(
                 "SSH agent socket connection requires Landlock ABI 9 on this host".into(),
