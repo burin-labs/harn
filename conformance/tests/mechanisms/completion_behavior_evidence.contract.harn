@@ -1,0 +1,200 @@
+import {
+  CompletionBehaviorCheck,
+  CompletionBehaviorTarget,
+  completion_behavior_run_check,
+} from "std/agent/completion_behavior_evidence"
+import { agent_completion_gate, agent_completion_gate_preview } from "std/agent/completion_gate"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
+import { VerificationInputState } from "std/verification"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+pipeline default(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const source = path_join(root, "target.txt")
+      const revision = path_join(root, "revision.txt")
+      const sid = harness.agent.open(
+        "behavior-contract-${harness.random.uuid()}",
+        {workspace_anchor: {primary: root}},
+      )
+      const stored_key = "behavior-contract.after.${sid}"
+      const command = "exit 0"
+      const spec = {mode: "shell", command: command, cwd: root}
+      const target = { ->
+        const result: CompletionBehaviorTarget = {
+          identity: "target.txt",
+          digest: sha256(harness.fs.read_text(source)),
+        }
+        return result
+      }
+      const reuse = {
+        scope: "behavior-contract/${sid}",
+        inputs: { ->
+          const result: VerificationInputState = {
+            revision: to_int(harness.fs.read_text(revision)) ?? -1,
+            workspace: root,
+            source: sha256(harness.fs.read_text(source)),
+            dependencies: "none",
+            environment: "contract",
+          }
+          return result
+        },
+        accept: { result -> result.success },
+      }
+      const loop_options = {
+        provider: "mock",
+        model: "mock",
+        session_id: sid,
+        root: root,
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 4,
+        max_nudges: 4,
+      }
+      harness.fs.write_text(source, "before")
+      harness.fs.write_text(revision, "0")
+      harness.agent.with_run(
+        sid,
+        loop_options,
+        { ->
+          harness.agent.set_goal(
+            sid,
+            {
+              spec: {
+                objective: "Refactor target.txt preserving behavior",
+                success_criteria: [],
+                retired_criteria: [],
+                constraints: [],
+                budget: {},
+              },
+              metadata: {
+                acceptance_note: "",
+                criterion_sources: {},
+                verification: {command: command, source: "contract"},
+                target: "target.txt",
+                source: "contract",
+              },
+            },
+          )
+          const before = completion_behavior_run_check(
+            harness,
+            sid,
+            sid,
+            target,
+            "check",
+            spec,
+            {record: false, reuse: reuse},
+          )
+          assert(before.check.result.success && before.behavior_check != nil)
+          const tools = tool_define(
+            tool_registry(),
+            "refactor",
+            "Edit the target",
+            {
+              parameters: {},
+              returns: {type: "string"},
+              annotations: {kind: "write"},
+              handler: { _ ->
+                harness.fs.write_text(source, "after")
+                harness.fs.write_text(revision, "1")
+                const after = completion_behavior_run_check(
+                  harness,
+                  sid,
+                  sid,
+                  target,
+                  "check",
+                  spec,
+                  {record: false, reuse: reuse},
+                )
+                assert(after.check.result.success && after.behavior_check != nil)
+                harness.runtime.store_set(stored_key, after.behavior_check)
+                return "edited and verified"
+              },
+            },
+          )
+          const options = {
+            facts: fn(_ctx) { return {
+              source_write_count: 1,
+              verify: {ok: true, command: command},
+              verification_current: true,
+              verification_discriminates: false,
+            } },
+            behavior_evidence: { _ctx ->
+              const stored = harness.runtime.store_get(stored_key)
+              if stored == nil {
+                return nil
+              }
+              return {
+                agent: harness.agent,
+                active_goal_id: sid,
+                intent: "behavior_preserving",
+                before: before.behavior_check,
+                after: schema_expect(stored, schema_of(CompletionBehaviorCheck)),
+                reuse: reuse,
+                target: target,
+              }
+            },
+          }
+          with_llm_script(
+            harness.llm,
+            [
+              llm_tool_call("refactor", {}),
+              llm_text("<user_response>Done.</user_response>\n<done>##DONE##</done>"),
+            ],
+            { ->
+              const result = agent_loop(
+                harness,
+                "Refactor target.txt preserving behavior",
+                nil,
+                loop_options + {tools: tools} + agent_completion_gate(harness.runtime, options),
+              )
+              assert_eq(len(result.tools.successful), 1)
+              assert(
+                contract_effect(
+                  harness.stdio,
+                  "preserving_refactor_completes",
+                  result.status == "done",
+                ),
+              )
+            },
+          )
+          const wrong_target = { ->
+            const result: CompletionBehaviorTarget = {
+              identity: "unrelated.txt",
+              digest: sha256(harness.fs.read_text(source)),
+            }
+            return result
+          }
+          const after = schema_expect(
+            harness.runtime.store_get(stored_key),
+            schema_of(CompletionBehaviorCheck),
+          )
+          const wrong = options
+            + {
+              behavior_evidence: { _ctx ->
+                {
+                  agent: harness.agent,
+                  active_goal_id: sid,
+                  intent: "behavior_preserving",
+                  before: before.behavior_check,
+                  after: after,
+                  reuse: reuse,
+                  target: wrong_target,
+                }
+              },
+            }
+          assert(
+            contract_negative(
+              harness.stdio,
+              "unrelated_target_does_not_complete",
+              agent_completion_gate_preview(harness.runtime, {session_id: sid}, wrong).confirm,
+            ),
+          )
+        },
+      )
+      harness.agent.close(sid)
+    },
+  )
+}
