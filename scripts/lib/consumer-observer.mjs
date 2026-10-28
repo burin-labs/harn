@@ -614,10 +614,16 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     || targets.some(target => typeof target !== 'string' || !/^[a-z0-9_-]+$/.test(target))
     || !Array.isArray(jobs) || jobs.length === 0 || new Set(jobs.map(job=>job.id)).size !== jobs.length
     || new Set(jobs.map(job=>job.name)).size !== jobs.length) refuse('archive_producer_identity_unproven');
-  // The residual audit runs beside the canary and the candidate verdict gates on it, so it
-  // need not have finished when the observer admits the archive.
+  // Only a child of this live candidate can proceed while its audit runs. Recovery and
+  // standalone promotion require a completed, successful audit before using the archives.
+  const audit=jobs.find(job=>job.name==='Release residual audit');
+  const auditPending=request.allowPendingAudit===true && liveStates.has(run.status)
+    && audit && liveStates.has(audit.status) && audit.conclusion===null;
+  if (!audit || !(audit.status==='completed' && audit.conclusion==='success' || auditPending)) {
+    refuse('archive_producer_builds_unproven');
+  }
   const deferred = new Set(['Consumer release rehearsal / Consumer canary',
-    'Consumer release rehearsal / Settled verdict','Release candidate verdict','Release residual audit']);
+    'Consumer release rehearsal / Settled verdict','Release candidate verdict']);
   const required = ['Resolve release context','Prepare CLI AOT payload','Assemble candidate manifest',
     'Consumer release rehearsal / Decide whether main moved',
     ...targets.map(target=>`Build ${target}`),
@@ -627,6 +633,7 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
       || job.run_attempt!==attempt || job.head_sha!==sourceRevision || typeof job.name!=='string'
       || !(job.status==='completed' && job.conclusion==='success'
         || job.name==='Report cache budget' && job.status==='completed' && job.conclusion==='skipped'
+        || job.name==='Release residual audit' && auditPending
         || deferred.has(job.name) && (liveStates.has(job.status) && job.conclusion===null
           || job.status==='completed' && ['success','failure','skipped'].includes(job.conclusion))))) {
     refuse('archive_producer_builds_unproven');
@@ -644,7 +651,8 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     producer_run:runId,producer_attempt:attempt,verdict:'pass',observed_jobs:jobs.length,
     proven_artifacts:names.length,manifest:{id:artifacts.find(artifact=>artifact.name===`candidate-manifest-${sourceRevision}`).id,
       digest:artifacts.find(artifact=>artifact.name===`candidate-manifest-${sourceRevision}`).digest},
-    pending:0,failed_jobs:[],next_action:'measure-consumer-repair'};
+    pending:auditPending?1:0,pending_jobs:auditPending?['Release residual audit']:[],
+    failed_jobs:[],next_action:'measure-consumer-repair'};
 }
 
 export async function githubArchiveProducer(token, request, fetchRecord=fetch) {
