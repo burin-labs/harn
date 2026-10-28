@@ -662,6 +662,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
             &tool_name,
             &tool_id,
             &tool_args,
+            None,
             tools,
             denial.into_tool_denial(&tool_name),
         ))
@@ -749,7 +750,8 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                             &tool_args,
                             denial,
                             false,
-                            DenialEvidence::new(Some(policy_decision), None),
+                            DenialEvidence::new(Some(policy_decision), None)
+                                .with_operation(approval_args.as_ref()),
                         )
                         .await);
                     }
@@ -790,7 +792,8 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                         &tool_args,
                         denial,
                         escalated,
-                        DenialEvidence::new(Some(policy_decision), None),
+                        DenialEvidence::new(Some(policy_decision), None)
+                            .with_operation(approval_args.as_ref()),
                     )
                     .await);
                 }
@@ -802,6 +805,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                 &tool_name,
                 &tool_id,
                 &tool_args,
+                approval_args.as_ref(),
                 tools,
                 policy_denial.into_tool_denial(&tool_name),
             ))
@@ -835,7 +839,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                 &tool_args,
                 denial,
                 false,
-                DenialEvidence::new(None, None),
+                DenialEvidence::new(None, None).with_operation(approval_args.as_ref()),
             )
             .await);
         }
@@ -930,7 +934,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                     &tool_args,
                     denial,
                     escalated,
-                    DenialEvidence::new(None, None),
+                    DenialEvidence::new(None, None).with_operation(approval_args.as_ref()),
                 )
                 .await);
             }
@@ -988,7 +992,8 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                 &tool_args,
                 denial,
                 false,
-                DenialEvidence::new(Some(decision.receipt), None),
+                DenialEvidence::new(Some(decision.receipt), None)
+                    .with_operation(approval_args.as_ref()),
             )
             .await);
         }
@@ -1104,7 +1109,8 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                     &tool_args,
                     denial,
                     escalated,
-                    DenialEvidence::new(Some(decision.receipt.clone()), None),
+                    DenialEvidence::new(Some(decision.receipt.clone()), None)
+                        .with_operation(approval_args.as_ref()),
                 )
                 .await);
             }
@@ -1259,7 +1265,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
             &tool_args,
             denial,
             false,
-            DenialEvidence::new(receipt, None),
+            DenialEvidence::new(receipt, None).with_operation(approval_args.as_ref()),
         )
         .await;
         return Ok(json_to_vm_value(&attach_hook_reminder_audit(
