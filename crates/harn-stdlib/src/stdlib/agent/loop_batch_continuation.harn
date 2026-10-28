@@ -1,0 +1,48 @@
+import { agent_session_await_inbox, agent_session_pending_injections } from "std/agent/state"
+import { agent_tool_result_data } from "std/agent/tool_lifecycle"
+
+/**
+ * The producer can require the model to observe edit feedback before checking.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __batch_mutation_needs_observation(result: dict) -> bool {
+  const data = agent_tool_result_data(result)
+  const raw = result?.requires_repair_before_verify
+    ?? (type_of(data) == "dict" ? data?.requires_repair_before_verify : nil)
+  if raw == nil {
+    return true
+  }
+  // An absent or invalid producer fact cannot authorize a follow-up operation.
+  return type_of(raw) != "bool" || raw
+}
+
+/**
+ * Inspect both existing control queues without draining them into an incomplete
+ * native tool-result sequence. Any pending or unreadable control defers the
+ * verifier to the normal post-dispatch checkpoint.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn __batch_control_boundary_clear(agent: HarnessAgent, session_id: string) -> bool {
+  if session_id == "" {
+    return false
+  }
+  const bridge = try {
+    agent_session_pending_injections(agent, session_id)
+  }
+  if is_err(bridge) {
+    return false
+  }
+  const pending = unwrap(bridge)
+  if type_of(pending) != "dict" || type_of(pending?.pendingCount) != "int"
+    || pending.pendingCount != 0 {
+    return false
+  }
+  const inbox = try {
+    agent_session_await_inbox(agent, session_id, 0)
+  }
+  return is_ok(inbox) && unwrap(inbox) == false
+}

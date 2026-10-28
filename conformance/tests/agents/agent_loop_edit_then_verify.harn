@@ -1,0 +1,95 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  const edits = harness.runtime.atomic(0)
+  const checks = harness.runtime.atomic(0)
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Edit the workspace.",
+    {
+      handler: { _args ->
+        harness.runtime.atomic_add(edits, 1)
+        return agent_tool_handler_result(
+          "edited",
+          {mutation_status: "applied", requires_repair_before_verify: false},
+        )
+      },
+      parameters: {},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "verify",
+    "Check the workspace.",
+    {
+      handler: { _args ->
+        require harness.runtime.atomic_get(edits) == 1, "verify must observe the completed edit"
+        harness.runtime.atomic_add(checks, 1)
+        return agent_tool_handler_result("verified", {})
+      },
+      parameters: {command: {type: "string"}},
+      annotations: {
+        kind: "execute",
+        side_effect_level: "process_exec",
+        completion_evidence_role: "verification",
+      },
+    },
+  )
+  const session = "edit-then-verify-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [
+          {
+            tool_calls: [
+              {id: "edit", name: "edit", arguments: {}},
+              {
+                id: "verify",
+                name: "verify",
+                arguments: {command: "grep -Fx 'first proof' README.md"},
+              },
+            ],
+          },
+          {text: "##DONE##"},
+        ],
+        { ->
+          return agent_loop(
+            harness,
+            "Edit and verify.",
+            nil,
+            {
+              provider: "mock",
+              tools: tools,
+              tool_format: "native",
+              loop_until_done: true,
+              max_iterations: 1,
+              session_id: session,
+            },
+          )
+        },
+      )
+    },
+  )
+  let deferred = 0
+  for event in captured.events {
+    if event?.type == "tool_batch_disposition"
+      && event?.receipt?.tool_name == "verify"
+      && event?.receipt?.disposition == "deferred" {
+      deferred = deferred + 1
+    }
+  }
+  require harness.runtime.atomic_get(edits) == 1, "the edit must execute"
+  require harness.runtime.atomic_get(checks) == 1,
+    "the proposed verifier must execute after the edit"
+  require deferred == 0, "the verifier must not require a second model proposal"
+  harness.stdio.println("edit_then_verify=ok")
+}
