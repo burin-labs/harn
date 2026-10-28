@@ -41,9 +41,13 @@ fn admission_requires_account_evidence_for_conditional_provider_terms() {
                 "inference_boundary.training_unknown"
             );
             let note = snapshot["data_controls_note"].as_str().unwrap();
-            assert!(note.contains("cannot confirm"), "{provider}: {snapshot}");
             if provider == "gemini" {
-                assert!(note.contains("Contributor Tier"), "{snapshot}");
+                assert!(
+                    note.contains("Contributor Tier sharing is turned off"),
+                    "{snapshot}"
+                );
+            } else {
+                assert!(note.contains("cannot confirm"), "{provider}: {snapshot}");
             }
         }
     }

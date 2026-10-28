@@ -7,6 +7,62 @@
 use super::*;
 
 #[test]
+fn host_account_confirmations_are_private_even_without_an_attached_scope() {
+    use crate::llm::api::HOST_ACCOUNT_ATTESTATIONS_ENV;
+
+    let snapshot = BTreeMap::from([
+        (
+            HOST_ACCOUNT_ATTESTATIONS_ENV.to_string(),
+            "fingerprint-canary".to_string(),
+        ),
+        ("UNCHANGED_SENTINEL".to_string(), "retained".to_string()),
+    ]);
+    let read = |name: &str| snapshot.get(name).cloned();
+    let environment = SessionEnvironment::launch_from_snapshot(
+        EnvironmentPolicyKind::Inherited,
+        vec![],
+        snapshot.clone(),
+        &read,
+    )
+    .unwrap();
+    let child = super::super::resolve_env(&environment, &no_env, &|_, _| None).unwrap();
+    assert_eq!(
+        child.get("UNCHANGED_SENTINEL").map(String::as_str),
+        Some("retained")
+    );
+    assert!(!child.contains_key(HOST_ACCOUNT_ATTESTATIONS_ENV));
+    assert!(crate::security::lookup_env(
+        &environment,
+        HOST_ACCOUNT_ATTESTATIONS_ENV,
+        &no_env,
+        &|_, _| None
+    )
+    .unwrap()
+    .is_none());
+    assert!(!environment
+        .admitted_environment_names()
+        .iter()
+        .any(|name| name == HOST_ACCOUNT_ATTESTATIONS_ENV));
+
+    let renamed = GrantSpec {
+        name: "account-copy".into(),
+        source: GrantSourceSpec::Env {
+            var: HOST_ACCOUNT_ATTESTATIONS_ENV.into(),
+        },
+        expose_as_env: Some("RENAMED_ACCOUNT_COPY".into()),
+        for_command: None,
+        expose_to: GrantAudience::Session,
+    };
+    assert!(SessionEnvironment::launch_from_snapshot(
+        EnvironmentPolicyKind::Granted,
+        vec![renamed],
+        snapshot.clone(),
+        &read,
+    )
+    .is_err());
+}
+
+#[test]
 fn session_input_sources_can_be_withheld_from_ambient_grants() {
     let launcher = LauncherEnvironment::from_snapshot(BTreeMap::from([
         ("SERVICE_KEY".into(), "opaque-source-canary".into()),

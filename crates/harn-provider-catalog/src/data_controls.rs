@@ -66,6 +66,38 @@ pub enum TrainingDefault {
     Unspecified,
 }
 
+/// Account facts that must all be confirmed for a conditional no-training claim.
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum NoTrainingRequirement {
+    BillingEnabled,
+    ContributorSharingDisabled,
+}
+
+pub(crate) fn no_training_requirement_values() -> Vec<String> {
+    let schema = serde_json::to_value(schemars::schema_for!(NoTrainingRequirement))
+        .expect("requirement schema is serializable");
+    if let Some(values) = schema["enum"].as_array() {
+        return values
+            .iter()
+            .map(|value| value.as_str().expect("string requirement").to_owned())
+            .collect();
+    }
+    schema["oneOf"]
+        .as_array()
+        .expect("requirements are a closed enum")
+        .iter()
+        .map(|variant| {
+            variant["const"]
+                .as_str()
+                .expect("string requirement")
+                .to_owned()
+        })
+        .collect()
+}
+
 /// A per-model override of the provider's training posture.
 ///
 /// Some providers do not sell one posture per account or per request. They
@@ -208,6 +240,9 @@ pub struct DataControlsDef {
     pub request_controls: Vec<DataControlDef>,
     pub retention_default: RetentionDefault,
     pub training_default: TrainingDefault,
+    /// Account facts required for a conditional no-training claim.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub no_training_requires: Vec<NoTrainingRequirement>,
     /// ISO date the declaration was checked against provider documentation.
     pub checked_on: String,
     /// HTTPS provider-documentation URLs backing every field above.

@@ -90,10 +90,15 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
     }
 }
 
+public enum HarnCatalogNoTrainingRequirement: String, Codable, Sendable {
+__HARN_NO_TRAINING_REQUIREMENT_CASES__
+}
+
 public struct HarnProviderDataControls: Codable, Sendable, Equatable {
     public let controlScope: String
     public let retentionDefault: String
     public let trainingDefault: String
+    public let noTrainingRequires: [HarnCatalogNoTrainingRequirement]?
     public let checkedOn: String
     public let sources: [String]
     public let note: String?
@@ -103,6 +108,7 @@ public struct HarnProviderDataControls: Codable, Sendable, Equatable {
         case controlScope = "control_scope"
         case retentionDefault = "retention_default"
         case trainingDefault = "training_default"
+        case noTrainingRequires = "no_training_requires"
         case checkedOn = "checked_on"
         case sources
         case note

@@ -295,6 +295,50 @@ pub fn set_user_overrides(config: Option<ProvidersConfig>) {
     LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| *cell.borrow_mut() = config);
 }
 
+/// Collect explicit execution restrictions without letting one row hide another.
+pub(crate) fn execution_training_restrictions(provider: &str, model: &str) -> Vec<TrainingDefault> {
+    let route = super::model_catalog_id_for_route(provider, model);
+    let endpoint =
+        super::provider_config(provider).map(|definition| super::resolve_base_url(&definition));
+    LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| {
+        let config = cell.borrow();
+        let Some(config) = config.as_ref() else {
+            return Vec::new();
+        };
+        let mut restrictions = Vec::new();
+        if let Some(definition) = config.providers.get(provider) {
+            restrictions.extend(
+                definition
+                    .data_controls
+                    .iter()
+                    .map(|controls| controls.training_default),
+            );
+            restrictions.extend(
+                definition
+                    .regions
+                    .values()
+                    .filter(|region| Some(region.base_url.as_str()) == endpoint.as_deref())
+                    .filter_map(|region| {
+                        region
+                            .data_controls
+                            .as_ref()
+                            .map(|controls| controls.training_default)
+                    }),
+            );
+        }
+        for id in [Some(model), route.as_deref()].into_iter().flatten() {
+            restrictions.extend(
+                config
+                    .models
+                    .get(id)
+                    .and_then(|row| row.data_controls.as_ref())
+                    .map(|controls| controls.training_default),
+            );
+        }
+        restrictions
+    })
+}
+
 /// Swap the per-execution provider overrides and return the previous value.
 ///
 /// `AmbientExecutionScope` owns the poll-scoped use of this primitive. Normal

@@ -46,6 +46,8 @@ pub(super) fn generate_python_with_payloads(payloads: &SessionUpdatePayloads) ->
             "HarnInferenceAdmissionBoundary",
             "HarnInferenceAdmissionRequest",
             "HarnInferenceAdmissionSnapshot",
+            "HarnNoTrainingRequirement",
+            "HarnProviderAccountAttestation",
             "HarnMachineSpendExhaustion",
             "HarnMachineSpendPeriod",
         ]

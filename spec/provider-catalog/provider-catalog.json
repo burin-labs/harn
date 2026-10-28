@@ -1,6 +1,6 @@
 {
-  "schema_version": 14,
-  "schema": "https://harnlang.com/schemas/provider-catalog.v14.json",
+  "schema_version": 15,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v15.json",
   "generated_by": "harn provider catalog generate",
   "providers": [
     {
@@ -580,13 +580,17 @@
         "control_scope": "per_request",
         "retention_default": "unspecified",
         "training_default": "unspecified",
+        "no_training_requires": [
+          "billing_enabled",
+          "contributor_sharing_disabled"
+        ],
         "checked_on": "2026-10-27",
         "sources": [
           "https://ai.google.dev/gemini-api/terms",
           "https://ai.google.dev/gemini-api/docs/zdr",
           "https://ai.google.dev/gemini-api/docs/logs-policy"
         ],
-        "note": "Harn cannot confirm whether this project uses paid service with Contributor Tier sharing turned off. Full zero-data-retention requires approval; Search grounding retains data for 30 days.",
+        "note": "Harn cannot confirm whether Contributor Tier sharing is turned off without a matching account confirmation; billing must also be enabled. Full zero-data-retention requires approval; Search grounding retains data for 30 days.",
         "request_controls": [
           {
             "location": "body",
