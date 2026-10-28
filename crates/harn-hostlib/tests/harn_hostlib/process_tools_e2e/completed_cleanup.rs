@@ -47,10 +47,12 @@ print(pid, flush=True)
     let waited = require_dict(waited);
     assert_eq!(require_str(&waited, "status"), "completed");
     assert_eq!(require_int(&waited, "exit_code"), 0);
-    let pid: i32 = require_str(&waited, "stdout")
-        .trim()
-        .parse()
-        .expect("detached child reached");
+    let stdout = require_str(&waited, "stdout");
+    let pid: i32 = stdout
+        .lines()
+        .find_map(|line| line.trim().parse().ok())
+        .unwrap_or_else(|| panic!("detached child did not report its PID: {stdout:?}"));
+    assert!(pid > 0);
     let cleanup = require_nested_dict(&waited, "process_cleanup");
     assert!(require_int(&cleanup, "observed_child_count") > 0);
     let children = require_list(&cleanup, "observed_children");
