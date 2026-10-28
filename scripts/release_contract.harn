@@ -27,6 +27,7 @@ pub type SourceCandidateRequest = {
   benchmark_source_ref: string,
   benchmark_source_sha: string,
   benchmark_cargo_bloat: bool,
+  source_sha: string,
 }
 
 pub type SourceCandidateDecision = {
@@ -36,6 +37,7 @@ pub type SourceCandidateDecision = {
     | "wrong_event" \
     | "wrong_ref" \
     | "wrong_runner_profile" \
+    | "invalid_source" \
     | "conflicting_inputs" \
     | "invalid_request",
   build_mode: "candidate" | "none",
@@ -102,6 +104,10 @@ pub fn source_candidate_decision(request: SourceCandidateRequest) -> SourceCandi
     reason = "wrong_ref"
   } else if request.runner_profile != policy.runner_profile {
     reason = "wrong_runner_profile"
+  } else if request.source_sha != ""
+    && (request.event != "workflow_dispatch"
+      || regex_match("^[0-9a-f]{40}$", request.source_sha) == nil) {
+    reason = "invalid_source"
   } else if request.warm_cache_only || request.benchmark_only || request.targets != ""
     || request.benchmark_source_ref != ""
     || request.benchmark_source_sha != ""
@@ -133,6 +139,7 @@ pub fn source_candidate_decision_parse(value: unknown) -> SourceCandidateDecisio
         benchmark_source_ref: schema_string(),
         benchmark_source_sha: schema_string(),
         benchmark_cargo_bloat: schema_bool(),
+        source_sha: schema_string(),
       },
     ),
   )

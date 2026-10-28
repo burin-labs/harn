@@ -595,10 +595,15 @@ export async function githubRunJobs(token,repository,runId,attempt,fetchRecord=f
 
 /** Build evidence belongs to its producing attempt. A new live promotion can
  * measure a repaired consumer without rerunning those immutable archives. */
-export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
+export function qualifyArchiveProducer(run, jobs, artifacts, request, targets, historicalManifest = null) {
   const {sourceRevision, runId, attempt} = request;
+  const historical = run?.head_sha !== sourceRevision;
   if (!sha.test(sourceRevision) || !id.test(runId) || !Number.isSafeInteger(attempt) || attempt < 1
-    || String(run?.id) !== runId || run.run_attempt !== attempt || run.head_sha !== sourceRevision
+    || String(run?.id) !== runId || run.run_attempt !== attempt || !sha.test(run.head_sha)
+    || historical && (run.event !== 'workflow_dispatch' || run.status !== 'completed' || run.conclusion !== 'success'
+      || historicalManifest?.schemaVersion !== 'burin-labs.candidate_manifest.v1'
+      || historicalManifest.repository !== parentRepository || historicalManifest.sourceCommit !== sourceRevision
+      || historicalManifest.runId !== runId || historicalManifest.runAttempt !== String(attempt))
     || run.head_repository?.full_name !== parentRepository || run.repository?.full_name !== parentRepository
     || run.path !== observerParentWorkflows.candidate || run.head_branch !== 'main'
     || !['push','workflow_dispatch'].includes(run.event)
@@ -611,14 +616,17 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
   const deferred = new Set(['Consumer release rehearsal / Consumer canary',
     'Consumer release rehearsal / Settled verdict','Release candidate verdict']);
   const required = ['Resolve release context','Prepare CLI AOT payload','Assemble candidate manifest',
-    'Release residual audit','Consumer release rehearsal / Decide whether main moved',
+    'Release residual audit',...(historical ? ['Qualify candidate source','Qualify native release source','Release candidate verdict'] :
+      ['Consumer release rehearsal / Decide whether main moved']),
     ...targets.map(target=>`Build ${target}`),
     ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)];
   if (required.some(name=>!jobs.some(job=>job.name===name && job.status==='completed' && job.conclusion==='success'))
+    || historical && !jobs.some(job=>job.name==='Consumer release rehearsal' && job.status==='completed' && job.conclusion==='skipped')
     || jobs.some(job=>!Number.isSafeInteger(job.id) || job.id < 1 || String(job.run_id)!==runId
-      || job.run_attempt!==attempt || job.head_sha!==sourceRevision || typeof job.name!=='string'
+      || job.run_attempt!==attempt || job.head_sha!==run.head_sha || typeof job.name!=='string'
       || !(job.status==='completed' && job.conclusion==='success'
         || job.name==='Report cache budget' && job.status==='completed' && job.conclusion==='skipped'
+        || historical && job.name==='Consumer release rehearsal' && job.status==='completed' && job.conclusion==='skipped'
         || deferred.has(job.name) && (liveStates.has(job.status) && job.conclusion===null
           || job.status==='completed' && ['success','failure','skipped'].includes(job.conclusion))))) {
     refuse('archive_producer_builds_unproven');
@@ -630,7 +638,7 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     return matches.length!==1 || !Number.isSafeInteger(artifact.id) || artifact.id<1
       || artifact.expired!==false || !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes<1
       || !/^sha256:[0-9a-f]{64}$/.test(artifact.digest)
-      || String(artifact.workflow_run?.id)!==runId || artifact.workflow_run?.head_sha!==sourceRevision;
+      || String(artifact.workflow_run?.id)!==runId || artifact.workflow_run?.head_sha!==run.head_sha;
   })) refuse('archive_producer_artifacts_unproven');
   return {schema:'harn.release.producer_readiness.v1',stage:'candidate-archives',source_sha:sourceRevision,
     producer_run:runId,producer_attempt:attempt,verdict:'pass',observed_jobs:jobs.length,
@@ -639,14 +647,45 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     pending:0,failed_jobs:[],next_action:'measure-consumer-repair'};
 }
 
-export async function githubArchiveProducer(token, request, fetchRecord=fetch) {
+export async function githubArchiveProducer(token, request, fetchRecord=fetch, extract=artifactJsonFromZip) {
   const run=await githubRecord(token,parentRepository,request.runId,fetchRecord,request.attempt);
   const jobs=await githubRunJobs(token,parentRepository,request.runId,request.attempt,fetchRecord);
   const artifacts=await githubArtifactCensus(token,parentRepository,request.runId,fetchRecord);
   // The shell contract owns the target list for writers and readers alike.
   const targets=JSON.parse(execFileSync('bash',[fileURLToPath(new URL('./candidate_archive_contract.sh',import.meta.url)),'--targets-json'],
     {encoding:'utf8',timeout:10_000,maxBuffer:16_384}));
-  return qualifyArchiveProducer(run,jobs,artifacts,request,targets);
+  let manifest = null;
+  if (run.head_sha !== request.sourceRevision) {
+    if (!sha.test(request.sourceRevision) || !sha.test(run.head_sha) || run.event !== 'workflow_dispatch'
+      || run.head_branch !== 'main' || run.status !== 'completed' || run.conclusion !== 'success'
+      || run.repository?.full_name !== parentRepository || run.head_repository?.full_name !== parentRepository
+      || run.path !== observerParentWorkflows.candidate) refuse('archive_producer_identity_unproven');
+    const comparison = await githubRead(token,
+      `https://api.github.com/repos/${parentRepository}/compare/${request.sourceRevision}...${run.head_sha}`,fetchRecord);
+    if (!comparison.ok) refuse('archive_producer_identity_unproven');
+    const ancestry = await comparison.json();
+    if (!['ahead','identical'].includes(ancestry?.status)
+      || ancestry.merge_base_commit?.sha !== request.sourceRevision) refuse('archive_producer_identity_unproven');
+    const name = `candidate-manifest-${request.sourceRevision}`;
+    const matches = artifacts.filter(artifact=>artifact.name===name);
+    const artifact = matches[0];
+    if (matches.length!==1 || !Number.isSafeInteger(artifact.id) || artifact.id<1 || artifact.expired!==false
+      || !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes<1 || artifact.size_in_bytes>65_536
+      || !/^sha256:[0-9a-f]{64}$/.test(artifact.digest) || String(artifact.workflow_run?.id)!==request.runId
+      || artifact.workflow_run?.head_sha!==run.head_sha || artifact.workflow_run?.head_branch!=='main'
+      || !Number.isSafeInteger(run.repository?.id) || run.repository.id<1
+      || run.head_repository?.id!==run.repository.id
+      || artifact.workflow_run?.repository_id!==run.repository.id
+      || artifact.workflow_run?.head_repository_id!==run.repository.id) refuse('archive_producer_artifacts_unproven');
+    const archive = await githubRead(token,
+      `https://api.github.com/repos/${parentRepository}/actions/artifacts/${artifact.id}/zip`,fetchRecord);
+    if (!archive.ok) refuse('archive_producer_artifacts_unproven');
+    const bytes=Buffer.from(await archive.arrayBuffer());
+    if (bytes.length>65_536 || `sha256:${createHash('sha256').update(bytes).digest('hex')}`!==artifact.digest)
+      refuse('archive_producer_artifacts_unproven');
+    manifest=extract(bytes,'candidate-manifest.json');
+  }
+  return qualifyArchiveProducer(run,jobs,artifacts,request,targets,manifest);
 }
 
 /** One authenticated, bounded archive reader for public declarations and

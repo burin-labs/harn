@@ -34,6 +34,7 @@ fi
 run="$(gh api "repos/$repository/actions/runs/$run_id")"
 requires_attached_consumer=false
 requires_consumer_repair=false
+producer_proof=""
 if [[ "$standalone" == true ]]; then
   CANDIDATE_RUN_ATTEMPT="$(jq -er .run_attempt <<< "$run")" \
     node "$script_dir/ci/qualify-release-producer.mjs" >&2 || exit 1
@@ -43,8 +44,9 @@ if [[ -n "$repair_pull" ]]; then
     echo '::error::Consumer repair requires one pull request and no attached-child substitution.' >&2
     exit 1
   }
-  CANDIDATE_RUN_ATTEMPT="$(jq -er .run_attempt <<< "$run")" \
-    node "$script_dir/ci/qualify-release-producer.mjs" >&2 || exit 1
+  producer_proof="$(CANDIDATE_RUN_ATTEMPT="$(jq -er .run_attempt <<< "$run")" \
+    node "$script_dir/ci/qualify-release-producer.mjs")" || exit 1
+  echo "$producer_proof" >&2
   requires_consumer_repair=true
 fi
 if [[ -n "$completed_child" ]]; then
@@ -74,10 +76,18 @@ sha="$(jq -er --arg repository "$repository" --arg run_id "$run_id" --arg attach
   echo "::error::Run $run_id is not a successful owning release producer." >&2
   exit 1
 }
-[[ "$sha" == "$expected_sha" ]] || {
-  echo "::error::Candidate source does not match the requested publication identity." >&2
-  exit 1
-}
+if [[ "$sha" != "$expected_sha" ]]; then
+  if [[ "$requires_consumer_repair" != true ]] || ! jq -e \
+    --arg source "$expected_sha" --arg producer "$run_id" \
+    --argjson attempt "$(jq -er .run_attempt <<< "$run")" \
+    '.schema == "harn.release.producer_readiness.v1" and .verdict == "pass" and
+      .source_sha == $source and .producer_run == $producer and .producer_attempt == $attempt' \
+    <<< "$producer_proof" >/dev/null; then
+    echo "::error::Candidate source does not match the requested publication identity." >&2
+    exit 1
+  fi
+  sha="$expected_sha"
+fi
 comparison="$(gh api "repos/$repository/compare/$sha...main")"
 jq -e --arg sha "$sha" '
   (.status == "identical" or .status == "ahead") and .merge_base_commit.sha == $sha
@@ -97,9 +107,9 @@ if [[ "$(jq -r '.event' <<< "$run")" == workflow_dispatch ]]; then
     --arg files "$RELEASE_FILES_ARTIFACT" '[.[] | "harn-" + .] + ["candidate-manifest-" + $sha, $files]')"
   artifacts="$(gh api "repos/$repository/actions/runs/$run_id/artifacts?per_page=100")"
   if ! release_candidate_artifacts_complete "$artifacts" "$expected" ||
-    ! jq -e --argjson run_id "$run_id" --arg sha "$sha" --argjson run "$run" '
+    ! jq -e --argjson run_id "$run_id" --argjson run "$run" '
       all(.artifacts[];
-        .workflow_run.id == $run_id and .workflow_run.head_sha == $sha and
+        .workflow_run.id == $run_id and .workflow_run.head_sha == $run.head_sha and
         .workflow_run.head_branch == "main" and
         .workflow_run.repository_id == $run.repository.id and
         .workflow_run.head_repository_id == $run.head_repository.id and

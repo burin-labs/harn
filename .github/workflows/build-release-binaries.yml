@@ -30,8 +30,10 @@ name: Build release binaries
 #      cadence is a spend decision; scripts/scheduled_workflows.toml records it.
 #
 #   4. workflow_dispatch — warm_cache_only, benchmark_only size gates, or an
-#      explicit source_candidate on main. Source candidates reuse the full
-#      signed producer and checks; dispatches cannot trigger promotion.
+#      explicit source_candidate on main. An optional source_sha selects a
+#      stable main ancestor; the workflow policy remains the dispatched main
+#      commit. Source candidates reuse the full signed producer and checks;
+#      dispatches cannot trigger promotion.
 #
 #   5. merge_group — builds nothing. A group whose head is a release commit
 #      runs the exact-source consumer rehearsal at the commit that lands, and
@@ -55,10 +57,15 @@ on:
   workflow_dispatch:
     inputs:
       source_candidate:
-        description: 'Build, sign, notarize and attest the main source commit without publishing a release.'
+        description: 'Build, sign, notarize and attest a main source candidate without publishing a release.'
         required: false
         type: boolean
         default: false
+      source_sha:
+        description: 'Optional exact main-ancestor source commit for a source candidate.'
+        required: false
+        type: string
+        default: ''
       warm_cache_only:
         description: 'Build the release matrix on main only to refresh default-branch Rust caches.'
         required: false
@@ -197,6 +204,7 @@ jobs:
         id: resolve
         env:
           INPUT_SOURCE_CANDIDATE: ${{ (inputs.source_candidate || github.event_name == 'schedule') && 'true' || 'false' }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha || '' }}
           INPUT_WARM_CACHE_ONLY: ${{ inputs.warm_cache_only && 'true' || 'false' }}
           INPUT_TARGETS: ${{ inputs.targets }}
           INPUT_BENCHMARK_ONLY: ${{ inputs.benchmark_only && 'true' || 'false' }}
@@ -215,6 +223,7 @@ jobs:
           RELEASE_BUILD_INPUTS_CHANGED: ${{ steps.release-build-inputs.outputs.release_build_inputs || 'false' }}
         run: |
           set -euo pipefail
+          INPUT_SOURCE_SHA="${INPUT_SOURCE_SHA:-}"
           # shellcheck source=scripts/lib/release_version.sh
           source scripts/lib/release_version.sh
           # shellcheck source=scripts/lib/release_candidate_run.sh
@@ -248,6 +257,10 @@ jobs:
             echo "::error::benchmark_cargo_bloat requires benchmark_only=true"
             exit 1
           fi
+          if [[ "${INPUT_SOURCE_CANDIDATE:-false}" != true && -n "$INPUT_SOURCE_SHA" ]]; then
+            echo '::error::source_sha requires source_candidate=true'
+            exit 1
+          fi
           if [[ "${INPUT_SOURCE_CANDIDATE:-false}" != true ]] &&
              [[ -n "$INPUT_BENCHMARK_SOURCE_REF" || -n "$INPUT_BENCHMARK_SOURCE_SHA" || -n "$INPUT_TARGETS" ]] &&
              [[ "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
@@ -263,11 +276,12 @@ jobs:
               --argjson benchmark_only "$INPUT_BENCHMARK_ONLY" \
               --arg targets "$INPUT_TARGETS" --arg benchmark_source_ref "$INPUT_BENCHMARK_SOURCE_REF" \
               --arg benchmark_source_sha "$INPUT_BENCHMARK_SOURCE_SHA" \
+              --arg source_sha "$INPUT_SOURCE_SHA" \
               --argjson benchmark_cargo_bloat "$INPUT_BENCHMARK_CARGO_BLOAT" \
               '{event:$event,ref_type:$ref_type,ref_name:$ref_name,runner_profile:$runner_profile,
                 warm_cache_only:$warm_cache_only,benchmark_only:$benchmark_only,targets:$targets,
                 benchmark_source_ref:$benchmark_source_ref,benchmark_source_sha:$benchmark_source_sha,
-                benchmark_cargo_bloat:$benchmark_cargo_bloat}' > "$SOURCE_REQUEST"
+                benchmark_cargo_bloat:$benchmark_cargo_bloat,source_sha:$source_sha}' > "$SOURCE_REQUEST"
             if ! harn run --standalone --no-sandbox scripts/release_contract.harn -- \
                 --source-candidate-request "$SOURCE_REQUEST" > "$SOURCE_DECISION"; then
               echo "::error::Source candidate request refused: $(cat "$SOURCE_DECISION")"
@@ -279,6 +293,22 @@ jobs:
             printf '\nSource candidate decision: %s\n' "$(cat "$SOURCE_DECISION")" >> "$GITHUB_STEP_SUMMARY"
             REF="$GITHUB_SHA"
             CANDIDATE_SOURCE_SHA="$GITHUB_SHA"
+            if [[ -n "$INPUT_SOURCE_SHA" ]]; then
+              if ! git merge-base --is-ancestor "$INPUT_SOURCE_SHA" "$GITHUB_SHA"; then
+                echo '::error::Requested candidate source is not an ancestor of main.'
+                exit 1
+              fi
+              REF="$INPUT_SOURCE_SHA"
+              CANDIDATE_SOURCE_SHA="$INPUT_SOURCE_SHA"
+              SOURCE_VERSION="$(git show "$INPUT_SOURCE_SHA:Cargo.toml" | release_workspace_version)"
+              if [[ "$SOURCE_VERSION" != "$VERSION" ]] ||
+                ! release_version_is_canonical "$SOURCE_VERSION" ||
+                release_version_is_prerelease "$SOURCE_VERSION"; then
+                echo '::error::Requested source must carry the current stable release version.'
+                exit 1
+              fi
+              VERSION="$SOURCE_VERSION"
+            fi
             BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
             SHOULD_BUILD_BINARIES=true
             SHOULD_PACKAGE_ARCHIVES=true
@@ -292,7 +322,7 @@ jobs:
                 echo "::notice::Reusing live source candidate run $LIVE_CANDIDATE_RUN at $GITHUB_SHA."
               fi
             fi
-            echo "::notice::Signed source candidate $GITHUB_SHA uses the existing full candidate producer. Source candidate events cannot publish a release."
+            echo "::notice::Signed source candidate $CANDIDATE_SOURCE_SHA uses the existing full candidate producer. Source candidate events cannot publish a release."
           elif [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "::error::benchmark_only is only valid for workflow_dispatch"
@@ -1876,13 +1906,15 @@ jobs:
           name: candidate-manifest-${{ needs.setup.outputs.candidate_source_sha }}
           path: ${{ runner.temp }}/candidate-manifest
       - name: Verify the candidate Harn binary
+        env:
+          CANDIDATE_SOURCE_SHA: ${{ needs.setup.outputs.candidate_source_sha }}
         run: >-
           ./scripts/ci/rust_artifact.sh restore-candidate
           "$RUNNER_TEMP/candidate-archive/harn-x86_64-unknown-linux-gnu.tar.xz"
           "$RUNNER_TEMP/candidate-manifest/candidate-manifest.json"
           x86_64-unknown-linux-gnu
           "$RUNNER_TEMP/candidate-harn"
-          "$GITHUB_SHA"
+          "$CANDIDATE_SOURCE_SHA"
           "$GITHUB_ENV"
       - name: Run the release residual audit
         run: ./scripts/release_gate.sh audit --residual-only

@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {githubArchiveProducer,qualifyArchiveProducer} from '../lib/consumer-observer.mjs';
 
 const targets=JSON.parse(execFileSync('bash',[fileURLToPath(new URL('../lib/candidate_archive_contract.sh',import.meta.url)),'--targets-json'],{encoding:'utf8'}));
@@ -48,6 +49,31 @@ test('archive readiness is independent of a later consumer failure and requires 
   }
 });
 
+test('a historical source is bound to its main policy run by the producer manifest',()=>{
+  const policy='c'.repeat(40);
+  const historicalRun={...run,head_sha:policy,event:'workflow_dispatch',status:'completed',conclusion:'success'};
+  const historicalJobs=jobs.filter(job=>!job.name.startsWith('Consumer release rehearsal /'))
+    .map(job=>({...job,head_sha:policy,status:'completed',conclusion:'success'}));
+  historicalJobs.push(...['Qualify candidate source','Qualify native release source','Release candidate verdict']
+    .map((name,index)=>({id:200+index,run_id:42,run_attempt:1,head_sha:policy,name,status:'completed',conclusion:'success'})));
+  historicalJobs.push({id:203,run_id:42,run_attempt:1,head_sha:policy,name:'Consumer release rehearsal',status:'completed',conclusion:'skipped'});
+  const historicalArtifacts=artifacts.map(artifact=>({...artifact,workflow_run:{id:42,head_sha:policy}}));
+  const manifest={schemaVersion:'burin-labs.candidate_manifest.v1',repository:'burin-labs/harn',
+    sourceCommit:source,runId:'42',runAttempt:'1'};
+  assert.equal(qualifyArchiveProducer(historicalRun,historicalJobs,historicalArtifacts,request,targets,manifest).verdict,'pass');
+  for(const changed of [null,{...manifest,sourceCommit:policy},{...manifest,runId:'43'},
+    {...manifest,runAttempt:'2'},{...manifest,repository:'fork/harn'},{...manifest,schemaVersion:'unknown'}]) {
+    assert.throws(()=>qualifyArchiveProducer(historicalRun,historicalJobs,historicalArtifacts,request,targets,changed),/identity_unproven/);
+  }
+  for(const changed of [{...historicalRun,event:'schedule'},{...historicalRun,head_branch:'topic'},
+    {...historicalRun,status:'in_progress',conclusion:null}]) {
+    assert.throws(()=>qualifyArchiveProducer(changed,historicalJobs,historicalArtifacts,request,targets,manifest),/identity_unproven/);
+  }
+  for(const required of ['Qualify candidate source','Qualify native release source','Release candidate verdict','Consumer release rehearsal']) {
+    assert.throws(()=>qualifyArchiveProducer(historicalRun,historicalJobs.filter(job=>job.name!==required),historicalArtifacts,request,targets,manifest),/builds_unproven/);
+  }
+});
+
 test('the owning reader uses the producing attempt and refuses partial authenticated censuses',async()=>{
   const calls=[];
   const read=async(url)=>{
@@ -61,6 +87,38 @@ test('the owning reader uses the producing attempt and refuses partial authentic
   assert.ok(calls.includes('/repos/burin-labs/harn/actions/runs/42/attempts/1/jobs'));
   await assert.rejects(githubArchiveProducer('fixture-read',request,async(url,options)=>url.includes('/jobs')?
     {ok:true,json:async()=>({total_count:jobs.length+1,jobs})}:read(url,options)),/census_unmeasured/);
+});
+
+test('the historical producer reader authenticates the manifest bytes and main ancestry',async()=>{
+  const policy='c'.repeat(40);
+  const producer={...run,head_sha:policy,event:'workflow_dispatch',status:'completed',conclusion:'success',
+    repository:{full_name:'burin-labs/harn',id:9},head_repository:{full_name:'burin-labs/harn',id:9}};
+  const producerJobs=jobs.filter(job=>!job.name.startsWith('Consumer release rehearsal /'))
+    .map(job=>({...job,head_sha:policy,status:'completed',conclusion:'success'}));
+  producerJobs.push(...['Qualify candidate source','Qualify native release source','Release candidate verdict']
+    .map((name,index)=>({id:200+index,run_id:42,run_attempt:1,head_sha:policy,name,status:'completed',conclusion:'success'})));
+  producerJobs.push({id:203,run_id:42,run_attempt:1,head_sha:policy,name:'Consumer release rehearsal',status:'completed',conclusion:'skipped'});
+  const manifest={schemaVersion:'burin-labs.candidate_manifest.v1',repository:'burin-labs/harn',
+    sourceCommit:source,runId:'42',runAttempt:'1'};
+  const bytes=Buffer.from(JSON.stringify(manifest));
+  const digest=`sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+  const producerArtifacts=artifacts.map(artifact=>({...artifact,digest,workflow_run:{id:42,head_sha:policy,
+    head_branch:'main',repository_id:9,head_repository_id:9}}));
+  const read=({ancestor=source,archive=bytes,listed=producerArtifacts,observedJobs=producerJobs}={})=>async(url)=>{
+    if(url.includes('/compare/')) return {ok:true,json:async()=>({status:'ahead',merge_base_commit:{sha:ancestor}})};
+    if(url.endsWith('/zip')) return {ok:true,arrayBuffer:async()=>archive};
+    const record=url.includes('/jobs')?{total_count:observedJobs.length,jobs:observedJobs}:
+      url.includes('/artifacts')?{total_count:listed.length,artifacts:listed}:producer;
+    return {ok:true,json:async()=>record};
+  };
+  const extract=data=>JSON.parse(data.toString());
+  assert.equal((await githubArchiveProducer('fixture-read',request,read(),extract)).verdict,'pass');
+  await assert.rejects(githubArchiveProducer('fixture-read',request,read({ancestor:policy}),extract),/identity_unproven/);
+  await assert.rejects(githubArchiveProducer('fixture-read',request,read({archive:Buffer.from('{}')}),extract),/artifacts_unproven/);
+  await assert.rejects(githubArchiveProducer('fixture-read',request,read({observedJobs:producerJobs.filter(job=>job.name!=='Qualify native release source')}),extract),/builds_unproven/);
+  const changed=producerArtifacts.map(artifact=>artifact.name.startsWith('candidate-manifest-')?
+    {...artifact,workflow_run:{...artifact.workflow_run,repository_id:10}}:artifact);
+  await assert.rejects(githubArchiveProducer('fixture-read',request,read({listed:changed}),extract),/artifacts_unproven/);
 });
 
 test('the actual recovery dispatcher authenticates its live promotion and preserves original archive identity',()=>{
@@ -152,6 +210,68 @@ test('the actual promotion resolver admits only an explicit repair with complete
       assert.notEqual(refused.status,0);
       assert.equal(refused.outputs,'','unmeasured source must emit no promotion outputs');
     }
+  } finally {
+    fs.rmSync(scratch,{recursive:true,force:true});
+  }
+});
+
+test('the actual promotion resolver binds historical archives and still requires a fresh consumer repair',()=>{
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-historical-resolver-'));
+  try {
+    const policy='c'.repeat(40);
+    const historical={...run,head_sha:policy,event:'workflow_dispatch',status:'completed',conclusion:'success',
+      repository:{full_name:'burin-labs/harn',id:9},head_repository:{full_name:'burin-labs/harn',id:9}};
+    const historicalJobs=jobs.filter(job=>!job.name.startsWith('Consumer release rehearsal /'))
+      .map(job=>({...job,head_sha:policy,status:'completed',conclusion:'success'}));
+    historicalJobs.push(...['Qualify candidate source','Qualify native release source','Release candidate verdict']
+      .map((name,index)=>({id:200+index,run_id:42,run_attempt:1,head_sha:policy,name,status:'completed',conclusion:'success'})));
+    historicalJobs.push({id:203,run_id:42,run_attempt:1,head_sha:policy,name:'Consumer release rehearsal',status:'completed',conclusion:'skipped'});
+    fs.writeFileSync(path.join(scratch,'candidate-manifest.json'),JSON.stringify({
+      schemaVersion:'burin-labs.candidate_manifest.v1',repository:'burin-labs/harn',sourceCommit:source,runId:'42',runAttempt:'1'}));
+    execFileSync('zip',['-q','manifest.zip','candidate-manifest.json'],{cwd:scratch});
+    const archive=fs.readFileSync(path.join(scratch,'manifest.zip'));
+    const digest=`sha256:${createHash('sha256').update(archive).digest('hex')}`;
+    const historicalArtifacts=artifacts.map(artifact=>({...artifact,digest,workflow_run:{id:42,head_sha:policy,
+      head_branch:'main',repository_id:9,head_repository_id:9}}));
+    const fixture=path.join(scratch,'fixture.json');
+    const preload=path.join(scratch,'fetch.mjs');
+    const output=path.join(scratch,'output');
+    fs.writeFileSync(preload,`import fs from 'node:fs';
+      const d=JSON.parse(fs.readFileSync(process.env.REPAIR_FIXTURE,'utf8'));
+      globalThis.fetch=async(url)=>{
+        if(url.includes('/compare/')) return {ok:true,json:async()=>({status:'ahead',merge_base_commit:{sha:d.ancestor}})};
+        if(url.endsWith('/zip')) return {ok:true,arrayBuffer:async()=>Buffer.from(d.archive,'base64')};
+        return {ok:true,json:async()=>url.includes('/jobs')?{total_count:d.jobs.length,jobs:d.jobs}:
+          url.includes('/artifacts')?{total_count:d.artifacts.length,artifacts:d.artifacts}:d.run};
+      };`);
+    fs.writeFileSync(path.join(scratch,'gh'),`#!${process.execPath}
+      const fs=require('node:fs');
+      const d=JSON.parse(fs.readFileSync(process.env.REPAIR_FIXTURE,'utf8'));
+      const route=process.argv[3];
+      if(route.includes('/compare/')) console.log(JSON.stringify({status:'ahead',merge_base_commit:{sha:d.ancestor}}));
+      else if(route.includes('/contents/Cargo.toml')) console.log('version = "0.10.181"');
+      else if(route.includes('/artifacts')) console.log(JSON.stringify({total_count:d.artifacts.length,artifacts:d.artifacts}));
+      else if(route.endsWith('/42')) console.log(JSON.stringify(d.run));
+      else process.exit(2);`,{mode:0o755});
+    const execute=(changes={},repair='7')=>{
+      fs.writeFileSync(fixture,JSON.stringify({run:historical,jobs:historicalJobs,artifacts:historicalArtifacts,
+        ancestor:source,archive:archive.toString('base64'),...changes}));
+      fs.writeFileSync(output,'');
+      const result=spawnSync('bash',[fileURLToPath(new URL('../resolve-release-promotion-source.sh',import.meta.url))],{
+        encoding:'utf8',env:{PATH:`${scratch}:${process.env.PATH}`,NODE_OPTIONS:`--import=${preload}`,
+          REPAIR_FIXTURE:fixture,GH_TOKEN:'fixture-read',GITHUB_REPOSITORY:'burin-labs/harn',
+          CANDIDATE_RUN_ID:'42',EXPECTED_SOURCE_SHA:source,GITHUB_OUTPUT:output,CONSUMER_PULL_REQUEST:repair},
+      });
+      return {...result,outputs:fs.readFileSync(output,'utf8')};
+    };
+    const admitted=execute();
+    assert.equal(admitted.status,0,admitted.stderr);
+    assert.match(admitted.outputs,new RegExp(`source_sha=${source}\\n`));
+    assert.match(admitted.outputs,/requires_consumer_repair=true\n/);
+    assert.notEqual(execute({},'').status,0);
+    assert.notEqual(execute({ancestor:policy}).status,0);
+    assert.notEqual(execute({archive:Buffer.from('{}').toString('base64')}).status,0);
+    assert.notEqual(execute({jobs:historicalJobs.filter(job=>job.name!=='Qualify native release source')}).status,0);
   } finally {
     fs.rmSync(scratch,{recursive:true,force:true});
   }

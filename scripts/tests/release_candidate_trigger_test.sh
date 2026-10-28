@@ -169,6 +169,26 @@ resolve source EVENT_NAME=workflow_dispatch INPUT_SOURCE_CANDIDATE=true
 [[ "$(output source source_candidate_decision | jq -er '.accepted and .reason == "accepted"')" == true ]] \
   || fail "actual source resolver did not emit its typed admission receipt"
 
+# A manual recovery may build an older commit only when it is an ancestor
+# carrying the same stable release version as the workflow head.
+git -C "$repo" checkout --quiet -b stable-recovery "$head_sha"
+commit_version 0.10.142 "Change after the release version"
+resolve historical_source EVENT_NAME=workflow_dispatch INPUT_SOURCE_CANDIDATE=true INPUT_SOURCE_SHA="$head_sha"
+[[ "$(output historical_source candidate_source_sha)" == "$head_sha" &&
+   "$(output historical_source ref)" == "$head_sha" &&
+   "$(output historical_source version)" == 0.10.142 ]] \
+  || fail "historical source was not frozen to the requested commit"
+if run_resolver foreign_source EVENT_NAME=workflow_dispatch INPUT_SOURCE_CANDIDATE=true INPUT_SOURCE_SHA="$feature_sha"; then
+  fail "a non-ancestor source was admitted"
+fi
+git -C "$repo" checkout --quiet main
+if run_resolver changed_version EVENT_NAME=workflow_dispatch INPUT_SOURCE_CANDIDATE=true INPUT_SOURCE_SHA="$head_sha"; then
+  fail "a source with a different current version was admitted"
+fi
+if run_resolver source_without_candidate EVENT_NAME=workflow_dispatch INPUT_SOURCE_SHA="$head_sha"; then
+  fail "a source override without candidate mode was admitted"
+fi
+
 # Scheduled candidates cover even main commits excluded by warm-cache paths.
 resolve scheduled EVENT_NAME=schedule INPUT_SOURCE_CANDIDATE=true
 [[ "$(output scheduled build_mode)" == candidate &&

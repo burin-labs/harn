@@ -43,6 +43,7 @@ pipeline test_source_candidate_decision_reports_admission_and_refusal(task: unkn
     benchmark_source_ref: "",
     benchmark_source_sha: "",
     benchmark_cargo_bloat: false,
+    source_sha: "",
   }
   const admitted = source_candidate_decision(request)
   assert_eq(admitted.accepted, true)
@@ -50,6 +51,10 @@ pipeline test_source_candidate_decision_reports_admission_and_refusal(task: unkn
   assert_eq(admitted.build_mode, "candidate")
   assert_eq(admitted.candidate_purpose, "source")
   assert_eq(source_candidate_decision(request + {event: "schedule"}), admitted)
+  assert_eq(
+    source_candidate_decision(request + {source_sha: "0123456789abcdef0123456789abcdef01234567"}),
+    admitted,
+  )
   const invalid = [
     request + {event: "push"},
     request + {ref_name: "topic"},
@@ -61,6 +66,8 @@ pipeline test_source_candidate_decision_reports_admission_and_refusal(task: unkn
     request + {benchmark_source_ref: "main"},
     request + {benchmark_source_sha: "0123456789012345678901234567890123456789"},
     request + {benchmark_cargo_bloat: true},
+    request + {source_sha: "not-a-commit"},
+    request + {event: "schedule", source_sha: "0123456789abcdef0123456789abcdef01234567"},
   ]
   for conflict in invalid {
     const refused = source_candidate_decision(conflict)

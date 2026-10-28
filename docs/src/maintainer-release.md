@@ -277,6 +277,13 @@ it after the release publishes.
   `source_candidate=true`, then use manual promotion recovery. Recovery proves
   the stable version transition in the source's first-parent history and still
   requires exact-source CI, consumer rehearsal, and candidate certification.
+  To rebuild a specific earlier main ancestor after main has advanced, dispatch
+  `build-release-binaries.yml` on main with `source_candidate=true` and
+  `source_sha=FULL_SHA`. The source must carry main's current stable version.
+  Promote that producer with the exact source, run ID and an explicit
+  `consumer_pull_request` repair. The publisher authenticates the source and
+  workflow-policy commits separately and requires a fresh consumer rehearsal;
+  this does not permit scheduled runs or branch sources to publish.
 - Promotion failed: rerun the failed jobs in the exact promotion run. It
   checks the existing tag's commit and refuses a conflicting tag.
 - Candidate succeeded but no main-push event started promotion: dispatch the
