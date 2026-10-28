@@ -189,6 +189,7 @@ pub fn schema_value() -> Value {
                 "required": ["base_url"],
                 "properties": {
                     "base_url": {"type": "string", "minLength": 1},
+                    "data_controls": {"$ref": "#/$defs/model_data_controls"},
                     "label": {"type": "string", "minLength": 1},
                     "source_url": {"type": "string", "minLength": 1},
                     "last_verified": {"type": "string", "minLength": 1},

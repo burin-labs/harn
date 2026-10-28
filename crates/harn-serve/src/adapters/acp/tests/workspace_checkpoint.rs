@@ -409,10 +409,7 @@ async fn historical_fork_restores_its_matching_file_boundary() {
 }
 
 #[cfg(feature = "hostlib")]
-#[tokio::test(flavor = "current_thread")]
-async fn acp_checkpoint_preserves_a_captured_in_workspace_state_root() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path();
+async fn check_captured_in_workspace_state_root(root: &std::path::Path) {
     for args in [
         vec!["init", "-q"],
         vec!["config", "user.email", "t@example.com"],
@@ -427,6 +424,9 @@ async fn acp_checkpoint_preserves_a_captured_in_workspace_state_root() {
             .success());
     }
     std::fs::write(root.join("agent.txt"), "before").unwrap();
+    std::fs::create_dir(root.join("custom-runtime")).unwrap();
+    std::fs::write(root.join("custom-runtime/.gitignore"), "").unwrap();
+    std::fs::write(root.join("custom-runtime/user.txt"), "user before").unwrap();
     for args in [vec!["add", "-A"], vec!["commit", "-q", "-m", "init"]] {
         assert!(std::process::Command::new("git")
             .arg("-C")
@@ -473,15 +473,28 @@ async fn acp_checkpoint_preserves_a_captured_in_workspace_state_root() {
     let fork = recv_response_with_id(&mut rx, 4).await;
     assert!(fork["result"]["sessionId"].is_string(), "{fork}");
     std::fs::write(root.join("agent.txt"), "agent edited").unwrap();
+    std::fs::write(root.join("custom-runtime/user.txt"), "user edited").unwrap();
     server.handle_incoming_message(serde_json::json!({"jsonrpc":"2.0", "id":5, "method":"session/workspace_checkpoint", "params":{"sessionId":session, "action":"call_end", "callId":"edit-1"}})).await;
     let end = recv_response_with_id(&mut rx, 5).await;
     let changes = end["result"]["changes"]
         .as_array()
         .expect("attributed changes");
-    assert_eq!(changes.len(), 1, "{changes:?}");
-    assert_eq!(changes[0]["path"], "agent.txt");
+    let changed: Vec<&str> = changes
+        .iter()
+        .map(|change| change["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        changed,
+        ["agent.txt", "custom-runtime/user.txt"],
+        "{changes:?}"
+    );
     server.handle_incoming_message(serde_json::json!({"jsonrpc":"2.0", "id":6, "method":"session/workspace_checkpoint", "params":{"sessionId":session, "action":"restore", "boundaryId":"turn-1"}})).await;
     let restored = recv_response_with_id(&mut rx, 6).await;
+    assert_eq!(
+        restored["result"]["restored"].as_array().unwrap().len(),
+        2,
+        "{restored}"
+    );
     assert_eq!(
         restored["result"]["restored"][0]["path"], "agent.txt",
         "{restored}"
@@ -490,9 +503,31 @@ async fn acp_checkpoint_preserves_a_captured_in_workspace_state_root() {
         std::fs::read_to_string(root.join("agent.txt")).unwrap(),
         "before"
     );
+    assert_eq!(
+        std::fs::read_to_string(root.join("custom-runtime/user.txt")).unwrap(),
+        "user before"
+    );
     assert!(state_root.join("session-store.sqlite").is_file());
     assert!(state_root.join("agent-run-writers/project.lock").is_file());
     harn_hostlib::workspace_checkpoint::drop_session(&session);
+}
+
+#[cfg(feature = "hostlib")]
+#[tokio::test(flavor = "current_thread")]
+async fn acp_checkpoint_preserves_a_captured_in_workspace_state_root() {
+    let dir = tempfile::TempDir::new().unwrap();
+    check_captured_in_workspace_state_root(dir.path()).await;
+}
+
+#[cfg(all(feature = "hostlib", unix))]
+#[tokio::test(flavor = "current_thread")]
+async fn acp_checkpoint_excludes_custom_runtime_through_workspace_alias() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let physical = dir.path().join("workspace");
+    let alias = dir.path().join("workspace-alias");
+    std::fs::create_dir(&physical).unwrap();
+    std::os::unix::fs::symlink(&physical, &alias).unwrap();
+    check_captured_in_workspace_state_root(&alias).await;
 }
 
 #[cfg(feature = "hostlib")]

@@ -928,29 +928,71 @@ if ! grep -Fq "HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --record-re
   exit 1
 fi
 
-make_provider_targets="$tmp_root/make-provider-targets.txt"
-make -C "$repo_root" -n \
-  gen-provider-catalog check-provider-catalog \
-  gen-provider-support check-provider-support \
-  gen-provider-matrix check-provider-matrix \
-  HARN_BIN="$fake_harn" > "$make_provider_targets"
+export FAKE_PROVIDER_RECORD="$tmp_root/provider-calls.txt"
+export FAKE_PROVIDER_RESOLVE_RECORD="$tmp_root/provider-resolutions.txt"
+export FAKE_PROVIDER_BIN="$fake_harn"
+fake_provider_resolver="$tmp_root/resolve-provider-bin"
+cat > "$fake_harn" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$FAKE_PROVIDER_RECORD"
+if [[ "${FAKE_PROVIDER_FAIL:-}" = "$*" ]]; then exit 37; fi
+SH
+cat > "$fake_provider_resolver" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'resolve\n' >> "$FAKE_PROVIDER_RESOLVE_RECORD"
+if [[ "${FAKE_PROVIDER_RESOLVE_FAIL:-0}" = 1 ]]; then exit 38; fi
+printf '%s\n' "$FAKE_PROVIDER_BIN"
+SH
+chmod +x "$fake_provider_resolver"
+make -s --no-print-directory -C "$repo_root" \
+  gen-provider-catalog check-provider-catalog check-provider-support check-provider-matrix \
+  HARN_BIN="$fake_harn" HARN_BIN_PRINT_CMD="$fake_provider_resolver"
+cat > "$tmp_root/expected-provider-calls.txt" <<'EOF'
+provider catalog generate
+provider catalog matrix
+provider catalog support
+provider catalog generate --check
+provider catalog support --check
+provider catalog matrix --check
+EOF
+diff -u "$tmp_root/expected-provider-calls.txt" "$FAKE_PROVIDER_RECORD"
+printf 'resolve\n' > "$tmp_root/expected-provider-resolutions.txt"
+diff -u "$tmp_root/expected-provider-resolutions.txt" "$FAKE_PROVIDER_RESOLVE_RECORD"
 
-for operation in \
-  'generate' 'generate --check' \
-  'support' 'support --check' \
-  'matrix' 'matrix --check'
-do
-  expected='env HARN_BIN="'"$fake_harn"'" ./scripts/harn_bin.sh -- provider catalog '"$operation"
-  occurrences=$(grep -Fxc "$expected" "$make_provider_targets" || true)
-  if [ "$occurrences" -ne 1 ]; then
-    echo "provider targets should run $operation once with HARN_BIN, got $occurrences" >&2
-    cat "$make_provider_targets" >&2
+: > "$FAKE_PROVIDER_RECORD"
+make -s --no-print-directory -C "$repo_root" \
+  gen-provider-support gen-provider-matrix HARN_BIN="$fake_harn"
+printf 'provider catalog support\nprovider catalog matrix\n' > "$tmp_root/expected-provider-standalone.txt"
+diff -u "$tmp_root/expected-provider-standalone.txt" "$FAKE_PROVIDER_RECORD"
+
+limit=0
+for operation in generate matrix support; do
+  limit=$((limit + 1))
+  : > "$FAKE_PROVIDER_RECORD"
+  if FAKE_PROVIDER_FAIL="provider catalog $operation" \
+    make -s --no-print-directory -C "$repo_root" gen-provider-catalog \
+      HARN_BIN="$fake_harn" HARN_BIN_PRINT_CMD="$fake_provider_resolver" \
+      > "$tmp_root/provider-$operation.out" 2> "$tmp_root/provider-$operation.err"; then
+    echo "catalog generation accepted a failed $operation projection" >&2
     exit 1
   fi
+  head -n "$limit" "$tmp_root/expected-provider-calls.txt" > "$tmp_root/expected-provider-prefix.txt"
+  diff -u "$tmp_root/expected-provider-prefix.txt" "$FAKE_PROVIDER_RECORD"
 done
-if grep -Eq 'make.*gen-provider-(config|capabilities)' "$make_provider_targets"; then
-  echo "provider composed targets still recurse through sub-targets" >&2
-  cat "$make_provider_targets" >&2
+
+: > "$FAKE_PROVIDER_RECORD"
+if FAKE_PROVIDER_RESOLVE_FAIL=1 \
+  make -s --no-print-directory -C "$repo_root" gen-provider-catalog \
+    HARN_BIN="$fake_harn" HARN_BIN_PRINT_CMD="$fake_provider_resolver" \
+    > "$tmp_root/provider-resolver.out" 2> "$tmp_root/provider-resolver.err"; then
+  echo "catalog generation accepted a failed binary resolution" >&2
+  exit 1
+fi
+if [[ -s "$FAKE_PROVIDER_RECORD" ]]; then
+  echo "catalog generation reached a projection after binary resolution failed" >&2
+  cat "$FAKE_PROVIDER_RECORD" >&2
   exit 1
 fi
 

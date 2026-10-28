@@ -115,6 +115,43 @@ fn clear_hook() {
 }
 
 #[test]
+fn checkpoint_operations_refuse_before_call_begin_returns() {
+    let (dir, id) = deleted_in_subdir("beginning");
+    let hook_id = id.clone();
+    let hook_root = dir.path().to_path_buf();
+    CALL_BEGIN_HOOK.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(move || {
+            for outcome in [
+                serde_json::to_value(plan(&hook_id, "turn-1").unwrap()).unwrap(),
+                serde_json::to_value(restore(&hook_id, "turn-1", None).unwrap()).unwrap(),
+                serde_json::to_value(capture(&hook_id, "turn-2", Some(&hook_root)).unwrap())
+                    .unwrap(),
+                serde_json::to_value(
+                    fork_session(&hook_id, "beginning-child", &hook_root).unwrap(),
+                )
+                .unwrap(),
+            ] {
+                assert_eq!(outcome["available"], false, "{outcome}");
+                assert_eq!(outcome["reason"], "calls_in_flight");
+                assert!(outcome["detail"].as_str().unwrap().contains("tool-2"));
+            }
+            assert!(!hook_root.join("sub/f.txt").exists());
+            assert!(call_begin(&hook_id, "tool-2").is_err());
+            assert!(call_end(&hook_id, "tool-2", None).is_err());
+            let outcome = serde_json::to_value(plan(&hook_id, "turn-1").unwrap()).unwrap();
+            assert_eq!(outcome["reason"], "calls_in_flight", "{outcome}");
+        }));
+    });
+    call_begin(&id, "tool-2").unwrap();
+    CALL_BEGIN_HOOK.with(|slot| *slot.borrow_mut() = None);
+    call_end(&id, "tool-2", None).unwrap();
+    assert!(matches!(plan(&id, "turn-1").unwrap(), Outcome::Ready(_)));
+    call_begin(&id, "tool-2").unwrap();
+    call_end(&id, "tool-2", None).unwrap();
+    drop_session(&id);
+}
+
+#[test]
 fn restore_and_fork_refuse_while_the_call_end_scan_is_running() {
     let (dir, id) = deleted_in_subdir("ending");
     call_begin(&id, "tool-2").unwrap();

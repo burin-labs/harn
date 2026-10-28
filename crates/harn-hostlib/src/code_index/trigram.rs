@@ -121,10 +121,10 @@ impl TrigramIndex {
         }
     }
 
-    /// Order-of-magnitude resident-bytes estimate. Reported by
+    /// Nominal live-content bytes, independent of storage layout. Reported by
     /// `code_index.stats.memory_bytes`.
     pub fn estimated_bytes(&self) -> usize {
-        self.postings.estimated_bytes()
+        self.postings.estimated_bytes(|_| 0)
     }
 
     /// Fold accumulated edits into a fresh shared base once they are worth it.

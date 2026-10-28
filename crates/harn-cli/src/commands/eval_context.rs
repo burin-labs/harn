@@ -61,7 +61,7 @@ static DISPATCH_RENDER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_
 
 pub async fn run(args: EvalContextArgs) -> i32 {
     if !matches!(args.report_version, 1 | 2) {
-        eprintln!("error: context eval report version must be 1 or 2");
+        cli_diagnostic!("error: context eval report version must be 1 or 2");
         return 1;
     }
     let report = match aggregate_report(&args) {
@@ -71,16 +71,16 @@ pub async fn run(args: EvalContextArgs) -> i32 {
 
     let output_dir = args.output.unwrap_or_else(context_eval_default_output_dir);
     if let Err(error) = fs::create_dir_all(&output_dir) {
-        eprintln!("error: failed to create {}: {error}", output_dir.display());
+        cli_diagnostic!("error: failed to create {}: {error}", output_dir.display());
         return 1;
     }
 
     let legacy = if args.report_version == 1 {
-        eprintln!("warning: context eval report v1 is deprecated and substitutes zero for missing costs; use v2 for cost coverage");
+        cli_diagnostic!("warning: context eval report v1 is deprecated and substitutes zero for missing costs; use v2 for cost coverage");
         match context_eval_report_v1(&report) {
             Ok(value) => Some(value),
             Err(error) => {
-                eprintln!("error: failed to project context eval report v1: {error}");
+                cli_diagnostic!("error: failed to project context eval report v1: {error}");
                 return 1;
             }
         }
@@ -98,7 +98,7 @@ pub async fn run(args: EvalContextArgs) -> i32 {
         write_json_artifacts(&output_dir, &report, &report.runs)
     };
     if let Err(error) = result {
-        eprintln!("error: failed to write context eval outputs: {error}");
+        cli_diagnostic!("error: failed to write context eval outputs: {error}");
         return 1;
     }
 
@@ -128,14 +128,14 @@ fn aggregate_report(args: &EvalContextArgs) -> Result<ContextEvalReportV2, i32> 
     let manifest = match load_context_eval_manifest(&args.manifest) {
         Ok(manifest) => manifest,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return Err(1);
         }
     };
     let report = match evaluate_context_eval_manifest_v2(&manifest) {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return Err(1);
         }
     };
@@ -147,7 +147,7 @@ fn post_render_exit_code(report: &ContextEvalReportV2) -> i32 {
 }
 
 fn announce_output_paths(output_dir: &Path) {
-    eprintln!(
+    cli_diagnostic!(
         "wrote {}, {}, and {}",
         output_dir.join("summary.json").display(),
         output_dir.join("per_run.jsonl").display(),
@@ -188,7 +188,7 @@ async fn write_markdown_dispatch(
 ) -> Result<(), i32> {
     let payload = render_via_dispatch(report, "markdown").await?;
     if let Err(error) = fs::write(output_dir.join("summary.md"), payload) {
-        eprintln!("error: failed to write context eval markdown: {error}");
+        cli_diagnostic!("error: failed to write context eval markdown: {error}");
         return Err(1);
     }
     Ok(())
@@ -224,7 +224,7 @@ async fn render_via_dispatch<T: Serialize>(report: &T, mode: &str) -> Result<Str
     let report_json = match serde_json::to_string(report) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to serialise ContextEvalReport for dispatch: {error}");
+            cli_diagnostic!("error: failed to serialise ContextEvalReport for dispatch: {error}");
             return Err(1);
         }
     };

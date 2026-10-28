@@ -120,7 +120,7 @@ if [[ -z "$harn_runner" || ! -x "$harn_runner" ]]; then
 fi
 
 # The policy uses core data functions, stdin/stdout, and Harn's deterministic
-# command parser. That parser is the only non-core builtin allowed here; the
+# command and syntax parsers. Those are the only non-core builtins allowed here; the
 # model kill switch blocks real provider calls. Standalone mode makes the
 # policy independent of ambient project handlers, packages, skills, and cache
 # authority; the parser remains an explicit host grant.
@@ -131,7 +131,7 @@ guard_command=(
 [[ "$harn_mode" == "standalone" ]] && guard_command+=(--standalone)
 # Standalone rules need explicit grants for case folding and assignment-name
 # iteration as well as the command parser.
-guard_command+=(--allow=command_risk_scan,lowercase,range "$script_dir/agent_shell_guard.harn")
+guard_command+=("--allow=bytes_from_string,command_risk_scan,hostlib_ast_search,lowercase,range" "$script_dir/agent_shell_guard.harn")
 
 # The worktree rule may only name an admission command this repository actually
 # has. The guard runs in a hook host with no filesystem builtin, so the answer

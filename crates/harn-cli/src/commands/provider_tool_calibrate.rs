@@ -13,7 +13,7 @@ async fn dispatch(args: ProviderToolCalibrateArgs) -> i32 {
     let routes = match parse_routes(&args.routes) {
         Ok(routes) => routes,
         Err(error) => {
-            eprintln!("{error}");
+            cli_diagnostic!("error: {error}");
             return 2;
         }
     };
@@ -42,7 +42,7 @@ async fn dispatch(args: ProviderToolCalibrateArgs) -> i32 {
             {
                 Ok(model) => model,
                 Err(error) => {
-                    eprintln!("{error}");
+                    cli_diagnostic!("error: {error}");
                     return 1;
                 }
             };
@@ -77,14 +77,14 @@ async fn dispatch(args: ProviderToolCalibrateArgs) -> i32 {
 
     let store = harn_vm::llm::tool_scorecard::fitness_store_from_tool_reports(&reports);
     if let Err(error) = write_store(&args.output, &store) {
-        eprintln!("{error}");
+        cli_diagnostic!("error: {error}");
         return 1;
     }
     if args.json {
         match serde_json::to_string_pretty(&store) {
             Ok(json) => println!("{json}"),
             Err(error) => {
-                eprintln!("error: failed to render tool-format fitness: {error}");
+                cli_diagnostic!("error: failed to render tool-format fitness: {error}");
                 return 1;
             }
         }

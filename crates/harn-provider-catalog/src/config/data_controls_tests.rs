@@ -6,6 +6,42 @@ use super::*;
 const AS_OF: &str = "2026-08-30";
 
 #[test]
+fn endpoint_declarations_require_evidence_and_an_unambiguous_https_route() {
+    let mut config = super::embedded_config(None);
+    let zai = config.providers.get_mut("zai").expect("zai provider");
+    let global = zai.regions.get_mut("global").expect("global region");
+    global
+        .data_controls
+        .as_mut()
+        .expect("global declaration")
+        .sources
+        .clear();
+    let validation = validate_data_controls_audit(&config, AS_OF);
+    assert!(
+        validation
+            .errors
+            .iter()
+            .any(|error| error.contains("must cite at least one HTTPS")),
+        "{:?}",
+        validation.errors
+    );
+
+    let zai = config.providers.get_mut("zai").unwrap();
+    let mut duplicate = zai.regions.get("global").unwrap().clone();
+    duplicate.data_controls = None;
+    zai.regions.insert("duplicate".into(), duplicate);
+    let validation = validate_data_controls_audit(&config, AS_OF);
+    assert!(
+        validation
+            .errors
+            .iter()
+            .any(|error| error.contains("ambiguous endpoint")),
+        "{:?}",
+        validation.errors
+    );
+}
+
+#[test]
 fn every_catalog_provider_is_classified_or_explicitly_queued() {
     let config = super::embedded_config(None);
     let validation = validate_data_controls_audit(&config, AS_OF);

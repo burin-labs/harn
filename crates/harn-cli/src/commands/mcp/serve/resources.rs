@@ -291,8 +291,11 @@ impl McpOrchestratorService {
         };
         let outcome = if result.is_ok() { "success" } else { "error" };
 
-        eprintln!(
-            "[harn] mcp: client={client_identity} tool={tool_name} status={status} trace_id={trace_id}"
+        harn_vm::events::log_info(
+            "mcp",
+            &format!(
+                "client={client_identity} tool={tool_name} status={status} trace_id={trace_id}"
+            ),
         );
 
         let event_log = self.orchestrator_event_log()?;

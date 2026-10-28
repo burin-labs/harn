@@ -335,9 +335,14 @@ struct CallRecord {
 }
 
 struct PendingCall {
-    before: Arc<Scan>,
     boundary_idx: usize,
-    ending: bool,
+    scan: PendingScan,
+}
+
+enum PendingScan {
+    Beginning,
+    Active(Arc<Scan>),
+    Ending,
 }
 
 struct Session {
@@ -361,6 +366,7 @@ type CallEndHook = Box<dyn Fn()>;
 #[cfg(all(test, unix))]
 thread_local! {
     static CALL_END_HOOK: std::cell::RefCell<Option<CallEndHook>> = const { std::cell::RefCell::new(None) };
+    static CALL_BEGIN_HOOK: std::cell::RefCell<Option<CallEndHook>> = const { std::cell::RefCell::new(None) };
 }
 
 fn sessions() -> &'static Mutex<BTreeMap<String, SharedSession>> {
@@ -586,10 +592,32 @@ pub fn call_begin(
         return Ok(no_checkpoint(session_id));
     };
     let (root, parents) = {
-        let state = lock(&session);
+        let mut state = lock(&session);
+        if state.pending.contains_key(call_id) {
+            return Err(HostlibError::InvalidParameter {
+                builtin: CALL_BEGIN_BUILTIN,
+                param: "call_id",
+                message: format!("checkpoint call `{call_id}` is already in flight"),
+            });
+        }
+        advance_revision(&mut state, CALL_BEGIN_BUILTIN)?;
+        let boundary_idx = state.boundaries.len().saturating_sub(1);
+        state.pending.insert(
+            call_id.to_string(),
+            PendingCall {
+                boundary_idx,
+                scan: PendingScan::Beginning,
+            },
+        );
         (state.root.clone(), state.read_parent_ignores)
     };
     let scan = scan_tree(&root, parents);
+    #[cfg(all(test, unix))]
+    CALL_BEGIN_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow().as_ref() {
+            hook();
+        }
+    });
     let receipt = CallBeginReceipt {
         available: true,
         call_id: call_id.to_string(),
@@ -597,24 +625,11 @@ pub fn call_begin(
         scan_errors: scan.errors,
         scan_ms: scan.elapsed_ms,
     };
-    let mut state = lock(&session);
-    if state.pending.contains_key(call_id) {
-        return Err(HostlibError::InvalidParameter {
-            builtin: CALL_BEGIN_BUILTIN,
-            param: "call_id",
-            message: format!("checkpoint call `{call_id}` is already in flight"),
-        });
-    }
-    advance_revision(&mut state, CALL_BEGIN_BUILTIN)?;
-    let boundary_idx = state.boundaries.len().saturating_sub(1);
-    state.pending.insert(
-        call_id.to_string(),
-        PendingCall {
-            before: Arc::new(scan),
-            boundary_idx,
-            ending: false,
-        },
-    );
+    lock(&session)
+        .pending
+        .get_mut(call_id)
+        .expect("beginning call remains pending")
+        .scan = PendingScan::Active(Arc::new(scan));
     Ok(Outcome::Ready(receipt))
 }
 
@@ -640,15 +655,25 @@ pub fn call_end(
                 message: format!("no checkpoint_call_begin for `{call_id}`"),
             });
         };
-        if pending.ending {
-            return Err(HostlibError::InvalidParameter {
-                builtin: CALL_END_BUILTIN,
-                param: "call_id",
-                message: format!("checkpoint call `{call_id}` is already ending"),
-            });
-        }
-        pending.ending = true;
-        (root, parents, pending.before.clone(), pending.boundary_idx)
+        let before = match &pending.scan {
+            PendingScan::Beginning => {
+                return Err(HostlibError::InvalidParameter {
+                    builtin: CALL_END_BUILTIN,
+                    param: "call_id",
+                    message: format!("checkpoint call `{call_id}` is still beginning"),
+                });
+            }
+            PendingScan::Ending => {
+                return Err(HostlibError::InvalidParameter {
+                    builtin: CALL_END_BUILTIN,
+                    param: "call_id",
+                    message: format!("checkpoint call `{call_id}` is already ending"),
+                });
+            }
+            PendingScan::Active(before) => before.clone(),
+        };
+        pending.scan = PendingScan::Ending;
+        (root, parents, before, pending.boundary_idx)
     };
     #[cfg(all(test, unix))]
     CALL_END_HOOK.with(|slot| {

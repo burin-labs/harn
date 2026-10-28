@@ -122,14 +122,14 @@ pub(crate) async fn run_agents_conformance(config: AgentsConformanceConfig) {
         Duration::from_millis(config.timeout_ms),
     )
     .unwrap_or_else(|error| {
-        eprintln!("{error}");
+        cli_diagnostic!("error: {error}");
         process::exit(2);
     });
 
     let requested_categories = match resolve_categories(&config.categories) {
         Ok(categories) => categories,
         Err(error) => {
-            eprintln!("{error}");
+            cli_diagnostic!("error: {error}");
             process::exit(2);
         }
     };
@@ -174,11 +174,11 @@ pub(crate) async fn run_agents_conformance(config: AgentsConformanceConfig) {
 
     if let Some(path) = config.json_out.as_deref() {
         let rendered = serde_json::to_string_pretty(&report).unwrap_or_else(|error| {
-            eprintln!("failed to serialize agents conformance JSON: {error}");
+            cli_diagnostic!("error: failed to serialize agents conformance JSON: {error}");
             process::exit(1);
         });
         fs::write(path, rendered).unwrap_or_else(|error| {
-            eprintln!("failed to write agents conformance JSON to {path}: {error}");
+            cli_diagnostic!("error: failed to write agents conformance JSON to {path}: {error}");
             process::exit(1);
         });
         if !config.json {
@@ -344,7 +344,7 @@ async fn run_category(
     };
 
     if verbose {
-        eprintln!("agents-conformance category {} completed", report.name);
+        cli_diagnostic!("agents-conformance category {} completed", report.name);
     }
     report
 }

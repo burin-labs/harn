@@ -142,7 +142,7 @@ with `HARN_ORCHESTRATOR_LOG_FORMAT`. `RUST_LOG` controls filtering, for example:
 RUST_LOG=harn=debug harn orchestrator serve --log-format json
 ```
 
-JSON logs are newline-delimited and are written to stdout. The same records are
+JSON logs are newline-delimited and are written to stderr. The same records are
 mirrored to `<state-dir>/logs/orchestrator.log`, which rotates to
 `orchestrator.log.1` at 10 MiB. Records include the tracing fields emitted at
 each boundary, including `trace_id` for request-scoped events.

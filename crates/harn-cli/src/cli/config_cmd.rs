@@ -21,7 +21,7 @@ pub(crate) enum ConfigCommand {
 #[derive(Debug, Args)]
 pub(crate) struct ConfigInspectArgs {
     /// Include per-field provenance, shadowed candidates, and lock status.
-    #[arg(long)]
+    #[arg(skip)]
     pub explain: bool,
     /// Do not discover OS/user/project config files; only built-ins, explicit inputs, and env.
     #[arg(long)]

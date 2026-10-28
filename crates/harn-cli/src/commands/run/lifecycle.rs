@@ -50,5 +50,5 @@ impl TerminalRun {
 
 pub(super) enum RunExecution {
     Terminal(TerminalRun),
-    Failed(String),
+    Failed { brief: String, detail: String },
 }

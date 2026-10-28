@@ -160,12 +160,12 @@ pub(crate) async fn run(args: TimeRunArgs) {
     let (target, outcome) = match (args.eval.as_deref(), args.file.as_deref()) {
         (Some(code), None) => {
             let (wrapped, tmp) = prepare_eval_temp_file(code).unwrap_or_else(|e| {
-                eprintln!("error: {e}");
+                cli_diagnostic!("error: {e}");
                 process::exit(1);
             });
             let tmp_path: PathBuf = tmp.path().to_path_buf();
             if let Err(e) = fs::write(&tmp_path, &wrapped) {
-                eprintln!("error: failed to write temp file for -e: {e}");
+                cli_diagnostic!("error: failed to write temp file for -e: {e}");
                 process::exit(1);
             }
             let path_str = tmp_path.to_string_lossy().into_owned();
@@ -192,13 +192,13 @@ pub(crate) async fn run(args: TimeRunArgs) {
             (Some(file.to_string()), outcome)
         }
         (Some(_), Some(_)) => {
-            eprintln!(
+            cli_diagnostic!(
                 "error: `harn time run` accepts either `-e <code>` or `<file.harn>`, not both"
             );
             process::exit(2);
         }
         (None, None) => {
-            eprintln!("error: `harn time run` requires either `-e <code>` or `<file.harn>`");
+            cli_diagnostic!("error: `harn time run` requires either `-e <code>` or `<file.harn>`");
             process::exit(2);
         }
     };

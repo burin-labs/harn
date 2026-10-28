@@ -128,17 +128,31 @@ impl GeminiInteractions {
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
         let dialect = crate::llm::api::DialectContract::for_request(request);
-        let mut body = dialect.build_request_body(request);
-        if request.stream {
-            body["stream"] = json!(true);
-        }
         let pdef = crate::llm_config::provider_config(&request.provider);
         let base_url = pdef
             .as_ref()
             .map(crate::llm_config::resolve_base_url)
             .unwrap_or_else(|| "https://generativelanguage.googleapis.com".to_string());
         let url = format!("{base_url}/v1beta/interactions");
-        let client = crate::llm::blocking_client_for_base_url(&base_url);
+        let wire_model = crate::llm_config::wire_model_id(&request.model);
+        let wire_model = wire_model.strip_prefix("models/").unwrap_or(&wire_model);
+        let boundary =
+            crate::llm::api::inference_boundary::effective_result(request.inference_boundary)
+                .map_err(VmError::Runtime)?;
+        let approved = crate::llm::api::inference_boundary::ApprovedWireRoute::capture(
+            boundary,
+            &request.provider,
+            &url,
+            wire_model,
+        );
+        let mut body = dialect.build_request_body(request);
+        if request.stream {
+            body["stream"] = json!(true);
+        }
+        if let Some(approved) = &approved {
+            approved.verify(&request.provider, &url, &body)?;
+        }
+        let client = crate::llm::blocking_client_for_base_url(&base_url, approved.as_ref());
         let http = client
             .post(url)
             .header("Content-Type", "application/json")

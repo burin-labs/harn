@@ -37,7 +37,7 @@ pub(crate) async fn render_embedded_report<T: Serialize>(
     {
         Ok(outcome) => outcome,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };

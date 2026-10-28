@@ -1267,7 +1267,7 @@ fn emit_error(error: &str, json_mode: bool) {
             .expect("execution error serializes")
         );
     } else {
-        eprintln!("Batch execution failed: {error}");
+        cli_diagnostic!("Batch execution failed: {error}");
     }
 }
 

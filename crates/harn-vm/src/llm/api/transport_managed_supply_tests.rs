@@ -4,8 +4,22 @@ use crate::llm::api::{inference_boundary, InferenceBoundary, InferenceReach, Llm
 #[path = "transport_managed_spend_tests.rs"]
 mod managed_spend_tests;
 
+struct ClearTrustedManagedCatalog;
+
+impl Drop for ClearTrustedManagedCatalog {
+    fn drop(&mut self) {
+        crate::llm_config::clear_runtime_catalog_overlay();
+    }
+}
+
 fn install_managed_supply_stub_provider(provider: &str, addr: std::net::SocketAddr) {
     let mut overlay = crate::llm_config::ProvidersConfig::default();
+    // These gateway tests exercise physical weight and receipt authority, not
+    // the real Mistral account's unknown training settings.
+    let mut mistral = crate::llm_config::provider_config("mistral").unwrap();
+    mistral.data_controls.as_mut().unwrap().training_default =
+        crate::llm_config::TrainingDefault::DoesNotTrain;
+    overlay.providers.insert("mistral".into(), mistral);
     overlay.providers.insert(
         provider.to_string(),
         crate::llm_config::ProviderDef {
@@ -28,7 +42,8 @@ fn install_managed_supply_stub_provider(provider: &str, addr: std::net::SocketAd
             ..Default::default()
         },
     );
-    crate::llm_config::set_user_overrides(Some(overlay));
+    crate::llm_config::clear_user_overrides();
+    crate::llm_config::set_runtime_catalog_overlay(Some(overlay));
 }
 
 fn managed_opts(provider: &str) -> LlmCallOptions {
@@ -43,6 +58,7 @@ fn managed_opts(provider: &str) -> LlmCallOptions {
 #[test]
 fn managed_supply_json_uses_logical_capabilities_and_authoritative_receipt() {
     let _guard = env_guard();
+    let _trusted_catalog = ClearTrustedManagedCatalog;
     let _allow_llm_transport = allow_stubbed_llm_transport();
     let served_fingerprint =
         crate::llm::managed_supply::capability_fingerprint("groq", "qwen/qwen3.8-27b");
@@ -150,6 +166,7 @@ fn managed_supply_json_uses_logical_capabilities_and_authoritative_receipt() {
 #[test]
 fn managed_supply_missing_or_malformed_authority_never_reaches_transport() {
     let _guard = env_guard();
+    let _trusted_catalog = ClearTrustedManagedCatalog;
     let _allow_llm_transport = allow_stubbed_llm_transport();
     let requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed_requests = requests.clone();
@@ -290,6 +307,7 @@ fn managed_supply_missing_or_malformed_authority_never_reaches_transport() {
 #[test]
 fn managed_supply_terminal_receipt_preserves_open_weight_caller_limit() {
     let _guard = env_guard();
+    let _trusted_catalog = ClearTrustedManagedCatalog;
     let _allow_llm_transport = allow_stubbed_llm_transport();
     let logical = "mistral-large-2512";
     let closed = "codestral-2508";
@@ -377,6 +395,7 @@ fn managed_supply_terminal_receipt_preserves_open_weight_caller_limit() {
 #[test]
 fn managed_supply_streams_multiple_deltas_and_applies_terminal_receipt() {
     let _guard = env_guard();
+    let _trusted_catalog = ClearTrustedManagedCatalog;
     let _allow_llm_transport = allow_stubbed_llm_transport();
     let served_fingerprint =
         crate::llm::managed_supply::capability_fingerprint("groq", "qwen/qwen3.8-27b");
@@ -483,6 +502,7 @@ fn managed_supply_streams_multiple_deltas_and_applies_terminal_receipt() {
 #[test]
 fn managed_supply_missing_terminal_receipt_fails_closed() {
     let _guard = env_guard();
+    let _trusted_catalog = ClearTrustedManagedCatalog;
     let _allow_llm_transport = allow_stubbed_llm_transport();
     let server = spawn_openai_success_stub();
     install_managed_supply_stub_provider("managed-gateway-missing", server.addr());
@@ -503,6 +523,7 @@ fn managed_supply_missing_terminal_receipt_fails_closed() {
 #[test]
 fn managed_supply_rejects_a_valid_but_capability_incompatible_served_route() {
     let _guard = env_guard();
+    let _trusted_catalog = ClearTrustedManagedCatalog;
     let _allow_llm_transport = allow_stubbed_llm_transport();
     let served_model = "claude-haiku-4-5-20251001";
     let served_fingerprint =

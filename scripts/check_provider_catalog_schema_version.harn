@@ -1,0 +1,89 @@
+/* The catalog's generated schema is a downstream contract. Compare against the
+ * actual base so updating a local snapshot cannot hide an unversioned change. */
+import { flag_value, git_show_at, resolve_base_ref, resolve_commit } from "./git_base.harn"
+
+const SCHEMA_PATH = "spec/provider-catalog/provider-catalog.schema.json"
+
+/** Collect every declared field, including nested and referenced definitions. */
+pub fn catalog_fields(value: any, path: string = "$") -> list<string> {
+  if type_of(value) == "list" {
+    let found: list<string> = []
+    for {index, value: item} in value.enumerate() {
+      found = found + catalog_fields(item, "${path}[${index}]")
+    }
+    return found
+  }
+  if type_of(value) != "dict" {
+    return []
+  }
+  let found: list<string> = []
+  for key in value.keys().sorted() {
+    const child = "${path}.${key}"
+    if key == "properties" && type_of(value[key]) == "dict" {
+      for field in value[key].keys().sorted() {
+        found = found + ["${child}.${field}"]
+      }
+    }
+    found = found + catalog_fields(value[key], child)
+  }
+  return found
+}
+
+pub fn catalog_version_error(before: any, after: any) -> string {
+  const old_version = before?.properties?.schema_version?.const
+  const new_version = after?.properties?.schema_version?.const
+  if type_of(old_version) != "int" || type_of(new_version) != "int" {
+    return "catalog schema versions must both be integers"
+  }
+  const old_fields = catalog_fields(before).sorted()
+  const new_fields = catalog_fields(after).sorted()
+  if old_fields.count == 0 || new_fields.count == 0 {
+    return "catalog schema has no declared fields"
+  }
+  if new_version < old_version {
+    return "catalog schema version decreased"
+  }
+  if old_fields != new_fields && new_version == old_version {
+    const added = new_fields.filter({ field -> !old_fields.contains(field) }).to_list()
+    const removed = old_fields.filter({ field -> !new_fields.contains(field) }).to_list()
+    return "catalog fields changed without a version bump; added: ${added.join(", ")}; removed: ${removed.join(", ")}"
+  }
+  return ""
+}
+
+fn main(harness: Harness) {
+  const base = resolve_base_ref(
+    harness.env,
+    harness.process,
+    flag_value(argv, "--base"),
+    "CATALOG_SCHEMA_GUARD_BASE",
+  )
+  const commit = resolve_commit(harness.process, base)
+  if commit.error != "" {
+    throw "cannot resolve catalog schema base ${base}: ${commit.error}"
+  }
+  const previous = git_show_at(harness.process, base, SCHEMA_PATH)
+  if previous.error != "" || !previous.found {
+    throw "cannot read catalog schema at ${base}: ${previous.error}"
+  }
+  const before = json_parse(previous.text)
+  const after = json_parse(harness.fs.read_text(SCHEMA_PATH))
+  const old_fields = catalog_fields(before)
+  const new_fields = catalog_fields(after)
+  harness.stdio.println(
+    "catalog schema: base=${commit.sha} old_fields=${old_fields.count} new_fields=${new_fields.count}",
+  )
+  for required in [
+    "$.properties.providers",
+    "$.$defs.model.properties.id",
+    "$.$defs.endpoint_region.properties.base_url",
+  ] {
+    if !old_fields.contains(required) || !new_fields.contains(required) {
+      throw "catalog schema comparison is incomplete: missing ${required}"
+    }
+  }
+  const error = catalog_version_error(before, after)
+  if error != "" {
+    throw error
+  }
+}

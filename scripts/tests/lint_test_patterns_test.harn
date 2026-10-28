@@ -114,6 +114,14 @@ pipeline test_e2e_exact_entry(harness: Harness, task: unknown) {
     true,
   )
   assert_eq(
+    is_e2e_subprocess_path("crates/harn-cli/tests/harn_cli_e2e/provider_admission_privacy.rs"),
+    true,
+  )
+  assert_eq(
+    is_e2e_subprocess_path("crates/harn-cli/tests/harn_cli_fast/provider_admission_privacy.rs"),
+    false,
+  )
+  assert_eq(
     is_e2e_subprocess_path("crates/harn-cli/tests/harn_cli_fast/llm_fixture_policy.rs"),
     false,
   )
