@@ -81,11 +81,23 @@
         "any_hosted"
       ],
       "type": "string"
+    },
+    "NoTrainingRequirement": {
+      "description": "Account facts that must all be confirmed for a conditional no-training claim.",
+      "enum": [
+        "billing_enabled",
+        "contributor_sharing_disabled"
+      ],
+      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Admission says only what the current policy and route facts permit.\nIt does not establish credentials, availability, model readiness, or future\nadmission. Actual inference resolves and enforces its boundary again.",
   "properties": {
+    "account_confirmation_applied": {
+      "description": "Whether this admission used a matching host confirmation.",
+      "type": "boolean"
+    },
     "data_controls_note": {
       "description": "The route's own data-handling note when its model row declares one,\notherwise its provider's. Absent when neither level carries a note.",
       "type": [
@@ -152,6 +164,13 @@
     },
     "provider": {
       "type": "string"
+    },
+    "required_account_facts": {
+      "description": "Account settings the trusted provider terms require for no training.",
+      "items": {
+        "$ref": "#/$defs/NoTrainingRequirement"
+      },
+      "type": "array"
     },
     "schema": {
       "type": "string"

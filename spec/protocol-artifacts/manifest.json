@@ -1023,6 +1023,15 @@
       "source": "crates/harn-vm/src/llm/api/inference_boundary/admission.rs"
     },
     {
+      "artifact": "schemas/provider-account-attestation.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::llm::api::inference_boundary",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/llm/api/inference_boundary/admission.rs"
+    },
+    {
       "artifact": "schemas/machine-spend-exhaustion.schema.json",
       "protocol": "harn",
       "provenance": {

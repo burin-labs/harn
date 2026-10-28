@@ -1,5 +1,82 @@
 use super::*;
 
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum CaptureStage {
+    BeforePublish,
+    AfterPublish,
+}
+
+type CaptureHook = Box<dyn Fn(CaptureStage)>;
+
+thread_local! {
+    static CAPTURE_HOOK: std::cell::RefCell<Option<CaptureHook>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(super) fn capture_hook(stage: CaptureStage) {
+    CAPTURE_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow().as_ref() {
+            hook(stage);
+        }
+    });
+}
+
+#[test]
+fn racing_first_capture_cannot_acknowledge_an_unstored_writer_policy() {
+    use std::sync::mpsc::channel;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    git(dir.path(), &["init", "-q"]);
+    let id = format!("capture-policy-race-{}", std::process::id());
+    let (scanned_tx, scanned_rx) = channel();
+    let (published_tx, published_rx) = channel();
+    let (finished_tx, finished_rx) = channel();
+    harn_parser::runtime_stack::scope(|scope| {
+        let root = dir.path();
+        let strict_id = &id;
+        let strict = scope.spawn(move || {
+            CAPTURE_HOOK.with(|slot| {
+                *slot.borrow_mut() = Some(Box::new(move |stage| {
+                    if stage == CaptureStage::BeforePublish {
+                        scanned_tx.send(()).unwrap();
+                        published_rx.recv().unwrap();
+                    }
+                }));
+            });
+            let result = capture_with_writer_policy(
+                strict_id,
+                "strict",
+                Some(root),
+                Some(WriterPolicy::RequireKnown),
+            );
+            CAPTURE_HOOK.with(|slot| *slot.borrow_mut() = None);
+            finished_tx.send(()).unwrap();
+            result
+        });
+        scanned_rx.recv().unwrap();
+        CAPTURE_HOOK.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move |stage| {
+                if stage == CaptureStage::AfterPublish {
+                    published_tx.send(()).unwrap();
+                    finished_rx.recv().unwrap();
+                }
+            }));
+        });
+        let legacy = capture(&id, "legacy", Some(dir.path()));
+        CAPTURE_HOOK.with(|slot| *slot.borrow_mut() = None);
+        let strict = strict.join().unwrap().unwrap();
+        assert!(
+            matches!(strict, Outcome::Unavailable(ref why) if why.reason == "concurrent_calls")
+        );
+        assert!(
+            matches!(legacy.unwrap(), Outcome::Ready(receipt) if receipt.writer_policy == WriterPolicy::LegacyScan)
+        );
+    });
+    let state = find_session(&id).unwrap();
+    assert_eq!(lock(&state).writer_policy, WriterPolicy::LegacyScan);
+    assert_eq!(lock(&state).boundaries.len(), 1);
+    drop_session(&id);
+}
+
 #[test]
 fn fork_refuses_when_a_call_starts_and_finishes_during_copy() {
     let (dir, id) = deleted_in_subdir("fork-race-call");
@@ -179,6 +256,33 @@ fn restore_and_fork_refuse_while_the_call_end_scan_is_running() {
     call_end(&id, "tool-2", None).unwrap();
     CALL_END_HOOK.with(|slot| *slot.borrow_mut() = None);
     assert!(matches!(plan(&id, "turn-1").unwrap(), Outcome::Ready(_)));
+    drop_session(&id);
+}
+
+#[test]
+fn strict_restore_preserves_a_file_created_after_the_final_guard() {
+    let (dir, id) = deleted_in_subdir("final-guard");
+    lock(&find_session(&id).unwrap()).writer_policy = WriterPolicy::RequireKnown;
+    let root = dir.path().to_path_buf();
+    with_hook(Stage::AfterFinalGuard, move || {
+        stdfs::write(root.join("sub/f.txt"), "person's concurrent edit\n").unwrap();
+    });
+    let confirmation = ConfirmedPath {
+        session_id: id.clone(),
+        boundary_id: "turn-1".to_string(),
+        path: "sub/f.txt".to_string(),
+        observed: ObservedFileState::Absent,
+    };
+    let result = restore_with_confirmations(&id, "turn-1", None, &[confirmation]).unwrap();
+    clear_hook();
+    let Outcome::Ready(receipt) = result else {
+        panic!("restore unavailable");
+    };
+    assert!(receipt.restored.is_empty(), "{receipt:?}");
+    assert_eq!(
+        stdfs::read_to_string(dir.path().join("sub/f.txt")).unwrap(),
+        "person's concurrent edit\n"
+    );
     drop_session(&id);
 }
 

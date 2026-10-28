@@ -503,9 +503,8 @@ pub fn reviewer_refused(decision: &crate::orchestration::PolicyEvaluation) -> bo
 /// because the dispatch function is under a file-length ratchet that a body
 /// this size would push past its ceiling.
 ///
-/// Only `Ask` and `Deny` are offered. An `Allow` is not a refusal and there is
-/// nothing to reconsider; passing one here would let the seam widen a decision
-/// nobody had objected to.
+/// Asks and reviewable refusals may be offered. A matched deny rule is a ceiling
+/// that no reviewer may lift. An allow needs no review.
 pub async fn maybe_grant_by_auto_review(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     decision: Option<&mut crate::orchestration::PolicyEvaluation>,
@@ -519,6 +518,10 @@ pub async fn maybe_grant_by_auto_review(
     // Only a refusal is offered; an `Allow` is not this seam's business and
     // must not be annotated as though a reviewer had weighed in on it.
     if !decision.is_deny() && !decision.is_ask() {
+        return false;
+    }
+    if decision.is_rule_denial() {
+        record_decline(decision, false, "", Some("deny_rule"), None);
         return false;
     }
     // A reviewer that is not installed is recorded, not skipped. This used to
@@ -579,6 +582,34 @@ fn attach_evaluation_review(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn deny_rule_records_a_skipped_review_without_requiring_a_reviewer() {
+        let policy: crate::orchestration::ToolApprovalPolicy =
+            serde_json::from_value(serde_json::json!({
+                "rules": [{"action": "deny", "match": {"tool": "probe"}}]
+            }))
+            .unwrap();
+        let mut decision = policy.evaluate_detailed("probe", &serde_json::json!({}));
+        assert!(decision.is_deny());
+        assert!(decision.is_rule_denial());
+        assert!(
+            !maybe_grant_by_auto_review(
+                None,
+                Some(&mut decision),
+                "probe",
+                &serde_json::json!({}),
+                "deny-rule-receipt",
+            )
+            .await
+        );
+        assert!(decision.is_deny());
+        let review = &decision.receipt["auto_review"];
+        assert_eq!(review["unavailable_reason"], "deny_rule");
+        assert_eq!(review["reviewer_answered"], false);
+        assert_eq!(review["approved"], false);
+        assert!(!reviewer_refused(&decision));
+    }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
         let mut map = crate::value::DictMap::default();

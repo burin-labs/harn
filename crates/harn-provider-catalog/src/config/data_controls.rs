@@ -31,7 +31,8 @@ use super::ProvidersConfig;
 
 pub use crate::{
     DataControlDef, DataControlDialect, DataControlEffect, DataControlLocation, DataControlScope,
-    DataControlValue, DataControlsDef, ModelDataControlsDef, RetentionDefault, TrainingDefault,
+    DataControlValue, DataControlsDef, ModelDataControlsDef, NoTrainingRequirement,
+    RetentionDefault, TrainingDefault,
 };
 
 /// The registry's own default posture.
@@ -224,6 +225,25 @@ fn validate_declaration(
     result: &mut DataControlsAuditValidation,
 ) {
     validate_evidence(id, &controls.checked_on, &controls.sources, result);
+
+    if !controls.no_training_requires.is_empty()
+        && controls.training_default != TrainingDefault::Unspecified
+    {
+        result.errors.push(format!(
+            "provider {id} conditional no-training requirements need an unspecified default"
+        ));
+    }
+    if controls
+        .no_training_requires
+        .iter()
+        .collect::<BTreeSet<_>>()
+        .len()
+        != controls.no_training_requires.len()
+    {
+        result
+            .errors
+            .push(format!("provider {id} repeats a no-training requirement"));
+    }
 
     // Direction coherence. A row that claims a per-request control must name
     // one, and a row that claims none must not smuggle one in. Without this

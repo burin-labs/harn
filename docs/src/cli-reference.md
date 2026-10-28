@@ -41,14 +41,18 @@ and leave a durable audit receipt.
 
 An optional top-level `stop_on_unknown_usage = true` also refuses a new
 reservation while any attempt in the scope is unsettled or has no measured
-usage. This serializes provider attempts across processes and retains the
-refusal after a crash or an unpriced response. The first opener fixes this
+usage. A competing request is refused immediately; Harn does not queue it or
+retry it after the first request settles. The refusal survives a crash or an
+unpriced response. The first opener fixes this
 setting for the scope; a later opener with a different value is refused.
 Measured zero is settled usage. The lifetime receipt distinguishes
 `lifetime_unsettled_attempts` from `lifetime_unpriced_attempts`; the existing
 unknown count includes both. While the strict policy refuses new attempts,
 the effective budget query returns zero even if the receipt shows unused
 allowance. The default is `false`.
+
+For an interrupted attempt, follow [Recover a blocked spend scope](./spend-recovery.md).
+Restarting the process or increasing a ceiling does not settle unknown usage.
 
 Keep the policy and ledger outside an agent's writable roots. A host embedding
 Harn can install the same allowance through `MachineSpendQuota::scope`.

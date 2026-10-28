@@ -50,6 +50,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::sync::Arc;
 
 use super::environment_policy::environment_names_equal;
 use serde::{Deserialize, Serialize};
@@ -69,6 +70,12 @@ pub fn set_session_environment(environment: Option<SessionEnvironment>) {
 /// Return the active policy, distinguishing no session from an empty grant set.
 pub fn current_session_environment() -> Option<SessionEnvironment> {
     SESSION_ENVIRONMENT_CONTEXT.with(|current| current.borrow().clone())
+}
+
+pub(crate) fn with_current_session_environment<T>(
+    read: impl FnOnce(Option<&SessionEnvironment>) -> T,
+) -> T {
+    SESSION_ENVIRONMENT_CONTEXT.with(|current| read(current.borrow().as_ref()))
 }
 
 /// Declare a default only when no session policy is already installed.
@@ -103,6 +110,18 @@ impl SessionEnvironmentGuard {
     ) -> Self {
         if let Some(environment) = current_session_environment() {
             set_session_environment(Some(environment.with_host_inference_boundary(boundary)));
+        }
+        self
+    }
+
+    pub fn with_host_account_attestations(
+        self,
+        attestations: Vec<crate::llm::api::ProviderAccountAttestation>,
+    ) -> Self {
+        if let Some(environment) = current_session_environment() {
+            set_session_environment(Some(
+                environment.with_host_account_attestations(attestations),
+            ));
         }
         self
     }
@@ -647,6 +666,11 @@ pub struct SessionEnvironment {
     launcher_snapshot: BTreeMap<String, String>,
     grants: Vec<SessionGrant>,
     host_inference_boundary: Option<crate::llm::api::InferenceBoundary>,
+    host_account_attestations: Option<Arc<Vec<crate::llm::api::ProviderAccountAttestation>>>,
+}
+
+fn is_host_account_attestations_env(name: &str) -> bool {
+    environment_names_equal(name, crate::llm::api::HOST_ACCOUNT_ATTESTATIONS_ENV)
 }
 
 impl SessionEnvironment {
@@ -696,11 +720,20 @@ impl SessionEnvironment {
             });
         }
         validate_unique_specs(&specs)?;
+        // Host confirmations are authority input, never session or child data.
         let grants = specs
             .into_iter()
-            .map(|spec| spec.resolve(env_lookup))
+            .map(|spec| {
+                spec.resolve(&|name| {
+                    if is_host_account_attestations_env(name) {
+                        None
+                    } else {
+                        env_lookup(name)
+                    }
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?;
-        let launcher_snapshot = if matches!(kind, EnvironmentPolicyKind::Inherited) {
+        let mut launcher_snapshot = if matches!(kind, EnvironmentPolicyKind::Inherited) {
             launcher_snapshot
         } else {
             launcher_snapshot
@@ -708,11 +741,13 @@ impl SessionEnvironment {
                 .filter(|(name, _)| super::environment_policy::allowlist_admits(name))
                 .collect()
         };
+        launcher_snapshot.retain(|name, _| !is_host_account_attestations_env(name));
         Ok(SessionEnvironment {
             kind,
             launcher_snapshot,
             grants,
             host_inference_boundary: None,
+            host_account_attestations: None,
         })
     }
 
@@ -733,6 +768,31 @@ impl SessionEnvironment {
             });
         }
         self
+    }
+
+    /// Install host confirmations; a nested scope can only remove existing facts.
+    pub fn with_host_account_attestations(
+        mut self,
+        attestations: Vec<crate::llm::api::ProviderAccountAttestation>,
+    ) -> Self {
+        self.host_account_attestations =
+            Some(Arc::new(match self.host_account_attestations.take() {
+                Some(existing) => existing
+                    .iter()
+                    .filter(|fact| attestations.contains(fact))
+                    .cloned()
+                    .collect(),
+                None => attestations,
+            }));
+        self
+    }
+
+    pub(crate) fn host_account_attestations(
+        &self,
+    ) -> &[crate::llm::api::ProviderAccountAttestation] {
+        self.host_account_attestations
+            .as_deref()
+            .map_or(&[], Vec::as_slice)
     }
 
     /// An isolated environment with no grants.
@@ -790,6 +850,7 @@ impl SessionEnvironment {
                     launcher_snapshot: self.launcher_snapshot.clone(),
                     grants: Vec::new(),
                     host_inference_boundary: self.host_inference_boundary,
+                    host_account_attestations: self.host_account_attestations.clone(),
                 })
             }
             (EnvironmentPolicyKind::Inherited, EnvironmentPolicyKind::Granted) => {
@@ -817,6 +878,7 @@ impl SessionEnvironment {
                 launcher_snapshot: self.launcher_snapshot.clone(),
                 grants: Vec::new(),
                 host_inference_boundary: self.host_inference_boundary,
+                host_account_attestations: self.host_account_attestations.clone(),
             }),
             (EnvironmentPolicyKind::Granted, EnvironmentPolicyKind::Granted) => {
                 validate_unique_specs(&specs)?;
@@ -841,6 +903,7 @@ impl SessionEnvironment {
                     launcher_snapshot: self.launcher_snapshot.clone(),
                     grants,
                     host_inference_boundary: self.host_inference_boundary,
+                    host_account_attestations: self.host_account_attestations.clone(),
                 })
             }
             _ => Err(EnvironmentPolicyError::ChildPolicyExceedsParent {
@@ -852,7 +915,9 @@ impl SessionEnvironment {
                         .to_string(),
             }),
         }?;
-        Ok(child.with_host_inference_boundary(inherited_boundary))
+        let mut child = child.with_host_inference_boundary(inherited_boundary);
+        child.host_account_attestations = self.host_account_attestations.clone();
+        Ok(child)
     }
 
     /// The launcher's value for `name`, matched the way the host platform
@@ -898,8 +963,12 @@ impl SessionEnvironment {
     }
 
     pub(crate) fn is_host_inference_target(&self, name: &str) -> bool {
-        self.host_inference_boundary.is_some()
-            && environment_names_equal(name, crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV)
+        (self.host_inference_boundary.is_some()
+            && environment_names_equal(
+                name,
+                crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV,
+            ))
+            || is_host_account_attestations_env(name)
     }
 
     /// The non-secret receipts recorded on the session run-record. Empty for an
@@ -1003,11 +1072,10 @@ impl SessionEnvironment {
         self.grants
             .iter()
             .filter(|grant| {
-                self.host_inference_boundary.is_none()
-                    || !grant
-                        .expose_as_env
-                        .as_deref()
-                        .is_some_and(|name| self.is_host_inference_target(name))
+                !grant
+                    .expose_as_env
+                    .as_deref()
+                    .is_some_and(|name| self.is_host_inference_target(name))
             })
             .filter(|grant| grant.reaches_spawn(program))
             .filter_map(|grant| grant.exposure(resolve_secret))
@@ -1030,6 +1098,9 @@ impl SessionEnvironment {
         var: &str,
         resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
     ) -> Result<Option<String>, EnvironmentPolicyError> {
+        if is_host_account_attestations_env(var) {
+            return Ok(None);
+        }
         if environment_names_equal(var, crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV) {
             if let Some(host) = self.host_inference_boundary {
                 let requested = self.grants.iter().find(|grant| {
@@ -1208,6 +1279,8 @@ pub enum EnvironmentPolicyError {
     MissingSecret { name: String },
     /// A loader control would fire before trusted sandbox setup executes.
     UnsafeTrustedSetupVariable { variable: String },
+    /// Host account confirmations were not a valid closed input.
+    MalformedHostAccountAttestations,
 }
 
 impl fmt::Display for EnvironmentPolicyError {
@@ -1215,6 +1288,9 @@ impl fmt::Display for EnvironmentPolicyError {
         match self {
             Self::MalformedHostInferenceBoundary => {
                 write!(f, "[inference_boundary.host_boundary_malformed] invalid host inference ceiling")
+            }
+            Self::MalformedHostAccountAttestations => {
+                write!(f, "[inference_boundary.host_account_attestations_malformed] invalid host account confirmations")
             }
             EnvironmentPolicyError::UnsafeTrustedSetupVariable { variable } => write!(
                 f, "trusted sandbox setup cannot preserve loader control {variable}; remove it from this launch environment"
@@ -1318,6 +1394,9 @@ impl EnvironmentPolicyError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::MalformedHostInferenceBoundary => "inference_boundary.host_boundary_malformed",
+            Self::MalformedHostAccountAttestations => {
+                "inference_boundary.host_account_attestations_malformed"
+            }
             Self::UnsafeTrustedSetupVariable { .. } => {
                 "environment_policy.unsafe_trusted_setup_variable"
             }
@@ -1401,7 +1480,9 @@ impl EnvironmentPolicyError {
                     object.insert("grant".to_string(), serde_json::json!(grant));
                 }
             }
-            Self::EmptyName | Self::MalformedHostInferenceBoundary => {}
+            Self::EmptyName
+            | Self::MalformedHostInferenceBoundary
+            | Self::MalformedHostAccountAttestations => {}
         }
         value
     }

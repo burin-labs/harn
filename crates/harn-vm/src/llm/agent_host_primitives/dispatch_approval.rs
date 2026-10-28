@@ -124,6 +124,7 @@ impl DispatchApproval {
             .as_deref()
             .filter(|decision| {
                 (decision.is_ask() || decision.is_deny())
+                    && !decision.is_rule_denial()
                     && crate::orchestration::approval_reviewer_active()
             })
             .map(|decision| Box::new(decision.clone()));

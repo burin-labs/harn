@@ -12,6 +12,9 @@ use crate::orchestration::{
     HandoffBudgetRemainingRecord, HandoffTargetRecord,
 };
 
+mod a2a_rpc;
+use a2a_rpc::send_a2a_rpc;
+
 pub const EXTERNAL_AGENT_SCHEMA_ID: &str = "harn.external_agent.v1";
 pub const EXTERNAL_AGENT_HANDOFF_SCHEMA_ID: &str = "harn.external_agent.handoff.v1";
 pub const A2A_PLAN_METHOD: &str = "_harn/externalAgent.plan";
@@ -784,30 +787,6 @@ fn normalize_a2a_target(target: &str) -> String {
         .strip_prefix("a2a://")
         .unwrap_or_else(|| target.trim())
         .to_string()
-}
-
-async fn send_a2a_rpc(
-    peer: &ExternalAgentPeer,
-    request_id: String,
-    method: &str,
-    params: Value,
-    cancel_rx: &mut broadcast::Receiver<()>,
-) -> Result<Value, ExternalAgentError> {
-    let request = crate::jsonrpc::request(request_id.clone(), method, params);
-    let body =
-        crate::a2a::send_jsonrpc_request(&peer.rpc_url, &request, &request_id, cancel_rx).await?;
-    if let Some(error) = body.get("error") {
-        let message = error
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown external agent error");
-        return Err(ExternalAgentError::Protocol(format!(
-            "{method} failed: {message}"
-        )));
-    }
-    body.get("result")
-        .cloned()
-        .ok_or_else(|| ExternalAgentError::Protocol(format!("{method} response missing result")))
 }
 
 fn parse_remote_checkpoint(

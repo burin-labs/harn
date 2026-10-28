@@ -35,6 +35,7 @@ fn install_managed_supply_stub_provider(provider: &str, addr: std::net::SocketAd
                 request_controls: vec![],
                 retention_default: crate::llm_config::RetentionDefault::Unspecified,
                 training_default: crate::llm_config::TrainingDefault::DoesNotTrain,
+                no_training_requires: vec![],
                 checked_on: "2026-10-05".to_string(),
                 sources: vec!["https://example.invalid/privacy-fixture".to_string()],
                 note: None,

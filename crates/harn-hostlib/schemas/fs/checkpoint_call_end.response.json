@@ -34,6 +34,12 @@
               "post_hash": {
                 "type": "string"
               },
+              "writer": {
+                "type": "object",
+                "properties": {"kind": {"const": "unknown"}},
+                "required": ["kind"],
+                "additionalProperties": false
+              },
               "incomplete": {
                 "type": "boolean",
                 "description": "True when a scan error means this path's attribution may be wrong; restore refuses it."
@@ -41,7 +47,8 @@
             },
             "required": [
               "path",
-              "kind"
+              "kind",
+              "writer"
             ],
             "additionalProperties": false
           }

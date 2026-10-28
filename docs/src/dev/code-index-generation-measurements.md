@@ -9,8 +9,8 @@ The baseline is main with the #9743 snapshot format. The candidate restores
 the symbol graph and the trigram and word postings as shared immutable
 generations with copy-on-write edits and file tombstones, decodes graph nodes
 in parallel sections, and writes snapshots straight from the live index. The
-[complete trial record](perf/code-index-9771.json) keeps every trial, both
-binary digests, the seed digest, phase timings, and skipped-file inventories.
+Every trial, both binary digests, the seed digest, phase timings, and
+skipped-file inventories were recorded.
 
 ## Workload and controls
 
@@ -84,8 +84,7 @@ writes them (0.57 seconds).
 file's path and language once rather than on every node: in memory as one
 shared path and the registry's static language name, and in the snapshot as a
 per-file table. It was measured against main on a quiet host, where every trial
-met the 0.25-core external-load bound; the
-[trial record](perf/code-index-node-strings.json) has the details.
+met the 0.25-core external-load bound.
 
 | Operation | Baseline median | Candidate median | Paired ratio [95% interval] | Pairs |
 | --- | --- | --- | --- | --- |
@@ -104,9 +103,8 @@ snapshot on a background thread. Its write detached a copy under the index
 lock (about 43 milliseconds here, mostly the file table), then encoded and
 wrote outside the lock. The baseline was source `70bc0eee20`, binary SHA-256
 `4a4aab73bf8d…`; the candidate was source `3c1d0cb59a`, binary `c7876135113b…`.
-Measured on a quiet host against the per-file strings build, the
-[trial record](perf/code-index-background-persist.json) keeps when each write
-landed and the time of the registered queries that follow readiness.
+Measured on a quiet host against the per-file strings build, each write landing
+and the registered queries that follow readiness were recorded.
 
 | Operation | Baseline ready | Candidate ready | Ready plus queries, baseline / candidate | Write landed | Ready ratio [95% interval] |
 | --- | --- | --- | --- | --- | --- |
@@ -124,8 +122,7 @@ while the detached copy exists.
 ## Cumulative quiet-host result
 
 The final #9712 artifact, binary SHA-256 `785cded9e739…`, against the October 13
-candidate `c7876135113b…` from source `3c1d0cb59a`, on a quiet host; the
-[trial record](perf/code-index-cumulative-quiet.json) has every trial.
+candidate `c7876135113b…` from source `3c1d0cb59a`, on a quiet host.
 
 | Operation | #9712 median | October 13 candidate median | Paired ratio [95% interval] | Accepted pairs |
 | --- | --- | --- | --- | --- |

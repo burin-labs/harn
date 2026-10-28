@@ -1,11 +1,14 @@
 use super::*;
 
-#[test]
-fn portable_options_match_strict_hosted_observations() {
-    let receipt: serde_json::Value =
-        serde_json::from_str(include_str!("portable_option_observations.json")).unwrap();
+fn assert_observations(
+    source: &str,
+    expected_cells: usize,
+    expected_supported: usize,
+    expected_models: usize,
+) {
+    let receipt: serde_json::Value = serde_json::from_str(source).unwrap();
     let cells = receipt["cells"].as_array().unwrap();
-    assert_eq!(cells.len(), 39);
+    assert_eq!(cells.len(), expected_cells);
     let config = llm_config::packaged_config();
     let view = CatalogView::new(config, crate::capabilities::builtin_file(), None);
     let mut seen = BTreeSet::new();
@@ -42,14 +45,26 @@ fn portable_options_match_strict_hosted_observations() {
         };
         assert_eq!(actual, expected, "{model}/{option}");
     }
-    assert_eq!(supported, 14);
+    assert_eq!(supported, expected_supported);
     assert_eq!(
         seen.iter()
             .map(|(model, _)| model)
             .collect::<BTreeSet<_>>()
             .len(),
-        20
+        expected_models
     );
+}
+
+#[test]
+fn portable_options_match_strict_hosted_observations() {
+    assert_observations(
+        include_str!("portable_option_observations.json"),
+        39,
+        14,
+        20,
+    );
+    let config = llm_config::packaged_config();
+    let view = CatalogView::new(config, crate::capabilities::builtin_file(), None);
     // Shaped IDs resolve even without catalog membership. Neither a later
     // generation nor the unmeasured free variant may inherit these receipts.
     assert!(!config.models.contains_key("qwen/qwen3.9-flash"));
@@ -69,5 +84,15 @@ fn portable_options_match_strict_hosted_observations() {
         view.capabilities("openrouter", "meta/muse-glimmer-30b")
             .capabilities()
             .seed_supported
+    );
+}
+
+#[test]
+fn portable_options_match_october_26_hosted_observations() {
+    assert_observations(
+        include_str!("portable_option_observations_20261026.json"),
+        13,
+        3,
+        6,
     );
 }

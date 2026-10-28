@@ -424,6 +424,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
         crate::llm::api::data_controls::dialect_of(dialect.stream_protocol()),
         opts.data_controls,
         boundary,
+        Some(&opts.api_key),
         crate::llm::api::data_controls::ControlDelivery::Written,
     );
     if let Some(refusal) = crate::llm::api::data_controls::training_refusal(
