@@ -176,6 +176,14 @@ pub struct Lease {
     pub expires_at: OffsetDateTime,
 }
 
+/// Stable identity of one captured monitor occurrence, scoped to its session.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureIdentity {
+    pub session_id: String,
+    pub monitor_key: String,
+    pub event_id: String,
+}
+
 /// The current generation's delivery: the session it is routed to, any
 /// outstanding lease, and the ack that settles it.
 /// Only the inbox creates one, so it can gain fields without breaking readers.
@@ -210,6 +218,12 @@ impl Delivery {
 /// One condition and its lifecycle.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Signal {
+    /// Present for immutable occurrences; these never route to another session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<CaptureIdentity>,
+    /// Ingestion order among retained captures, independent of wall-clock ties.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_order: Option<u64>,
     pub key: String,
     pub state: SignalState,
     pub generation: u64,

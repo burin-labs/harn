@@ -52,6 +52,13 @@ pub(crate) struct SignalsPendingArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct SignalsFireArgs {
+    /// Capture a distinct occurrence instead of updating a condition. Use a
+    /// stable file cursor or producer sequence; identical text may recur.
+    #[arg(long, requires = "session")]
+    pub event_id: Option<String>,
+    /// Exact recipient for a captured occurrence; no repository fallback.
+    #[arg(long, requires = "event_id")]
+    pub session: Option<String>,
     /// Read a `harn.triage_event.v1` document from this file, or `-` for stdin.
     #[arg(long, value_name = "FILE", conflicts_with_all = ["summary", "source_url"])]
     pub event: Option<PathBuf>,

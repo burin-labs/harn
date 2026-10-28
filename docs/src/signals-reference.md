@@ -38,10 +38,39 @@ Commands that print data accept `--json` and emit the standard
 | `--topic TOPIC` | none | Routing hint for custom routers. |
 | `--expires-in DURATION` | `fired_ttl_seconds` | Expire the signal if it is still fired after this long, for example `4h`. |
 | `--event FILE` | none | Read a `harn.triage_event.v1` document from a file, or `-` for stdin, instead of the text flags. |
+| `--event-id ID` | none | Capture one distinct occurrence, deduplicating retries of this ID. Requires `--session`. |
+| `--session SESSION` | none | Exact capture recipient, with no fallback. Requires `--event-id`. |
 
 `fire` and `resolve` print the transition: `fired (generation N)` for a state
 change, or `unchanged` when the signal was already in that state. A change owes
 one reminder; an unchanged result owes none.
+
+### Capture monitor occurrences
+
+For appended output, give every occurrence a stable cursor or producer sequence
+with `harn signals fire --event-id ID --session SESSION`. The ordinary `--key`
+identifies the monitor. Distinct event IDs retain distinct reminders even when
+their text is identical. Retrying the same session, monitor key and event ID
+does not change the stored occurrence or create another delivery while that
+record is retained. Include the monitor execution generation in the key when
+a restarted producer resets its sequence.
+Within each severity, captured occurrences are leased in persisted ingestion
+order even when their timestamps are equal or the clock moves backwards.
+Condition reminders retain their existing priority within that severity.
+The shared `muted` policy matches both the captured monitor key and an individual
+capture key, so a muted monitor's occurrences remain held in the inbox.
+
+Captured occurrences route only to the exact named session. With that session
+absent, they wait instead of falling back to a repository peer or control role.
+They use the existing inbox capacity, expiry, policy and lease-token acknowledgments.
+Resolve is for conditions; captured occurrences are immutable and are settled
+by acknowledging delivery. Summaries exceeding the storage bound are refused;
+split output into bounded chunks or reference the full output. Capture does not
+start a process, schedule a model call, or introduce a wake-rate guarantee.
+
+Acknowledged captures may be pruned to make room under `max_signals`; pending
+captures are never evicted to accept new input. Producers must retain cursors
+and stop or retry on explicit capacity errors.
 
 ## Hook adapter
 

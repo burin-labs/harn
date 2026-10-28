@@ -106,9 +106,15 @@ fn run_command(args: SignalsArgs) -> Result<(), String> {
         }
         SignalsCommand::Fire(fire) => {
             let json = fire.json;
-            let transition = inbox
-                .fire(fire_input(*fire, now)?, now)
-                .map_err(|error| error.to_string())?;
+            let event_id = fire.event_id.clone();
+            let session = fire.session.clone();
+            let input = fire_input(*fire, now)?;
+            let transition = match (session, event_id) {
+                (Some(session), Some(event_id)) => inbox.capture(&session, &event_id, input, now),
+                (None, None) => inbox.fire(input, now),
+                _ => return Err("--event-id and --session must be supplied together".into()),
+            }
+            .map_err(|error| error.to_string())?;
             report(&transition, json)
         }
         SignalsCommand::Resolve(resolve) => {

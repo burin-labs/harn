@@ -31,9 +31,9 @@ pub use inbox::{
     SIGNALS_DIR_ENV,
 };
 pub use model::{
-    Activity, CheckIn, CheckInScope, Delivery, HarnessKind, Lease, Provenance, Reminder,
-    ReminderId, RoutingHints, Session, SessionAnnouncement, Severity, Signal, SignalInput,
-    SignalState, SignatureStatus,
+    Activity, CaptureIdentity, CheckIn, CheckInScope, Delivery, HarnessKind, Lease, Provenance,
+    Reminder, ReminderId, RoutingHints, Session, SessionAnnouncement, Severity, Signal,
+    SignalInput, SignalState, SignatureStatus,
 };
 pub use repo::{repo_slug, slug_from_url};
 pub use router::{Router, RuleRouter};
