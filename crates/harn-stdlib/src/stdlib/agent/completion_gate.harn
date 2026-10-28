@@ -1,4 +1,10 @@
 import {
+  CompletionBehaviorEvidence,
+  CompletionBehaviorRequest,
+  completion_behavior_evidence,
+  completion_behavior_evidence_allows,
+} from "std/agent/completion_behavior_evidence"
+import {
   CompletionRequirementAssessment,
   CompletionRequirementEvidenceRecord,
   CompletionRequirementReport,
@@ -60,6 +66,8 @@ pub type CompletionFacts = {
   verification_current?: bool,
   verifier_available?: bool,
   verification_discriminates?: bool,
+  behavior_evidence?: CompletionBehaviorEvidence?,
+  behavior_session_id?: string,
   observed_failure_required?: bool,
   observed_failure?: bool,
   requirement_contract?: CompletionRequirementContract,
@@ -109,6 +117,8 @@ pub type CompletionGateVerdict = {
 
 pub type CompletionFactsProvider = fn(CompletionGateContext) -> CompletionFacts?
 
+pub type CompletionBehaviorProvider = fn(CompletionGateContext) -> CompletionBehaviorRequest?
+
 pub type CompletionWriteClassifier = fn(string, string?) -> WriteKind
 
 pub type CompletionVerifier = fn() -> CompletionVerifyVerdict?
@@ -122,6 +132,9 @@ pub type CompletionFeedbackDecorator = fn(string, string, CompletionGateVerdict)
  * Host-fact callbacks (all optional):
  * - `facts(ctx) -> CompletionFacts` — the primary fact supplier. `ctx` carries
  *   `{session_id, task, stop_reason, text, messages}`.
+ * - `behavior_evidence(ctx) -> CompletionBehaviorRequest?` — supplies the
+ *   declared intent, check pair, goal and live input reader. The gate reads the
+ *   active goal and verifier inputs at every completion decision.
  * - `classify_write(path, diff?) -> WriteKind` — classifies a single write when
  *   `facts` returns a `writes` list without counts.
  * - `verify_command() -> CompletionVerifyVerdict` — runs the verifier oracle when
@@ -157,6 +170,7 @@ pub type CompletionFeedbackDecorator = fn(string, string, CompletionGateVerdict)
  */
 pub type CompletionGateOptions = {
   facts?: CompletionFactsProvider,
+  behavior_evidence?: CompletionBehaviorProvider,
   classify_write?: CompletionWriteClassifier,
   verify_command?: CompletionVerifier,
   feedback_decorator?: CompletionFeedbackDecorator,
@@ -203,7 +217,7 @@ pub fn completion_gate_verdict(
         feedback: "Verification predates the latest change. Run it again before finishing.",
       }
     }
-    if facts.verification_discriminates == false {
+    if facts.verification_discriminates == false && !__completion_gate_behavior_allowed(facts) {
       return {
         ok: false,
         strict: true,
@@ -297,7 +311,13 @@ fn __completion_gate_options(options: CompletionGateOptions) -> CompletionGateOp
 
 /** Validate a CompletionGateOptions at config time. */
 fn __completion_gate_validate_options(opts: dict) {
-  for field in ["facts", "classify_write", "verify_command", "feedback_decorator"] {
+  for field in [
+    "facts",
+    "behavior_evidence",
+    "classify_write",
+    "verify_command",
+    "feedback_decorator",
+  ] {
     const value = opts[field]
     if value != nil && !__completion_gate_callable(value) {
       throw "agent_completion_gate: `" + field + "` must be a callable or nil; got "
@@ -461,13 +481,24 @@ fn __completion_gate_write_counts(raw: dict, classify_write: any) {
   return {source_write_count: 0, cosmetic_write_count: 0, source_known: false}
 }
 
+fn __completion_gate_behavior_allowed(facts: CompletionFacts) -> bool {
+  const evidence = facts.behavior_evidence
+  const verify = __completion_gate_combine_verify(facts.verify)
+  return evidence != nil && facts.behavior_session_id != nil
+    && evidence.session_id == facts.behavior_session_id
+    && verify != nil
+    && (verify.ok ?? false)
+    && to_string(verify.command ?? "") == evidence.after.command
+    && completion_behavior_evidence_allows(evidence)
+}
+
 fn __completion_gate_verification(
   verify: CompletionVerifyVerdict?,
   facts: CompletionFacts,
   oracle_expected: bool,
 ) -> CompletionVerificationState {
   const accepted = facts.verification_current != false && facts.verifier_available != false
-    && facts.verification_discriminates != false
+    && (facts.verification_discriminates != false || __completion_gate_behavior_allowed(facts))
     && (!(facts.observed_failure_required ?? false) || (facts.observed_failure ?? false))
   const observed_command = to_string(verify?.command ?? "").trim()
   return {
@@ -485,6 +516,33 @@ fn __completion_gate_verification(
       "failed"
     },
     observed_at_evidence_index: nil,
+  }
+}
+
+fn __completion_gate_read_behavior(
+  provider: CompletionBehaviorProvider?,
+  ctx: CompletionGateContext,
+) -> CompletionBehaviorEvidence? {
+  if provider == nil {
+    return nil
+  }
+  return try {
+    const request = provider(ctx)
+    if request == nil {
+      nil
+    } else {
+      completion_behavior_evidence(
+        request.agent,
+        ctx.session_id,
+        request.active_goal_id,
+        request.intent,
+        request.before,
+        request.after,
+        request.reuse,
+      )
+    }
+  } catch {
+    nil
   }
 }
 
@@ -530,11 +588,15 @@ fn __completion_gate_evaluate(
     // bare payload rather than the loop's evidence snapshot.
     obligations: payload?.obligations ?? completion_obligations_from_messages(messages, task),
   }
-  const raw = if facts != nil {
+  const observed = if facts != nil {
     facts(ctx) ?? {}
   } else {
     {}
   }
+  // Always obtain behavior evidence at the decision seam; a stale value in a
+  // host fact dictionary is never sufficient to relax the strict veto.
+  const behavior = __completion_gate_read_behavior(opts.behavior_evidence, ctx)
+  const raw = observed + {behavior_evidence: behavior, behavior_session_id: session_id}
   const counts = __completion_gate_write_counts(raw, classify_write)
   const verify_raw = if raw?.verify != nil {
     raw.verify
@@ -577,7 +639,11 @@ fn __completion_gate_evaluate(
   // The gate already computes this to reach its own verdict. Returning only
   // `{confirm, reason}` threw it away, and the model judge downstream was then
   // asked a question this oracle had answered, with no way to see the answer.
-  const verification = __completion_gate_verification(verify, raw, derived.oracle_expected)
+  const verification = __completion_gate_verification(
+    verify,
+    raw + {verify: verify},
+    derived.oracle_expected,
+  )
   const evidence_verdict = completion_gate_verdict(
     raw
       + {

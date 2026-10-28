@@ -33,6 +33,7 @@ knobs. Every field is optional.
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `facts` | `fn(ctx) -> CompletionFacts` | — | The primary fact supplier. `ctx` is `{session_id, task, stop_reason, text, messages}`. |
+| `behavior_evidence` | `fn(ctx) -> CompletionBehaviorRequest?` | — | Supplies the goal, intent, check pair and live input reader for a behavior-preserving task. |
 | `classify_write` | `fn(path, diff?) -> WriteKind` | — | Labels one write when `facts` returns a `writes` list without counts. |
 | `verify_command` | `fn() -> CompletionVerifyVerdict` | — | Runs the verifier oracle when `facts` carries no `verify` verdict. |
 | `feedback_decorator` | `fn(reason, feedback, verdict) -> string` | — | Decorates a delivered veto using its stable ladder reason and structured verdict. |
@@ -87,6 +88,28 @@ the pending and terminal readings still report `not_run`.
 `verifier_available: false` records that the configured verifier could not start;
 after a source write the live gate ends unverified rather than asking for repairs
 to a check that measured nothing.
+
+### Behavior-preserving work
+
+For an explicitly declared `behavior_preserving` task, a check that passed before
+the edit can count after the edit when both executions and the current workspace
+are bound to the same active goal. Use `completion_behavior_run_check` from
+`std/agent/completion_behavior_evidence` before and after the edit. Supply its
+two `behavior_check` records, agent capability, active goal ID, intent and
+`VerificationReuse` reader in the gate's `behavior_evidence` callback. At each
+decision, the gate reads the current goal and verifier inputs itself. The current
+supported check is a shell command matching the goal's declared verification
+command. Its working directory must resolve inside the session's workspace
+anchor, including an additional mounted root. A missing or changed anchor cannot
+bind the check.
+
+The `VerificationReuse` input reader must read complete current workspace,
+source, dependency, environment and revision identities, including changes made
+outside the agent. Missing or unreadable inputs, an absent baseline, stale source,
+a replaced goal, or another session leave the ordinary strict veto in place.
+Run a fresh check after further changes. Neither a write nor a passing pair proves
+that behavior is preserved; the declaration and verifier express the caller's
+intent and evidence. `behavior_change` and `unknown` retain the strict rule.
 
 A facts provider may supply `requirement_contract` for the current boundary,
 using the same typed roster,
