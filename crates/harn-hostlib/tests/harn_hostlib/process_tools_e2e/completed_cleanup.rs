@@ -23,7 +23,12 @@ fn real_completed_background_cancel_replays_guardian_cleanup_receipt() {
                 return None;
             }
             let metadata = unsafe { metadata.assume_init() };
-            Some((metadata.st_dev as u64, metadata.st_ino as u64))
+            #[allow(
+                clippy::unnecessary_cast,
+                reason = "dev_t is signed on macOS and unsigned on Linux"
+            )]
+            let device = metadata.st_dev as u64;
+            Some((device, metadata.st_ino))
         })
         .collect::<Vec<_>>();
     let parent_metadata = parent_file.metadata().unwrap();
