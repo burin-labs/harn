@@ -71,6 +71,8 @@ if [[ "$1" == "api" && "$2" == repos/burin-labs/harn/commits/*/check-runs* ]]; t
     if [[ "${pair%%=*}" == "$sha" ]]; then
       if [[ "$sha" == "${FAKE_SKIPPED_CHECKS:-none}" ]]; then
         jq -cn --arg at "${pair#*=}" '[{check_runs:[{started_at:$at,conclusion:"skipped"}]}]'
+      elif [[ "$sha" == "${FAKE_CANCELLED_CHECKS:-none}" ]]; then
+        jq -cn --arg at "${pair#*=}" '[{check_runs:[{started_at:$at,conclusion:"cancelled"}]}]'
       else
         jq -cn --arg at "${pair#*=}" '[{check_runs:[{started_at:$at,conclusion:"success"}]}]'
       fi
@@ -108,6 +110,9 @@ $plan"
 skipped_plan="$(FAKE_SKIPPED_CHECKS="$recent" "$script" --repo burin-labs/harn --now 2026-10-06T03:00:00Z)"
 grep -q "^3	$recent	no_outcome$" <<<"$skipped_plan" \
   || fail "a skipped eligibility check was treated as a successful request"
+cancelled_plan="$(FAKE_CANCELLED_CHECKS="$recent" "$script" --repo burin-labs/harn --now 2026-10-06T03:00:00Z)"
+! grep -q "^3	$recent	" <<<"$cancelled_plan" \
+  || fail "a canceled request was immediately retried despite an unknown dispatch outcome"
 
 # Applying sends at most --limit requests, oldest first, each with its record.
 : > "$calls"
