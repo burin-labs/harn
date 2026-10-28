@@ -72,6 +72,12 @@ require_native_platform() {
     # Dispatch acceptance can precede visibility in the run census.
     sleep 5
   done
+  # A cancelled or skipped dispatch (often a duplicate) never decides; absence of any other run is unmeasured.
+  runs=$(jq -c 'map(select(.status != "completed" or (.conclusion != "cancelled" and .conclusion != "skipped")))' <<< "$runs")
+  if [[ $(jq length <<< "$runs") == 0 ]]; then
+    native_qualification_unmeasured "$name:cancelled-only"
+    return 1
+  fi
   selected=$(jq -c 'max_by(.id)' <<< "$runs")
   id=$(jq -r .id <<< "$selected")
   attempt=$(jq -r .run_attempt <<< "$selected")
