@@ -113,6 +113,7 @@ export interface HarnProviderDataControls {
   control_scope: "per_request" | "account" | "none"
   retention_default: "retained" | "not_retained" | "abuse_monitoring_only" | "unspecified"
   training_default: "trains" | "does_not_train" | "unspecified"
+  no_training_requires?: (__HARN_NO_TRAINING_REQUIREMENTS__)[]
   checked_on: string
   sources: string[]
   note?: string

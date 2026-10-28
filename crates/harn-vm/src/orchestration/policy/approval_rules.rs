@@ -509,6 +509,13 @@ impl PolicyEvaluation {
         self.action == PolicyAction::Deny.as_str()
     }
 
+    /// A matched deny rule is a ceiling, never a request for review.
+    pub fn is_rule_denial(&self) -> bool {
+        self.matched_rule
+            .as_ref()
+            .is_some_and(|rule| rule.action == PolicyAction::Deny.as_str())
+    }
+
     /// Rewrite this decision as an allow granted by the automated reviewer.
     ///
     /// The original action and reason are kept in the receipt under

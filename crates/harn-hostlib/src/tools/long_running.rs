@@ -325,6 +325,8 @@ pub(crate) struct LongRunningSpawnOptions {
     pub(crate) env_remove: Vec<String>,
     pub(crate) capture: CaptureConfig,
     pub(crate) session_id: String,
+    /// An explicit lifetime limit, independent of the foreground wait window.
+    pub(crate) hard_timeout: Option<Duration>,
     pub(crate) progress_interval: Option<Duration>,
     pub(crate) progress_max_interval: Option<Duration>,
     pub(crate) progress_max_inline_bytes: usize,
@@ -421,6 +423,7 @@ pub fn spawn_long_running(
             env_remove: Vec::new(),
             capture: CaptureConfig::default(),
             session_id,
+            hard_timeout: None,
             progress_interval: None,
             progress_max_interval: None,
             progress_max_inline_bytes: CaptureConfig::default().max_inline_bytes,
@@ -438,6 +441,7 @@ pub(crate) fn spawn_long_running_with_options(
     env: BTreeMap<String, String>,
     options: LongRunningSpawnOptions,
 ) -> Result<LongRunningHandleInfo, HostlibError> {
+    let started = std::time::Instant::now();
     let requested_cwd = cwd.as_ref().map(to_agent_path);
     let effective_cwd = proc::resolve_effective_cwd(builtin, cwd.as_deref())?;
     let sandbox_reporting = harn_vm::process_sandbox::ProcessSandboxReportingContext::current();
@@ -530,6 +534,34 @@ pub(crate) fn spawn_long_running_with_options(
             builtin,
             message: format!("failed to spawn waiter thread: {e}"),
         })?;
+
+    if let Some(limit) = options.hard_timeout {
+        let deadline_handle = handle_id.clone();
+        let remaining = limit.saturating_sub(started.elapsed());
+        if let Err(error) = harn_parser::runtime_stack::builder()
+            .name(format!("hto-deadline-{deadline_handle}"))
+            .spawn(move || {
+                if matches!(
+                    wait_for_result(&deadline_handle, remaining),
+                    BackgroundWaitOutcome::Running
+                ) {
+                    cancel_handle_with_options(
+                        &deadline_handle,
+                        CancelOptions {
+                            timed_out: true,
+                            wait_result: None,
+                        },
+                    );
+                }
+            })
+        {
+            cancel_handle(&handle_id);
+            return Err(HostlibError::Backend {
+                builtin,
+                message: format!("failed to start background deadline: {error}"),
+            });
+        }
+    }
 
     Ok(LongRunningHandleInfo {
         command_id,

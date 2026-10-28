@@ -1,19 +1,8 @@
 use std::fs;
 
-use super::support::{parse_json, run, success_data};
-
-fn write_http_fixture(path: &std::path::Path, mocks: serde_json::Value) {
-    fs::write(
-        path,
-        serde_json::to_string_pretty(&serde_json::json!({"mocks": mocks}))
-            .expect("serialize HTTP fixture"),
-    )
-    .expect("write HTTP fixture");
-}
-
-fn fixture_calls_diagnostic(path: &std::path::Path) -> String {
-    fs::read_to_string(path).unwrap_or_else(|error| format!("<unavailable: {error}>"))
-}
+use super::support::{
+    fixture_calls_diagnostic, parse_json, prepare_batch, run, success_data, write_http_fixture,
+};
 
 #[test]
 fn models_batch_mistral_live_create_uses_prepared_wire_model() {
@@ -41,21 +30,7 @@ fn models_batch_mistral_live_create_uses_prepared_wire_model() {
         &[],
     );
     assert_eq!(planned.exit_code, 0, "{}", planned.stderr);
-    let prepared = run(
-        &[
-            "models",
-            "batch",
-            "prepare",
-            "--manifest",
-            manifest.to_str().unwrap(),
-            "--out-dir",
-            prepared_dir.to_str().unwrap(),
-            "--json",
-        ],
-        &[],
-    );
-    assert_eq!(prepared.exit_code, 0, "{}", prepared.stderr);
-    let prepared_json = parse_json(&prepared.stdout, "Mistral prepare");
+    let prepared_json = prepare_batch(&manifest, &prepared_dir, "Mistral prepare");
     let job = &success_data(&prepared_json)["jobs"][0];
     assert_eq!(job["model"], "mistral-large-4-0");
     assert_eq!(job["wire_model"], "mistral-large-4");

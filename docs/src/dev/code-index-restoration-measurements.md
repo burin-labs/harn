@@ -5,8 +5,8 @@ following the [reference-expansion measurements](code-index-release-measurements
 The paired comparisons use the owning restore, reconciliation, registered query,
 and reindex paths on the same frozen corpus. Whole-application startup and the
 embedding host's optional semantic reference resolver are outside this boundary.
-The [complete trial record](perf/code-index-9712.json) retains accepted and
-rejected trials, counter readings, identities, phase counts, and inventories.
+The measurement covers accepted and rejected trials, counter readings,
+identities, phase counts, and inventories.
 
 ## Workload and identities
 

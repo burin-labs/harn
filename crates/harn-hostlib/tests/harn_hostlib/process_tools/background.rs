@@ -215,6 +215,94 @@ fn run_command_background_after_survives_foreground_timeout() {
     );
 }
 
+#[test]
+fn background_hard_timeout_cancels_both_start_modes() {
+    for auto in [false, true] {
+        let session_id = unique_session_id("background-hard-timeout");
+        let _session = harn_vm::agent_sessions::enter_current_session(session_id);
+        let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
+        let mut request = dict_map();
+        request.insert("argv".into(), vlist_str(&["sleep", "30"]));
+        if auto {
+            request.put_int("background_after_ms", 10);
+        } else {
+            request.put_bool("background", true);
+        }
+        request.put_int("hard_timeout_ms", 150);
+        let started = require_dict(call_tool("hostlib_tools_run_command", request).unwrap());
+        assert_eq!(require_str(&started, "status"), "running");
+        let mut wait = dict_map();
+        wait.insert(
+            "handle_id".into(),
+            vm_string(&require_str(&started, "handle_id")),
+        );
+        wait.put_int("timeout_ms", 5000);
+        let result = require_dict(call_tool("hostlib_tools_wait_command", wait).unwrap());
+        assert_eq!(require_str(&result, "status"), "timed_out");
+        assert!(require_bool(&result, "timed_out"));
+        assert!(
+            controller.was_killed(),
+            "the deadline must actually kill the command"
+        );
+    }
+}
+
+#[test]
+fn background_hard_timeout_rejects_zero_and_foreground() {
+    for (background, timeout) in [(true, 0), (false, 100)] {
+        let mut request = dict_map();
+        request.insert("argv".into(), vlist_str(&["sleep", "30"]));
+        request.put_bool("background", background);
+        request.put_int("hard_timeout_ms", timeout);
+        let error = call_tool("hostlib_tools_run_command", request).unwrap_err();
+        assert!(matches!(
+            error,
+            HostlibError::InvalidParameter {
+                param: "hard_timeout_ms",
+                ..
+            }
+        ));
+    }
+}
+
+#[test]
+fn background_hard_timeout_does_not_reclassify_completed_commands() {
+    let _session = harn_vm::agent_sessions::enter_current_session(unique_session_id(
+        "background-hard-complete",
+    ));
+    let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
+    let mut request = dict_map();
+    request.insert("argv".into(), vlist_str(&["sleep", "30"]));
+    request.put_bool("background", true);
+    request.put_int("hard_timeout_ms", 200);
+    let started = require_dict(call_tool("hostlib_tools_run_command", request).unwrap());
+    controller.complete_with(ExitStatus::from_code(0));
+    let mut wait = dict_map();
+    wait.insert(
+        "handle_id".into(),
+        vm_string(&require_str(&started, "handle_id")),
+    );
+    wait.put_int("timeout_ms", 5000);
+    let result = require_dict(call_tool("hostlib_tools_wait_command", wait).unwrap());
+    assert_eq!(require_str(&result, "status"), "completed");
+    let mut late_deadline = dict_map();
+    late_deadline.insert(
+        "handle_id".into(),
+        vm_string(&require_str(&started, "handle_id")),
+    );
+    late_deadline.put_bool("timed_out", true);
+    let receipt = require_dict(call_tool("hostlib_tools_cancel_handle", late_deadline).unwrap());
+    assert!(!require_bool(&receipt, "cancelled"));
+    assert_eq!(
+        require_str(&require_nested_dict(&receipt, "result"), "status"),
+        "completed"
+    );
+    assert!(
+        !controller.was_killed(),
+        "a late deadline must not kill a completed process"
+    );
+}
+
 // Command-ledger Phase 1: `list_handles` is the loop's liveness/reconciliation
 // query. An auto-converted (`background_after_ms`) command is an `awaited` lease
 // and is listed until it exits and its waiter drains it.

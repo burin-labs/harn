@@ -29,6 +29,10 @@ pub type SessionStoreOptions = {
 /** A read result that keeps a missing store distinct from an empty value. */
 pub type SessionStoreRead<out T> = {state: "absent"} | {state: "present", value: T}
 
+/** Bounded journal lookup; `unavailable` requires a different supported read. */
+pub type SessionStorePresence = {state: "absent" | "missing" | "unavailable"} \
+  | {state: "present", has_events: bool}
+
 pub type SessionStoreEventKind = {kind: string, type?: string}
 
 pub type SessionStoreEventSignature = {algorithm: string, key_id: string, signature: string}
@@ -232,6 +236,31 @@ pub fn session_store_events(
     state: "present",
     value: read.value.map({ event -> __session_store_event(event) }).to_list(),
   }
+}
+
+/**
+ * Check for a journal through an already-owned store without reading events.
+ * An unavailable owner or legacy stream returns `unavailable`, never `missing`.
+ *
+ * @effects: [store.read, fs.read, env.read]
+ * @errors: [runtime]
+ */
+pub fn session_store_presence(
+  agent: HarnessAgent,
+  session_id: string,
+  options: SessionStoreOptions? = nil,
+) -> SessionStorePresence {
+  const read = agent.session_store_presence(session_id, options)
+  if read.state == "present" {
+    return {state: "present", has_events: read.has_events}
+  }
+  if read.state == "missing" {
+    return {state: "missing"}
+  }
+  if read.state == "absent" {
+    return {state: "absent"}
+  }
+  return {state: "unavailable"}
 }
 
 /**

@@ -57,6 +57,7 @@ mod subscribers;
 pub(crate) use journal::next_journal_event;
 pub(crate) use journal::{
     active_run_id, has_journal, journal_audit_writer, journal_first_event_id, journal_store,
+    with_journal_in_state_dir,
 };
 pub(crate) use journal::{
     claim_journal_task, clear_journal, install_journal, journal_flush_lock, journal_owns_session,

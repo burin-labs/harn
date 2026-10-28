@@ -7,7 +7,11 @@ use crate::value::{ErrorCategory, VmDictExt, VmError, VmValue};
 use super::data_controls::DataControlsReceipt;
 use super::errors::{LlmErrorKind, LlmErrorReason};
 
+pub(super) mod account;
 mod admission;
+pub use account::{
+    capture_process_attestations, ProviderAccountAttestation, HOST_ACCOUNT_ATTESTATIONS_ENV,
+};
 pub use admission::{
     inference_admission_schemas, preview_inference_admission, DataControlsRefusal,
     InferenceAdmissionRequest, InferenceAdmissionSnapshot, InferenceAdmissionStatus,
@@ -280,7 +284,7 @@ fn decide(
             "{provider}/{model} trains on API traffic without an applied training control"
         ))),
         _ => Err(DenialRule::TrainingUnknown.refuse(format!(
-            "no verified no-training fact for {provider}/{model}"
+            "Harn cannot confirm a no-training fact for {provider}/{model}"
         ))),
     }
 }
@@ -314,6 +318,7 @@ pub(crate) fn preflight_chat(
         request.data_controls,
         boundary,
         request.api_mode,
+        Some(&request.api_key),
     );
     preflight(
         request.inference_boundary,
@@ -411,6 +416,7 @@ fn chat_controls(
     requested_posture: crate::llm_config::DataPosture,
     boundary: Option<InferenceBoundary>,
     api_mode: super::options::LlmApiMode,
+    credential: Option<&str>,
 ) -> super::data_controls::DataControlsPlan {
     // The shared HTTP transports apply the resolved data-control plan again
     // at send time. Native/ACP/Responses adapters do not, so never credit a
@@ -435,6 +441,7 @@ fn chat_controls(
         ),
         posture,
         boundary,
+        credential,
         if shared_transport {
             super::data_controls::ControlDelivery::Written
         } else {

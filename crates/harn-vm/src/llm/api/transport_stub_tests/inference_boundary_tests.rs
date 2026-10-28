@@ -94,6 +94,48 @@ fn project_privacy_facts_and_endpoint_cannot_widen_host_ceiling() {
         "model override sent no request"
     );
 
+    let mut project_provider = provider.clone();
+    project_provider
+        .data_controls
+        .as_mut()
+        .unwrap()
+        .training_default = TrainingDefault::Trains;
+    let mut project_model = crate::llm_config::model_catalog_entry(&opts.model).unwrap();
+    project_model.data_controls = Some(crate::llm_config::ModelDataControlsDef {
+        training_default: TrainingDefault::DoesNotTrain,
+        retention_default: None,
+        checked_on: "2026-10-27".into(),
+        sources: vec!["https://example.invalid/model-claim".into()],
+        note: None,
+    });
+    let mut conflicting = ProvidersConfig::default();
+    conflicting
+        .providers
+        .insert("openai".into(), project_provider);
+    conflicting.models.insert(opts.model.clone(), project_model);
+    crate::llm_config::set_user_overrides(Some(conflicting));
+    assert_eq!(
+        crate::llm_config::effective_training_default("openai", &opts.model),
+        Some(TrainingDefault::DoesNotTrain),
+        "the model claim must actually mask the provider row in the merged catalog"
+    );
+    assert_eq!(preview().status, InferenceAdmissionStatus::Denied);
+    let refusal = runtime
+        .block_on(vm_call_llm_full(&opts))
+        .expect_err("a model claim cannot erase the project's stricter provider restriction");
+    assert!(
+        refusal
+            .to_string()
+            .contains("inference_boundary.training_default"),
+        "{refusal}"
+    );
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        1,
+        "conflicting project rows sent no request"
+    );
+    crate::llm_config::clear_user_overrides();
+
     let mut project = provider.clone();
     project.base_url = format!("http://{}/v1", redirected.addr());
     let mut overlay = ProvidersConfig::default();

@@ -135,7 +135,7 @@ async fn orchestrator_lifecycle(
 ) -> Result<(), OrchestratorError> {
     harn_vm::reset_thread_local_state();
     let _environment =
-        crate::commands::run::environment::host_environment_scope(host_inference_boundary);
+        crate::commands::run::environment::host_environment_scope(host_inference_boundary)?;
 
     let shutdown_timeout = config.shutdown_timeout;
     let drain_config = config.drain;

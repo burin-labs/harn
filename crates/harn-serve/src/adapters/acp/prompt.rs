@@ -81,6 +81,23 @@ impl AcpServer {
         cancellation: Option<Arc<PromptCancellation>>,
         reply: TurnReply,
     ) {
+        let checkpoint_tracking = params
+            .get("sessionId")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|session_id| self.sessions.get(session_id))
+            .is_some_and(|session| session.workspace_checkpoint);
+        if checkpoint_tracking
+            && !matches!(
+                params.get("messageId").and_then(serde_json::Value::as_str),
+                Some(message_id) if !message_id.trim().is_empty()
+            )
+        {
+            self.send_prompt_protocol_error(
+                id,
+                "workspaceCheckpoint tracking requires a nonempty messageId",
+            );
+            return;
+        }
         let admission = match params.get("sessionId").and_then(|value| value.as_str()) {
             Some(session_id) => match self.prompt_admission(session_id) {
                 Ok(admission) => admission,
@@ -148,6 +165,26 @@ impl AcpServer {
             }
         };
         let prompt_text = prompt.text.clone();
+        if let Some(boundary_id) = prompt.correlation.message_id.as_deref() {
+            if let Some(session) = self.sessions.get(&session_id) {
+                if session.workspace_checkpoint {
+                    match session.checkpoint_tracking.contains(boundary_id) {
+                        Ok(false) => {}
+                        Ok(true) => {
+                            self.send_prompt_protocol_error(
+                                id,
+                                "messageId was already used by this checkpoint lineage",
+                            );
+                            return;
+                        }
+                        Err(error) => {
+                            self.send_prompt_protocol_error(id, error);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
 
         let candidate_task = if self.concurrent_controls.task_admission.is_some() {
             match TaskPromptTarget::from_params(params) {
@@ -212,13 +249,14 @@ impl AcpServer {
             self.send_prompt_error(id, &message);
             return;
         }
-        let (cwd, project_root, store_scope, environment_policy) =
+        let (cwd, project_root, store_scope, environment_policy, workspace_checkpoint) =
             match self.sessions.get(&session_id) {
                 Some(session) => (
                     session.cwd.clone(),
                     session.project_root.clone(),
                     session.store_scope.clone(),
                     session.environment_policy.clone(),
+                    session.workspace_checkpoint,
                 ),
                 None => {
                     self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
@@ -406,6 +444,37 @@ impl AcpServer {
                 return;
             }
         };
+        let mut checkpoint_reserved = false;
+        if workspace_checkpoint {
+            if let Some(boundary_id) = prompt.correlation.message_id.as_deref() {
+                let tracking = &self
+                    .sessions
+                    .get(&session_id)
+                    .expect("admitted session")
+                    .checkpoint_tracking;
+                match tracking.reserve(boundary_id) {
+                    Ok(true) => checkpoint_reserved = true,
+                    Ok(false) => tracking.fail(
+                        boundary_id,
+                        "messageId was already used by this checkpoint lineage".to_string(),
+                    ),
+                    Err(_) => {}
+                }
+            }
+        }
+        #[cfg(feature = "hostlib")]
+        if checkpoint_reserved {
+            if let Some(boundary_id) = prompt.correlation.message_id.as_deref() {
+                // A failed capture must not prevent the person's prompt running.
+                self.sessions
+                    .get(&session_id)
+                    .expect("admitted session")
+                    .checkpoint_tracking
+                    .capture_boundary(&session_id, boundary_id, &cwd, &store_scope, true);
+            }
+        }
+        #[cfg(not(feature = "hostlib"))]
+        let _ = (workspace_checkpoint, checkpoint_reserved);
         self.turn_started(&session_id, reply);
         let output = self
             .output
@@ -453,6 +522,41 @@ impl AcpServer {
         );
         host_bridge.set_session_id(&bridge.session_id);
         host_bridge.set_caller_message_id(prompt.correlation.message_id.clone());
+        #[cfg(feature = "hostlib")]
+        if workspace_checkpoint {
+            let tracking = self
+                .sessions
+                .get(&session_id)
+                .expect("admitted session")
+                .checkpoint_tracking
+                .clone();
+            let owner_id = session_id.clone();
+            let checkpoint_root = cwd.clone();
+            let checkpoint_scope = store_scope.clone();
+            host_bridge.set_user_injection_boundary(Arc::new(
+                move |injected_session, message_id, stage| {
+                    if injected_session == owner_id {
+                        match stage {
+                            harn_vm::bridge::UserInjectionStage::Before => tracking
+                                .capture_boundary(
+                                    injected_session,
+                                    message_id,
+                                    &checkpoint_root,
+                                    &checkpoint_scope,
+                                    false,
+                                ),
+                            harn_vm::bridge::UserInjectionStage::Delivered => {
+                                tracking.finish_injection(message_id, true);
+                            }
+                            harn_vm::bridge::UserInjectionStage::Failed => {
+                                tracking.finish_injection(message_id, false);
+                            }
+                            _ => tracking.finish_injection(message_id, false),
+                        }
+                    }
+                },
+            ));
+        }
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.host_bridge = Some(host_bridge.clone());
             session

@@ -2506,6 +2506,12 @@ export const HARN_INFERENCE_ADMISSION_DATA_POSTURE_VALUES = [
 ] as const
 export type HarnInferenceAdmissionDataPosture = (typeof HARN_INFERENCE_ADMISSION_DATA_POSTURE_VALUES)[number]
 
+export const HARN_NO_TRAINING_REQUIREMENT_VALUES = [
+  "billing_enabled",
+  "contributor_sharing_disabled",
+] as const
+export type HarnNoTrainingRequirement = (typeof HARN_NO_TRAINING_REQUIREMENT_VALUES)[number]
+
 export const HARN_INFERENCE_ADMISSION_DATA_CONTROLS_OUTCOME_VALUES = [
   "not_requested",
   "applied",
@@ -2546,6 +2552,7 @@ export interface HarnInferenceAdmissionSnapshot {
   status: HarnInferenceAdmissionStatus
   training_control_planned: boolean
   data_posture: HarnInferenceAdmissionDataPosture
+  account_confirmation_applied?: boolean
   data_controls_note?: string | null
   data_controls_outcome?: HarnInferenceAdmissionDataControlsOutcome
   data_controls_refusal?: HarnInferenceAdmissionDataControlsRefusal
@@ -2553,7 +2560,15 @@ export interface HarnInferenceAdmissionSnapshot {
   governing_rule?: string | null
   local_runtime?: boolean | null
   open_weight?: boolean | null
+  required_account_facts?: HarnNoTrainingRequirement[]
   training_default?: string | null
+}
+
+export interface HarnProviderAccountAttestation {
+  provider: string
+  credential_fingerprint: string
+  billing_enabled?: boolean | null
+  contributor_sharing_enabled?: boolean | null
 }
 export interface HarnCanonicalSessionBoundary {
   schema: string

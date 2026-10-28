@@ -495,6 +495,39 @@ fn real_background_child_receives_explicit_credential_over_private_pipe() {
 }
 
 #[test]
+fn real_background_hard_timeout_reaps_detached_descendant() {
+    let session_id = format!("test-background-hard-timeout-{}", std::process::id());
+    let _session = harn_vm::agent_sessions::enter_current_session(session_id);
+    let python = python3().expect("the process fixture requires Python 3");
+    let script = "import subprocess,sys; p=subprocess.Popen(['sleep','60'],start_new_session=True); print(p.pid,flush=True); p.wait()";
+    let mut request = dict_map();
+    request.insert("argv".into(), vlist_str(&[&python, "-c", script]));
+    request.put_bool("background", true);
+    request.put_int("hard_timeout_ms", 1500);
+    let started = require_dict(call("hostlib_tools_run_command", request).unwrap());
+    let mut wait = dict_map();
+    wait.insert(
+        "handle_id".into(),
+        vm_string(&require_str(&started, "handle_id")),
+    );
+    wait.put_int("timeout_ms", 15_000);
+    let result = require_dict(call("hostlib_tools_wait_command", wait).unwrap());
+    assert_eq!(require_str(&result, "status"), "timed_out");
+    assert!(require_bool(&result, "timed_out"));
+    let stdout = require_str(&result, "stdout");
+    let pid: i32 = stdout
+        .lines()
+        .find_map(|line| line.trim().parse().ok())
+        .unwrap_or_else(|| panic!("detached child did not report its PID: {stdout:?}"));
+    assert!(pid > 0);
+    let cleanup = require_nested_dict(&result, "process_cleanup");
+    assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+    // The actual detached child was reached, and the operating system no
+    // longer reports it alive after the measured cleanup receipt.
+    assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "detached child survived");
+}
+
+#[test]
 fn real_wait_command_completes_background_after_fifo_release() {
     let session_id = format!(
         "test-real-wait-command-release-{}-{:?}",
@@ -1214,6 +1247,7 @@ fn real_run_command_background_child_survives_interrupt() {
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "30"]));
     req.put_bool("background", true);
+    req.put_int("hard_timeout_ms", 30_000);
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert_eq!(require_str(&resp, "status"), "running");
     let pid = require_int(&resp, "pid");
@@ -1239,6 +1273,13 @@ fn real_run_command_background_child_survives_interrupt() {
     completion_rx
         .recv()
         .expect("background waiter did not publish completion");
+    let mut wait_req = dict_map();
+    wait_req.insert("handle_id".into(), vm_string(&handle_id));
+    let terminal = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+    assert!(
+        !require_bool(&terminal, "timed_out"),
+        "explicit cancellation is not a deadline"
+    );
     assert!(!unix_process_exists(pid), "cancel_handle must reap {pid}");
 }
 

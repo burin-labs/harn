@@ -2150,6 +2150,15 @@ var HarnInferenceAdmissionDataPostureValues = []HarnInferenceAdmissionDataPostur
 	"strictest_available",
 }
 
+// HarnNoTrainingRequirement is the named string type for the HarnNoTrainingRequirementValues wire vocabulary.
+type HarnNoTrainingRequirement string
+
+// HarnNoTrainingRequirementValues enumerates every wire value Harn currently emits for HarnNoTrainingRequirement.
+var HarnNoTrainingRequirementValues = []HarnNoTrainingRequirement{
+	"billing_enabled",
+	"contributor_sharing_disabled",
+}
+
 // HarnInferenceAdmissionDataControlsOutcome is the named string type for the HarnInferenceAdmissionDataControlsOutcomeValues wire vocabulary.
 type HarnInferenceAdmissionDataControlsOutcome string
 
@@ -2190,20 +2199,29 @@ type HarnInferenceAdmissionRequest struct {
 }
 
 type HarnInferenceAdmissionSnapshot struct {
-	Schema                 string                                     `json:"schema"`
-	Provider               string                                     `json:"provider"`
-	Model                  string                                     `json:"model"`
-	Status                 HarnInferenceAdmissionStatus               `json:"status"`
-	TrainingControlPlanned bool                                       `json:"training_control_planned"`
-	DataPosture            HarnInferenceAdmissionDataPosture          `json:"data_posture"`
-	DataControlsNote       *string                                    `json:"data_controls_note,omitempty"`
-	DataControlsOutcome    *HarnInferenceAdmissionDataControlsOutcome `json:"data_controls_outcome,omitempty"`
-	DataControlsRefusal    *HarnInferenceAdmissionDataControlsRefusal `json:"data_controls_refusal,omitempty"`
-	EffectiveBoundary      *HarnInferenceAdmissionBoundary            `json:"effective_boundary,omitempty"`
-	GoverningRule          *string                                    `json:"governing_rule,omitempty"`
-	LocalRuntime           *bool                                      `json:"local_runtime,omitempty"`
-	OpenWeight             *bool                                      `json:"open_weight,omitempty"`
-	TrainingDefault        *string                                    `json:"training_default,omitempty"`
+	Schema                     string                                     `json:"schema"`
+	Provider                   string                                     `json:"provider"`
+	Model                      string                                     `json:"model"`
+	Status                     HarnInferenceAdmissionStatus               `json:"status"`
+	TrainingControlPlanned     bool                                       `json:"training_control_planned"`
+	DataPosture                HarnInferenceAdmissionDataPosture          `json:"data_posture"`
+	AccountConfirmationApplied *bool                                      `json:"account_confirmation_applied,omitempty"`
+	DataControlsNote           *string                                    `json:"data_controls_note,omitempty"`
+	DataControlsOutcome        *HarnInferenceAdmissionDataControlsOutcome `json:"data_controls_outcome,omitempty"`
+	DataControlsRefusal        *HarnInferenceAdmissionDataControlsRefusal `json:"data_controls_refusal,omitempty"`
+	EffectiveBoundary          *HarnInferenceAdmissionBoundary            `json:"effective_boundary,omitempty"`
+	GoverningRule              *string                                    `json:"governing_rule,omitempty"`
+	LocalRuntime               *bool                                      `json:"local_runtime,omitempty"`
+	OpenWeight                 *bool                                      `json:"open_weight,omitempty"`
+	RequiredAccountFacts       []HarnNoTrainingRequirement                `json:"required_account_facts,omitempty"`
+	TrainingDefault            *string                                    `json:"training_default,omitempty"`
+}
+
+type HarnProviderAccountAttestation struct {
+	Provider                  string `json:"provider"`
+	CredentialFingerprint     string `json:"credential_fingerprint"`
+	BillingEnabled            *bool  `json:"billing_enabled,omitempty"`
+	ContributorSharingEnabled *bool  `json:"contributor_sharing_enabled,omitempty"`
 }
 type HarnCanonicalSessionBoundary struct {
 	Schema     string  `json:"schema"`

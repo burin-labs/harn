@@ -31,6 +31,7 @@ pub(super) fn append(out: &mut String, target: Target) {
         ("InferenceAdmissionStatus", "HarnInferenceAdmissionStatus"),
         ("InferenceReach", "HarnInferenceAdmissionReach"),
         ("DataPosture", "HarnInferenceAdmissionDataPosture"),
+        ("NoTrainingRequirement", "HarnNoTrainingRequirement"),
         (
             "DataControlsOutcome",
             "HarnInferenceAdmissionDataControlsOutcome",
@@ -96,6 +97,10 @@ pub(super) fn append(out: &mut String, target: Target) {
             "InferenceAdmissionSnapshot",
             "HarnInferenceAdmissionSnapshot".into(),
         ),
+        (
+            "ProviderAccountAttestation",
+            "HarnProviderAccountAttestation".into(),
+        ),
     ];
     let schema = json!({"$defs": definitions});
     let records = SchemaRecords {
@@ -117,6 +122,9 @@ pub(super) fn append(out: &mut String, target: Target) {
                 "data_controls_refusal" => Some(FieldKind::Named(
                     "HarnInferenceAdmissionDataControlsRefusal".into(),
                 )),
+                "required_account_facts" => Some(FieldKind::DefaultList(Box::new(
+                    FieldKind::Named("HarnNoTrainingRequirement".into()),
+                ))),
                 _ => None,
             })
         },

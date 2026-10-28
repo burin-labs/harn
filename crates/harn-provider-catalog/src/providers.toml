@@ -16041,7 +16041,11 @@ latency_p50_ms = 1800
 [providers.gemini.data_controls]
 checked_on = "2026-10-27"
 control_scope = "per_request"
-note = "Harn cannot confirm whether this project uses paid service with Contributor Tier sharing turned off. Full zero-data-retention requires approval; Search grounding retains data for 30 days."
+no_training_requires = [
+    "billing_enabled",
+    "contributor_sharing_disabled",
+]
+note = "Harn cannot confirm whether Contributor Tier sharing is turned off without a matching account confirmation; billing must also be enabled. Full zero-data-retention requires approval; Search grounding retains data for 30 days."
 retention_default = "unspecified"
 sources = [
     "https://ai.google.dev/gemini-api/terms",

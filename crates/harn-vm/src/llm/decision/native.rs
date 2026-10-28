@@ -32,6 +32,7 @@ pub(super) fn privacy_plan(
         dialect,
         DataPosture::StrictestAvailable,
         crate::llm::api::inference_boundary::effective(None),
+        None,
         crate::llm::api::data_controls::ControlDelivery::Written,
     )
 }

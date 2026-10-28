@@ -360,7 +360,9 @@ import {
 } from "std/command"
 
 const server = command_run(
-  harness.tools, ["my-server", "--port", "8080"], {background: true},
+  harness.tools,
+  ["my-server", "--port", "8080"],
+  {background: true, hard_timeout_ms: 60000},
 )
 defer { command_cancel(server, {wait_result_ms: 5000}) }
 const ready = command_wait_for_output(

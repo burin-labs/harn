@@ -4,220 +4,85 @@
   "title": "fs.checkpoint_restore response",
   "type": "object",
   "description": "Either the method's result (`available: true`) or an explicit unavailable result. Unavailable is never an empty success.",
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "action": {"enum": ["restore", "delete", "recreate", "refuse", "skip", "fail"]},
+        "writers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "properties": {"kind": {"const": "unknown"}},
+            "required": ["kind"],
+            "additionalProperties": false
+          }
+        },
+        "observed": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {"kind": {"const": "absent"}},
+              "required": ["kind"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {"const": "present"},
+                "sha256": {"type": "string"}
+              },
+              "required": ["kind", "sha256"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "reason": {"type": "string"},
+        "expected_hash": {"type": "string"},
+        "found_hash": {"type": "string"}
+      },
+      "required": ["path", "action", "writers"],
+      "additionalProperties": false
+    }
+  },
   "oneOf": [
     {
       "type": "object",
       "properties": {
-        "available": {
-          "const": true
-        },
-        "boundary_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "restored": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string",
-                "minLength": 1
-              },
-              "action": {
-                "enum": [
-                  "restore",
-                  "delete",
-                  "recreate",
-                  "refuse",
-                  "skip",
-                  "fail"
-                ]
-              },
-              "reason": {
-                "type": "string"
-              },
-              "expected_hash": {
-                "type": "string"
-              },
-              "found_hash": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "path",
-              "action"
-            ],
-            "additionalProperties": false
-          }
-        },
-        "refused": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string",
-                "minLength": 1
-              },
-              "action": {
-                "enum": [
-                  "restore",
-                  "delete",
-                  "recreate",
-                  "refuse",
-                  "skip",
-                  "fail"
-                ]
-              },
-              "reason": {
-                "type": "string"
-              },
-              "expected_hash": {
-                "type": "string"
-              },
-              "found_hash": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "path",
-              "action"
-            ],
-            "additionalProperties": false
-          }
-        },
-        "skipped": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string",
-                "minLength": 1
-              },
-              "action": {
-                "enum": [
-                  "restore",
-                  "delete",
-                  "recreate",
-                  "refuse",
-                  "skip",
-                  "fail"
-                ]
-              },
-              "reason": {
-                "type": "string"
-              },
-              "expected_hash": {
-                "type": "string"
-              },
-              "found_hash": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "path",
-              "action"
-            ],
-            "additionalProperties": false
-          }
-        },
+        "available": {"const": true},
+        "boundary_id": {"type": "string", "minLength": 1},
+        "restored": {"type": "array", "items": {"$ref": "#/$defs/entry"}},
+        "refused": {"type": "array", "items": {"$ref": "#/$defs/entry"}},
+        "skipped": {"type": "array", "items": {"$ref": "#/$defs/entry"}},
+        "failed": {"type": "array", "items": {"$ref": "#/$defs/entry"}},
         "irreversible": {
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
-              "call_id": {
-                "type": "string",
-                "minLength": 1
-              },
-              "side_effect": {
-                "enum": [
-                  "network",
-                  "desktop_control"
-                ]
-              }
+              "call_id": {"type": "string", "minLength": 1},
+              "side_effect": {"enum": ["network", "desktop_control"]}
             },
-            "required": [
-              "call_id",
-              "side_effect"
-            ],
-            "additionalProperties": false
-          }
-        },
-        "failed": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string",
-                "minLength": 1
-              },
-              "action": {
-                "enum": [
-                  "restore",
-                  "delete",
-                  "recreate",
-                  "refuse",
-                  "skip",
-                  "fail"
-                ]
-              },
-              "reason": {
-                "type": "string"
-              },
-              "expected_hash": {
-                "type": "string"
-              },
-              "found_hash": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "path",
-              "action"
-            ],
+            "required": ["call_id", "side_effect"],
             "additionalProperties": false
           }
         }
       },
-      "required": [
-        "available",
-        "boundary_id",
-        "restored",
-        "refused",
-        "skipped",
-        "irreversible",
-        "failed"
-      ],
+      "required": ["available", "boundary_id", "restored", "refused", "skipped", "irreversible", "failed"],
       "additionalProperties": false
     },
     {
       "type": "object",
       "properties": {
-        "available": {
-          "const": false
-        },
+        "available": {"const": false},
         "reason": {
-          "enum": [
-            "not_a_git_worktree",
-            "git_unavailable",
-            "index_not_writable_as_tree",
-            "no_checkpoint",
-            "unknown_boundary"
-          ]
+          "enum": ["not_a_git_worktree", "git_unavailable", "index_not_writable_as_tree", "no_checkpoint", "unknown_boundary", "calls_in_flight", "incomplete_attribution"]
         },
-        "detail": {
-          "type": "string"
-        }
+        "detail": {"type": "string"}
       },
-      "required": [
-        "available",
-        "reason",
-        "detail"
-      ],
+      "required": ["available", "reason", "detail"],
       "additionalProperties": false
     }
   ]

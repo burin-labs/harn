@@ -29,6 +29,11 @@ fn typescript_type_block(language: &str) -> String {
         .map(|operation| format!("\"{}\"", operation.as_str()))
         .collect::<Vec<_>>()
         .join(" | ");
+    let no_training_requirements = crate::no_training_requirement_values()
+        .iter()
+        .map(|requirement| serde_json::to_string(requirement).expect("requirement is serializable"))
+        .collect::<Vec<_>>()
+        .join(" | ");
     format!(
         "{}{}",
         generated_header("//", language),
@@ -40,6 +45,10 @@ fn typescript_type_block(language: &str) -> String {
             .replace("__HARN_CHAT_API_ADAPTERS__", &chat_adapters)
             .replace("__HARN_MODEL_OPERATIONS__", &operations)
             .replace("__HARN_DATA_CONTROL_DIALECTS__", &dialects)
+            .replace(
+                "__HARN_NO_TRAINING_REQUIREMENTS__",
+                &no_training_requirements
+            )
     )
 }
 
@@ -68,10 +77,20 @@ fn swift_binding_body() -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let no_training_requirements = crate::no_training_requirement_values()
+        .iter()
+        .map(|requirement| format!("    case {requirement} = \"{requirement}\""))
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
         "{}{}",
         generated_header("//", "swift"),
-        SWIFT_TYPES.replace("__HARN_MODEL_OPERATIONS__", &operations)
+        SWIFT_TYPES
+            .replace("__HARN_MODEL_OPERATIONS__", &operations)
+            .replace(
+                "__HARN_NO_TRAINING_REQUIREMENT_CASES__",
+                &no_training_requirements
+            )
     )
 }
 

@@ -264,6 +264,7 @@ fn validate_served_admission(
         crate::llm_config::DataControlDialect::OpenAiSse,
         crate::llm_config::DataPosture::Default,
         Some(boundary),
+        None,
         data_controls::ControlDelivery::Unsupported,
     );
     inference_boundary::governing_rule(boundary, provider, model, &controls.receipt)
