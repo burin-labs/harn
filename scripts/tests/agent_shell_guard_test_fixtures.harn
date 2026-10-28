@@ -19,7 +19,7 @@ pub fn claude_payload(command: string) -> string {
   return json_stringify({tool_name: "Bash", tool_input: {command: command}})
 }
 
-pub const TEST_GIT_BUILTINS: fn(string) -> list<string> = { program ->
+pub const TEST_GIT_BUILTINS: fn(string) -> list<string> = { _program ->
   [
     "config",
     "diff",

@@ -2,7 +2,6 @@
 import {
   ADMISSION_CHECKED_ENV,
   GIT_ALIASES_UNREADABLE,
-  NO_CONFIG_ALIASES,
   ShellGuardDecision,
   WorktreeAdmissionCensus,
   cargo_violation,
@@ -12,7 +11,6 @@ import {
   is_disposable_path,
   make_target_census,
   program_of,
-  raw_worktree_add_attempt,
   raw_worktree_add_violation,
   segments_of,
   worktree_admission_census,
@@ -1254,7 +1252,7 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
     )
   }
   // A configuration git could not read is refused rather than read as having no aliases.
-  const unreadable = { options -> {"<unreadable>": ""} }
+  const unreadable = { _options -> {"<unreadable>": ""} }
   assert(
     !decision(claude_payload("git -C /missing s"), ADMITTED, NO_MAKE_TARGETS, unreadable).allow,
   )
@@ -1267,7 +1265,7 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
         ADMITTED,
         NO_MAKE_TARGETS,
         unreadable,
-        { program -> ["status", "log", "diff"] },
+        { _program -> ["status", "log", "diff"] },
       ).allow,
       command + " must not consult the alias lookup",
     )
@@ -1276,7 +1274,7 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
   const nested = git_config_aliases("alias.foo !git -c alias.s=stash s pop\n")
   assert_eq(nested["foo"], "!git -c alias.s=stash s pop")
   assert(
-    !decision(claude_payload("git foo"), ADMITTED, NO_MAKE_TARGETS, { options -> nested }).allow,
+    !decision(claude_payload("git foo"), ADMITTED, NO_MAKE_TARGETS, { _options -> nested }).allow,
     "an alias that defines an inner alias still reaches the stash write",
   )
   // A command-local config source is invisible to the lookup, so a non-built-in subcommand under it
@@ -1307,7 +1305,7 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
       ADMITTED,
       NO_MAKE_TARGETS,
       lookup,
-      { program -> ["status"] },
+      { _program -> ["status"] },
     ).allow,
   )
   assert(
