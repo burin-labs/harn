@@ -17,7 +17,7 @@ for name in os.listdir('/dev/fd'):
     except OSError as error:
         assert error.errno == errno.EBADF
         continue
-    raise AssertionError('payload inherited an extra descriptor')
+    raise AssertionError('payload inherited descriptor ' + name + ': ' + os.readlink('/dev/fd/' + name))
 r, w = os.pipe()
 pid = os.fork()
 if pid == 0:
@@ -46,7 +46,7 @@ print(pid, flush=True)
     assert_response_matches_schema("wait_command", &waited);
     let waited = require_dict(waited);
     assert_eq!(require_str(&waited, "status"), "completed");
-    assert_eq!(require_int(&waited, "exit_code"), 0);
+    assert_eq!(require_int(&waited, "exit_code"), 0, "{waited:?}");
     let stdout = require_str(&waited, "stdout");
     let pid: i32 = stdout
         .lines()

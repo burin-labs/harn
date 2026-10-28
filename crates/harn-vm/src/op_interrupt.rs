@@ -775,7 +775,6 @@ fn cleanup_token_census(token: &str) -> (Vec<ProcessCleanupChild>, ProcessCleanu
         false,
         ProcessRefreshKind::nothing()
             .with_environ(UpdateKind::Always)
-            .with_user(UpdateKind::Always)
             .with_cmd(UpdateKind::Always),
     );
     let own_pid = sysinfo::Pid::from_u32(std::process::id());
@@ -788,14 +787,11 @@ fn cleanup_token_census(token: &str) -> (Vec<ProcessCleanupChild>, ProcessCleanu
             process.environ().contains(&entry)
         })
     });
-    let own_uid = own.and_then(|process| process.user_id());
     let unreadable_processes = sys
         .processes()
         .values()
         .filter(|process| {
-            process_status_can_execute(process.status())
-                && (process.user_id().is_none() || process.user_id() == own_uid)
-                && process.environ().is_empty()
+            process_status_can_execute(process.status()) && process.environ().is_empty()
         })
         .count();
     let census = ProcessCleanupCensus {
