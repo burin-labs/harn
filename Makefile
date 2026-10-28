@@ -605,7 +605,7 @@ lint-harn-trees:
 	$(HARN_CMD) lint --strict tests && \
 	$(HARN_CMD) lint --strict bench && \
 	$(HARN_CMD) lint --strict crates/harn-cli/assets/demo && \
-	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals crates/harn-serve/src/adapters/api/tests/fixtures; \
+	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals crates/harn-serve/src/adapters/api/tests/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures; \
 	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
 
 lint-harn-stdlib-metadata:
@@ -641,7 +641,7 @@ STDLIB_HARN_DIR := crates/harn-stdlib/src/stdlib
 # historically outside the fmt-harn gate. Keeping them in the
 # gate avoids the "I edited persona X and pre-commit reformatted three
 # unrelated files" surprise from accumulated drift.
-EXTRA_HARN_DIRS := personas tests examples evals crates/harn-cli/assets/demo crates/harn-vm/src/llm/rate_limit/fixtures crates/harn-serve/src/adapters/api/tests/fixtures
+EXTRA_HARN_DIRS := personas tests examples evals crates/harn-cli/assets/demo crates/harn-vm/src/llm/rate_limit/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures crates/harn-serve/src/adapters/api/tests/fixtures
 EXTRA_HARN_FIND := find $(EXTRA_HARN_DIRS) -type d -name .harn -prune -o -type f -name '*.harn' -print0 2>/dev/null
 
 fmt-harn-fix:

@@ -71,6 +71,25 @@ impl CompositionToolHost for ClosureCompositionToolHost {
                 let json = crate::llm::vm_value_to_json(&value);
                 CompositionToolOutput::ok(json)
             }
+            Err(crate::value::VmError::Thrown(value)) => {
+                let json = crate::llm::vm_value_to_json(&value);
+                if json.get("schema").and_then(Value::as_str)
+                    == Some("harn.composition.dispatch_error.v1")
+                {
+                    if let (Some(message), Some(category)) = (
+                        json.get("message").and_then(Value::as_str),
+                        json.get("error_category").and_then(|category| {
+                            serde_json::from_value::<ToolCallErrorCategory>(category.clone()).ok()
+                        }),
+                    ) {
+                        return CompositionToolOutput::error(message, category);
+                    }
+                }
+                CompositionToolOutput::error(
+                    crate::value::VmError::Thrown(value).to_string(),
+                    ToolCallErrorCategory::ToolError,
+                )
+            }
             Err(error) => {
                 CompositionToolOutput::error(error.to_string(), ToolCallErrorCategory::ToolError)
             }

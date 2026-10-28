@@ -339,14 +339,14 @@ struct FixtureStatusDelta {
 pub async fn run(args: EvalCodingAgentArgs) -> i32 {
     let output_dir = args.output.clone().unwrap_or_else(default_output_dir);
     if let Err(error) = fs::create_dir_all(&output_dir) {
-        eprintln!("error: failed to create {}: {error}", output_dir.display());
+        cli_diagnostic!("error: failed to create {}: {error}", output_dir.display());
         return 1;
     }
 
     let (_env_guard, env_keys_loaded) = match load_env_files(&args.env_files) {
         Ok(loaded) => loaded,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -354,21 +354,21 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
     let fixtures = match resolve_fixtures(&args.fixtures, &args.python) {
         Ok(fixtures) => fixtures,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 2;
         }
     };
     let models = match resolve_models(&args).await {
         Ok(models) => models,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
     let tool_formats = match normalize_tool_formats(&args.tool_formats) {
         Ok(formats) => formats,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 2;
         }
     };
@@ -380,7 +380,7 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         args.replicates,
     );
     if matrix.is_empty() {
-        eprintln!("error: no coding-agent benchmark runs selected");
+        cli_diagnostic!("error: no coding-agent benchmark runs selected");
         return 2;
     }
 
@@ -408,14 +408,14 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
             .or(report.stderr_excerpt.as_deref())
             .filter(|detail| !detail.trim().is_empty());
         match detail {
-            Some(detail) => eprintln!(
+            Some(detail) => cli_diagnostic!(
                 "{} {} {}: {} ({detail})",
                 report.fixture_id,
                 selector_label(&report.selector),
                 report.tool_format,
                 report.status
             ),
-            None => eprintln!(
+            None => cli_diagnostic!(
                 "{} {} {}: {}",
                 report.fixture_id,
                 selector_label(&report.selector),
@@ -430,7 +430,7 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         Some(path) => match load_baseline_comparison(path, &reports) {
             Ok(comparison) => Some(comparison),
             Err(error) => {
-                eprintln!("error: --baseline-comparison-against: {error}");
+                cli_diagnostic!("error: --baseline-comparison-against: {error}");
                 return 1;
             }
         },
@@ -455,7 +455,7 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
     // before any rendering so a render failure doesn't leave a partially
     // written report directory.
     if let Err(error) = write_json_artifacts(&output_dir, &summary) {
-        eprintln!("error: failed to write benchmark outputs: {error}");
+        cli_diagnostic!("error: failed to write benchmark outputs: {error}");
         return 1;
     }
 
@@ -1192,7 +1192,7 @@ fn write_json_artifacts(output_dir: &Path, summary: &EvalSummary) -> Result<(), 
 }
 
 fn announce_output_paths(output_dir: &Path) {
-    eprintln!(
+    cli_diagnostic!(
         "wrote {}, {}, {}, {}, {}, {}, and {}",
         output_dir.join("summary.json").display(),
         output_dir.join("per_run.jsonl").display(),
@@ -1212,12 +1212,12 @@ async fn write_markdown_artifacts_dispatch(
 ) -> Result<(), i32> {
     let markdown = render_via_dispatch(summary, "markdown").await?;
     if let Err(error) = fs::write(output_dir.join("summary.md"), markdown) {
-        eprintln!("error: failed to write summary.md: {error}");
+        cli_diagnostic!("error: failed to write summary.md: {error}");
         return Err(1);
     }
     let followups = render_via_dispatch(summary, "followups").await?;
     if let Err(error) = fs::write(output_dir.join("followups.md"), followups) {
-        eprintln!("error: failed to write followups.md: {error}");
+        cli_diagnostic!("error: failed to write followups.md: {error}");
         return Err(1);
     }
     Ok(())
@@ -1254,7 +1254,7 @@ async fn render_via_dispatch(summary: &EvalSummary, mode: &str) -> Result<String
     let summary_json = match serde_json::to_string(summary) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to serialise EvalSummary for dispatch: {error}");
+            cli_diagnostic!("error: failed to serialise EvalSummary for dispatch: {error}");
             return Err(1);
         }
     };

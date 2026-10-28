@@ -36,18 +36,18 @@ pub(crate) fn run_generate(args: &ProvidersGenerateArgs) -> Result<(), String> {
     let validation = validate_artifact_contract(&artifact)?;
     if !validation.errors.is_empty() || !validation.schema_errors.is_empty() {
         for warning in validation.warnings {
-            eprintln!("warning: {warning}");
+            cli_diagnostic!("warning: {warning}");
         }
         for error in validation.errors {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
         }
         for error in validation.schema_errors {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
         }
         return Err("generated provider catalog contract is invalid".to_string());
     }
     for warning in validation.warnings {
-        eprintln!("warning: {warning}");
+        cli_diagnostic!("warning: {warning}");
     }
     let artifacts = generated_artifacts_from_artifact(&artifact)?;
     let stdlib_provider_names = generated_stdlib_provider_names(&provider_config.config);
@@ -72,7 +72,9 @@ pub(crate) fn run_generate(args: &ProvidersGenerateArgs) -> Result<(), String> {
             return Ok(());
         }
         for path in drift {
-            eprintln!("error: generated provider catalog artifact is stale or missing: {path}");
+            cli_diagnostic!(
+                "error: generated provider catalog artifact is stale or missing: {path}"
+            );
         }
         return Err("provider catalog generated artifacts drifted".to_string());
     }

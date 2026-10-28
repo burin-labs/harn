@@ -42,7 +42,12 @@ async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session(
     crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
     crate::agent_sessions::install_journal(session_id, prepared.state).expect("install journal");
     let mut rollback = super::AgentSessionInitRollback::new(session_id.to_string(), true);
-    rollback.fail(None).await;
+    rollback
+        .fail(
+            None,
+            &crate::value::VmError::UndefinedBuiltin("host_pipeline_input".into()),
+        )
+        .await;
 
     assert!(!crate::agent_sessions::exists(session_id));
     assert!(!crate::agent_sessions::has_journal(session_id));
@@ -78,6 +83,18 @@ async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session(
             .pointer("/transcript_event/metadata/visible_reply"),
         Some(&json!(""))
     );
+    assert_eq!(
+        terminals[0]
+            .payload
+            .pointer("/transcript_event/metadata/error/kind"),
+        Some(&json!("undefined_builtin"))
+    );
+    assert_eq!(
+        terminals[0]
+            .payload
+            .pointer("/transcript_event/metadata/error/message"),
+        Some(&json!("Undefined builtin: host_pipeline_input"))
+    );
     let replay =
         crate::agent_session_restore::load_canonical_session_replay_from_store(&*store, session_id)
             .await
@@ -90,6 +107,60 @@ async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session(
     } if reply.is_empty() && outcome.kind == agent_events::AgentTerminalKind::RuntimeError)
     ));
     crate::agent_sessions::reset_session_store();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn initialization_failure_redacts_secret_in_durable_cause() {
+    crate::test_support::session_init_fixture::reset();
+    let root = tempfile::tempdir().expect("temp root");
+    let session_id = "init-redaction";
+    crate::test_support::session_init_fixture::prepare(root.path(), session_id).await;
+    let mut rollback = super::AgentSessionInitRollback::new(session_id.to_string(), true);
+    rollback
+        .fail(
+            None,
+            &crate::value::VmError::Runtime("api_key=sk-probe-secret-do-not-persist".into()),
+        )
+        .await;
+    let terminal =
+        crate::test_support::session_init_fixture::terminal(root.path(), session_id).await;
+    let error = terminal
+        .pointer("/transcript_event/metadata/error")
+        .expect("typed cause");
+    assert_eq!(error["kind"], "vm_error");
+    assert!(!error.to_string().contains("sk-probe-secret-do-not-persist"));
+    assert!(!terminal
+        .to_string()
+        .contains("sk-probe-secret-do-not-persist"));
+    crate::test_support::session_init_fixture::reset();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn failing_prompt_hook_records_its_actual_initialization_cause() {
+    crate::test_support::session_init_fixture::reset_with_hooks();
+    let root = tempfile::tempdir().expect("temp root");
+    let root_literal = serde_json::to_string(root.path().to_str().unwrap()).unwrap();
+    let source =
+        include_str!("fixtures/failing_prompt_hook.harn").replace("__TEST_ROOT__", &root_literal);
+    let chunk = crate::compile_source(&source).expect("compile test pipeline");
+    let mut vm = crate::test_support::vm_with_stdlib();
+    let error = vm
+        .execute(&chunk)
+        .await
+        .expect_err("the real prompt hook must fail");
+    assert!(error.to_string().contains("prompt hook failed distinctly"));
+    let terminal =
+        crate::test_support::session_init_fixture::terminal(root.path(), "failing-prompt-hook")
+            .await;
+    let error = terminal
+        .pointer("/transcript_event/metadata/error/message")
+        .and_then(serde_json::Value::as_str)
+        .expect("typed cause message");
+    assert!(
+        error.contains("prompt hook failed distinctly"),
+        "actual hook cause: {error}"
+    );
+    crate::test_support::session_init_fixture::reset_with_hooks();
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -98,7 +98,7 @@ the queue with `harn orchestrator queue drain triage`. See
 `HARN_ORCHESTRATOR_KEY`.
 
 The listener serves Prometheus metrics at `/metrics`. Logs default to compact
-text; pass `--log-format json` for newline-delimited JSON on stdout plus a
+text; pass `--log-format json` for newline-delimited JSON on stderr plus a
 rotating file at `<state-dir>/logs/orchestrator.log`. Set
 `HARN_OTEL_ENDPOINT` to export OTLP traces. See
 [Orchestrator observability](./orchestrator/observability.md) for metric names,

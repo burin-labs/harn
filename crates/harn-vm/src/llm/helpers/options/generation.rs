@@ -467,7 +467,10 @@ pub fn validate_options(opts: &crate::llm::api::LlmCallOptions) -> Result<(), Vm
     {
         if !model.supports_operation(crate::llm_config::ModelOperation::TextGeneration) {
             return Err(crate::llm::call::invalid_request_error(
-                "model does not declare required operation `text_generation`",
+                format!(
+                    "model does not declare required operation `text_generation` (model: {})",
+                    opts.model
+                ),
                 &opts.provider,
                 &opts.model,
             ));

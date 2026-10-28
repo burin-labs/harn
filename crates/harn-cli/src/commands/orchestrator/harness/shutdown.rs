@@ -53,7 +53,10 @@ pub(super) async fn graceful_shutdown(
     waitpoint_cancel_pump: PumpHandle,
     waitpoint_sweeper: WaitpointSweepHandle,
 ) -> Result<(), OrchestratorError> {
-    eprintln!("[harn] signal received, starting graceful shutdown...");
+    harn_vm::events::log_info(
+        "orchestrator",
+        "signal received, starting graceful shutdown...",
+    );
     tracing::info!(
         component = "orchestrator",
         trace_id = "",
@@ -89,9 +92,12 @@ pub(super) async fn graceful_shutdown(
     for handle in &ctx.connectors.handles {
         let connector = handle.lock().await;
         if let Err(error) = connector.shutdown(remaining_budget(deadline)).await {
-            eprintln!(
-                "[harn] connector {} shutdown warning: {error}",
-                connector.provider_id().as_str()
+            harn_vm::events::log_warn(
+                "orchestrator",
+                &format!(
+                    "connector {} shutdown: {error}",
+                    connector.provider_id().as_str()
+                ),
             );
         }
     }
@@ -222,12 +228,15 @@ pub(super) async fn graceful_shutdown(
     )?;
 
     if timed_out {
-        eprintln!(
-            "[harn] graceful shutdown timed out with {} dispatches and {} retry waits remaining",
-            drain_report.in_flight, drain_report.retry_queue_depth
+        harn_vm::events::log_warn(
+            "orchestrator",
+            &format!(
+                "graceful shutdown timed out with {} dispatches and {} retry waits remaining",
+                drain_report.in_flight, drain_report.retry_queue_depth
+            ),
         );
     }
-    eprintln!("[harn] graceful shutdown complete");
+    harn_vm::events::log_info("orchestrator", "graceful shutdown complete");
     tracing::info!(
         component = "orchestrator",
         trace_id = "",

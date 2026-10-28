@@ -143,8 +143,8 @@ impl ProgressReporter {
             _ => self.skipped += 1,
         }
         if self.enabled {
-            eprintln!(
-                "[harn] trigger {} progress {}/{} succeeded={} failed={} skipped={}",
+            cli_diagnostic!(
+                "trigger {} progress {}/{} succeeded={} failed={} skipped={}",
                 self.operation,
                 self.processed,
                 self.total,

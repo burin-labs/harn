@@ -28,16 +28,16 @@ pub fn main() {
     // The compiler and runtime read the stdlib through the catalog this binary
     // installs, so a stdlib edit rebuilds only harn-stdlib and this binary.
     if let Err(error) = harn_stdlib::install() {
-        eprintln!("{error}");
+        cli_diagnostic!("error: {error}");
         std::process::exit(2);
     }
     match harn_vm::initialize_runtime() {
         Err(error) => {
-            eprintln!("{error}");
+            cli_diagnostic!("error: {error}");
             std::process::exit(2);
         }
         // Exactly one line, once, naming why caching is off for this run.
-        Ok(Some(warning)) => eprintln!("warning: {warning}"),
+        Ok(Some(warning)) => cli_diagnostic!("warning: {warning}"),
         Ok(None) => {}
     }
     match invoked_as().as_deref() {

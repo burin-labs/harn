@@ -18,7 +18,9 @@ pub(crate) fn run(args: ProviderToolProbeAuditArgs) {
         match serde_json::to_string_pretty(&report) {
             Ok(json) => println!("{json}"),
             Err(error) => {
-                eprintln!("internal error: failed to render tool-probe audit report: {error}");
+                cli_diagnostic!(
+                    "internal error: failed to render tool-probe audit report: {error}"
+                );
                 process::exit(1);
             }
         }

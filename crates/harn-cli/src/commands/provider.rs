@@ -139,7 +139,7 @@ async fn aggregate_provider_probe(args: &ProviderProbeArgs) -> ProviderProbe {
             Err(error) => {
                 // Detailed resident-model state is best-effort: a daemon that
                 // doesn't expose it shouldn't block the readiness signal.
-                eprintln!("warning: loaded-model probe unavailable: {error}");
+                cli_diagnostic!("warning: loaded-model probe unavailable: {error}");
                 Vec::new()
             }
         }
@@ -175,7 +175,7 @@ async fn dispatch_provider_tool_probe(mut args: ProviderToolProbeArgs) -> i32 {
         match crate::commands::providers::resolve_probe_wire_model(&args.provider, &args.model) {
             Ok(model) => model,
             Err(error) => {
-                eprintln!("{error}");
+                cli_diagnostic!("error: {error}");
                 return 1;
             }
         };
@@ -183,13 +183,13 @@ async fn dispatch_provider_tool_probe(mut args: ProviderToolProbeArgs) -> i32 {
         return crate::commands::providers::render_tool_probe_request(&args);
     }
     if let Some(error) = args.live_request_profile_error() {
-        eprintln!("{error}");
+        cli_diagnostic!("error: {error}");
         return 1;
     }
     let report = match aggregate_tool_conformance_report(&args).await {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("{error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -260,7 +260,7 @@ async fn dispatch_provider_tool_scorecard(args: ProviderToolScorecardArgs) -> i3
         ) {
             Ok(plan) => plan,
             Err(error) => {
-                eprintln!("{error}");
+                cli_diagnostic!("error: {error}");
                 return 1;
             }
         };
@@ -270,7 +270,7 @@ async fn dispatch_provider_tool_scorecard(args: ProviderToolScorecardArgs) -> i3
     let report = match aggregate_tool_scorecard(&args) {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("{error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -311,7 +311,7 @@ pub(crate) async fn run_provider_cache_probe(args: ProviderCacheProbeArgs) {
 
 async fn dispatch_provider_cache_probe(args: ProviderCacheProbeArgs) -> i32 {
     let Some(fixture_path) = args.usage_fixture.as_ref() else {
-        eprintln!(
+        cli_diagnostic!(
             "error: live prompt-cache probing is not yet wired; pass --usage-fixture <path> \
              with a saved repeat-run usage fixture"
         );
@@ -320,7 +320,7 @@ async fn dispatch_provider_cache_probe(args: ProviderCacheProbeArgs) -> i32 {
     let raw = match std::fs::read_to_string(fixture_path) {
         Ok(raw) => raw,
         Err(error) => {
-            eprintln!("error: failed to read {}: {error}", fixture_path.display());
+            cli_diagnostic!("error: failed to read {}: {error}", fixture_path.display());
             return 1;
         }
     };
@@ -331,7 +331,7 @@ async fn dispatch_provider_cache_probe(args: ProviderCacheProbeArgs) -> i32 {
     ) {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };

@@ -47,6 +47,22 @@ fn write_run(path: &Path, id: &str, session_id: &str) {
 }
 
 #[test]
+fn run_record_failures_use_the_cli_diagnostic_sink() {
+    let temp = TempDir::new().unwrap();
+    let invalid = temp.path().join("invalid.json");
+    fs::write(&invalid, "not a run record").unwrap();
+
+    for path in [&invalid, &temp.path().join("missing.json")] {
+        let output = run_harn(&["runs", "inspect", path.to_str().unwrap()]);
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.starts_with("[harn] error:"), "{stderr}");
+        assert!(stderr.contains("failed to load run record"), "{stderr}");
+    }
+}
+
+#[test]
 fn runs_view_prints_run_view_json() {
     let temp = TempDir::new().unwrap();
     let run_path = temp.path().join("run.json");

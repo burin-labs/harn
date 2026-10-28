@@ -12,7 +12,7 @@ pub(crate) async fn run(mut args: ProviderOptionProbeArgs) -> i32 {
         match crate::commands::providers::resolve_probe_wire_model(&args.provider, &args.model) {
             Ok(model) => model,
             Err(error) => {
-                eprintln!("{error}");
+                cli_diagnostic!("error: {error}");
                 return 1;
             }
         };
