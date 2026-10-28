@@ -136,6 +136,38 @@ async fn initialization_failure_redacts_secret_in_durable_cause() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn initialization_failure_bounds_the_redacted_durable_cause() {
+    crate::test_support::session_init_fixture::reset();
+    let root = tempfile::tempdir().expect("temp root");
+    let session_id = "init-cause-boundary";
+    crate::test_support::session_init_fixture::prepare(root.path(), session_id).await;
+    let raw = format!(
+        "api_key=sk-probe-secret-do-not-persist {}",
+        "é".repeat(2048)
+    );
+    assert!(raw.len() > 2048, "the input must exceed the storage limit");
+    let mut rollback = super::AgentSessionInitRollback::new(session_id.to_string(), true);
+    rollback
+        .fail(None, &crate::value::VmError::Runtime(raw))
+        .await;
+    let terminal =
+        crate::test_support::session_init_fixture::terminal(root.path(), session_id).await;
+    let message = terminal
+        .pointer("/transcript_event/metadata/error/message")
+        .and_then(serde_json::Value::as_str)
+        .expect("the actual terminal must contain the typed cause message");
+    assert!(
+        message.len() <= 2048,
+        "durable cause exceeds its byte limit"
+    );
+    assert!(message.len() > 2000, "the input must exercise truncation");
+    assert!(!terminal
+        .to_string()
+        .contains("sk-probe-secret-do-not-persist"));
+    crate::test_support::session_init_fixture::reset();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn failing_prompt_hook_records_its_actual_initialization_cause() {
     crate::test_support::session_init_fixture::reset_with_hooks();
     let root = tempfile::tempdir().expect("temp root");

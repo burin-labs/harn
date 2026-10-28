@@ -231,11 +231,44 @@ pub(crate) async fn flush_init_terminal(
 }
 
 fn init_failure_cause(cause: &VmError) -> serde_json::Value {
+    const MAX_CAUSE_BYTES: usize = 2048;
+    let rendered = cause.to_string();
+    let mut message = crate::redact::current_policy()
+        .redact_string(&rendered)
+        .into_owned();
+    if message.len() > MAX_CAUSE_BYTES {
+        let mut end = MAX_CAUSE_BYTES;
+        while !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        message.truncate(end);
+    }
     serde_json::json!({
         "category": crate::value::error_to_category(cause).as_str(),
         "kind": if matches!(cause, VmError::UndefinedBuiltin(_)) { "undefined_builtin" } else { "vm_error" },
-        "message": crate::redact::current_policy().redact_string(&cause.to_string()).into_owned(),
+        "message": message,
     })
+}
+
+#[cfg(test)]
+mod init_failure_cause_tests {
+    use super::{init_failure_cause, VmError};
+
+    #[test]
+    fn cause_is_redacted_before_persistence_and_bounded_on_utf8_boundary() {
+        let secret = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD";
+        let cause = VmError::Runtime(format!("{secret} {}", "é".repeat(2048)));
+        assert!(
+            cause.to_string().contains(secret),
+            "positive raw-cause control"
+        );
+        let value = init_failure_cause(&cause);
+        let message = value["message"].as_str().expect("cause message");
+        assert!(!message.contains(secret));
+        assert!(message.contains("<redacted:openai_key:"));
+        assert!(message.len() <= 2048);
+        assert!(message.len() > 2000, "the limit must actually be reached");
+    }
 }
 
 pub(crate) async fn flush_init_terminal_with_cause(
