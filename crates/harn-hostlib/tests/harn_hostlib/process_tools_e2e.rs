@@ -495,6 +495,65 @@ fn real_background_child_receives_explicit_credential_over_private_pipe() {
 }
 
 #[test]
+fn real_completed_background_cancel_replays_guardian_cleanup_receipt() {
+    let _session = harn_vm::agent_sessions::enter_current_session(format!(
+        "completed-cleanup-{}",
+        std::process::id()
+    ));
+    let python = python3().expect("the process fixture requires Python 3");
+    let script = r#"
+import os, signal
+r, w = os.pipe()
+pid = os.fork()
+if pid == 0:
+    os.close(r)
+    os.setsid()
+    os.close(0)
+    os.close(1)
+    os.close(2)
+    os.write(w, b'R')
+    os.close(w)
+    while True: signal.pause()
+os.close(w)
+assert os.read(r, 1) == b'R'
+os.close(r)
+print(pid, flush=True)
+"#;
+    let mut request = dict_map();
+    request.insert("argv".into(), vlist_str(&[&python, "-c", script]));
+    request.put_bool("background", true);
+    let started = require_dict(call("hostlib_tools_run_command", request).unwrap());
+    let handle = require_str(&started, "handle_id");
+    let mut wait = dict_map();
+    wait.insert("handle_id".into(), vm_string(&handle));
+    wait.put_int("timeout_ms", 15_000);
+    let waited = require_dict(call("hostlib_tools_wait_command", wait).unwrap());
+    assert_eq!(require_str(&waited, "status"), "completed");
+    let pid: i32 = require_str(&waited, "stdout")
+        .trim()
+        .parse()
+        .expect("detached child reached");
+    let cleanup = require_nested_dict(&waited, "process_cleanup");
+    assert!(require_int(&cleanup, "observed_child_count") > 0);
+    assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "detached child survived");
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+    let mut cancel = dict_map();
+    cancel.insert("handle_id".into(), vm_string(&handle));
+    cancel.put_int("wait_result_ms", 15_000);
+    let cancelled = require_dict(call("hostlib_tools_cancel_command", cancel).unwrap());
+    assert!(!require_bool(&cancelled, "cancelled"));
+    let replay = require_nested_dict(&cancelled, "result");
+    assert_eq!(waited.get("process_cleanup"), replay.get("process_cleanup"));
+    assert_eq!(
+        require_str(&replay, "command_id"),
+        require_str(&waited, "command_id")
+    );
+}
+
+#[test]
 fn real_background_hard_timeout_reaps_detached_descendant() {
     let session_id = format!("test-background-hard-timeout-{}", std::process::id());
     let _session = harn_vm::agent_sessions::enter_current_session(session_id);

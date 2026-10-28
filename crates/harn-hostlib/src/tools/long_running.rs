@@ -111,11 +111,17 @@ impl CancelState {
         Some(state)
     }
 
-    fn complete_wait(&self) -> CancellationSnapshot {
+    fn complete_wait(
+        &self,
+        report: Option<process_handle::ProcessCleanupReport>,
+    ) -> CancellationSnapshot {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(report) = report {
+            state.record_cleanup(report);
+        }
         state.completed = true;
         CancellationSnapshot {
             cancelled: state.cancelled,
@@ -685,7 +691,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
             .extend_from_slice(format!("\nharn: process completion refused: {error}\n").as_bytes());
     }
 
-    let cancellation = cancel_state.complete_wait();
+    let cancellation = cancel_state.complete_wait(handle.cleanup_report());
     let cancelled = cancellation.cancelled;
     let timed_out = cancelled && cancellation.timed_out;
     let process_cleanup = cancellation.process_cleanup;
@@ -1383,7 +1389,7 @@ mod tests {
         let waiter = harn_parser::runtime_stack::spawn(move || {
             started_tx.send(()).expect("test waiter start receiver");
             snapshot_tx
-                .send(waiter_state.complete_wait())
+                .send(waiter_state.complete_wait(None))
                 .expect("test snapshot receiver");
         });
 

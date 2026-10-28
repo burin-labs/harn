@@ -22,9 +22,9 @@ impl PreparedCommand {
                         | GuardianConfinement::AfterNamespace { ruleset: true }
                 )
             ) {
-                &[RULESET_FD][..]
+                &[RULESET_FD, completion_receipt::RECEIPT_FD][..]
             } else {
-                &[]
+                &[completion_receipt::RECEIPT_FD][..]
             };
             // SAFETY: the caller supplies exclusive startup custody. Validate
             // all transferred and reserved roles before adopting any handle.

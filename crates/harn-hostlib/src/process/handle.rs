@@ -199,6 +199,11 @@ pub enum OutputCapture {
 /// real and mock paths uniform without forcing async into the rest of the
 /// hostlib.
 pub trait ProcessHandle: Send {
+    /// Guardian evidence, available after wait; absent when no guardian was used.
+    fn cleanup_report(&self) -> Option<ProcessCleanupReport> {
+        None
+    }
+
     /// Available only after a normal wait validates this child's prepared runner.
     fn verifier_execution_receipt(
         &self,

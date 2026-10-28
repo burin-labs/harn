@@ -32,6 +32,11 @@ use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use super::{ProcessError, SpawnSpec};
 
+#[cfg(unix)]
+mod completion_receipt;
+#[cfg(unix)]
+pub(crate) use completion_receipt::ReceiptReader;
+
 #[cfg(target_os = "linux")]
 #[path = "owner_death/adopted_children.rs"]
 mod adopted_children;
@@ -167,6 +172,7 @@ struct StartupMessage {
 /// Guardian launch and the parent's completion witness.
 #[cfg(unix)]
 pub(crate) struct PreparedGuardian {
+    pub(crate) cleanup_receipt: ReceiptReader,
     pub(crate) command: Command,
     pub(crate) request: Vec<u8>,
     pub(crate) missing_program: Option<String>,
@@ -184,7 +190,10 @@ pub(crate) fn prepare_guardian(
     payload_spec.configure_process_group = false;
     payload_spec.owner_death = super::OwnerDeathPolicy::None;
     #[cfg(target_os = "linux")]
-    let pinned = super::program_lookup::pinned_verifier(&payload_spec, &[RULESET_FD])?;
+    let pinned = super::program_lookup::pinned_verifier(
+        &payload_spec,
+        &[RULESET_FD, completion_receipt::RECEIPT_FD],
+    )?;
     #[cfg(target_os = "linux")]
     let (prepared, confinement) = {
         let (command, env_closed, confinement) = harn_vm::process_sandbox::command_for_reexec(
@@ -292,7 +301,11 @@ pub(crate) fn prepare_guardian(
     };
     #[cfg(not(target_os = "linux"))]
     let witness = None;
+    let cleanup_receipt = completion_receipt::prepare(&mut guardian).map_err(|error| {
+        ProcessError::Spawn(format!("create guardian cleanup receipt: {error}"))
+    })?;
     Ok(PreparedGuardian {
+        cleanup_receipt,
         command: guardian,
         request,
         missing_program,
@@ -633,6 +646,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     if std::env::var(MODE_ENV).as_deref() != Ok(PIPE_MODE) {
         return Err(io::Error::other("guardian request pipe is not active"));
     }
+    let mut cleanup_receipt = completion_receipt::inherited_writer()?;
     let raw = read_request()?;
     let request: GuardianCommandRequest = serde_json::from_slice(&raw)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
@@ -758,7 +772,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
             }
             GuardianEvent::PayloadExited(status) => {
                 payload_status = Some(status?);
-                let _ =
+                let mut cleanup =
                     harn_vm::op_interrupt::signal_pid_tree_and_token_preserving_group_with_report(
                         payload_pid,
                         Some(&cleanup_token),
@@ -766,6 +780,8 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
                         libc::SIGKILL,
                     );
                 reap_adopted_children()?;
+                harn_vm::op_interrupt::finish_process_owner_cleanup(&mut cleanup, &cleanup_token);
+                completion_receipt::write(&mut cleanup_receipt, &cleanup)?;
                 let survivors = harn_vm::op_interrupt::process_owner_survivors(&cleanup_token);
                 if !survivors.is_empty() {
                     let guardian_pid = std::process::id();

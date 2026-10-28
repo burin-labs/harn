@@ -48,6 +48,12 @@ fn cleanup_report_fixture(signal: i32) -> ProcessCleanupReport {
     ProcessCleanupReport {
         root_pid: Some(99_999),
         attempted_signals: vec![signal],
+        census: harn_vm::op_interrupt::ProcessCleanupCensus {
+            control_read: true,
+            scanned_processes: 1,
+            unreadable_processes: 0,
+        },
+        omitted_children: 0,
         children: vec![ProcessCleanupChild {
             pid: 100_001,
             parent_pid: Some(99_999),
