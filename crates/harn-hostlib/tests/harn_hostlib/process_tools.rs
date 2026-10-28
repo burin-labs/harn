@@ -224,6 +224,26 @@ fn run_command_pipes_stdin_into_child() {
 
 #[test]
 fn run_command_cleanup_counts_unknown_liveness_and_refuses_unmeasured_zero() {
+    let schema = |method| {
+        serde_json::from_str::<serde_json::Value>(
+            harn_hostlib::schemas::lookup(
+                "tools",
+                method,
+                harn_hostlib::schemas::SchemaKind::Response,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let run_schema = schema("run_command");
+    let wait_schema = schema("wait_command");
+    for name in ["process_cleanup", "process_cleanup_child"] {
+        assert_eq!(run_schema["$defs"][name], wait_schema["$defs"][name]);
+    }
+    let cleanup_schema = serde_json::json!({
+        "$ref": "#/$defs/process_cleanup", "$defs": run_schema["$defs"].clone()
+    });
+    let validator = jsonschema::validator_for(&cleanup_schema).unwrap();
     for case in [
         "complete",
         "unknown",
@@ -254,10 +274,17 @@ fn run_command_cleanup_counts_unknown_liveness_and_refuses_unmeasured_zero() {
         let mut request = dict_map();
         request.insert("argv".into(), vlist_str(&["sleep", "30"]));
         request.put_int("timeout_ms", 150);
-        let response = require_dict(call_tool("hostlib_tools_run_command", request).unwrap());
+        let response = call_tool("hostlib_tools_run_command", request).unwrap();
+        assert_response_matches_schema("run_command", &response);
+        let response = require_dict(response);
         assert!(controller.was_killed(), "{case}: cleanup was not reached");
         assert!(require_bool(&response, "timed_out"));
         let cleanup = require_nested_dict(&response, "process_cleanup");
+        let mut cleanup_json = harn_vm::value::json::vm_value_dict_to_json(&cleanup);
+        assert!(
+            validator.is_valid(&cleanup_json),
+            "{case}: published cleanup schema mismatch"
+        );
         if case == "complete" {
             assert_eq!(require_int(&cleanup, "survivor_count"), 0);
             assert!(require_bool(&cleanup, "census_complete"));
@@ -270,6 +297,13 @@ fn run_command_cleanup_counts_unknown_liveness_and_refuses_unmeasured_zero() {
                 "{case}"
             );
             assert!(!require_bool(&cleanup, "census_complete"), "{case}");
+        }
+        if case != "complete" {
+            cleanup_json["survivor_count"] = 0.into();
+            assert!(
+                !validator.is_valid(&cleanup_json),
+                "{case}: false zero accepted by schema"
+            );
         }
     }
 }

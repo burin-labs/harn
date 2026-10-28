@@ -224,7 +224,12 @@
         },
         "observed_child_count": { "type": "integer", "minimum": 0 },
         "reaped_child_count": { "type": "integer", "minimum": 0 },
-        "survivor_count": { "type": "integer", "minimum": 0 },
+        "survivor_count": { "type": ["integer", "null"], "minimum": 0 },
+        "census_complete": { "type": "boolean" },
+        "census_control_read": { "type": "boolean" },
+        "census_scanned_processes": { "type": "integer", "minimum": 0 },
+        "census_unreadable_processes": { "type": "integer", "minimum": 0 },
+        "omitted_child_count": { "type": "integer", "minimum": 0 },
         "observed_children": {
           "type": "array",
           "items": { "$ref": "#/$defs/process_cleanup_child" }
@@ -244,11 +249,28 @@
         "observed_child_count",
         "reaped_child_count",
         "survivor_count",
+        "census_complete",
+        "census_control_read",
+        "census_scanned_processes",
+        "census_unreadable_processes",
+        "omitted_child_count",
         "observed_children",
         "reaped_children",
         "surviving_children"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [{
+        "if": { "properties": { "survivor_count": { "const": 0 } } },
+        "then": { "properties": {
+          "census_complete": { "const": true },
+          "census_control_read": { "const": true },
+          "census_scanned_processes": { "minimum": 1 },
+          "census_unreadable_processes": { "const": 0 },
+          "omitted_child_count": { "const": 0 },
+          "surviving_children": { "maxItems": 0 },
+          "observed_children": { "items": { "properties": { "alive_after_cleanup": { "const": false } } } }
+        } }
+      }]
     },
     "process_cleanup_child": {
       "type": "object",

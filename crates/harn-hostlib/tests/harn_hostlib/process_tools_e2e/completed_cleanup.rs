@@ -42,7 +42,9 @@ print(pid, flush=True)
     let mut wait = dict_map();
     wait.insert("handle_id".into(), vm_string(&handle));
     wait.put_int("timeout_ms", 15_000);
-    let waited = require_dict(call("hostlib_tools_wait_command", wait).unwrap());
+    let waited = call("hostlib_tools_wait_command", wait).unwrap();
+    assert_response_matches_schema("wait_command", &waited);
+    let waited = require_dict(waited);
     assert_eq!(require_str(&waited, "status"), "completed");
     assert_eq!(require_int(&waited, "exit_code"), 0);
     let pid: i32 = require_str(&waited, "stdout")
@@ -58,13 +60,7 @@ print(pid, flush=True)
         .find(|child| require_int(child, "pid") == i64::from(pid))
         .expect("receipt must measure the actual detached child");
     assert!(!require_bool(&child, "alive_after_cleanup"));
-    if require_bool(&cleanup, "census_complete") {
-        assert!(require_bool(&cleanup, "census_control_read"));
-        assert!(require_int(&cleanup, "census_scanned_processes") > 0);
-        assert_eq!(require_int(&cleanup, "survivor_count"), 0);
-    } else {
-        assert!(matches!(cleanup.get("survivor_count"), Some(VmValue::Nil)));
-    }
+    assert_no_observed_survivors(&cleanup);
     assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "detached child survived");
     assert_eq!(
         std::io::Error::last_os_error().raw_os_error(),
@@ -76,9 +72,32 @@ print(pid, flush=True)
     let cancelled = require_dict(call("hostlib_tools_cancel_command", cancel).unwrap());
     assert!(!require_bool(&cancelled, "cancelled"));
     let replay = require_nested_dict(&cancelled, "result");
-    assert_eq!(waited.get("process_cleanup"), replay.get("process_cleanup"));
+    assert_eq!(
+        harn_vm::value::json::vm_value_dict_to_json(&cleanup),
+        harn_vm::value::json::vm_value_dict_to_json(&require_nested_dict(
+            &replay,
+            "process_cleanup"
+        ))
+    );
     assert_eq!(
         require_str(&replay, "command_id"),
         require_str(&waited, "command_id")
     );
+}
+
+pub(super) fn assert_no_observed_survivors(cleanup: &harn_vm::value::DictMap) {
+    assert!(require_list(cleanup, "surviving_children").is_empty());
+    if require_bool(cleanup, "census_complete") {
+        assert!(require_bool(cleanup, "census_control_read"));
+        assert!(require_int(cleanup, "census_scanned_processes") > 0);
+        assert_eq!(require_int(cleanup, "survivor_count"), 0);
+    } else {
+        assert!(matches!(cleanup.get("survivor_count"), Some(VmValue::Nil)));
+        assert!(
+            !require_bool(cleanup, "census_control_read")
+                || require_int(cleanup, "census_scanned_processes") == 0
+                || require_int(cleanup, "census_unreadable_processes") > 0
+                || require_int(cleanup, "omitted_child_count") > 0
+        );
+    }
 }
