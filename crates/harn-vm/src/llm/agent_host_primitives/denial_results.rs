@@ -6,6 +6,7 @@ pub(super) async fn deny_policy_tool_call(
     tool_name: &str,
     tool_id: &str,
     tool_args: &serde_json::Value,
+    operation: Option<&serde_json::Value>,
     tools: Option<&crate::value::VmValue>,
     denial: ToolDenial,
 ) -> crate::value::VmValue {
@@ -24,7 +25,7 @@ pub(super) async fn deny_policy_tool_call(
         tool_args,
         denial,
         false,
-        DenialEvidence::new(None, schema_repair),
+        DenialEvidence::new(None, schema_repair).with_operation(operation),
     )
     .await
 }
@@ -76,6 +77,7 @@ pub(super) fn schema_validation_tool_result(
 pub(super) struct DenialEvidence {
     pub(super) policy_decision: Option<serde_json::Value>,
     pub(super) schema_repair: Option<serde_json::Value>,
+    operation: Option<serde_json::Value>,
 }
 
 impl DenialEvidence {
@@ -86,7 +88,13 @@ impl DenialEvidence {
         Self {
             policy_decision,
             schema_repair,
+            operation: None,
         }
+    }
+
+    pub(super) fn with_operation(mut self, operation: Option<&serde_json::Value>) -> Self {
+        self.operation = operation.cloned();
+        self
     }
 }
 
@@ -131,15 +139,17 @@ pub(super) async fn deny_tool_call(
         None
     };
     denial = super::tools::normalize_repaired_denial(denial, repair.as_ref());
+    let observed_args = evidence.operation.as_ref().unwrap_or(tool_args);
     if denial.denied_paths.is_empty() {
         denial.denied_paths =
-            crate::orchestration::current_tool_declared_paths(tool_name, tool_args);
+            crate::orchestration::current_tool_declared_paths(tool_name, observed_args);
     }
     // Every gate, not just the ones that remember to. A gate names its own
     // particulars; WHAT it refused is the same question for all of them, and
     // this is the one place every denial passes through.
     if denial.denied_commands.is_empty() {
-        denial.denied_commands = crate::orchestration::current_tool_declared_commands(tool_args);
+        denial.denied_commands =
+            crate::orchestration::current_tool_declared_commands(observed_args);
     }
     emit_permission_deny_event(
         session_id,

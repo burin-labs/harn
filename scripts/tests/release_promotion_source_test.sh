@@ -53,16 +53,28 @@ resolve || fail "successful main push refused"
 jq '.event="workflow_dispatch" | .head_branch="main"' "$tmp/good-run.json" > "$tmp/run.json"
 cp "$tmp/run.json" "$tmp/good-manual.json"
 cp "$tmp/artifacts.json" "$tmp/good-artifacts.json"
-resolve || fail "successful stable manual main candidate refused"
+RECOVERY=true resolve || fail "successful stable manual main candidate refused"
 grep -Fxq "source_sha=$sha" "$tmp/output" || fail "wrong manual source"
-for mutation in '.head_branch="feature"' '.event="schedule"' '.event="pull_request"'; do
+# Any successful main producer is a candidate source, whatever event built it.
+for event in schedule workflow_dispatch; do
+  jq --arg event "$event" '.event=$event' "$tmp/good-manual.json" > "$tmp/run.json"
+  resolve || fail "automatic $event main producer refused"
+  RECOVERY=true resolve || fail "recovered $event main producer refused"
+done
+# An automatic run of a producer that built no candidate is the planner's
+# decision, not a resolver failure.
+cp "$tmp/good-manual.json" "$tmp/run.json"
+printf '{"total_count":0,"artifacts":[]}\n' > "$tmp/artifacts.json"
+resolve || fail "automatic producer without a candidate failed before planning"
+cp "$tmp/good-artifacts.json" "$tmp/artifacts.json"
+for mutation in '.head_branch="feature"' '.event="pull_request"'; do
   jq "$mutation" "$tmp/good-manual.json" > "$tmp/run.json"
-  refuse "manual producer $mutation"
+  RECOVERY=true refuse "manual producer $mutation"
 done
 cp "$tmp/good-manual.json" "$tmp/run.json"
 for version in 0.10.159-dev 0.10.159-rc.1 0.010.159 invalid ''; do
   printf '[workspace.package]\nversion = "%s"\n' "$version" > "$tmp/Cargo.toml"
-  refuse "manual candidate version $version"
+  RECOVERY=true refuse "manual candidate version $version"
 done
 printf '[workspace.package]\nversion = "0.10.159"\n' > "$tmp/Cargo.toml"
 for mutation in '.total_count=8' '.artifacts=[] | .total_count=0' \
@@ -74,12 +86,12 @@ for mutation in '.total_count=8' '.artifacts=[] | .total_count=0' \
   'del(.artifacts[0].workflow_run)' '.artifacts[0].name="unrelated"' \
   '.artifacts[0].name=.artifacts[1].name' 'del(.artifacts[-1]) | .total_count-=1' '{}'; do
   jq "$mutation" "$tmp/good-artifacts.json" > "$tmp/artifacts.json"
-  refuse "manual artifacts $mutation"
+  RECOVERY=true refuse "manual artifacts $mutation"
 done
 printf 'not json\n' > "$tmp/artifacts.json"
-refuse 'malformed manual artifacts'
+RECOVERY=true refuse 'malformed manual artifacts'
 : > "$tmp/artifacts.json"
-refuse 'empty manual artifacts'
+RECOVERY=true refuse 'empty manual artifacts'
 cp "$tmp/good-artifacts.json" "$tmp/artifacts.json"
 for mutation in '.conclusion="failure"' '.status="in_progress"' '.event="pull_request"' \
   '.repository.full_name="foreign/repo"' '.head_repository.full_name="fork/harn"' \

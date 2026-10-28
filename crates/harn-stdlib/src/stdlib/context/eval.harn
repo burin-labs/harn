@@ -305,7 +305,7 @@ pub type ContextEvalAggregate = {
   total_input_tokens: int,
   total_output_tokens: int,
   total_cost_usd: float?,
-  total_known_cost_usd: float,
+  total_known_cost_usd: float?,
   cost_measured_runs: int,
   cost_unmeasured_runs: int,
   total_compaction_count: int,

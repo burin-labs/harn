@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
-# Finds the build run that made a release candidate. A release is built by the
-# push of its version commit to main, which uploads `candidate-manifest-<sha>`;
-# that artifact is what makes it a candidate rather than a warm or skipped
-# build of the same commit.
+# Finds the build run that made a release candidate at one main commit: the
+# version commit's push, or a scheduled or requested source candidate. The
+# `candidate-manifest-<sha>` artifact is what makes it a candidate rather than
+# a warm or skipped build of the same commit.
 
 # Prints the id of a successful "Build release binaries" run that built the
 # candidate at <sha>, or nothing when none has. Fails when GitHub cannot be

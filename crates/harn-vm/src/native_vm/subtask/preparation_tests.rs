@@ -85,6 +85,7 @@ struct Fixture {
     policy: Option<crate::orchestration::CapabilityPolicy>,
     approval_policy: Option<crate::orchestration::ToolApprovalPolicy>,
     read_session_facts: bool,
+    capture_denial: bool,
 }
 
 impl Fixture {
@@ -106,6 +107,7 @@ impl Fixture {
             policy: None,
             approval_policy: None,
             read_session_facts: false,
+            capture_denial: false,
         }
     }
 
@@ -289,8 +291,14 @@ async fn dispatch(
     let call = crate::stdlib::json_to_vm_value(
         &json!({"name": "verify", "id": "prepared-verify", "arguments": arguments}),
     );
-    let options =
-        crate::stdlib::json_to_vm_value(&json!({"tool_retries": 1, "tool_backoff_ms": 1}));
+    let session_id = fixture
+        .capture_denial
+        .then(|| crate::agent_sessions::open_or_create_for_test(None));
+    let mut options = json!({"tool_retries": 1, "tool_backoff_ms": 1});
+    if let Some(id) = &session_id {
+        options["session_id"] = json!(id);
+    }
+    let options = crate::stdlib::json_to_vm_value(&options);
     let permission = async {
         crate::orchestration::scope_approval_policy(
             policy,
@@ -305,7 +313,23 @@ async fn dispatch(
     }
     .expect("dispatch returns a tool outcome");
     let requests = captured.lock().unwrap().clone();
-    (crate::llm::vm_value_to_json(&outcome), requests)
+    let outcome = crate::llm::vm_value_to_json(&outcome);
+    if fixture.capture_denial {
+        let snapshot = crate::agent_sessions::snapshot(session_id.as_deref().unwrap())
+            .expect("session snapshot");
+        let snapshot = crate::llm::vm_value_to_json(&snapshot);
+        let event = snapshot["events"]
+            .as_array()
+            .and_then(|events| {
+                events
+                    .iter()
+                    .find(|event| event["kind"] == "PermissionDeny")
+            })
+            .expect("durable permission denial");
+        assert_eq!(event["metadata"]["denial"], outcome["denial"]);
+        assert_eq!(event["metadata"]["arguments"], json!({}));
+    }
+    (outcome, requests)
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -399,6 +423,7 @@ async fn prepared_verify_reads_session_facts_under_the_live_tool_effect_ceiling(
 #[tokio::test(flavor = "current_thread")]
 async fn prepared_verify_policy_matches_retained_command_before_requesting_consent() {
     let mut fixture = Fixture::new();
+    fixture.capture_denial = true;
     fixture.approval_policy = Some(
         serde_json::from_value(json!({"rules": [
             {"id": "refuse-prepared-command", "deny": {
@@ -417,6 +442,11 @@ async fn prepared_verify_policy_matches_retained_command_before_requesting_conse
     )
     .await;
     assert_eq!(outcome["ok"], false, "{outcome}");
+    assert_eq!(
+        outcome["denial"]["denied_commands"],
+        json!([fixture.facts["operation"]["command"]]),
+        "{outcome}"
+    );
     assert!(
         requests.is_empty(),
         "command refusal must precede consent: {outcome}"
@@ -426,7 +456,8 @@ async fn prepared_verify_policy_matches_retained_command_before_requesting_conse
 
 #[tokio::test(flavor = "current_thread")]
 async fn prepared_verify_refusal_runs_no_process() {
-    let fixture = Fixture::new();
+    let mut fixture = Fixture::new();
+    fixture.capture_denial = true;
     let (outcome, requests) = dispatch(
         &fixture,
         crate::llm::acp_permission::reject_response(Some("declined".into())),
@@ -437,6 +468,11 @@ async fn prepared_verify_refusal_runs_no_process() {
     .await;
     assert_eq!(requests.len(), 1, "{outcome}");
     assert_eq!(outcome["ok"], false);
+    assert_eq!(
+        outcome["denial"]["denied_commands"],
+        json!([fixture.facts["operation"]["command"]]),
+        "{outcome}"
+    );
     fixture.no_effect();
 }
 

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Execute promote-release.yml's real plan step against fixture build runs. Only
-# a stable version transition is promoted automatically. Manual recovery also
-# admits a corrected descendant with that version's proved transition. A rerun
-# after publication is a no-op, and a tag at another commit is refused.
+# Execute promote-release.yml's real plan step against fixture build runs. Any
+# main source declaring an unpublished stable version, with that version's
+# transition proved in its first-parent history, is promoted automatically
+# from its successful candidate; a failed candidate at the version commit
+# strands nothing. A red source is still refused, a release already published
+# from any source is a no-op, and an unpublished tag at another commit is
+# refused.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -33,7 +36,7 @@ cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_r
   "$root/scripts/lib/release_consumer_verdict.sh" "$root/scripts/lib/consumer_canary_policy.sh" \
   "$root/scripts/lib/candidate_archive_contract.sh" "$root/scripts/lib/sha256.sh" \
   "$root/scripts/lib/green_checkpoint.sh" "$repo/scripts/lib/"
-cp "$root/scripts/ci/consumer_canary_policy.json" "$root/scripts/ci/release_publication_overdue.sh" "$repo/scripts/ci/"
+cp "$root/scripts/ci/consumer_canary_policy.json" "$repo/scripts/ci/"
 cp "$root/scripts/release_contract.env" "$repo/scripts/"
 git -C "$repo" init -b main --quiet
 git -C "$repo" config user.name "Release Promotion Test"
@@ -121,8 +124,9 @@ output() {
 commit_version 0.10.142-dev "Start 0.10.142 development"
 commit_version 0.10.142-dev "Change something"
 plan warm
-[[ "$(cat "$tmp/warm.status")" == 0 && "$(output warm promote)" == false ]] \
-  || fail "a development push was promoted: $(cat "$tmp/warm.log")"
+[[ "$(cat "$tmp/warm.status")" == 0 && "$(output warm promote)" == false &&
+   "$(output warm reconcile)" == true ]] \
+  || fail "a development push was promoted or skipped reconciliation: $(cat "$tmp/warm.log")"
 # Only a version commit waits on green; an ordinary push never reads it.
 ! grep -Fq 'matching-refs/heads/green' "$tmp/warm.calls" || fail "a development push read green"
 plan warm_red FAKE_GREEN=ahead
@@ -273,16 +277,47 @@ plan conflict FAKE_TAG_SHA=1111111111111111111111111111111111111111
 grep -Fq "not the candidate commit $head_sha" "$tmp/conflict.log" \
   || fail "the tag conflict does not name the candidate: $(cat "$tmp/conflict.log")"
 
-# Negative controls: a Release subject without a version change, and a
-# prerelease version change, are not promoted.
-commit_version 0.10.142 "Release v0.10.142"
-plan release_subject
-[[ "$(output release_subject promote)" == false ]] || fail "a Release subject was promoted"
-[[ "$(cat "$tmp/release_subject.status")" == 0 ]] \
-  || fail "a just-landed unpublished version alarmed: $(cat "$tmp/release_subject.log")"
-plan release_overdue "NOW_EPOCH=$(( $(date -u +%s) + 5 * 3600 ))" "FAKE_ISSUE_LOG=$tmp/issues.log"
-[[ "$(cat "$tmp/release_overdue.status")" != 0 ]] && grep -q '^issue create' "$tmp/issues.log" \
-  || fail "an unpublished version past its allowance passed quietly: $(cat "$tmp/release_overdue.log")"
+# The class falsifier: the version commit's candidate failed, so no run holds a
+# candidate there, and main moved on while still declaring v0.10.142. A later
+# main commit's successful candidate, whatever event built it, publishes the
+# version automatically. Before this invariant, it was a no-op and the version
+# stayed stranded until a person recovered it.
+commit_version 0.10.142 "Fix the cause of the failed candidate"
+descendant_sha="$(git -C "$repo" rev-parse HEAD)"
+plan descendant_without_candidate FAKE_CANDIDATE_RUN=
+[[ "$(cat "$tmp/descendant_without_candidate.status")" == 0 &&
+   "$(output descendant_without_candidate promote)" == false &&
+   "$(output descendant_without_candidate reconcile)" == true ]] \
+  || fail "a descendant without a candidate did not hand off to reconciliation: $(cat "$tmp/descendant_without_candidate.log")"
+! grep -Fq 'matching-refs/heads/green' "$tmp/descendant_without_candidate.calls" \
+  || fail "a descendant without a candidate waited on green"
+plan descendant FAKE_CANDIDATE_RUN=5150
+[[ "$(cat "$tmp/descendant.status")" == 0 && "$(output descendant promote)" == true &&
+   "$(output descendant tag)" == v0.10.142 && "$(output descendant run_id)" == 5150 &&
+   -z "$(output descendant reconcile)" ]] \
+  || fail "a qualified descendant candidate of the unpublished version was not promoted: $(cat "$tmp/descendant.log")"
+grep -Fq "Promoting descendant $descendant_sha of v0.10.142 version commit $head_sha" "$tmp/descendant.log" \
+  || fail "the descendant promotion does not name its version commit: $(cat "$tmp/descendant.log")"
+# Negative control: a red descendant never publishes, candidate or not.
+for green in ahead diverged absent; do
+  plan "descendant_green_$green" FAKE_CANDIDATE_RUN=5150 "FAKE_GREEN=$green"
+  [[ "$(cat "$tmp/descendant_green_$green.status")" != 0 &&
+     "$(output "descendant_green_$green" promote)" != true ]] \
+    || fail "a descendant green does not contain ($green) was promoted"
+done
+plan descendant_failed_consumer FAKE_CANDIDATE_RUN=5150 FAKE_CONSUMER=failure
+[[ "$(cat "$tmp/descendant_failed_consumer.status")" != 0 ]] \
+  || fail "a descendant bypassed its failed consumer rehearsal"
+# Newest-wins: once any candidate published the version, the rest are no-ops.
+plan descendant_after_publication FAKE_CANDIDATE_RUN=5150 "FAKE_TAG_SHA=$head_sha" FAKE_RELEASE=1
+[[ "$(cat "$tmp/descendant_after_publication.status")" == 0 &&
+   "$(output descendant_after_publication promote)" == false ]] \
+  || fail "a candidate after publication from another source was not a no-op: $(cat "$tmp/descendant_after_publication.log")"
+# An unproved transition is never promoted automatically.
+git clone --quiet --depth 1 "file://$repo" "$tmp/unproved-source"
+plan descendant_unproved FAKE_CANDIDATE_RUN=5150 "SOURCE_DIRECTORY=$tmp/unproved-source"
+[[ "$(cat "$tmp/descendant_unproved.status")" != 0 ]] \
+  || fail "a descendant without a proved transition was promoted"
 plan corrected_source RECOVERY=true
 [[ "$(cat "$tmp/corrected_source.status")" == 0 && "$(output corrected_source promote)" == true ]] \
   || fail "certified corrected stable source was refused: $(cat "$tmp/corrected_source.log")"
@@ -298,7 +333,8 @@ plan corrected_source_unproved RECOVERY=true "SOURCE_DIRECTORY=$tmp/shallow-sour
   || fail "missing transition history authorized corrected-source recovery"
 commit_version 0.10.143-rc.1 "Prerelease"
 plan prerelease
-[[ "$(output prerelease promote)" == false ]] || fail "a prerelease was promoted"
+[[ "$(cat "$tmp/prerelease.status")" == 0 && "$(output prerelease promote)" == false ]] \
+  || fail "a prerelease was promoted"
 plan recovery_prerelease RECOVERY=true
 [[ "$(cat "$tmp/recovery_prerelease.status")" != 0 ]] \
   || fail "manual recovery accepted a prerelease run"

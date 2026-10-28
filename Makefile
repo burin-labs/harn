@@ -901,7 +901,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/open_release_pr_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_withdrawal_lineage_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_candidate_trigger_test.sh
-	./scripts/tests/release_publication_overdue_test.sh
+	./scripts/tests/release_candidate_reconcile_test.sh
 	./scripts/tests/dispatch_native_qualification_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
 	$(MAKE) test-embedded-asset-rebuild
