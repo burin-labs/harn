@@ -236,6 +236,18 @@ fn captured_monitor_mute_holds_until_policy_reopens() {
 }
 
 #[test]
+fn previous_schema_is_refused_without_rewriting() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("inbox.json");
+    let original = br#"{"schema":"harn.signals.inbox.v1","signals":{},"sessions":{}}"#;
+    std::fs::write(&path, original).unwrap();
+    let inbox = Inbox::open(dir.path()).unwrap();
+    let error = inbox.snapshot(now()).unwrap_err().to_string();
+    assert!(error.contains("harn.signals.inbox.v2"), "{error}");
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[test]
 fn captured_occurrences_remain_with_ended_session_and_refuse_full_inbox() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("config.toml"), "max_signals = 2\n").unwrap();

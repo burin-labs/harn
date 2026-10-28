@@ -318,7 +318,7 @@ fn the_inbox_refuses_a_document_from_another_schema() {
     .unwrap();
     let inbox = Inbox::open(dir.path()).unwrap();
     let error = inbox.snapshot(t0()).unwrap_err().to_string();
-    assert!(error.contains("harn.signals.inbox.v1"), "{error}");
+    assert!(error.contains("harn.signals.inbox.v2"), "{error}");
 }
 
 #[test]

@@ -20,7 +20,7 @@ use crate::router::{Router, RuleRouter};
 use crate::watcher::{self, WatcherLock};
 use crate::SignalsError;
 
-pub const INBOX_SCHEMA: &str = "harn.signals.inbox.v1";
+pub const INBOX_SCHEMA: &str = "harn.signals.inbox.v2";
 pub const SIGNALS_DIR_ENV: &str = "HARN_EXT_SIGNALS_DIR";
 
 const INBOX_FILE: &str = "inbox.json";

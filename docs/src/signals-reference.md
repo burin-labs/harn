@@ -112,7 +112,7 @@ The inbox directory is `$HARN_EXT_SIGNALS_DIR` when set, else
 
 | File | Contents |
 |---|---|
-| `inbox.json` | Signals and sessions, schema `harn.signals.inbox.v1`. Replaced atomically on every change. |
+| `inbox.json` | Signals and sessions, schema `harn.signals.inbox.v2`. Replaced atomically on every change. |
 | `inbox.lock` | Advisory lock file every transaction holds exclusively. |
 | `watchers/<hex session id>.lock` | Held by the running `--rewake` watcher for a session. The watcher removes it as it exits; `SessionEnd` removes one a killed watcher left, and so does the next write to the inbox once the session is no longer registered. |
 | `.inbox.json.*.tmp` | A write in progress. The next write removes one a killed process left. |
@@ -122,7 +122,7 @@ The inbox directory is `$HARN_EXT_SIGNALS_DIR` when set, else
 
 ```json
 {
-  "schema": "harn.signals.inbox.v1",
+  "schema": "harn.signals.inbox.v2",
   "signals": {
     "<key>": {
       "key": "<key>",
@@ -167,6 +167,10 @@ The inbox stores the event's normalized fields only. It replaces
 `raw_payload` with `{}` and sets `privacy.raw_payload_retained` to `false`.
 
 A document with any other `schema` is refused rather than migrated.
+Version 2 preserves capture ownership and ingestion order. Older writers refuse
+it instead of discarding those fields and routing captures to another session.
+Use a separate inbox directory when rolling out the new format; preserve the
+old inbox and its reader for any remaining old-format work.
 
 ### `config.toml`
 
