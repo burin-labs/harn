@@ -10,10 +10,10 @@ use harn_vm::agent_events::AgentEventSink;
 
 #[tokio::test(flavor = "current_thread")]
 async fn published_tool_names_validate_against_the_unmodified_upstream_schema() {
-    let upstream: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../../../../conformance/protocols/schemas/acp-1.26.0-upstream.schema.json"
-    ))
-    .unwrap();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/protocols/schemas/acp-1.26.0-upstream.schema.json");
+    let upstream: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let mut checked = BTreeSet::new();
     for notification in collect_notifications(super::standard_fixture_events()).await {
         let update = &notification["params"]["update"];
