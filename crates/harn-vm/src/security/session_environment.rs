@@ -669,6 +669,10 @@ pub struct SessionEnvironment {
     host_account_attestations: Option<Arc<Vec<crate::llm::api::ProviderAccountAttestation>>>,
 }
 
+fn is_host_account_attestations_env(name: &str) -> bool {
+    environment_names_equal(name, crate::llm::api::HOST_ACCOUNT_ATTESTATIONS_ENV)
+}
+
 impl SessionEnvironment {
     /// Capture the default policy at a session launch boundary.
     pub fn inherited() -> Self {
@@ -716,11 +720,20 @@ impl SessionEnvironment {
             });
         }
         validate_unique_specs(&specs)?;
+        // Host confirmations are authority input, never session or child data.
         let grants = specs
             .into_iter()
-            .map(|spec| spec.resolve(env_lookup))
+            .map(|spec| {
+                spec.resolve(&|name| {
+                    if is_host_account_attestations_env(name) {
+                        None
+                    } else {
+                        env_lookup(name)
+                    }
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?;
-        let launcher_snapshot = if matches!(kind, EnvironmentPolicyKind::Inherited) {
+        let mut launcher_snapshot = if matches!(kind, EnvironmentPolicyKind::Inherited) {
             launcher_snapshot
         } else {
             launcher_snapshot
@@ -728,6 +741,7 @@ impl SessionEnvironment {
                 .filter(|(name, _)| super::environment_policy::allowlist_admits(name))
                 .collect()
         };
+        launcher_snapshot.retain(|name, _| !is_host_account_attestations_env(name));
         Ok(SessionEnvironment {
             kind,
             launcher_snapshot,
@@ -770,9 +784,6 @@ impl SessionEnvironment {
                     .collect(),
                 None => attestations,
             }));
-        self.launcher_snapshot.retain(|name, _| {
-            !environment_names_equal(name, crate::llm::api::HOST_ACCOUNT_ATTESTATIONS_ENV)
-        });
         self
     }
 
@@ -957,8 +968,7 @@ impl SessionEnvironment {
                 name,
                 crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV,
             ))
-            || (self.host_account_attestations.is_some()
-                && environment_names_equal(name, crate::llm::api::HOST_ACCOUNT_ATTESTATIONS_ENV))
+            || is_host_account_attestations_env(name)
     }
 
     /// The non-secret receipts recorded on the session run-record. Empty for an
@@ -1088,9 +1098,7 @@ impl SessionEnvironment {
         var: &str,
         resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
     ) -> Result<Option<String>, EnvironmentPolicyError> {
-        if self.host_account_attestations.is_some()
-            && environment_names_equal(var, crate::llm::api::HOST_ACCOUNT_ATTESTATIONS_ENV)
-        {
+        if is_host_account_attestations_env(var) {
             return Ok(None);
         }
         if environment_names_equal(var, crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV) {

@@ -1,6 +1,9 @@
 Trusted launchers can confirm credential-bound provider account settings for
 conditional no-training terms. Gemini requires both paid billing and disabled
 Contributor Tier sharing; unknown settings continue to refuse no-training calls.
+The reserved confirmation input is withheld from scripts and child processes,
+including sessions that do not attach confirmations, and cannot be re-granted
+under another environment name.
 
 Migration: Rust callers constructing `DataControlsDef` or
 `CatalogProviderDataControls` must supply `no_training_requires`, using an empty
