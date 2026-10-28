@@ -345,7 +345,7 @@ mod tests {
                 let conflicting =
                     registry(vec![crate::schema::json_to_vm_value(&serde_json::json!({
                         "name": "anything",
-                        "parameters": {"value": {"type": "integer", "required": true}}
+                        "parameters": {"unpublished": {"type": "string", "required": true}}
                     }))]);
                 validate_registered_input(
                     Some(&conflicting),
