@@ -71,7 +71,7 @@ print(pid, flush=True)
     let mut cancel = dict_map();
     cancel.insert("handle_id".into(), vm_string(&handle));
     cancel.put_int("wait_result_ms", 15_000);
-    let cancelled = require_dict(call("hostlib_tools_cancel_command", cancel).unwrap());
+    let cancelled = require_dict(call("hostlib_tools_cancel_handle", cancel).unwrap());
     assert!(!require_bool(&cancelled, "cancelled"));
     let replay = require_nested_dict(&cancelled, "result");
     assert_eq!(
