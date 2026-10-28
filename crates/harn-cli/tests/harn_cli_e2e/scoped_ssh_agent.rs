@@ -136,6 +136,8 @@ fn exact_agent_grant_signs_without_exposing_keys_or_other_sockets() {
         include_str!("../fixtures/scoped_ssh_agent.harn"),
     )
     .unwrap();
+    let mut measured_refusals = 0;
+    let mut measured_signing_cases = 0;
     for granted in [false, true, false] {
         assert!(
             key.is_file(),
@@ -159,6 +161,22 @@ fn exact_agent_grant_signs_without_exposing_keys_or_other_sockets() {
             .arg(&other.socket)
             .output()
             .unwrap();
+        if let Some(refusal) = crate::test_util::process::unavailable_worktree_sandbox() {
+            assert!(!output.status.success(), "unsupported host ran the payload");
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains(&refusal.to_string()),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(output.stdout.is_empty(), "refused payload produced output");
+            assert_eq!(
+                git(&repo, &home, &agent.socket, &["rev-parse", "HEAD"]),
+                before,
+                "refused payload changed the repository"
+            );
+            measured_refusals += 1;
+            continue;
+        }
         assert!(
             output.status.success(),
             "{}",
@@ -179,5 +197,11 @@ fn exact_agent_grant_signs_without_exposing_keys_or_other_sockets() {
             assert_ne!(proof["sign_exit"], 0, "{proof}");
             assert_eq!(before, after);
         }
+        measured_signing_cases += 1;
     }
+    assert_eq!(measured_refusals + measured_signing_cases, 3);
+    assert!(measured_refusals == 0 || measured_refusals == 3);
+    eprintln!(
+        "scoped agent: signing_cases={measured_signing_cases} host_refusals={measured_refusals}"
+    );
 }
