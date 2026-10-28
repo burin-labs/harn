@@ -614,10 +614,12 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     || targets.some(target => typeof target !== 'string' || !/^[a-z0-9_-]+$/.test(target))
     || !Array.isArray(jobs) || jobs.length === 0 || new Set(jobs.map(job=>job.id)).size !== jobs.length
     || new Set(jobs.map(job=>job.name)).size !== jobs.length) refuse('archive_producer_identity_unproven');
+  // The residual audit runs beside the canary and the candidate verdict gates on it, so it
+  // need not have finished when the observer admits the archive.
   const deferred = new Set(['Consumer release rehearsal / Consumer canary',
-    'Consumer release rehearsal / Settled verdict','Release candidate verdict']);
+    'Consumer release rehearsal / Settled verdict','Release candidate verdict','Release residual audit']);
   const required = ['Resolve release context','Prepare CLI AOT payload','Assemble candidate manifest',
-    'Release residual audit','Consumer release rehearsal / Decide whether main moved',
+    'Consumer release rehearsal / Decide whether main moved',
     ...targets.map(target=>`Build ${target}`),
     ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)];
   if (required.some(name=>!jobs.some(job=>job.name===name && job.status==='completed' && job.conclusion==='success'))

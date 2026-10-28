@@ -12,11 +12,13 @@ const source='a'.repeat(40);
 const request={sourceRevision:source,runId:'42',attempt:1};
 const run={id:42,run_attempt:1,head_sha:source,head_branch:'main',event:'push',status:'in_progress',conclusion:null,
   repository:{full_name:'burin-labs/harn'},head_repository:{full_name:'burin-labs/harn'},path:'.github/workflows/build-release-binaries.yml'};
-const names=['Resolve release context','Prepare CLI AOT payload','Assemble candidate manifest','Release residual audit',
+const names=['Resolve release context','Prepare CLI AOT payload','Assemble candidate manifest',
   'Consumer release rehearsal / Decide whether main moved',...targets.map(target=>`Build ${target}`),
   ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)];
 const jobs=names.map((name,index)=>({id:index+1,run_id:42,run_attempt:1,head_sha:source,name,status:'completed',conclusion:'success'}));
 jobs.push({id:99,run_id:42,run_attempt:1,head_sha:source,name:'Consumer release rehearsal / Consumer canary',status:'in_progress',conclusion:null});
+// Candidate 40747597919 was refused while this audit was still running beside the canary.
+jobs.push({id:98,run_id:42,run_attempt:1,head_sha:source,name:'Release residual audit',status:'in_progress',conclusion:null});
 const artifacts=[...targets.map(target=>`harn-${target}`),`candidate-manifest-${source}`,'harn-release-files'].map((name,index)=>({
   id:index+100,name,expired:false,size_in_bytes:100,digest:`sha256:${'b'.repeat(64)}`,workflow_run:{id:42,head_sha:source},
 }));
