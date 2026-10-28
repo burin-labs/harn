@@ -965,11 +965,9 @@ fn git_executable_context(command: string) -> GitExecutableContext {
   if scan.execution_semantics?.resolved != true || source_groups == nil {
     return {path_changed: true, cwd_changed: true}
   }
-  const stages: list<GitExecutionStage> = scan.execution_stages ?? []
+  let stages: list<GitExecutionStage> = scan.execution_stages ?? []
   for group in source_groups {
-    for stage in group {
-      stages.push(stage)
-    }
+    stages = stages + group
   }
   let path_changed = false
   let cwd_changed = false
