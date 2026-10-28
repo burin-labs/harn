@@ -1,78 +1,41 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { fetchLaunchJobs, fetchLaunchTargets, fetchLlmOptions, fetchPortalMeta, launchRun } from "../lib/api"
-import type { PortalLaunchJob, PortalLaunchTarget, PortalLlmOptions, PortalMeta } from "../types"
+import { errorMessage } from "../lib/query"
 
 export function useLaunchData() {
-  const [portalMeta, setPortalMeta] = useState<PortalMeta | null>(null)
-  const [llmOptions, setLlmOptions] = useState<PortalLlmOptions | null>(null)
-  const [launchTargets, setLaunchTargets] = useState<PortalLaunchTarget[]>([])
-  const [launchJobs, setLaunchJobs] = useState<PortalLaunchJob[]>([])
-  const [loading, setLoading] = useState(false)
-  const [lastError, setLastError] = useState<string | null>(null)
-
-  const loadPortalOptions = useCallback(async () => {
-    try {
-      const [meta, nextLlmOptions] = await Promise.all([fetchPortalMeta(), fetchLlmOptions()])
-      setPortalMeta(meta)
-      setLlmOptions(nextLlmOptions)
-      setLastError(null)
-    } catch (error) {
-      setLastError(error instanceof Error ? error.message : String(error))
-    }
-  }, [])
-
-  const loadLaunchData = useCallback(async () => {
-    setLoading(true)
-    try {
+  const queryClient = useQueryClient()
+  const options = useQuery({
+    queryKey: ["launch", "options"],
+    queryFn: async () => {
+      const [portalMeta, llmOptions] = await Promise.all([fetchPortalMeta(), fetchLlmOptions()])
+      return { portalMeta, llmOptions }
+    },
+  })
+  const launch = useQuery({
+    queryKey: ["launch", "targets-and-jobs"],
+    queryFn: async () => {
       const [targets, jobs] = await Promise.all([fetchLaunchTargets(), fetchLaunchJobs()])
-      setLaunchTargets(targets.targets)
-      setLaunchJobs(jobs.jobs.sort((a, b) => b.started_at.localeCompare(a.started_at)))
-      setLastError(null)
-    } catch (error) {
-      setLastError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      void loadPortalOptions()
-      void loadLaunchData()
-    })
-  }, [loadLaunchData, loadPortalOptions])
-
-  const hasRunningLaunches = useMemo(
-    () => launchJobs.some((job) => job.status === "running"),
-    [launchJobs],
-  )
-
-  useEffect(() => {
-    if (!hasRunningLaunches) {
-      return
-    }
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "hidden") {
-        return
+      return {
+        launchTargets: targets.targets,
+        launchJobs: [...jobs.jobs].sort((a, b) => b.started_at.localeCompare(a.started_at)),
       }
-      void loadLaunchData()
-    }, 5000)
-    return () => window.clearInterval(interval)
-  }, [hasRunningLaunches, loadLaunchData])
+    },
+    refetchInterval: (query) => (query.state.data?.launchJobs.some((job) => job.status === "running") ? 5000 : false),
+  })
+  const launchMutation = useMutation({
+    mutationFn: launchRun,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["launch", "targets-and-jobs"] }),
+  })
 
   return {
-    portalMeta,
-    llmOptions,
-    launchTargets,
-    launchJobs,
-    loading,
-    lastError,
-    loadLaunchData,
-    launchRun: async (payload: Parameters<typeof launchRun>[0]) => {
-      const job = await launchRun(payload)
-      await loadLaunchData()
-      return job
-    },
+    portalMeta: options.data?.portalMeta ?? null,
+    llmOptions: options.data?.llmOptions ?? null,
+    launchTargets: launch.data?.launchTargets ?? [],
+    launchJobs: launch.data?.launchJobs ?? [],
+    loading: launch.isFetching,
+    lastError: errorMessage(launch.error ?? options.error),
+    loadLaunchData: () => launch.refetch(),
+    launchRun: launchMutation.mutateAsync,
   }
 }
