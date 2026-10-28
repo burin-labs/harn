@@ -1,5 +1,7 @@
 use super::*;
 use std::os::fd::{AsRawFd, FromRawFd};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 
 const MAX_RECEIPT_BYTES: u64 = 64 * 1024;
 const MAX_CHILDREN: usize = 128;
@@ -17,29 +19,44 @@ pub(crate) fn prepare(command: &mut Command) -> io::Result<(ReceiptReader, i32)>
             Ok(())
         });
     }
-    Ok((
-        ReceiptReader(Some(harn_parser::runtime_stack::spawn(move || {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    harn_parser::runtime_stack::spawn(move || {
+        let result = (|| {
             let mut bytes = Vec::new();
             reader.take(MAX_RECEIPT_BYTES + 1).read_to_end(&mut bytes)?;
             if bytes.len() as u64 > MAX_RECEIPT_BYTES {
                 return Err(io::Error::other("guardian cleanup receipt exceeded limit"));
             }
             serde_json::from_slice(&bytes).map_err(io::Error::other)
+        })();
+        let _ = sender.send(result);
+    });
+    Ok((
+        ReceiptReader(Arc::new(Mutex::new(ReceiptState {
+            receiver,
+            report: None,
         }))),
         receipt_fd,
     ))
 }
 
-pub(crate) struct ReceiptReader(
-    Option<std::thread::JoinHandle<io::Result<harn_vm::op_interrupt::ProcessCleanupReport>>>,
-);
+struct ReceiptState {
+    receiver: mpsc::Receiver<io::Result<harn_vm::op_interrupt::ProcessCleanupReport>>,
+    report: Option<harn_vm::op_interrupt::ProcessCleanupReport>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ReceiptReader(Arc<Mutex<ReceiptState>>);
 
 impl ReceiptReader {
-    pub(crate) fn finish(mut self) -> Option<harn_vm::op_interrupt::ProcessCleanupReport> {
-        self.0
-            .take()
-            .and_then(|reader| reader.join().ok())
-            .and_then(Result::ok)
+    pub(crate) fn finish(&self) -> Option<harn_vm::op_interrupt::ProcessCleanupReport> {
+        let mut state = self.0.lock().unwrap_or_else(|poison| poison.into_inner());
+        if state.report.is_none() {
+            if let Ok(Ok(report)) = state.receiver.recv_timeout(Duration::from_secs(15)) {
+                state.report = Some(report);
+            }
+        }
+        state.report.clone()
     }
 }
 
@@ -144,6 +161,25 @@ mod tests {
         request.cleanup_receipt_fd = Some(fd);
         request.pinned_verifier_descriptors.push(fd);
         // SAFETY: the invalid alias must be rejected before taking ownership.
+        assert!(unsafe { PreparedCommand::from_inherited_request(request) }.is_err());
+        assert!(unsafe { libc::fcntl(fd, libc::F_GETFD) } >= 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cancellation_cannot_alias_the_receipt_descriptor() {
+        let (_reader, writer) = io::pipe().unwrap();
+        let fd = writer.as_raw_fd();
+        let mut request = GuardianCommandRequest::from_command(
+            &Command::new("unused"),
+            false,
+            "token".into(),
+            None,
+            false,
+        );
+        request.cleanup_receipt_fd = Some(fd);
+        request.cancel_request_fd = Some(fd);
+        // SAFETY: admission must reject the alias before adopting a handle.
         assert!(unsafe { PreparedCommand::from_inherited_request(request) }.is_err());
         assert!(unsafe { libc::fcntl(fd, libc::F_GETFD) } >= 0);
     }

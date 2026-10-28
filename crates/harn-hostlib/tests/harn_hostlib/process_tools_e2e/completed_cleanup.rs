@@ -2,6 +2,125 @@ use super::*;
 
 #[cfg(target_os = "linux")]
 #[test]
+fn active_cancel_preserves_guardian_custody_for_scrubbed_detached_child() {
+    active_cleanup(false);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn active_deadline_preserves_guardian_custody_for_scrubbed_detached_child() {
+    active_cleanup(true);
+}
+
+#[cfg(target_os = "linux")]
+fn active_cleanup(deadline: bool) {
+    use std::os::fd::AsRawFd;
+    let _session = harn_vm::agent_sessions::enter_current_session(format!(
+        "cancel-cleanup-{}-{deadline}",
+        std::process::id(),
+    ));
+    let python = python3().expect("the process fixture requires Python 3");
+    let temp = tempfile::tempdir().unwrap();
+    let fifo = temp.path().join("ready.fifo");
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap()
+        .success());
+    let mut ready = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&fifo)
+        .unwrap();
+    let script = r#"
+import os, signal, sys
+r, w = os.pipe()
+pid = os.fork()
+if pid == 0:
+    os.close(r)
+    os.setsid()
+    os.set_inheritable(w, True)
+    os.execve(sys.executable, [sys.executable, '-c',
+        'import os,signal,sys; os.write(int(sys.argv[1]),b"R"); os.close(int(sys.argv[1])); signal.pause()', str(w)], {})
+os.close(w)
+assert os.read(r, 1) == b'R'
+os.close(r)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+with open(sys.argv[1], 'w') as ready:
+    ready.write(str(pid) + '\n')
+    ready.flush()
+while True: signal.pause()
+"#;
+    let mut request = dict_map();
+    request.insert(
+        "argv".into(),
+        vlist_str(&[&python, "-c", script, &fifo.to_string_lossy()]),
+    );
+    request.put_bool("background", true);
+    if deadline {
+        request.put_int("hard_timeout_ms", 10_000);
+    }
+    let started = require_dict(call("hostlib_tools_run_command", request).unwrap());
+    let handle = require_str(&started, "handle_id");
+    let mut bytes = Vec::new();
+    loop {
+        let mut signal = libc::pollfd {
+            fd: ready.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        assert!(
+            unsafe { libc::poll(&mut signal, 1, 15_000) } > 0,
+            "detached child did not signal readiness"
+        );
+        let mut byte = [0_u8; 1];
+        ready.read_exact(&mut byte).unwrap();
+        if byte[0] == b'\n' {
+            break;
+        }
+        bytes.push(byte[0]);
+    }
+    let pid: i32 = std::str::from_utf8(&bytes).unwrap().parse().unwrap();
+    assert!(
+        pid > 1 && unsafe { libc::kill(pid, 0) } == 0,
+        "detached child must exist before cancellation"
+    );
+    let pid_path = temp.path().join("detached.pid");
+    std::fs::write(&pid_path, pid.to_string()).unwrap();
+    let _cleanup = PidFileCleanup { path: pid_path };
+    let completed =
+        harn_hostlib::tools::long_running::register_completion_notifier(&handle).unwrap();
+    if !deadline {
+        let mut cancel = dict_map();
+        cancel.insert("handle_id".into(), vm_string(&handle));
+        assert!(require_bool(
+            &require_dict(call("hostlib_tools_cancel_handle", cancel).unwrap()),
+            "cancelled"
+        ));
+    }
+    completed
+        .recv_timeout(std::time::Duration::from_secs(25))
+        .expect("cancelled handle did not settle");
+    let mut wait = dict_map();
+    wait.insert("handle_id".into(), vm_string(&handle));
+    let terminal = require_dict(call("hostlib_tools_wait_command", wait).unwrap());
+    assert_eq!(
+        require_str(&terminal, "status"),
+        if deadline { "timed_out" } else { "killed" }
+    );
+    assert_eq!(require_bool(&terminal, "timed_out"), deadline);
+    let cleanup = require_nested_dict(&terminal, "process_cleanup");
+    assert!(require_bool(&cleanup, "guardian_custody_complete"));
+    assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+    assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "scrubbed child survived");
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn guardian_reaps_detached_child_without_owner_environment() {
     let _session = harn_vm::agent_sessions::enter_current_session(format!(
         "scrubbed-cleanup-{}",
