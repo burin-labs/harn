@@ -1020,8 +1020,8 @@ fn git_executable_context(command: string) -> GitExecutableContext {
   if source_groups == nil {
     return {path_changed: true, cwd_changed: true}
   }
-  // Older scanners omit assignment-only commands from both stage inventories.
-  if scan.shell_source_groups == nil && unprojected_path_assignment(command) {
+  // Shell control flow can omit assignment-only commands from either inventory.
+  if unprojected_path_assignment(command) {
     return {path_changed: true, cwd_changed: true}
   }
   let stages: list<GitExecutionStage> = scan.execution_stages ?? []
