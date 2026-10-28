@@ -177,7 +177,7 @@ pub async fn run(args: EvalToolCallsArgs) -> i32 {
 
 async fn run_eval(args: EvalToolCallsArgs) -> i32 {
     let Some(planner_arg) = args.planner.as_deref() else {
-        eprintln!("error: `harn eval tool-calls` requires --planner");
+        cli_diagnostic!("error: `harn eval tool-calls` requires --planner");
         return 2;
     };
     let planner = resolve_selector(planner_arg);
@@ -187,7 +187,7 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
     let mut cases = match load_tool_call_eval_dataset(&args.dataset) {
         Ok(cases) => cases,
         Err(error) => {
-            eprintln!("error: failed to load tool-call dataset: {error}");
+            cli_diagnostic!("error: failed to load tool-call dataset: {error}");
             return 1;
         }
     };
@@ -198,7 +198,7 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
         cases.truncate(max_cases);
     }
     if cases.is_empty() {
-        eprintln!("error: no tool-call eval cases selected");
+        cli_diagnostic!("error: no tool-call eval cases selected");
         return 1;
     }
 
@@ -210,7 +210,7 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
 
     let output_dir = args.output.clone().unwrap_or_else(default_output_dir);
     if let Err(error) = fs::create_dir_all(&output_dir) {
-        eprintln!("error: failed to create {}: {error}", output_dir.display());
+        cli_diagnostic!("error: failed to create {}: {error}", output_dir.display());
         return 1;
     }
 
@@ -222,7 +222,7 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
         for result in futures::future::join_all(trials).await {
             match result {
                 Ok(report) => {
-                    eprintln!(
+                    cli_diagnostic!(
                         "{}: {} ({})",
                         case.id,
                         if report.score.passed { "pass" } else { "fail" },
@@ -232,7 +232,7 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
                 }
                 Err(error) => {
                     had_infra_error = true;
-                    eprintln!("{}: error: {error}", case.id);
+                    cli_diagnostic!("{}: error: {error}", case.id);
                 }
             }
         }
@@ -255,10 +255,10 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
         had_infra_error = true;
     }
     if let Err(error) = write_outputs(&output_dir, &summary, &reports) {
-        eprintln!("error: failed to write eval outputs: {error}");
+        cli_diagnostic!("error: failed to write eval outputs: {error}");
         return 1;
     }
-    eprintln!(
+    cli_diagnostic!(
         "wrote {} and {}",
         output_dir.join("summary.json").display(),
         output_dir.join("per_case.jsonl").display()
@@ -295,7 +295,7 @@ async fn dispatch_summary_line(summary: &EvalSummary) -> Result<String, i32> {
     let payload_json = match serde_json::to_string(&envelope) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to serialise tool-calls summary envelope: {error}");
+            cli_diagnostic!("error: failed to serialise tool-calls summary envelope: {error}");
             return Err(1);
         }
     };
@@ -416,9 +416,10 @@ fn all_required_provider_keys_available(
             && selector.provider != "fake"
             && !harn_vm::llm::provider_auth_status(&selector.provider).available
         {
-            eprintln!(
+            cli_diagnostic!(
                 "error: provider `{}` for `{}` has no configured credentials",
-                selector.provider, selector.selector
+                selector.provider,
+                selector.selector
             );
             return false;
         }
@@ -1238,14 +1239,14 @@ async fn run_regression_check(args: EvalToolCallsRegressionArgs) -> i32 {
     let current = match read_regression_summary(&current_path) {
         Ok(summary) => summary,
         Err(error) => {
-            eprintln!("error: failed to read current summary: {error}");
+            cli_diagnostic!("error: failed to read current summary: {error}");
             return 1;
         }
     };
     let baseline = match read_regression_summary(&args.against) {
         Ok(summary) => summary,
         Err(error) => {
-            eprintln!("error: failed to read baseline summary: {error}");
+            cli_diagnostic!("error: failed to read baseline summary: {error}");
             return 1;
         }
     };
@@ -1299,7 +1300,7 @@ async fn dispatch_regression_render(
     let payload_json = match serde_json::to_string(&envelope) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to serialise regression envelope: {error}");
+            cli_diagnostic!("error: failed to serialise regression envelope: {error}");
             return 1;
         }
     };

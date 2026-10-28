@@ -15,17 +15,19 @@ pub(crate) fn eval_run_record(
         let path_buf = PathBuf::from(path);
         if !path_buf.is_file() || path_buf.extension().and_then(|ext| ext.to_str()) != Some("harn")
         {
-            eprintln!(
-                "--structural-experiment currently requires a .harn pipeline path, got {path}"
+            cli_diagnostic!(
+                "error: --structural-experiment currently requires a .harn pipeline path, got {path}"
             );
             process::exit(1);
         }
         if compare.is_some() {
-            eprintln!("--compare cannot be combined with --structural-experiment");
+            cli_diagnostic!("error: --compare cannot be combined with --structural-experiment");
             process::exit(1);
         }
         if matches!(llm_mock_mode, commands::run::CliLlmMockMode::Record { .. }) {
-            eprintln!("--llm-mock-record cannot be combined with --structural-experiment");
+            cli_diagnostic!(
+                "error: --llm-mock-record cannot be combined with --structural-experiment"
+            );
             process::exit(1);
         }
         let path_buf = fs::canonicalize(&path_buf).unwrap_or_else(|error| {
@@ -41,14 +43,14 @@ pub(crate) fn eval_run_record(
     let path_buf = PathBuf::from(path);
     if path_buf.is_file() && file_looks_like_persona_eval_ladder_manifest(&path_buf) {
         if compare.is_some() {
-            eprintln!("--compare is not supported with persona eval ladder manifests");
+            cli_diagnostic!("error: --compare is not supported with persona eval ladder manifests");
             process::exit(1);
         }
         let manifest = load_persona_eval_ladder_manifest_or_exit(&path_buf);
         let report =
             harn_vm::orchestration::run_persona_eval_ladder(&manifest).unwrap_or_else(|error| {
-                eprintln!(
-                    "Failed to evaluate persona eval ladder {}: {error}",
+                cli_diagnostic!(
+                    "error: failed to evaluate persona eval ladder {}: {error}",
                     path_buf.display()
                 );
                 process::exit(1);
@@ -62,14 +64,14 @@ pub(crate) fn eval_run_record(
 
     if path_buf.is_file() && file_looks_like_eval_pack_manifest(&path_buf) {
         if compare.is_some() {
-            eprintln!("--compare is not supported with eval pack manifests");
+            cli_diagnostic!("error: --compare is not supported with eval pack manifests");
             process::exit(1);
         }
         let manifest = load_eval_pack_manifest_or_exit(&path_buf);
         let report = harn_vm::orchestration::evaluate_eval_pack_manifest_resumable(&manifest, None)
             .unwrap_or_else(|error| {
-                eprintln!(
-                    "Failed to evaluate eval pack {}: {error}",
+                cli_diagnostic!(
+                    "error: failed to evaluate eval pack {}: {error}",
                     path_buf.display()
                 );
                 process::exit(1);
@@ -83,14 +85,14 @@ pub(crate) fn eval_run_record(
 
     if path_buf.is_file() && file_looks_like_eval_manifest(&path_buf) {
         if compare.is_some() {
-            eprintln!("--compare is not supported with eval suite manifests");
+            cli_diagnostic!("error: --compare is not supported with eval suite manifests");
             process::exit(1);
         }
         let manifest = load_eval_suite_manifest_or_exit(&path_buf);
         let suite = harn_vm::orchestration::evaluate_run_suite_manifest(&manifest).unwrap_or_else(
             |error| {
-                eprintln!(
-                    "Failed to evaluate manifest {}: {error}",
+                cli_diagnostic!(
+                    "error: failed to evaluate manifest {}: {error}",
                     path_buf.display()
                 );
                 process::exit(1);
@@ -300,7 +302,7 @@ pub(crate) fn print_persona_ladder_report(
 
 pub(crate) fn run_package_evals() {
     let paths = package::load_package_eval_pack_paths(None).unwrap_or_else(|error| {
-        eprintln!("{error}");
+        cli_diagnostic!("error: {error}");
         process::exit(1);
     });
     let mut all_pass = true;
@@ -309,7 +311,10 @@ pub(crate) fn run_package_evals() {
         let manifest = load_eval_pack_manifest_or_exit(path);
         let report = harn_vm::orchestration::evaluate_eval_pack_manifest_resumable(&manifest, None)
             .unwrap_or_else(|error| {
-                eprintln!("Failed to evaluate eval pack {}: {error}", path.display());
+                cli_diagnostic!(
+                    "error: failed to evaluate eval pack {}: {error}",
+                    path.display()
+                );
                 process::exit(1);
             });
         print_eval_pack_report(&report);
@@ -358,16 +363,16 @@ pub(crate) fn run_structural_experiment_eval(
     let baseline_runs = collect_structural_eval_runs(baseline_dir.path());
     let variant_runs = collect_structural_eval_runs(variant_dir.path());
     if baseline_runs.is_empty() || variant_runs.is_empty() {
-        eprintln!(
-            "structural eval expected workflow run records under {} and {}, but one side was empty",
+        cli_diagnostic!(
+            "error: structural eval expected workflow run records under {} and {}, but one side was empty",
             baseline_dir.path().display(),
             variant_dir.path().display()
         );
         process::exit(1);
     }
     if baseline_runs.len() != variant_runs.len() {
-        eprintln!(
-            "structural eval produced different run counts: baseline={} variant={}",
+        cli_diagnostic!(
+            "error: structural eval produced different run counts: baseline={} variant={}",
             baseline_runs.len(),
             variant_runs.len()
         );

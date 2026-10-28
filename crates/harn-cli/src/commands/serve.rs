@@ -57,20 +57,17 @@ pub(crate) async fn run_command(command: ServeCommand) {
         }
         ServeCommand::Site(args) => {
             if let Err(error) = run_site_server(&args).await {
-                eprintln!("{error}");
-                std::process::exit(1);
+                crate::fatal_error(error);
             }
         }
         ServeCommand::Worker(args) => {
             if let Err(error) = run_worker_server(&args).await {
-                eprintln!("{error}");
-                std::process::exit(1);
+                crate::fatal_error(error);
             }
         }
         ServeCommand::Test => {
             if let Err(error) = crate::commands::test_worker::serve_stdio().await {
-                eprintln!("{error}");
-                std::process::exit(1);
+                crate::fatal_error(error);
             }
         }
     }
@@ -374,8 +371,8 @@ pub(crate) async fn run_worker_server(args: &WorkerServeArgs) -> Result<(), Stri
                 .filter_map(|job| job.queue.as_deref())
                 .collect::<BTreeSet<_>>()
                 .len();
-            eprintln!(
-                "[harn] worker ready: jobs={job_count} queues={queue_count} script={}",
+            cli_diagnostic!(
+                "worker ready: jobs={job_count} queues={queue_count} script={}",
                 script_path.display()
             );
 
@@ -389,8 +386,8 @@ pub(crate) async fn run_worker_server(args: &WorkerServeArgs) -> Result<(), Stri
                     report.in_flight, report.retry_queue_depth, report.dlq_depth
                 ));
             }
-            eprintln!(
-                "[harn] worker stopped: jobs={} queues={} dlq={}",
+            cli_diagnostic!(
+                "worker stopped: jobs={} queues={} dlq={}",
                 report.jobs, report.queues, report.dlq_depth
             );
             Ok(())

@@ -8,15 +8,13 @@ use crate::env_guard::ScopedEnvVar;
 
 pub(crate) async fn run(args: TryArgs) {
     if !mock_provider_active() && harn_vm::llm::available_provider_names().is_empty() {
-        eprintln!("{}", crate::commands::doctor::no_credentials_hint());
-        std::process::exit(1);
+        crate::fatal_error(crate::commands::doctor::no_credentials_hint());
     }
 
     let resolved = match resolve_try_model() {
         Ok(resolved) => resolved,
         Err(error) => {
-            eprintln!("{error}");
-            std::process::exit(1);
+            crate::fatal_error(error);
         }
     };
 

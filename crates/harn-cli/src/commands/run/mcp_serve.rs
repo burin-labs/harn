@@ -227,8 +227,7 @@ async fn run_server(loaded: LoadedMcpRuntime, mode: RunFileMcpServeMode) {
         }
     };
     if let Err(error) = result {
-        eprintln!("error: MCP server error: {error}");
-        std::process::exit(1);
+        crate::fatal_error(format!("MCP server error: {error}"));
     }
 }
 
@@ -255,25 +254,25 @@ pub(crate) async fn run_file_mcp_serve(
     mode: RunFileMcpServeMode,
     host_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
 ) {
-    use std::process;
-
     let _environment = super::environment::host_environment_scope(host_boundary);
     let watch = matches!(&mode, RunFileMcpServeMode::Stdio { watch: true });
     let loaded = match load_mcp_runtime(path, card_source).await {
         Ok(runtime) => runtime,
         Err(error) => {
-            eprintln!("error: {}", error.message);
-            process::exit(error.exit_code);
+            crate::fatal_error_with_code(error.message, error.exit_code);
         }
     };
     if !loaded.diagnostics.is_empty() {
         eprint!("{}", loaded.diagnostics);
     }
-    eprintln!(
-        "[harn] serve mcp: serving {} as '{}'{}",
-        loaded.capability_summary,
-        loaded.server_name,
-        if watch { " with source reload" } else { "" },
+    harn_vm::events::log_info(
+        "mcp",
+        &format!(
+            "serve mcp: serving {} as '{}'{}",
+            loaded.capability_summary,
+            loaded.server_name,
+            if watch { " with source reload" } else { "" },
+        ),
     );
 
     let local = tokio::task::LocalSet::new();
@@ -436,12 +435,13 @@ async fn run_reloadable_stdio(path: &str, loaded: LoadedMcpRuntime) {
                 let _ = source_tx.try_send(());
             }
             Ok(_) => {}
-            Err(error) => eprintln!("[harn] serve mcp: source watcher error: {error}"),
+            Err(error) => {
+                harn_vm::events::log_warn("mcp", &format!("source watcher error: {error}"));
+            }
         }) {
             Ok(watcher) => watcher,
             Err(error) => {
-                eprintln!("error: failed to create MCP source watcher: {error}");
-                std::process::exit(1);
+                crate::fatal_error(format!("failed to create MCP source watcher: {error}"));
             }
         };
     // A bare filename has an empty parent, which notify cannot watch.
@@ -450,11 +450,10 @@ async fn run_reloadable_stdio(path: &str, loaded: LoadedMcpRuntime) {
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     if let Err(error) = watcher.watch(watch_root, RecursiveMode::Recursive) {
-        eprintln!(
-            "error: failed to watch MCP source root {}: {error}",
+        crate::fatal_error(format!(
+            "failed to watch MCP source root {}: {error}",
             watch_root.display()
-        );
-        std::process::exit(1);
+        ));
     }
 
     let LoadedMcpRuntime {
@@ -478,17 +477,23 @@ async fn run_reloadable_stdio(path: &str, loaded: LoadedMcpRuntime) {
                     if !runtime.diagnostics.is_empty() {
                         eprint!("{}", runtime.diagnostics);
                     }
-                    eprintln!(
-                        "[harn] serve mcp: reloaded {} as '{}'",
-                        runtime.capability_summary, runtime.server_name
+                    harn_vm::events::log_info(
+                        "mcp",
+                        &format!(
+                            "serve mcp: reloaded {} as '{}'",
+                            runtime.capability_summary, runtime.server_name
+                        ),
                     );
                     if !reloader.replace(runtime.registry, runtime.vm, runtime.connector_clients) {
                         break;
                     }
                 }
-                Err(error) => eprintln!(
-                    "[harn] serve mcp: reload failed; keeping previous registry: {}",
-                    error.message
+                Err(error) => harn_vm::events::log_warn(
+                    "mcp",
+                    &format!(
+                        "serve mcp: reload failed; keeping previous registry: {}",
+                        error.message
+                    ),
                 ),
             }
         }
@@ -499,8 +504,7 @@ async fn run_reloadable_stdio(path: &str, loaded: LoadedMcpRuntime) {
         .await;
     drop(watcher);
     if let Err(error) = result {
-        eprintln!("error: MCP server error: {error}");
-        std::process::exit(1);
+        crate::fatal_error(format!("MCP server error: {error}"));
     }
 }
 

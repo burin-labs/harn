@@ -7,7 +7,7 @@ pub(crate) fn load_run_record_or_exit(path: &Path) -> harn_vm::orchestration::Ru
     match harn_vm::orchestration::load_run_record(path) {
         Ok(run) => run,
         Err(error) => {
-            eprintln!("Failed to load run record: {error}");
+            cli_diagnostic!("error: failed to load run record: {error}");
             process::exit(1);
         }
     }
@@ -17,7 +17,10 @@ pub(crate) fn load_eval_suite_manifest_or_exit(
     path: &Path,
 ) -> harn_vm::orchestration::EvalSuiteManifest {
     harn_vm::orchestration::load_eval_suite_manifest(path).unwrap_or_else(|error| {
-        eprintln!("Failed to load eval manifest {}: {error}", path.display());
+        cli_diagnostic!(
+            "error: failed to load eval manifest {}: {error}",
+            path.display()
+        );
         process::exit(1);
     })
 }
@@ -26,7 +29,10 @@ pub(crate) fn load_eval_pack_manifest_or_exit(
     path: &Path,
 ) -> harn_vm::orchestration::EvalPackManifest {
     harn_vm::orchestration::load_eval_pack_manifest(path).unwrap_or_else(|error| {
-        eprintln!("Failed to load eval pack {}: {error}", path.display());
+        cli_diagnostic!(
+            "error: failed to load eval pack {}: {error}",
+            path.display()
+        );
         process::exit(1);
     })
 }
@@ -35,8 +41,8 @@ pub(crate) fn load_persona_eval_ladder_manifest_or_exit(
     path: &Path,
 ) -> harn_vm::orchestration::PersonaEvalLadderManifest {
     harn_vm::orchestration::load_persona_eval_ladder_manifest(path).unwrap_or_else(|error| {
-        eprintln!(
-            "Failed to load persona eval ladder {}: {error}",
+        cli_diagnostic!(
+            "error: failed to load persona eval ladder {}: {error}",
             path.display()
         );
         process::exit(1);
@@ -113,20 +119,23 @@ pub(crate) fn collect_run_record_paths(path: &str) -> Vec<PathBuf> {
     if path.is_dir() {
         let mut entries: Vec<PathBuf> = fs::read_dir(path)
             .unwrap_or_else(|error| {
-                eprintln!("Failed to read run directory {}: {error}", path.display());
+                cli_diagnostic!(
+                    "error: failed to read run directory {}: {error}",
+                    path.display()
+                );
                 process::exit(1);
             })
             .filter_map(|entry| entry.ok().map(|entry| entry.path()))
             .filter(|entry| entry.extension().and_then(|ext| ext.to_str()) == Some("json"))
             .collect();
         if entries.is_empty() {
-            eprintln!("No run records found at {}", path.display());
+            cli_diagnostic!("error: no run records found at {}", path.display());
             process::exit(1);
         }
         entries.sort();
         return entries;
     }
-    eprintln!("Run path does not exist: {}", path.display());
+    cli_diagnostic!("error: run path does not exist: {}", path.display());
     process::exit(1);
 }
 

@@ -122,6 +122,9 @@ pub struct ProviderDef {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ProviderRegionDef {
     pub base_url: String,
+    /// Data handling documented for this exact endpoint, not sibling regions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_controls: Option<ModelDataControlsDef>,
     #[serde(default)]
     pub label: Option<String>,
     #[serde(default)]

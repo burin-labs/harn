@@ -47,6 +47,7 @@ fn main(harness: Harness) {
     harness.stdio.println("activation-attempt-reached")
   }
 }
+
 "#,
     )
     .unwrap();
@@ -72,4 +73,145 @@ fn main(harness: Harness) {
             assert!(!marker.exists(), "help/version started a lazy child");
         }
     }
+}
+
+#[test]
+fn eager_mcp_warning_uses_the_stderr_log_level() {
+    let temp = TempDir::new().unwrap();
+    fs::write(
+        temp.path().join("harn.toml"),
+        r#"
+[package]
+name = "mcp-log-fixture"
+version = "0.1.0"
+[[mcp]]
+name = "missing-server"
+command = "harn-test-command-that-does-not-exist"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("main.harn"),
+        "fn main(harness: Harness) { harness.stdio.println(\"program-output\") }\n",
+    )
+    .unwrap();
+    for (level, expected_warning) in [("info", true), ("off", false)] {
+        let output = harn_e2e_command()
+            .current_dir(temp.path())
+            .env("HARN_LOG_LEVEL", level)
+            .args(["run", "--no-sandbox", "main.harn"])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{level}: {stdout}\n{stderr}");
+        assert_eq!(stdout, "program-output\n");
+        assert!(
+            stderr.contains("[harn] warning: harn run --no-sandbox disables"),
+            "{level}: {stderr}"
+        );
+        assert_eq!(
+            stderr.contains("[harn] warning: mcp: failed to connect to 'missing-server'"),
+            expected_warning,
+            "{level}: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn unknown_mcp_server_reports_a_prefixed_error_on_stderr() {
+    let temp = TempDir::new().unwrap();
+    fs::write(
+        temp.path().join("harn.toml"),
+        "[package]\nname = \"mcp-status-fixture\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let output = harn_e2e_command()
+        .current_dir(temp.path())
+        .args(["mcp", "status", "missing-server"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("[harn] error:"), "{stderr}");
+    assert!(stderr.contains("missing-server"), "{stderr}");
+}
+
+#[test]
+fn fatal_command_error_survives_disabled_logs_and_keeps_its_exit_code() {
+    let output = harn_e2e_command()
+        .env("HARN_LOG_LEVEL", "off")
+        .args(["provider", "admission", "--request", "invalid-json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("[harn] error:"), "{stderr}");
+    assert!(stderr.contains("malformed"), "{stderr}");
+}
+
+#[test]
+fn argument_errors_are_short_unless_explained() {
+    for explain in [false, true] {
+        let mut command = harn_e2e_command();
+        if explain {
+            command.arg("--explain");
+        }
+        let output = command.arg("--not-a-real-option").output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.starts_with("[harn] error:"), "{stderr}");
+        assert!(stderr.contains("--not-a-real-option"), "{stderr}");
+        assert_eq!(stderr.contains("Usage:"), explain, "{stderr}");
+    }
+    let output = harn_e2e_command().output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Usage:"));
+}
+
+#[test]
+fn invalid_run_options_use_the_common_error_sink() {
+    let output = harn_e2e_command()
+        .args(["run", "-e", "1", "--allow-unsigned"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("[harn] error:"), "{stderr}");
+    assert!(stderr.contains("cannot be combined with `-e`"), "{stderr}");
+}
+
+#[test]
+fn missing_session_bundle_uses_the_common_error_sink() {
+    let temp = TempDir::new().unwrap();
+    let output = harn_e2e_command()
+        .current_dir(temp.path())
+        .args(["session", "validate", "missing.json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("[harn] error:"), "{stderr}");
+    assert!(stderr.contains("missing.json"), "{stderr}");
+}
+
+#[test]
+fn existing_project_directory_uses_the_common_error_sink() {
+    let temp = TempDir::new().unwrap();
+    fs::create_dir(temp.path().join("existing")).unwrap();
+    let output = harn_e2e_command()
+        .current_dir(temp.path())
+        .args(["new", "existing"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("[harn] error:"), "{stderr}");
+    assert!(stderr.contains("existing"), "{stderr}");
 }

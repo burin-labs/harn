@@ -189,8 +189,9 @@ without a live provider or host dispatcher.
 
 By default, every binding call resolves through `metadata.mock_output` or a
 structured echo, which is the right behavior for replay fixtures and offline
-audits. Hosts that want real tool dispatch pass a `dispatcher` closure on the
-options dict:
+audits. This low-level call is a simulation when no dispatcher is supplied;
+the served MCP profile never uses it as a live tool result. Hosts that want real
+tool dispatch pass a `dispatcher` closure on the options dict:
 
 ```harn
 fn dispatch_binding(fs: HarnessFs, binding_name: string, input: dict) {
@@ -234,12 +235,18 @@ The profile registers:
 
 - `harn.code.search_examples`: returns curated snippets and examples.
 - `harn.code.generate_harn_api`: returns a manifest plus typed `.harn`
-  wrapper declarations for the MCP tool surface.
+  wrapper declarations for the server's registered read-only tools.
 - `harn.code.execute_composition`: executes a read-only snippet against the
-  supplied binding manifest and returns a reduced result envelope.
+  server's registered tools and returns a reduced result envelope. A supplied
+  manifest selects from those bindings; it cannot add tools or change their
+  schemas, policy, or dispatch metadata.
 
 Hybrid servers can expose ordinary tools plus the Code Mode profile by passing
-an existing registry into `composition_mcp_tools(registry)`.
+an existing registry into `composition_mcp_tools(registry)`. The server must
+configure the tools: client-supplied tool lists are rejected. Without registered
+tools declared read-only, snippets cannot call tools. Tools with undeclared side
+effects are excluded. The server also configures which remote servers and
+annotations are trusted; clients cannot expand that trust.
 
 Inside an agent loop, `composition_mcp_api(tools, {query?, limit?})` builds the
 same manifest/API pair from only MCP-served tools. The query path uses the same

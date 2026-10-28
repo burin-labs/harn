@@ -3,13 +3,12 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{self, Stdio};
 
-use clap::{error::ErrorKind, CommandFactory};
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
 
-use crate::cli::{Cli, TestArgs};
+use crate::cli::TestArgs;
 use crate::commands::run::{
     install_cli_llm_mock_mode, persist_cli_llm_mock_recording, CliLlmMockMode,
 };
@@ -423,7 +422,7 @@ async fn run_standard_command(
                     command_error(&problems.join("\n"));
                 }
                 if inventory.selected_files.is_empty() {
-                    eprintln!(
+                    cli_diagnostic!(
                         "Package intentionally has no tests: {}",
                         inventory.allow_empty_reason.as_deref().unwrap_or_default()
                     );
@@ -514,7 +513,7 @@ async fn run_user_test_targets(
         }
         match resolved.mode {
             affected::AffectedTestMode::Selected => {
-                eprintln!(
+                cli_diagnostic!(
                     "affected tests: selected {} test file(s) from {} requested target(s)",
                     resolved.files.len(),
                     paths.len()
@@ -528,7 +527,7 @@ async fn run_user_test_targets(
                 &selected_paths
             }
             affected::AffectedTestMode::Full => {
-                eprintln!(
+                cli_diagnostic!(
                     "affected tests: {}; running the complete requested suite",
                     resolved.reason
                 );
@@ -693,9 +692,7 @@ fn resolve_test_shard(
 }
 
 fn command_error(message: &str) -> ! {
-    Cli::command()
-        .error(ErrorKind::ValueValidation, message)
-        .exit()
+    crate::exit::command_error(message)
 }
 
 /// Optional report contract threaded into `run_user_tests` as one unit.
@@ -922,7 +919,7 @@ fn error_line_matches(actual_error: &str, pattern: &str) -> bool {
         match Regex::new(re_pattern.trim()) {
             Ok(re) => re.is_match(actual_error),
             Err(_) => {
-                eprintln!("    warning: invalid regex in .error file: {re_pattern}");
+                cli_diagnostic!("    warning: invalid regex in .error file: {re_pattern}");
                 false
             }
         }
@@ -942,7 +939,7 @@ fn write_junit_xml_or_exit(path: &str, report: &TestReport, announce: bool) {
             }
         }
         Err(error) => {
-            eprintln!("{error}");
+            cli_diagnostic!("{error}");
             process::exit(1);
         }
     }
@@ -956,7 +953,7 @@ fn write_user_test_json_or_exit(path: &str, report: &TestReport, announce: bool)
             }
         }
         Err(error) => {
-            eprintln!("{error}");
+            cli_diagnostic!("{error}");
             process::exit(1);
         }
     }
@@ -1039,7 +1036,7 @@ pub(crate) async fn run_user_tests(
     let paths = path_strs.iter().map(PathBuf::from).collect::<Vec<_>>();
     for (path_str, path) in path_strs.iter().zip(&paths) {
         if !path.exists() {
-            eprintln!("Path not found: {path_str}");
+            cli_diagnostic!("Path not found: {path_str}");
             process::exit(1);
         }
     }
@@ -1101,14 +1098,14 @@ pub(crate) async fn run_user_tests(
         process::exit(crate::exit::PROGRAM_FAILURE);
     }
     if fail_on_skip && summary.skipped > 0 {
-        eprintln!(
+        cli_diagnostic!(
             "error: {} user test(s) skipped under --fail-on-skip",
             summary.skipped
         );
         process::exit(crate::exit::PROGRAM_FAILURE);
     }
     if summary.total == 0 && !allow_empty {
-        eprintln!("{}", empty_user_test_message(display_targets, filter));
+        cli_diagnostic!("{}", empty_user_test_message(display_targets, filter));
         process::exit(crate::exit::PROGRAM_FAILURE);
     }
 }
@@ -1148,7 +1145,7 @@ fn preflight_dependencies_or_exit(paths: &[PathBuf]) {
             continue;
         }
         if let Err(error) = crate::package::ensure_dependencies_materialized(&anchor) {
-            eprintln!("error: failed to prepare test dependencies: {error}");
+            cli_diagnostic!("error: failed to prepare test dependencies: {error}");
             process::exit(crate::exit::RUN_SETUP_FAILURE);
         }
     }
@@ -1173,7 +1170,7 @@ fn emit_coverage_report(report: &harn_vm::coverage::Coverage, out: Option<&str>)
     // records).
     if let Some(path) = out {
         if let Err(error) = fs::write(path, report.render_lcov()) {
-            eprintln!("failed to write coverage report to {path}: {error}");
+            cli_diagnostic!("failed to write coverage report to {path}: {error}");
             process::exit(1);
         }
         println!("LCOV tracefile written to {path}");
@@ -1189,11 +1186,11 @@ fn preflight_report_path(path: &str) {
     let buf = PathBuf::from(path);
     if let Some(parent) = buf.parent().filter(|p| !p.as_os_str().is_empty()) {
         if !parent.exists() {
-            eprintln!("report directory does not exist: {}", parent.display());
+            cli_diagnostic!("report directory does not exist: {}", parent.display());
             process::exit(1);
         }
         if !parent.is_dir() {
-            eprintln!("report directory is not a directory: {}", parent.display());
+            cli_diagnostic!("report directory is not a directory: {}", parent.display());
             process::exit(1);
         }
     }
@@ -1429,7 +1426,7 @@ pub(crate) async fn run_determinism_tests(
     cli_skill_dirs: &[PathBuf],
 ) {
     let files = collect_user_test_files(path_str).unwrap_or_else(|error| {
-        eprintln!("{error}");
+        cli_diagnostic!("{error}");
         process::exit(1);
     });
     let mut passed = 0usize;

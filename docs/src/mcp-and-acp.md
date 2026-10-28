@@ -482,8 +482,10 @@ This exposes `harn.code.search_examples`, `harn.code.generate_harn_api`, and
 `harn.code.execute_composition`. The executor still runs through Harn's
 read-only composition path and returns the reduced snippet result by default
 instead of an opaque "execute code" result. Hybrid servers can call
-`composition_mcp_tools(existing_registry)` to expose ordinary tools and the
-compact Code Mode profile together.
+`composition_mcp_tools(existing_registry)` to expose ordinary tools and bind
+the profile to that registry's declared read-only tools. Client manifests select
+from those bindings; they cannot add tools or grant trust. Without a registered
+read-only tool, the profile cannot call one.
 
 ### Defining resources and prompts
 
@@ -1651,6 +1653,12 @@ agents can interact with. The server implements A2A protocol version 0.3.0 and
 uses the shared `harn-serve` dispatch core. Harn keeps this adapter rather than
 adopting the official `a2a-lf` Rust SDK; see
 [ADR 0005](./adr/0005-a2a-keep-bespoke-adapter.md).
+
+Requests may include `A2A-Version: 0.3` as a header or query parameter; an absent
+or empty value also selects 0.3. Conflicting or repeated values are rejected.
+The server rejects unsupported versions before dispatch. JSON-RPC returns error
+code `-32009`; HTTP+JSON returns a 400 problem response listing the supported
+versions. Patch versions do not change protocol compatibility.
 
 ### Running the server
 

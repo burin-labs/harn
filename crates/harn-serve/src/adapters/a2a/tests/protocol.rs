@@ -136,13 +136,9 @@ async fn legacy_jsonrpc_methods_emit_deprecation_header() {
 }
 
 #[tokio::test]
-async fn unknown_a2a_version_header_no_longer_rejects_request() {
-    // Per A2A 0.3.0, version negotiation happens through AgentCard
-    // discovery; the request header is non-canonical. A request that
-    // carries an unknown `a2a-version` value must still dispatch; the
-    // adapter records only a soft-deprecation warning.
+async fn a2a_version_header_rejects_unsupported_versions_before_dispatch() {
     let (_dir, server) = echo_server();
-    let router = http_router(server, LOCAL_URL);
+    let router = http_router(server.clone(), LOCAL_URL);
     let body = serde_json::to_vec(&harn_vm::jsonrpc::request(
         "version-1",
         "message/send",
@@ -155,7 +151,7 @@ async fn unknown_a2a_version_header_no_longer_rejects_request() {
     ))
     .expect("request body");
 
-    for header_value in ["1.0", "0.3.0", "9.9.9", "garbage"] {
+    for header_value in ["", "0.3", "0.3.0", "0.3.17", "0.3.18446744073709551616"] {
         let response = router
             .clone()
             .oneshot(
@@ -188,6 +184,130 @@ async fn unknown_a2a_version_header_no_longer_rejects_request() {
             "header {header_value} did not dispatch: {value}"
         );
     }
+    let query_version = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/?A2A-Version=0.3")
+                .body(Body::from(body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(query_version.status(), StatusCode::OK);
+    let query_body = to_bytes(query_version.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let query_result: JsonValue = serde_json::from_slice(&query_body).unwrap();
+    assert_eq!(query_result["result"]["status"]["state"], "completed");
+    let task_count = server.tasks.lock().unwrap().len();
+    for header_value in ["1.0", "9.9.9", "garbage", "0.3.", "0.3.+1"] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .header(A2A_VERSION_HEADER, header_value)
+                    .body(Body::from(body.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: JsonValue = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["id"], "version-1");
+        assert_eq!(value["error"]["code"], -32009);
+        assert_eq!(
+            value["error"]["data"][0]["@type"],
+            "type.googleapis.com/google.rpc.ErrorInfo"
+        );
+        assert_eq!(
+            value["error"]["data"][0]["metadata"]["supportedVersions"],
+            "0.3"
+        );
+        assert_eq!(server.tasks.lock().unwrap().len(), task_count);
+    }
+    for uri in [
+        "/?A2A-Version=1.0",
+        "/?a2a-version=1%2E0",
+        "/?A2A-Version=0.3&A2A-Version=1.0",
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(uri)
+                    .body(Body::from(body.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: JsonValue = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["error"]["code"], -32009);
+        assert_eq!(server.tasks.lock().unwrap().len(), task_count);
+    }
+    let conflicting = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/?A2A-Version=1.0")
+                .header(A2A_VERSION_HEADER, "0.3")
+                .body(Body::from(body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(conflicting.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(server.tasks.lock().unwrap().len(), task_count);
+    let duplicate = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/")
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .header(A2A_VERSION_HEADER, "0.3")
+                .header(A2A_VERSION_HEADER, "1.0")
+                .body(Body::from(body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(server.tasks.lock().unwrap().len(), task_count);
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/v1/message:send")
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .header(A2A_VERSION_HEADER, "1.0")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response.headers()[axum::http::header::CONTENT_TYPE],
+        "application/problem+json"
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let problem: JsonValue = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        problem["type"],
+        "https://a2a-protocol.org/errors/version-not-supported"
+    );
+    assert_eq!(problem["supportedVersions"], json!(["0.3"]));
+    assert_eq!(server.tasks.lock().unwrap().len(), task_count);
 }
 
 #[tokio::test]

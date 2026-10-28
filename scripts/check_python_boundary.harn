@@ -53,6 +53,14 @@ const PYTHON_ALLOWLIST = [
   },
   {
     kind: "exact",
+    pattern: "scripts/tests/prune_stale_targets_reader_test.py",
+    category: "subprocess-fixture",
+    owner: "Target-cache collector",
+    reason:
+      "Coordinates a real open-file reader and disposable target to verify host process liveness and cleanup decisions.",
+  },
+  {
+    kind: "exact",
     pattern: "crates/harn-vm/tests/fixtures/source_verifier_unittest.py",
     category: "fixture",
     owner: "Prepared source verifier",
@@ -86,6 +94,13 @@ const PYTHON_ALLOWLIST = [
 ]
 
 const EMBEDDED_PYTHON_ALLOWLIST = [
+  {
+    path: "Makefile",
+    pattern: r"^\s*python3\s+\./scripts/tests/prune_stale_targets_reader_test\.py(?:\s|$)",
+    category: "subprocess-fixture",
+    owner: "Target-cache collector",
+    reason: "Runs the process-handle regression in the repository shell gate.",
+  },
   {
     path: "scripts/generate_sdk_clients.sh",
     pattern: r"^\s*python3\s+-m\s+venv(?:\s|$)",

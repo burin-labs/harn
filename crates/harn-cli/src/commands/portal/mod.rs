@@ -40,7 +40,7 @@ pub(crate) async fn run_portal(
     let addr: SocketAddr = match format!("{host}:{port}").parse() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("error: invalid portal bind address {host}:{port}: {e}");
+            cli_diagnostic!("error: invalid portal bind address {host}:{port}: {e}");
             std::process::exit(1);
         }
     };
@@ -56,29 +56,29 @@ pub(crate) async fn run_portal(
         mutation_endpoints_enabled: addr.ip().is_loopback() || allow_remote_launch,
     });
     let app = build_router(state.clone());
-    let url = format!("http://{addr}");
-
-    println!("Harn portal listening on {url}");
-    println!("Watching run records in {}", run_dir.display());
-    if !state.mutation_endpoints_enabled {
-        println!(
-            "Launch and replay endpoints are disabled for non-loopback binds; pass --allow-remote-launch to enable them."
-        );
-    }
-
-    if open_browser {
-        let _ = webbrowser::open(&url);
-    }
-
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("error: failed to bind portal listener on {addr}: {e}");
+            cli_diagnostic!("error: failed to bind portal listener on {addr}: {e}");
             std::process::exit(1);
         }
     };
+    let bound_addr = listener.local_addr().unwrap_or_else(|error| {
+        crate::fatal_error(format!("failed to inspect portal listener: {error}"))
+    });
+    let url = format!("http://{bound_addr}");
+    cli_diagnostic!("Harn portal listening on {url}");
+    cli_diagnostic!("Watching run records in {}", run_dir.display());
+    if !state.mutation_endpoints_enabled {
+        cli_diagnostic!(
+            "Launch and replay endpoints are disabled for non-loopback binds; pass --allow-remote-launch to enable them."
+        );
+    }
+    if open_browser {
+        let _ = webbrowser::open(&url);
+    }
     if let Err(e) = axum::serve(listener, app).await {
-        eprintln!("error: portal server failed: {e}");
+        cli_diagnostic!("error: portal server failed: {e}");
         std::process::exit(1);
     }
 }

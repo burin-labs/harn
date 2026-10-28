@@ -21,7 +21,7 @@ impl ProviderReportDispatch {
             return dispatch_provider_report(self, json, report).await;
         }
         let Some(markdown_env) = provider_report_markdown_env(self.script_name) else {
-            eprintln!(
+            cli_diagnostic!(
                 "error: {} does not support Markdown rendering",
                 self.payload_name
             );
@@ -61,7 +61,7 @@ pub(crate) async fn dispatch_provider_report_with_env<T: Serialize>(
     let payload_json = match serde_json::to_string(report) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!(
+            cli_diagnostic!(
                 "error: failed to serialise {} payload: {error}",
                 dispatch_info.payload_name
             );
@@ -71,7 +71,7 @@ pub(crate) async fn dispatch_provider_report_with_env<T: Serialize>(
     let payload_pretty = match serde_json::to_string_pretty(report) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!(
+            cli_diagnostic!(
                 "error: failed to render {} payload: {error}",
                 dispatch_info.payload_name
             );

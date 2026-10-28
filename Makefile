@@ -605,7 +605,7 @@ lint-harn-trees:
 	$(HARN_CMD) lint --strict tests && \
 	$(HARN_CMD) lint --strict bench && \
 	$(HARN_CMD) lint --strict crates/harn-cli/assets/demo && \
-	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals crates/harn-serve/src/adapters/api/tests/fixtures; \
+	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals crates/harn-serve/src/adapters/api/tests/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures; \
 	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
 
 lint-harn-stdlib-metadata:
@@ -641,7 +641,7 @@ STDLIB_HARN_DIR := crates/harn-stdlib/src/stdlib
 # historically outside the fmt-harn gate. Keeping them in the
 # gate avoids the "I edited persona X and pre-commit reformatted three
 # unrelated files" surprise from accumulated drift.
-EXTRA_HARN_DIRS := personas tests examples evals crates/harn-cli/assets/demo crates/harn-vm/src/llm/rate_limit/fixtures crates/harn-serve/src/adapters/api/tests/fixtures
+EXTRA_HARN_DIRS := personas tests examples evals crates/harn-cli/assets/demo crates/harn-vm/src/llm/rate_limit/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures crates/harn-serve/src/adapters/api/tests/fixtures
 EXTRA_HARN_FIND := find $(EXTRA_HARN_DIRS) -type d -name .harn -prune -o -type f -name '*.harn' -print0 2>/dev/null
 
 fmt-harn-fix:
@@ -847,6 +847,8 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/release_gate_stale_out_dir_test.sh
 	./scripts/tests/release_gate_docs_proof_test.sh
 	./scripts/tests/prune_stale_targets_test.sh
+	bash ./scripts/tests/prune_stale_targets_lock_test.sh
+	python3 ./scripts/tests/prune_stale_targets_reader_test.py
 	./scripts/tests/prune_stale_targets_retention_test.sh
 	./scripts/tests/prune_stale_targets_host_policy_test.sh
 	bash ./scripts/tests/prune_stale_targets_pressure_test.sh
@@ -1149,7 +1151,7 @@ check-trigger-quickref:
 	@echo "    Harn trigger quickref OK."
 
 # Regenerate the provider/model capability matrix from capabilities.toml.
-gen-provider-matrix: gen-provider-catalog
+gen-provider-matrix:
 	$(HARN_CMD) provider catalog matrix
 
 # CI guard: fail if the provider matrix docs drift from capabilities.toml.
@@ -1159,7 +1161,7 @@ check-provider-matrix: check-provider-catalog
 	@echo "    Harn provider matrix OK."
 
 # Regenerate provider support recommendations from catalog/capabilities/notes.
-gen-provider-support: gen-provider-catalog
+gen-provider-support:
 	$(HARN_CMD) provider catalog support
 
 # CI guard: fail if provider support markdown or JSON drift.
@@ -1170,7 +1172,10 @@ check-provider-support: check-provider-catalog
 
 # Regenerate the checked-in provider/model catalog JSON, schema, and downstream bindings.
 gen-provider-catalog:
-	$(HARN_CMD) provider catalog generate
+	@$(HARN_BIN_ASSIGN) || exit 1; \
+	"$$harn_bin" provider catalog generate && \
+	"$$harn_bin" provider catalog matrix && \
+	"$$harn_bin" provider catalog support
 
 # CI guard: fail if checked-in provider/model catalog artifacts drift.
 check-provider-catalog:

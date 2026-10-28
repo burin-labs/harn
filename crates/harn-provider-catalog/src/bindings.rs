@@ -33,6 +33,10 @@ fn typescript_type_block(language: &str) -> String {
         "{}{}",
         generated_header("//", language),
         TYPESCRIPT_TYPES
+            .replace(
+                "__HARN_CATALOG_SCHEMA_VERSION__",
+                &PROVIDER_CATALOG_SCHEMA_VERSION.to_string()
+            )
             .replace("__HARN_CHAT_API_ADAPTERS__", &chat_adapters)
             .replace("__HARN_MODEL_OPERATIONS__", &operations)
             .replace("__HARN_DATA_CONTROL_DIALECTS__", &dialects)

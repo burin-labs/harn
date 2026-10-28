@@ -66,13 +66,13 @@ pub(crate) async fn resolve_run_path_or_exit(
     match session.materialize().await {
         Some(Ok(materialized)) => materialized,
         Some(Err(error)) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             process::exit(1);
         }
         None => match path {
             Some(path) => path.to_string(),
             None => {
-                eprintln!("error: a run record path or --session is required");
+                cli_diagnostic!("error: a run record path or --session is required");
                 process::exit(2);
             }
         },

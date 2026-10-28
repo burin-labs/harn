@@ -92,6 +92,70 @@ fn restored_postings_answer_like_live_ones_before_and_after_edits() {
 }
 
 #[test]
+fn memory_estimate_tracks_live_content_across_restore_and_edits() {
+    let (mut live_t, mut live_w) = seeded();
+    let (mut restored_t, mut restored_w) = restored(&live_t, &live_w);
+    let estimate = |t: &TrigramIndex, w: &WordIndex| (t.estimated_bytes(), w.estimated_bytes());
+
+    let original = estimate(&live_t, &live_w);
+    assert!(original.0 > 0 && original.1 > 0);
+    assert_eq!(estimate(&restored_t, &restored_w), original);
+
+    edit(&mut live_t, &mut live_w);
+    edit(&mut restored_t, &mut restored_w);
+    let edited = estimate(&live_t, &live_w);
+    assert_ne!(edited, original, "changed content must affect the estimate");
+    assert_eq!(estimate(&restored_t, &restored_w), edited);
+    restored_t.postings.compact();
+    restored_w.postings.compact();
+    assert_eq!(estimate(&restored_t, &restored_w), edited);
+}
+
+#[test]
+fn memory_estimate_does_not_clone_live_hits_after_edit() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    struct Hit {
+        file: u32,
+        clones: Arc<AtomicUsize>,
+    }
+    impl Clone for Hit {
+        fn clone(&self) -> Self {
+            self.clones.fetch_add(1, Ordering::Relaxed);
+            Self {
+                file: self.file,
+                clones: Arc::clone(&self.clones),
+            }
+        }
+    }
+    impl super::FilePosting for Hit {
+        fn file(&self) -> u32 {
+            self.file
+        }
+    }
+
+    let clones = Arc::new(AtomicUsize::new(0));
+    let hit = |file| Hit {
+        file,
+        clones: Arc::clone(&clones),
+    };
+    let mut postings =
+        super::FilePostings::from_files([(1, vec![(7_u8, hit(1))]), (2, vec![(7_u8, hit(2))])]);
+    postings.replace_file(1, [(7_u8, vec![hit(1)])]);
+    clones.store(0, Ordering::Relaxed);
+
+    let bytes = postings.estimated_bytes(|_| 0);
+    assert_eq!(
+        bytes,
+        std::mem::size_of::<u8>()
+            + std::mem::size_of::<Vec<Hit>>()
+            + 2 * std::mem::size_of::<Hit>()
+    );
+    assert_eq!(clones.load(Ordering::Relaxed), 0);
+}
+
+#[test]
 fn compaction_preserves_every_read() {
     let (seed_t, seed_w) = seeded();
     let (mut trigrams, mut words) = restored(&seed_t, &seed_w);

@@ -56,7 +56,7 @@ pub import {
   ci_cache_policy_parse,
   ci_workflow_concurrency_errors,
   consumer_canary_errors,
-  e2e_elastic_capacity_errors,
+  e2e_hosted_runner_errors,
   e2e_workflow_concurrency_errors,
   landlock_incapable_runner_errors,
   linux_cache_environment_errors,

@@ -48,11 +48,13 @@ pub(crate) async fn prepare(
     name: &str,
     arguments: &Value,
     session_id: &str,
+    audience: crate::tool_registry::ToolAudience,
 ) -> Result<Option<Arc<PreparedInvocation>>, VmError> {
     let Some(prepare) = super::agent_tools::find_tool_closure(registry, name, "prepare") else {
         return Ok(None);
     };
-    super::agent_tool_governance::require_registry_membership(registry, name).map_err(rejected)?;
+    super::agent_tool_governance::require_registry_membership_for(registry, name, audience)
+        .map_err(rejected)?;
     super::agent_tool_governance::prepared_handler_catalog(
         registry.ok_or_else(|| rejected("prepared tool requires its registry"))?,
         name,

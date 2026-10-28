@@ -36,6 +36,26 @@ fn public_settlement_prices_long_lived_cache_and_hosted_calls_without_spending()
 }
 
 #[test]
+fn terra_search_calls_settle_at_published_fees_in_standard_and_fast_service() {
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    let mut request = input();
+    request.provider = "openai".into();
+    request.model = "gpt-6.1-terra".into();
+    request.cache_write_tokens = 0;
+    request.prompt_cache_ttl = None;
+    request.billing.hosted_tool_calls =
+        [("web_search".into(), 1), ("file_search".into(), 1)].into();
+    for (served_fast, token_cost) in [(false, 0.001), (true, 0.002)] {
+        request.served_fast = served_fast;
+        let result = settle_call_cost(&request).expect("embedded Terra card");
+        assert!(result.unpriced.is_empty(), "{result:?}");
+        assert!((result.cost_usd.expect("complete price") - token_cost - 0.0125).abs() < 1e-12);
+        assert!((result.breakdown.unwrap().adjustments_usd - 0.0125).abs() < 1e-12);
+    }
+}
+
+#[test]
 fn missing_tool_price_keeps_priced_cache_and_refuses_a_complete_amount() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
