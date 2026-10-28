@@ -31,9 +31,26 @@ passes the tool annotation's side-effect class as `side_effect`.
 `{sessionId, action, boundaryId?, callId?, sideEffect?, paths?}` where `action`
 is `capture`, `call_begin`, `call_end`, `plan`, `restore`, or `drop`. The root is
 the session's cwd, and the result is the same typed object the `harness.fs`
-method returns. `session/close` drops the session's checkpoint state. The
-server does not bracket tool calls itself: the host that owns the turn calls
-`capture` at each user message and `call_begin` / `call_end` around each call.
+method returns. `session/close` drops the session's checkpoint state.
+
+Set `workspaceCheckpoint: true` on `session/new` or a cold `session/load` to
+capture a boundary when a prompt starts a turn. The prompt must carry a
+nonempty `messageId`; Harn uses that identity as the boundary ID. The default
+is `false`, and a server without
+hostlib rejects `true`. A fork inherits this setting. A repeated `messageId`
+is rejected in an opted-in session. The session response confirms the
+setting in `workspaceCheckpointTracking`; clients must not treat a missing
+field as enabled. Captures can be unavailable without blocking the prompt.
+Query `plan` before offering file restoration; a failed
+capture returns `{available: false, reason: "capture_failed"}` from `plan`
+and `restore`, even if an older boundary used that ID. Loading an already-live
+session cannot change its tracking setting. A cold load starts a new in-memory
+checkpoint history; it doesn't restore earlier file boundaries. A steer
+inserted into a running turn captures its own boundary immediately before its
+message enters the transcript. If a tool call is still in flight or capture
+otherwise fails, `plan` and `restore` report `capture_failed` for that message.
+The host must bracket tool and shell calls with `call_begin` and `call_end` and
+capture any additional boundaries it needs.
 After a session is reanchored, checkpoint actions other than `drop` return
 `{available: false, reason: "workspace_root_changed"}` while their recorded
 root differs from the session's current root.
