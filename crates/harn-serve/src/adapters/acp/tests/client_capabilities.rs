@@ -52,6 +52,7 @@ async fn negotiated_terminal_support_controls_the_real_prompt_dispatch() {
             (serde_json::json!({}), false),
             (serde_json::json!({"terminal": false}), false),
             (serde_json::json!({"terminal": "true"}), false),
+            (serde_json::json!([{}, true]), false),
             (serde_json::json!({"terminal": true}), true),
         ] {
             let workspace = tempfile::tempdir().unwrap();

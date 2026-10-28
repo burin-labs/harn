@@ -3,15 +3,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub(super) struct ClientCapabilities {
-    #[serde(deserialize_with = "or_default")]
+    #[serde(deserialize_with = "object_or_default")]
     pub fs: FileSystemCapabilities,
     #[serde(deserialize_with = "or_default")]
     pub terminal: bool,
-    #[serde(deserialize_with = "or_default")]
+    #[serde(deserialize_with = "object_or_default")]
     pub auth: AuthCapabilities,
-    #[serde(deserialize_with = "or_default")]
+    #[serde(deserialize_with = "object_or_default")]
     pub elicitation: Option<ElicitationCapabilities>,
-    #[serde(deserialize_with = "or_default")]
+    #[serde(deserialize_with = "object_or_default")]
     pub session: Option<SessionCapabilities>,
 }
 
@@ -34,27 +34,27 @@ pub(super) struct AuthCapabilities {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub(super) struct ElicitationCapabilities {
-    #[serde(deserialize_with = "or_default")]
+    #[serde(deserialize_with = "object_or_default")]
     pub form: Option<ObjectCapability>,
-    #[serde(deserialize_with = "or_default")]
+    #[serde(deserialize_with = "object_or_default")]
     pub url: Option<ObjectCapability>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub(super) struct SessionCapabilities {
-    #[serde(deserialize_with = "or_default")]
+    #[serde(deserialize_with = "object_or_default")]
     pub notices: Option<ObjectCapability>,
-    #[serde(deserialize_with = "or_default")]
+    #[serde(deserialize_with = "object_or_default")]
     pub compaction: Option<ObjectCapability>,
-    #[serde(deserialize_with = "or_default")]
+    #[serde(deserialize_with = "object_or_default")]
     pub config_options: Option<ConfigOptionsCapabilities>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub(super) struct ConfigOptionsCapabilities {
-    #[serde(deserialize_with = "or_default")]
+    #[serde(deserialize_with = "object_or_default")]
     pub boolean: Option<ObjectCapability>,
 }
 
@@ -72,10 +72,24 @@ where
     Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
+fn object_or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned + Default,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(if value.is_object() {
+        serde_json::from_value(value).unwrap_or_default()
+    } else {
+        T::default()
+    })
+}
+
 impl ClientCapabilities {
     pub(super) fn from_initialize(params: &serde_json::Value) -> Self {
         params
             .get("clientCapabilities")
+            .filter(|value| value.is_object())
             .cloned()
             .and_then(|value| serde_json::from_value(value).ok())
             .unwrap_or_default()
@@ -94,6 +108,34 @@ impl ClientCapabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arrays_cannot_supply_object_capabilities_through_struct_sequence_decoding() {
+        let root = ClientCapabilities::from_initialize(&serde_json::json!({
+            "clientCapabilities": [{}, true],
+        }));
+        assert!(!root.terminal);
+        let nested = ClientCapabilities::from_initialize(&serde_json::json!({
+            "clientCapabilities": {
+                "terminal": true,
+                "fs": [true, true],
+                "auth": [true],
+                "session": {"notices": [], "compaction": [], "configOptions": []},
+                "elicitation": {"form": [], "url": []},
+            },
+        }));
+        assert!(
+            nested.terminal,
+            "a malformed neighbor must not erase a valid grant"
+        );
+        assert!(!nested.fs.read_text_file && !nested.fs.write_text_file);
+        assert!(!nested.auth.terminal);
+        let session = nested.session.unwrap();
+        assert!(session.notices.is_none() && session.compaction.is_none());
+        assert!(session.config_options.is_none());
+        let elicitation = nested.elicitation.unwrap();
+        assert!(elicitation.form.is_none() && elicitation.url.is_none());
+    }
 
     #[test]
     fn optional_capabilities_default_independently_and_require_real_grants() {
