@@ -112,6 +112,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_receipt_is_shared_without_inventing_one_on_disconnect() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let reader = ReceiptReader(Arc::new(Mutex::new(ReceiptState {
+            receiver,
+            report: None,
+        })));
+        let expected = harn_vm::op_interrupt::ProcessCleanupReport {
+            root_pid: Some(42),
+            ..Default::default()
+        };
+        sender.send(Ok(expected.clone())).unwrap();
+        assert_eq!(reader.finish(), Some(expected.clone()));
+        assert_eq!(reader.clone().finish(), Some(expected));
+
+        let (sender, receiver) = mpsc::sync_channel(1);
+        drop(sender);
+        let absent = ReceiptReader(Arc::new(Mutex::new(ReceiptState {
+            receiver,
+            report: None,
+        })));
+        assert!(absent.finish().is_none());
+    }
+
+    #[test]
     fn missing_receipt_is_unavailable_and_descriptor_is_reserved_until_spawn() {
         let mut command = Command::new("unspawned");
         let (reader, fd) = prepare(&mut command).unwrap();
