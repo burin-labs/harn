@@ -198,6 +198,21 @@ impl ProcessCleanupCensus {
 }
 
 impl ProcessCleanupReport {
+    pub fn survivors(&self) -> impl Iterator<Item = &ProcessCleanupChild> {
+        self.children
+            .iter()
+            .filter(|child| child.alive_after_cleanup != Some(false))
+    }
+
+    pub fn census_complete(&self) -> bool {
+        self.census.complete() && self.omitted_children == 0
+    }
+
+    pub fn survivor_count(&self) -> Option<usize> {
+        let count = self.survivors().count();
+        (count > 0 || self.census_complete()).then_some(count)
+    }
+
     pub fn for_signal(root_pid: Option<u32>, signal: i32) -> Self {
         Self {
             root_pid,

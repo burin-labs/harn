@@ -78,9 +78,7 @@ pub(super) fn refuse_survivors(
     report: &harn_vm::op_interrupt::ProcessCleanupReport,
 ) -> io::Result<()> {
     let survivors = report
-        .children
-        .iter()
-        .filter(|child| child.alive_after_cleanup != Some(false))
+        .survivors()
         .map(|child| format!("pid={} alive={:?}", child.pid, child.alive_after_cleanup))
         .collect::<Vec<_>>();
     if survivors.is_empty() {

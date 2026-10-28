@@ -705,9 +705,7 @@ pub(crate) fn process_cleanup_to_dict(
         .map(process_cleanup_child_to_value)
         .collect::<Vec<_>>();
     let surviving_children = report
-        .children
-        .iter()
-        .filter(|child| child.alive_after_cleanup != Some(false))
+        .survivors()
         .map(process_cleanup_child_to_value)
         .collect::<Vec<_>>();
     let observed_children = report
@@ -734,13 +732,12 @@ pub(crate) fn process_cleanup_to_dict(
     );
     dict.put_int("observed_child_count", report.children.len() as i64);
     dict.put_int("reaped_child_count", reaped_children.len() as i64);
-    let census_complete = report.census.complete() && report.omitted_children == 0;
-    if !surviving_children.is_empty() || census_complete {
-        dict.put_int("survivor_count", surviving_children.len() as i64);
+    if let Some(count) = report.survivor_count() {
+        dict.put_int("survivor_count", count as i64);
     } else {
         dict.put("survivor_count", VmValue::Nil);
     }
-    dict.put("census_complete", VmValue::Bool(census_complete));
+    dict.put("census_complete", VmValue::Bool(report.census_complete()));
     dict.put(
         "census_control_read",
         VmValue::Bool(report.census.control_read),
