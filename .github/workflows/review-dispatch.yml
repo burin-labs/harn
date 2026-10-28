@@ -49,22 +49,16 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 
 jobs:
-  dispatch:
+  eligibility:
     if: github.event_name == 'pull_request_target'
-    # This name is the request record. A `pull_request_target` job reports as a
-    # check run on the pull request head, so an eligible request leaves an
-    # `Automatic review: requested` check there, the same record the sweep
-    # writes and reads to space its requests. Renaming it breaks that pairing;
-    # scripts/tests/review_dispatch_sweep_test.sh holds the two names equal.
-    name: >-
-      ${{ github.event.pull_request.head.repo.full_name != github.repository && 'Automatic review: skipped (fork)'
-      || github.event.pull_request.draft && 'Automatic review: skipped (draft)'
-      || github.event.pull_request.user.type == 'Bot' && 'Automatic review: skipped (bot author)'
-      || (vars.REVIEW_DISPATCH_REPOSITORY == '' || vars.REVIEW_DISPATCH_WORKFLOW == '' || vars.REVIEW_DISPATCH_REF == '') && 'Automatic review: skipped (not configured)'
-      || 'Automatic review: requested' }}
+    name: 'Automatic review: eligibility'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    permissions: {}
+    outputs:
+      dispatch: ${{ steps.optout.outputs.opted_out == 'false' && 'true' || 'false' }}
+    permissions:
+      contents: read
+      issues: read
     env:
       ELIGIBLE: >-
         ${{ github.event.pull_request.head.repo.full_name == github.repository
@@ -74,12 +68,37 @@ jobs:
         && vars.REVIEW_DISPATCH_WORKFLOW != ''
         && vars.REVIEW_DISPATCH_REF != '' }}
     steps:
+      # Read policy from the base revision, never from the pull request head.
+      - name: Check out review dispatch policy
+        if: env.ELIGIBLE == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/review_dispatch_event.sh
+            scripts/review_dispatch_opt_out.jq
+            scripts/review_dispatch_labels.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Check automated review opt-out
+        id: optout
+        if: env.ELIGIBLE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          opted_out="$(bash scripts/review_dispatch_event.sh "$GITHUB_EVENT_PATH" "$GITHUB_REPOSITORY" "$PR_NUMBER")"
+          printf 'opted_out=%s\n' "$opted_out" >> "$GITHUB_OUTPUT"
+
       - name: Say why no review was requested
-        if: env.ELIGIBLE != 'true'
+        if: env.ELIGIBLE != 'true' || steps.optout.outputs.opted_out == 'true'
         env:
           FROM_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
           IS_DRAFT: ${{ github.event.pull_request.draft }}
           AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+          OPTED_OUT: ${{ steps.optout.outputs.opted_out }}
           REVIEW_REPOSITORY_NAME: ${{ vars.REVIEW_DISPATCH_REPOSITORY }}
           REVIEW_WORKFLOW: ${{ vars.REVIEW_DISPATCH_WORKFLOW }}
           REVIEW_REF: ${{ vars.REVIEW_DISPATCH_REF }}
@@ -91,15 +110,52 @@ jobs:
             echo "::notice title=Automatic review skipped::The pull request is a draft. Marking it ready for review requests a review."
           elif [ "$AUTHOR_TYPE" = "Bot" ]; then
             echo "::notice title=Automatic review skipped::The pull request was opened by a bot, and no person triggered this review."
+          elif [ "$OPTED_OUT" = "true" ]; then
+            echo "::notice title=Automatic review skipped::The pull request opted out of automated review."
           elif [ -z "$REVIEW_REPOSITORY_NAME" ] || [ -z "$REVIEW_WORKFLOW" ] || [ -z "$REVIEW_REF" ]; then
             echo "::warning title=Automatic review not configured::Set REVIEW_DISPATCH_REPOSITORY, REVIEW_DISPATCH_WORKFLOW, and the measured REVIEW_DISPATCH_REF to request reviews."
+          fi
+
+  dispatch:
+    if: github.event_name == 'pull_request_target' && needs.eligibility.outputs.dispatch == 'true'
+    needs: eligibility
+    # Only a successful dispatch is a request record. The sweep ignores the
+    # skipped check this job produces for an ineligible pull request.
+    name: 'Automatic review: requested'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - name: Check out review dispatch policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/review_dispatch_opt_out.jq
+            scripts/review_dispatch_labels.sh
+          sparse-checkout-cone-mode: false
+
+      # A label may change while this job waits for a runner. A refusal here
+      # fails the request check rather than reporting a request that never ran.
+      - name: Recheck automated review opt-out
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          opted_out="$(bash scripts/review_dispatch_labels.sh "$GITHUB_REPOSITORY" "$PR_NUMBER")"
+          if [ "$opted_out" = "true" ]; then
+            echo "::error::The pull request opted out while the dispatch was waiting."
+            exit 1
           fi
 
       # Scoped to the review repository alone, and to dispatching workflows
       # there: actions write is the one permission a workflow dispatch needs.
       - name: Mint a token that can only dispatch the review workflow
         id: token
-        if: env.ELIGIBLE == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
@@ -109,7 +165,6 @@ jobs:
           permission-actions: write
 
       - name: Request a review of this head
-        if: env.ELIGIBLE == 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           REVIEW_REPOSITORY: ${{ github.repository_owner }}/${{ vars.REVIEW_DISPATCH_REPOSITORY }}
@@ -155,7 +210,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: scripts/review_dispatch_sweep.sh
+          sparse-checkout: |
+            scripts/review_dispatch_sweep.sh
+            scripts/review_dispatch_opt_out.jq
+            scripts/review_dispatch_labels.sh
           sparse-checkout-cone-mode: false
 
       - name: Mint a token that can only dispatch the review workflow
