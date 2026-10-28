@@ -116,8 +116,8 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
             assert_eq!(
                 initialize["result"]["agentCapabilities"]["mcpCapabilities"],
                 serde_json::json!({
-                    "http": true,
-                    "sse": true,
+                    "http": false,
+                    "sse": false,
                 })
             );
             assert!(
