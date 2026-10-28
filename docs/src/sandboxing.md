@@ -90,9 +90,10 @@ launcher's `SSH_AUTH_SOCK`. The process policy records that one socket as
 `--environment-policy isolated`. It grants connection to that endpoint without
 granting private-key reads, directory reads under `~/.ssh`, socket creation, or
 IP networking. Other connections remain governed by their existing grants.
-macOS enforces the exact socket path. Linux requires Landlock ABI 9 for this
-path restriction and refuses the grant on older kernels unless the policy
-already permits general networking. Other backends refuse it. The socket must
+macOS enforces the exact socket path. Linux requires an enforcing Landlock
+backend with ABI 9 for this path restriction. Older kernels and the bubblewrap
+fallback refuse the grant unless the policy already permits general networking.
+Other backends refuse it. The socket must
 exist and have an absolute path; an unset `SSH_AUTH_SOCK` is a CLI error.
 
 When a confined child fails, the refusal record names the boundary that

@@ -23,7 +23,7 @@ pub(in crate::stdlib::sandbox) fn validate(policy: &CapabilityPolicy) -> Result<
             && !sandbox::linux::ssh_agent_path_scope_available()
         {
             return Err(sandbox_rejection(
-                "SSH agent socket connection requires Landlock ABI 9 on this host".into(),
+                "SSH agent socket connection requires Landlock ABI 9 with measured enforcement on this host".into(),
             ));
         }
         Ok(())

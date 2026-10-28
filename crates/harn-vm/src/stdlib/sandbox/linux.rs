@@ -406,7 +406,8 @@ fn unix_socket_local_ipc_grant(policy: &CapabilityPolicy) -> bool {
 }
 
 pub(super) fn ssh_agent_path_scope_available() -> bool {
-    LandlockSupport::negotiate(ABI::V9).is_some_and(|support| support.abi() >= ABI::V9)
+    Backend::filesystem_mechanism() == super::SandboxMechanism::LinuxLandlock
+        && LandlockSupport::negotiate(ABI::V9).is_some_and(|support| support.abi() >= ABI::V9)
 }
 
 fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {
