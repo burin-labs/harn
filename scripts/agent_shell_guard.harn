@@ -1355,6 +1355,20 @@ fn git_builtin_lookup_in_context(
   }
 }
 
+/** Reuse measured executable facts only for this one policy decision. */
+fn cached_git_builtin_lookup(lookup: fn(string) -> list<string>) -> fn(string) -> list<string> {
+  let facts: dict<string, list<string>> = {}
+  return { program ->
+    const cached = facts[program]
+    if cached != nil {
+      return cached
+    }
+    const commands = lookup(program)
+    facts[program] = commands
+    return commands
+  }
+}
+
 /** Inspect the shared scanner's executed stages, including nested substitutions. */
 fn executed_stages_write_stash(
   command: string,
@@ -1574,14 +1588,15 @@ pub fn git_stash_violation(
   builtin_lookup: fn(string) -> list<string> = NO_GIT_BUILTINS,
   parse: fn(string, string) -> dict = { source, query -> {} },
 ) -> string {
-  if !git_stash_write_in(command, 0, alias_lookup, builtin_lookup) {
+  const builtins = cached_git_builtin_lookup(builtin_lookup)
+  if !git_stash_write_in(command, 0, alias_lookup, builtins) {
     return ""
   }
   // A resolved executed stage is authoritative, including a substitution whose shell comments
   // make the fallback delimiter scanner ambiguous. Only retry a denial the scanner did not prove.
   if command.contains("<<")
-    && !executed_stages_write_stash(command, 0, alias_lookup, builtin_lookup, false)
-    && !heredoc_stash_write(command, alias_lookup, builtin_lookup, parse) {
+    && !executed_stages_write_stash(command, 0, alias_lookup, builtins, false)
+    && !heredoc_stash_write(command, alias_lookup, builtins, parse) {
     return ""
   }
   return "`git stash` is refused: the stash list is shared by every linked worktree, so a pop can apply "

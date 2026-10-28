@@ -13,6 +13,48 @@ import {
   decision,
 } from "./agent_shell_guard_test_fixtures"
 
+pipeline test_git_builtin_facts_are_queried_once_per_executable(harness: Harness) {
+  const single = harness.runtime.atomic(0)
+  const once = decision(
+    claude_payload("bash -lc 'git status'"),
+    ADMITTED,
+    NO_MAKE_TARGETS,
+    NO_CONFIG_ALIASES,
+    { _program ->
+      harness.runtime.atomic_add(single, 1)
+      return ["status"]
+    },
+  )
+  assert(once.allow)
+  assert_eq(harness.runtime.atomic_get(single), 1)
+  assert(
+    decision(
+      claude_payload("git status"),
+      ADMITTED,
+      NO_MAKE_TARGETS,
+      NO_CONFIG_ALIASES,
+      { _program ->
+        harness.runtime.atomic_add(single, 1)
+        return ["status"]
+      },
+    ).allow,
+  )
+  assert_eq(harness.runtime.atomic_get(single), 2)
+  const multiple = harness.runtime.atomic(0)
+  const separate = decision(
+    claude_payload("/old/git status && /new/git status"),
+    ADMITTED,
+    NO_MAKE_TARGETS,
+    NO_CONFIG_ALIASES,
+    { _program ->
+      harness.runtime.atomic_add(multiple, 1)
+      return ["status"]
+    },
+  )
+  assert(separate.allow)
+  assert_eq(harness.runtime.atomic_get(multiple), 2)
+}
+
 pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
   const aliases = { _options ->
     {

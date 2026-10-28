@@ -109,6 +109,8 @@ assignment-only stages and outer shell prefixes, so a PATH or working-directory
 change cannot reuse facts from a different Git installation. Missing context
 remains unknown. When a payload changes Git configuration, run a custom alias in
 a separate shell call so the guard can read its effective configuration.
+Within one decision, repeated scans reuse measured builtin facts for the same
+executable. A new decision queries again; different executables keep separate facts.
 
 ## Keep complete command output
 
