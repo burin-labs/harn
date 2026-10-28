@@ -128,7 +128,7 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
         const p = new URL(url).pathname;
         calls.push({method: options.method ?? 'GET', path: p});
         fs.writeFileSync(${JSON.stringify(callsFile)}, JSON.stringify(calls));
-        if (p.endsWith('/cancel')) {cancelled = true; return {status:202};}
+        if (p.endsWith('/cancel')) {cancelled = fixture.cancelStatus !== 403; return {status:fixture.cancelStatus ?? 202};}
         if (p.endsWith('/zip')) {
           const a = fixture.archives[p.includes('/501/') ? 0 : 1];
           return {ok:true,arrayBuffer:async()=>fs.readFileSync(a.archive)};
@@ -190,8 +190,9 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     assert.equal(expiredObserver.run.status,0,expiredObserver.run.stderr);
     assert.deepEqual(expiredObserver.posts.map(call=>call.path),['/repos/acme/widget-host/actions/runs/73/cancel']);
     const failedParent = execute({parent:{...parent,conclusion:'failure'}});
-    assert.equal(failedParent.run.status,1,failedParent.run.stderr);
+    assert.equal(failedParent.run.status,0,failedParent.run.stderr);
     assert.deepEqual(failedParent.posts,[],'completion cleanup also preserves a measurement after observer failure');
+    assert.match(failedParent.run.stdout,/cleanup remains pending: pending=1 refused=0/);
     const retained = execute({parent:{...parent,conclusion:'failure'}},false,true);
     assert.equal(retained.run.status,0,retained.run.stderr);
     assert.deepEqual(retained.posts,[],'the scheduled pass must preserve the same in-budget child');
@@ -200,6 +201,10 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     assert.equal(expiredRetained.run.status,0,expiredRetained.run.stderr);
     assert.deepEqual(expiredRetained.posts.map(call=>call.path),['/repos/acme/widget-host/actions/runs/73/cancel'],
       'a later scheduled pass must enforce the original deadline without a second parent completion');
+    const failedCancellation = execute({parent:{...parent,conclusion:'failure'},now:8210,cancelStatus:403},false,true);
+    assert.equal(failedCancellation.run.status,1,'an actual cancellation failure remains red');
+    assert.match(failedCancellation.run.stdout,/errors=1/);
+    assert.deepEqual(failedCancellation.posts.map(call=>call.path),['/repos/acme/widget-host/actions/runs/73/cancel']);
     const emptySweep = execute({liveEmpty:true},false,true);
     assert.equal(emptySweep.run.status,0,emptySweep.run.stderr);
     assert.match(emptySweep.run.stdout,/scanned=0 declarations=0 discovered=0 owned=0 terminal=0 cancelled=0 pending=0 refused=0/);
@@ -210,8 +215,9 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     for (const changes of [{missing:0},{missing:1},{child:{...child,run_attempt:2}},
       {child:{...child,actor:{login:'unrelated[bot]',type:'Bot'}}}]) {
       const unownedSweep = execute({...changes,now:8210},false,true);
-      assert.equal(unownedSweep.run.status,1);
+      assert.equal(unownedSweep.run.status,0);
       assert.deepEqual(unownedSweep.posts,[],'a scheduled deadline still requires exact custody');
+      assert.match(unownedSweep.run.stdout,/cleanup remains pending:/);
     }
     for(const step of [{...observed,conclusion:'success'}, {...observed,status:'in_progress',conclusion:null},
       {...observed,name:'Unrelated failed step'}, {...observed,number:1}]) {
@@ -219,12 +225,18 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
       assert.equal(needed.posts.length,0,'a live observer must preserve its child');
       assert.match(needed.run.stdout,/cancelled=0 pending=1 refused=0/);
     }
-    for (const changes of [{ missing: 0 }, { missing: 1 }, { child: { ...child, run_attempt: 2 } },
-      { child: { ...child, actor: { login: 'unrelated[bot]', type: 'Bot' } } },
-      { parent: { ...parent, head_repository: { full_name: 'unrelated/foreign-parent' } } }]) {
+    for (const changes of [{ missing: 1 }, { child: { ...child, run_attempt: 2 } },
+      { child: { ...child, actor: { login: 'unrelated[bot]', type: 'Bot' } } }]) {
       const negative = execute(changes);
-      assert.equal(negative.run.status, 1);
+      assert.equal(negative.run.status, 0);
       assert.equal(negative.posts.length, 0);
+      assert.match(negative.run.stdout,/cleanup remains pending:/);
+    }
+    for (const changes of [{ missing: 0 },
+      { parent: { ...parent, head_repository: { full_name: 'unrelated/foreign-parent' } } }]) {
+      const unprovenParent = execute(changes);
+      assert.equal(unprovenParent.run.status, 1);
+      assert.equal(unprovenParent.posts.length, 0);
     }
     for (const [workflow, jobName] of [
       ['consumer-canary.yml', 'Declare consumer observer'],

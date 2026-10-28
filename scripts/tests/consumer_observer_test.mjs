@@ -318,7 +318,7 @@ test('the same reconciler cancels only receipt-owned live children of an ended e
     return { result, calls, waits };
   };
   const positive = await run();
-  assert.deepEqual(positive.result, { discovered: 1, owned: 1, terminal: 1, cancelled: 1, pending: 0, refused: 0, retained: 0 });
+  assert.deepEqual(positive.result, { discovered: 1, owned: 1, terminal: 1, cancelled: 1, pending: 0, refused: 0, retained: 0, errors: 0 });
   assert.equal(positive.calls.filter(call => call.method === 'POST').length, 1);
   for (const control of [
     { missing: true }, { latest: { ...child, run_attempt: 2 } },
@@ -336,7 +336,7 @@ test('the same reconciler cancels only receipt-owned live children of an ended e
   assert.equal(complete.calls.filter(call => call.method === 'POST').length, 0);
   const failedObserver = {...endedParent,conclusion:'failure'};
   const preserved = await run({parentReading:failedObserver});
-  assert.deepEqual(preserved.result,{discovered:1,owned:1,terminal:0,cancelled:0,pending:1,refused:0,retained:1});
+  assert.deepEqual(preserved.result,{discovered:1,owned:1,terminal:0,cancelled:0,pending:1,refused:0,retained:1,errors:0});
   assert.equal(preserved.calls.filter(call => call.method === 'POST').length,0,
     'an ended failed observer cannot discard a live measurement within its budget');
   const expired = await run({parentReading:failedObserver,now:8210});
@@ -344,6 +344,7 @@ test('the same reconciler cancels only receipt-owned live children of an ended e
   const incomplete = await run({parentReading:failedObserver,jobFailure:true});
   assert.equal(incomplete.calls.filter(call => call.method === 'POST').length,0,'an unreadable timeout census grants no cancellation');
   assert.equal(incomplete.result.refused,1);
+  assert.equal(incomplete.result.errors,1,'a refused API read remains an operational failure');
   const settling = await run({ settlesAfter: 2 });
   assert.equal(settling.result.terminal, 1);
   assert.deepEqual(settling.waits, [5000, 5000]);
