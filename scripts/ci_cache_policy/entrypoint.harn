@@ -119,7 +119,7 @@ pub fn run_ci_cache_policy(harness: Harness) {
     harn_check_cache_writer_errors(policy, workflows),
     ci_workflow_concurrency_errors(workflows["ci.yml"]),
     minimal_pr_capacity_errors(workflows["ci.yml"], workflows["publish-release.yml"]),
-    e2e_elastic_capacity_errors(workflows["e2e.yml"]),
+    e2e_hosted_runner_errors(workflows["e2e.yml"]),
     consumer_canary_errors(
       workflows[CONSUMER_CANARY_WORKFLOW],
       read_yaml(harness.fs, ".github/actions/observe-consumer/action.yml", nil),

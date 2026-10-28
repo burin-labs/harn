@@ -166,6 +166,9 @@ pub const RUNNER_TIER_ENV = "HARN_RUNNER_TIER"
 
 pub const HOSTED_LINUX_RUNNER = "ubuntu-24.04"
 
+/** The isolated runner that can install the slow E2E namespace grant. */
+pub const E2E_HOSTED_RUNNER = "ubuntu-8core"
+
 /**
  * The producers' rung after the owned pool: GitHub's free standard runner.
  *
@@ -191,9 +194,6 @@ pub const SELFHOSTED_LINUX_BIG_RUNNER = "[\"self-hosted\", \"Linux\", \"X64\", \
 
 /** The census pool that answers for that label set. */
 pub const SELFHOSTED_LINUX_BIG_POOL = "linux_big"
-
-/** The step that names where the slow E2E suite is about to land. */
-pub const E2E_CAPACITY_DECISION_STEP = "Decide where the slow E2E suite lands"
 
 /** The input that carries the evacuation switch into that decision. */
 pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
@@ -2171,7 +2171,7 @@ pub const PAID_CAPACITY_ROUTE_INPUTS = [
   "CAPACITY_VENDOR_RUNNER",
 ]
 
-/** Every active workflow runner selector and capacity route must stay free or owned. */
+/** Paid public capacity is reserved for the isolated namespace E2E suite. */
 pub fn public_repository_runner_errors(
   workflows: dict,
   release_runner_policy: dict,
@@ -2181,7 +2181,10 @@ pub fn public_repository_runner_errors(
     const workflow = workflows[workflow_name] ?? {}
     for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
       for label in job_runner_labels(workflow, job) {
-        if paid_public_runner_selector(label, release_runner_policy) {
+        const e2e_exception = workflow_name == "e2e.yml" && job_name == "e2e"
+          && label == E2E_HOSTED_RUNNER
+          && job?.["runs-on"] == E2E_HOSTED_RUNNER
+        if paid_public_runner_selector(label, release_runner_policy) && !e2e_exception {
           errors = errors
             + [
               "${workflow_name}:${job_name} runner selection can resolve through paid token ${label}",
@@ -2445,23 +2448,12 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   return errors
 }
 
-/**
- * Keep the slow suite's capacity decision explicit.
- *
- * Public repository jobs may use owned capacity or the standard hosted
- * fallback. `public_repository_runner_errors` separately refuses every paid
- * route input, including ones hidden behind this capacity decision.
- */
-pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
-  const capacity_job = e2e?.jobs?.["e2e-capacity"] ?? {}
-  const capacity_step = step_by_name(capacity_job?.steps ?? [], E2E_CAPACITY_DECISION_STEP)
-  let errors: list<string> = []
-  if capacity_step == nil {
-    errors = errors
-      + ["e2e.yml:e2e-capacity must keep the '${E2E_CAPACITY_DECISION_STEP}' step"]
-    return errors
+/** Keep namespace proof on an isolated runner with its own scoped grant. */
+pub fn e2e_hosted_runner_errors(e2e: dict) -> list<string> {
+  if e2e?.jobs?.e2e?.["runs-on"] != E2E_HOSTED_RUNNER {
+    return ["e2e.yml:e2e must run on ${E2E_HOSTED_RUNNER} for namespace confinement"]
   }
-  return errors
+  return []
 }
 
 pub const CONSUMER_CANARY_WORKFLOW = "consumer-canary.yml"
