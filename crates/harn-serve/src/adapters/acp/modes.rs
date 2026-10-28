@@ -73,9 +73,8 @@ pub(super) fn session_mode_state(current_mode_id: &str) -> serde_json::Value {
 
 /// Render the preferred ACP `configOptions` representation for the
 /// per-session knobs Harn exposes today: session mode, pinned LLM
-/// model, and a provider-aware thought level. Entries follow the `select` shape (the only `type` the
-/// current spec defines, per
-/// <https://agentclientprotocol.com/protocol/session-config-options>).
+/// model, and a provider-aware thought level. These settings all use the
+/// protocol's string `select` shape.
 ///
 /// New knobs (temperature, permissions, …) plug in here by appending
 /// another entry rather than introducing a new wire surface; ACP keeps
@@ -101,6 +100,30 @@ pub(super) fn config_options_state(
         reasoning_policy_config_option(pinned_reasoning_policy),
         budget_config_option(budget_value),
     ])
+}
+
+pub(super) enum ConfigOptionValue<'a> {
+    ValueId(&'a str),
+    Boolean(bool),
+}
+
+impl<'a> ConfigOptionValue<'a> {
+    pub(super) fn from_request(params: &'a serde_json::Value) -> Result<Self, &'static str> {
+        match params.get("type") {
+            Some(serde_json::Value::String(kind)) if kind == "boolean" => params
+                .get("value")
+                .and_then(serde_json::Value::as_bool)
+                .map(Self::Boolean)
+                .ok_or("boolean config values require a boolean value"),
+            // ACP retains string selections for absent or future discriminators.
+            None | Some(serde_json::Value::String(_)) => params
+                .get("value")
+                .and_then(serde_json::Value::as_str)
+                .map(Self::ValueId)
+                .ok_or("selection config values require a string value"),
+            Some(_) => Err("config value type must be a string when supplied"),
+        }
+    }
 }
 
 fn mode_entries(id_key: &str) -> Vec<serde_json::Value> {
