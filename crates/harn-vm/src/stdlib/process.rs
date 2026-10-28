@@ -225,8 +225,19 @@ pub fn asset_root_path() -> PathBuf {
 }
 
 fn env_override(name: &str) -> Option<String> {
-    (name == HARN_REPLAY_ENV && crate::triggers::dispatcher::current_dispatch_is_replay())
-        .then(|| "1".to_string())
+    match name {
+        HARN_REPLAY_ENV if crate::triggers::dispatcher::current_dispatch_is_replay() => {
+            Some("1".into())
+        }
+        "SSH_AUTH_SOCK" => granted_ssh_agent_env().map(|(_, socket)| socket),
+        _ => None,
+    }
+}
+
+pub(crate) fn granted_ssh_agent_env() -> Option<(&'static str, String)> {
+    crate::orchestration::current_execution_policy()
+        .and_then(|policy| policy.process_sandbox.ssh_agent_socket)
+        .map(|socket| ("SSH_AUTH_SOCK", socket))
 }
 
 /// Runtime-owned environment projected into every child process.
@@ -239,6 +250,7 @@ pub(crate) fn runtime_child_env_overlay() -> Vec<(String, String)> {
     env_override(HARN_REPLAY_ENV)
         .map(|value| (HARN_REPLAY_ENV.to_string(), value))
         .into_iter()
+        .chain(granted_ssh_agent_env().map(|(name, value)| (name.to_string(), value)))
         .collect()
 }
 
@@ -807,6 +819,9 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     if spec.env_clear || resolved_environment.is_some() {
         command.env_clear();
     }
+    if !spec.env_clear {
+        command.envs(granted_ssh_agent_env());
+    }
     for (key, value) in resolved_environment.as_deref().unwrap_or(spec.env) {
         command.env(key, value);
     }
@@ -1277,10 +1292,8 @@ fn session_env_with(
             env.insert(key, value);
         }
     }
-    if let Some(socket) = crate::orchestration::current_execution_policy()
-        .and_then(|policy| policy.process_sandbox.ssh_agent_socket)
-    {
-        env.insert("SSH_AUTH_SOCK".to_string(), socket);
+    if let Some((name, socket)) = granted_ssh_agent_env() {
+        env.insert(name.to_string(), socket);
     }
     Ok(Some(env))
 }

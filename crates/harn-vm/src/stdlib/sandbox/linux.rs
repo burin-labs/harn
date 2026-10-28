@@ -897,19 +897,21 @@ fn compile_seccomp_program(
     if unix_socket_local_ipc_grant(policy)
         || (policy.process_sandbox.ssh_agent_socket.is_some() && !policy_allows_network(policy))
     {
-        // The family filter withholds IP networking. Landlock scopes any
-        // admitted connection; only a socket-root grant also admits serving.
-        let unix_domain_only = SeccompRule::new(vec![SeccompCondition::new(
-            0,
-            SeccompCmpArgLen::Dword,
-            SeccompCmpOp::Eq,
-            libc::AF_UNIX as u64,
-        )
-        .map_err(|err| {
-            sandbox_rejection(format!("failed to build the Unix-domain condition: {err}"))
-        })?])
-        .map_err(|err| sandbox_rejection(format!("failed to build the socket rule: {err}")))?;
-        rules.insert(libc::SYS_socket, vec![unix_domain_only]);
+        // A separate loopback grant already owns IP socket creation inside
+        // its namespace. Landlock still scopes the agent connection by inode.
+        if !namespaced_loopback_grant(policy) {
+            let unix_domain_only = SeccompRule::new(vec![SeccompCondition::new(
+                0,
+                SeccompCmpArgLen::Dword,
+                SeccompCmpOp::Eq,
+                libc::AF_UNIX as u64,
+            )
+            .map_err(|err| {
+                sandbox_rejection(format!("failed to build the Unix-domain condition: {err}"))
+            })?])
+            .map_err(|err| sandbox_rejection(format!("failed to build the socket rule: {err}")))?;
+            rules.insert(libc::SYS_socket, vec![unix_domain_only]);
+        }
         if policy.process_sandbox.ssh_agent_socket.is_some() {
             rules.entry(libc::SYS_connect).or_default();
         }

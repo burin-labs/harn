@@ -26,6 +26,8 @@ pub(super) fn apply_process_config(
     }
     if config.closed_env {
         command.env_clear();
+    } else {
+        command.envs(crate::stdlib::process::granted_ssh_agent_env());
     }
     command.envs(config.env.iter().map(|(key, value)| (key, value)));
     for key in &config.env_remove {
