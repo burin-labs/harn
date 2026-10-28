@@ -8,6 +8,39 @@ use crate::adapters::acp::events::agent_event_ext_params;
 use harn_vm::agent_events::AgentEvent;
 use harn_vm::agent_events::AgentEventSink;
 
+#[tokio::test(flavor = "current_thread")]
+async fn published_tool_names_validate_against_the_unmodified_upstream_schema() {
+    let upstream: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../../../conformance/protocols/schemas/acp-1.26.0-upstream.schema.json"
+    ))
+    .unwrap();
+    let mut checked = BTreeSet::new();
+    for notification in collect_notifications(super::standard_fixture_events()).await {
+        let update = &notification["params"]["update"];
+        let definition = match update["sessionUpdate"].as_str() {
+            Some("tool_call") => "ToolCall",
+            Some("tool_call_update") => "ToolCallUpdate",
+            _ => continue,
+        };
+        let schema = serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$ref": format!("#/$defs/{definition}"),
+            "$defs": upstream["$defs"],
+        });
+        let validator = jsonschema::draft202012::new(&schema).unwrap();
+        assert_eq!(update["name"], "read");
+        assert!(validator.is_valid(update), "{definition}: {update}");
+        let mut invalid = update.clone();
+        invalid["name"] = serde_json::json!(42);
+        assert!(
+            !validator.is_valid(&invalid),
+            "upstream must reject a numeric tool name"
+        );
+        checked.insert(definition);
+    }
+    assert_eq!(checked, BTreeSet::from(["ToolCall", "ToolCallUpdate"]));
+}
+
 pub(in crate::adapters::acp::events) async fn collect_notifications(
     events: Vec<AgentEvent>,
 ) -> Vec<serde_json::Value> {

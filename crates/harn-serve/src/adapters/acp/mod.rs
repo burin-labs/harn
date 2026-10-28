@@ -15,6 +15,7 @@ mod bridge;
 mod builtins;
 mod checkpoint_tracking;
 mod checkpoints;
+mod client_capabilities;
 mod commands;
 mod confinement;
 mod core;
@@ -37,6 +38,7 @@ mod prompt_owner;
 mod schema;
 mod session;
 mod session_inputs;
+mod session_options;
 mod session_state;
 mod session_watch;
 mod sessions;
@@ -995,6 +997,7 @@ struct VmBaselineCacheEntry {
 /// ACP server that reads JSON-RPC requests from a transport and writes
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
+    client_capabilities: client_capabilities::ClientCapabilities,
     launcher_environment: harn_vm::security::LauncherEnvironment,
     host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
     machine_spend_quota: Option<harn_vm::llm::MachineSpendQuota>,

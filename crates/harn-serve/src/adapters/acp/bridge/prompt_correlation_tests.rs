@@ -101,6 +101,7 @@ async fn same_session_delayed_calls_and_events_keep_their_prompt_owner() {
         assert!(old_call.await.is_err());
     }
     let acp = |output, first_id| AcpBridge {
+        client_capabilities: Default::default(),
         session_id: "same-session".into(),
         output,
         pending: pending.clone(),

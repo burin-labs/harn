@@ -599,6 +599,7 @@ type ToolCallReceipt struct {
 type ACPToolCall struct {
 	SessionUpdate string             `json:"sessionUpdate"`
 	ToolCallID    string             `json:"toolCallId"`
+	Name          *string            `json:"name,omitempty"`
 	Title         string             `json:"title"`
 	Kind          *string            `json:"kind,omitempty"`
 	Status        *string            `json:"status,omitempty"`
@@ -613,6 +614,7 @@ type ACPToolCall struct {
 type ACPToolCallUpdate struct {
 	SessionUpdate string             `json:"sessionUpdate"`
 	ToolCallID    string             `json:"toolCallId"`
+	Name          *string            `json:"name,omitempty"`
 	Title         *string            `json:"title,omitempty"`
 	Kind          *string            `json:"kind,omitempty"`
 	Status        *string            `json:"status,omitempty"`
@@ -638,6 +640,7 @@ type ACPSessionUpdateEnvelope struct {
 	NewTipTurnID     *string            `json:"newTipTurnId,omitempty"`
 	Reason           *string            `json:"reason,omitempty"`
 	ToolCallID       *string            `json:"toolCallId,omitempty"`
+	Name             *string            `json:"name,omitempty"`
 	Title            *string            `json:"title,omitempty"`
 	Kind             *string            `json:"kind,omitempty"`
 	Status           *string            `json:"status,omitempty"`

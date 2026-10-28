@@ -182,6 +182,7 @@ fn correlate_prompt_frame(
 /// Shared state that bridge-style builtins use to communicate with the
 /// ACP client (editor) over JSON-RPC.
 pub(super) struct AcpBridge {
+    pub(super) client_capabilities: client_capabilities::ClientCapabilities,
     pub(super) session_id: String,
     pub(super) output: AcpOutput,
     pub(super) pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
@@ -345,6 +346,11 @@ impl AcpBridge {
         params: serde_json::Value,
         abort_on_cancel: bool,
     ) -> Result<serde_json::Value, harn_vm::VmError> {
+        if !self.client_capabilities.supports_method(method) {
+            return Err(harn_vm::VmError::Runtime(format!(
+                "ACP client did not advertise support for {method}"
+            )));
+        }
         if abort_on_cancel && self.cancellation.cancelled.load(Ordering::SeqCst) {
             return Err(harn_vm::VmError::Runtime("Cancelled".into()));
         }

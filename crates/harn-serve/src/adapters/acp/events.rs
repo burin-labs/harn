@@ -310,6 +310,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "tool_call",
                     "toolCallId": tool_call_id,
+                    "name": tool_name,
                     "title": tool_name,
                     "status": Self::status_str(*status),
                     "rawInput": raw_input,
@@ -358,6 +359,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "tool_call_update",
                     "toolCallId": tool_call_id,
+                    "name": tool_name,
                     "title": tool_name,
                     "status": Self::status_str(*status),
                 });

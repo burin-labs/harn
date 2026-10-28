@@ -280,8 +280,8 @@ pub(super) fn acp_agent_capabilities() -> serde_json::Value {
         },
         "promptCapabilities": acp_prompt_capabilities(),
         "mcpCapabilities": {
-            "http": true,
-            "sse": true,
+            "http": false,
+            "sse": false,
         },
         "sessionCapabilities": {
             "close": {},

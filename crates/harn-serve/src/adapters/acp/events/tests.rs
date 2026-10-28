@@ -1135,6 +1135,7 @@ async fn bridge_progress_and_log_session_updates_namespace_vendor_fields() {
         .run_until(async {
             let (tx, mut rx) = mpsc::unbounded_channel();
             let bridge = Arc::new(super::super::AcpBridge {
+                client_capabilities: Default::default(),
                 session_id: "session-1".to_string(),
                 output: AcpOutput::Channel(tx),
                 pending: Arc::new(TokioMutex::new(HashMap::new())),

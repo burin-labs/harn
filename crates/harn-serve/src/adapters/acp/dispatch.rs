@@ -44,7 +44,7 @@ impl AcpServer {
                 self.handle_session_inputs(&id, params);
             }
             "initialize" => {
-                self.handle_initialize(&id);
+                self.handle_initialize(&id, &params);
             }
             "authenticate" => {
                 self.handle_authenticate(&id, &params).await;
