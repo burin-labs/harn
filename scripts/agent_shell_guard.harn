@@ -965,7 +965,7 @@ fn git_executable_context(command: string) -> GitExecutableContext {
   if scan.execution_semantics?.resolved != true || source_groups == nil {
     return {path_changed: true, cwd_changed: true}
   }
-  let stages: list<GitExecutionStage> = scan.execution_stages ?? []
+  const stages: list<GitExecutionStage> = scan.execution_stages ?? []
   for group in source_groups {
     for stage in group {
       stages.push(stage)
@@ -1341,6 +1341,22 @@ fn has_expanding_heredoc(command: string) -> bool {
   return false
 }
 
+fn git_builtin_lookup_in_context(
+  command: string,
+  builtin_lookup: fn(string) -> list<string>,
+) -> fn(string) -> list<string> {
+  const context = git_executable_context(command)
+  return { program ->
+    // builtin_lookup independently checks the hook's platform and PATH.
+    if !(git_program_is_absolute(program, ":") || git_program_is_absolute(program, ";"))
+      && (context.path_changed
+        || (context.cwd_changed && (program.contains("/") || program.contains("\\")))) {
+      return []
+    }
+    return builtin_lookup(program)
+  }
+}
+
 /** Inspect the shared scanner's executed stages, including nested substitutions. */
 fn executed_stages_write_stash(
   command: string,
@@ -1393,16 +1409,7 @@ fn git_stash_write_in(
   }
   // A substitution body is a command line the shell runs, so it gets the same analysis. A body that
   // never closes, or one nested past the depth cap, cannot be proven harmless and is refused.
-  const context = git_executable_context(command)
-  const builtins = { program ->
-    // This is only a shape check; builtin_lookup independently checks the hook's platform and PATH.
-    if !(git_program_is_absolute(program, ":") || git_program_is_absolute(program, ";"))
-      && (context.path_changed
-        || (context.cwd_changed && (program.contains("/") || program.contains("\\")))) {
-      return []
-    }
-    return builtin_lookup(program)
-  }
+  const builtins = git_builtin_lookup_in_context(command, builtin_lookup)
   const literal_heredoc = command.contains("<<") && !has_expanding_heredoc(command)
   if executed_stages_write_stash(command, depth, lookup, builtins, literal_heredoc) {
     return true
