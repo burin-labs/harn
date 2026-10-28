@@ -13,7 +13,7 @@ publish = false
 # through `#[path]` in `src/main.rs`; cargo-machete does not traverse those
 # nonlocal module files.
 [package.metadata.cargo-machete]
-ignored = ["serde_json", "sha2"]
+ignored = ["hex", "serde_json", "sha2"]
 
 [dependencies]
 harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.181" }

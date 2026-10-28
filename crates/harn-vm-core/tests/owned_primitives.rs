@@ -102,6 +102,9 @@ fn sse_framing_has_one_owner() {
     assert_no_matches(
         "SSE framing",
         "`crate::sse_frames::SseFrames` in harn-vm",
+        offenders,
+    );
+}
 
 /// The `hex` and `percent-encoding` crates own byte-to-hex and `%HH` encoding.
 /// Formatting bytes with `{:02x}` / `{:02X}` is a hand-rolled copy of one; the
