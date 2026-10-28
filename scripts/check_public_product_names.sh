@@ -102,7 +102,7 @@ scan_new_text() {
 # the list short and say why in the commit that adds one.
 is_allowlisted() {
   case "$1" in
-    CHANGELOG.md|changelog/archive/*|experiments/step-judge/results/*) return 0 ;;
+    CHANGELOG.md|changelog/archive/*) return 0 ;;
     spec/provider-catalog/provider-catalog.json) return 0 ;;
     crates/harn-vm/src/llm/catalog_sources/50-presentation/00-model-selection.toml) return 0 ;;
     crates/harn-provider-catalog/src/providers.toml) return 0 ;;

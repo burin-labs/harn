@@ -138,7 +138,7 @@ describe("documentation asset publication", () => {
     },
   )
 
-  it("publishes every canonical source asset, including the nonempty benchmark evidence", () => {
+  it("publishes every canonical source asset, including nonempty JSON", () => {
     const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
     const content = collectDocContent(join(repoRoot, "docs/src"))
     const { dist } = fixture()
@@ -149,8 +149,7 @@ describe("documentation asset publication", () => {
       const published = readFileSync(join(dist, asset.sourceRel))
       expect(published.equals(readFileSync(asset.sourcePath)), asset.sourceRel).toBe(true)
     }
-    const trials = JSON.parse(readFileSync(join(dist, "dev/perf/code-index-9712.json"), "utf8"))
-    expect(Object.keys(trials).length).toBeGreaterThan(0)
-    expect(trials.structural_trials.length).toBeGreaterThan(0)
+    const dashboard = JSON.parse(readFileSync(join(dist, "orchestrator/observability-dashboard.json"), "utf8"))
+    expect(dashboard.panels.length).toBeGreaterThan(0)
   })
 })

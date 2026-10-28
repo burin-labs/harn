@@ -1,18 +1,16 @@
 # Code-index release measurements
 
 Measured on 2026-10-11 for [issue #9703](https://github.com/burin-labs/harn/issues/9703).
-The [measurement record](perf/code-index-9703.json) contains all 58 trials,
+The measurement covers all 58 trials,
 phase totals and invocation counts, graph and corpus digests, skipped paths,
 host load, memory readings, compiler settings, and binary/source identities.
-Repeated skipped-path lists are stored once under `skippedFileInventories`;
-each trial identifies its exact list through `skipped_file_inventory`.
 
 ## Workload and boundary
 
 The frozen downstream corpus contains 8,463 indexed files plus one controlled Rust
 fixture, 88,173,033 source bytes, 752,584 graph nodes, 5,036,843 edges, and
-441,301 resolved calls. Forty XML trace files are skipped; the record names
-them and distinguishes attempted reads from successful ingestion.
+441,301 resolved calls. Forty XML trace files are skipped, distinguishing attempted reads
+from successful ingestion.
 
 The benchmark host is an AMD Ryzen 5 3600X with 12 logical CPUs and about
 60 GiB reported RAM. Both binaries use Rust 1.95.0 and the repository release
@@ -20,8 +18,6 @@ profile: optimization level 3, thin LTO, and 16 codegen units. Their common
 source base is `059ef4c45271aed0f975c695082875724dfa55ae`; runtime phase
 instrumentation is published separately in commit
 `7e21a3232ec04c375066282c8662780f108342d8`.
-Hostnames and disposable absolute roots use public placeholders in the record;
-timings and source, corpus, and binary digests retain their measured values.
 
 `crates/harn-hostlib/examples/code_index_latency.rs` calls the owning
 `IndexState::build_from_root` or `CodeIndexCapability::restore_from_disk` path
