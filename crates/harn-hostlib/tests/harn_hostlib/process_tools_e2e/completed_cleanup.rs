@@ -7,16 +7,25 @@ fn real_completed_background_cancel_replays_guardian_cleanup_receipt() {
         std::process::id()
     ));
     let python = python3().expect("the process fixture requires Python 3");
+    use std::os::unix::fs::MetadataExt;
+    let inherited_descriptors = std::fs::read_dir("/dev/fd")
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter_map(|entry| std::fs::metadata(entry.path()).ok())
+        .map(|metadata| (metadata.dev(), metadata.ino()))
+        .collect::<Vec<_>>();
     let script = r#"
 import errno, os, signal
+inherited_descriptors = __INHERITED_DESCRIPTORS__
 for name in os.listdir('/dev/fd'):
     fd = int(name)
     if fd <= 2: continue
     try:
-        os.fstat(fd)
+        stat = os.fstat(fd)
     except OSError as error:
         assert error.errno == errno.EBADF
         continue
+    if [stat.st_dev, stat.st_ino] in inherited_descriptors: continue
     raise AssertionError('payload inherited descriptor ' + name + ': ' + os.readlink('/dev/fd/' + name))
 r, w = os.pipe()
 pid = os.fork()
@@ -33,9 +42,13 @@ os.close(w)
 assert os.read(r, 1) == b'R'
 os.close(r)
 print(pid, flush=True)
-"#;
+"#
+    .replace(
+        "__INHERITED_DESCRIPTORS__",
+        &serde_json::to_string(&inherited_descriptors).unwrap(),
+    );
     let mut request = dict_map();
-    request.insert("argv".into(), vlist_str(&[&python, "-c", script]));
+    request.insert("argv".into(), vlist_str(&[&python, "-c", &script]));
     request.put_bool("background", true);
     let started = require_dict(call("hostlib_tools_run_command", request).unwrap());
     let handle = require_str(&started, "handle_id");
@@ -46,7 +59,12 @@ print(pid, flush=True)
     assert_response_matches_schema("wait_command", &waited);
     let waited = require_dict(waited);
     assert_eq!(require_str(&waited, "status"), "completed");
-    assert_eq!(require_int(&waited, "exit_code"), 0, "{waited:?}");
+    assert_eq!(
+        require_int(&waited, "exit_code"),
+        0,
+        "payload stderr: {}",
+        require_str(&waited, "stderr")
+    );
     let stdout = require_str(&waited, "stdout");
     let pid: i32 = stdout
         .lines()
