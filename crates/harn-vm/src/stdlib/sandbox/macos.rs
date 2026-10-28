@@ -530,6 +530,15 @@ fn render_profile_with_extra_read_roots(
             sandbox_profile_escape(&ancestor)
         ));
     }
+    if let Some(socket) = &policy.process_sandbox.ssh_agent_socket {
+        for path in sandbox_profile_path_aliases(socket) {
+            let escaped = sandbox_profile_escape(&path);
+            profile.push_str(&format!(
+                "(allow network-outbound (literal \"{escaped}\"))\n\
+                 (allow file-read-metadata (require-all (literal \"{escaped}\") (vnode-type SOCKET)))\n"
+            ));
+        }
+    }
     profile
 }
 

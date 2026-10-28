@@ -232,6 +232,7 @@ fn enforcement_for(filesystem_mechanism: &str) -> Option<&'static BackendEnforce
 pub(crate) fn ensure_spawn_enforceable<B: SandboxBackend + ?Sized>(
     policy: &CapabilityPolicy,
 ) -> Result<(), VmError> {
+    super::ssh_agent::validate(policy)?;
     if let Some(refusal) = refusal_for_mechanism(B::filesystem_mechanism().as_str(), policy) {
         return Err(refusal.into_error());
     }

@@ -117,6 +117,11 @@ pub struct ProcessSandboxPolicy {
     /// workflow graph digest pinned before the field existed moves.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unix_socket_roots: Vec<String>,
+    /// One host-authorized SSH agent socket. Children receive this exact path
+    /// as `SSH_AUTH_SOCK`; the grant permits connection, never key-file reads.
+    /// Linux requires Landlock ABI 9 to enforce the path and refuses below it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_agent_socket: Option<String>,
     /// Permit a confined child to enumerate its own entries under the process
     /// filesystem, not merely read the files it already knows the names of.
     ///
@@ -264,6 +269,9 @@ impl ProcessSandboxPolicy {
         extend_unique(&mut self.read_deny_roots, &other.read_deny_roots);
         self.allow_tcp_loopback |= other.allow_tcp_loopback;
         extend_unique(&mut self.unix_socket_roots, &other.unix_socket_roots);
+        if let Some(socket) = &other.ssh_agent_socket {
+            self.ssh_agent_socket = Some(socket.clone());
+        }
         self.allow_process_self_introspection |= other.allow_process_self_introspection;
         self.allow_child_workspace_write |= other.allow_child_workspace_write;
         if let Some(path) = other.netns_launcher_path.as_ref() {
@@ -303,6 +311,11 @@ impl ProcessSandboxPolicy {
                 &self.unix_socket_roots,
                 &requested.unix_socket_roots,
             ),
+            ssh_agent_socket: self
+                .ssh_agent_socket
+                .as_ref()
+                .filter(|socket| requested.ssh_agent_socket.as_ref() == Some(*socket))
+                .cloned(),
             // Narrows like every other additive term: a nested request may
             // keep the grant its ceiling already made and may never invent it.
             allow_process_self_introspection: self.allow_process_self_introspection

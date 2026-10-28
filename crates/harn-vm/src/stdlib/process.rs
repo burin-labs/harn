@@ -1277,6 +1277,11 @@ fn session_env_with(
             env.insert(key, value);
         }
     }
+    if let Some(socket) = crate::orchestration::current_execution_policy()
+        .and_then(|policy| policy.process_sandbox.ssh_agent_socket)
+    {
+        env.insert("SSH_AUTH_SOCK".to_string(), socket);
+    }
     Ok(Some(env))
 }
 

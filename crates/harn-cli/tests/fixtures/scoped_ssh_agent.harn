@@ -1,0 +1,13 @@
+import { command_run } from "std/command"
+
+fn main(harness: Harness) {
+  const sign = command_run(harness.tools, ["git", "commit", "--allow-empty", "-S", "-m", "Socket grant proof"])
+  const read = command_run(harness.tools, ["sh", "-c", "cat \"$1\" >/dev/null", "key-read-control", argv[0]])
+  const other = command_run(harness.tools, ["ssh-add", "-l"], {env: {SSH_AUTH_SOCK: argv[1]}})
+  harness.stdio.println(json_stringify({
+    sign_exit: sign.exit_code,
+    key_read_exit: read.exit_code,
+    other_agent_exit: other.exit_code,
+    confinement_fired: sign.sandbox.enforced && read.sandbox.enforced && other.sandbox.enforced,
+  }))
+}

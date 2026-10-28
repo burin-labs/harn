@@ -414,6 +414,10 @@ fn unix_socket_local_ipc_grant(policy: &CapabilityPolicy) -> bool {
     !policy.process_sandbox.unix_socket_roots.is_empty() && !policy_allows_network(policy)
 }
 
+pub(super) fn ssh_agent_path_scope_available() -> bool {
+    LandlockSupport::negotiate(ABI::V9).is_some_and(|support| support.abi() >= ABI::V9)
+}
+
 fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {
     if let Some(landlock) = &profile.landlock {
         landlock_support::enter_ruleset(landlock.ruleset.as_raw_fd())?;
@@ -451,7 +455,15 @@ fn landlock_profile_for(
     // descendants, which is the containment the grant claims. An older kernel
     // cannot express it, so the grant is refused there rather than issued
     // half-enforced.
-    let scope_abstract_unix = unix_socket_local_ipc_grant(policy);
+    super::ssh_agent::validate(policy)?;
+    let scope_unix_paths =
+        policy.process_sandbox.ssh_agent_socket.is_some() && !policy_allows_network(policy);
+    if scope_unix_paths && support.abi() < ABI::V9 {
+        return Err(sandbox_rejection(
+            "SSH agent socket connection requires Landlock ABI 9 on this host".into(),
+        ));
+    }
+    let scope_abstract_unix = unix_socket_local_ipc_grant(policy) || scope_unix_paths;
     if scope_abstract_unix && !support.scopes_abstract_unix_sockets() {
         return Err(sandbox_rejection(format!(
             "serve-only Unix-domain sockets need Landlock ABI {} to contain abstract sockets; this host reports ABI {}",
@@ -465,6 +477,20 @@ fn landlock_profile_for(
         support.handled_access(),
         ProcessFilesystemScope::Host,
     )?;
+    if scope_unix_paths {
+        use std::os::unix::fs::OpenOptionsExt;
+        let path = PathBuf::from(policy.process_sandbox.ssh_agent_socket.as_ref().unwrap());
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_PATH | libc::O_CLOEXEC)
+            .open(&path)
+            .map_err(|error| sandbox_rejection(format!("cannot pin SSH agent socket: {error}")))?;
+        filesystem.rules.push(FilesystemRule {
+            file,
+            path,
+            allowed_access: AccessFs::ResolveUnix.into(),
+        });
+    }
     let private_tmp = netns::private_tmp_dir(
         policy,
         filesystem.rules.iter().map(|rule| rule.path.as_path()),
@@ -482,6 +508,7 @@ fn landlock_profile_for(
     let ruleset = support
         .populated_ruleset(
             scope_abstract_unix,
+            scope_unix_paths,
             filesystem
                 .rules
                 .iter()
@@ -876,7 +903,9 @@ fn compile_seccomp_program(
         landlock_support::filter_path_truncation(&mut rules)?;
     }
 
-    if unix_socket_local_ipc_grant(policy) {
+    if unix_socket_local_ipc_grant(policy)
+        || (policy.process_sandbox.ssh_agent_socket.is_some() && !policy_allows_network(policy))
+    {
         // `socket` is admitted only for the Unix domain. An argument condition
         // is the whole protection: an unconditional entry here would hand the
         // child every address family, which is the grant this term exists to
@@ -896,14 +925,19 @@ fn compile_seccomp_program(
         })?])
         .map_err(|err| sandbox_rejection(format!("failed to build the socket rule: {err}")))?;
         rules.insert(libc::SYS_socket, vec![unix_domain_only]);
-        for syscall in [
-            libc::SYS_bind,
-            libc::SYS_listen,
-            libc::SYS_accept,
-            libc::SYS_accept4,
-            libc::SYS_getsockname,
-        ] {
-            rules.entry(syscall).or_default();
+        if policy.process_sandbox.ssh_agent_socket.is_some() {
+            rules.entry(libc::SYS_connect).or_default();
+        }
+        if unix_socket_local_ipc_grant(policy) {
+            for syscall in [
+                libc::SYS_bind,
+                libc::SYS_listen,
+                libc::SYS_accept,
+                libc::SYS_accept4,
+                libc::SYS_getsockname,
+            ] {
+                rules.entry(syscall).or_default();
+            }
         }
     }
     admit_own_identity_changes(&mut rules)?;

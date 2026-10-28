@@ -92,6 +92,11 @@ pub(crate) struct SandboxArgs {
         conflicts_with = "no_sandbox"
     )]
     pub sandbox_unix_socket_root: Vec<PathBuf>,
+    /// Let subprocesses connect to the launcher's SSH agent and receive its
+    /// SSH_AUTH_SOCK path, including under an isolated environment. Grants no
+    /// private-key reads or other socket connections. Unsupported kernels refuse.
+    #[arg(long = "allow-ssh-agent", conflicts_with = "no_sandbox")]
+    pub allow_ssh_agent: bool,
     /// Let subprocesses enumerate their own entries in the process
     /// filesystem, which some managed runtimes need in order to identify
     /// themselves during startup. Read-only, grants no network authority,

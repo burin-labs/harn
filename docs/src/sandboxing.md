@@ -86,6 +86,17 @@ widening. Granting the
 process write roots as socket roots is the natural pairing, since a socket file
 is a file.
 
+Pass `--allow-ssh-agent` to let a confined command sign Git commits through the
+launcher's `SSH_AUTH_SOCK`. The process policy records that one socket as
+`process_sandbox.ssh_agent_socket` and passes its path to children even with
+`--environment-policy isolated`. It grants connection to that endpoint without
+granting private-key reads, directory reads under `~/.ssh`, socket creation, or
+IP networking. Other connections remain governed by their existing grants.
+macOS enforces the exact socket path. Linux requires Landlock ABI 9 for this
+path restriction and refuses the grant on older kernels unless the policy
+already permits general networking. Other backends refuse it. The socket must
+exist and have an absolute path; an unset `SSH_AUTH_SOCK` is a CLI error.
+
 When a confined child fails, the refusal record names the boundary that
 refused it: `mechanism` is one of `egress`, `local_socket`, `home_read`,
 `write`, or `unknown`, and `reason` spells out what was and was not granted.

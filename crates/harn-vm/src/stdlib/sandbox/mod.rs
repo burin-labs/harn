@@ -96,6 +96,7 @@ pub use path_scope::{
 mod read_roots;
 mod refusal;
 mod scope_memo;
+mod ssh_agent;
 use backend::ActiveBackend;
 pub use backend::{
     active_backend_available, active_backend_filesystem_available,
