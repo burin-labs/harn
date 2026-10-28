@@ -1082,6 +1082,69 @@ pipeline default(harness: Harness, task: unknown) {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn registered_checkpoint_strict_recreation_round_trips_through_harn_and_schemas() {
+    let dir = super::workspace_checkpoint::repo();
+    let id = format!("registered-strict-checkpoint-{}", std::process::id());
+    let root = harn_string_literal(&dir.path().to_string_lossy());
+    let started = execute_harn(&format!(
+        r#"
+pipeline default(harness: Harness, task: unknown) {{
+  let captured = harness.fs.checkpoint_capture({{
+    session_id: "{id}", boundary_id: "turn-1", root: "{root}",
+    writer_policy: "require_known"
+  }})
+  let begun = harness.fs.checkpoint_call_begin({{session_id: "{id}", call_id: "edit"}})
+  return {{captured: captured, begun: begun}}
+}}
+"#
+    ))
+    .expect("strict capture must pass registered request and response validation");
+    let started = harn_vm::llm::vm_value_to_json(&started);
+    assert_eq!(started["captured"]["writer_policy"], "require_known");
+    assert_eq!(started["begun"]["available"], true);
+    fs::remove_file(dir.path().join("a.txt")).unwrap();
+    let finished = execute_harn(&format!(
+        r#"
+pipeline default(harness: Harness, task: unknown) {{
+  let ended = harness.fs.checkpoint_call_end({{session_id: "{id}", call_id: "edit"}})
+  let plan = harness.fs.checkpoint_plan({{session_id: "{id}", boundary_id: "turn-1"}})
+  let restored = harness.fs.checkpoint_restore({{
+    session_id: "{id}", boundary_id: "turn-1",
+    confirmed_paths: [{{
+      session_id: "{id}", boundary_id: "turn-1", path: "a.txt",
+      observed: {{kind: "absent"}}
+    }}]
+  }})
+  return {{ended: ended, plan: plan, restored: restored}}
+}}
+"#
+    ))
+    .expect("strict confirmation and every receipt must pass registered validation");
+    let finished = harn_vm::llm::vm_value_to_json(&finished);
+    assert_eq!(finished["ended"]["changes"][0]["writer"]["kind"], "unknown");
+    assert_eq!(finished["plan"]["session_id"], id);
+    assert_eq!(finished["plan"]["entries"][0]["action"], "refuse");
+    assert_eq!(finished["restored"]["restored"][0]["path"], "a.txt");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "a original\n"
+    );
+    harn_hostlib::workspace_checkpoint::drop_session(&id);
+
+    let invalid = execute_harn(
+        r#"
+pipeline default(harness: Harness, task: unknown) {
+  return harness.fs.checkpoint_capture({
+    session_id: "invalid-policy-control", boundary_id: "turn-1", writer_policy: "trust_scan"
+  })
+}
+"#,
+    );
+    assert!(matches!(invalid, Err(VmError::Thrown(_))));
+}
+
 #[cfg(all(unix, feature = "terminal-session"))]
 #[test]
 fn registered_terminal_session_round_trips_through_harn_and_schemas() {

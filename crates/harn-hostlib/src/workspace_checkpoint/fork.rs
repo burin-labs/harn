@@ -48,7 +48,7 @@ pub(super) fn fork_session_checked(
     let Some(source) = find_session(source_id) else {
         return Ok(no_checkpoint(source_id));
     };
-    let (root, read_parent_ignores, source_blobs, boundaries, calls, revision) = {
+    let (root, writer_policy, read_parent_ignores, source_blobs, boundaries, calls, revision) = {
         let state = lock(&source);
         if state.root != resolve_root(Some(target_root)) {
             return Ok(unavailable(
@@ -61,6 +61,7 @@ pub(super) fn fork_session_checked(
         }
         (
             state.root.clone(),
+            state.writer_policy,
             state.read_parent_ignores,
             state.blob_dir.clone(),
             state.boundaries.clone(),
@@ -156,6 +157,7 @@ pub(super) fn fork_session_checked(
         target_id.to_string(),
         Arc::new(Mutex::new(Session {
             root,
+            writer_policy,
             read_parent_ignores,
             blob_dir: target_blobs,
             boundaries,

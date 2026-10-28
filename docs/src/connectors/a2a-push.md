@@ -91,7 +91,8 @@ Handlers receive `provider_payload` with:
 ## A2A dispatch registration
 
 When `HARN_A2A_PUSH_URL` is set, outbound `a2a://...` dispatches include
-and register a `pushNotificationConfig` for pending tasks. Set
+and register a `pushNotificationConfig` for 0.3 pending tasks. For 1.0 peers,
+the initial request carries `taskPushNotificationConfig` instead. Set
 `HARN_A2A_PUSH_TOKEN` to include a bearer credential in that config.
 Outbound dispatches from an active Harn agent session also include the current
 session actor chain as `message.metadata.actor_chain` and mirror it under

@@ -1,0 +1,12 @@
+scripted_deny_refused=true
+scripted_deny_reviewed=true
+scripted_deny_executed=true
+scripted_ask_granted=true
+scripted_ask_reviewed=true
+scripted_ask_executed=true
+allow_all_deny_refused=true
+allow_all_deny_reviewed=true
+allow_all_deny_executed=true
+allow_all_ask_granted=true
+allow_all_ask_reviewed=true
+allow_all_ask_executed=true

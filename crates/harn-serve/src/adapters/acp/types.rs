@@ -167,6 +167,15 @@ impl AcpJsonRpcRequest<AcpSessionLoadParams> {
     }
 }
 
+impl AcpJsonRpcRequest<AcpSessionLoadWithCheckpoint> {
+    pub fn session_load_with_checkpoint(
+        id: impl Into<AcpJsonRpcId>,
+        params: AcpSessionLoadWithCheckpoint,
+    ) -> Self {
+        Self::new(id, ACP_METHOD_SESSION_LOAD, params)
+    }
+}
+
 impl AcpJsonRpcRequest<AcpSessionIdParams> {
     pub fn session_resume(id: impl Into<AcpJsonRpcId>, params: AcpSessionIdParams) -> Self {
         Self::new(id, ACP_METHOD_SESSION_RESUME, params)
@@ -499,6 +508,15 @@ impl AcpSessionNewParams {
             },
         )
     }
+
+    /// Capture workspace boundaries for admitted prompts with a caller ID.
+    pub fn with_workspace_checkpoint(mut self, enabled: bool) -> Self {
+        self.extra.insert(
+            "workspaceCheckpoint".to_string(),
+            serde_json::Value::Bool(enabled),
+        );
+        self
+    }
 }
 
 /// `session/new`, `session/load`, and `session/resume` result fields Harn
@@ -521,6 +539,15 @@ pub struct AcpSessionRestoreResult {
     pub extra: BTreeMap<String, serde_json::Value>,
 }
 
+impl AcpSessionRestoreResult {
+    /// Whether the server acknowledged automatic workspace checkpoint tracking.
+    pub fn workspace_checkpoint_tracking(&self) -> Option<bool> {
+        self.extra
+            .get("workspaceCheckpointTracking")
+            .and_then(serde_json::Value::as_bool)
+    }
+}
+
 /// `session/load` params with the launcher's explicit environment declaration.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcpSessionLoadParams {
@@ -530,6 +557,15 @@ pub struct AcpSessionLoadParams {
     pub cwd: Option<String>,
     #[serde(rename = "environmentPolicy")]
     pub environment_policy: AcpSessionEnvironmentConfig,
+}
+
+/// A session-load request with an explicit workspace checkpoint preference.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcpSessionLoadWithCheckpoint {
+    #[serde(flatten)]
+    pub session: AcpSessionLoadParams,
+    #[serde(rename = "workspaceCheckpoint")]
+    pub workspace_checkpoint: bool,
 }
 
 impl AcpSessionLoadParams {
@@ -547,6 +583,13 @@ impl AcpSessionLoadParams {
     pub fn with_cwd(mut self, cwd: impl Into<String>) -> Self {
         self.cwd = Some(cwd.into());
         self
+    }
+
+    pub fn with_workspace_checkpoint(self, enabled: bool) -> AcpSessionLoadWithCheckpoint {
+        AcpSessionLoadWithCheckpoint {
+            session: self,
+            workspace_checkpoint: enabled,
+        }
     }
 }
 
@@ -936,10 +979,44 @@ mod tests {
                 grants: Vec::new(),
             }),
             extra: BTreeMap::new(),
-        };
+        }
+        .with_workspace_checkpoint(true);
         let value = serde_json::to_value(params).unwrap();
         assert_eq!(value["environmentPolicy"]["kind"], "isolated");
+        assert_eq!(value["workspaceCheckpoint"], true);
         assert!(value.get("profile").is_none());
+    }
+
+    #[test]
+    fn checkpoint_extensions_preserve_existing_rust_struct_shapes() {
+        let params = AcpSessionLoadParams {
+            session_id: "saved-session".into(),
+            cwd: Some("/workspace".into()),
+            environment_policy: AcpSessionEnvironmentConfig::default(),
+        }
+        .with_workspace_checkpoint(true);
+        let request = AcpJsonRpcRequest::session_load_with_checkpoint(8, params)
+            .into_json_value()
+            .unwrap();
+        assert_eq!(request["params"]["workspaceCheckpoint"], true);
+        assert_eq!(request["params"]["sessionId"], "saved-session");
+
+        let tracked: AcpSessionRestoreResult = serde_json::from_value(serde_json::json!({
+            "sessionId": "saved-session", "workspaceCheckpointTracking": false
+        }))
+        .unwrap();
+        assert_eq!(tracked.workspace_checkpoint_tracking(), Some(false));
+        let old_server: AcpSessionRestoreResult =
+            serde_json::from_value(serde_json::json!({"sessionId": "saved-session"})).unwrap();
+        assert_eq!(old_server.workspace_checkpoint_tracking(), None);
+        let existing_literal = AcpSessionRestoreResult {
+            session_id: "saved-session".into(),
+            session: None,
+            modes: None,
+            config_options: None,
+            extra: BTreeMap::new(),
+        };
+        assert_eq!(existing_literal.workspace_checkpoint_tracking(), None);
     }
 
     #[test]

@@ -14,6 +14,9 @@
     },
     "root": {
       "type": "string"
+    },
+    "writer_policy": {
+      "enum": ["legacy_scan", "require_known"]
     }
   },
   "required": [

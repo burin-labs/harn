@@ -312,6 +312,7 @@
 ## CLI and tooling
 
 - [CLI reference](./cli-reference.md)
+- [Recover a blocked spend scope](./spend-recovery.md)
 - [Signals reference](./signals-reference.md)
 - [Benchmark the portable kernel](./portable-kernel-benchmarking.md)
 - [Linked-program reachability](./dev/linked-program-reachability.md)

@@ -172,15 +172,15 @@ impl Parent {
             .map_err(|e| format!("read {}: {e}", self.display))
     }
 
-    /// Write `bytes` through an exclusive temp file and `renameat`. `recheck`
-    /// runs just before the rename and may veto it by returning an error; the
-    /// temp file is removed on any failure.
+    /// Stage bytes and publish them, optionally requiring an absent destination.
+    /// Returns false when a no-replace destination appeared concurrently.
     pub(super) fn write(
         &self,
         bytes: &[u8],
         exec: bool,
+        no_replace: bool,
         recheck: impl FnOnce(&Self) -> Result<(), String>,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         let tmp = cstr(
             harn_vm::atomic_io::temp_sibling_name_os(std::ffi::OsStr::from_bytes(
                 self.name.as_bytes(),
@@ -226,6 +226,23 @@ impl Parent {
             unlink_tmp();
             return Err(error);
         }
+        if no_replace {
+            // SAFETY: both names are NUL-terminated and the directory descriptor is live.
+            let linked = unsafe {
+                libc::linkat(self.dir(), tmp.as_ptr(), self.dir(), self.name.as_ptr(), 0)
+            };
+            if linked != 0 {
+                let error = io::Error::last_os_error();
+                unlink_tmp();
+                return if error.kind() == io::ErrorKind::AlreadyExists {
+                    Ok(false)
+                } else {
+                    Err(fail("link into", error))
+                };
+            }
+            unlink_tmp();
+            return Ok(true);
+        }
         // SAFETY: both names are NUL-terminated and the directory descriptor is live.
         let renamed =
             unsafe { libc::renameat(self.dir(), tmp.as_ptr(), self.dir(), self.name.as_ptr()) };
@@ -234,7 +251,7 @@ impl Parent {
             unlink_tmp();
             return Err(fail("rename into", error));
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Unlink the entry, then remove directories left empty up to the root.
