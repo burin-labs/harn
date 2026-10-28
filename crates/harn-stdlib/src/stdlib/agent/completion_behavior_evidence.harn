@@ -136,7 +136,7 @@ pub fn completion_behavior_run_check(
   const after = __completion_behavior_goal(harness.agent, goal_id)
   const workspace_after = __completion_behavior_workspace(harness.agent, session_id)
   const command = __completion_behavior_goal_command(before, spec)
-  const bound = if trim(session_id) != "" && goal_id == session_id
+  const bound = if trim(session_id) != ""
     && before != nil
     && before == after
     && workspace_before != nil
@@ -180,7 +180,7 @@ pub fn completion_behavior_evidence(
   after: CompletionBehaviorCheck?,
   reuse: VerificationReuse?,
 ) -> CompletionBehaviorEvidence? {
-  if trim(session_id) == "" || active_goal_id != session_id
+  if trim(session_id) == ""
     || before == nil
     || after == nil
     || reuse == nil

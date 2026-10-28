@@ -101,7 +101,8 @@ decision, the gate reads the current goal and verifier inputs itself. The curren
 supported check is a shell command matching the goal's declared verification
 command. Its working directory must resolve inside the session's workspace
 anchor, including an additional mounted root. A missing or changed anchor cannot
-bind the check.
+bind the check. The active goal ID can differ from the run session ID; supply it
+from the host's current goal resolution, and both checks must name that goal.
 
 The `VerificationReuse` input reader must read complete current workspace,
 source, dependency, environment and revision identities, including changes made
