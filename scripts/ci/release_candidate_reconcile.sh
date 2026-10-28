@@ -123,7 +123,7 @@ existing="$(gh issue list --repo "$repository" --state open --search "\"$title\"
 }
 if [[ -z "$existing" ]]; then
   next="Read the failed jobs of run(s) $attempted in build-release-binaries.yml. For a source defect, land the fix on main: the next main push requests a fresh candidate and promotion publishes the first one that qualifies. For an infrastructure failure, rerun the failed jobs of that run; its success promotes automatically."
-  gh issue create --repo "$repository" --title "$title" \
+  gh issue create --repo "$repository" --title "[Release] $tag is unpublished on main" \
     --body "$message"$'\n\n'"$next"$'\n\n'"Detected by promote-release.yml. Close this issue once $tag is published." >/dev/null
 fi
 exit 1
