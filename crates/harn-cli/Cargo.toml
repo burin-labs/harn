@@ -227,6 +227,7 @@ harn-clock = { path = "../harn-clock", version = "=0.10.181", features = ["test-
 harn-mcp-compat = { path = "../harn-mcp-compat" }
 syn = { version = "3", features = ["full", "visit"] }
 rcgen.workspace = true
+rstest.workspace = true
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
 wat = "1"
 lzma-rust2 = { version = "0.15", default-features = false, features = ["encoder"] }
