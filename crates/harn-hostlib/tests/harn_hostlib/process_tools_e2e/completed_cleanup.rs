@@ -21,7 +21,7 @@ if pid == 0:
 os.close(w)
 assert os.read(r, 1) == b'R'
 os.close(r)
-print(pid, flush=True)
+print('SCRUBBED_PID=' + str(pid), flush=True)
 "#;
     let mut request = dict_map();
     request.insert("argv".into(), vlist_str(&[&python, "-c", script]));
@@ -38,7 +38,12 @@ print(pid, flush=True)
     let result = require_dict(result);
     assert_eq!(require_str(&result, "status"), "completed");
     assert_eq!(require_int(&result, "exit_code"), 0);
-    let pid: i32 = require_str(&result, "stdout").trim().parse().unwrap();
+    let stdout = require_str(&result, "stdout");
+    let pid: i32 = stdout
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("SCRUBBED_PID=")?.parse().ok())
+        .unwrap_or_else(|| panic!("scrubbed child did not report its PID: {stdout:?}"));
+    assert!(pid > 0);
     let cleanup = require_nested_dict(&result, "process_cleanup");
     assert!(require_bool(&cleanup, "guardian_custody_complete"));
     assert_eq!(require_int(&cleanup, "survivor_count"), 0);
