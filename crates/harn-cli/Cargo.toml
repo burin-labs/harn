@@ -42,6 +42,7 @@ path = "src/bin/harn-freshness-check.rs"
 required-features = ["internal-freshness-checker"]
 
 [dependencies]
+ts-rs = { version = "=12.0.1", features = ["serde-json-impl"] }
 harn-source-fingerprint = { path = "../harn-source-fingerprint", version = "=0.10.181" }
 # `name` is needed for model-id pattern matching; harn-vm already enables it,
 # so this costs no additional build.

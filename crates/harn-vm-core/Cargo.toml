@@ -13,6 +13,7 @@ vm-test-support = []
 vm-bench-internals = []
 
 [dependencies]
+ts-rs = { version = "=12.0.1", features = ["serde-json-impl"] }
 harn-source-fingerprint = { path = "../harn-source-fingerprint", version = "=0.10.181" }
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.181" }
 harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.181" }

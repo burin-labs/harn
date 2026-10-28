@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(ts_rs::TS)]
 pub enum PersonaLifecycleState {
     Inactive,
     Starting,
@@ -63,7 +64,7 @@ pub struct PersonaRuntimeBinding {
 
 pub use harn_execution_policy::{StageDecl, StageExit};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct PersonaLease {
     pub id: String,
     pub holder: String,
@@ -72,7 +73,7 @@ pub struct PersonaLease {
     pub expires_at_ms: i64,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct PersonaBudgetStatus {
     pub daily_usd: Option<f64>,
     pub hourly_usd: Option<f64>,
@@ -89,7 +90,7 @@ pub struct PersonaBudgetStatus {
     pub last_receipt_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct PersonaStatus {
     pub name: String,
     #[serde(default)]
@@ -116,7 +117,7 @@ pub struct PersonaStatus {
     pub paused_event_policy: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct PersonaAssignmentStatus {
     pub work_key: String,
     pub lease_id: String,
@@ -125,7 +126,7 @@ pub struct PersonaAssignmentStatus {
     pub expires_at: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct PersonaQueuedWork {
     pub work_key: String,
     pub provider: String,
@@ -137,7 +138,7 @@ pub struct PersonaQueuedWork {
     pub metadata: BTreeMap<String, String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct PersonaHandoffInboxItem {
     pub work_key: String,
     pub handoff_id: Option<String>,
@@ -148,9 +149,10 @@ pub struct PersonaHandoffInboxItem {
     pub reason: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct PersonaValueReceipt {
     pub kind: PersonaValueEventKind,
+    #[ts(type = "string | null")]
     pub run_id: Option<Uuid>,
     pub occurred_at: String,
     pub paid_cost_usd: f64,
@@ -206,6 +208,7 @@ pub struct PersonaRunCost {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(ts_rs::TS)]
 pub enum PersonaValueEventKind {
     RunStarted,
     RunCompleted,

@@ -122,8 +122,8 @@ pub(crate) use doctor::{DoctorArgs, DoctorCommand};
 pub(crate) use dump::{
     ConnectorSchemaCodegenArgs, DumpBuiltinMethodsArgs, DumpCliSurfaceArgs,
     DumpConnectorMatrixArgs, DumpHarnessMigrationsArgs, DumpHighlightKeywordsArgs,
-    DumpOperatorPrecedenceArgs, DumpPortableBenchmarkSchemaArgs, DumpPromptGrammarArgs,
-    DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
+    DumpOperatorPrecedenceArgs, DumpPortableBenchmarkSchemaArgs, DumpPortalTypesArgs,
+    DumpPromptGrammarArgs, DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
 };
 pub use eval::{
     EvalArgs, EvalCalibrateArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs,
@@ -650,6 +650,12 @@ SCRIPTING
     /// `make gen-builtin-methods` target.
     #[command(hide = true, name = "dump-builtin-methods")]
     DumpBuiltinMethods(DumpBuiltinMethodsArgs),
+    /// Regenerate the portal web client's TypeScript API types from the Rust DTOs.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via the `make gen-portal-types`
+    /// target.
+    #[command(hide = true, name = "dump-portal-types")]
+    DumpPortalTypes(DumpPortalTypesArgs),
     /// Regenerate docs/llm/harn-triggers-quickref.md from the live trigger provider catalog.
     ///
     /// Dev-only. Hidden from `--help` — invoke via

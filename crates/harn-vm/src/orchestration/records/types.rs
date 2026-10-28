@@ -236,6 +236,8 @@ pub struct ReplayEvalSuiteReport {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "RunDeliverableSummary")]
 pub struct RunDeliverableSummaryRecord {
     pub id: String,
     pub text: String,
@@ -245,6 +247,8 @@ pub struct RunDeliverableSummaryRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "RunTaskLedgerSummary")]
 pub struct RunTaskLedgerSummaryRecord {
     pub root_task: String,
     pub rationale: String,
@@ -255,6 +259,8 @@ pub struct RunTaskLedgerSummaryRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "RunPlannerRound")]
 pub struct RunPlannerRoundRecord {
     pub stage_id: String,
     pub node_id: String,
@@ -279,6 +285,8 @@ pub struct RunPlannerRoundRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "RunWorkerLineage")]
 pub struct RunWorkerLineageRecord {
     pub worker_id: String,
     pub worker_name: String,
@@ -294,6 +302,8 @@ pub struct RunWorkerLineageRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "RunActionGraphNode")]
 pub struct RunActionGraphNodeRecord {
     pub id: String,
     pub label: String,
@@ -311,6 +321,8 @@ pub struct RunActionGraphNodeRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "RunActionGraphEdge")]
 pub struct RunActionGraphEdgeRecord {
     pub from_id: String,
     pub to_id: String,
@@ -320,6 +332,8 @@ pub struct RunActionGraphEdgeRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "RunVerificationOutcome")]
 pub struct RunVerificationOutcomeRecord {
     pub stage_id: String,
     pub node_id: String,
@@ -330,6 +344,8 @@ pub struct RunVerificationOutcomeRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "RunTranscriptPointer")]
 pub struct RunTranscriptPointerRecord {
     pub id: String,
     pub label: String,
@@ -344,6 +360,7 @@ pub struct RunTranscriptPointerRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
 pub struct RunTranscriptArtifactDescriptor {
     pub schema_version: String,
     pub artifact_kind: String,
@@ -398,6 +415,8 @@ pub struct CompactionEventRecord {
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
+#[derive(ts_rs::TS)]
+#[ts(rename = "DaemonEventKind")]
 pub enum DaemonEventKindRecord {
     #[default]
     Spawned,
@@ -409,6 +428,8 @@ pub enum DaemonEventKindRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "DaemonEvent")]
 pub struct DaemonEventRecord {
     pub daemon_id: String,
     pub name: String,
@@ -420,6 +441,8 @@ pub struct DaemonEventRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "RunObservability")]
 pub struct RunObservabilityRecord {
     pub schema_version: usize,
     pub planner_rounds: Vec<RunPlannerRoundRecord>,
@@ -429,6 +452,7 @@ pub struct RunObservabilityRecord {
     pub worker_lineage: Vec<RunWorkerLineageRecord>,
     pub verification_outcomes: Vec<RunVerificationOutcomeRecord>,
     pub transcript_pointers: Vec<RunTranscriptPointerRecord>,
+    #[ts(skip)]
     pub compaction_events: Vec<CompactionEventRecord>,
     pub daemon_events: Vec<DaemonEventRecord>,
 }
@@ -438,11 +462,14 @@ pub struct RunObservabilityRecord {
 /// they do not mint parallel execution identities.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "RunEvidence")]
 pub struct ExecutionEvidenceRecord {
     pub schema_version: u32,
     pub execution_id: Option<String>,
     /// Completed duration-bearing operations for this execution. This is the
     /// canonical persisted span tree; telemetry and user interfaces project it.
+    #[ts(skip)]
     pub trace_spans: Vec<RunTraceSpanRecord>,
     pub flight_recording: Option<crate::flight_recorder::FlightRecordingArtifact>,
     /// Evidence requested for this execution that could not be made durable.
@@ -457,15 +484,19 @@ pub struct ExecutionEvidenceRecord {
     /// made no LLM call. A consumer that treats the absent case as agreement
     /// would read every old record as proof the wire carried what was asked.
     #[schemars(with = "Option<Vec<serde_json::Value>>")]
+    #[ts(skip)]
     pub reasoning_receipts: Option<Vec<crate::llm::ReasoningReceipt>>,
     /// Complete bounded evaluations, including local refusals. Absent means
     /// the producer did not report; an empty list means none occurred.
     #[schemars(with = "Option<Vec<serde_json::Value>>")]
+    #[ts(skip)]
     pub evaluation_receipts: Option<Vec<crate::llm::decision::receipt::EvaluationReceipt>>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "PortalEvidenceGap")]
 pub struct RunEvidenceGapRecord {
     /// Stable evidence component, for example `flight_recording`.
     pub component: String,
@@ -477,6 +508,8 @@ pub struct RunEvidenceGapRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "RunStageDiff")]
 pub struct RunStageDiffRecord {
     pub node_id: String,
     pub change: String,
@@ -485,6 +518,8 @@ pub struct RunStageDiffRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "ToolCallDiff")]
 pub struct ToolCallDiffRecord {
     pub tool_name: String,
     pub args_hash: String,
@@ -495,6 +530,8 @@ pub struct ToolCallDiffRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "RunObservabilityDiff")]
 pub struct RunObservabilityDiffRecord {
     pub section: String,
     pub label: String,
@@ -1292,6 +1329,8 @@ pub(crate) fn run_child_record_from_worker_metadata(
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
+#[ts(rename = "RunExecution")]
 pub struct RunExecutionRecord {
     pub cwd: Option<String>,
     pub project_root: Option<String>,

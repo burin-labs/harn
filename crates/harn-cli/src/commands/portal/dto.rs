@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalStats {
     pub(super) total_runs: usize,
     pub(super) completed_runs: usize,
@@ -12,7 +12,7 @@ pub(super) struct PortalStats {
     pub(super) avg_duration_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalTrustGraphResponse {
     pub(super) records: Vec<harn_vm::TrustRecord>,
     pub(super) groups: Option<Vec<harn_vm::TrustTraceGroup>>,
@@ -21,7 +21,8 @@ pub(super) struct PortalTrustGraphResponse {
     pub(super) topics: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(rename = "RunSummary")]
 pub(super) struct PortalRunSummary {
     pub(super) path: String,
     pub(super) id: String,
@@ -44,14 +45,14 @@ pub(super) struct PortalRunSummary {
     pub(super) skills: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalInsight {
     pub(super) label: String,
     pub(super) value: String,
     pub(super) detail: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalCostSummary {
     pub(super) total_cost_usd: f64,
     pub(super) call_count: i64,
@@ -59,7 +60,7 @@ pub(super) struct PortalCostSummary {
     pub(super) output_tokens: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalCostTrendPoint {
     pub(super) date: String,
     pub(super) pipeline: String,
@@ -69,7 +70,7 @@ pub(super) struct PortalCostTrendPoint {
     pub(super) output_tokens: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalProviderCostBreakdown {
     pub(super) provider: String,
     pub(super) model: String,
@@ -79,14 +80,14 @@ pub(super) struct PortalProviderCostBreakdown {
     pub(super) output_tokens: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalCostReport {
     pub(super) summary: PortalCostSummary,
     pub(super) trend: Vec<PortalCostTrendPoint>,
     pub(super) provider_breakdown: Vec<PortalProviderCostBreakdown>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalStage {
     pub(super) id: String,
     pub(super) node_id: String,
@@ -103,7 +104,7 @@ pub(super) struct PortalStage {
     pub(super) debug: PortalStageDebug,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalStageDebug {
     pub(super) call_count: i64,
     pub(super) input_tokens: i64,
@@ -126,7 +127,7 @@ pub(super) struct PortalStageDebug {
     pub(super) rendered_context: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalSpan {
     pub(super) span_id: u64,
     pub(super) parent_id: Option<u64>,
@@ -141,7 +142,7 @@ pub(super) struct PortalSpan {
     pub(super) metadata: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalActivity {
     pub(super) label: String,
     pub(super) kind: String,
@@ -155,19 +156,22 @@ pub(super) struct PortalActivity {
     /// activity row visually clean for spans that never went through
     /// `with_required_reason` / `with_audit_log` / etc.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub(super) audit: Option<PortalActivityAudit>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalActivityAudit {
     /// User-facing one-liner pulled from `audit.summary`
     /// (ACP `title` / OpenAI `summary_text` convention). Renders as a
     /// chip below the tool name.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub(super) reason: Option<String>,
     /// Optional ACP-style classification (`read`, `search`, etc.) from
     /// `audit.kind` or the typed receipt.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub(super) kind: Option<String>,
     /// Receipt status (`ok` / `error` / `consent_denied` / etc.) when a
     /// `ToolCallReceipt` was attached.
@@ -179,18 +183,20 @@ pub(super) struct PortalActivityAudit {
     /// pre-signed cloud URL). Passed through unchanged — the portal
     /// never rewrites it.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub(super) receipt_uri: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalActivityAuditLayer {
     pub(super) name: String,
     pub(super) status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub(super) metadata: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalArtifact {
     pub(super) id: String,
     pub(super) kind: String,
@@ -202,7 +208,7 @@ pub(super) struct PortalArtifact {
     pub(super) preview: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalTransition {
     pub(super) from_node_id: Option<String>,
     pub(super) to_node_id: String,
@@ -211,7 +217,7 @@ pub(super) struct PortalTransition {
     pub(super) produced_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalCheckpoint {
     pub(super) reason: String,
     pub(super) ready_count: usize,
@@ -219,7 +225,7 @@ pub(super) struct PortalCheckpoint {
     pub(super) last_stage_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalExecutionSummary {
     pub(super) cwd: Option<String>,
     pub(super) repo_path: Option<String>,
@@ -228,7 +234,7 @@ pub(super) struct PortalExecutionSummary {
     pub(super) adapter: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalPolicySummary {
     pub(super) tools: Vec<String>,
     pub(super) capabilities: Vec<String>,
@@ -242,7 +248,7 @@ pub(super) struct PortalPolicySummary {
     pub(super) reachable_nodes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalReplayAssertion {
     pub(super) node_id: String,
     pub(super) expected_status: String,
@@ -252,7 +258,7 @@ pub(super) struct PortalReplayAssertion {
     pub(super) visible_text_contains: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalReplaySummary {
     pub(super) fixture_id: String,
     pub(super) source_run_id: String,
@@ -261,13 +267,13 @@ pub(super) struct PortalReplaySummary {
     pub(super) stage_assertions: Vec<PortalReplayAssertion>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalTranscriptMessage {
     pub(super) role: String,
     pub(super) content: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalTranscriptStep {
     pub(super) call_id: String,
     pub(super) span_id: Option<u64>,
@@ -294,7 +300,7 @@ pub(super) struct PortalTranscriptStep {
 /// Powers the portal's "Variant resolution" panel (#1668) so on-call
 /// engineers can answer "which capability branch fired for this
 /// model?" without re-running the template.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalTemplateRender {
     pub(super) template_uri: String,
     pub(super) template_revision_hash: String,
@@ -308,7 +314,7 @@ pub(super) struct PortalTemplateRender {
     pub(super) timestamp: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalTemplateBranch {
     pub(super) kind: String,
     pub(super) template_uri: String,
@@ -318,7 +324,7 @@ pub(super) struct PortalTemplateBranch {
     pub(super) branch_label: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalStorySection {
     pub(super) title: String,
     pub(super) scope: String,
@@ -328,7 +334,7 @@ pub(super) struct PortalStorySection {
     pub(super) preview: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalChildRun {
     pub(super) worker_name: String,
     pub(super) status: String,
@@ -345,7 +351,7 @@ pub(super) struct PortalChildRun {
 /// reference the 0-based agent-loop iteration when the skill came in /
 /// went out; `deactivated_iteration: None` means the skill stayed active
 /// through the end of the run.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalSkillTimelineEntry {
     pub(super) name: String,
     pub(super) description: String,
@@ -358,7 +364,7 @@ pub(super) struct PortalSkillTimelineEntry {
 }
 
 /// One rank of the matcher from a `skill_matched` event.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalSkillMatchEvent {
     pub(super) iteration: i64,
     pub(super) strategy: String,
@@ -367,7 +373,7 @@ pub(super) struct PortalSkillMatchEvent {
     pub(super) candidates: Vec<PortalSkillMatchCandidate>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalSkillMatchCandidate {
     pub(super) name: String,
     pub(super) score: f64,
@@ -379,7 +385,7 @@ pub(super) struct PortalSkillMatchCandidate {
 /// entry pairs a `tool_search_query` with its matching
 /// `tool_search_result` so the portal can render a waterfall of "which
 /// tools entered context in which turn, via which query".
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalToolLoadEvent {
     pub(super) query: String,
     pub(super) strategy: String,
@@ -391,9 +397,10 @@ pub(super) struct PortalToolLoadEvent {
     pub(super) scope: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalRunDetail {
     pub(super) summary: PortalRunSummary,
+    #[ts(type = "{ evidence: RunEvidence }")]
     pub(super) view: harn_vm::orchestration::RunView,
     pub(super) task: String,
     pub(super) workflow_id: String,
@@ -421,7 +428,7 @@ pub(super) struct PortalRunDetail {
     pub(super) active_skills: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalLaunchTarget {
     pub(super) path: String,
     pub(super) group: String,
@@ -435,7 +442,7 @@ pub(super) struct MaterializedLaunchTarget {
     pub(super) workspace_dir: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub(super) struct PortalLaunchJob {
     pub(super) id: String,
     pub(super) mode: String,
@@ -450,12 +457,12 @@ pub(super) struct PortalLaunchJob {
     pub(super) transcript_path: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(super) struct PortalLaunchTargetList {
     pub(super) targets: Vec<PortalLaunchTarget>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(super) struct PortalLaunchJobList {
     pub(super) jobs: Vec<PortalLaunchJob>,
 }
@@ -475,7 +482,7 @@ pub(super) struct PortalTriggerReplayRequest {
     pub(super) event_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub(super) struct PortalRunDiff {
     pub(super) left_path: String,
     pub(super) right_path: String,
@@ -491,7 +498,7 @@ pub(super) struct PortalRunDiff {
     pub(super) checkpoint_count_delta: isize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(super) struct PortalListResponse {
     pub(super) stats: PortalStats,
     pub(super) filtered_count: usize,
@@ -499,7 +506,7 @@ pub(super) struct PortalListResponse {
     pub(super) runs: Vec<PortalRunSummary>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(super) struct PortalPagination {
     pub(super) page: usize,
     pub(super) page_size: usize,
@@ -509,20 +516,20 @@ pub(super) struct PortalPagination {
     pub(super) has_next: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(super) struct PortalMeta {
     pub(super) workspace_root: String,
     pub(super) run_dir: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(super) struct PortalHighlightKeywords {
     pub(super) keyword: Vec<String>,
     pub(super) literal: Vec<String>,
     pub(super) built_in: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(super) struct PortalLlmProviderOption {
     pub(super) name: String,
     pub(super) base_url: String,
@@ -537,7 +544,7 @@ pub(super) struct PortalLlmProviderOption {
     pub(super) default_model: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(super) struct PortalLlmOptions {
     pub(super) preferred_provider: Option<String>,
     pub(super) preferred_model: Option<String>,

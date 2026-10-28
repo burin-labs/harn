@@ -297,6 +297,7 @@ impl GrantSourceSpec {
     Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
+#[derive(ts_rs::TS)]
 pub enum GrantAudience {
     /// In-process readers and spawned children (narrowed by `for_command`).
     #[default]
@@ -636,6 +637,7 @@ fn strip_windows_executable_suffix(name: &str) -> &str {
     Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
+#[derive(ts_rs::TS)]
 pub enum EnvironmentPolicyKind {
     /// Preserve a launch-time snapshot of the launcher's environment.
     #[default]
@@ -1199,19 +1201,22 @@ fn validate_unique_specs(specs: &[GrantSpec]) -> Result<(), EnvironmentPolicyErr
 /// Carries the grant name, source kind, optional environment target, optional
 /// command binding, and audience — never the value or a reversible source
 /// reference. `secret_store` account/key pointers are intentionally omitted.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, ts_rs::TS)]
 pub struct GrantReceipt {
     pub name: String,
     pub source_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub exposed_as_env: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub for_command: Option<String>,
     /// `in_process` when no child could see the exposure. Omitted for the
     /// default session audience, so a record written before audiences
     /// existed reads back as what it was.
     #[serde(default, skip_serializing_if = "GrantAudience::is_session")]
     #[schemars(extend("default" = GrantAudience::default()))]
+    #[ts(optional, as = "Option<GrantAudience>")]
     pub exposed_to: GrantAudience,
 }
 

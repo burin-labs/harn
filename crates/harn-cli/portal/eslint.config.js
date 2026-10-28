@@ -5,7 +5,7 @@ import tseslint from "typescript-eslint"
 
 export default tseslint.config(
   {
-    ignores: ["dist", "../portal-dist"],
+    ignores: ["dist", "../portal-dist", "src/types.ts"],
   },
   js.configs.recommended,
   // strict + stylistic raise the floor above plain `recommended` without
