@@ -7,6 +7,11 @@ fn real_completed_background_cancel_replays_guardian_cleanup_receipt() {
         std::process::id()
     ));
     let python = python3().expect("the process fixture requires Python 3");
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    let parent_file = tempfile::tempfile().unwrap();
+    let inherited_fd = unsafe { libc::fcntl(parent_file.as_raw_fd(), libc::F_DUPFD, 131) };
+    assert!(inherited_fd >= 131);
+    let _parent_descriptor = unsafe { OwnedFd::from_raw_fd(inherited_fd) };
     use std::os::unix::fs::MetadataExt;
     let inherited_descriptors = std::fs::read_dir("/dev/fd")
         .unwrap()
