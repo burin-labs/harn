@@ -43,6 +43,9 @@ pub(super) fn prepared_handler_catalog(
     registry: &VmValue,
     name: &str,
 ) -> Result<std::sync::Arc<PreparedToolCatalog>, VmError> {
+    if crate::mcp_server::is_served_composition() {
+        return crate::mcp_server::composition_catalog(name);
+    }
     if let Some(registry) = registry.as_dict() {
         if let Some(VmValue::Resource(resource)) = registry.get(PREPARED_CATALOG_KEY) {
             if let Some(owned) = resource.downcast::<AgentPreparedCatalog>() {
@@ -66,16 +69,7 @@ pub(super) fn validate_registered_input(
     audience: crate::tool_registry::ToolAudience,
 ) -> Result<(), String> {
     if audience == crate::tool_registry::ToolAudience::Mcp {
-        let Some(registry) = registry else {
-            return Ok(());
-        };
-        let present = registry.as_dict().and_then(|dict| dict.get("tools")).is_some_and(|tools| {
-            matches!(tools, VmValue::List(tools) if tools.iter().any(|tool| tool.as_dict().and_then(|entry| entry.get("name").map(VmValue::display)).as_deref() == Some(name)))
-        });
-        if !present {
-            return Ok(());
-        }
-        return prepared_handler_catalog(registry, name)
+        return crate::mcp_server::composition_catalog(name)
             .map_err(|error| error.to_string())?
             .validate_input(name, arguments)
             .map_err(|error| error.to_string());
@@ -338,6 +332,22 @@ mod tests {
             std::collections::BTreeMap::from([("anything".to_string(), published)]),
             async {
                 let allowed = registry(vec![entry]);
+                validate_registered_input(
+                    Some(&allowed),
+                    "anything",
+                    &serde_json::json!({}),
+                    crate::tool_registry::ToolAudience::Mcp,
+                )
+                .expect("published catalog entry validates");
+                let missing = crate::mcp_server::composition_catalog("missing")
+                    .expect_err("an unpublished name has no validation authority");
+                assert!(matches!(
+                    missing,
+                    VmError::CategorizedError {
+                        category: ErrorCategory::SchemaValidation,
+                        ..
+                    }
+                ));
                 assert!(require_registry_membership_for(
                     Some(&allowed),
                     "anything",
@@ -353,6 +363,13 @@ mod tests {
             },
         )
         .await;
+        assert!(matches!(
+            crate::mcp_server::composition_catalog("anything"),
+            Err(VmError::CategorizedError {
+                category: ErrorCategory::SchemaValidation,
+                ..
+            })
+        ));
         assert!(require_registry_membership_for(
             None,
             "anything",
