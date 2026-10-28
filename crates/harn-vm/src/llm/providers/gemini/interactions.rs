@@ -270,26 +270,22 @@ pub(crate) async fn consume_interaction_sse<R: tokio::io::AsyncBufRead + Unpin>(
     delta_tx: Option<DeltaSender>,
     dialect: crate::llm::api::DialectContract,
 ) -> Result<Value, VmError> {
-    use tokio::io::AsyncBufReadExt;
-
     if dialect.stream_protocol() != crate::llm::api::StreamProtocol::GeminiInteractionsSse {
         return Err(vm_err(
             "Gemini Interactions stream received a mismatched dialect",
         ));
     }
 
-    let mut lines = reader.lines();
+    let mut frames = crate::sse_frames::SseFrames::new(reader);
     let mut stream = InteractionStream::new();
     let mut saw_provider_frame = false;
     let mut saw_terminal_event = false;
-    while let Some(line) = lines
-        .next_line()
+    while let Some(frame) = frames
+        .next()
         .await
         .map_err(|error| vm_err(format!("gemini stream read error: {error}")))?
     {
-        let Some(payload) = line.strip_prefix("data:").map(str::trim) else {
-            continue;
-        };
+        let payload = frame.data.trim();
         if payload.is_empty() {
             continue;
         }
