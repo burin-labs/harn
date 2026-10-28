@@ -1,7 +1,7 @@
 [
   {
     "default": "absent; non-discriminating verification retains the strict veto",
-    "evidence": "conformance/tests/mechanisms/completion_behavior_evidence.contract.harn drives a scripted refactor through the completion gate and rejects an unrelated target. Burin host adoption remains unproven.",
+    "evidence": "conformance/tests/mechanisms/completion_behavior_evidence.contract.harn drives a scripted refactor through the completion gate and rejects an unrelated target. Downstream host adoption remains unproven.",
     "expiry": "2026-11-28",
     "kind": "configuration",
     "layer": "stop decision",
