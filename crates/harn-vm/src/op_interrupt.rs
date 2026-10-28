@@ -224,7 +224,19 @@ impl ProcessCleanupReport {
     }
 
     pub fn merge(&mut self, other: Self) {
-        self.census = other.census;
+        if self == &Self::default() {
+            *self = other;
+            return;
+        }
+        self.census.control_read &= other.census.control_read;
+        self.census.scanned_processes = self
+            .census
+            .scanned_processes
+            .saturating_add(other.census.scanned_processes);
+        self.census.unreadable_processes = self
+            .census
+            .unreadable_processes
+            .saturating_add(other.census.unreadable_processes);
         self.omitted_children += other.omitted_children;
         if self.root_pid.is_none() {
             self.root_pid = other.root_pid;

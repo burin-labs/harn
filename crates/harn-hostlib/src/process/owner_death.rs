@@ -262,8 +262,6 @@ pub(crate) fn prepare_guardian(
     }
     let executable = std::env::current_exe()
         .map_err(|error| ProcessError::Spawn(format!("resolve guardian executable: {error}")))?;
-    harn_vm::op_interrupt::initialize_process_owner_group_journal(&cleanup_token)
-        .map_err(|error| ProcessError::Spawn(format!("create owner process journal: {error}")))?;
     let mut guardian = Command::new(executable);
     match REEXEC_ARGS.with(|slot| slot.borrow().clone()) {
         Some(args) => {
@@ -302,6 +300,8 @@ pub(crate) fn prepare_guardian(
     request.cleanup_receipt_fd = Some(receipt_fd);
     let request = serde_json::to_vec(&request)
         .map_err(|error| ProcessError::Spawn(format!("encode guardian request: {error}")))?;
+    harn_vm::op_interrupt::initialize_process_owner_group_journal(&cleanup_token)
+        .map_err(|error| ProcessError::Spawn(format!("create owner process journal: {error}")))?;
     Ok(PreparedGuardian {
         cleanup_receipt,
         command: guardian,

@@ -35,12 +35,11 @@ pub(crate) struct ReceiptReader(
 );
 
 impl ReceiptReader {
-    pub(crate) fn finish(mut self) -> harn_vm::op_interrupt::ProcessCleanupReport {
+    pub(crate) fn finish(mut self) -> Option<harn_vm::op_interrupt::ProcessCleanupReport> {
         self.0
             .take()
             .and_then(|reader| reader.join().ok())
             .and_then(Result::ok)
-            .unwrap_or_default()
     }
 }
 
@@ -103,9 +102,7 @@ mod tests {
         assert!(flags >= 0);
         assert_ne!(flags & libc::FD_CLOEXEC, 0);
         drop(command);
-        let receipt = reader.finish();
-        assert!(!receipt.census.complete());
-        assert_eq!(receipt.census.scanned_processes, 0);
+        assert!(reader.finish().is_none());
     }
 
     #[test]

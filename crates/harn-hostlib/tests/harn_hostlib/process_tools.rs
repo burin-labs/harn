@@ -231,6 +231,7 @@ fn run_command_cleanup_counts_unknown_liveness_and_refuses_unmeasured_zero() {
         "no_control",
         "partial",
         "omitted",
+        "merged_unavailable",
     ] {
         let mut report = cleanup_report_fixture(9);
         match case {
@@ -239,6 +240,10 @@ fn run_command_cleanup_counts_unknown_liveness_and_refuses_unmeasured_zero() {
             "no_control" => report.census.control_read = false,
             "partial" => report.census.unreadable_processes = 1,
             "omitted" => report.omitted_children = 1,
+            "merged_unavailable" => {
+                report.census = harn_vm::op_interrupt::ProcessCleanupCensus::default();
+                report.merge(cleanup_report_fixture(9));
+            }
             _ => {}
         }
         let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig {
@@ -374,6 +379,27 @@ fn run_command_kills_child_when_scope_interrupt_fires() {
     let cleanup = require_nested_dict(&resp, "process_cleanup");
     assert_eq!(require_int(&cleanup, "root_pid"), 99_999);
     assert!(controller.was_killed(), "interrupt must kill the child");
+}
+
+#[test]
+fn run_command_background_without_guardian_measurement_reports_unavailable() {
+    let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::completed(0));
+    let mut request = dict_map();
+    request.insert("argv".into(), vlist_str(&["true"]));
+    request.put_bool("background", true);
+    let started = require_dict(call_tool("hostlib_tools_run_command", request).unwrap());
+    let mut wait = dict_map();
+    wait.insert(
+        "handle_id".into(),
+        vm_string(&require_str(&started, "handle_id")),
+    );
+    wait.put_int("timeout_ms", 10_000);
+    let result = require_dict(call_tool("hostlib_tools_wait_command", wait).unwrap());
+    assert_eq!(require_str(&result, "status"), "completed");
+    assert!(!controller.was_killed());
+    let cleanup = require_nested_dict(&result, "process_cleanup");
+    assert!(!require_bool(&cleanup, "census_complete"));
+    assert!(matches!(cleanup.get("survivor_count"), Some(VmValue::Nil)));
 }
 
 #[test]

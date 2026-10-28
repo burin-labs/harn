@@ -659,7 +659,7 @@ impl RealProcess {
     fn witnessed_exit(&mut self, status: std::process::ExitStatus) -> io::Result<ExitStatus> {
         #[cfg(unix)]
         if let Some(receipt) = self.cleanup_receipt.take() {
-            self.cleanup_report = Some(receipt.finish());
+            self.cleanup_report = receipt.finish();
         }
         if let Some(witness) = self.verifier_witness.as_ref() {
             self.verifier_receipt = Some(witness.receipt()?);
