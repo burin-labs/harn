@@ -152,7 +152,10 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 ## Adding a model or provider to the catalog
 
-- Model rows are `crates/harn-vm/src/llm/catalog_sources/`; capability rules are
+- Add a model once in `crates/harn-vm/src/llm/catalog_sources/`: its source-only
+  `registration` owns request rules, aliases, routes, replacement pointers, and
+  picker placement. See [Register a model](docs/src/llm/register-model.md).
+  Existing standalone capability rules are
   `crates/harn-vm/src/llm/capability_sources/`. Both aggregate into
   `crates/harn-provider-catalog/src/providers.toml` and
   `crates/harn-provider-catalog/src/capabilities.toml`, which are generated along with
@@ -165,12 +168,12 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   also be authored locally. Preserve complete Harn pricing cards for conditions,
   modalities, or fees the importer rejects; keep runtime behavior and measured
   capabilities in Harn. See [Update model facts](docs/src/llm/models-dev-source.md).
-- Regenerate with `make gen-provider-catalog`, `make gen-provider-matrix`, and
-  `make gen-provider-support`, then verify with the matching `check-` targets.
+- Regenerate every projection with `make gen-provider-catalog`, then verify
+  with `make check-provider-catalog check-provider-matrix check-provider-support`.
   All three generators read the current source fragments from the repository
-  root. Catalog-only edits don't require rebuilding the CLI. Matrix and support
-  use embedded defaults when source directories are absent; `generate` requires
-  sources. Invalid fragments fail explicitly.
+  root instead of the old embedded catalog. Rebuild before exercising the
+  updated runtime. Matrix and support use embedded defaults when source
+  directories are absent; `generate` requires sources. Invalid fragments fail explicitly.
 - **Ship every route the model is served on.** A model reachable both directly
   and through an aggregator needs a catalog row and a capability rule on each
   route. Adding only the direct route leaves the aggregated route falling

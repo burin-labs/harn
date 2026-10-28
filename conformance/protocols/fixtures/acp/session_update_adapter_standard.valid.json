@@ -88,6 +88,7 @@
           "entries": [
             {
               "content": "edit",
+              "priority": "medium",
               "status": "pending"
             }
           ],
@@ -143,7 +144,7 @@
     }
   ],
   "matrix": {
-    "version": "v0.12.2",
+    "version": "v1.26.0",
     "family": "session_update",
     "case": "adapter_standard_success",
     "source": {

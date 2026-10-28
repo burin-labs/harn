@@ -38,6 +38,7 @@ mod manifest;
 mod result;
 mod scoring;
 mod snapshot;
+pub(crate) use snapshot::snapshot_path as checkpoint_snapshot_path;
 mod subproject;
 mod symbols;
 mod test_mapping;

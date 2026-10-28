@@ -63,6 +63,7 @@
           "entries": [
             {
               "content": "Verify bindings.",
+              "priority": "medium",
               "status": "pending"
             }
           ],

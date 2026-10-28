@@ -35,6 +35,18 @@ route facts, never credentials, endpoint URLs, or request-control values.
 preview does not apply it or establish model readiness. Inference enforces its
 boundary again at dispatch.
 
+When a host sets an inference ceiling, privacy and model facts come from the
+host and verified catalog. Project `[llm]` overrides can restrict a route but
+cannot create a no-training promise, a privacy control, or an open-weight
+classification. Redirecting a provider to an endpoint without a matching
+trusted declaration or remapping a model to a different wire identity makes
+its hosted privacy facts unknown.
+With a ceiling in effect, `provider_overrides.model` cannot replace the model
+selected for admission, and OpenRouter model fallback lists cannot delegate to
+unadmitted models. Inference requests do not follow HTTP redirects while a
+ceiling is active, because the redirect destination was not admitted. Select
+the intended model through the normal route.
+
 `data_posture` is the data posture inference will send on this route: the
 request's `data_controls` when given, otherwise the catalog's
 `[data_controls_policy] default_posture`, and `default` on a transport that
@@ -1411,6 +1423,14 @@ it per organization with no request field at all. Harn keeps that per-provider
 fact in the provider registry so every embedding host reads one answer instead
 of deriving its own.
 
+When a provider publishes different terms for different endpoints, the catalog
+may attach data-use facts to a specific regional base URL. Harn applies that
+declaration only to the matching resolved endpoint. Other regions and custom
+base URLs remain unresearched unless the catalog declares their own policy. A
+known training default does not imply that retention controls were researched.
+Harn does not follow inference redirects from an endpoint with a scoped fact,
+because the redirect target has not inherited that endpoint's data policy.
+
 Ask for a posture in provider-neutral terms:
 
 ```harn
@@ -1450,9 +1470,10 @@ harn provider catalog show > catalog.json
 jq -r '.providers[] | select(.data_controls) | [.id, .data_controls.control_scope, .data_controls.retention_default, .data_controls.training_default] | @tsv' catalog.json
 ```
 
-Each row carries `checked_on` and the `sources` URLs backing it. A provider
-absent from that output is queued as unresearched in the registry's audit
-block, which expires; it is not a provider that offers nothing.
+Each row carries `checked_on` and the `sources` URLs backing it. Endpoint-specific
+declarations appear under `endpoint.regions.<region>.data_controls`. A provider
+absent from the table is queued as unresearched at provider scope; its declared
+regional endpoints may still have their own evidence.
 
 ### Changing the default
 

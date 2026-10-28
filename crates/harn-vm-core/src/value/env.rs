@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -222,23 +222,16 @@ pub type WeakModuleState = Weak<VmMutex<VmEnv>>;
 
 /// Strong owners of a closure's module function table and module-level state.
 ///
-/// A [`VmClosure`] resolves sibling module `pub fn`s through its module's
-/// function registry, which it references only via a [`Weak`]
-/// ([`VmClosure::module_functions`] / [`module_state`](VmClosure::module_state)).
-/// The sole strong owner of that registry is normally the registering VM's
-/// `module_cache`. When a closure is registered into a process/thread-local
-/// registry (reminder providers, session/lifecycle hooks) it outlives that VM;
-/// once the VM tears down, the `Weak` dangles and a sibling-fn call inside the
-/// invoked closure falls through name resolution to host-bridge dispatch. This
-/// pins strong owners so the `Weak` stays upgradeable for the closure's whole
-/// retained lifetime.
+/// Strong owners for the module scopes reachable by a retained closure.
+/// Module functions keep weak references to their home scopes, so an imported
+/// callee also needs its scope after the registering VM has gone away.
 ///
 /// The fields are intentionally unread — their sole purpose is to keep the
 /// referenced `Arc`s alive.
 #[derive(Debug)]
 pub struct RetainedModuleScope {
-    _functions: Option<ModuleFunctionRegistry>,
-    _state: Option<ModuleState>,
+    _functions: Vec<ModuleFunctionRegistry>,
+    _states: Vec<ModuleState>,
 }
 
 impl VmClosure {
@@ -263,32 +256,81 @@ impl VmClosure {
     /// Return a clone of this closure suitable for storage in a process- or
     /// thread-local registry that outlives the VM that created it (reminder
     /// providers, session/lifecycle hooks). The clone pins strong owners of
-    /// this closure's module function table and module-level state
-    /// ([`RetainedModuleScope`]), so its body still resolves sibling module
-    /// `pub fn`s after the registering VM — the only other strong owner, via
-    /// `module_cache` — is dropped.
+    /// the reachable module function tables and module-level state
+    /// ([`RetainedModuleScope`]), so sibling and transitively imported functions
+    /// still resolve after the registering VM's `module_cache` is dropped.
     ///
     /// The owners are pinned on a *clone* (a fresh `Arc<VmClosure>` that is
     /// never itself a member of any function registry), so retaining a closure
     /// that IS a module `pub fn` cannot form an `Arc` cycle with its registry.
     ///
-    /// A no-op refcount bump when there is nothing to pin: the closure is
-    /// already pinned, or its `Weak`s do not upgrade — e.g. an entry-chunk
-    /// closure whose sibling functions live in captured `env` rather than a
-    /// module registry, which resolves without this.
+    /// Already-pinned closures and closures with no live module scopes are
+    /// returned without another allocation.
     pub fn retained_for_host_registry(self: &Arc<Self>) -> Arc<Self> {
         if self.retained_module_scope.is_some() {
             return Arc::clone(self);
         }
-        let functions = self.module_functions();
-        let state = self.module_state();
-        if functions.is_none() && state.is_none() {
+        let mut pending = vec![VmValue::Closure(Arc::clone(self))];
+        let mut seen = HashSet::new();
+        let mut functions = Vec::new();
+        let mut states = Vec::new();
+        while let Some(value) = pending.pop() {
+            match value {
+                VmValue::Closure(closure) => {
+                    if !seen.insert(Arc::as_ptr(&closure) as usize) {
+                        continue;
+                    }
+                    for scope in &closure.env.scopes {
+                        if seen.insert(Arc::as_ptr(&scope.vars) as usize) {
+                            pending.extend(scope.vars.values().map(Binding::read));
+                        }
+                    }
+                    if let Some(registry) = closure.module_functions() {
+                        if seen.insert(Arc::as_ptr(&registry) as usize) {
+                            pending.extend(registry.lock().values().cloned().map(VmValue::Closure));
+                            functions.push(registry);
+                        }
+                    }
+                    if let Some(state) = closure.module_state() {
+                        if seen.insert(Arc::as_ptr(&state) as usize) {
+                            for scope in &state.lock().scopes {
+                                if seen.insert(Arc::as_ptr(&scope.vars) as usize) {
+                                    pending.extend(scope.vars.values().map(Binding::read));
+                                }
+                            }
+                            states.push(state);
+                        }
+                    }
+                }
+                VmValue::Dict(values) if seen.insert(Arc::as_ptr(&values) as usize) => {
+                    pending.extend(values.values().cloned());
+                }
+                VmValue::List(values) if seen.insert(Arc::as_ptr(&values) as usize) => {
+                    pending.extend(values.iter().cloned());
+                }
+                VmValue::Set(values) if seen.insert(Arc::as_ptr(&values) as usize) => {
+                    pending.extend(values.iter().cloned());
+                }
+                VmValue::Pair(values) if seen.insert(Arc::as_ptr(&values) as usize) => {
+                    pending.push(values.0.clone());
+                    pending.push(values.1.clone());
+                }
+                VmValue::EnumVariant(value) if seen.insert(Arc::as_ptr(&value) as usize) => {
+                    pending.extend(value.fields.iter().cloned());
+                }
+                VmValue::StructInstance(value) if seen.insert(Arc::as_ptr(&value) as usize) => {
+                    pending.extend(value.fields.iter().flatten().cloned());
+                }
+                _ => {}
+            }
+        }
+        if functions.is_empty() && states.is_empty() {
             return Arc::clone(self);
         }
         let mut pinned = (**self).clone();
         pinned.retained_module_scope = Some(Arc::new(RetainedModuleScope {
             _functions: functions,
-            _state: state,
+            _states: states,
         }));
         Arc::new(pinned)
     }

@@ -83,6 +83,7 @@
         "entries": [
           {
             "content": "edit",
+            "priority": "medium",
             "status": "pending"
           }
         ],

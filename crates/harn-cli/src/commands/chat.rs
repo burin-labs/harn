@@ -14,13 +14,13 @@ pub(crate) async fn run(args: ChatArgs) -> i32 {
     let routing = match resolve_routing(args.model.as_deref(), args.provider.as_deref()) {
         Ok(routing) => routing,
         Err(message) => {
-            eprintln!("{message}");
+            cli_diagnostic!("error: {message}");
             return 1;
         }
     };
 
     if let Some(message) = unreachable_provider_message(&routing).await {
-        eprintln!("{message}");
+        cli_diagnostic!("error: {message}");
         return 1;
     }
 

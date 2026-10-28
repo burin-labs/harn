@@ -9,6 +9,8 @@ use crate::value::{ErrorCategory, VmError};
 struct PolicyFile {
     ledger_path: PathBuf,
     scope: String,
+    #[serde(default)]
+    stop_on_unknown_usage: bool,
     limits: MachineSpendPolicy,
 }
 
@@ -54,7 +56,12 @@ impl MachineSpendPolicyFile {
     /// Open the already parsed selection, retaining the immutable durable policy.
     /// The host must first exclude it from the evaluated program's write authority.
     pub fn open(self) -> Result<MachineSpendQuota, VmError> {
-        MachineSpendQuota::open(self.inner.ledger_path, self.inner.scope, self.inner.limits)
+        MachineSpendQuota::open_with_usage_policy(
+            self.inner.ledger_path,
+            self.inner.scope,
+            self.inner.limits,
+            self.inner.stop_on_unknown_usage,
+        )
     }
 }
 
@@ -82,6 +89,20 @@ mod tests {
         )
     }
 
+    fn assert_unresolved_usage(error: VmError, unsettled: u64, unpriced: u64) {
+        let VmError::Thrown(receipt) = error else {
+            panic!("expected a structured unresolved-usage refusal");
+        };
+        let receipt = crate::value::vm_to_storage_json(&receipt).unwrap();
+        assert_eq!(receipt["admission_reason"], "unresolved_usage");
+        assert_eq!(
+            receipt["message"],
+            format!(
+                "machine spend scope has {unsettled} unsettled and {unpriced} unpriced attempts"
+            )
+        );
+    }
+
     #[test]
     fn host_policy_file_reopens_same_scope_without_releasing_unknown_attempts() {
         let dir = tempfile::tempdir().unwrap();
@@ -96,10 +117,129 @@ mod tests {
         assert_eq!(receipt.lifetime_reserved_microusd, 600_000);
         assert_eq!(receipt.lifetime_usage_unknown_attempts, 1);
         assert_eq!(receipt.lifetime_remaining_microusd, Some(400_000));
+        assert_eq!(second.remaining_microusd().unwrap(), 400_000);
         assert!(second.reserve(Decimal::new(5, 1)).is_err());
         std::fs::write(&path, policy_source(&ledger, 2_000_000)).unwrap();
         assert!(MachineSpendQuota::from_policy_file(&path).is_err());
         assert_eq!(second.receipt().unwrap(), receipt);
+    }
+
+    #[test]
+    fn strict_policy_stops_at_first_unknown_across_reopened_handles() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("policy.toml");
+        let ledger = dir.path().join("spend.sqlite");
+        let source = policy_source(&ledger, 1_000_000)
+            .replace("[limits]", "stop_on_unknown_usage = true\n[limits]");
+        std::fs::write(&path, &source).unwrap();
+        let actor = MachineSpendQuota::from_policy_file(&path).unwrap();
+        let judge = MachineSpendQuota::from_policy_file(&path).unwrap();
+        assert_eq!(judge.remaining_microusd().unwrap(), 1_000_000);
+        let first = actor.reserve(Decimal::new(1, 1)).unwrap();
+        // A second process must not dispatch while the first is in flight.
+        assert_unresolved_usage(judge.reserve(Decimal::new(1, 1)).unwrap_err(), 1, 0);
+        assert_eq!(judge.remaining_microusd().unwrap(), 0);
+        let in_flight = judge.receipt().unwrap();
+        assert_eq!(in_flight.lifetime_unsettled_attempts, 1);
+        assert_eq!(in_flight.lifetime_unpriced_attempts, 0);
+        first
+            .settle(Decimal::new(1, 1), Some(Decimal::ZERO))
+            .unwrap();
+        let measured_zero = judge.receipt().unwrap();
+        assert_eq!(measured_zero.lifetime_usage_unknown_attempts, 0);
+        assert_eq!(measured_zero.lifetime_unsettled_attempts, 0);
+        assert_eq!(measured_zero.lifetime_unpriced_attempts, 0);
+        // The usage is measured, but the conservative upper bound remains.
+        assert_eq!(judge.remaining_microusd().unwrap(), 900_000);
+        let second = judge.reserve(Decimal::new(1, 1)).unwrap();
+        second.settle(Decimal::new(1, 1), None).unwrap();
+        drop(actor);
+        drop(judge);
+        // A version 3 runtime must not open the ledger and bypass this policy.
+        let old_schema =
+            harn_sqlite::schema::RuntimeSqliteSchema::new("machine_spend_quota", 3, "");
+        let old_migration_ran = std::cell::Cell::new(false);
+        let old_open = harn_sqlite::schema::initialize_runtime_sqlite_migrating(
+            &rusqlite::Connection::open(&ledger).unwrap(),
+            std::time::Duration::from_secs(5),
+            &old_schema,
+            |_| {
+                old_migration_ran.set(true);
+                Ok(())
+            },
+        );
+        assert!(matches!(
+            old_open,
+            Err(harn_sqlite::InitializationError::NewerSchemaVersion {
+                name: "machine_spend_quota",
+                stored: 4,
+                supported: 3,
+            })
+        ));
+        assert!(!old_migration_ran.get());
+        let restarted = MachineSpendQuota::from_policy_file(&path).unwrap();
+        assert_unresolved_usage(restarted.reserve(Decimal::new(1, 1)).unwrap_err(), 0, 1);
+        assert_eq!(restarted.remaining_microusd().unwrap(), 0);
+        assert_eq!(
+            restarted.receipt().unwrap().lifetime_usage_unknown_attempts,
+            1
+        );
+        assert_eq!(restarted.receipt().unwrap().lifetime_unsettled_attempts, 0);
+        assert_eq!(restarted.receipt().unwrap().lifetime_unpriced_attempts, 1);
+        // A different host policy cannot silently weaken the same scope.
+        std::fs::write(&path, policy_source(&ledger, 1_000_000)).unwrap();
+        assert!(MachineSpendQuota::from_policy_file(&path).is_err());
+    }
+
+    #[test]
+    fn strict_policy_keeps_an_interrupted_reservation_closed_after_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("policy.toml");
+        let ledger = dir.path().join("spend.sqlite");
+        let source = policy_source(&ledger, 1_000_000)
+            .replace("[limits]", "stop_on_unknown_usage = true\n[limits]");
+        std::fs::write(&path, source).unwrap();
+        let quota = MachineSpendQuota::from_policy_file(&path).unwrap();
+        drop(quota.reserve(Decimal::new(1, 1)).unwrap());
+        drop(quota);
+        let restarted = MachineSpendQuota::from_policy_file(&path).unwrap();
+        assert_unresolved_usage(restarted.reserve(Decimal::new(1, 1)).unwrap_err(), 1, 0);
+        assert_eq!(
+            restarted.receipt().unwrap().lifetime_reserved_microusd,
+            100_000
+        );
+        assert_eq!(restarted.receipt().unwrap().lifetime_unsettled_attempts, 1);
+        assert_eq!(restarted.receipt().unwrap().lifetime_unpriced_attempts, 0);
+    }
+
+    #[test]
+    fn strict_policy_atomically_allows_only_one_concurrent_reservation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("policy.toml");
+        let ledger = dir.path().join("spend.sqlite");
+        let source = policy_source(&ledger, 1_000_000)
+            .replace("[limits]", "stop_on_unknown_usage = true\n[limits]");
+        std::fs::write(&path, source).unwrap();
+        let first = MachineSpendQuota::from_policy_file(&path).unwrap();
+        let second = MachineSpendQuota::from_policy_file(&path).unwrap();
+        let finish = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let (sent, received) = std::sync::mpsc::channel();
+        crate::runtime_stack::scope(|threads| {
+            for quota in [first, second] {
+                let finish = finish.clone();
+                let sent = sent.clone();
+                threads.spawn(move || {
+                    let reservation = quota.reserve(Decimal::new(1, 1));
+                    sent.send(reservation.is_ok()).unwrap();
+                    finish.wait();
+                    drop(reservation);
+                });
+            }
+            let admitted =
+                usize::from(received.recv().unwrap()) + usize::from(received.recv().unwrap());
+            finish.wait();
+            assert_eq!(admitted, 1);
+        });
     }
 
     #[test]

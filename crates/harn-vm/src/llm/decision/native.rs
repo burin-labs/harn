@@ -26,11 +26,13 @@ pub(super) fn privacy_plan(
         DecisionProtocol::OpenrouterDecisions => DataControlDialect::OpenrouterDecisions,
         DecisionProtocol::StructuredLlm => DataControlDialect::OpenAiSse,
     };
-    crate::llm::api::data_controls::resolve(
+    crate::llm::api::data_controls::resolve_for_boundary(
         request.provider,
         request.model,
         dialect,
         DataPosture::StrictestAvailable,
+        crate::llm::api::inference_boundary::effective(None),
+        crate::llm::api::data_controls::ControlDelivery::Written,
     )
 }
 
@@ -160,11 +162,24 @@ impl DecisionBackend for NativeDecisionBackend {
         .map_err(|error| DecisionTransportError::LocalAdmissionDenied {
             diagnostic: error.to_string(),
         })?;
-        let body = request_body(&request)?;
         let definition = crate::llm_config::provider_config(request.provider)
             .ok_or_else(|| unsupported("decision provider is not configured"))?;
         let base = crate::llm_config::resolve_base_url(&definition);
         let url = endpoint(&base, request.contract.protocol)?;
+        let approved = crate::llm::api::inference_boundary::ApprovedWireRoute::capture(
+            crate::llm::api::inference_boundary::effective(None),
+            request.provider,
+            &url,
+            &request.contract.served_model_id,
+        );
+        let body = request_body(&request)?;
+        if let Some(approved) = &approved {
+            approved
+                .verify(request.provider, &url, &body)
+                .map_err(|error| DecisionTransportError::LocalAdmissionDenied {
+                    diagnostic: error.to_string(),
+                })?;
+        }
         let key = crate::llm::resolve_api_key(request.provider)
             .map_err(|_| DecisionTransportError::AuthorityDenied)?;
         let allow_hosts = crate::egress::configured_provider_private_allow_host(&base)
@@ -332,6 +347,7 @@ pub(super) fn read_response(
                         crate::llm::api::inference_boundary::catalog_evidence(
                             request.provider,
                             request.model,
+                            true,
                         )
                         .map_err(|error| {
                             DecisionTransportError::LocalAdmissionDenied {

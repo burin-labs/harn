@@ -22,7 +22,7 @@ fn print_json(value: &serde_json::Value, pretty: bool) {
         serde_json::to_string(value)
     }
     .unwrap_or_else(|error| {
-        eprintln!("Failed to serialize JSON output: {error}");
+        cli_diagnostic!("Failed to serialize JSON output: {error}");
         process::exit(1);
     });
     println!("{output}");
@@ -204,7 +204,7 @@ fn bundle_contract_value(args: &ContractsBundleArgs) -> (serde_json::Value, bool
     let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
     let files = check::collect_harn_targets(&targets);
     if files.is_empty() {
-        eprintln!("No .harn files found");
+        cli_diagnostic!("No .harn files found");
         process::exit(1);
     }
 

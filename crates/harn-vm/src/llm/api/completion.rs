@@ -60,11 +60,15 @@ pub(crate) async fn vm_call_completion_full(
         return Ok(result);
     }
 
-    let controls = super::data_controls::resolve(
+    let boundary = super::inference_boundary::effective_result(opts.inference_boundary)
+        .map_err(VmError::Runtime)?;
+    let controls = super::data_controls::resolve_for_boundary(
         &opts.provider,
         &opts.model,
         crate::llm_config::DataControlDialect::OpenAiSse,
         crate::llm_config::DataPosture::Default,
+        boundary,
+        super::data_controls::ControlDelivery::Unsupported,
     );
     let boundary_rule = super::inference_boundary::preflight(
         opts.inference_boundary,
@@ -75,7 +79,23 @@ pub(crate) async fn vm_call_completion_full(
     crate::llm::ensure_real_llm_allowed(&opts.provider)?;
 
     let resolved = crate::llm_config::provider_config(&opts.provider);
-    let completion_endpoint = resolved.and_then(|p| p.completion_endpoint);
+    let completion_endpoint = resolved
+        .as_ref()
+        .and_then(|p| p.completion_endpoint.clone());
+    let approved_wire_route = resolved
+        .as_ref()
+        .zip(completion_endpoint.as_ref())
+        .and_then(|(provider, endpoint)| {
+            super::inference_boundary::ApprovedWireRoute::capture(
+                boundary,
+                &opts.provider,
+                &format!(
+                    "{}{endpoint}",
+                    crate::llm_config::resolve_base_url(provider)
+                ),
+                &crate::llm_config::wire_model_id(&opts.model),
+            )
+        });
 
     let mut result = match completion_endpoint.as_deref() {
         Some("/api/generate") => {
@@ -90,7 +110,7 @@ pub(crate) async fn vm_call_completion_full(
                 ],
                 "Ollama generate",
             )?;
-            vm_call_completion_ollama(opts, prefix, suffix).await
+            vm_call_completion_ollama(opts, prefix, suffix, approved_wire_route.as_ref()).await
         }
         Some(_) => {
             reject_completion_options(
@@ -105,7 +125,8 @@ pub(crate) async fn vm_call_completion_full(
                 ],
                 "OpenAI-compatible completions",
             )?;
-            vm_call_completion_openai_style(opts, prefix, suffix).await
+            vm_call_completion_openai_style(opts, prefix, suffix, approved_wire_route.as_ref())
+                .await
         }
         None => vm_call_completion_fallback(opts, prefix, suffix).await,
     }?;
@@ -151,6 +172,7 @@ async fn vm_call_completion_openai_style(
     opts: &LlmCallOptions,
     prefix: &str,
     suffix: Option<&str>,
+    approved: Option<&super::inference_boundary::ApprovedWireRoute>,
 ) -> Result<LlmResult, VmError> {
     let llm_timeout = opts.resolve_timeout();
 
@@ -163,7 +185,7 @@ async fn vm_call_completion_openai_style(
         .as_ref()
         .and_then(|p| p.completion_endpoint.as_deref())
         .unwrap_or("/completions");
-    let client = crate::llm::blocking_client_for_base_url(&base_url);
+    let client = crate::llm::blocking_client_for_base_url(&base_url, approved);
 
     let wire_model = crate::llm_config::wire_model_id(&opts.model);
     let mut body = serde_json::json!({
@@ -211,8 +233,12 @@ async fn vm_call_completion_openai_style(
         );
     }
 
+    let url = format!("{base_url}{endpoint}");
+    if let Some(approved) = approved {
+        approved.verify(&opts.provider, &url, &body)?;
+    }
     let req = client
-        .post(format!("{base_url}{endpoint}"))
+        .post(url)
         .header("Content-Type", "application/json")
         .timeout(std::time::Duration::from_secs(llm_timeout))
         .json(&body);
@@ -260,6 +286,7 @@ async fn vm_call_completion_ollama(
     opts: &LlmCallOptions,
     prefix: &str,
     suffix: Option<&str>,
+    approved: Option<&super::inference_boundary::ApprovedWireRoute>,
 ) -> Result<LlmResult, VmError> {
     let llm_timeout = opts.resolve_timeout();
     let pdef = crate::llm_config::provider_config(&opts.provider);
@@ -271,7 +298,7 @@ async fn vm_call_completion_ollama(
         .as_ref()
         .and_then(|p| p.completion_endpoint.as_deref())
         .unwrap_or("/api/generate");
-    let client = crate::llm::blocking_client_for_base_url(&base_url);
+    let client = crate::llm::blocking_client_for_base_url(&base_url, approved);
 
     let mut options = serde_json::Map::new();
     if let Some(temp) = opts.temperature {
@@ -335,8 +362,12 @@ async fn vm_call_completion_ollama(
         opts.provider_overrides.as_ref(),
     );
 
+    let url = format!("{base_url}{endpoint}");
+    if let Some(approved) = approved {
+        approved.verify(&opts.provider, &url, &body)?;
+    }
     let req = client
-        .post(format!("{base_url}{endpoint}"))
+        .post(url)
         .header("Content-Type", "application/json")
         .timeout(std::time::Duration::from_secs(llm_timeout))
         .json(&body);

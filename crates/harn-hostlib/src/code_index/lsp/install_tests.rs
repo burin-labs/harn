@@ -169,6 +169,70 @@ fn an_override_naming_no_file_does_not_resolve() {
     assert!(reason.contains("HARN_LSP_SERVER_RUST_ANALYZER"), "{reason}");
 }
 
+#[test]
+fn an_empty_process_override_does_not_fall_back_to_a_project_server() {
+    const CHILD: &str = "HARN_TEST_EMPTY_LSP_OVERRIDE_CHILD";
+    const OVERRIDE: &str = "HARN_LSP_SERVER_TYPESCRIPT_LANGUAGE_SERVER";
+    if std::env::var_os(CHILD).is_some() {
+        let workspace = tempfile::tempdir().unwrap();
+        let name = if cfg!(windows) {
+            "typescript-language-server.cmd"
+        } else {
+            "typescript-language-server"
+        };
+        executable(&workspace.path().join("node_modules/.bin").join(name));
+        let launch = &servers::for_language(Language::TypeScript)
+            .unwrap()
+            .launches[0];
+        let result = launch.resolve_with(&super::ProcessProbe, workspace.path());
+        assert!(
+            result.is_err(),
+            "an empty set override must win over the project server: {result:?}"
+        );
+        return;
+    }
+    // Process-global environment is isolated in a child, so parallel tests do
+    // not race on PATH or the server override.
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "code_index::lsp::install::tests::an_empty_process_override_does_not_fall_back_to_a_project_server", "--nocapture"])
+        .env(CHILD, "1")
+        .env(OVERRIDE, "")
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&child.stdout);
+    let stderr = String::from_utf8_lossy(&child.stderr);
+    assert!(
+        child.status.success(),
+        "isolated override test failed:\n{stdout}\n{stderr}"
+    );
+    assert!(
+        stdout.contains("1 passed; 0 failed"),
+        "the isolated test must actually run: {stdout}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_tsc_without_version_metadata_does_not_resolve() {
+    let home = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let name = if cfg!(windows) { "tsc.cmd" } else { "tsc" };
+    executable(&workspace.path().join("node_modules/.bin").join(name));
+    let mut probe = FakeProbe::new(home.path());
+    probe.vars.insert("PATH", OsString::new());
+    let tsc = &servers::for_language(Language::TypeScript)
+        .unwrap()
+        .launches[1];
+    let reason = tsc
+        .resolve_with(&probe, workspace.path())
+        .expect_err("an unversioned tsc does not prove TypeScript 7 LSP support");
+    assert!(
+        reason.contains("cannot determine the TypeScript version"),
+        "{reason}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn a_tsc_older_than_typescript_7_does_not_resolve() {

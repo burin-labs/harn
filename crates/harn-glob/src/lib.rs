@@ -111,30 +111,33 @@ pub fn match_name(pattern: &str, name: &str) -> bool {
     if pattern == "*" {
         return true;
     }
-    if !has_name_meta(pattern) {
+    if !has_name_metacharacters(pattern) {
         return pattern == name;
     }
     // Fast paths for the dominant shapes: `prefix*`, `*suffix`, `*infix*`.
     if let Some(prefix) = pattern.strip_suffix('*') {
-        if !has_name_meta(prefix) {
+        if !has_name_metacharacters(prefix) {
             return name.starts_with(prefix);
         }
         if let Some(infix) = prefix.strip_prefix('*') {
-            if !has_name_meta(infix) {
+            if !has_name_metacharacters(infix) {
                 return name.contains(infix);
             }
         }
     }
     if let Some(suffix) = pattern.strip_prefix('*') {
-        if !has_name_meta(suffix) {
+        if !has_name_metacharacters(suffix) {
             return name.ends_with(suffix);
         }
     }
     compiled_name_match(pattern, name)
 }
 
+/// Whether a flat-name pattern uses glob operators or backslash escaping.
+/// Use this before deriving an exact name matcher from an external identifier.
 #[cfg(feature = "name")]
-fn has_name_meta(pattern: &str) -> bool {
+#[must_use]
+pub fn has_name_metacharacters(pattern: &str) -> bool {
     pattern
         .bytes()
         .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b'{' | b'\\'))

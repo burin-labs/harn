@@ -52,7 +52,7 @@ pub fn is_supported_session_mode(mode_id: &str) -> bool {
     modes::is_known(mode_id)
 }
 use bridge::AcpBridge;
-pub use bridge::AcpOutput;
+pub use bridge::{acp_plan_update, AcpOutput};
 pub use confinement::{confine_acp_server_process, AcpServerConfinement};
 pub use execute::PromptExecutionError as AcpPromptExecutionError;
 use live_clients::{

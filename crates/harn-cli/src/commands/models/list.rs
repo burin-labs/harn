@@ -61,7 +61,7 @@ async fn run_dispatch(args: ModelsListArgs) -> i32 {
     let payload_json = match serde_json::to_string(&payload) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to serialise models list query: {error}");
+            cli_diagnostic!("error: failed to serialise models list query: {error}");
             return 1;
         }
     };

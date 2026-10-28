@@ -8,10 +8,12 @@
         "entries": [
           {
             "content": "Emit plan event.",
+            "priority": "medium",
             "status": "completed"
           },
           {
             "content": "Verify fixtures.",
+            "priority": "medium",
             "status": "pending"
           }
         ],

@@ -52,6 +52,8 @@ mod retirement_tests;
 #[cfg(test)]
 mod schema_shape_tests;
 #[cfg(test)]
+mod terra_registration_tests;
+#[cfg(test)]
 mod tests_parity_provenance;
 #[cfg(test)]
 mod tool_capability_tests;
@@ -191,6 +193,7 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
                         id.clone(),
                         ProviderEndpointRegion {
                             base_url: region.base_url.clone(),
+                            data_controls: region.data_controls.clone(),
                             label: region.label.clone(),
                             source_url: region.source_url.clone(),
                             last_verified: region.last_verified.clone(),

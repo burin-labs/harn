@@ -276,7 +276,7 @@ pub(crate) async fn run(args: ReplayArgs) -> i32 {
         if args.json {
             print_json_error("invalid_runs", "--runs must be at least 1");
         } else {
-            eprintln!("error: --runs must be at least 1");
+            cli_diagnostic!("error: --runs must be at least 1");
         }
         return 1;
     }
@@ -287,7 +287,7 @@ pub(crate) async fn run(args: ReplayArgs) -> i32 {
             if args.json {
                 print_json_error("replay_source_invalid", error);
             } else {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
             }
             return 1;
         }
@@ -388,14 +388,14 @@ fn run_human(source: ReplaySource, runs: usize) -> i32 {
     let executions = match execute_runs(&source, runs) {
         Ok(executions) => executions,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
     let counterfactual = match evaluate_counterfactual(&source) {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };

@@ -17,12 +17,12 @@ pub(crate) fn run(output_path: &str, check_only: bool) {
     let existing = match fs::read_to_string(output_path) {
         Ok(text) => text,
         Err(error) => {
-            eprintln!("error: cannot read {output_path}: {error}");
+            cli_diagnostic!("error: cannot read {output_path}: {error}");
             process::exit(1);
         }
     };
     let Some(generated) = splice_reference(&existing) else {
-        eprintln!("error: {output_path} has no `{REFERENCE_BEGIN_MARKER}` region");
+        cli_diagnostic!("error: {output_path} has no `{REFERENCE_BEGIN_MARKER}` region");
         process::exit(1);
     };
     write_or_check(

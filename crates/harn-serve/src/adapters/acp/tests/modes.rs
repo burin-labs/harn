@@ -555,7 +555,17 @@ async fn acp_set_mode_emits_current_mode_update_notification() {
         notification["params"]["update"]["sessionUpdate"],
         "current_mode_update"
     );
+    assert_eq!(
+        notification["params"]["update"]["currentModeId"],
+        "architect"
+    );
     assert_eq!(notification["params"]["update"]["modeId"], "architect");
+    let mut fixture_notification = notification.clone();
+    fixture_notification["params"]["sessionId"] = serde_json::json!("session-1");
+    crate::protocol_fixture_tests::assert_fixture_documents_match(
+        "conformance/protocols/fixtures/acp/session_update_adapter_mode.valid.json",
+        vec![fixture_notification],
+    );
 
     let config_notification = recv_json(&mut rx).await;
     assert_eq!(config_notification["method"], "session/update");

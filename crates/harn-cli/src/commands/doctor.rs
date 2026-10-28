@@ -124,7 +124,7 @@ async fn run_dispatch(opts: DoctorOptions) -> i32 {
     let report_json = match serde_json::to_string(&report) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to serialise doctor report: {error}");
+            cli_diagnostic!("error: failed to serialise doctor report: {error}");
             return 1;
         }
     };

@@ -100,16 +100,20 @@ Harn-owned ACP/MCP extension fields are specified in
 [Harn ACP/MCP extensions v1](./spec/harn-extensions/v1.md). Harn tracks the
 upstream Agent Client Protocol schema and pins its
 wire contract against `agentclientprotocol/agent-client-protocol` schema
-`v0.12.2`. The adapter treats these `session/update` values as standard
-ACP variants:
+`v1.26.0`. This pin describes the adapter profile, not support for every
+optional ACP capability. The adapter recognizes these standard `session/update`
+values:
 
-- `user_message`
 - `user_message_chunk`
 - `agent_message_chunk`
 - `agent_thought_chunk`
 - `tool_call`
 - `tool_call_update`
 - `plan`
+- `available_commands_update`
+- `current_mode_update`
+- `config_option_update`
+- `session_info_update`
 
 Harn emits additional host-facing lifecycle updates outside ACP. They
 ride as top-level `sessionUpdate` discriminators for compatibility with
@@ -117,7 +121,6 @@ existing IDE-host and other host renderers, advertised during
 `initialize` under `agentCapabilities._meta.harn.sessionUpdateExtensions`:
 
 - `artifact`
-- `available_commands_update`
 - `fs_watch`
 - `handoff`
 - `hitl_request`
@@ -138,6 +141,8 @@ existing IDE-host and other host renderers, advertised during
 Unknown values should be ignored per ACP forward-compatibility rules.
 Hosts that render Harn extensions should key off the explicit extension
 list from `initialize` instead of a local allow-list.
+Harn retains `user_message` as a legacy nonstandard update and continues to
+advertise `available_commands_update` in its extension list for compatibility.
 
 Agent-loop prompt results expose the same producer-owned terminal outcome used
 by Harn's runtime under `result._meta.harn.terminal`, advertised through

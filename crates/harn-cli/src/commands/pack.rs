@@ -120,7 +120,7 @@ pub fn run(args: PackArgs) {
                 println!("{}", to_string_pretty(&envelope));
             } else {
                 for warning in &outcome.warnings {
-                    eprintln!("warning[{}]: {}", warning.code, warning.message);
+                    cli_diagnostic!("warning[{}]: {}", warning.code, warning.message);
                 }
                 println!(
                     "wrote {} ({} bytes, bundle_hash {})",

@@ -6,6 +6,7 @@
 harn
 harn --argument-schema
 harn --command
+harn --explain
 harn --json-schemas
 harn --parent-secret-stdin
 harn --spend-policy
@@ -100,7 +101,6 @@ harn completion <positional 1>
 harn config
 harn config inspect
 harn config inspect --config
-harn config inspect --explain
 harn config inspect --managed
 harn config inspect --no-discovery
 harn config inspect --remote-defaults-url
@@ -362,6 +362,7 @@ harn eval coding-agent --tool-format
 harn eval context
 harn eval context --json
 harn eval context --output
+harn eval context --report-version
 harn eval context <positional 1>
 harn eval prompt
 harn eval prompt --bindings

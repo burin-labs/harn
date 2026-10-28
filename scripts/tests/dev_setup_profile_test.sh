@@ -5,6 +5,9 @@ set -euo pipefail
 export HARN_CARGO_LEASE_MODE=off
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+# The collector only touches private fixture targets here; the reader suite
+# separately exercises the real all-process handle census.
+export HARN_TARGET_GC_HANDLE_PROBE="$repo_root/scripts/tests/fixtures/target-gc-handle-probe.sh"
 tmp_root=$(mktemp -d)
 ambient_bin="$tmp_root/ambient-bin"
 ambient_cargo_record="$tmp_root/ambient-cargo.txt"

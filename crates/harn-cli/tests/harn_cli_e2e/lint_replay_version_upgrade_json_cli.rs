@@ -11,6 +11,22 @@ const REPLAY_SCHEMA_VERSION: u32 = 1;
 const VERSION_SCHEMA_VERSION: u32 = 2;
 
 #[test]
+fn upgrade_check_keeps_its_result_on_stdout() {
+    let out = Command::new(binary_path())
+        .args(["upgrade", "--check", "--version", "v0.0.1"])
+        .output()
+        .expect("spawn harn upgrade --check");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Installed:"), "stdout: {stdout}");
+    assert!(stdout.contains("Target:    v0.0.1"), "stdout: {stdout}");
+}
+
+#[test]
 fn lint_json_emits_envelope_for_clean_and_diagnostic_files() {
     let temp = tempfile::TempDir::new().expect("tempdir");
 

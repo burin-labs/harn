@@ -74,6 +74,7 @@ pub mod terminal_session;
 pub mod tools;
 pub mod verdict;
 pub mod workspace_checkpoint;
+pub mod workspace_runtime_paths;
 
 mod json;
 #[cfg(all(test, feature = "grammars-all"))]

@@ -475,6 +475,15 @@ pub(crate) fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(sidecar)
 }
 
+/// Database and coordination paths owned by a live session store.
+pub fn session_store_runtime_paths(database: &Path) -> Vec<PathBuf> {
+    let mut paths = harn_sqlite::database_runtime_paths(database);
+    if let Some(directory) = database.parent() {
+        paths.push(crate::session_lease_directory(directory));
+    }
+    paths
+}
+
 fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
     let has_legacy_schema_version = transaction
         .query_row(

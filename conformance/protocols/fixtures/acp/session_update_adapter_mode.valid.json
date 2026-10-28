@@ -1,0 +1,29 @@
+{
+  "name": "acp.adapter.session_update.mode",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "currentModeId": "architect",
+          "modeId": "architect",
+          "sessionUpdate": "current_mode_update"
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "v1.26.0",
+    "family": "session_update_mode",
+    "case": "success",
+    "source": {
+      "kind": "adapter_generated",
+      "generator": "HARN_TEST_ONE_PACKAGE=harn-serve HARN_TEST_ONE_NAME=adapters::acp::tests::modes::acp_set_mode_emits_current_mode_update_notification make test-one"
+    }
+  }
+}

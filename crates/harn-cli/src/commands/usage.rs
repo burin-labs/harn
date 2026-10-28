@@ -163,7 +163,7 @@ pub(crate) async fn run(args: UsageArgs) -> i32 {
                 // A single unreadable log under `--all` should not abort
                 // the whole sweep; surface it and keep going.
                 if args.all {
-                    eprintln!("warning: skipping {}: {error}", base_dir.display());
+                    cli_diagnostic!("warning: skipping {}: {error}", base_dir.display());
                     continue;
                 }
                 return emit_error(args.json, "usage_read", &error);
@@ -754,7 +754,7 @@ fn emit_error(json: bool, code: &str, message: &str) -> i32 {
             JsonEnvelope::err(USAGE_SCHEMA_VERSION, code, message);
         println!("{}", to_string_pretty(&envelope));
     } else {
-        eprintln!("error: {message}");
+        cli_diagnostic!("error: {message}");
     }
     1
 }

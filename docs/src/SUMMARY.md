@@ -149,6 +149,7 @@
   - [Provider support recommendations](./provider-support.md)
   - [Provider catalog refresh workflow](./llm/provider-catalog-refresh.md)
   - [Update model facts from Models.dev](./llm/models-dev-source.md)
+  - [Register a model](./llm/register-model.md)
   - [Coding agent provider benchmark](./llm/coding-agent-benchmark.md)
 - [Layered runtime configuration](./configuration.md)
 - [Long-running tools](./long-running-tools.md)

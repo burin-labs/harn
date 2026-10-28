@@ -861,7 +861,9 @@ fn durable_state_path() -> Option<PathBuf> {
     }
 
     let base = crate::stdlib::process::runtime_root_base();
-    Some(crate::runtime_paths::state_root(&base).join("llm-rate-limits.sqlite"))
+    Some(
+        crate::runtime_paths::state_root(&base).join(crate::runtime_paths::LLM_RATE_LIMIT_DATABASE),
+    )
 }
 
 fn durable_bucket(

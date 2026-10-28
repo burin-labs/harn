@@ -22,11 +22,11 @@ pub(crate) fn run(markdown_paths: &[String], tree_sitter_path: &str, check_only:
     for markdown in markdown_paths {
         let path = Path::new(markdown);
         let current = fs::read_to_string(path).unwrap_or_else(|error| {
-            eprintln!("error: cannot read {}: {error}", path.display());
+            cli_diagnostic!("error: cannot read {}: {error}", path.display());
             process::exit(1);
         });
         let generated = replace_table(&current).unwrap_or_else(|| {
-            eprintln!(
+            cli_diagnostic!(
                 "error: {} has no `{TABLE_BEGIN}` ... `{TABLE_END}` region",
                 path.display()
             );

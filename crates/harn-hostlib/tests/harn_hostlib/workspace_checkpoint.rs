@@ -153,6 +153,36 @@ fn tool_edit_is_attributed_and_restored() {
     assert_eq!(read(root, "a.txt"), "a original\n");
 }
 
+#[test]
+fn corrupt_checkpoint_blob_is_reported_without_overwriting_the_workspace() {
+    let dir = repo();
+    let root = dir.path();
+    std::fs::write(root.join("a.txt"), "dirty baseline\n").unwrap();
+    let s = Session::new(root);
+    assert_eq!(s.capture("turn-1")["available"], true);
+    s.call_with("tool-1", Some("workspace_write"), || {
+        std::fs::write(root.join("a.txt"), "agent edit\n").unwrap();
+    });
+    let blobs = root
+        .join(".harn/state/checkpoints")
+        .join(&s.id)
+        .join("blobs");
+    let blob = std::fs::read_dir(blobs)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    std::fs::write(blob, "corrupt checkpoint\n").unwrap();
+    let receipt = s.restore("turn-1");
+    assert_eq!(paths(&receipt, "failed"), ["a.txt"], "{receipt}");
+    assert!(receipt["failed"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("hash mismatch"));
+    assert_eq!(read(root, "a.txt"), "agent edit\n");
+}
+
 /// A subprocess, not an in-process write, changes the tree: the stat diff must
 /// attribute what a shell command did without seeing the command itself.
 #[test]
@@ -475,6 +505,123 @@ fn second_capture_does_not_store_the_checkpoint_directory() {
 }
 
 #[test]
+fn session_store_state_is_not_attributed_but_user_harn_files_are() {
+    let dir = repo();
+    let root = dir.path();
+    let skills = root.join(".harn/skills");
+    fs::create_dir_all(&skills).unwrap();
+    fs::write(skills.join("custom.md"), "before").unwrap();
+    fs::create_dir_all(root.join(".harn/personas")).unwrap();
+    fs::write(root.join(".harn/personas/custom.md"), "before").unwrap();
+    fs::write(root.join(".harn/session-store.sqlite"), "initial runtime").unwrap();
+    let session = Session::new(root);
+    let capture = session.capture("turn-1");
+    assert_eq!(capture["available"], true);
+    assert_eq!(capture["stored_files"], 2, "{capture}");
+    let attributed = session.call_with("tool-1", Some("workspace_write"), || {
+        fs::create_dir_all(root.join(".harn/agent-run-writers")).unwrap();
+        fs::create_dir_all(root.join(".harn/fs-cas-locks")).unwrap();
+        fs::create_dir_all(root.join(".harn/hostlib")).unwrap();
+        for path in [
+            ".harn/session-store.sqlite",
+            ".harn/session-store.sqlite-wal",
+            ".harn/session-store.sqlite-shm",
+            ".harn/session-store.sqlite-journal",
+            ".harn/session-store.sqlite.harn-init.lock",
+            ".harn/agent-run-writers/project.lock",
+            ".harn/fs-cas-locks/file.lock",
+            ".harn/hostlib/scanner-snapshot.json",
+            ".harn/workers/worker.json",
+            ".harn/receipts/receipt.json",
+            ".harn/hostlib-tests/output",
+            ".harn/orchestrator/state.json",
+            ".harn/skills-cache/pkg/file",
+            ".harn/flow.sqlite-wal",
+            ".harn/personas/activations.json",
+            ".harn/personas/activations.lock",
+        ] {
+            fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+            fs::write(root.join(path), "runtime").unwrap();
+        }
+        fs::write(skills.join("custom.md"), "agent edit").unwrap();
+        fs::write(root.join(".harn/personas/custom.md"), "agent edit").unwrap();
+    });
+    assert_eq!(
+        paths(&attributed, "changes"),
+        [".harn/personas/custom.md", ".harn/skills/custom.md"]
+    );
+    let receipt = session.restore("turn-1");
+    assert_eq!(
+        paths(&receipt, "restored"),
+        [".harn/personas/custom.md", ".harn/skills/custom.md"]
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/personas/custom.md")).unwrap(),
+        "before"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/flow.sqlite-wal")).unwrap(),
+        "runtime"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/personas/activations.lock")).unwrap(),
+        "runtime"
+    );
+    assert_eq!(
+        fs::read_to_string(skills.join("custom.md")).unwrap(),
+        "before"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/session-store.sqlite")).unwrap(),
+        "runtime"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/agent-run-writers/project.lock")).unwrap(),
+        "runtime"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/fs-cas-locks/file.lock")).unwrap(),
+        "runtime"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".harn/hostlib/scanner-snapshot.json")).unwrap(),
+        "runtime"
+    );
+}
+
+#[test]
+fn nested_source_relative_runtime_state_is_not_an_edit() {
+    let dir = repo();
+    let root = dir.path();
+    let nested = root.join("src/.harn");
+    fs::create_dir_all(nested.join("skills")).unwrap();
+    fs::write(nested.join("skills/custom.md"), "before").unwrap();
+    let session = Session::new(root);
+    assert_eq!(session.capture("turn-1")["available"], true);
+    let attributed = session.call_with("tool-1", None, || {
+        fs::create_dir_all(nested.join("memory")).unwrap();
+        fs::write(nested.join("memory/events.jsonl"), "runtime").unwrap();
+        fs::write(nested.join("skills/custom.md"), "agent edit").unwrap();
+    });
+    assert_eq!(
+        paths(&attributed, "changes"),
+        ["src/.harn/skills/custom.md"]
+    );
+    assert_eq!(
+        paths(&session.restore("turn-1"), "restored"),
+        ["src/.harn/skills/custom.md"]
+    );
+    assert_eq!(
+        fs::read_to_string(nested.join("memory/events.jsonl")).unwrap(),
+        "runtime"
+    );
+    assert_eq!(
+        fs::read_to_string(nested.join("skills/custom.md")).unwrap(),
+        "before"
+    );
+}
+
+#[test]
 fn capture_with_a_different_root_is_rejected() {
     let dir = repo();
     let other = repo();
@@ -534,7 +681,7 @@ mod unix_permissions {
     }
 
     #[test]
-    fn directory_unreadable_at_call_begin_makes_its_files_incomplete_and_refused() {
+    fn directory_unreadable_at_call_begin_makes_restore_unavailable() {
         if running_as_root() {
             return;
         }
@@ -557,12 +704,66 @@ mod unix_permissions {
         assert_eq!(change["incomplete"], true);
 
         let receipt = s.restore("turn-1");
-        assert_eq!(
-            paths(&receipt, "refused"),
-            ["locked/person.txt"],
-            "{receipt}"
-        );
+        assert_eq!(receipt["available"], false, "{receipt}");
+        assert_eq!(receipt["reason"], "incomplete_attribution");
         assert_eq!(read(root, "locked/person.txt"), "edited later\n");
+    }
+
+    #[test]
+    fn unreadable_directory_in_both_scans_cannot_look_like_an_empty_restore() {
+        if running_as_root() {
+            return;
+        }
+        let dir = repo();
+        let root = dir.path();
+        fs::create_dir(root.join("locked")).unwrap();
+        fs::write(root.join("locked/person.txt"), "original\n").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-q", "-m", "locked"]);
+        let s = Session::new(root);
+        assert_eq!(s.capture("turn-1")["available"], true);
+
+        chmod(&root.join("locked"), 0o000);
+        let attributed = s.call_with("tool-1", None, || {
+            chmod(&root.join("locked"), 0o755);
+            fs::write(root.join("locked/person.txt"), "edited while unseen\n").unwrap();
+            chmod(&root.join("locked"), 0o000);
+        });
+        chmod(&root.join("locked"), 0o755);
+        assert!(
+            attributed["scan_errors"].as_u64().unwrap() > 0,
+            "{attributed}"
+        );
+        assert!(
+            attributed["changes"].as_array().unwrap().is_empty(),
+            "{attributed}"
+        );
+        for receipt in [s.plan("turn-1"), s.restore("turn-1")] {
+            assert_eq!(receipt["available"], false, "{receipt}");
+            assert_eq!(receipt["reason"], "incomplete_attribution");
+            assert!(receipt["detail"].as_str().unwrap().contains("tool-1"));
+        }
+        assert_eq!(read(root, "locked/person.txt"), "edited while unseen\n");
+    }
+
+    #[test]
+    fn incomplete_initial_scan_cannot_create_a_checkpoint() {
+        if running_as_root() {
+            return;
+        }
+        let dir = repo();
+        let root = dir.path();
+        fs::create_dir(root.join("locked")).unwrap();
+        fs::write(root.join("locked/person.txt"), "original\n").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-q", "-m", "locked"]);
+        let s = Session::new(root);
+        chmod(&root.join("locked"), 0o000);
+        let capture = s.capture("turn-1");
+        chmod(&root.join("locked"), 0o755);
+        assert_eq!(capture["available"], false, "{capture}");
+        assert_eq!(capture["reason"], "incomplete_capture");
+        assert_eq!(s.plan("turn-1")["reason"], "no_checkpoint");
     }
 
     #[test]

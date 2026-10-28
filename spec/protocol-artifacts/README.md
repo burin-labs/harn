@@ -25,7 +25,7 @@ Files:
 - `manifest.json`: deterministic summary of protocol versions, advertised Harn
 extension fields, and generated binding vocabulary.
 - `schemas/acp-session-update.schema.json`: Harn's ACP session-update schema
-profile (`agentclientprotocol/agent-client-protocol schema v0.12.2`).
+profile (`agentclientprotocol/agent-client-protocol schema v1.26.0`).
 - `schemas/a2a-0.3.0.schema.json`: Harn's A2A schema profile (`0.3.0`).
 - `schemas/mcp-2026-07-28.schema.json`: Harn's stable MCP schema profile
 (`2026-07-28`).

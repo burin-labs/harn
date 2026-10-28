@@ -89,8 +89,10 @@ pub(crate) fn report_analysis_stats(files: usize) {
         return;
     }
     let stats = harn_parser::analysis::process_stats();
-    eprintln!(
+    cli_diagnostic!(
         "analysis stats: files={files} lex={} parse={} typecheck={}",
-        stats.lex_runs, stats.parse_runs, stats.typecheck_runs
+        stats.lex_runs,
+        stats.parse_runs,
+        stats.typecheck_runs
     );
 }

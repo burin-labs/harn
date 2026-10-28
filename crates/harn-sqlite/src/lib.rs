@@ -11,7 +11,7 @@ use rusqlite::{
 use std::ffi::OsString;
 use std::fmt;
 use std::fs::{File, OpenOptions, TryLockError};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -574,9 +574,26 @@ fn initialization_lock_path<E>(connection: &Connection) -> Result<PathBuf, Initi
             source,
         }
     })?;
-    let mut path = OsString::from(canonical.as_os_str());
+    Ok(initialization_lock_path_for_database(&canonical))
+}
+
+/// The initialization lock adjacent to a database path.
+pub fn initialization_lock_path_for_database(database_path: &Path) -> PathBuf {
+    let mut path = OsString::from(database_path.as_os_str());
     path.push(".harn-init.lock");
-    Ok(PathBuf::from(path))
+    PathBuf::from(path)
+}
+
+/// Database and SQLite sidecars reserved for a live database.
+pub fn database_runtime_paths(database_path: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![database_path.to_path_buf()];
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let mut path = OsString::from(database_path.as_os_str());
+        path.push(suffix);
+        paths.push(PathBuf::from(path));
+    }
+    paths.push(initialization_lock_path_for_database(database_path));
+    paths
 }
 
 #[cfg(unix)]

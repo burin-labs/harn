@@ -307,7 +307,6 @@ equivalence_group = "gpt-5.6-terra"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
-superseded_by = "openai/gpt-6-sol"
 tier = "mid"
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
 models_dev = {provider = "openrouter", model = "openai/gpt-5.6-terra", fields = ["context_window", "open_weight"]}
@@ -320,7 +319,6 @@ equivalence_group = "gpt-5.6-terra"
 served_variant = "openrouter_pro"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
-superseded_by = "openai/gpt-6-sol-pro"
 tier = "mid"
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
 models_dev = {provider = "openrouter", model = "openai/gpt-5.6-terra-pro", fields = ["context_window", "open_weight"]}

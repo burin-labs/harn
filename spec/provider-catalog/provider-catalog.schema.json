@@ -360,6 +360,9 @@
           "minLength": 1,
           "type": "string"
         },
+        "data_controls": {
+          "$ref": "#/$defs/model_data_controls"
+        },
         "label": {
           "minLength": 1,
           "type": "string"
@@ -2156,7 +2159,7 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v13.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v14.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -2206,10 +2209,10 @@
       "type": "array"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v13.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v14.json"
     },
     "schema_version": {
-      "const": 13
+      "const": 14
     },
     "variants": {
       "items": {

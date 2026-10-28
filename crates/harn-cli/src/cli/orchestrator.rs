@@ -28,7 +28,7 @@ pub(crate) struct OrchestratorLocalArgs {
     #[arg(
         long = "state-dir",
         env = "HARN_ORCHESTRATOR_STATE_DIR",
-        default_value = ".harn/orchestrator",
+        default_value = harn_vm::runtime_paths::DEFAULT_ORCHESTRATOR_PATH,
         value_name = "PATH"
     )]
     pub state_dir: PathBuf,

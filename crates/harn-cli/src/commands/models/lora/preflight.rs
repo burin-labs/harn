@@ -29,7 +29,7 @@ pub(super) async fn preflight(args: &ModelsLoraPreflightArgs) -> i32 {
     let report = match preflight_report(args) {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };

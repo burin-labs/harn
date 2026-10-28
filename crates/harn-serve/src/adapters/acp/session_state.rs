@@ -510,6 +510,7 @@ impl AcpServer {
                 "sessionId": session_id,
                 "update": {
                     "sessionUpdate": "current_mode_update",
+                    "currentModeId": mode_id,
                     "modeId": mode_id,
                 },
             }),

@@ -36,12 +36,10 @@ pub(crate) async fn init_project(name: Option<&str>, template: ProjectTemplate) 
         Some(n) => {
             let dir = PathBuf::from(n);
             if dir.exists() {
-                eprintln!("Directory '{n}' already exists");
-                process::exit(1);
+                crate::fatal_error(format!("Directory '{n}' already exists"));
             }
             fs::create_dir_all(&dir).unwrap_or_else(|e| {
-                eprintln!("Failed to create directory: {e}");
-                process::exit(1);
+                crate::fatal_error(format!("Failed to create directory: {e}"));
             });
             dir
         }
@@ -58,8 +56,7 @@ pub(crate) async fn init_project(name: Option<&str>, template: ProjectTemplate) 
         process::exit(exit);
     }
     if let Err(error) = generate_scaffolded_docs(&dir, template) {
-        eprintln!("Failed to generate {SCAFFOLD_DOCS_PATH}: {error}");
-        process::exit(1);
+        crate::fatal_error(format!("Failed to generate {SCAFFOLD_DOCS_PATH}: {error}"));
     }
 }
 

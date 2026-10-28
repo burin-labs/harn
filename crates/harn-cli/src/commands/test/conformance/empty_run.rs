@@ -112,7 +112,7 @@ pub(super) fn report_empty_run(json: bool, message: String) -> ! {
         );
         println!("{}", json_envelope::to_string_pretty(&envelope));
     } else {
-        eprintln!("{message}");
+        cli_diagnostic!("{message}");
     }
     process::exit(1)
 }

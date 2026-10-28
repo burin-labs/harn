@@ -5,7 +5,7 @@ Run these commands from a Harn source checkout with a CLI built from that checko
 
 ```sh
 harn provider catalog update-source --live
-make gen-provider-catalog gen-provider-matrix gen-provider-support
+make gen-provider-catalog
 make check-provider-catalog check-provider-matrix check-provider-support
 ```
 

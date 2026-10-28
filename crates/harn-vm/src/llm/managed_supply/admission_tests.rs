@@ -19,14 +19,30 @@ fn request(reach: InferenceReach) -> ManagedSupplyRequest {
 #[test]
 fn physical_weight_class_is_admitted_independently_of_matching_capabilities() {
     let _guard = crate::llm::env_guard();
+    struct ClearCatalog;
+    impl Drop for ClearCatalog {
+        fn drop(&mut self) {
+            crate::llm_config::clear_runtime_catalog_overlay();
+        }
+    }
+    let _clear_catalog = ClearCatalog;
     assert_eq!(
         capability_fingerprint("mistral", "mistral-large-2512"),
         capability_fingerprint("mistral", "codestral-2508"),
         "the negative must reach beyond capability compatibility"
     );
     let open = request(InferenceReach::HostedOpenWeight);
+    let unknown = compatible_served_route(&open, "mistral", "mistral-large-2512")
+        .expect_err("unconfirmed account must not imply no training");
+    assert_eq!(unknown.code(), "inference_boundary.training_unknown");
+    let mut mistral = crate::llm_config::provider_config("mistral").unwrap();
+    mistral.data_controls.as_mut().unwrap().training_default =
+        crate::llm_config::TrainingDefault::DoesNotTrain;
+    let mut fixture = crate::llm_config::ProvidersConfig::default();
+    fixture.providers.insert("mistral".into(), mistral);
+    crate::llm_config::set_runtime_catalog_overlay(Some(fixture));
     compatible_served_route(&open, "mistral", "mistral-large-2512")
-        .expect("known open-weight supply");
+        .expect("open-weight supply with a trusted no-training fixture");
     let refusal = compatible_served_route(&open, "mistral", "codestral-2508")
         .expect_err("matching capabilities do not grant closed-weight supply");
     assert_eq!(refusal.code(), "inference_boundary.hosted_open_weight");
@@ -36,7 +52,7 @@ fn physical_weight_class_is_admitted_independently_of_matching_capabilities() {
         "mistral",
         "codestral-2508",
     )
-    .expect("explicit hosted reach allows the researched no-training closed model");
+    .expect("explicit hosted reach allows the trusted no-training closed fixture");
     let refusal = compatible_served_route(
         &request(InferenceReach::LocalOnly),
         "mistral",

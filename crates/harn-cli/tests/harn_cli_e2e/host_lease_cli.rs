@@ -118,6 +118,24 @@ fn named_lease_domains_are_independent_at_the_cli_boundary() {
         serde_json::from_str(&release_acquisition.stdout).expect("release acquisition JSON");
     assert_eq!(release_acquisition["data"]["handle"]["domain"], "release");
 
+    let busy = run_harn_e2e(
+        &[
+            "host",
+            "lease",
+            "acquire",
+            "--host",
+            "lease-cli-fixture",
+            "--domain",
+            "release",
+            "--owner",
+            "challenger",
+        ],
+        &[(harn_hostlib::HOST_LEASE_ROOT_ENV, lease_root.as_ref())],
+    );
+    assert_eq!(busy.exit_code, 75, "{}", busy.stderr);
+    assert!(busy.stdout.is_empty(), "{}", busy.stdout);
+    assert!(busy.stderr.starts_with("[harn] Host "), "{}", busy.stderr);
+
     let build = acquire("build", "build-owner");
     assert_eq!(build.exit_code, 0, "build stderr: {}", build.stderr);
     let build: serde_json::Value =

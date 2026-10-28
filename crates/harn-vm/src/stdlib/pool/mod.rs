@@ -55,11 +55,6 @@ const POOL_TASK_TYPE: &str = "pool_task";
 const POOL_AUDIT_TOPIC: &str = "lifecycle.pool.audit";
 const POOL_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 
-/// On-disk root for pipeline-scope pool state. Mirrors the channel scope
-/// convention (`.harn/...`) so durable artifacts stay co-located with the
-/// pipeline's other state.
-const PIPELINE_POOLS_ROOT: &str = ".harn/pools";
-
 /// Default stale-in-flight threshold. A task whose heartbeat is older than
 /// this on reload is classified as failed. Configurable via `opts.stale_after_ms`.
 const DEFAULT_STALE_AFTER_MS: i64 = 30_000;
@@ -999,7 +994,7 @@ fn pipeline_pool_file_path(dir_override: Option<&str>, pipeline_id: &str, name: 
     let safe_name = crate::event_log::sanitize_topic_component(name);
     let root = match dir_override {
         Some(path) => PathBuf::from(path),
-        None => PathBuf::from(PIPELINE_POOLS_ROOT),
+        None => PathBuf::from(".harn").join(crate::runtime_paths::POOLS_DIR),
     };
     root.join(format!(
         "{safe_pipeline}__{safe_name}__{}.jsonl",

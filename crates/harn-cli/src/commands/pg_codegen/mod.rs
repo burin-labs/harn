@@ -25,7 +25,7 @@ pub(crate) fn run(args: &PgCodegenArgs) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
         Err(message) => {
-            eprintln!("harn pg codegen: {message}");
+            cli_diagnostic!("harn pg codegen: {message}");
             1
         }
     }
@@ -58,7 +58,7 @@ fn run_inner(args: &PgCodegenArgs) -> Result<i32, String> {
     harn_vm::atomic_io::atomic_write(out, rendered.as_bytes())
         .map_err(|error| format!("failed to write {}: {error}", out.display()))?;
     let table_count = schema.tables().count();
-    eprintln!(
+    cli_diagnostic!(
         "wrote {table_count} type{} to {}",
         if table_count == 1 { "" } else { "s" },
         out.display()

@@ -1,0 +1,9 @@
+pipeline main(harness: Harness) {
+  harness.agent.register_session_hook(
+    "user_prompt_submit",
+    { _harness, _payload ->
+      throw "prompt hook failed distinctly"
+    },
+  )
+  __host_agent_session_init("hello", nil, {session_id: "failing-prompt-hook", root: __TEST_ROOT__})
+}

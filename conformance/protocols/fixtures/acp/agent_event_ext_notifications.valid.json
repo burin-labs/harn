@@ -715,7 +715,7 @@
     }
   ],
   "matrix": {
-    "version": "v0.12.2",
+    "version": "v1.26.0",
     "family": "agent_event_extension",
     "case": "adapter_ext_notification_success",
     "source": {
