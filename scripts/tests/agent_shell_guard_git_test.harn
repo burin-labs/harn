@@ -89,12 +89,22 @@ pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
   for command in [
     "PATH=/older/bin:$PATH git history",
     "PATH=/older/bin; git history",
+    "x=PATH; export $x=/older/bin; git history",
+    "A=PA; B=TH; eval \"$A$B=/older/bin\"; git history",
+    "if true; then PATH=/older/bin; fi; git history",
+    "{ PATH=/older/bin; }; git history",
+    "x=PATH; unset $x; git history",
     "PATH='/older git/bin'; git history",
     "env -i git history",
     "export PATH=/older/bin; git history",
     "PATH=/older/bin sh -c 'git history'",
+    "sh -c 'PATH=/older/bin; git history'",
+    "sh -c 'if true; then PATH=/older/bin; fi; git history'",
   ] {
-    assert(!decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, aliases, versions).allow)
+    assert(
+      !decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, aliases, versions).allow,
+      command,
+    )
   }
   assert(
     decision(claude_payload("FOO=1 git status"), ADMITTED, NO_MAKE_TARGETS, aliases, versions)

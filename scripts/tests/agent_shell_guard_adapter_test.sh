@@ -176,6 +176,25 @@ if [[ -n "$worktree_allowed" ]]; then
   exit 1
 fi
 
+# The pinned consumer runtime must also reach that decision after a real cd.
+cd_worktree_allowed="$(
+  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cd $fixture_root && git worktree add ../unowned origin/main\"}}" \
+    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+)"
+if [[ -n "$cd_worktree_allowed" ]]; then
+  echo "adapter falsely refused worktree creation after cd on the pinned runtime" >&2
+  printf '%s\n' "$cd_worktree_allowed" >&2
+  exit 1
+fi
+cd_untrusted_git="$(
+  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"PATH=/untrusted; cd $fixture_root && git worktree add ../unowned origin/main\"}}" \
+    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$cd_untrusted_git" != *'"permissionDecision":"deny"'* ]]; then
+  echo "adapter trusted Git after an unmeasured PATH change" >&2
+  exit 1
+fi
+
 # A target outside every measured root is not a target found to own nothing.
 # A path *inside* a measured repository is covered by that repository's row,
 # which is why this one points outside them all.

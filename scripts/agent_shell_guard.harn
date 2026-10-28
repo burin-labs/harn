@@ -959,10 +959,69 @@ type GitExecutableContext = {path_changed: bool, cwd_changed: bool}
 
 type GitExecutionStage = {argv: list<string>, source_argv?: list<string>}
 
+/** The older scanner can omit standalone assignments, including inside shell control flow. */
+fn unprojected_path_assignment(command: string) -> bool {
+  let single = false
+  let double = false
+  let index = 0
+  while index < len(command) {
+    const char = command.substring(index, index + 1)
+    if char == "\\" && !single {
+      // Escaping can construct a variable name outside the scanner's projection.
+      return true
+    }
+    if char == "'" && !double {
+      single = !single
+    } else if char == "\"" && !single {
+      double = !double
+    } else if !single && !double && command.substring(index, index + 4) == "PATH" {
+      const previous = index == 0 ? "" : command.substring(index - 1, index)
+      const next = command.substring(index + 4, index + 6)
+      if (previous == "" || !VARIABLE_NAME_CHARACTERS.contains(previous))
+        && (next.starts_with("=") || next == "+=") {
+        return true
+      }
+    }
+    index = index + 1
+  }
+  return single || double
+}
+
+/** Older scanners expose source stages in their complete shell command groups. */
+fn legacy_git_source_groups(command: string, scan: dict) -> list<list<GitExecutionStage>>? {
+  if scan.shell_io_complete != true {
+    const substitutions = substitution_bodies(command, true)
+    if !substitutions.ok || len(substitutions.bodies) == 0 {
+      return nil
+    }
+  }
+  const groups: list<list<ShellCommandStage>>? = scan.shell_command_groups
+  if groups == nil || len(groups) == 0 {
+    return nil
+  }
+  let projected: list<list<GitExecutionStage>> = []
+  for group in groups {
+    let stages: list<GitExecutionStage> = []
+    for stage in group {
+      stages = stages + [{argv: stage.argv, source_argv: stage.argv}]
+    }
+    projected = projected + [stages]
+  }
+  return projected
+}
+
 fn git_executable_context(command: string) -> GitExecutableContext {
   const scan = command_risk_scan({request: {mode: "shell", command: command}})
   const source_groups: list<list<GitExecutionStage>>? = scan.shell_source_groups
-  if scan.execution_semantics?.resolved != true || source_groups == nil {
+    ?? legacy_git_source_groups(command, scan)
+  if scan.execution_semantics?.resolved != true {
+    return {path_changed: true, cwd_changed: true}
+  }
+  if source_groups == nil {
+    return {path_changed: true, cwd_changed: true}
+  }
+  // Older scanners omit assignment-only commands from both stage inventories.
+  if scan.shell_source_groups == nil && unprojected_path_assignment(command) {
     return {path_changed: true, cwd_changed: true}
   }
   let stages: list<GitExecutionStage> = scan.execution_stages ?? []
@@ -991,10 +1050,14 @@ fn git_executable_context(command: string) -> GitExecutableContext {
     if ["cd", "pushd", "popd"].contains(program) {
       cwd_changed = true
     }
-    if ["source", ".", "alias", "function"].contains(program)
+    if ["source", ".", "alias", "function", "eval"].contains(program)
       || (ENVIRONMENT_CHANGING_WORDS.contains(program)
         && stage.argv.slice(1, len(stage.argv)).any(
-          { word -> word == "PATH" || word.starts_with("PATH=") || word.starts_with("PATH+=") },
+          { word ->
+            word == "PATH" || word.starts_with("PATH=") || word.starts_with("PATH+=")
+              || word.contains("$")
+              || word.contains("`")
+          },
         )) {
       path_changed = true
     }
