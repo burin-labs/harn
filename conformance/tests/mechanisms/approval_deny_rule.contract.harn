@@ -1,0 +1,77 @@
+import { approval_allow_all_reviewer } from "std/agent/approval_review"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+pipeline default(harness: Harness) {
+  for resolver in ["scripted", "allow_all"] {
+    const executed = harness.runtime.atomic(0)
+    const reviewed = harness.runtime.atomic(0)
+    const tools = tool_define(
+      tool_registry(),
+      "probe",
+      "Record execution",
+      {
+        parameters: {},
+        returns: {type: "string"},
+        annotations: {side_effect_level: "read_only"},
+        handler: { _ ->
+          harness.runtime.atomic_add(executed, 1)
+          return "executed"
+        },
+      },
+    )
+    const allow_all = approval_allow_all_reviewer({floor: {never_grant: []}})
+    const reviewer = { request ->
+      harness.runtime.atomic_add(reviewed, 1)
+      if resolver == "allow_all" {
+        return allow_all(request)
+      }
+      return {approved: true, reviewer_answered: true, rationale: "the task requests the probe"}
+    }
+    const call = {id: "probe", name: "probe", arguments: {}}
+    const denied = agent_dispatch_tool_call(
+      harness.tools,
+      call,
+      tools,
+      {
+        approval_policy: {
+          rules: [{id: "explicit-deny", source: "user", action: "deny", match: {tool: "probe"}}],
+        },
+        approval_reviewer: reviewer,
+      },
+    )
+    contract_effect(harness.stdio, "${resolver}_deny_refused", denied.ok == false)
+    contract_negative(
+      harness.stdio,
+      "${resolver}_deny_reviewed",
+      harness.runtime.atomic_get(reviewed) != 0,
+    )
+    contract_negative(
+      harness.stdio,
+      "${resolver}_deny_executed",
+      harness.runtime.atomic_get(executed) != 0,
+    )
+    const asked = agent_dispatch_tool_call(
+      harness.tools,
+      call,
+      tools,
+      {
+        approval_policy: {
+          rules: [{id: "explicit-ask", source: "user", action: "ask", match: {tool: "probe"}}],
+        },
+        approval_reviewer: reviewer,
+      },
+    )
+    contract_effect(harness.stdio, "${resolver}_ask_granted", asked.ok == true)
+    contract_effect(
+      harness.stdio,
+      "${resolver}_ask_reviewed",
+      harness.runtime.atomic_get(reviewed) == 1,
+    )
+    contract_effect(
+      harness.stdio,
+      "${resolver}_ask_executed",
+      harness.runtime.atomic_get(executed) == 1,
+    )
+  }
+}
