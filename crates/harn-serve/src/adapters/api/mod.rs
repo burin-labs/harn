@@ -155,6 +155,15 @@ impl ApiServer {
     }
 
     pub async fn run_http(self: Arc<Self>, options: ApiHttpServeOptions) -> Result<(), String> {
+        self.run_http_with_ready(options, |_| Ok(())).await
+    }
+
+    /// Run the HTTP server and report the address only after its listener is ready.
+    pub async fn run_http_with_ready(
+        self: Arc<Self>,
+        options: ApiHttpServeOptions,
+        on_ready: impl FnOnce(SocketAddr) -> Result<(), String>,
+    ) -> Result<(), String> {
         let router = api_router(self.state.clone());
         let router =
             crate::apply_transport_layers(router, &crate::TransportConfig::default_enabled());
@@ -167,11 +176,14 @@ impl ApiServer {
             .public_url
             .clone()
             .unwrap_or_else(|| format!("{}://{local_addr}", options.tls.advertised_scheme()));
-        eprintln!("[harn] Agents API server ready on {advertised}");
-        eprintln!("[harn] OpenAPI document: {advertised}/openapi.json");
-        crate::tls::serve_router_from_tcp(listener, router, &options.tls)
-            .await
-            .map_err(|error| format!("Agents API server failed: {error}"))
+        crate::tls::serve_router_from_tcp_with_ready(listener, router, &options.tls, || {
+            on_ready(local_addr)?;
+            eprintln!("[harn] Agents API server ready on {advertised}");
+            eprintln!("[harn] OpenAPI document: {advertised}/openapi.json");
+            Ok(())
+        })
+        .await
+        .map_err(|error| format!("Agents API server failed: {error}"))
     }
 }
 
