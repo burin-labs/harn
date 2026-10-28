@@ -31,6 +31,7 @@ fn main(harness: Harness) {
     "negative_unmeasured_census_is_not_zero",
     receipt != nil
       && receipt.survivor_count == 0
+      && !receipt.guardian_custody_complete
       && (!receipt.census_complete || !receipt.census_control_read
         || receipt.census_scanned_processes == 0),
   )

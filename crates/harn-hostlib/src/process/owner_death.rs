@@ -781,6 +781,12 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
                     );
                 reap_adopted_children()?;
                 harn_vm::op_interrupt::finish_process_owner_cleanup(&mut cleanup, &cleanup_token);
+                // Only Linux actually establishes subreaper custody and observes
+                // ECHILD in reap_adopted_children. Keep the host census unchanged.
+                #[cfg(target_os = "linux")]
+                {
+                    cleanup.guardian_custody_complete = true;
+                }
                 completion_receipt::write(&mut cleanup_receipt, &cleanup)?;
                 completion_receipt::refuse_survivors(&cleanup)?;
             }

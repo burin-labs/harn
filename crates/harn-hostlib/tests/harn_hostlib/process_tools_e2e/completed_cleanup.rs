@@ -1,5 +1,54 @@
 use super::*;
 
+#[cfg(target_os = "linux")]
+#[test]
+fn guardian_reaps_detached_child_without_owner_environment() {
+    let _session = harn_vm::agent_sessions::enter_current_session(format!(
+        "scrubbed-cleanup-{}",
+        std::process::id()
+    ));
+    let python = python3().expect("the process fixture requires Python 3");
+    let script = r#"
+import os, sys
+r, w = os.pipe()
+pid = os.fork()
+if pid == 0:
+    os.close(r)
+    os.setsid()
+    os.set_inheritable(w, True)
+    os.execve(sys.executable, [sys.executable, '-c',
+        'import os,signal,sys; os.write(int(sys.argv[1]),b"R"); os.close(int(sys.argv[1])); signal.pause()', str(w)], {})
+os.close(w)
+assert os.read(r, 1) == b'R'
+os.close(r)
+print(pid, flush=True)
+"#;
+    let mut request = dict_map();
+    request.insert("argv".into(), vlist_str(&[&python, "-c", script]));
+    request.put_bool("background", true);
+    let started = require_dict(call("hostlib_tools_run_command", request).unwrap());
+    let mut wait = dict_map();
+    wait.insert(
+        "handle_id".into(),
+        vm_string(&require_str(&started, "handle_id")),
+    );
+    wait.put_int("timeout_ms", 15_000);
+    let result = call("hostlib_tools_wait_command", wait).unwrap();
+    assert_response_matches_schema("wait_command", &result);
+    let result = require_dict(result);
+    assert_eq!(require_str(&result, "status"), "completed");
+    assert_eq!(require_int(&result, "exit_code"), 0);
+    let pid: i32 = require_str(&result, "stdout").trim().parse().unwrap();
+    let cleanup = require_nested_dict(&result, "process_cleanup");
+    assert!(require_bool(&cleanup, "guardian_custody_complete"));
+    assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+    assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "scrubbed child survived");
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+}
+
 #[test]
 fn real_completed_background_cancel_replays_guardian_cleanup_receipt() {
     let _session = harn_vm::agent_sessions::enter_current_session(format!(
@@ -110,6 +159,9 @@ pub(super) fn assert_no_observed_survivors(cleanup: &harn_vm::value::DictMap) {
     if require_bool(cleanup, "census_complete") {
         assert!(require_bool(cleanup, "census_control_read"));
         assert!(require_int(cleanup, "census_scanned_processes") > 0);
+        assert_eq!(require_int(cleanup, "survivor_count"), 0);
+    } else if require_bool(cleanup, "guardian_custody_complete") {
+        assert_eq!(require_int(cleanup, "omitted_child_count"), 0);
         assert_eq!(require_int(cleanup, "survivor_count"), 0);
     } else {
         assert!(matches!(cleanup.get("survivor_count"), Some(VmValue::Nil)));
