@@ -13,6 +13,7 @@
 mod auth;
 mod bridge;
 mod builtins;
+mod checkpoint_tracking;
 mod checkpoints;
 mod commands;
 mod confinement;
@@ -93,10 +94,11 @@ pub use types::{
     AcpPlanDocumentMutationParams, AcpPlanDocumentMutationResult, AcpPromptCorrelation,
     AcpPromptDelivery, AcpPromptErrorData, AcpPromptErrorSchema, AcpPromptFailureFacts,
     AcpRoutingAttempt, AcpSessionCancelToolCallParams, AcpSessionEnvironmentConfig,
-    AcpSessionIdParams, AcpSessionInjectHostEventParams, AcpSessionLoadParams, AcpSessionNewParams,
-    AcpSessionPromptParams, AcpSessionPromptReceipt, AcpSessionPromptResult,
-    AcpSessionRestoreResult, ACP_METHOD_CANCEL_REQUEST, ACP_METHOD_INITIALIZE,
-    ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE,
+    AcpSessionIdParams, AcpSessionInjectHostEventParams, AcpSessionLoadParams,
+    AcpSessionLoadWithCheckpoint, AcpSessionNewParams, AcpSessionPromptParams,
+    AcpSessionPromptReceipt, AcpSessionPromptResult, AcpSessionRestoreResult,
+    ACP_METHOD_CANCEL_REQUEST, ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL,
+    ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE,
     ACP_METHOD_SESSION_INJECT_HOST_EVENT, ACP_METHOD_SESSION_INPUTS, ACP_METHOD_SESSION_LOAD,
     ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_PROMPTS,
     ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE, ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_RESUME,

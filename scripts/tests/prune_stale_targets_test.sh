@@ -9,6 +9,7 @@ set -euo pipefail
 # reaps.
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+export HARN_TARGET_GC_HANDLE_PROBE="${HARN_TARGET_GC_HANDLE_PROBE:-$repo_root/scripts/tests/fixtures/target-gc-handle-probe.sh}"
 tmp_root=$(mktemp -d)
 minimum_bash=$(command -v bash)
 if [[ -x /bin/bash ]]; then

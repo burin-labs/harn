@@ -517,6 +517,8 @@ impl AcpServer {
                 cwd,
                 project_root,
                 store_scope,
+                workspace_checkpoint: false,
+                checkpoint_tracking: super::checkpoint_tracking::CheckpointTracking::default(),
                 cancellation,
                 host_bridge: None,
                 inject_state: concurrent_control.inject_state.clone(),

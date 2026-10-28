@@ -62,6 +62,9 @@ const DEFAULT_ACTOR: &str = "harn";
 const DEFAULT_KIND_TYPE: &str = "LibrarianEntry";
 const LEGACY_IMPORT_FORMAT: &str = "harn.session.jsonl.v1";
 
+#[path = "session_store_presence.rs"]
+mod presence;
+
 harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_session_store_builtins);
 
 #[harn_builtin(
@@ -138,6 +141,21 @@ async fn session_store_events_impl(
         .map(stored_event_value)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(store_read_present_value(VmValue::list(values)))
+}
+
+#[harn_builtin(
+    exposure = "harness.agent.session_store_presence",
+    effects = ["fs.read@dynamic", "state.read@arg0"],
+    sig = "__session_store_presence(session_id: string, options?: dict) -> SessionStorePresence",
+    kind = "async",
+    category = "session_store",
+    doc = "Read bounded journal presence through an already-owned store. Unavailable requires a supported fallback; it does not mean missing."
+)]
+async fn session_store_presence_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    presence::lookup(args)
 }
 
 #[harn_builtin(

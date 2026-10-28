@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 usage() {
   cat <<'USAGE'
@@ -109,6 +110,7 @@ query='query($owner: String!, $name: String!) {
         isCrossRepository
         headRefOid
         author { __typename }
+        labels(first: 100) { totalCount nodes { name } }
         reviews(last: 15) { nodes { author { __typename } commit { oid } submittedAt body } }
         comments(last: 20) { nodes { author { __typename } createdAt body } }
       }
@@ -124,12 +126,14 @@ response="$(gh api graphql -f query="$query" -f owner="$owner" -f name="$name")"
 # unfinished marker and is not a review: it is counted, not taken as an
 # outcome. One JSON object per head, carrying the kind of the reviewer's latest
 # stand-down for it, if any.
-waiting="$(jq -c '
+waiting="$(jq -c -L "$script_dir" '
+  include "review_dispatch_opt_out";
   if .data.repository.pullRequests == null then error("no pull requests in the response") else . end
   | .data.repository.pullRequests.nodes[]
   | select(.isDraft | not)
   | select(.isCrossRepository | not)
   | select(.author.__typename != "Bot")
+  | select(review_dispatch_connection_opted_out | not)
   | .headRefOid as $head
   # On a line of its own: a review that quotes the marker in prose is a review.
   | ("(^|\n)<!-- [a-z][a-z0-9-]*-review-unfinished: " + $head + " -->(\n|$)") as $unfinished_marker
@@ -157,9 +161,11 @@ census=""
 while IFS= read -r entry; do
   [[ -n "$entry" ]] || continue
   head="$(jq -r '.head' <<<"$entry")"
-  requests="$(gh api "repos/$repo/commits/$head/check-runs?check_name=$(jq -rn --arg c "$request_check" '$c | @uri')&per_page=100" \
-    --jq '[.check_runs[].started_at | select(. != null)] | max')" \
+  request_pages="$(gh api "repos/$repo/commits/$head/check-runs?check_name=$(jq -rn --arg c "$request_check" '$c | @uri')&per_page=100" --paginate --slurp)" \
     || die "could not read the review requests of $head"
+  requests="$(jq -r -L "$script_dir" \
+    'include "review_dispatch_opt_out"; review_dispatch_latest_request' <<<"$request_pages")" \
+    || die "could not interpret the review requests of $head"
   census+="$(jq -c --arg last "$requests" '. + {last_request: (if $last == "" or $last == "null" then null else $last end)}' <<<"$entry")"$'\n'
 done <<<"$waiting"
 
@@ -213,6 +219,12 @@ while IFS=$'\t' read -r number head reason; do
   [[ "$sent" -lt "$limit" ]] || continue
   if [[ "$sent" -gt 0 && "$spacing" -gt 0 ]]; then
     sleep "$spacing"
+  fi
+  opted_out="$(bash "$script_dir/review_dispatch_labels.sh" "$repo" "$number")" \
+    || die "could not check current labels for $repo#$number"
+  if [[ "$opted_out" == true ]]; then
+    printf 'Skipped %s#%s: automated review is opted out.\n' "$repo" "$number"
+    continue
   fi
   GH_TOKEN="$DISPATCH_TOKEN" gh workflow run "$REVIEW_WORKFLOW" \
     --repo "$REVIEW_REPOSITORY" \

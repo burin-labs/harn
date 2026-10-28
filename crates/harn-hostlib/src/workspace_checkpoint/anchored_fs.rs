@@ -29,6 +29,8 @@ pub(super) enum Stage {
     BeforeWalk,
     /// The parent directory is resolved; the write or delete is next.
     AfterWalk,
+    /// The last content guard passed, immediately before the replacement.
+    AfterFinalGuard,
 }
 
 #[cfg(all(test, unix))]
@@ -76,6 +78,7 @@ pub(super) fn restore_one(
     entry: &PlanEntry,
     guard: &Option<String>,
     write: Option<&WritePayload>,
+    require_no_replace: bool,
 ) -> Result<Step, String> {
     #[cfg(all(test, unix))]
     restore_hook(Stage::BeforeWalk);
@@ -94,16 +97,25 @@ pub(super) fn restore_one(
     if found != *guard {
         return Ok(Step::Refused(found));
     }
+    if require_no_replace && (guard.is_some() || write.is_none()) {
+        return Ok(Step::Refused(found));
+    }
     match write {
         Some(payload) => {
-            // Re-verify through the same descriptor just before the rename.
-            parent.write(&payload.bytes, payload.exec, |dir| {
-                if dir.hash()? == *guard {
-                    Ok(())
-                } else {
-                    Err(format!("{} changed while restoring", entry.path))
-                }
-            })?;
+            // Re-verify through the same descriptor before publishing.
+            let written =
+                parent.write(&payload.bytes, payload.exec, require_no_replace, |dir| {
+                    if dir.hash()? == *guard {
+                        #[cfg(all(test, unix))]
+                        restore_hook(Stage::AfterFinalGuard);
+                        Ok(())
+                    } else {
+                        Err(format!("{} changed while restoring", entry.path))
+                    }
+                })?;
+            if !written {
+                return Ok(Step::Refused(parent.hash()?));
+            }
         }
         None => parent.delete()?,
     }
@@ -116,7 +128,11 @@ pub(super) fn restore_one(
     entry: &PlanEntry,
     guard: &Option<String>,
     write: Option<&WritePayload>,
+    require_no_replace: bool,
 ) -> Result<Step, String> {
+    if require_no_replace {
+        return Err("concurrent-safe restore is unavailable on this platform".to_string());
+    }
     let root = &anchor.0;
     let full = root.join(&entry.path);
     let found = current_hash(&full)?;

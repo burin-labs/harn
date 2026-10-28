@@ -37,8 +37,10 @@ asked.
 - `allow_all` — answer every ask yes. This is what `yolo` and `full-auto` mean,
   and it has one owner rather than a per-surface empty policy overlay.
 
-`allow_all` does not lift the catastrophic floor. That is the one thing yolo
-still refuses.
+Matched deny rules never reach a reviewer, including `allow_all`. Their receipts
+record `auto_review.unavailable_reason: "deny_rule"` and `reviewer_answered: false`.
+Reviewers may answer asks and deliberately reviewable refusals such as side-effect
+ceilings. `allow_all` also preserves the catastrophic floor.
 
 ## Install a reviewer on a loop
 

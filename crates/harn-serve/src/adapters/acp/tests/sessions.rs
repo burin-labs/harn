@@ -8,6 +8,52 @@ mod typed_observability;
 use prompt_output::{run_json_prompt, run_prompt_with_project_capability};
 
 #[tokio::test(flavor = "current_thread")]
+async fn checkpoint_tracking_rejects_non_boolean_options() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    server.handle_incoming_message(serde_json::json!({
+        "jsonrpc":"2.0", "id":1, "method":"session/new",
+        "params":{"cwd":".", "environmentPolicy":{"kind":"isolated", "grants":[]}, "workspaceCheckpoint":"true"},
+    })).await;
+    let response = recv_response_with_id(&mut rx, 1).await;
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("must be a boolean"),
+        "{response}"
+    );
+    server.handle_incoming_message(serde_json::json!({
+        "jsonrpc":"2.0", "id":2, "method":"session/new",
+        "params":{"cwd":".", "environmentPolicy":{"kind":"isolated", "grants":[]}, "workspaceCheckpoint":null},
+    })).await;
+    let response = recv_response_with_id(&mut rx, 2).await;
+    assert_eq!(
+        response["result"]["workspaceCheckpointTracking"], false,
+        "{response}"
+    );
+}
+
+#[cfg(not(feature = "hostlib"))]
+#[tokio::test(flavor = "current_thread")]
+async fn checkpoint_tracking_is_refused_without_hostlib() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    server.handle_incoming_message(serde_json::json!({
+        "jsonrpc":"2.0", "id":1, "method":"session/new",
+        "params":{"cwd":".", "environmentPolicy":{"kind":"isolated", "grants":[]}, "workspaceCheckpoint":true},
+    })).await;
+    let response = recv_response_with_id(&mut rx, 1).await;
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("requires the hostlib feature"),
+        "{response}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn acp_server_handles_session_flow_and_prompt_updates() {
     harn_clock::test_support::with_local_tasks(async {
             let (request_tx, request_rx) = mpsc::unbounded_channel();

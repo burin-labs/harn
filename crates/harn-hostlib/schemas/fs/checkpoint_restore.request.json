@@ -18,7 +18,39 @@
       "items": {
         "type": "string"
       },
-      "description": "Optional subset of attributed paths to restore. Omitted or empty restores every attributed path."
+      "description": "Optional nonempty subset of attributed paths to restore. Omit to restore every attributed path."
+    },
+    "confirmed_paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "session_id": {"type": "string", "minLength": 1},
+          "boundary_id": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "observed": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {"kind": {"const": "absent"}},
+                "required": ["kind"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {"const": "present"},
+                  "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                },
+                "required": ["kind", "sha256"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": ["session_id", "boundary_id", "path", "observed"],
+        "additionalProperties": false
+      }
     }
   },
   "required": [

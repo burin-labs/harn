@@ -569,6 +569,11 @@ impl A2aPushJwtClaims {
 }
 
 fn normalize_task_state(state: &str) -> String {
+    if state.starts_with("TASK_STATE_") {
+        if let Ok(normalized) = crate::a2a::A2aWireVersion::V1_0.task_state(state) {
+            return normalized.to_string();
+        }
+    }
     match state {
         "cancelled" => "canceled".to_string(),
         other => other.to_string(),
@@ -767,6 +772,34 @@ mod tests {
             payload.actor_chain,
             Some(json!({"sub": "user:kenneth", "act": {"sub": "agent:reviewer"}})),
         );
+    }
+
+    #[tokio::test]
+    async fn normalizes_v1_completed_status_update() {
+        let (connector, _inbox) = connector_with_binding(jwt_binding()).await;
+        let body = serde_json::to_vec(&json!({
+            "statusUpdate": {
+                "taskId": "task-v1",
+                "contextId": "ctx-v1",
+                "status": {"state": "TASK_STATE_COMPLETED"}
+            }
+        }))
+        .unwrap();
+        let mut headers = BTreeMap::new();
+        headers.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", jwt("jti-v1", "opaque-token")),
+        );
+        let mut raw = RawInbound::new("", headers, body);
+        raw.metadata = json!({"binding_id": "reviewer-task-update"});
+        let event = connector.normalize_inbound(raw).await.unwrap();
+        assert_eq!(event.kind, "a2a.task.completed");
+        let ProviderPayload::Known(KnownProviderPayload::A2aPush(payload)) = event.provider_payload
+        else {
+            panic!("expected a2a payload");
+        };
+        assert_eq!(payload.task_id.as_deref(), Some("task-v1"));
+        assert_eq!(payload.task_state.as_deref(), Some("completed"));
     }
 
     #[tokio::test]

@@ -30,6 +30,7 @@ set -euo pipefail
 #      idle at every depth must still be retired.
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+export HARN_TARGET_GC_HANDLE_PROBE="${HARN_TARGET_GC_HANDLE_PROBE:-$repo_root/scripts/tests/fixtures/target-gc-handle-probe.sh}"
 gc="$repo_root/scripts/prune_stale_targets.sh"
 tmp_root=$(mktemp -d)
 live_pids=()

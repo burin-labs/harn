@@ -20,11 +20,9 @@
 #      cache entry outlived the worktree it caches, permanently.
 #   2. Never remove a tree a live process owns. Liveness is decided by
 #      process, not by mtime: a build paused between steps leaves its tree
-#      untouched for a long time and reads as idle. Two signals count -- a
-#      process holding cargo's advisory `.cargo-lock`, and a process naming
-#      the entry on its command line. The probe excludes its own process
-#      ancestry, because a GC whose own command line names the entry it is
-#      scanning would otherwise manufacture a live owner for it.
+#      untouched for a long time and reads as idle. An open file or a command
+#      line naming the entry both count. Command-line matching excludes the
+#      probe's ancestry; open handles from any process still protect the tree.
 #   3. Bound what rule 1 keeps. Dropping orphans bounds nothing on a machine
 #      whose worktrees are all alive, because every one of them keeps its tree
 #      forever, and the cache grows with the number of worktrees the machine
@@ -39,7 +37,7 @@
 # liveness one: it is the last line of defence for a worktree that discovery
 # never reached, so a warm target outside HARN_TARGET_GC_ROOTS is still kept.
 # When the process probe is unavailable (no usable `ps` or `lsof`), the GC says
-# so rather than reading an unanswerable question as "idle". Removal is read
+# so and keeps the entry instead of treating it as idle. Removal is read
 # back: the path must be gone afterwards, and every entry reported as kept must
 # still be there.
 #
@@ -108,6 +106,10 @@
 #                               both the legacy $TMPDIR and durable cache roots
 #   HARN_TARGET_GC_PROTECT      the caller's own entry (path or name), kept
 #                               whatever its age or rank
+#   HARN_TARGET_GC_HANDLE_PROBE optional absolute executable supplied by the
+#                               host. It receives the lexical and physical
+#                               target paths and must print exactly busy, idle,
+#                               or unknown. Failures and unknown retain targets.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -355,8 +357,8 @@ pressure_floor_bytes() {
 # removals as failures. The lock is a directory beside the success receipt
 # (mkdir is atomic), holding the owner's pid and start time. A run that finds a
 # live holder reports `status=skipped` and exits 0: nothing went wrong, another
-# run is doing this work. A holder whose pid is gone, or that has held the lock
-# past HARN_TARGET_GC_LOCK_STALE_SECS (default 6h), is stale and is replaced.
+# run is doing this work. A proven-dead holder or an old unrecorded lock can
+# be replaced; age alone never overrides a live or unmeasured holder.
 run_lock="${receipt_root}/prune-stale-targets.lock"
 run_lock_held=0
 release_run_lock() {
@@ -367,6 +369,7 @@ release_run_lock() {
 }
 acquire_run_lock() {
   local stale_secs="${HARN_TARGET_GC_LOCK_STALE_SECS:-21600}" holder_pid holder_epoch now attempt
+  local holder_state ps_self ps_holder ps_status
   case "$stale_secs" in
     ''|*[!0-9]*) echo "HARN_TARGET_GC_LOCK_STALE_SECS must be a non-negative integer: $stale_secs" >&2; exit 2 ;;
   esac
@@ -388,9 +391,29 @@ acquire_run_lock() {
       ''|*[!0-9]*) holder_epoch="$(file_mtime_epoch "$run_lock" 2>/dev/null || date +%s)" ;;
     esac
     now="$(date +%s)"
+    holder_state=unrecorded
+    case "$holder_pid" in
+      ''|0|*[!0-9]*) ;;
+      *)
+        holder_state=unknown
+        if kill -0 "$holder_pid" 2>/dev/null; then
+          holder_state=live
+        elif ps_self="$(ps -p "$$" -o pid= 2>&1)" &&
+             [ "${ps_self//[[:space:]]/}" = "$$" ]; then
+          if ps_holder="$(ps -p "$holder_pid" -o pid= 2>&1)"; then
+            [ "${ps_holder//[[:space:]]/}" != "$holder_pid" ] || holder_state=live
+          else
+            ps_status=$?
+            if [ "$ps_status" -eq 1 ] && [ -z "$ps_holder" ]; then
+              holder_state=dead
+            fi
+          fi
+        fi
+        ;;
+    esac
     if [ "$attempt" -eq 1 ] && {
-      { [ -n "$holder_pid" ] && ! kill -0 "$holder_pid" 2>/dev/null; } \
-        || [ $((now - holder_epoch)) -gt "$stale_secs" ]; }; then
+      [ "$holder_state" = dead ] ||
+        { [ "$holder_state" = unrecorded ] && [ $((now - holder_epoch)) -gt "$stale_secs" ]; }; }; then
       echo "harn-target GC: replacing stale run lock (holder_pid=${holder_pid:-unknown} age_secs=$((now - holder_epoch)))"
       rm -f "$run_lock/owner"
       rmdir "$run_lock" 2>/dev/null || true
@@ -543,31 +566,57 @@ probe_note=""
 if ! ps_probe="$(ps -eo pid=,args= 2>/dev/null)" || [ -z "$ps_probe" ]; then
   probe_mode="degraded"
   probe_note="no usable process listing"
-elif ! command -v lsof >/dev/null 2>&1; then
+elif [ -n "${HARN_TARGET_GC_HANDLE_PROBE:-}" ] &&
+     { [[ "$HARN_TARGET_GC_HANDLE_PROBE" != /* ]] || [ ! -x "$HARN_TARGET_GC_HANDLE_PROBE" ]; }; then
+  probe_mode="degraded"
+  probe_note="configured handle probe unavailable"
+elif [ -z "${HARN_TARGET_GC_HANDLE_PROBE:-}" ] && ! command -v lsof >/dev/null 2>&1; then
   probe_mode="degraded"
   probe_note="lsof unavailable, cannot see build locks"
 fi
 if [ "$probe_mode" = "degraded" ]; then
-  echo "harn-target GC: process liveness unavailable ($probe_note); the idle age of ${min_age}s is the only remaining guard"
+  echo "harn-target GC: process liveness unavailable ($probe_note); targets will be kept"
 fi
 
-# Pids that own a cache entry, one per line. Cargo holds an advisory lock under
-# the target dir for the whole build, so a paused build still holds it; a build
-# configured on the command line names the path in its args.
+# Pids that own a cache entry, one per line.
 entry_live_pids() {
-  local dir="$1" lock pid line snapshot lsof_out
-  for lock in "$dir"/.cargo-lock "$dir"/*/.cargo-lock; do
-    [ -f "$lock" ] || continue
-    lsof_out="$(lsof -t -- "$lock" 2>/dev/null || true)"
+  local dir="$1" pid line snapshot lsof_out handle_pids physical handle_verdict
+  physical="$(cd "$dir" && pwd -P)" || return 1
+  # A reader can hold any artifact without naming the path in its arguments or
+  # holding Cargo's lock. A failed or empty census cannot establish idleness.
+  if [ -n "${HARN_TARGET_GC_HANDLE_PROBE:-}" ]; then
+    handle_verdict="$("$HARN_TARGET_GC_HANDLE_PROBE" "$dir" "$physical" 2>/dev/null)" || return 1
+    case "$handle_verdict" in
+      busy) printf '%s\n' host-handle-probe ;;
+      idle) ;;
+      *) return 1 ;;
+    esac
+  else
+    lsof_out="$(lsof -n -Fpfn 2>&1)" || return 1
+    [ -n "$lsof_out" ] || return 1
+    handle_pids="$(printf '%s\n' "$lsof_out" | HARN_GC_PATH_RAW="$dir" HARN_GC_PATH_PHYSICAL="$physical" awk '
+    /^p[0-9]+$/ { pid = substr($0, 2); next }
+    /^fNOFD$/ { incomplete = 1; next }
+    /^f/ { next }
+    /^n/ {
+      path = substr($0, 2)
+      if (path ~ /\((readlink|opendir|stat): (Permission denied|Operation not permitted)\)$/) incomplete = 1
+      d = ENVIRON["HARN_GC_PATH_RAW"]
+      p = ENVIRON["HARN_GC_PATH_PHYSICAL"]
+      if (path == d || index(path, d "/") == 1 ||
+          path == p || index(path, p "/") == 1) print pid
+      next
+    }
+    { incomplete = 1 }
+    END { if (incomplete) exit 1 }
+    ')" || return 1
     while IFS= read -r pid; do
       case "$pid" in
         ''|*[!0-9]*) continue ;;
       esac
-      is_self_pid "$pid" && continue
       printf '%s\n' "$pid"
-    done <<< "$lsof_out"
-  done
-
+    done <<< "$handle_pids"
+  fi
   # Snapshot per entry rather than once per run: a sweep of a large root takes
   # tens of seconds, and a build that starts during it still owns its tree.
   # Capture the whole listing and then match it. Piping `ps` into `grep -q`
@@ -713,19 +762,23 @@ prune_root() {
 
     # Liveness is decided by process. An age bound alone cannot answer it: a
     # build paused between steps leaves its tree untouched and reads as idle.
-    if [ "$probe_mode" = "process" ]; then
-      if ! pids="$(entry_live_pids "$d" | sort -u | tr '\n' ' ')"; then
-        echo "keep (process ownership unmeasured): $name"
-        report_pending_named_entry "$name"
-        pending_candidates=$((pending_candidates + 1))
-        kept=$((kept + 1)); kept_paths+=("$d"); continue
-      fi
-      pids="${pids% }"
-      if [ -n "$pids" ]; then
-        echo "keep (live process: $pids): $name"
-        report_pending_named_entry "$name"
-        kept=$((kept + 1)); kept_paths+=("$d"); continue
-      fi
+    if [ "$probe_mode" != "process" ]; then
+      echo "keep (process ownership unmeasured): $name"
+      report_pending_named_entry "$name"
+      pending_candidates=$((pending_candidates + 1))
+      kept=$((kept + 1)); kept_paths+=("$d"); continue
+    fi
+    if ! pids="$(entry_live_pids "$d" | sort -u | tr '\n' ' ')"; then
+      echo "keep (process ownership unmeasured): $name"
+      report_pending_named_entry "$name"
+      pending_candidates=$((pending_candidates + 1))
+      kept=$((kept + 1)); kept_paths+=("$d"); continue
+    fi
+    pids="${pids% }"
+    if [ -n "$pids" ]; then
+      echo "keep (live process: $pids): $name"
+      report_pending_named_entry "$name"
+      kept=$((kept + 1)); kept_paths+=("$d"); continue
     fi
 
     # Placed after the liveness probe and before the rank and age rules on
@@ -960,20 +1013,26 @@ remove_entry() {
     return 0
   fi
   # Discovery and size measurement can outlast a build's startup.
-  if [ "$probe_mode" = process ]; then
-    local pids
-    if ! pids="$(entry_live_pids "$d" | sort -u | tr '\n' ' ')"; then
-      echo "keep (process ownership unmeasured before removal): $name" >&2
-      remember_kept_path "$d"
-      pending_candidates=$((pending_candidates + 1))
-      return 0
-    fi
-    if [ -n "$pids" ]; then
-      echo "keep (live process before removal: $pids): $name"
-      remember_kept_path "$d"
-      report_pending_named_entry "$name"
-      return 0
-    fi
+  if [ "$probe_mode" != process ]; then
+    echo "keep (process ownership unmeasured before removal): $name" >&2
+    remember_kept_path "$d"
+    report_pending_named_entry "$name"
+    pending_candidates=$((pending_candidates + 1))
+    return 0
+  fi
+  local pids
+  if ! pids="$(entry_live_pids "$d" | sort -u | tr '\n' ' ')"; then
+    echo "keep (process ownership unmeasured before removal): $name" >&2
+    remember_kept_path "$d"
+    report_pending_named_entry "$name"
+    pending_candidates=$((pending_candidates + 1))
+    return 0
+  fi
+  if [ -n "$pids" ]; then
+    echo "keep (live process before removal: $pids): $name"
+    remember_kept_path "$d"
+    report_pending_named_entry "$name"
+    return 0
   fi
   if [ "$dry_run" -eq 1 ]; then
     echo "would remove $reason: $name (${sz:-?})"

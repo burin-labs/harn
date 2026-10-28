@@ -85,8 +85,8 @@ Requires an OpenRouter API key in the environment or `HARN_EXT_EXPERIMENT_ENV_FI
   --no-probes \
   --step-judge off \
   --structural-validator on \
-  --baseline-results-dir experiments/step-judge/results/main-grid-2026-05-24-v3 \
-  --output-dir experiments/step-judge/results/main-grid-2026-05-24-v3-validator
+  --baseline-results-dir experiments/step-judge/results/<baseline-timestamp> \
+  --output-dir experiments/step-judge/results/<validator-timestamp>
 ```
 
 Outputs land under `experiments/step-judge/results/<timestamp>/`,

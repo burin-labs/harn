@@ -72,7 +72,7 @@ pub use signing::{
     verify_event, verify_event_chain, verify_receipt_root, verify_session_chain, SessionSigner,
     VerifyError, ALGORITHM as SIGNATURE_ALGORITHM,
 };
-pub use sqlite::SqliteSessionStore;
+pub use sqlite::{SessionJournalPresence, SqliteSessionStore};
 pub use store::{
     CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ListOrder,
     ListSortKey, ReadRange, SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore,

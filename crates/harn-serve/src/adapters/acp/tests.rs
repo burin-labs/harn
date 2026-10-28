@@ -114,6 +114,17 @@ async fn start_acp_channel_session_with_config(
     config: AcpServerConfig,
     cwd: serde_json::Value,
 ) -> AcpTestSession {
+    start_acp_channel_session_with_params(
+        config,
+        serde_json::json!({"cwd": cwd, "environmentPolicy": {"kind": "isolated", "grants": []}}),
+    )
+    .await
+}
+
+async fn start_acp_channel_session_with_params(
+    config: AcpServerConfig,
+    params: serde_json::Value,
+) -> AcpTestSession {
     let (request_tx, request_rx) = mpsc::unbounded_channel();
     let (response_tx, mut response_rx) = mpsc::unbounded_channel();
     let server = tokio::task::spawn_local(super::run_acp_channel_server(
@@ -127,7 +138,7 @@ async fn start_acp_channel_session_with_config(
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": cwd, "environmentPolicy": {"kind": "isolated", "grants": []}},
+            "params": params,
         }))
         .expect("send session/new");
     let created = recv_json(&mut response_rx).await;

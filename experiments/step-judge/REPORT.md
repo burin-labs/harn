@@ -254,10 +254,7 @@ agent_loop(message, system, {
 
 ## Raw data
 
-- v1 (text, OpenRouter, 2026-05-23): `results/main-grid-2026-05-23/`
-- v3 (native, OpenRouter, 2026-05-24): `results/main-grid-2026-05-24-v3/`
-- v3 validator ablation (text, judge off, corrected 2026-05-25):
-  `results/main-grid-2026-05-24-v3-validator/`
-
-Per-run JSONL + transcript_events are gitignored under the
-timestamped run dirs. Only summary.json per cell is tracked.
+Runs: v1 (text, OpenRouter, 2026-05-23), v3 (native, OpenRouter,
+2026-05-24), and the v3 validator ablation (text, judge off, corrected
+2026-05-25). Their per-cell summaries are no longer tracked; the figures above
+are the record.

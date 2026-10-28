@@ -31,6 +31,7 @@ async fn execute_with_cancel(
     let source = format!(
         r#"
 import {{ agent_loop }} from "std/agent/loop"
+import {{ session_store_presence }} from "std/session-store"
 fn main(harness: Harness) {{
   const session = harness.agent.open("prepared-run")
   const call_options = {{provider: "openai", model: "gpt-5.6-luna", session_id: session,
@@ -59,6 +60,70 @@ async fn project(root: &std::path::Path) -> crate::orchestration::RunRecord {
     crate::orchestration::project_run_record_from_session(&store, "prepared-run")
         .await
         .expect("project the actual journal")
+}
+
+#[test]
+fn bounded_presence_reuses_live_owner_and_refuses_unknown_legacy_state() {
+    let _env = env_guard();
+    let _cleanup = Cleanup;
+    crate::agent_sessions::reset_session_store();
+    crate::reset_thread_local_state();
+    let root = tempfile::tempdir().unwrap();
+    let legacy_dir = root.path().join(".harn/session-store");
+    std::fs::create_dir_all(&legacy_dir).unwrap();
+    std::fs::write(legacy_dir.join("legacy.jsonl"), "not a valid event\n").unwrap();
+    let malformed_dir = root.path().join("malformed/.harn");
+    std::fs::create_dir_all(&malformed_dir).unwrap();
+    std::fs::write(malformed_dir.join("session-store.sqlite"), "not a database").unwrap();
+    let runtime = crate::test_support::current_thread_runtime();
+    runtime.block_on(tokio::task::LocalSet::new().run_until(async {
+        execute(
+            root.path(),
+            r#"
+  const absent = harness.agent.session_store_presence("missing", {root: options.root})
+  require absent.state == "absent", "missing store is distinct from a missing session"
+  for i in 0..128 {
+    harness.agent.session_store_append("saved", {value: i}, {root: options.root, tenant_id: "owner"})
+  }
+  const before = harness.agent.session_store_events("saved", {root: options.root, tenant_id: "owner"}).value
+  require len(before) == 128,
+    "the long-journal fixture must actually contain its events"
+  const unowned = harness.agent.session_store_presence("saved", {root: options.root})
+  require unowned.state == "unavailable", "closed owner cannot claim the session is missing"
+  const foreign_root = options.root + "/foreign"
+  harness.agent.session_store_append("foreign", {value: 1}, {root: foreign_root})
+  const malformed_root = options.root + "/malformed"
+  const malformed = harness.agent.session_store_presence("saved", {root: malformed_root})
+  require malformed.state == "unavailable", "an unowned database cannot be assumed valid"
+  const malformed_read = try { harness.agent.session_store_events("saved", {root: malformed_root}) }
+  require is_err(malformed_read), "the existing fallback surfaces a malformed database"
+  harness.agent.with_run(session, options, { ->
+    const saved = harness.agent.session_store_presence("saved", {root: options.root, tenant_id: "owner"})
+    require saved.state == "present" && saved.has_events, "live owner finds the saved journal"
+    const typed = session_store_presence(harness.agent, "saved", {root: options.root, tenant_id: "owner"})
+    require typed.state == "present" && typed.has_events, "the typed public facade preserves the result"
+    const unknown = harness.agent.session_store_presence("missing", {root: options.root})
+    require unknown.state == "missing", "live owner distinguishes a missing session"
+    const foreign = harness.agent.session_store_presence("foreign", {root: foreign_root})
+    require foreign.state == "unavailable", "an owner of another root cannot answer this lookup"
+    const wrong_tenant = try {
+      harness.agent.session_store_presence("saved", {root: options.root, tenant_id: "other"})
+    }
+    require is_err(wrong_tenant), "tenant denial is not reported as missing"
+    const legacy = harness.agent.session_store_presence("legacy", {root: options.root})
+    require legacy.state == "unavailable", "unread legacy content is not reported as missing"
+    const legacy_read = try { harness.agent.session_store_events("legacy", {root: options.root}) }
+    require is_err(legacy_read), "the existing fallback surfaces malformed legacy data"
+    const after = harness.agent.session_store_events("saved", {root: options.root, tenant_id: "owner"}).value
+    require len(after) == len(before) && after[127].record_hash == before[127].record_hash,
+      "presence reads leave the saved journal unchanged"
+    require !harness.agent.exists("missing"), "the missing lookup does not open a session"
+  })
+"#,
+        )
+        .await
+        .expect("the public owner-backed presence path satisfies its contract");
+    }));
 }
 
 #[test]

@@ -5,9 +5,8 @@ following the [restoration measurements](code-index-restoration-measurements.md)
 The baseline is the final #9712 optimized release probe. The candidate replaces
 the JSON snapshot with a sectioned binary file, decodes and restores its
 sections in parallel, and uses a seeded fast hasher on the restore-path maps.
-The [complete trial record](perf/code-index-9743.json) keeps every trial,
-both binary digests, the seed digest, phase timings, and skipped-file
-inventories.
+Every trial, both binary digests, the seed digest, phase timings, and
+skipped-file inventories were recorded.
 
 ## Workload and controls
 
@@ -81,8 +80,7 @@ improves only through the faster write; parsing dominates it.
 
 The October 13, 2026 matrix compared #9712 binary SHA-256 `785cded9e739…` with
 the #9743 binary `0dfd5c397665…`. It was repeated while CI happened to be idle, so no
-runners were paused; the [quiet trial record](perf/code-index-9743-quiet.json)
-keeps every trial. CI returned partway through, so the summary uses only pairs
+runners were paused. CI returned partway through, so the summary uses only pairs
 whose two trials stayed under the 0.25-core external-load bound. The paired
 ratios agree with the shared-host results above.
 
