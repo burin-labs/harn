@@ -609,6 +609,390 @@ fn go_workspace_rename() {
 }
 
 #[test]
+fn go_workspace_rename_detects_name_collision_in_sibling_without_old_name() {
+    for sibling_declaration in [
+        "type DocumentLibrary struct { Name string }",
+        "var DocumentLibrary int",
+        "const DocumentLibrary = 1",
+        "func DocumentLibrary() {}",
+    ] {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("lab")).unwrap();
+        let declaration = "package lab\n\ntype DocumentStore struct { Count int }\n";
+        let sibling = format!("package lab\n\n{sibling_declaration}\n");
+        fs::write(root.join("lab/store.go"), declaration).unwrap();
+        fs::write(root.join("lab/other.go"), &sibling).unwrap();
+        let capability = build_index(root);
+        let symbol_ref = dict(&[
+            ("name", vm_string("DocumentStore")),
+            ("path", vm_string("lab/store.go")),
+            ("kind", vm_string("Type")),
+        ]);
+        let result = rename(&capability, symbol_ref, "DocumentLibrary", "workspace");
+        assert_eq!(
+            s(field(&result, "result")),
+            "conflict",
+            "{sibling_declaration}: {result:?}"
+        );
+        assert!(list_len(field(&result, "conflicts")) >= 1);
+        assert_eq!(
+            fs::read_to_string(root.join("lab/store.go")).unwrap(),
+            declaration
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("lab/other.go")).unwrap(),
+            sibling
+        );
+    }
+}
+
+#[test]
+fn go_rename_commit_refuses_a_package_change_and_writes_when_unchanged() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let declaration = "package lab\n\ntype DocumentStore struct { Count int }\n";
+    let seed_path = root.join("store.go");
+    fs::write(&seed_path, declaration).unwrap();
+    let (state, _) = IndexState::build_from_root(&root);
+    let (shadows, proof) =
+        super::super::rename_go::inspect(&root, "store.go", "DocumentLibrary", None).unwrap();
+    assert!(shadows.is_empty());
+    let tree = ast_api::parse_tree(declaration, Language::Go).unwrap();
+    let start = declaration.find("DocumentStore").unwrap();
+    let node = tree
+        .root_node()
+        .named_descendant_for_byte_range(start, start + "DocumentStore".len())
+        .unwrap();
+    let edit = EditSpan {
+        span: super::super::refactor_core::IdentifierSpan::of(node),
+        before: "DocumentStore".into(),
+        after: "DocumentLibrary".into(),
+    };
+    let plan = plan_file(
+        "store.go".into(),
+        Language::Go,
+        declaration.into(),
+        vec![edit],
+        true,
+    )
+    .unwrap();
+    let env = ResponseEnv {
+        symbol_name: "DocumentStore",
+        new_name: "DocumentLibrary",
+        symbol_path: "store.go",
+        symbol_line: None,
+        symbol_kind: Some(NodeKind::Type),
+        scope: Scope::Workspace,
+        backend: BackendReport::default(),
+        stale: Vec::new(),
+        proof: false,
+        preserved: None,
+        graph: &state.symbols,
+    };
+    let added = root.join("other.go");
+    fs::write(&added, "package lab\ntype DocumentLibrary struct{}\n").unwrap();
+    let call = HostCallContext::current();
+    let plans = vec![plan];
+    let result = commit(&env, &call, &root, &plans, None, Some(&proof))
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(s(field(&result, "result")), "refused");
+    assert_eq!(fs::read_to_string(&seed_path).unwrap(), declaration);
+    fs::remove_file(&added).unwrap();
+    let failed = commit(&env, &call, &root, &plans, None, Some(&proof))
+        .unwrap()
+        .unwrap();
+    assert!(failed.is_empty());
+    assert_eq!(
+        fs::read_to_string(&seed_path).unwrap(),
+        declaration.replace("DocumentStore", "DocumentLibrary")
+    );
+}
+
+#[test]
+fn go_rename_allows_same_name_in_external_test_package() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("lab")).unwrap();
+    let declaration = "package lab\n\ntype DocumentStore struct { Count int }\n";
+    let external = "package lab_test\n\ntype DocumentLibrary struct { Name string }\n";
+    fs::write(root.join("lab/store.go"), declaration).unwrap();
+    fs::write(root.join("lab/other_test.go"), external).unwrap();
+    let capability = build_index(root);
+    let symbol_ref = dict(&[
+        ("name", vm_string("DocumentStore")),
+        ("path", vm_string("lab/store.go")),
+        ("kind", vm_string("Type")),
+    ]);
+    let result = rename(&capability, symbol_ref, "DocumentLibrary", "workspace");
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    assert_eq!(
+        fs::read_to_string(root.join("lab/store.go")).unwrap(),
+        declaration.replace("DocumentStore", "DocumentLibrary")
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("lab/other_test.go")).unwrap(),
+        external
+    );
+}
+
+#[test]
+fn go_rename_allows_same_spelling_in_a_sibling_field() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("lab")).unwrap();
+    let declaration = "package lab\n\ntype DocumentStore struct { Count int }\n";
+    let sibling = "package lab\n\ntype Settings struct { DocumentLibrary int }\n";
+    fs::write(root.join("lab/store.go"), declaration).unwrap();
+    fs::write(root.join("lab/other.go"), sibling).unwrap();
+    let capability = build_index(root);
+    let symbol_ref = dict(&[
+        ("name", vm_string("DocumentStore")),
+        ("path", vm_string("lab/store.go")),
+        ("kind", vm_string("Type")),
+    ]);
+    let result = rename(&capability, symbol_ref, "DocumentLibrary", "workspace");
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    assert_eq!(
+        fs::read_to_string(root.join("lab/store.go")).unwrap(),
+        declaration.replace("DocumentStore", "DocumentLibrary")
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("lab/other.go")).unwrap(),
+        sibling
+    );
+}
+
+#[test]
+fn go_workspace_rename_refuses_shadowed_sibling_type_before_writes() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("lab")).unwrap();
+    let declaration = "package lab\n\ntype DocumentStore struct { Count int }\n";
+    let sibling = "package lab\n\nfunc Read(s *DocumentStore) int { return s.Count }\nfunc Identity[DocumentStore any](s DocumentStore) DocumentStore { return s }\n";
+    fs::write(root.join("lab/store.go"), declaration).unwrap();
+    fs::write(root.join("lab/use.go"), sibling).unwrap();
+    let capability = build_index(root);
+    let symbol_ref = dict(&[
+        ("name", vm_string("DocumentStore")),
+        ("path", vm_string("lab/store.go")),
+        ("kind", vm_string("Type")),
+    ]);
+    let result = rename(&capability, symbol_ref, "DocumentLibrary", "workspace");
+    assert_eq!(
+        s(field(&result, "result")),
+        "ambiguous_symbol",
+        "{result:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("lab/store.go")).unwrap(),
+        declaration
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("lab/use.go")).unwrap(),
+        sibling
+    );
+}
+
+#[test]
+fn go_workspace_rename_refuses_local_name_shadow_before_writes() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("lab")).unwrap();
+    let declaration = "package lab\n\ntype DocumentStore struct { Count int }\n";
+    let sibling = "package lab\n\nfunc Read(s *DocumentStore) int { return s.Count }\nfunc Shadow() int { DocumentStore := 7; return DocumentStore }\n";
+    fs::write(root.join("lab/store.go"), declaration).unwrap();
+    fs::write(root.join("lab/use.go"), sibling).unwrap();
+    let capability = build_index(root);
+    let symbol_ref = dict(&[
+        ("name", vm_string("DocumentStore")),
+        ("path", vm_string("lab/store.go")),
+        ("kind", vm_string("Type")),
+    ]);
+    let result = rename(&capability, symbol_ref, "DocumentLibrary", "workspace");
+    assert_eq!(
+        s(field(&result, "result")),
+        "ambiguous_symbol",
+        "{result:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("lab/store.go")).unwrap(),
+        declaration
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("lab/use.go")).unwrap(),
+        sibling
+    );
+}
+
+#[test]
+fn go_workspace_rename_refuses_unproven_build_variant_before_writes() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("lab")).unwrap();
+    let declaration = "package lab\n\ntype DocumentStore struct { Count int }\n";
+    let variant =
+        "//go:build windows\n\npackage lab\n\nfunc Read(s *DocumentStore) int { return s.Count }\n";
+    fs::write(root.join("lab/store.go"), declaration).unwrap();
+    fs::write(root.join("lab/use_windows.go"), variant).unwrap();
+    let capability = build_index(root);
+    let symbol_ref = dict(&[
+        ("name", vm_string("DocumentStore")),
+        ("path", vm_string("lab/store.go")),
+        ("kind", vm_string("Type")),
+    ]);
+    let result = rename(&capability, symbol_ref, "DocumentLibrary", "workspace");
+    assert_eq!(
+        s(field(&result, "result")),
+        "ambiguous_symbol",
+        "{result:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("lab/store.go")).unwrap(),
+        declaration
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("lab/use_windows.go")).unwrap(),
+        variant
+    );
+}
+
+#[test]
+fn go_rename_detects_collision_in_a_new_staged_sibling() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    fs::create_dir_all(root.join("lab")).unwrap();
+    let declaration = "package lab\n\ntype DocumentStore struct { Count int }\n";
+    let sibling = "package lab\n\ntype DocumentLibrary struct { Name string }\n";
+    let seed_path = root.join("lab/store.go");
+    let sibling_path = root.join("lab/new.go");
+    fs::write(&seed_path, declaration).unwrap();
+    let capability = build_index(&root);
+    let session_id = format!(
+        "go-rename-new-{}",
+        root.file_name().unwrap().to_string_lossy()
+    );
+    crate::fs::configure_session_root(&session_id, &root);
+    crate::fs::set_mode(&session_id, crate::fs::FsMode::Staged, Some(&root)).unwrap();
+    crate::fs::stage_write_or_none(
+        BUILTIN,
+        &sibling_path,
+        sibling.as_bytes(),
+        false,
+        true,
+        Some(&session_id),
+    )
+    .unwrap()
+    .expect("sibling was staged");
+    let result = run(
+        &capability.shared(),
+        &[dict(&[
+            (
+                "symbol_ref",
+                dict(&[
+                    ("name", vm_string("DocumentStore")),
+                    ("path", vm_string("lab/store.go")),
+                    ("kind", vm_string("Type")),
+                ]),
+            ),
+            ("new_name", vm_string("DocumentLibrary")),
+            ("scope", vm_string("workspace")),
+            ("backend", vm_string("syntax_tree")),
+            ("session_id", vm_string(&session_id)),
+        ])],
+    )
+    .unwrap();
+    assert_eq!(s(field(&result, "result")), "conflict", "{result:?}");
+    assert_eq!(fs::read_to_string(&seed_path).unwrap(), declaration);
+    assert!(!sibling_path.exists());
+    assert_eq!(
+        crate::fs::read(&sibling_path, Some(&session_id))
+            .unwrap()
+            .unwrap(),
+        sibling.as_bytes()
+    );
+    assert_eq!(
+        crate::fs::staged_status(&session_id)
+            .unwrap()
+            .pending_writes
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn go_workspace_rename_uses_the_staged_seed_package_before_writes() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    fs::create_dir_all(root.join("lab")).unwrap();
+    let declaration = "package lab\n\ntype DocumentStore struct { Count int }\n";
+    let staged_declaration = "package other\n\ntype DocumentStore struct { Count int }\n";
+    let sibling = "package lab\n\nfunc Read(s *DocumentStore) int { return s.Count }\n";
+    let seed_path = root.join("lab/store.go");
+    fs::write(&seed_path, declaration).unwrap();
+    fs::write(root.join("lab/use.go"), sibling).unwrap();
+    let capability = build_index(&root);
+    let session_id = format!(
+        "go-rename-staged-{}",
+        root.file_name().unwrap().to_string_lossy()
+    );
+    crate::fs::configure_session_root(&session_id, &root);
+    crate::fs::set_mode(&session_id, crate::fs::FsMode::Staged, Some(&root)).unwrap();
+    crate::fs::stage_write_or_none(
+        BUILTIN,
+        &seed_path,
+        staged_declaration.as_bytes(),
+        false,
+        true,
+        Some(&session_id),
+    )
+    .unwrap()
+    .expect("seed edit was staged");
+    let result = run(
+        &capability.shared(),
+        &[dict(&[
+            (
+                "symbol_ref",
+                dict(&[
+                    ("name", vm_string("DocumentStore")),
+                    ("path", vm_string("lab/store.go")),
+                    ("kind", vm_string("Type")),
+                ]),
+            ),
+            ("new_name", vm_string("DocumentLibrary")),
+            ("scope", vm_string("workspace")),
+            ("backend", vm_string("syntax_tree")),
+            ("session_id", vm_string(&session_id)),
+        ])],
+    )
+    .unwrap();
+    assert_eq!(
+        s(field(&result, "result")),
+        "ambiguous_symbol",
+        "{result:?}"
+    );
+    assert_eq!(fs::read_to_string(&seed_path).unwrap(), declaration);
+    assert_eq!(
+        fs::read_to_string(root.join("lab/use.go")).unwrap(),
+        sibling
+    );
+    assert_eq!(
+        crate::fs::read(&seed_path, Some(&session_id))
+            .unwrap()
+            .unwrap(),
+        staged_declaration.as_bytes()
+    );
+    assert_eq!(
+        crate::fs::staged_status(&session_id)
+            .unwrap()
+            .pending_writes
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn swift_file_rename() {
     let dir = tempdir().unwrap();
     let root = dir.path();

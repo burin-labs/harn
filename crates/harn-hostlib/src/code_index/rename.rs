@@ -11,7 +11,8 @@
 //!
 //! - `applied`     — the rename succeeded (or, with `dry_run`, would).
 //! - `conflict`    — `new_name` already exists as an identifier in at
-//!   least one file the rename would have touched.
+//!   least one file the rename would have touched, or in a Go sibling
+//!   whose package scope may be affected by the new declaration.
 //! - `no_match`    — `symbol_ref` did not resolve to a node in the graph.
 //! - `ambiguous_symbol` — multiple distinct symbols match `symbol_ref`,
 //!   or an occurrence cannot be proved to refer to the seed binding.
@@ -457,11 +458,38 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         return Ok(no_match_response(&env));
     }
 
+    let check_go_package = is_rename
+        && seed_node.language == "go"
+        && matches!(seed_node.kind, NodeKind::Function | NodeKind::Type);
+    let go_proof = if check_go_package {
+        match super::rename_go::inspect(&state.root, &seed_path, &new_name, session_id.as_deref()) {
+            Ok((package_shadows, _)) if !package_shadows.is_empty() => {
+                return Ok(conflict_response(&env, &package_shadows));
+            }
+            Ok((_, proof)) => Some(proof),
+            Err(detail) => {
+                return Ok(ambiguous_response_with_details(
+                    &env,
+                    &format!("rename aborted without writes: {detail}"),
+                ));
+            }
+        }
+    } else {
+        None
+    };
+
     // Pre-flight done. With `dry_run` we stop here without persisting.
     let failed = if dry_run {
         Vec::new()
     } else {
-        match commit(&env, &call, &state.root, &plans, session_id.as_deref())? {
+        match commit(
+            &env,
+            &call,
+            &state.root,
+            &plans,
+            session_id.as_deref(),
+            go_proof.as_ref(),
+        )? {
             Ok(failed) => failed,
             Err(stopped) => return Ok(stopped),
         }
@@ -583,8 +611,19 @@ fn commit(
     root: &Path,
     plans: &[FilePlan],
     session_id: Option<&str>,
+    go_proof: Option<&super::rename_go::PackageProof>,
 ) -> Result<Result<Vec<(String, String)>, VmValue>, HostlibError> {
     let committed = call.commit(BUILTIN, |writes| {
+        if go_proof.is_some_and(|proof| !proof.unchanged(root, session_id)) {
+            return Ok(Err(emit_response(
+                env,
+                "refused",
+                ResponseExtras {
+                    details: "rename stopped without writes: the Go package changed after the rename read it; run it again".into(),
+                    ..Default::default()
+                },
+            )));
+        }
         let changed =
             super::refactor_core::changed_since_planned(BUILTIN, root, plans, session_id);
         if changed.is_empty() {
