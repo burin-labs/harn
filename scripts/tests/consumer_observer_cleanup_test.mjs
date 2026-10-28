@@ -145,7 +145,8 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
         else if (p.endsWith('/artifacts')) {
           const index=p.includes('/42/') ? 0 : 1;
           const missing=fixture.missing === index;
-          record={total_count:missing ? 0 : 1,artifacts:missing ? [] : [fixture.archives[index].metadata]};
+          record={total_count:missing ? 0 : 1,artifacts:missing || (index === 1 && fixture.incompleteChildCensus)
+            ? [] : [fixture.archives[index].metadata]};
         }
         else if (p.endsWith('/rehearsal.yml/runs')) {
           const selected = new URL(url).searchParams.get('status');
@@ -212,6 +213,12 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     assert.equal(partialSweep.run.status,1);
     assert.match(partialSweep.run.stderr,/reason=observer_census_unmeasured/);
     assert.deepEqual(partialSweep.posts,[],'a partial census cannot become a measured zero');
+    for (const sweep of [false, true]) {
+      const partialChild = execute({incompleteChildCensus:true},false,sweep);
+      assert.equal(partialChild.run.status,1,'an incomplete child census remains an operational failure');
+      assert.match(partialChild.run.stdout,/errors=1/);
+      assert.deepEqual(partialChild.posts,[],'an incomplete child census cannot authorize cancellation');
+    }
     for (const changes of [{missing:0},{missing:1},{child:{...child,run_attempt:2}},
       {child:{...child,actor:{login:'unrelated[bot]',type:'Bot'}}}]) {
       const unownedSweep = execute({...changes,now:8210},false,true);

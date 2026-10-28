@@ -77,7 +77,8 @@ export function observerRefusal(error, fallback) {
 
 function cleanupReadFailed(error) {
   const reason = observerRefusal(error, 'unclassified').reason;
-  return reason === 'unclassified' || reason === 'github_read_unavailable' || reason.endsWith('_read_refused');
+  return reason === 'unclassified' || reason === 'github_read_unavailable'
+    || reason === 'observer_census_unmeasured' || reason.endsWith('_read_refused');
 }
 
 /** Normalize once. Unknown fields cannot silently alter the ownership contract.
