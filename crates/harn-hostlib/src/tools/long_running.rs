@@ -538,7 +538,7 @@ pub(crate) fn spawn_long_running_with_options(
     if let Some(limit) = options.hard_timeout {
         let deadline_handle = handle_id.clone();
         let remaining = limit.saturating_sub(started.elapsed());
-        if let Err(error) = std::thread::Builder::new()
+        if let Err(error) = harn_parser::runtime_stack::builder()
             .name(format!("hto-deadline-{deadline_handle}"))
             .spawn(move || {
                 if matches!(
