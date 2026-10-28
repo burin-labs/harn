@@ -28,14 +28,14 @@ pub(super) fn warm_stdlib_before_cases(threads: usize, json: bool) {
     if json {
         return;
     }
-    eprintln!(
+    cli_diagnostic!(
         "harn conformance: warmed {} of {} stdlib module(s) in {:.1}s",
         report.warmed,
         report.modules,
         started.elapsed().as_secs_f64()
     );
     for (module, error) in &report.failed {
-        eprintln!("harn conformance: stdlib module {module} left lazy: {error}");
+        cli_diagnostic!("harn conformance: stdlib module {module} left lazy: {error}");
     }
 }
 
@@ -1115,7 +1115,7 @@ pub(crate) async fn run_conformance_tests(
             );
             println!("{}", json_envelope::to_string_pretty(&envelope));
         } else {
-            eprintln!("Directory not found: {dir}");
+            cli_diagnostic!("Directory not found: {dir}");
         }
         process::exit(1);
     }
@@ -1130,7 +1130,7 @@ pub(crate) async fn run_conformance_tests(
                 );
                 println!("{}", json_envelope::to_string_pretty(&envelope));
             } else {
-                eprintln!("{error}");
+                cli_diagnostic!("{error}");
             }
             process::exit(1);
         }
@@ -1158,7 +1158,7 @@ pub(crate) async fn run_conformance_tests(
                 );
                 println!("{}", json_envelope::to_string_pretty(&envelope));
             } else {
-                eprintln!("{error}");
+                cli_diagnostic!("{error}");
             }
             process::exit(1);
         }
@@ -1437,11 +1437,11 @@ pub(crate) async fn run_conformance_determinism_tests(
 ) {
     let dir_path = PathBuf::from(dir);
     let suite_root = canonicalize_or_err(&dir_path).unwrap_or_else(|error| {
-        eprintln!("{error}");
+        cli_diagnostic!("{error}");
         process::exit(1);
     });
     let files = resolve_conformance_selection(&suite_root, selection).unwrap_or_else(|error| {
-        eprintln!("{error}");
+        cli_diagnostic!("{error}");
         process::exit(1);
     });
     let mut passed = 0usize;

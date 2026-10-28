@@ -3,6 +3,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use axum::response::IntoResponse;
 use harn_vm::llm::{MachineSpendPolicy, MachineSpendQuota};
 
 use crate::test_util::process::harn_e2e_command;
@@ -153,6 +154,334 @@ async fn local_provider(
     )
     .unwrap();
     (calls, hold_transport, release, server)
+}
+
+async fn judged_agent_provider(
+    root: &Path,
+    actor_priced: bool,
+) -> (Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = calls.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let handler = move |axum::Json(body): axum::Json<serde_json::Value>| {
+        let call = counter.fetch_add(1, Ordering::SeqCst) + 1;
+        async move {
+            let content = if call % 2 == 1 {
+                "<user_response>ready</user_response>\n<done>##DONE##</done>".to_string()
+            } else {
+                let verdict = if actor_priced && call == 2 {
+                    "continue"
+                } else {
+                    "done"
+                };
+                let gap = if verdict == "continue" {
+                    "other"
+                } else {
+                    "none"
+                };
+                serde_json::json!({
+                    "verdict": verdict, "detail": "Reply ready.", "gap_class": gap,
+                    "gaps": [], "goal_assessment": {"kind": "unknown", "evidence_refs": []}
+                })
+                .to_string()
+            };
+            if body["stream"].as_bool() == Some(true) {
+                let chunk = serde_json::json!({"model": body["model"], "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": null}]});
+                let terminal = serde_json::json!({"model": body["model"], "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]});
+                return (
+                    [("content-type", "text/event-stream")],
+                    format!("data: {chunk}\n\ndata: {terminal}\n\ndata: [DONE]\n\n"),
+                )
+                    .into_response();
+            }
+            let mut response = serde_json::json!({"model": body["model"], "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}]});
+            if actor_priced && call == 1 {
+                response["usage"] = serde_json::json!({"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2});
+            }
+            axum::Json(response).into_response()
+        }
+    };
+    let app = axum::Router::new().route("/v1/chat/completions", axum::routing::post(handler));
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    std::fs::write(root.join("providers.toml"), format!("[providers.openai]\nbase_url = \"http://{address}/v1\"\nauth_env = \"SPEND_FIXTURE_KEY\"\n")).unwrap();
+    (calls, server)
+}
+
+async fn invoke_isolated(
+    project: &Path,
+    authority: &Path,
+    transcript_dir: Option<&Path>,
+) -> std::process::Output {
+    let project = project.to_path_buf();
+    let authority = authority.to_path_buf();
+    let transcript_dir = transcript_dir.map(Path::to_path_buf);
+    tokio::task::spawn_blocking(move || {
+        let home = authority.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let mut command = harn_e2e_command();
+        command
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .current_dir(project)
+            .env("HOME", home)
+            .env("HARN_PROVIDERS_CONFIG", authority.join("providers.toml"))
+            .env("HARN_SECRET_PROVIDERS", "env")
+            .env("HARN_SPEND_POLICY", authority.join("policy.toml"))
+            .env("SPEND_FIXTURE_KEY", "local-fixture-only")
+            .env_remove("HARN_LLM_CALLS_DISABLED")
+            .args(["run", "probe.harn"]);
+        if let Some(system_root) = std::env::var_os("SYSTEMROOT") {
+            command.env("SYSTEMROOT", system_root);
+        }
+        if let Some(transcript_dir) = transcript_dir {
+            command.env("HARN_LLM_TRANSCRIPT_DIR", transcript_dir);
+        }
+        command.output().unwrap()
+    })
+    .await
+    .unwrap()
+}
+
+async fn agent_spend_guard_case(
+    actor_priced: bool,
+    strict: bool,
+    expected_calls: usize,
+    transcript_available: bool,
+) {
+    let source = r#"import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+fn main(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("spend-guard")
+  harness.agent.open("spend-guard")
+  const opts: AgentSpec = {
+    provider: "openai", model: "gpt-4o-mini", stream: false, root: root,
+    session_id: "spend-guard", loop_until_done: true, max_iterations: 4,
+    turn_end_condition: true,
+  }
+  const result = agent_loop(harness, "Reply ready.", nil, opts)
+  harness.stdio.println(json_stringify(result))
+}"#;
+    let started = std::time::Instant::now();
+    eprintln!(
+            "spend guard case start: actor_priced={actor_priced} strict={strict} transcript_available={transcript_available}"
+        );
+    let authority = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("probe.harn"), source).unwrap();
+    let transcript_dir = authority.path().join("transcript");
+    if transcript_available {
+        std::fs::create_dir(&transcript_dir).unwrap();
+    } else {
+        // A regular file cannot be a directory, even for a privileged test user.
+        std::fs::write(&transcript_dir, "blocked").unwrap();
+    }
+    let (calls, server) = judged_agent_provider(authority.path(), actor_priced).await;
+    write_policy(authority.path(), 100_000_000);
+    let policy = authority.path().join("policy.toml");
+    let contents = std::fs::read_to_string(&policy).unwrap();
+    std::fs::write(
+        &policy,
+        contents.replace(
+            "[limits]",
+            &format!("stop_on_unknown_usage = {strict}\n[limits]"),
+        ),
+    )
+    .unwrap();
+    let output = invoke_isolated(project.path(), authority.path(), Some(&transcript_dir)).await;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("typed agent result");
+    assert_eq!(calls.load(Ordering::SeqCst), expected_calls, "{result}");
+    let transcript_path = transcript_dir.join("llm_transcript.jsonl");
+    if transcript_available {
+        let transcript = std::fs::read_to_string(&transcript_path).unwrap();
+        assert!(
+            transcript.lines().any(|line| {
+                serde_json::from_str::<serde_json::Value>(line)
+                    .is_ok_and(|event| event["type"] == "provider_call_request")
+            }),
+            "positive transcript control did not reach provider request logging"
+        );
+    } else {
+        assert!(
+            !transcript_path.exists(),
+            "failed transcript unexpectedly exists"
+        );
+    }
+    let receipt = MachineSpendQuota::from_policy_file(&policy)
+        .unwrap()
+        .receipt()
+        .unwrap();
+    let expected_unknown = if strict {
+        1
+    } else if actor_priced {
+        3
+    } else {
+        2
+    };
+    assert_eq!(receipt.lifetime_usage_unknown_attempts, expected_unknown);
+    assert_eq!(receipt.lifetime_unsettled_attempts, expected_unknown);
+    assert_eq!(receipt.lifetime_unpriced_attempts, 0);
+    if actor_priced {
+        assert!(receipt.lifetime_actual_known_microusd > 0);
+    }
+    if !strict {
+        assert_eq!(result["status"], "done", "{result}");
+        assert_eq!(result["visible_text"], "ready", "{result}");
+    } else {
+        assert_ne!(result["status"], "done", "{result}");
+    }
+    eprintln!(
+            "spend guard case complete: actor_priced={actor_priced} strict={strict} transcript_available={transcript_available} elapsed_ms={}",
+            started.elapsed().as_millis()
+        );
+    server.abort();
+}
+
+macro_rules! agent_spend_guard_test {
+    ($name:ident, $actor_priced:expr, $strict:expr, $calls:expr, $transcript:expr) => {
+        #[tokio::test]
+        pub(super) async fn $name() {
+            agent_spend_guard_case($actor_priced, $strict, $calls, $transcript).await;
+        }
+    };
+}
+
+agent_spend_guard_test!(agent_spend_guard_actor_unknown, false, true, 1, false);
+agent_spend_guard_test!(agent_spend_guard_actor_permissive, false, false, 2, false);
+agent_spend_guard_test!(agent_spend_guard_judge_unknown, true, true, 2, false);
+agent_spend_guard_test!(agent_spend_guard_judge_permissive, true, false, 4, false);
+agent_spend_guard_test!(agent_spend_guard_transcript_control, false, false, 2, true);
+
+#[tokio::test]
+pub(super) async fn strict_scope_refuses_a_new_process_after_unpriced_provider_usage() {
+    let authority = tempfile::tempdir().unwrap();
+    let actor = tempfile::tempdir().unwrap();
+    let judge = tempfile::tempdir().unwrap();
+    for (project, role) in [
+        (actor.path(), "agent.main"),
+        (judge.path(), "completion.judge"),
+    ] {
+        std::fs::write(
+            project.join("probe.harn"),
+            format!(
+                r#"fn main(harness: Harness) {{
+  harness.llm.call("hello", nil, {{provider: "openai", model: "gpt-4o-mini", max_tokens: 64, stream: false, call_role: "{role}"}})
+  harness.stdio.println("provider_call_completed")
+}}"#
+            ),
+        )
+        .unwrap();
+    }
+    let (calls, _, _, server) = local_provider(authority.path(), false).await;
+    write_policy(authority.path(), 2_000_000);
+    let policy_path = authority.path().join("policy.toml");
+    let source = std::fs::read_to_string(&policy_path).unwrap();
+    std::fs::write(
+        &policy_path,
+        source.replace("[limits]", "stop_on_unknown_usage = true\n[limits]"),
+    )
+    .unwrap();
+
+    let first = invoke_isolated(actor.path(), authority.path(), None).await;
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(String::from_utf8_lossy(&first.stdout).contains("provider_call_completed"));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let quota = MachineSpendQuota::from_policy_file(&policy_path).unwrap();
+    let receipt = quota.receipt().unwrap();
+    assert_eq!(receipt.lifetime_usage_unknown_attempts, 1);
+    assert!(receipt.lifetime_reserved_microusd > 0);
+    assert!(
+        receipt.lifetime_remaining_microusd.unwrap() >= receipt.lifetime_reserved_microusd,
+        "the second call must fit the remaining allowance without the strict policy"
+    );
+
+    let second = invoke_isolated(judge.path(), authority.path(), None).await;
+    assert!(
+        !second.status.success(),
+        "unpriced actor call must stop the judge"
+    );
+    assert!(
+        String::from_utf8_lossy(&second.stderr).contains("unresolved_usage"),
+        "judge must report the unresolved-usage refusal: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the judge reached the provider"
+    );
+
+    // Reverse the roles in a fresh scope so both programs prove they can
+    // reach the provider when no earlier unknown exists.
+    let source = std::fs::read_to_string(&policy_path).unwrap();
+    std::fs::write(
+        &policy_path,
+        source.replace("scope = \"catalog\"", "scope = \"judge-first\""),
+    )
+    .unwrap();
+    let judge_first = invoke_isolated(judge.path(), authority.path(), None).await;
+    assert!(
+        judge_first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&judge_first.stderr)
+    );
+    assert!(String::from_utf8_lossy(&judge_first.stdout).contains("provider_call_completed"));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let actor_second = invoke_isolated(actor.path(), authority.path(), None).await;
+    assert!(
+        !actor_second.status.success(),
+        "unpriced judge call must stop the actor"
+    );
+    assert!(
+        String::from_utf8_lossy(&actor_second.stderr).contains("unresolved_usage"),
+        "actor must report the unresolved-usage refusal: {}",
+        String::from_utf8_lossy(&actor_second.stderr)
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "the actor reached the provider"
+    );
+
+    let source = std::fs::read_to_string(&policy_path).unwrap();
+    std::fs::write(
+        &policy_path,
+        source
+            .replace("scope = \"judge-first\"", "scope = \"permissive-control\"")
+            .replace(
+                "stop_on_unknown_usage = true",
+                "stop_on_unknown_usage = false",
+            ),
+    )
+    .unwrap();
+    let actor_control = invoke_isolated(actor.path(), authority.path(), None).await;
+    assert!(
+        actor_control.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actor_control.stderr)
+    );
+    let judge_control = invoke_isolated(judge.path(), authority.path(), None).await;
+    assert!(
+        judge_control.status.success(),
+        "{}",
+        String::from_utf8_lossy(&judge_control.stderr)
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        4,
+        "both permissive controls must reach the provider"
+    );
+    server.abort();
 }
 
 #[tokio::test]

@@ -142,10 +142,23 @@ impl VertexProvider {
     ) -> Result<LlmResult, VmError> {
         let dialect = Self::dialect();
         let (url, tenant) = Self::endpoint_url_and_tenant(request)?;
+        let model = crate::llm_config::wire_model_id(&request.model);
+        let boundary =
+            crate::llm::api::inference_boundary::effective_result(request.inference_boundary)
+                .map_err(VmError::Runtime)?;
+        let approved = crate::llm::api::inference_boundary::ApprovedWireRoute::capture(
+            boundary,
+            &request.provider,
+            &url,
+            &model,
+        );
         let token = resolve_vertex_token(&request.api_key, &tenant).await?;
         let mut body = Self::build_request_body(request);
         apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
-        let response = crate::llm::blocking_client_for_base_url(&url)
+        if let Some(approved) = &approved {
+            approved.verify_url_model(&request.provider, &url, &model, &body)?;
+        }
+        let response = crate::llm::blocking_client_for_base_url(&url, approved.as_ref())
             .post(url)
             .header("Content-Type", "application/json")
             .header("Authorization", format!("Bearer {token}"))

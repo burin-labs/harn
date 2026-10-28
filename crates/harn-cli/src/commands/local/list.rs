@@ -28,7 +28,7 @@ pub(crate) async fn run(args: LocalListArgs, base_dir: &Path) -> Result<(), Stri
     for provider in providers {
         match snapshot_provider(&provider, base_dir).await {
             Ok(snapshot) => snapshots.push(snapshot),
-            Err(error) => eprintln!("warning: failed to snapshot {provider}: {error}"),
+            Err(error) => cli_diagnostic!("warning: failed to snapshot {provider}: {error}"),
         }
     }
     if args.json {

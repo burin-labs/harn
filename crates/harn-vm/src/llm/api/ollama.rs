@@ -719,7 +719,7 @@ async fn ollama_warmup(
     // "Effective vs. loaded context" section of docs/src/llm/providers.md.
     let body = settings.warmup_body(model);
 
-    let client = crate::llm::blocking_client_for_base_url(base_url);
+    let client = crate::llm::blocking_client_for_base_url(base_url, None);
     let response = match client
         .post(url.clone())
         .header("Content-Type", "application/json")

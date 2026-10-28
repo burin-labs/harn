@@ -88,9 +88,11 @@ fn no_rule_and_no_config_is_a_helpful_error() {
     std::fs::remove_file(dir.join("harn.toml")).unwrap();
     write(&dir, "src/a.ts", "foo();\n");
 
-    let (_stdout, stderr, code) = run(&dir, &["scan", "src"]);
+    let (stdout, stderr, code) = run(&dir, &["scan", "src"]);
     assert_ne!(code, 0);
+    assert!(stdout.is_empty(), "stdout={stdout}");
     assert!(stderr.contains("ruleDirs"), "stderr={stderr}");
+    assert!(stderr.lines().all(|line| line.starts_with("[harn] ")));
 
     let _ = std::fs::remove_dir_all(&dir);
 }

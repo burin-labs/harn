@@ -37,6 +37,46 @@ use crate::package::{self, Manifest};
 
 const MANIFEST_WATCH_DEBOUNCE: Duration = Duration::from_millis(200);
 
+#[inline(never)]
+fn log_startup(config_path: &Path, manifest: &Manifest, role: OrchestratorRole, state_dir: &Path) {
+    harn_vm::events::log_info(
+        "orchestrator",
+        &format!("manifest: {}", config_path.display()),
+    );
+    if let Some(name) = manifest
+        .package
+        .as_ref()
+        .and_then(|package| package.name.as_deref())
+    {
+        harn_vm::events::log_info("orchestrator", &format!("package: {name}"));
+    }
+    harn_vm::events::log_info(
+        "orchestrator",
+        &format!("role: {} ({})", role.as_str(), role.registry_mode()),
+    );
+    if let Some(gap) = role.unproven_isolation() {
+        harn_vm::events::log_warn("orchestrator", gap);
+        tracing::warn!(
+            component = "orchestrator",
+            trace_id = "",
+            role = role.as_str(),
+            "{gap}"
+        );
+    }
+    harn_vm::events::log_info(
+        "orchestrator",
+        &format!("state dir: {}", state_dir.display()),
+    );
+    tracing::info!(
+        component = "orchestrator",
+        trace_id = "",
+        role = role.as_str(),
+        state_dir = %state_dir.display(),
+        manifest = %config_path.display(),
+        "orchestrator starting"
+    );
+}
+
 async fn wait_for_pump_startup(
     pending_pumps: &mut [(String, PumpHandle)],
     inbox_pumps: &mut [(String, PumpHandle)],
@@ -82,7 +122,7 @@ pub(super) async fn orchestrator_task(
     )
     .await
     {
-        eprintln!("[harn] orchestrator harness error: {error}");
+        harn_vm::events::log_status(&format!("error: orchestrator harness: {error}"));
     }
 }
 
@@ -137,37 +177,7 @@ async fn orchestrator_lifecycle(
     let startup_started_at = now_rfc3339();
     let (admin_reload, mut reload_rx) = AdminReloadHandle::channel();
 
-    eprintln!("[harn] orchestrator manifest: {}", config_path.display());
-    if let Some(name) = manifest
-        .package
-        .as_ref()
-        .and_then(|package| package.name.as_deref())
-    {
-        eprintln!("[harn] orchestrator package: {name}");
-    }
-    eprintln!(
-        "[harn] orchestrator role: {} ({})",
-        config.role.as_str(),
-        config.role.registry_mode()
-    );
-    if let Some(gap) = config.role.unproven_isolation() {
-        eprintln!("[harn] WARNING: {gap}");
-        tracing::warn!(
-            component = "orchestrator",
-            trace_id = "",
-            role = config.role.as_str(),
-            "{gap}"
-        );
-    }
-    eprintln!("[harn] orchestrator state dir: {}", state_dir.display());
-    tracing::info!(
-        component = "orchestrator",
-        trace_id = "",
-        role = config.role.as_str(),
-        state_dir = %state_dir.display(),
-        manifest = %config_path.display(),
-        "orchestrator starting"
-    );
+    log_startup(&config_path, &manifest, config.role, &state_dir);
 
     let workspace_root = manifest_dir.clone();
     let mut vm = config
@@ -178,7 +188,7 @@ async fn orchestrator_lifecycle(
         .ok_or_else(|| "event log was not installed during VM initialization".to_string())?;
     let event_log_description = event_log.describe();
 
-    // The stderr warning above is the loud copy; this is the durable one. An
+    // The stderr warning above is the live copy; this is the durable one. An
     // operator reading `orchestrator.lifecycle` after the fact, or running with
     // `--log-format json`, should be able to see which isolation boundary the
     // role did not build without having caught the boot banner scrolling past.
@@ -202,27 +212,33 @@ async fn orchestrator_lifecycle(
             .into_iter()
             .filter(|tenant| tenant.status == harn_vm::TenantStatus::Active)
             .collect::<Vec<_>>();
-        eprintln!(
-            "[harn] tenants loaded: {} active ({})",
-            active_tenants.len(),
-            active_tenants
-                .iter()
-                .map(|tenant| tenant.scope.id.0.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
+        harn_vm::events::log_info(
+            "orchestrator",
+            &format!(
+                "tenants loaded: {} active ({})",
+                active_tenants.len(),
+                active_tenants
+                    .iter()
+                    .map(|tenant| tenant.scope.id.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         );
         Some(Arc::new(store))
     } else {
         None
     };
-    eprintln!(
-        "[harn] event log: {} {}",
-        event_log_description.backend,
-        event_log_description
-            .location
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "<memory>".to_string())
+    harn_vm::events::log_info(
+        "orchestrator",
+        &format!(
+            "event log: {} {}",
+            event_log_description.backend,
+            event_log_description
+                .location
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "<memory>".to_string())
+        ),
     );
 
     let secret_namespace = harn_vm::secrets::configured_secret_namespace();
@@ -234,7 +250,10 @@ async fn orchestrator_lifecycle(
             .to_string()
             .into());
     }
-    eprintln!("[harn] secret providers: {secret_chain_display} (namespace {secret_namespace})");
+    harn_vm::events::log_info(
+        "orchestrator",
+        &format!("secret providers: {secret_chain_display} (namespace {secret_namespace})"),
+    );
     let secret_provider: Arc<dyn harn_vm::secrets::SecretProvider> = Arc::new(secret_chain);
 
     let extensions = package::load_runtime_extensions(&config_path);
@@ -246,10 +265,13 @@ async fn orchestrator_lifecycle(
     let mut live_bindings =
         package::install_collected_manifest_triggers(&collected_triggers, &extensions).await?;
     apply_supervisor_state(&state_dir).await?;
-    eprintln!(
-        "[harn] registered triggers ({}): {}",
-        live_bindings.len(),
-        format_trigger_summary(&live_bindings)
+    harn_vm::events::log_info(
+        "orchestrator",
+        &format!(
+            "registered triggers ({}): {}",
+            live_bindings.len(),
+            format_trigger_summary(&live_bindings)
+        ),
     );
 
     let binding_versions = live_manifest_binding_versions();
@@ -270,14 +292,20 @@ async fn orchestrator_lifecycle(
     )?;
     let connector_clients = connector_runtime.registry.client_map().await;
     harn_vm::install_active_connector_clients(connector_clients);
-    eprintln!(
-        "[harn] registered connectors ({}): {}",
-        connector_runtime.providers.len(),
-        connector_runtime.providers.join(", ")
+    harn_vm::events::log_info(
+        "orchestrator",
+        &format!(
+            "registered connectors ({}): {}",
+            connector_runtime.providers.len(),
+            connector_runtime.providers.join(", ")
+        ),
     );
-    eprintln!(
-        "[harn] activated connectors: {}",
-        format_activation_summary(&connector_runtime.activations)
+    harn_vm::events::log_info(
+        "orchestrator",
+        &format!(
+            "activated connectors: {}",
+            format_activation_summary(&connector_runtime.activations)
+        ),
     );
     let (mcp_router, mcp_service) = if config.mcp {
         validate_mcp_path(&config.mcp_path)?;
@@ -299,7 +327,10 @@ async fn orchestrator_lifecycle(
             service.clone(),
             config.mcp_path.clone(),
         );
-        eprintln!("[harn] embedded MCP server mounted at {}", config.mcp_path);
+        harn_vm::events::log_info(
+            "orchestrator",
+            &format!("embedded MCP server mounted at {}", config.mcp_path),
+        );
         (Some(router), Some(service))
     } else {
         (None, None)
@@ -435,9 +466,12 @@ async fn orchestrator_lifecycle(
         .activate_all(&connector_runtime.trigger_registry)
         .await
         .map_err(|error| error.to_string())?;
-    eprintln!(
-        "[harn] activated connectors: {}",
-        format_activation_summary(&connector_runtime.activations)
+    harn_vm::events::log_info(
+        "orchestrator",
+        &format!(
+            "activated connectors: {}",
+            format_activation_summary(&connector_runtime.activations)
+        ),
     );
 
     let ready_pump_topics = wait_for_pump_startup(
@@ -508,10 +542,10 @@ async fn orchestrator_lifecycle(
 
     let stranded = stranded_envelopes(&event_log, Duration::ZERO).await?;
     if !stranded.is_empty() {
-        eprintln!(
-            "[harn] startup found {} stranded inbox envelope(s); inspect with `harn orchestrator queue` and recover explicitly with `harn orchestrator recover --dry-run --envelope-age ...`",
+        harn_vm::events::log_warn("orchestrator", &format!(
+            "startup found {} stranded inbox envelope(s); inspect with `harn orchestrator queue` and recover explicitly with `harn orchestrator recover --dry-run --envelope-age ...`",
             stranded.len()
-        );
+        ));
     }
     append_lifecycle_event(
         &event_log,
@@ -531,7 +565,7 @@ async fn orchestrator_lifecycle(
     // The listener has been accepting connections since it bound; this gates the
     // readiness *signal*, not request serving.
     listener.mark_ready();
-    eprintln!("[harn] HTTP listener ready on {}", listener.url());
+    harn_vm::events::log_status(&format!("HTTP listener ready on {}", listener.url()));
     tracing::info!(
         component = "orchestrator",
         trace_id = "",
@@ -616,7 +650,7 @@ async fn orchestrator_lifecycle(
             if shutdown.is_ok() {
                 return Err(OrchestratorError::Serve(error));
             }
-            eprintln!("[harn] observability shutdown warning: {error}");
+            harn_vm::events::log_warn("orchestrator", &format!("observability shutdown: {error}"));
         }
     }
     harn_vm::clear_active_metrics_registry();

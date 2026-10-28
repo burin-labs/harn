@@ -228,14 +228,14 @@ fn log_writer(config: &OrchestratorObservabilityConfig) -> Result<OrchestratorLo
         None
     };
     Ok(OrchestratorLogWriter {
-        format: config.log_format,
+        human_prefix: config.log_format != LogFormat::Json,
         file,
     })
 }
 
 #[derive(Clone)]
 struct OrchestratorLogWriter {
-    format: LogFormat,
+    human_prefix: bool,
     file: Option<Arc<Mutex<RotatingFile>>>,
 }
 
@@ -244,14 +244,14 @@ impl<'a> MakeWriter<'a> for OrchestratorLogWriter {
 
     fn make_writer(&'a self) -> Self::Writer {
         OrchestratorLogLineWriter {
-            format: self.format,
+            prefix_pending: self.human_prefix,
             file: self.file.clone(),
         }
     }
 }
 
 struct OrchestratorLogLineWriter {
-    format: LogFormat,
+    prefix_pending: bool,
     file: Option<Arc<Mutex<RotatingFile>>>,
 }
 
@@ -259,24 +259,26 @@ impl Write for OrchestratorLogLineWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         // The log exporter is a diagnostic, so a host that owns the terminal
         // owns it too.
-        let stream = match self.format {
-            LogFormat::Json => crate::host_stdio::HostStdioStream::Stdout,
-            LogFormat::Text | LogFormat::Pretty => crate::host_stdio::HostStdioStream::Stderr,
+        let mut prefixed = Vec::new();
+        let output = if self.prefix_pending {
+            self.prefix_pending = false;
+            prefixed.extend_from_slice(crate::events::HARN_LOG_PREFIX.as_bytes());
+            prefixed.extend_from_slice(buf);
+            prefixed.as_slice()
+        } else {
+            buf
         };
-        crate::host_stdio::write_bytes(stream, buf);
+        crate::events::write_stderr_log(output);
         if let Some(file) = self.file.as_ref() {
             file.lock()
                 .expect("orchestrator log file poisoned")
-                .write_all(buf)?;
+                .write_all(output)?;
         }
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        match self.format {
-            LogFormat::Json => io::stdout().flush()?,
-            LogFormat::Text | LogFormat::Pretty => io::stderr().flush()?,
-        }
+        io::stderr().flush()?;
         if let Some(file) = self.file.as_ref() {
             file.lock()
                 .expect("orchestrator log file poisoned")

@@ -61,7 +61,7 @@ pub(crate) async fn run(args: OrchestratorDeployArgs) -> Result<(), Orchestrator
     println!("wrote deploy bundle: {}", bundle.provider_dir.display());
 
     if !env.missing_secret_env.is_empty() {
-        eprintln!(
+        cli_diagnostic!(
             "warning: {} manifest secret env var(s) were not set locally and were not synced: {}",
             env.missing_secret_env.len(),
             env.missing_secret_env.join(", ")

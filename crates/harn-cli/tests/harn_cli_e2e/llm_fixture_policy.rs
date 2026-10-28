@@ -8,6 +8,91 @@ use crate::test_util::process::harn_e2e_command;
 
 const REPLY: &str = "cli-fixture-proof";
 
+#[tokio::test]
+async fn project_manifest_cannot_forge_host_privacy_fact_for_live_call() {
+    let temp = tempfile::tempdir().unwrap();
+    let provider = Provider::start(temp.path(), false).await;
+    let host_config = std::fs::read_to_string(&provider.config).unwrap()
+        + r#"
+[providers.runner-proof.data_controls]
+control_scope = "none"
+retention_default = "unspecified"
+training_default = "unspecified"
+checked_on = "2026-10-27"
+sources = ["https://example.invalid/host-policy"]
+"#;
+    std::fs::write(&provider.config, host_config).unwrap();
+    std::fs::write(
+        temp.path().join("harn.toml"),
+        r#"
+[llm.providers.runner-proof.data_controls]
+control_scope = "none"
+retention_default = "unspecified"
+training_default = "does_not_train"
+checked_on = "2026-10-27"
+sources = ["https://example.invalid/project-claim"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(temp.path().join("main.harn"), r#"
+fn main(harness: Harness) {
+  const result = harness.llm.call("fixture", nil, {provider: "runner-proof", model: "runner-proof", stream: true, max_tokens: 16})
+  harness.stdio.log(result.text)
+}
+"#).unwrap();
+    let run = |bounded: bool| {
+        let mut command = harn_e2e_command();
+        command
+            .current_dir(temp.path())
+            .args(["run", "main.harn"])
+            .env("HARN_PROVIDERS_CONFIG", &provider.config)
+            .env("HARN_LLM_CALLS_DISABLED", "0")
+            .env("HARN_LLM_RATE_LIMIT_DURABLE", "0")
+            .env("NO_COLOR", "1")
+            .env_remove("HARN_INFERENCE_BOUNDARY_JSON");
+        if bounded {
+            command.env(
+                "HARN_INFERENCE_BOUNDARY_JSON",
+                r#"{"reach":"any_hosted","allow_training_discounts":false}"#,
+            );
+        }
+        command
+    };
+    let mut allowed_command = run(false);
+    let mut refused_command = run(true);
+    let allowed = tokio::task::spawn_blocking(move || allowed_command.output().unwrap())
+        .await
+        .unwrap();
+    assert!(
+        allowed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+    assert!(String::from_utf8_lossy(&allowed.stdout).contains(REPLY));
+    assert_eq!(
+        provider.requests.lock().unwrap().len(),
+        1,
+        "unbounded positive control reached the listener"
+    );
+    let refused = tokio::task::spawn_blocking(move || refused_command.output().unwrap())
+        .await
+        .unwrap();
+    assert!(
+        !refused.status.success(),
+        "host ceiling must refuse project privacy claims"
+    );
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains("inference_boundary.training_unknown"),
+        "{stderr}"
+    );
+    assert_eq!(
+        provider.requests.lock().unwrap().len(),
+        1,
+        "bounded call sent no request"
+    );
+}
+
 struct Provider {
     config: std::path::PathBuf,
     requests: Arc<Mutex<Vec<serde_json::Value>>>,

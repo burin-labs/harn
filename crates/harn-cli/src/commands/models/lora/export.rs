@@ -38,7 +38,7 @@ pub(super) async fn export_dataset(args: &ModelsLoraExportArgs) -> i32 {
     let report = match export_report(args) {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };

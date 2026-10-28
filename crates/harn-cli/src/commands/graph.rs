@@ -110,7 +110,7 @@ pub(crate) async fn run(args: GraphArgs) -> i32 {
                     JsonEnvelope::err(GRAPH_SCHEMA_VERSION, "graph_error", error);
                 println!("{}", to_string_pretty(&envelope));
             } else {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
             }
             return 1;
         }
@@ -123,7 +123,7 @@ async fn run_dispatch(report: &GraphReport, json: bool) -> i32 {
     let view_json = match serde_json::to_string(report) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("internal error: failed to serialise graph view: {error}");
+            cli_diagnostic!("error: failed to serialise graph view: {error}");
             return 1;
         }
     };

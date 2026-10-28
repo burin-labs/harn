@@ -424,6 +424,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
         crate::llm::api::data_controls::dialect_of(dialect.stream_protocol()),
         opts.data_controls,
         boundary,
+        crate::llm::api::data_controls::ControlDelivery::Written,
     );
     if let Some(refusal) = crate::llm::api::data_controls::training_refusal(
         &opts.provider,
@@ -443,9 +444,15 @@ pub(crate) async fn vm_call_llm_api_with_body(
         )?;
         data_controls_receipt.inference_boundary_rule = Some(rule.to_string());
         data_controls_receipt.inference_catalog_evidence = Some(
-            super::inference_boundary::catalog_evidence(&opts.provider, &opts.model)?,
+            super::inference_boundary::catalog_evidence(&opts.provider, &opts.model, true)?,
         );
     }
+    let approved_wire_route = super::inference_boundary::ApprovedWireRoute::capture(
+        boundary,
+        &opts.provider,
+        &crate::llm::helpers::ResolvedProvider::resolve(&opts.provider).url(),
+        &crate::llm_config::wire_model_id(&opts.model),
+    );
     let mut result = vm_call_llm_api_with_body_inner(
         opts,
         delta_tx,
@@ -454,6 +461,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
         request_origin,
         &data_controls,
         managed_request.as_ref(),
+        approved_wire_route.as_ref(),
     )
     .await;
     // The receipt describes what Harn sent, so it must survive a provider
@@ -541,6 +549,7 @@ async fn vm_call_llm_api_with_body_inner(
     request_origin: tokio::time::Instant,
     data_controls: &crate::llm::api::data_controls::DataControlsPlan,
     managed_request: Option<&crate::llm::managed_supply::ManagedSupplyRequest>,
+    approved_wire_route: Option<&super::inference_boundary::ApprovedWireRoute>,
 ) -> Result<LlmResult, VmError> {
     let stream_protocol = dialect.stream_protocol();
     let provider = &opts.provider;
@@ -620,11 +629,14 @@ async fn vm_call_llm_api_with_body_inner(
     // finite-field adapters and optional data-control writes.
     crate::llm::managed_supply::attach_request_extension(&mut body, managed_request)?;
     private_inputs::filter_text_fields(&mut body);
+    if let Some(approved) = approved_wire_route {
+        approved.verify(provider, &resolved.url(), &body)?;
+    }
 
     let client = if use_stream_transport {
-        crate::llm::streaming_client_for_base_url(&resolved.base_url)
+        crate::llm::streaming_client_for_base_url(&resolved.base_url, approved_wire_route)
     } else {
-        crate::llm::blocking_client_for_base_url(&resolved.base_url)
+        crate::llm::blocking_client_for_base_url(&resolved.base_url, approved_wire_route)
     };
 
     let req = client

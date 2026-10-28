@@ -5,6 +5,7 @@ use crate::value::{VmError, VmValue};
 #[test]
 fn managed_spending_pause_survives_http_and_stream_transport() {
     let _guard = env_guard();
+    let _trusted_catalog = ClearTrustedManagedCatalog;
     let _allow_llm_transport = allow_stubbed_llm_transport();
     for (reason, kind, class) in [
         (

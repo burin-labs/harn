@@ -289,7 +289,7 @@ pub(crate) async fn warm_ollama(
         // Failure here is non-fatal — the readiness probe below will give
         // a clear `model_missing` message in that case.
         if let Err(error) = ensure_ollama_model_pulled(model).await {
-            eprintln!("warning: ollama pull skipped: {error}");
+            cli_diagnostic!("warning: ollama pull skipped: {error}");
         }
     }
 

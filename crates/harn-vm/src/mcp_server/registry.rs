@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use super::convert::{prompt_value_to_messages, vm_value_to_content, vm_value_to_json};
 use super::defs::{
@@ -13,6 +14,77 @@ use crate::mcp_tasks::McpTaskSupport;
 use crate::stdlib::json_to_vm_value;
 use crate::value::VmError;
 use crate::vm::Vm;
+
+tokio::task_local! {
+    static SERVED_MCP_COMPOSITION: Option<ServedComposition>;
+}
+
+struct ServedComposition {
+    entries: BTreeMap<String, Arc<crate::value::DictMap>>,
+    prepared: Arc<crate::tool_registry::PreparedToolCatalog>,
+}
+
+pub(crate) fn is_served_composition() -> bool {
+    SERVED_MCP_COMPOSITION
+        .try_with(Option::is_some)
+        .unwrap_or(false)
+}
+
+pub(crate) fn composition_allows_tool(name: &str, entry: &Arc<crate::value::DictMap>) -> bool {
+    SERVED_MCP_COMPOSITION
+        .try_with(|allowed| {
+            allowed
+                .as_ref()
+                .and_then(|served| served.entries.get(name))
+                .is_some_and(|published| Arc::ptr_eq(published, entry))
+        })
+        .unwrap_or(false)
+}
+
+pub(crate) fn composition_catalog(
+    name: &str,
+) -> Result<Arc<crate::tool_registry::PreparedToolCatalog>, VmError> {
+    let unavailable = || VmError::CategorizedError {
+        message: format!("tool '{name}' has no prepared MCP server catalog entry"),
+        category: crate::value::ErrorCategory::SchemaValidation,
+    };
+    SERVED_MCP_COMPOSITION
+        .try_with(|served| {
+            let served = served.as_ref().ok_or_else(unavailable)?;
+            served.prepared.entry(name).ok_or_else(unavailable)?;
+            Ok(Arc::clone(&served.prepared))
+        })
+        .map_err(|_| unavailable())?
+}
+
+#[cfg(test)]
+pub(crate) async fn scope_composition_for_test<F: std::future::Future>(
+    entries: BTreeMap<String, Arc<crate::value::DictMap>>,
+    future: F,
+) -> F::Output {
+    let mut registry = crate::value::DictMap::new();
+    registry.insert(
+        "_type".into(),
+        crate::value::VmValue::String("tool_registry".into()),
+    );
+    registry.insert(
+        "tools".into(),
+        crate::value::VmValue::list(
+            entries
+                .values()
+                .cloned()
+                .map(crate::value::VmValue::Dict)
+                .collect(),
+        ),
+    );
+    let catalog =
+        crate::tool_registry::tool_registry_catalog(&crate::value::VmValue::dict(registry))
+            .unwrap();
+    let prepared = Arc::new(crate::tool_registry::PreparedToolCatalog::prepare(catalog).unwrap());
+    SERVED_MCP_COMPOSITION
+        .scope(Some(ServedComposition { entries, prepared }), future)
+        .await
+}
 
 /// Tools, resources, and prompts a script published for `harn serve mcp`.
 ///
@@ -148,7 +220,17 @@ impl McpScriptRegistry {
             client_capabilities(params),
             scope_context(
                 progress,
-                crate::tool_handler_scope::scope(vm.call_closure_pub(&tool.handler, &[args_vm])),
+                SERVED_MCP_COMPOSITION.scope(
+                    (tool.catalog.name == "harn.code.execute_composition").then(|| {
+                        ServedComposition {
+                            entries: self.tools.published_entries().clone(),
+                            prepared: self.tools.prepared_catalog(),
+                        }
+                    }),
+                    crate::tool_handler_scope::scope(
+                        vm.call_closure_pub(&tool.handler, &[args_vm]),
+                    ),
+                ),
             ),
         )
         .await

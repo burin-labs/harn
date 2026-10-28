@@ -1,6 +1,6 @@
 {
-  "schema_version": 13,
-  "schema": "https://harnlang.com/schemas/provider-catalog.v13.json",
+  "schema_version": 14,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v14.json",
   "generated_by": "harn provider catalog generate",
   "providers": [
     {
@@ -578,14 +578,15 @@
       },
       "data_controls": {
         "control_scope": "per_request",
-        "retention_default": "abuse_monitoring_only",
-        "training_default": "does_not_train",
-        "checked_on": "2026-08-30",
+        "retention_default": "unspecified",
+        "training_default": "unspecified",
+        "checked_on": "2026-10-27",
         "sources": [
+          "https://ai.google.dev/gemini-api/terms",
           "https://ai.google.dev/gemini-api/docs/zdr",
           "https://ai.google.dev/gemini-api/docs/logs-policy"
         ],
-        "note": "Paid tier only. Full zero-data-retention is a per-project approval; Search grounding retains for 30 days regardless.",
+        "note": "Harn cannot confirm whether this project uses paid service with Contributor Tier sharing turned off. Full zero-data-retention requires approval; Search grounding retains data for 30 days.",
         "request_controls": [
           {
             "location": "body",
@@ -1023,14 +1024,15 @@
       "stream_usage_accounting": true,
       "data_controls": {
         "control_scope": "account",
-        "retention_default": "abuse_monitoring_only",
-        "training_default": "does_not_train",
-        "checked_on": "2026-08-30",
+        "retention_default": "unspecified",
+        "training_default": "unspecified",
+        "checked_on": "2026-10-27",
         "sources": [
-          "https://docs.mistral.ai/admin/monitor-comply/privacy-data-controls",
+          "https://help.mistral.ai/en/articles/347617-do-you-use-my-user-data-to-train-your-artificial-intelligence-models",
+          "https://help.mistral.ai/en/articles/455207-can-i-opt-out-of-my-input-or-output-data-being-used-for-training",
           "https://docs.mistral.ai/admin/monitor-comply/zero-data-retention"
         ],
-        "note": "Paid API traffic is excluded from training by default; free-tier training is opted out in the Admin Console. ZDR is a contract."
+        "note": "Harn cannot confirm whether API data sharing is turned off for this account. Mistral documents a separate API opt-out. Zero data retention requires approval."
       },
       "protocols": [
         "openai_chat_completions"

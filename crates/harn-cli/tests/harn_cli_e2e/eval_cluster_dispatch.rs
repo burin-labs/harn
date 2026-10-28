@@ -26,6 +26,21 @@ use std::process::Command;
 use crate::test_util::cli::workspace_root;
 use harn_cli::dispatch::run_embedded_script;
 
+#[test]
+fn structural_eval_argument_failure_uses_the_cli_diagnostic_sink() {
+    let output = crate::test_util::cli::run_harn(&[
+        "eval",
+        "missing.harn",
+        "--structural-experiment",
+        "example",
+    ]);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("[harn] error:"), "{stderr}");
+    assert!(stderr.contains("--structural-experiment"), "{stderr}");
+}
+
 // ─── eval context ────────────────────────────────────────────────────────
 
 #[test]

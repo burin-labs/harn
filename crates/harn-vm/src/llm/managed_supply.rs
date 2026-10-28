@@ -258,11 +258,13 @@ fn validate_served_admission(
 ) -> Result<(), ManagedSupplyContractError> {
     // The hosted wire adapter sends no opt-out controls. A planned control
     // cannot establish admission; use the default plan's actual empty writes.
-    let controls = data_controls::resolve(
+    let controls = data_controls::resolve_for_boundary(
         provider,
         model,
         crate::llm_config::DataControlDialect::OpenAiSse,
         crate::llm_config::DataPosture::Default,
+        Some(boundary),
+        data_controls::ControlDelivery::Unsupported,
     );
     inference_boundary::governing_rule(boundary, provider, model, &controls.receipt)
         .map(|_| ())
@@ -504,6 +506,55 @@ pub(crate) fn authoritative_cost_usd(result: &crate::llm::api::LlmResult) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gateway_route_refuses_project_invented_no_training_fact() {
+        struct Clear;
+        impl Drop for Clear {
+            fn drop(&mut self) {
+                crate::llm_config::clear_user_overrides();
+                crate::llm_config::clear_runtime_catalog_overlay();
+            }
+        }
+        let _guard = crate::llm::test_env::env_guard();
+        let _clear = Clear;
+        let mut provider = crate::llm_config::provider_config("openai").unwrap();
+        provider.data_controls.as_mut().unwrap().training_default =
+            crate::llm_config::TrainingDefault::DoesNotTrain;
+        let mut host = crate::llm_config::ProvidersConfig::default();
+        host.providers.insert("openai".into(), provider.clone());
+        crate::llm_config::set_runtime_catalog_overlay(Some(host));
+        let request = ManagedSupplyRequest {
+            version: MANAGED_SUPPLY_VERSION,
+            inference_boundary: InferenceBoundary {
+                reach: crate::llm::api::InferenceReach::AnyHosted,
+                allow_training_discounts: false,
+            },
+            logical_route: ManagedSupplyLogicalRoute {
+                provider: "openai".into(),
+                model: "gpt-5.6-luna".into(),
+                capability_fingerprint: capability_fingerprint("openai", "gpt-5.6-luna"),
+            },
+        };
+        assert!(
+            compatible_served_route(&request, "openai", "gpt-5.6-luna").is_ok(),
+            "trusted positive control"
+        );
+        provider.data_controls.as_mut().unwrap().training_default =
+            crate::llm_config::TrainingDefault::Unspecified;
+        let mut host = crate::llm_config::ProvidersConfig::default();
+        host.providers.insert("openai".into(), provider.clone());
+        crate::llm_config::set_runtime_catalog_overlay(Some(host));
+        provider.data_controls.as_mut().unwrap().training_default =
+            crate::llm_config::TrainingDefault::DoesNotTrain;
+        let mut project = crate::llm_config::ProvidersConfig::default();
+        project.providers.insert("openai".into(), provider);
+        crate::llm_config::set_user_overrides(Some(project));
+        assert!(
+            compatible_served_route(&request, "openai", "gpt-5.6-luna").is_err(),
+            "gateway must refuse before provider egress"
+        );
+    }
 
     #[test]
     fn direct_route_keeps_one_identity_and_emits_no_extension() {

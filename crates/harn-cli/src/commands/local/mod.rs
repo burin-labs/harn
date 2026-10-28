@@ -36,7 +36,7 @@ pub(crate) async fn run(args: LocalArgs) {
         LocalCommand::Stop(args) => stop::run(args, &base_dir).await,
     };
     if let Err(error) = result {
-        eprintln!("error: {error}");
+        cli_diagnostic!("error: {error}");
         std::process::exit(1);
     }
 }

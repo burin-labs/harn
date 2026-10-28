@@ -82,10 +82,10 @@ pub(super) fn write_applied_fixes(
     contents: &str,
 ) {
     std::fs::write(path, contents).unwrap_or_else(|error| {
-        eprintln!("Failed to write {path_str}: {error}");
+        cli_diagnostic!("Failed to write {path_str}: {error}");
         std::process::exit(1);
     });
-    eprintln!("{path_str}: applied {applied} fix(es)");
+    cli_diagnostic!("{path_str}: applied {applied} fix(es)");
 }
 
 /// Buffered form of [`print_lint_diagnostics`] for callers that replay text

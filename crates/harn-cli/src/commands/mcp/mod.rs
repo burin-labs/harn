@@ -48,46 +48,39 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
     match command {
         McpCommand::Serve(args) => {
             if let Err(error) = serve::run(args).await {
-                eprintln!("error: {error}");
-                process::exit(1);
+                crate::fatal_error(error);
             }
         }
         McpCommand::Call(args) => match call::run(args).await {
             Ok(0) => {}
             Ok(code) => process::exit(code),
             Err(error) => {
-                eprintln!("error: {error}");
-                process::exit(1);
+                crate::fatal_error(error);
             }
         },
         McpCommand::Mock(args) => match mock::run(&args.command).await {
             Ok(0) => {}
             Ok(code) => process::exit(code),
             Err(error) => {
-                eprintln!("error: {error}");
-                process::exit(1);
+                crate::fatal_error(error);
             }
         },
         McpCommand::Login(options) => {
             if let Err(error) = login(options).await {
-                eprintln!("error: {error}");
-                process::exit(1);
+                crate::fatal_error(error);
             }
         }
         McpCommand::Logout(server_ref) => {
             let server = resolve_server_reference(server_ref).unwrap_or_else(|error| {
-                eprintln!("error: {error}");
-                process::exit(1);
+                crate::fatal_error(error);
             });
             let discovery = mcp_oauth::discover(&server.url)
                 .await
                 .unwrap_or_else(|error| {
-                    eprintln!("error: {error}");
-                    process::exit(1);
+                    crate::fatal_error(error);
                 });
             let resource = canonical_server_resource(&server.url).unwrap_or_else(|error| {
-                eprintln!("error: {error}");
-                process::exit(1);
+                crate::fatal_error(error);
             });
             mcp_oauth::delete_token(
                 &resource,
@@ -96,8 +89,7 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
             )
             .await
             .unwrap_or_else(|error| {
-                eprintln!("error: {error}");
-                process::exit(1);
+                crate::fatal_error(error);
             });
             println!(
                 "Removed stored OAuth token for {} ({})",
@@ -109,24 +101,20 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
             // With a target, keep the focused per-server OAuth detail.
             if server_ref.target.is_none() && server_ref.url.is_none() {
                 if let Err(error) = run_mcp_status_report(server_ref.json).await {
-                    eprintln!("error: {error}");
-                    process::exit(1);
+                    crate::fatal_error(error);
                 }
                 return;
             }
             let server = resolve_server_reference(server_ref).unwrap_or_else(|error| {
-                eprintln!("error: {error}");
-                process::exit(1);
+                crate::fatal_error(error);
             });
             let discovery = mcp_oauth::discover(&server.url)
                 .await
                 .unwrap_or_else(|error| {
-                    eprintln!("error: {error}");
-                    process::exit(1);
+                    crate::fatal_error(error);
                 });
             let resource = canonical_server_resource(&server.url).unwrap_or_else(|error| {
-                eprintln!("error: {error}");
-                process::exit(1);
+                crate::fatal_error(error);
             });
             match mcp_oauth::load_token(
                 &resource,
@@ -139,8 +127,7 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                     if server_ref.json {
                         print_focused_status_report(&server, "connected", Some(&token), None)
                             .unwrap_or_else(|error| {
-                                eprintln!("error: {error}");
-                                process::exit(1);
+                                crate::fatal_error(error);
                             });
                         return;
                     }
@@ -168,8 +155,7 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                     if server_ref.json {
                         print_focused_status_report(&server, "auth_required", None, None)
                             .unwrap_or_else(|error| {
-                                eprintln!("error: {error}");
-                                process::exit(1);
+                                crate::fatal_error(error);
                             });
                         return;
                     }
@@ -181,20 +167,17 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                     if server_ref.json {
                         print_focused_status_report(&server, "error", None, Some(error))
                             .unwrap_or_else(|encode_error| {
-                                eprintln!("error: {encode_error}");
-                                process::exit(1);
+                                crate::fatal_error(encode_error);
                             });
                         return;
                     }
-                    eprintln!("error: {error}");
-                    process::exit(1);
+                    crate::fatal_error(error);
                 }
             }
         }
         McpCommand::Discover(args) => {
             if let Err(error) = discover_mcp_json(args).await {
-                eprintln!("error: {error}");
-                process::exit(1);
+                crate::fatal_error(error);
             }
         }
         McpCommand::RedirectUri => {
