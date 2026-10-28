@@ -214,6 +214,22 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         .expect("resolve_seed returned a node id present in the graph");
     let seed_path = seed_node.path.to_string();
 
+    if is_rename && !is_identifier_token(&new_name) {
+        return Ok(invalid_identifier_response(
+            &env,
+            "must start with a letter or underscore and consist of identifier characters",
+        ));
+    }
+
+    // Java type references and public-type file moves are not yet represented
+    // by the rename planner; changing only the declaration breaks callers.
+    if seed_node.language == "java" && seed_node.kind == NodeKind::Type {
+        return Ok(ambiguous_response_with_details(
+            &env,
+            "rename aborted without writes: Java type references and public-type file moves cannot yet be proven by this rename path",
+        ));
+    }
+
     let in_scope_files = files_in_scope(
         state,
         scope,
@@ -228,12 +244,6 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     // Replace mode rewrites arbitrary text, which a language server's rename
     // cannot express, so it always uses the syntax-tree engine.
     if is_rename && backend != BackendChoice::SyntaxTree {
-        if !is_identifier_token(&new_name) {
-            return Ok(invalid_identifier_response(
-                &env,
-                "must start with a letter or underscore and consist of identifier characters",
-            ));
-        }
         let request = language_server::Request {
             state,
             seed: seed_node,
@@ -281,16 +291,6 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         return Ok(ambiguous_response_with_details(
             &env,
             "rename aborted without writes: the scope contains separate declarations with this name. Pinning the seed does not disambiguate their references; use a binding-aware LSP rename or narrow the scope.",
-        ));
-    }
-
-    // The identifier-validity gate is a rename-only concern: an arbitrary
-    // `replacement_text` (e.g. `client.fetch(`) is intentionally not an
-    // identifier. Syntax validation (below) is the safety net for replace mode.
-    if is_rename && !is_identifier_token(&new_name) {
-        return Ok(invalid_identifier_response(
-            &env,
-            "must start with a letter or underscore and consist of identifier characters",
         ));
     }
 
