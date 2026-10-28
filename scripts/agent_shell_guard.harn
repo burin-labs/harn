@@ -1455,7 +1455,7 @@ fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>
   return false
 }
 
-// Tree-sitter reports UTF-8 byte offsets; Harn substring indexes characters.
+/** Tree-sitter reports UTF-8 byte offsets; Harn substring indexes characters. */
 fn character_offset_at_byte(text: string, target: int) -> int {
   let bytes = 0
   for index in range(0, len(text)) {
@@ -1472,6 +1472,40 @@ fn character_offset_at_byte(text: string, target: int) -> int {
   } else {
     -1
   }
+}
+
+/** Validate a capture before removing any text from the command. */
+fn heredoc_capture(command: string, found: dict, previous: int) -> dict {
+  const start_capture = found.captures?.start
+  const start = start_capture?.text
+  const body_capture = found.captures?.body
+  const body = body_capture?.text
+  const range = body_capture?.range
+  const redirect = found.captures?.redirect
+  if type_of(start) != "string" || type_of(body) != "string" || type_of(range) != "dict"
+    || type_of(start_capture?.range) != "dict"
+    || type_of(redirect?.text) != "string"
+    || type_of(redirect?.range) != "dict" {
+    return {ok: false}
+  }
+  const begin = character_offset_at_byte(command, redirect.range.start_byte)
+  const end = character_offset_at_byte(command, redirect.range.end_byte)
+  const body_begin = character_offset_at_byte(command, range.start_byte)
+  const body_end = character_offset_at_byte(command, range.end_byte)
+  const delimiter_begin = character_offset_at_byte(command, start_capture.range.start_byte)
+  const delimiter_end = character_offset_at_byte(command, start_capture.range.end_byte)
+  if begin < previous || end < begin || body_begin < begin || body_end < body_begin
+    || body_end > end
+    || delimiter_begin < begin
+    || delimiter_end < delimiter_begin
+    || delimiter_end > body_begin
+    || command.substring(begin, end) != redirect.text
+    || command.substring(delimiter_begin, delimiter_end) != start
+    || command.substring(body_begin, body_end) != body
+    || command.substring(delimiter_end, body_begin).trim() != "" {
+    return {ok: false}
+  }
+  return {ok: true, begin: begin, end: end, start: start, body: body}
 }
 
 /**
@@ -1502,39 +1536,16 @@ fn heredoc_stash_write(
   let sanitized = ""
   let previous = 0
   for found in bodies.matches {
-    const start_capture = found.captures?.start
-    const start = start_capture?.text
-    const body = found.captures?.body?.text
-    const range = found.captures?.body?.range
-    const redirect = found.captures?.redirect
-    if type_of(start) != "string" || type_of(body) != "string" || type_of(range) != "dict"
-      || type_of(start_capture?.range) != "dict"
-      || type_of(redirect?.text) != "string"
-      || type_of(redirect?.range) != "dict" {
+    const capture = heredoc_capture(command, found, previous)
+    if !capture.ok {
       return true
     }
-    const begin = character_offset_at_byte(command, redirect.range.start_byte)
-    const end = character_offset_at_byte(command, redirect.range.end_byte)
-    const body_begin = character_offset_at_byte(command, range.start_byte)
-    const body_end = character_offset_at_byte(command, range.end_byte)
-    const delimiter_begin = character_offset_at_byte(command, start_capture.range.start_byte)
-    const delimiter_end = character_offset_at_byte(command, start_capture.range.end_byte)
-    if begin < previous || end < begin || body_begin < begin || body_end < body_begin
-      || body_end > end
-      || delimiter_begin < begin
-      || delimiter_end < delimiter_begin
-      || delimiter_end > body_begin
-      || command.substring(begin, end) != redirect.text
-      || command.substring(delimiter_begin, delimiter_end) != start
-      || command.substring(body_begin, body_end) != body
-      || command.substring(delimiter_end, body_begin).trim() != "" {
-      return true
-    }
-    sanitized = sanitized + command.substring(previous, begin)
-    previous = end
+    sanitized = sanitized + command.substring(previous, capture.begin)
+    previous = capture.end
     // Any quoted delimiter suppresses expansion for the whole heredoc.
-    if !start.contains("'") && !start.contains("\"") && !start.contains("\\") {
-      const substitutions = substitution_bodies(body, false)
+    if !capture.start.contains("'") && !capture.start.contains("\"")
+      && !capture.start.contains("\\") {
+      const substitutions = substitution_bodies(capture.body, false)
       if !substitutions.ok {
         return true
       }
