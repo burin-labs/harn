@@ -1,4 +1,4 @@
-pub(crate) const CASES: [&str; 30] = [
+pub(crate) const CASES: [&str; 31] = [
     "provider_account_confirmation::gemini_confirmation_requires_billing_and_contributor_sharing_off",
     "provider_account_confirmation::account_confirmation_is_not_exposed_to_scripts_or_child_processes",
     "eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs",
@@ -32,4 +32,5 @@ pub(crate) const CASES: [&str; 30] = [
     "durable_spend_policy::agent_spend_guard_judge_unknown",
     "durable_spend_policy::agent_spend_guard_judge_permissive",
     "durable_spend_policy::agent_spend_guard_transcript_control",
+    "provider_account_confirmation::script_server_applies_confirmations_before_provider_transport",
 ];
