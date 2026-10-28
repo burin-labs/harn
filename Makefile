@@ -847,6 +847,8 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/release_gate_stale_out_dir_test.sh
 	./scripts/tests/release_gate_docs_proof_test.sh
 	./scripts/tests/prune_stale_targets_test.sh
+	bash ./scripts/tests/prune_stale_targets_lock_test.sh
+	python3 ./scripts/tests/prune_stale_targets_reader_test.py
 	./scripts/tests/prune_stale_targets_retention_test.sh
 	./scripts/tests/prune_stale_targets_host_policy_test.sh
 	bash ./scripts/tests/prune_stale_targets_pressure_test.sh

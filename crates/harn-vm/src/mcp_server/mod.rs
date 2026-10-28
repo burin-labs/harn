@@ -14,7 +14,7 @@ mod register;
 mod registry;
 #[cfg(test)]
 pub(crate) use registry::scope_composition_for_test;
-pub(crate) use registry::{composition_allows_tool, is_served_composition};
+pub(crate) use registry::{composition_allows_tool, composition_catalog, is_served_composition};
 mod tools_schema;
 pub mod uri;
 
