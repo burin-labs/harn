@@ -68,7 +68,7 @@ sha="$(jq -er --arg repository "$repository" --arg run_id "$run_id" --arg attach
     and ($repair == "true" or $standalone == "true" or (.status == "completed" and
       (.conclusion == "success" or ($attached == "true" and .conclusion == "failure"))))
     and (.event == "merge_group" or
-      ((.event == "push" or .event == "workflow_dispatch") and .head_branch == "main")))
+      ((.event == "push" or .event == "schedule" or .event == "workflow_dispatch") and .head_branch == "main")))
   | .head_sha | select(type == "string" and test("^[0-9a-f]{40}$"))
 ' <<< "$run")" || {
   echo "::error::Run $run_id is not a successful owning release producer." >&2
@@ -85,7 +85,9 @@ jq -e --arg sha "$sha" '
   echo "::error::Candidate $sha is not contained in main." >&2
   exit 1
 }
-if [[ "$(jq -r '.event' <<< "$run")" == workflow_dispatch ]]; then
+# A maintainer-named non-push producer must hold a complete candidate. An
+# automatic run of any producer leaves the candidate lookup to the planner.
+if [[ "${RECOVERY:-false}" == true && "$(jq -r '.event' <<< "$run")" != push ]]; then
   cargo="$(gh api "repos/$repository/contents/Cargo.toml?ref=$sha" \
     -H 'Accept: application/vnd.github.raw+json')"
   version="$(release_workspace_version <<< "$cargo")"

@@ -13,10 +13,9 @@ name: Build release binaries
 #      separate promotion workflow publishes exactly these files; nothing here
 #      creates a tag, a GitHub release, or a container.
 #
-#      This push is the only release candidate producer. The macOS smoke runs
-#      on a trusted host whose runner group admits this workflow only on
-#      refs/heads/main, so a candidate built on any other ref could never
-#      finish (.github/restricted-runner-groups.json).
+#      The macOS smoke runs on a trusted host whose runner group admits this
+#      workflow only on refs/heads/main, so a candidate built on any other ref
+#      could never finish (.github/restricted-runner-groups.json).
 #
 #   2. push main, any other commit — warm-cache-only mode. Runs the same build
 #      matrix to populate the per-target Swatinem rust-cache on main so the
@@ -31,7 +30,13 @@ name: Build release binaries
 #
 #   4. workflow_dispatch — warm_cache_only, benchmark_only size gates, or an
 #      explicit source_candidate on main. Source candidates reuse the full
-#      signed producer and checks; dispatches cannot trigger promotion.
+#      signed producer and checks. Promotion requests one itself while main
+#      owes a release and no candidate is in flight.
+#
+#      While main declares an unpublished stable version, a source candidate
+#      (trigger 3 or 4) is a release candidate of that version: it runs the
+#      consumer rehearsal and native qualification, and promotion publishes
+#      whichever main candidate of the version qualifies first.
 #
 #   5. merge_group — builds nothing. A group whose head is a release commit
 #      runs the exact-source consumer rehearsal at the commit that lands, and
@@ -292,7 +297,7 @@ jobs:
                 echo "::notice::Reusing live source candidate run $LIVE_CANDIDATE_RUN at $GITHUB_SHA."
               fi
             fi
-            echo "::notice::Signed source candidate $GITHUB_SHA uses the existing full candidate producer. Source candidate events cannot publish a release."
+            echo "::notice::Signed source candidate $GITHUB_SHA uses the existing full candidate producer."
           elif [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "::error::benchmark_only is only valid for workflow_dispatch"
@@ -369,7 +374,7 @@ jobs:
             fi
             RELEASE_COMMITS="$(release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA")"
             if [[ -n "$RELEASE_COMMITS" && "$RELEASE_COMMITS" != "$GITHUB_SHA" ]]; then
-              echo "::error::This push lands release commit(s) ${RELEASE_COMMITS//$'\n'/, } below its head $GITHUB_SHA. A release is built and promoted only from the head of its push, so nothing was built or promoted. Recover it with a source_candidate dispatch on main and manual promotion recovery (docs/src/maintainer-release.md)."
+              echo "::error::This push lands release commit(s) ${RELEASE_COMMITS//$'\n'/, } below its head $GITHUB_SHA. A release is built and promoted only from the head of its push, so nothing was built or promoted. Promotion requests a source candidate of main while the version is unpublished (docs/src/maintainer-release.md)."
               exit 1
             fi
             if [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]]; then
@@ -430,6 +435,20 @@ jobs:
 
           if [[ "$BUILD_MODE" == candidate && "$CANDIDATE_PURPOSE" == none ]]; then
             CANDIDATE_PURPOSE=release
+          fi
+          # The source's version decides the purpose, never the event: while
+          # main owes an unpublished stable version, a scheduled or requested
+          # main candidate is a release candidate and earns the same proofs.
+          if [[ "$BUILD_MODE" == candidate && "$CANDIDATE_PURPOSE" == source ]]; then
+            owed=0
+            release_version_is_owed "$GITHUB_REPOSITORY" "$VERSION" || owed=$?
+            case "$owed" in
+              0)
+                CANDIDATE_PURPOSE=release
+                echo "::notice::Main owes unpublished v$VERSION; this source candidate is a release candidate." ;;
+              1) ;;
+              *) echo "::error::Cannot read whether v$VERSION is published; candidate purpose is unproven."; exit 1 ;;
+            esac
           fi
           if [[ "$BUILD_MODE" == candidate && "$CANDIDATE_PURPOSE" == release ]]; then
             REHEARSAL_SOURCE_SHA="$CANDIDATE_SOURCE_SHA"
@@ -1917,7 +1936,7 @@ jobs:
       !cancelled() && needs.setup.result == 'success' && needs.setup.outputs.rehearsal_source_sha != '' &&
       (needs.setup.outputs.build_mode != 'candidate' ||
       (needs.build.result == 'success' && needs.collect_candidate_manifest.result == 'success' &&
-      (github.event_name == 'schedule' || needs.native-qualification.result == 'success')))
+      (needs.setup.outputs.candidate_purpose != 'release' || needs.native-qualification.result == 'success')))
     uses: ./.github/workflows/consumer-canary.yml
     with:
       source_revision: ${{ needs.setup.outputs.rehearsal_source_sha }}
@@ -1933,7 +1952,7 @@ jobs:
   native-qualification:
     name: Qualify native release source
     needs: [setup, source-ci]
-    if: needs.setup.outputs.build_mode == 'candidate' && github.event_name != 'schedule'
+    if: needs.setup.outputs.build_mode == 'candidate' && (github.event_name != 'schedule' || needs.setup.outputs.candidate_purpose == 'release')
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -2010,7 +2029,7 @@ jobs:
             echo "This run builds no candidate (build mode ${BUILD_MODE:-unset})."
             exit 0
           fi
-          if [[ "$EVENT_NAME" != schedule && "$NATIVE_RESULT" != success ]]; then
+          if [[ ( "$EVENT_NAME" != schedule || "$CANDIDATE_PURPOSE" == release ) && "$NATIVE_RESULT" != success ]]; then
             echo "::error::Native release qualification finished ${NATIVE_RESULT:-missing}; candidate refused."
             exit 1
           fi

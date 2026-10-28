@@ -96,11 +96,11 @@ reservation, and do not infer completed integration from a reserved attempt.
 
 ## Retire an unpublished candidate whose source can never promote
 
-Promotion requires a green full-suite main-push CI run at the release's exact
-source. When the CI run at that source can never become one, the version can
-never publish, whatever its candidate build concluded. Read the main-push CI
-run at the exact source, then request retirement through the existing
-development bump workflow:
+A source that can never promote no longer strands its version: a later main
+commit that declares the same version gets its own candidate, and promotion
+publishes the first one that qualifies. Retire a version only to abandon its
+identity on purpose. Read the main-push CI run at the exact source, then
+request retirement through the existing development bump workflow:
 
 ```bash
 gh workflow run open-development-bump.yml --repo burin-labs/harn --ref main \
@@ -160,8 +160,10 @@ Follow the runs for that commit in
    Daily scheduled runs build signed source candidates at their exact main
    commit, including commits outside the warm-cache path filter. They reuse a
    successful candidate only while its manifest, release files, and every
-   target archive remain available and unexpired. These runs do not publish a
-   release.
+   target archive remain available and unexpired. While main declares a
+   stable version with no published release, every source candidate, scheduled
+   or requested, is a release candidate of that version: it runs the consumer
+   rehearsal and native qualification, and promotion can publish it.
 2. The candidate run builds, signs, notarizes, and attests the five platform
    archives. It checks those files with the release audit and smoke tests.
    The `candidate-manifest-<sha>` artifact binds the source commit, files,
@@ -172,10 +174,13 @@ Follow the runs for that commit in
    it and still runs every required product check. Rehearsals without archives
    keep their source or pull-request CLI path. This installation permission
    does not replace the terminal consumer verdict or publication checks.
-3. `promote-release.yml` starts after the successful main push run. For a
-   version commit it waits up to 90 minutes for `green` to contain it, then finds
-   the successful candidate run at that commit and verifies the manifest,
-   digests, and attestations. It also requires successful full-suite main-push
+3. `promote-release.yml` starts after every successful main run of the
+   producer, whatever event started it. When the run's source declares a
+   stable version whose transition its first-parent history proves, it finds
+   the successful candidate run at that source, waits up to 90 minutes for
+   `green` to contain the source, and verifies the manifest, digests, and
+   attestations. A version already published from another candidate is a
+   no-op. It also requires successful full-suite main-push
    CI at the release commit, including every deferred test family. It waits
    for an active run; missing or failed proof blocks publication. It creates
    the tag and GitHub release using those files. Promotion doesn't rebuild them.
@@ -196,7 +201,7 @@ pending and failing job names, and next action.
 Before executing candidate code,
 the trusted workflow verifies that this source is a main ancestor and measures
 both allowed execution and a refused write through process confinement on the
-owned Mac. Scheduled source candidates don't start it. Arbitrary branch sources
+owned Mac. Scheduled source candidates start it only while main owes a release. Arbitrary branch sources
 are refused before checkout or execution on the restricted runner group.
 
 The common publication gate requires the native workspace tests, CLI smoke and
@@ -260,26 +265,33 @@ scheduled run discovers live children first, then authenticates their original
 receipts and parent attempts through the same cancellation gate. Scheduling can
 be delayed by GitHub; it does not extend a release's observation budget.
 
-Promotion reports a stuck release on its own. When main's stable version is
-still unpublished four hours after its version commit, every later promotion
-run fails and one `[Release] vX.Y.Z is unpublished on main` issue opens. Close
-it after the release publishes.
+A failed candidate does not strand its version. While main declares an
+unpublished stable version, every main run that leaves nothing to promote runs
+`scripts/ci/release_candidate_reconcile.sh`. When no candidate build or
+candidate promotion is in flight and main's newest commit has had no source
+candidate, it requests one with the release App; promotion then publishes the
+first candidate of the version that qualifies. Each candidate still requires
+full-suite CI at its own source, so a red source never publishes. The
+reconciler requests at most one source candidate per main commit. When main's
+newest commit has already had one, nothing is in flight, and the version commit
+is more than four hours old, promotion runs fail and one
+`[Release] vX.Y.Z is unpublished on main` issue opens. Close it after the
+release publishes.
 
 - Opener failed before publication: fix the cause and dispatch
   `bump-release.yml` again. Its admission checks run again.
-- Candidate failed because of infrastructure: rerun the failed jobs in that
-  exact candidate run. Successful matrix legs stay complete. Candidate AOT
-  payloads, license notices, and archives remain available for 30 days so a
-  later retry can restore successful handoffs. Compiler caches are an
-  acceleration aid and may be evicted independently. A source defect needs a corrected pull request and
-  certification of the resulting commit. For an unpublished stable version,
-  keep that version, build a signed source candidate on corrected main with
-  `source_candidate=true`, then use manual promotion recovery. Recovery proves
-  the stable version transition in the source's first-parent history and still
-  requires exact-source CI, consumer rehearsal, and candidate certification.
+- Candidate failed: you normally run nothing. The next main push requests a
+  fresh source candidate of main, and its success promotes automatically. For
+  a source defect, land the fix on main as an ordinary pull request and keep
+  the version. To retry an infrastructure failure at the same source, rerun
+  the failed jobs in that exact candidate run; its success also promotes
+  automatically. Successful matrix legs stay complete. Candidate AOT payloads,
+  license notices, and archives remain available for 30 days so a later retry
+  can restore successful handoffs. Compiler caches are an acceleration aid and
+  may be evicted independently.
 - Promotion failed: rerun the failed jobs in the exact promotion run. It
   checks the existing tag's commit and refuses a conflicting tag.
-- Candidate succeeded but no main-push event started promotion: dispatch the
+- Candidate succeeded but no completed main run started promotion: dispatch the
   existing promoter on main with that certified candidate's run ID and source:
   `gh workflow run promote-release.yml --repo burin-labs/harn --ref main -f candidate_run_id=RUN_ID -f candidate_sha=FULL_SHA`.
   Ordinary recovery refuses an unsuccessful or foreign producer and a source
