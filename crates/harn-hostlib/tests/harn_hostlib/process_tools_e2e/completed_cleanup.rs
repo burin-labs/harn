@@ -14,7 +14,7 @@ fn real_completed_background_cancel_replays_guardian_cleanup_receipt() {
         .filter_map(|entry| std::fs::metadata(entry.path()).ok())
         .map(|metadata| (metadata.dev(), metadata.ino()))
         .collect::<Vec<_>>();
-    let script = r#"
+    let script = r"
 import errno, os, signal
 inherited_descriptors = __INHERITED_DESCRIPTORS__
 for name in os.listdir('/dev/fd'):
@@ -42,7 +42,7 @@ os.close(w)
 assert os.read(r, 1) == b'R'
 os.close(r)
 print(pid, flush=True)
-"#
+"
     .replace(
         "__INHERITED_DESCRIPTORS__",
         &serde_json::to_string(&inherited_descriptors).unwrap(),
