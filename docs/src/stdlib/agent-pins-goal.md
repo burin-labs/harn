@@ -78,10 +78,12 @@ Nonempty timestamps use UTC RFC3339.
 Criteria contain `id` and `description`; executable checks stay with the caller.
 
 The closed metadata record contains `acceptance_note`, `criterion_sources`,
-nullable `verification`, and `source`. Verification contains the exact `command`
-and its opaque `source`. Criterion-source keys must identify an active or
-retired criterion. The runtime preserves these values without interpreting
-their provenance or inserting metadata into the model's prompt.
+nullable `verification`, optional `target`, and `source`. Verification contains
+the exact `command` and its opaque `source`. When supplied, `target` is the
+nonblank identity of the requested edit target. Criterion-source keys must
+identify an active or retired criterion. The runtime preserves these values
+without interpreting their provenance or inserting metadata into the model's
+prompt.
 
 | Method | Result | Meaning |
 | --- | --- | --- |

@@ -98,8 +98,8 @@ async fn finish_reason_terminal_completes_without_waiting_for_eof() {
     writer
         .write_all(
             concat!(
-                "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n",
-                "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n",
+                "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n\n",
             )
             .as_bytes(),
         )
@@ -458,9 +458,9 @@ async fn named_sse_error_event_classifies_instead_of_premature_eof() {
 #[tokio::test]
 async fn partial_text_then_sse_error_preserves_partial_and_upstream_taxonomy() {
     let body: &[u8] = concat!(
-        "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n",
         "event: error\n",
-        "data: {\"error\":\"Authorization: Bearer sk-secret-token\",\"kind\":\"terminal\",\"reason\":\"invalid_request\"}\n",
+        "data: {\"error\":\"Authorization: Bearer sk-secret-token\",\"kind\":\"terminal\",\"reason\":\"invalid_request\"}\n\n",
     )
     .as_bytes();
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -589,7 +589,7 @@ async fn idle_deadline_is_distinct_and_typed() {
             Duration::from_secs(5),
             Duration::from_secs(3),
         ),
-        Some(b"data: {\"choices\":[{\"delta\":{\"content\":\"p\"}}]}\n"),
+        Some(b"data: {\"choices\":[{\"delta\":{\"content\":\"p\"}}]}\n\n"),
     )
     .await;
     assert_eq!(failure.deadline, Some(ProviderStreamDeadline::Idle));

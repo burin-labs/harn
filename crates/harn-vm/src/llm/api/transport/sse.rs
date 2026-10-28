@@ -493,8 +493,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     provider_request_id: Option<&str>,
     request_origin: tokio::time::Instant,
 ) -> Result<LlmResult, VmError> {
-    use tokio::io::AsyncBufReadExt;
-    let mut lines = reader.lines();
+    let mut frames = crate::sse_frames::SseFrames::new(reader);
     let mut liveness =
         super::liveness::StreamLiveness::new(provider, deadline_policy, request_origin);
     let protocol = dialect.stream_protocol();
@@ -507,34 +506,23 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     // Per tool slot, how many argument bytes the inference meter has seen.
     let mut metered_tool_arguments: Vec<usize> = Vec::new();
     let mut forwarded_text = false;
-    // Most recent SSE `event:` name. Consumed with the next `data:` frame so
-    // named `event: error` payloads classify before delta parsing.
-    let mut current_event: Option<String> = None;
     let managed_transport = crate::llm::managed_supply::is_managed_transport(provider);
     let awaits_stream_usage = dialect.awaits_stream_usage(provider);
 
     loop {
-        let line = match liveness.next_line(lines.next_line()).await? {
-            Some(line) => line,
+        let frame = match liveness.next_item(frames.next()).await? {
+            Some(frame) => frame,
             None => return Err(liveness.premature_eof("a provider terminal event")),
         };
-        if let Some(event) = line.strip_prefix("event:") {
-            current_event = Some(event.trim().to_string());
-            continue;
-        }
-        let Some(data) = line.strip_prefix("data: ") else {
-            continue;
-        };
+        let data = frame.data.as_str();
         if data == "[DONE]" {
             break;
         }
         let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
-            // Drop a stale event name so a later data frame cannot inherit an
-            // earlier `event:` label after a malformed payload.
-            current_event = None;
             continue;
         };
-        let event_name = current_event.take();
+        // A named `event: error` frame classifies before delta parsing.
+        let event_name = frame.event;
         if is_structured_sse_error_frame(event_name.as_deref(), &json, protocol) {
             // Flush visible text held for `<think>` boundary detection so a
             // short partial answer still counts as partial output.

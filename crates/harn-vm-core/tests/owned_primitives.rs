@@ -76,3 +76,32 @@ fn atomic_replace_has_one_owner() {
         offenders,
     );
 }
+
+/// `harn-vm`'s `sse_frames` owns Server-Sent Events framing. A `data:` prefix
+/// strip over raw lines misses `data:` without a space or a payload split
+/// across lines, which is the bug the shared framer replaced.
+#[test]
+fn sse_framing_has_one_owner() {
+    const ALLOWED: &[&str] = &[
+        "harn-vm/src/sse_frames.rs",
+        // Reads NDJSON that may carry an optional `data: ` prefix per line; it
+        // frames no events.
+        "harn-vm/src/llm/api/transport/ndjson.rs",
+        // Scans a captured transcript line by line for fixtures, no live stream.
+        "harn-vm/src/llm/tool_conformance_helpers.rs",
+        // Parses `data:` URLs, not event streams.
+        "harn-vm/src/stdlib/vision.rs",
+    ];
+    let offenders = production_sources()
+        .into_iter()
+        .filter(|(path, _)| path.starts_with("harn-vm/src"))
+        .filter(|(path, _)| !ALLOWED.iter().any(|allowed| path.ends_with(allowed)))
+        .filter(|(_, text)| text.contains("strip_prefix(\"data:"))
+        .map(|(path, _)| path.display().to_string())
+        .collect();
+    assert_no_matches(
+        "SSE framing",
+        "`crate::sse_frames::SseFrames` in harn-vm",
+        offenders,
+    );
+}

@@ -477,9 +477,9 @@ async fn first_frame_latency_measures_the_wait_before_the_first_frame() {
     // The opening frame must NOT be terminal. A `finish_reason` on it ends the
     // read loop, the reader drops its half of the duplex, and the second write
     // fails with `BrokenPipe` instead of measuring anything.
-    let first = format!("data: {}\n", content_chunk(None));
+    let first = format!("data: {}\n\n", content_chunk(None));
     let rest = format!(
-        "data: {}\ndata: {}\ndata: [DONE]\n",
+        "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
         terminal_content_chunk(),
         usage_chunk(None)
     );

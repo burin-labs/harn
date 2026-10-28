@@ -201,22 +201,18 @@ async fn read_responses_events<R: tokio::io::AsyncBufRead + Unpin>(
     provider: &str,
     delta_tx: &DeltaSender,
 ) -> Result<(serde_json::Value, bool), VmError> {
-    use tokio::io::AsyncBufReadExt as _;
-
     let interrupted = |detail: String| VmError::CategorizedError {
         message: format!("{provider} Responses stream {detail}"),
         category: crate::value::ErrorCategory::TransientNetwork,
     };
-    let mut lines = reader.lines();
+    let mut frames = crate::sse_frames::SseFrames::new(reader);
     let mut streamed_text = false;
-    while let Some(line) = lines
-        .next_line()
+    while let Some(frame) = frames
+        .next()
         .await
         .map_err(|error| interrupted(format!("read failed: {error}")))?
     {
-        let Some(data) = line.strip_prefix("data:").map(str::trim) else {
-            continue;
-        };
+        let data = frame.data.trim();
         if data.is_empty() || data == "[DONE]" {
             continue;
         }

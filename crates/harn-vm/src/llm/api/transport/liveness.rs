@@ -118,9 +118,11 @@ impl StreamLiveness {
         self.partial_output = true;
     }
 
-    pub(super) async fn next_line<F>(&mut self, read: F) -> Result<Option<String>, VmError>
+    /// Await the next unit of provider output (a line or an SSE frame) under
+    /// the stream's total, first-chunk, and idle deadlines.
+    pub(super) async fn next_item<T, F>(&mut self, read: F) -> Result<Option<T>, VmError>
     where
-        F: Future<Output = std::io::Result<Option<String>>>,
+        F: Future<Output = std::io::Result<Option<T>>>,
     {
         let now_ms = self.clock.monotonic_ms();
         let total_elapsed = elapsed_since(self.started_ms, now_ms);
@@ -170,10 +172,10 @@ impl StreamLiveness {
         tokio::select! {
             biased;
             result = &mut read => match result {
-                Ok(Some(line)) => {
+                Ok(Some(item)) => {
                     self.saw_chunk = true;
                     self.last_activity_ms = self.clock.monotonic_ms();
-                    Ok(Some(line))
+                    Ok(Some(item))
                 }
                 Ok(None) => Ok(None),
                 Err(error) => {
