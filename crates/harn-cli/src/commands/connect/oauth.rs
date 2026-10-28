@@ -1183,7 +1183,7 @@ pub(super) fn generate_pkce_pair() -> (String, String) {
 
 pub(super) fn random_hex(bytes: usize) -> String {
     let raw: Vec<u8> = (0..bytes).map(|_| rand::random::<u8>()).collect();
-    raw.iter().map(|byte| format!("{byte:02x}")).collect()
+    hex::encode(raw)
 }
 
 pub(super) struct OAuthDiscoveryResult {

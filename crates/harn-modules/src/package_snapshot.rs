@@ -563,17 +563,8 @@ pub fn is_valid_package_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
-fn encode_hex(bytes: &[u8]) -> String {
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        let _ = write!(encoded, "{byte:02x}");
-    }
-    encoded
-}
-
 pub fn package_lock_digest(bytes: &[u8]) -> String {
-    format!("sha256:{}", encode_hex(&Sha256::digest(bytes)))
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
 fn canonical_directory_within(root: &Path, path: &Path) -> Result<PathBuf, PackageSnapshotError> {

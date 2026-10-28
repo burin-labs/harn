@@ -138,7 +138,7 @@ where
 
     loop {
         let line = liveness
-            .next_line(next_ollama_ndjson_line(
+            .next_item(next_ollama_ndjson_line(
                 &mut lines,
                 model,
                 unload_grace,

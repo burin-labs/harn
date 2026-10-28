@@ -29,8 +29,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:d8d105e57b5bf46071564eee76da8327f0373d17fb55d9ce4403782b3800dd85",
-    "projection_id": "session_view:session_root_transcript:d8d105e57b5b"
+    "projection_hash": "sha256:5bc87c8cc78db7d5ee7674d89a3e58bb246c16ac3c7ec1bd5aa45e8ad4b8774b",
+    "projection_id": "session_view:session_root_transcript:5bc87c8cc78d"
   },
   "runs": [
     {
@@ -143,8 +143,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:7897590db08667af06058ad7bf5df67a2cc031be3f73859f20f11c4837de00e4",
-        "projection_id": "run_view:run_root_transcript:7897590db086"
+        "projection_hash": "sha256:ecb4370cee53b688179181352f4ed35ecd67fd55319e6784922af90e04ae7f69",
+        "projection_id": "run_view:run_root_transcript:ecb4370cee53"
       },
       "providers": [
         {
@@ -229,7 +229,7 @@
         "output_tokens": 8,
         "total_cost": 0.02,
         "total_duration_ms": 3000,
-        "unpriced_calls": 0,
+        "unpriced_calls": 1,
         "usage_unknown_calls": 0
       },
       "visible_text": "The ticket is resolved."
@@ -252,7 +252,7 @@
     "cache_read_tokens": null,
     "cache_write_tokens": null,
     "call_count": 1,
-    "cost_usd": 0.02,
+    "cost_usd": null,
     "input_tokens": 12,
     "known_cost_usd": 0.02,
     "models": [
@@ -261,7 +261,7 @@
     "output_tokens": 8,
     "total_cost": 0.02,
     "total_duration_ms": 3000,
-    "unpriced_calls": 0,
+    "unpriced_calls": 1,
     "usage_unknown_calls": 0
   }
 }

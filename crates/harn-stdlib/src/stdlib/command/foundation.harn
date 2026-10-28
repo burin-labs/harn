@@ -10,6 +10,7 @@ const COMMAND_COMMON_OPTION_KEYS = [
   "env_mode",
   "stdin",
   "timeout_ms",
+  "hard_timeout_ms",
   "sandbox_profile",
   "background",
   "background_after_ms",

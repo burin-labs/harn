@@ -35,6 +35,27 @@ release_version_is_prerelease() {
   release_version_is_canonical "${1:-}" && [[ "$1" == *-* ]]
 }
 
+# Prints true when v<version> has a non-draft GitHub release, false when it has
+# none. Fails when releases cannot be read, so no caller reads silence as
+# "unpublished" or "published".
+release_version_is_published() {
+  local repository="${1:?repository required}" version="${2:?version required}" published
+  published="$(gh api "repos/$repository/releases?per_page=50" \
+    --jq "[.[] | select(.draft == false) | .tag_name] | index(\"v$version\") != null")" || return 1
+  [[ "$published" == true || "$published" == false ]] || return 1
+  printf '%s\n' "$published"
+}
+
+# Main owes a release while it declares a stable version that is not published.
+# Every main candidate of that version is a release candidate, whatever event
+# built it; promotion takes whichever qualifies first.
+release_version_is_owed() {
+  local repository="${1:?repository required}" version="${2:-}" published
+  release_version_is_canonical "$version" && ! release_version_is_prerelease "$version" || return 1
+  published="$(release_version_is_published "$repository" "$version")" || return 2
+  [[ "$published" == false ]]
+}
+
 release_next_patch_development() {
   local stable="${1:-}"
   if [[ ! "$stable" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then

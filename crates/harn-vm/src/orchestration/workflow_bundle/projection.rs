@@ -309,11 +309,7 @@ pub(super) fn render_workflow_bundle_mermaid(
 
 fn mermaid_id(value: &str) -> String {
     let digest = Sha256::digest(value.as_bytes());
-    let suffix = digest
-        .iter()
-        .take(4)
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    let suffix = hex::encode(&digest[..4]);
     let mut out = format!("n_{suffix}_");
     for ch in value.chars() {
         if ch.is_ascii_alphanumeric() {

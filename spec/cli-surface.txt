@@ -311,6 +311,9 @@ harn dump-operator-precedence --tree-sitter
 harn dump-portable-benchmark-schema
 harn dump-portable-benchmark-schema --check
 harn dump-portable-benchmark-schema --output
+harn dump-portal-types
+harn dump-portal-types --check
+harn dump-portal-types --output
 harn dump-prompt-grammar
 harn dump-prompt-grammar --check
 harn dump-prompt-grammar --output

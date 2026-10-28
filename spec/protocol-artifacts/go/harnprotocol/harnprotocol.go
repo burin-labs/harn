@@ -196,6 +196,7 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"orchestration_decision",
 	"pack_thinking_stripped",
 	"progress_reported",
+	"provider_usage",
 	"purpose_label",
 	"repair_output_contract_applied",
 	"require_successful_tools_violation",
@@ -2244,6 +2245,20 @@ type HarnCanonicalHistoryBoundaries struct {
 
 type HarnACPPromptCorrelation struct {
 	MessageID *string `json:"messageId,omitempty"`
+}
+type HarnProviderUsage struct {
+	RunID             string   `json:"run_id"`
+	ParentSessionID   string   `json:"parent_session_id"`
+	LineageKnown      bool     `json:"lineage_known"`
+	InputTokens       int64    `json:"input_tokens"`
+	OutputTokens      int64    `json:"output_tokens"`
+	CacheReadTokens   int64    `json:"cache_read_tokens"`
+	CacheWriteTokens  int64    `json:"cache_write_tokens"`
+	ProviderCallCount int64    `json:"provider_call_count"`
+	UnpricedCalls     int64    `json:"unpriced_calls"`
+	UsageUnknownCalls int64    `json:"usage_unknown_calls"`
+	KnownCostUsd      float64  `json:"known_cost_usd"`
+	CostUsd           *float64 `json:"cost_usd"`
 }
 type HarnAgentsTaskStatus string
 

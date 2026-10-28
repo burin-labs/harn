@@ -375,7 +375,7 @@ impl CacheKey {
     /// share a cache entry; the header's compilation-context hash still gates
     /// reuse on a per-load basis.
     pub fn filename(&self) -> String {
-        format!("{}.{}", hex(&self.source_hash), CACHE_EXTENSION)
+        format!("{}.{}", hex::encode(self.source_hash), CACHE_EXTENSION)
     }
 
     /// Module-artifact filename for this complete compilation key. Diagnostic
@@ -397,7 +397,7 @@ impl CacheKey {
         // path and overwrite each other.
         hasher.update([provenance_tag(self.provenance)]);
         let identity: [u8; 32] = hasher.finalize().into();
-        format!("{}.{}", hex(&identity), extension)
+        format!("{}.{}", hex::encode(identity), extension)
     }
 }
 
@@ -1126,14 +1126,6 @@ fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     hasher.finalize().into()
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push_str(&format!("{byte:02x}"));
-    }
-    out
 }
 
 /// Stable digest over every embedded stdlib source. Folded into the

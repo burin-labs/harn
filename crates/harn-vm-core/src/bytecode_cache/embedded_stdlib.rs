@@ -104,7 +104,7 @@ fn describe(build: &ArtifactBuild) -> String {
         build.harn_version,
         build.schema,
         build.codegen_fingerprint,
-        super::hex(&build.compiler_contracts),
+        hex::encode(build.compiler_contracts),
     )
 }
 

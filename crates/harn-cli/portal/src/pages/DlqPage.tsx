@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { defineMessages, useIntl } from "react-intl"
 import { useNavigate, useSearchParams } from "react-router"
 
@@ -11,7 +12,8 @@ import {
   replayDlqBulk,
   replayDlqEntry,
 } from "../lib/api"
-import type { PortalDlqEntry, PortalDlqListResponse, PortalLaunchJob } from "../types"
+import { errorMessage } from "../lib/query"
+import type { PortalDlqEntry, PortalLaunchJob } from "../types"
 
 const ERROR_CLASSES = [
   "provider_5xx",
@@ -92,10 +94,8 @@ export function DlqPage() {
   const intl = useIntl()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [data, setData] = useState<PortalDlqListResponse | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(searchParams.get("entry"))
-  const [loading, setLoading] = useState(false)
-  const [lastError, setLastError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const jobPollerRef = useRef<number | null>(null)
 
@@ -121,11 +121,10 @@ export function DlqPage() {
     [searchParams],
   )
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setLastError(null)
-    try {
-      const next = await fetchDlq({
+  const dlqQuery = useQuery({
+    queryKey: ["dlq", filters],
+    queryFn: () =>
+      fetchDlq({
         q: filters.q || undefined,
         trigger_id: filters.trigger_id || undefined,
         provider: filters.provider || undefined,
@@ -133,21 +132,13 @@ export function DlqPage() {
         state: filters.state || undefined,
         since: filters.since || undefined,
         until: filters.until || undefined,
-      })
-      setData(next)
-      if (!selectedId && next.entries.length > 0) {
-        setSelectedId(next.entries[0].id)
-      }
-    } catch (error) {
-      setLastError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setLoading(false)
-    }
-  }, [filters, selectedId])
-
-  useEffect(() => {
-    void load()
-  }, [load])
+      }),
+    refetchInterval: 15000,
+  })
+  const data = dlqQuery.data ?? null
+  const loading = dlqQuery.isFetching
+  const lastError = actionError ?? errorMessage(dlqQuery.error)
+  const load = () => dlqQuery.refetch()
 
   const selected = data?.entries.find((entry) => entry.id === selectedId) ?? data?.entries[0] ?? null
 
@@ -169,12 +160,12 @@ export function DlqPage() {
   }
 
   async function runAction(action: () => Promise<void>) {
-    setLastError(null)
+    setActionError(null)
     setNotice(null)
     try {
       await action()
     } catch (error) {
-      setLastError(error instanceof Error ? error.message : String(error))
+      setActionError(errorMessage(error))
     }
   }
 

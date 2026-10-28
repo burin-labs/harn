@@ -41,7 +41,7 @@ pub(super) struct DlqBulkRequest {
     pub(super) rate_limit_per_second: Option<f64>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, ts_rs::TS)]
 pub(super) struct PortalDlqAttempt {
     pub(super) attempt: u32,
     pub(super) at: String,
@@ -49,7 +49,7 @@ pub(super) struct PortalDlqAttempt {
     pub(super) error: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, ts_rs::TS)]
 pub(super) struct PortalDlqEntry {
     pub(super) id: String,
     pub(super) event_id: String,
@@ -72,14 +72,14 @@ pub(super) struct PortalDlqEntry {
     pub(super) predicate_trace: Vec<JsonValue>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(super) struct PortalDlqGroup {
     pub(super) error_class: String,
     pub(super) count: usize,
     pub(super) newest_failed_at: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(super) struct PortalDlqAlert {
     pub(super) trigger_id: String,
     pub(super) error_class: String,
@@ -89,7 +89,7 @@ pub(super) struct PortalDlqAlert {
     pub(super) destinations: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(super) struct PortalDlqAlertConfig {
     pub(super) trigger_id: String,
     pub(super) destinations: Vec<String>,
@@ -97,7 +97,7 @@ pub(super) struct PortalDlqAlertConfig {
     pub(super) threshold_percent: Option<f64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(super) struct PortalDlqListResponse {
     pub(super) total: usize,
     pub(super) entries: Vec<PortalDlqEntry>,
@@ -106,7 +106,7 @@ pub(super) struct PortalDlqListResponse {
     pub(super) alert_configs: Vec<PortalDlqAlertConfig>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(super) struct PortalDlqBulkResponse {
     pub(super) operation: String,
     pub(super) dry_run: bool,

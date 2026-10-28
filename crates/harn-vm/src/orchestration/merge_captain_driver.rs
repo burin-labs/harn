@@ -580,11 +580,7 @@ fn deterministic_run_id(events: &[PersistedAgentEvent]) -> Result<String, VmErro
         hasher.update(bytes);
     }
     let digest = hasher.finalize();
-    let mut suffix = String::with_capacity(16);
-    for byte in &digest[..8] {
-        suffix.push_str(&format!("{byte:02x}"));
-    }
-    Ok(format!("merge-captain-{suffix}"))
+    Ok(format!("merge-captain-{}", hex::encode(&digest[..8])))
 }
 
 #[cfg(test)]

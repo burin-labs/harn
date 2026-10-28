@@ -42,6 +42,10 @@ impl From<&LlmUsageRecord> for RunViewUsage {
 
 impl RunViewUsage {
     pub(super) fn add_usage(&mut self, usage: &Self) {
+        // A missing total is not a measured zero, even when the input has no
+        // explicit unpriced count. Preserve each owner's certainty while folding.
+        let total_is_exact = (self.call_count == 0 || self.cost_usd.is_some())
+            && (usage.call_count == 0 || usage.cost_usd.is_some());
         self.input_tokens += usage.input_tokens;
         self.output_tokens += usage.output_tokens;
         self.total_duration_ms += usage.total_duration_ms;
@@ -50,7 +54,7 @@ impl RunViewUsage {
         self.usage_unknown_calls += usage.usage_unknown_calls;
         self.known_cost_usd += usage.known_cost_usd;
         self.total_cost = self.known_cost_usd;
-        self.cost_usd = (self.unpriced_calls == 0).then_some(self.known_cost_usd);
+        self.cost_usd = total_is_exact.then_some(self.known_cost_usd);
         self.cache_read_tokens = add_reported(self.cache_read_tokens, usage.cache_read_tokens);
         self.cache_write_tokens = add_reported(self.cache_write_tokens, usage.cache_write_tokens);
         for model in &usage.models {

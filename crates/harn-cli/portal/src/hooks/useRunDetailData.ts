@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo } from "react"
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { fetchRunDetail, fetchRuns } from "../lib/api"
-import { type RunSortOrder, type RunStatusFilter } from "./useRunsData"
-import type { PortalRunDetail, RunSummary } from "../types"
+import { errorMessage } from "../lib/query"
+import type { PortalRunDetail } from "../types"
 
 function isFailed(status: string) {
   return ["failed", "error", "cancelled"].includes(status)
@@ -10,6 +11,10 @@ function isFailed(status: string) {
 
 function isCompleted(status: string) {
   return ["complete", "completed", "success", "verified"].includes(status)
+}
+
+function isLive(status: string | undefined) {
+  return status != null && !isFailed(status) && !isCompleted(status)
 }
 
 function mergeActionGraphNodes(
@@ -47,101 +52,53 @@ function mergeActionGraphEdges(
   return merged
 }
 
+type Observability = PortalRunDetail["observability"]
+type GraphDelta = Partial<Pick<Observability, "action_graph_nodes" | "action_graph_edges">>
+
+function withGraph(detail: PortalRunDetail, delta: GraphDelta): PortalRunDetail {
+  return {
+    ...detail,
+    observability: {
+      ...detail.observability,
+      action_graph_nodes: mergeActionGraphNodes(detail.observability.action_graph_nodes, delta.action_graph_nodes ?? []),
+      action_graph_edges: mergeActionGraphEdges(detail.observability.action_graph_edges, delta.action_graph_edges ?? []),
+    },
+  }
+}
+
 export function useRunDetailData(path: string | null) {
-  const [detail, setDetail] = useState<PortalRunDetail | null>(null)
-  const [compareRuns, setCompareRuns] = useState<RunSummary[]>([])
-  const [loading, setLoading] = useState(false)
-  const [lastError, setLastError] = useState<string | null>(null)
-
-  const loadDetail = useCallback(async () => {
-    if (!path) {
-      setDetail(null)
-      setCompareRuns([])
-      return
-    }
-    setLoading(true)
-    try {
-      const nextDetail = await fetchRunDetail(path)
-      setDetail(nextDetail)
-      setLastError(null)
-    } catch (error) {
-      setDetail(null)
-      setCompareRuns([])
-      setLastError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setLoading(false)
-    }
-  }, [path])
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      void loadDetail()
-    })
-  }, [loadDetail])
-
-  useEffect(() => {
-    if (!detail) {
-      let cancelled = false
-      queueMicrotask(() => {
-        if (!cancelled) {
-          setCompareRuns([])
-        }
-      })
-      return () => {
-        cancelled = true
+  const queryClient = useQueryClient()
+  const detailQuery = useQuery({
+    queryKey: ["run-detail", path],
+    // Keep streamed graph nodes the persisted snapshot has not caught up to yet.
+    queryFn: async () => {
+      const snapshot = await fetchRunDetail(path as string)
+      const live = queryClient.getQueryData<PortalRunDetail>(["run-detail", path])
+      if (!live) {
+        return snapshot
       }
-    }
-    let cancelled = false
-    const workflowName = detail.summary.workflow_name
+      const { action_graph_nodes, action_graph_edges } = withGraph(live, snapshot.observability).observability
+      return { ...snapshot, observability: { ...snapshot.observability, action_graph_nodes, action_graph_edges } }
+    },
+    enabled: path != null,
+    refetchInterval: (query) => (isLive(query.state.data?.summary.status) ? 5000 : false),
+  })
+  // A failed refresh drops the stale snapshot rather than showing a run that may be gone.
+  const detail = detailQuery.isError ? null : (detailQuery.data ?? null)
 
-    async function loadCompareRuns() {
-      try {
-        const data = await fetchRuns({
-          workflow: workflowName,
-          status: "all" satisfies RunStatusFilter,
-          sort: "newest" satisfies RunSortOrder,
-          page: 1,
-          pageSize: 200,
-        })
-        if (!cancelled) {
-          setCompareRuns(data.runs)
-        }
-      } catch {
-        if (!cancelled) {
-          setCompareRuns([])
-        }
-      }
-    }
+  const workflowName = detail?.summary.workflow_name
+  const compareQuery = useQuery({
+    queryKey: ["runs", "compare", workflowName],
+    queryFn: () => fetchRuns({ workflow: workflowName, status: "all", sort: "newest", page: 1, pageSize: 200 }),
+    enabled: workflowName != null,
+    placeholderData: keepPreviousData,
+    refetchInterval: isLive(detail?.summary.status) ? 5000 : false,
+  })
 
-    void loadCompareRuns()
-    return () => {
-      cancelled = true
-    }
-  }, [detail])
-
-  const needsPolling = useMemo(() => {
-    if (!detail) {
-      return false
-    }
-    return !isFailed(detail.summary.status) && !isCompleted(detail.summary.status)
-  }, [detail])
   const actionGraphTraceId = useMemo(
     () => detail?.observability.action_graph_nodes.find((node) => node.trace_id != null)?.trace_id ?? null,
     [detail],
   )
-
-  useEffect(() => {
-    if (!needsPolling || !path) {
-      return
-    }
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "hidden") {
-        return
-      }
-      void loadDetail()
-    }, 5000)
-    return () => window.clearInterval(interval)
-  }, [loadDetail, needsPolling, path])
 
   useEffect(() => {
     if (!path || !actionGraphTraceId || typeof EventSource === "undefined") {
@@ -162,25 +119,9 @@ export function useRunDetailData(path: string | null) {
         if (!nextObservability) {
           return
         }
-        setDetail((current) => {
-          if (!current) {
-            return current
-          }
-          return {
-            ...current,
-            observability: {
-              ...current.observability,
-              action_graph_nodes: mergeActionGraphNodes(
-                current.observability.action_graph_nodes,
-                nextObservability.action_graph_nodes ?? [],
-              ),
-              action_graph_edges: mergeActionGraphEdges(
-                current.observability.action_graph_edges,
-                nextObservability.action_graph_edges ?? [],
-              ),
-            },
-          }
-        })
+        queryClient.setQueryData<PortalRunDetail>(["run-detail", path], (current) =>
+          current ? withGraph(current, nextObservability) : current,
+        )
       } catch {
         // Ignore malformed live updates and keep the persisted snapshot.
       }
@@ -190,13 +131,13 @@ export function useRunDetailData(path: string | null) {
       stream.removeEventListener("action_graph_update", listener as EventListener)
       stream.close()
     }
-  }, [actionGraphTraceId, path])
+  }, [actionGraphTraceId, path, queryClient])
 
   return {
     detail,
-    compareRuns,
-    loading,
-    lastError,
-    loadDetail,
+    compareRuns: compareQuery.isError ? [] : (compareQuery.data?.runs ?? []),
+    loading: detailQuery.isFetching,
+    lastError: errorMessage(detailQuery.error),
+    loadDetail: () => detailQuery.refetch(),
   }
 }

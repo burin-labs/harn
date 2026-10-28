@@ -1,9 +1,10 @@
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use harn_vm_core::atomic_io;
 use harn_vm_core::value::VmError;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -113,7 +114,6 @@ pub trait DurableStateBackend {
 }
 
 const INTERNAL_DIR: &str = ".agent_state_meta";
-const TMP_SUFFIX: &str = ".agent_state_tmp";
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct StoredWriterMeta {
@@ -288,7 +288,7 @@ fn normalize_key(key: &str) -> Result<PathBuf, VmError> {
         match component {
             Component::Normal(part) => {
                 let name = part.to_string_lossy();
-                if name == INTERNAL_DIR || name.contains(TMP_SUFFIX) {
+                if name == INTERNAL_DIR || atomic_io::is_temp_sibling_name(&name) {
                     return Err(VmError::Runtime(format!(
                         "agent_state: key '{raw}' uses a reserved internal path"
                     )));
@@ -312,64 +312,25 @@ fn normalize_key(key: &str) -> Result<PathBuf, VmError> {
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), VmError> {
-    let parent = path.parent().ok_or_else(|| {
+    atomic_io::atomic_write_with(path, |writer| {
+        writer.write_all(bytes)?;
+        if std::env::var("HARN_AGENT_STATE_ABORT_AFTER_TMP_WRITE")
+            .ok()
+            .as_deref()
+            == Some("1")
+        {
+            writer.flush()?;
+            writer.get_ref().sync_all()?;
+            std::process::abort();
+        }
+        Ok(())
+    })
+    .map_err(|error| {
         VmError::Runtime(format!(
-            "agent_state.write: path '{}' has no parent directory",
+            "agent_state.write: failed to write {}: {error}",
             path.display()
         ))
-    })?;
-    let file_name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("state");
-    let tmp_path = parent.join(format!(
-        ".{file_name}.{TMP_SUFFIX}.{}",
-        uuid::Uuid::now_v7()
-    ));
-    let mut file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&tmp_path)
-        .map_err(|error| {
-            VmError::Runtime(format!(
-                "agent_state.write: failed to open temp file {}: {error}",
-                tmp_path.display()
-            ))
-        })?;
-    file.write_all(bytes).map_err(|error| {
-        VmError::Runtime(format!(
-            "agent_state.write: failed to write temp file {}: {error}",
-            tmp_path.display()
-        ))
-    })?;
-    file.sync_all().map_err(|error| {
-        VmError::Runtime(format!(
-            "agent_state.write: failed to sync temp file {}: {error}",
-            tmp_path.display()
-        ))
-    })?;
-
-    if std::env::var("HARN_AGENT_STATE_ABORT_AFTER_TMP_WRITE")
-        .ok()
-        .as_deref()
-        == Some("1")
-    {
-        std::process::abort();
-    }
-
-    fs::rename(&tmp_path, path).map_err(|error| {
-        VmError::Runtime(format!(
-            "agent_state.write: failed to rename {} to {}: {error}",
-            tmp_path.display(),
-            path.display()
-        ))
-    })?;
-
-    if let Ok(dir) = OpenOptions::new().read(true).open(parent) {
-        let _ = dir.sync_all();
-    }
-    Ok(())
+    })
 }
 
 fn read_writer_meta(scope: &BackendScope, key: &str) -> Result<Option<StoredWriterMeta>, VmError> {
@@ -462,7 +423,7 @@ fn collect_keys(root: &Path, current: &Path, out: &mut Vec<String>) -> Result<()
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or("");
-        if name == INTERNAL_DIR || name.contains(TMP_SUFFIX) {
+        if name == INTERNAL_DIR || atomic_io::is_temp_sibling_name(name) {
             continue;
         }
         if child.is_dir() {

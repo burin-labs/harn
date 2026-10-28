@@ -151,48 +151,93 @@ pub fn preserve_process_owner_token(command: &mut std::process::Command) {
     }
 }
 
-/// Return live processes carrying `token` as an operation or owner marker.
-///
-/// The current process is excluded. This audit deliberately does not consult
-/// the append-only process-group journal: exited groups can be reused by
-/// unrelated processes during a large suite. The journal is safe only for the
-/// guardian's abrupt-owner-death path, where reclaiming the whole lifetime
-/// takes precedence over a normal terminal report.
-pub fn process_owner_survivors(token: &str) -> Vec<ProcessCleanupChild> {
+/// Collect a final owner census without treating an unavailable scan as zero.
+/// The append-only group journal cannot establish normal completion: its exited
+/// groups may have been reused. Only the current token census supplies evidence.
+pub fn finish_process_owner_cleanup(report: &mut ProcessCleanupReport, token: &str) {
     #[cfg(unix)]
     {
-        let mut survivors = cleanup_token_processes(token)
-            .into_iter()
-            .filter(|child| child.pid != std::process::id())
-            .collect::<Vec<_>>();
-        survivors.sort_by_key(|child| child.pid);
-        survivors
+        let (children, census) = cleanup_token_census(token);
+        for child in children {
+            if child.pid != std::process::id() {
+                report.merge_child(child);
+            }
+        }
+        report.census = census;
+        if report.attempted_signals.contains(&libc::SIGKILL) {
+            wait_for_report_children_to_exit(report, SUBPROCESS_KILL_SETTLE);
+        }
+        report.refresh_survivor_status();
     }
     #[cfg(not(unix))]
-    {
-        let _ = token;
-        Vec::new()
-    }
+    let _ = (report, token);
 }
 
 /// Structural evidence collected when Harn kills a child process tree.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProcessCleanupReport {
     pub root_pid: Option<u32>,
     pub attempted_signals: Vec<i32>,
     pub children: Vec<ProcessCleanupChild>,
+    pub census: ProcessCleanupCensus,
+    pub omitted_children: usize,
+}
+
+/// A zero is measured only after the collector reads its own nonempty environment.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProcessCleanupCensus {
+    pub control_read: bool,
+    pub scanned_processes: usize,
+    pub unreadable_processes: usize,
+}
+
+impl ProcessCleanupCensus {
+    pub fn complete(&self) -> bool {
+        self.control_read && self.scanned_processes > 0 && self.unreadable_processes == 0
+    }
 }
 
 impl ProcessCleanupReport {
+    pub fn survivors(&self) -> impl Iterator<Item = &ProcessCleanupChild> {
+        self.children
+            .iter()
+            .filter(|child| child.alive_after_cleanup != Some(false))
+    }
+
+    pub fn census_complete(&self) -> bool {
+        self.census.complete() && self.omitted_children == 0
+    }
+
+    pub fn survivor_count(&self) -> Option<usize> {
+        let count = self.survivors().count();
+        (count > 0 || self.census_complete()).then_some(count)
+    }
+
     pub fn for_signal(root_pid: Option<u32>, signal: i32) -> Self {
         Self {
             root_pid,
             attempted_signals: vec![signal],
             children: Vec::new(),
+            census: ProcessCleanupCensus::default(),
+            omitted_children: 0,
         }
     }
 
     pub fn merge(&mut self, other: Self) {
+        if self == &Self::default() {
+            *self = other;
+            return;
+        }
+        self.census.control_read &= other.census.control_read;
+        self.census.scanned_processes = self
+            .census
+            .scanned_processes
+            .saturating_add(other.census.scanned_processes);
+        self.census.unreadable_processes = self
+            .census
+            .unreadable_processes
+            .saturating_add(other.census.unreadable_processes);
+        self.omitted_children += other.omitted_children;
         if self.root_pid.is_none() {
             self.root_pid = other.root_pid;
         }
@@ -208,7 +253,7 @@ impl ProcessCleanupReport {
         #[cfg(unix)]
         {
             for child in &mut self.children {
-                child.alive_after_cleanup = Some(process_exists(child.pid));
+                child.alive_after_cleanup = process_liveness(child.pid);
             }
         }
     }
@@ -237,7 +282,7 @@ impl ProcessCleanupReport {
 }
 
 /// A descendant process Harn targeted during cleanup.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProcessCleanupChild {
     pub pid: u32,
     pub parent_pid: Option<u32>,
@@ -458,6 +503,7 @@ fn signal_registered_process(entry: &ActiveProcessCleanup, signal: i32) -> Proce
             wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
         }
         report.refresh_survivor_status();
+        finish_process_owner_cleanup(&mut report, &entry.cleanup_token);
         report
     }
     #[cfg(not(unix))]
@@ -584,6 +630,9 @@ pub fn signal_pid_tree_group_and_token_with_report(
             wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
         }
         report.refresh_survivor_status();
+        if let Some(token) = cleanup_token.filter(|token| !token.is_empty()) {
+            finish_process_owner_cleanup(&mut report, token);
+        }
         report
     }
     #[cfg(not(unix))]
@@ -713,6 +762,11 @@ fn descendant_processes(root: u32) -> Vec<ProcessCleanupChild> {
 
 #[cfg(unix)]
 fn cleanup_token_processes(token: &str) -> Vec<ProcessCleanupChild> {
+    cleanup_token_census(token).0
+}
+
+#[cfg(unix)]
+fn cleanup_token_census(token: &str) -> (Vec<ProcessCleanupChild>, ProcessCleanupCensus) {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
     let mut sys = System::new();
@@ -723,6 +777,28 @@ fn cleanup_token_processes(token: &str) -> Vec<ProcessCleanupChild> {
             .with_environ(UpdateKind::Always)
             .with_cmd(UpdateKind::Always),
     );
+    let own_pid = sysinfo::Pid::from_u32(std::process::id());
+    let own = sys.process(own_pid);
+    let control_read = own.is_some_and(|process| {
+        std::env::vars_os().any(|(key, value)| {
+            let mut entry = key;
+            entry.push("=");
+            entry.push(value);
+            process.environ().contains(&entry)
+        })
+    });
+    let unreadable_processes = sys
+        .processes()
+        .values()
+        .filter(|process| {
+            process_status_can_execute(process.status()) && process.environ().is_empty()
+        })
+        .count();
+    let census = ProcessCleanupCensus {
+        control_read,
+        scanned_processes: sys.processes().len(),
+        unreadable_processes,
+    };
     let mut children = sys
         .processes()
         .iter()
@@ -740,7 +816,7 @@ fn cleanup_token_processes(token: &str) -> Vec<ProcessCleanupChild> {
         })
         .collect::<Vec<_>>();
     children.sort_by_key(|child| child.pid);
-    children
+    (children, census)
 }
 
 #[cfg(unix)]
@@ -827,7 +903,19 @@ fn command_name(command: &[std::ffi::OsString]) -> Option<String> {
 
 #[cfg(unix)]
 fn process_exists(pid: u32) -> bool {
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+    process_liveness(pid) != Some(false)
+}
+
+#[cfg(unix)]
+fn process_liveness(pid: u32) -> Option<bool> {
+    if unsafe { libc::kill(pid as i32, 0) } == 0 {
+        return Some(true);
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(libc::ESRCH) => Some(false),
+        Some(libc::EPERM) => Some(true),
+        _ => None,
+    }
 }
 
 #[cfg(unix)]

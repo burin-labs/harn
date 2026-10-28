@@ -392,6 +392,7 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "orchestration_decision",
     "pack_thinking_stripped",
     "progress_reported",
+    "provider_usage",
     "purpose_label",
     "repair_output_contract_applied",
     "require_successful_tools_violation",
@@ -2436,6 +2437,21 @@ class HarnCanonicalHistoryBoundaries(_HarnDataclass):
 @dataclass
 class HarnACPPromptCorrelation(_HarnDataclass):
     messageId: Optional[str] = None
+@dataclass
+class HarnProviderUsage(_HarnDataclass):
+    run_id: str
+    parent_session_id: str
+    lineage_known: bool
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    provider_call_count: int
+    unpriced_calls: int
+    usage_unknown_calls: int
+    known_cost_usd: float
+    cost_usd: Optional[float]
+
 
 
 class HarnAgentsTaskStatus(str, Enum):

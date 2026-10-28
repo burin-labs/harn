@@ -1,4 +1,5 @@
 CHANGELOG.md merge=union
+crates/harn-cli/portal/src/types.ts -merge eol=lf
 docs/theme/harn-keywords.js -merge eol=lf
 spec/HARN_SPEC.md -merge eol=lf
 docs/src/language-spec.md -merge eol=lf

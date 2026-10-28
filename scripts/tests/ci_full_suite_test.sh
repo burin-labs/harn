@@ -243,6 +243,17 @@ jq '.[0].workflow_runs += [.[0].workflow_runs[0] | .id=82 | .conclusion="failure
 jq '.id=82 | .conclusion="failure"' "$scratch/good-native/native-run" > "$scratch/newer-run"
 jq '.[0].jobs[0].run_id=82' "$scratch/good-native/native-jobs" > "$scratch/newer-jobs"
 native_refused newer-failure-after-prior-success
+# A cancelled duplicate with the highest id never hides an older success or counts as proof.
+jq '.[0].workflow_runs += [.[0].workflow_runs[0] | .id=82 | .conclusion="cancelled"] | .[0].total_count=2' "$scratch/good-native/native-runs" > "$scratch/native-runs"
+bash "$root/scripts/ci/require_full_suite.sh" > "$scratch/cancelled-newer-log" 2>&1
+grep -q '"status":"complete"' "$scratch/cancelled-newer-log"
+cp "$scratch/good-native/"* "$scratch/"
+jq '.[0].workflow_runs[0].conclusion="cancelled"' "$scratch/good-native/native-runs" > "$scratch/native-runs"
+native_refused only-cancelled-run
+jq '.[0].workflow_runs[0].conclusion="skipped"' "$scratch/good-native/native-runs" > "$scratch/native-runs"
+native_refused only-skipped-run
+jq '.[0].workflow_runs += [.[0].workflow_runs[0] | .id=82 | .conclusion="cancelled"] | .[0].total_count=2 | .[0].workflow_runs[0].conclusion="cancelled"' "$scratch/good-native/native-runs" > "$scratch/native-runs"
+native_refused all-cancelled-runs
 for defect in '.source_sha="3333333333333333333333333333333333333333"' '.policy_sha="3333333333333333333333333333333333333333"' '.run_id=82' '.run_attempt=2' '.phases=[]' '.extra=true'; do
   jq "$defect" "$scratch/good-receipt.json" > "$scratch/receipt.json"
   (cd "$scratch" && zip -jq native-receipt.zip receipt.json)

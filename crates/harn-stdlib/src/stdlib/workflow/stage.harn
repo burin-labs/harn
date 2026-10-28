@@ -248,6 +248,7 @@ fn __stage_command_options(node: dict) {
           "env_mode",
           "stdin",
           "timeout_ms",
+          "hard_timeout_ms",
           "background",
           "background_after_ms",
           "capture",

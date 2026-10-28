@@ -226,7 +226,7 @@ pub struct ContextEvalAggregateV2 {
     pub total_input_tokens: usize,
     pub total_output_tokens: usize,
     pub total_cost_usd: Option<f64>,
-    pub total_known_cost_usd: f64,
+    pub total_known_cost_usd: Option<f64>,
     pub cost_measured_runs: usize,
     pub cost_unmeasured_runs: usize,
     pub total_compaction_count: usize,
@@ -1085,28 +1085,29 @@ fn aggregate_runs(runs: &[ContextEvalRunReportV2]) -> Result<ContextEvalAggregat
     let mean_final_correctness = mean(total, runs.iter().map(|run| run.final_correctness.score));
     let mean_tool_call_quality = mean(total, runs.iter().map(|run| run.tool_call_quality.score));
     let cost_measured_runs = runs.iter().filter(|run| run.cost_usd.is_some()).count();
-    let total_known_cost_usd =
-        runs.iter()
-            .filter_map(|run| run.known_cost_usd)
-            .try_fold(0.0_f64, |sum, cost| {
-                let total = sum + cost;
-                if total.is_finite() {
-                    Ok(total)
-                } else {
-                    Err(VmError::Runtime(
-                        "context eval total known cost exceeds the supported numeric range"
-                            .to_string(),
-                    ))
-                }
-            })?;
-    let total_known_cost_usd = round6(total_known_cost_usd);
+    let total_known_cost_usd = runs.iter().filter_map(|run| run.known_cost_usd).try_fold(
+        None,
+        |sum: Option<f64>, cost| {
+            let total = sum.unwrap_or(0.0) + cost;
+            if total.is_finite() {
+                Ok(Some(total))
+            } else {
+                Err(VmError::Runtime(
+                    "context eval total known cost exceeds the supported numeric range".to_string(),
+                ))
+            }
+        },
+    )?;
+    let total_known_cost_usd = total_known_cost_usd.map(round6);
     Ok(ContextEvalAggregateV2 {
         mean_final_correctness,
         mean_tool_call_quality,
         total_latency_ms: runs.iter().map(|run| run.latency_ms).sum(),
         total_input_tokens: runs.iter().map(|run| run.input_tokens).sum(),
         total_output_tokens: runs.iter().map(|run| run.output_tokens).sum(),
-        total_cost_usd: (total > 0 && cost_measured_runs == total).then_some(total_known_cost_usd),
+        total_cost_usd: (total > 0 && cost_measured_runs == total)
+            .then_some(total_known_cost_usd)
+            .flatten(),
         total_known_cost_usd,
         cost_measured_runs,
         cost_unmeasured_runs: total - cost_measured_runs,
@@ -1252,11 +1253,7 @@ fn stable_hash(parts: &[&str]) -> String {
         hasher.update((part.len() as u64).to_le_bytes());
         hasher.update(part.as_bytes());
     }
-    hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hex::encode(hasher.finalize())
 }
 
 fn round4(value: f64) -> f64 {
@@ -1371,7 +1368,9 @@ mod tests {
         };
         let empty = aggregate_runs(&[]).unwrap();
         assert_eq!(empty.total_cost_usd, None);
+        assert_eq!(empty.total_known_cost_usd, None);
         let missing = aggregate_runs(&[run(None)]).unwrap();
+        assert_eq!(missing.total_known_cost_usd, None);
         assert_eq!(
             (
                 missing.total_cost_usd,
@@ -1381,6 +1380,7 @@ mod tests {
             (None, 0, 1)
         );
         let zero = aggregate_runs(&[run(Some(0.0))]).unwrap();
+        assert_eq!(zero.total_known_cost_usd, Some(0.0));
         assert_eq!(
             (
                 zero.total_cost_usd,
@@ -1397,7 +1397,7 @@ mod tests {
                 mixed.cost_measured_runs,
                 mixed.cost_unmeasured_runs
             ),
-            (None, 0.25, 1, 1)
+            (None, Some(0.25), 1, 1)
         );
         let partial = aggregate_runs(&[ContextEvalRunReportV2 {
             known_cost_usd: Some(0.125),
@@ -1406,7 +1406,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             (partial.total_cost_usd, partial.total_known_cost_usd),
-            (None, 0.125)
+            (None, Some(0.125))
         );
     }
 

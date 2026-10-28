@@ -170,8 +170,14 @@ fn __render_markdown(report: dict) -> string {
   const total_cost = aggregate["total_cost_usd"]
   const measured = aggregate["cost_measured_runs"] ?? 0
   const unmeasured = aggregate["cost_unmeasured_runs"] ?? 0
+  const known_cost = aggregate["total_known_cost_usd"]
   const cost_text = if total_cost == nil {
-    "unavailable (known subtotal ${__format_float_6(aggregate["total_known_cost_usd"] ?? 0.0)}; ${measured} measured, ${unmeasured} unmeasured)"
+    const subtotal = if known_cost == nil {
+      "no known subtotal"
+    } else {
+      "known subtotal ${__format_float_6(known_cost)}"
+    }
+    "unavailable (${subtotal}; ${measured} measured, ${unmeasured} unmeasured)"
   } else {
     __format_float_6(total_cost)
   }

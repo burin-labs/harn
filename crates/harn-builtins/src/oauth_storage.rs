@@ -32,11 +32,11 @@
 //! write, and atomic writes go through a sibling `.tmp` file plus
 //! rename.
 
+use harn_vm_core::atomic_io;
 use harn_vm_core::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions, TryLockError};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -761,60 +761,12 @@ fn write_file_entries(
     let encoded = serde_json::to_vec(&envelope).map_err(|error| {
         VmError::Runtime(format!("oauth storage: failed to encode envelope: {error}"))
     })?;
-    let tmp_path = match path.file_name() {
-        Some(name) => {
-            let mut buf = path.to_path_buf();
-            let mut filename = name.to_os_string();
-            filename.push(".tmp");
-            buf.set_file_name(filename);
-            buf
-        }
-        None => {
-            return Err(VmError::Runtime(format!(
-                "oauth storage: invalid file path `{}`",
-                path.display()
-            )));
-        }
-    };
-    {
-        let mut file = fs::File::create(&tmp_path).map_err(|error| {
-            VmError::Runtime(format!(
-                "oauth storage: failed to open `{}`: {error}",
-                tmp_path.display()
-            ))
-        })?;
-        file.write_all(&encoded).map_err(|error| {
-            VmError::Runtime(format!(
-                "oauth storage: failed to write `{}`: {error}",
-                tmp_path.display()
-            ))
-        })?;
-        file.sync_all().map_err(|error| {
-            VmError::Runtime(format!(
-                "oauth storage: failed to sync `{}`: {error}",
-                tmp_path.display()
-            ))
-        })?;
-        // The envelope is AES-GCM sealed, but the on-disk file should still be
-        // owner-only so a wide umask (0644) can't leave it group/world-readable.
-        // Set the mode on the temp file before the rename so the final path is
-        // never observable at looser permissions.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            file.set_permissions(fs::Permissions::from_mode(0o600))
-                .map_err(|error| {
-                    VmError::Runtime(format!(
-                        "oauth storage: failed to set permissions on `{}`: {error}",
-                        tmp_path.display()
-                    ))
-                })?;
-        }
-    }
-    fs::rename(&tmp_path, path).map_err(|error| {
+    // The envelope is AES-GCM sealed, but the file stays owner-only so a wide
+    // umask cannot leave it group/world-readable; the helper sets the mode on
+    // the temp file before the rename.
+    atomic_io::atomic_write_with_mode(path, &encoded, 0o600).map_err(|error| {
         VmError::Runtime(format!(
-            "oauth storage: failed to rename `{}` to `{}`: {error}",
-            tmp_path.display(),
+            "oauth storage: failed to write `{}`: {error}",
             path.display()
         ))
     })

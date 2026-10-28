@@ -837,6 +837,8 @@ mod non_stream_body_error_tests;
 #[cfg(test)]
 mod schema_stream_abort_tests;
 #[cfg(test)]
+mod sse_framing_tests;
+#[cfg(test)]
 mod sse_read_error_tests;
 #[cfg(test)]
 mod sse_telemetry_tests;

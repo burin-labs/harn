@@ -68,6 +68,11 @@
       "description": "Per-command sandbox profile override. The override is scoped to this command and preserves the surrounding workspace roots and capability ceilings. workspace_paths keeps Harn path enforcement while omitting recursive OS process confinement for trusted toolchain commands."
     },
     "background": { "type": "boolean", "default": false },
+    "hard_timeout_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum lifetime of a background command in milliseconds. Expiry cancels its process tree and publishes a timed-out result with cleanup evidence."
+    },
     "background_after_ms": {
       "type": "integer",
       "minimum": 0,

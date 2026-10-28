@@ -588,11 +588,7 @@ pub(super) fn header_value<'a>(
 
 fn fallback_body_digest(body: &[u8]) -> String {
     let digest = Sha256::digest(body);
-    let mut encoded = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        encoded.push_str(&format!("{byte:02x}"));
-    }
-    format!("sha256:{encoded}")
+    format!("sha256:{}", hex::encode(digest))
 }
 
 pub(in crate::commands::orchestrator::listener) struct HttpError {

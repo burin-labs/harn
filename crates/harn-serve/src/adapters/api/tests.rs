@@ -44,6 +44,76 @@ fn pipeline_server(source: &str) -> (tempfile::TempDir, ApiServer) {
 }
 
 #[tokio::test]
+async fn http_readiness_belongs_to_the_bound_server() {
+    let (_dir, server) = pipeline_server(TEST_PIPELINE);
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        Arc::new(server)
+            .run_http_with_ready(
+                ApiHttpServeOptions {
+                    bind: "127.0.0.1:0".parse().unwrap(),
+                    public_url: None,
+                    tls: HttpTlsConfig::plain(),
+                },
+                |address| {
+                    ready_tx
+                        .send(address)
+                        .map_err(|_| "receiver closed".to_string())
+                },
+            )
+            .await
+    });
+    let address = ready_rx.await.expect("server reported readiness");
+    let response = reqwest::get(format!("http://{address}/health"))
+        .await
+        .expect("ready server accepted a request");
+    assert!(response.status().is_success());
+    task.abort();
+
+    let occupant = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let (_dir, server) = pipeline_server(TEST_PIPELINE);
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let result = Arc::new(server)
+        .run_http_with_ready(
+            ApiHttpServeOptions {
+                bind: occupant.local_addr().unwrap(),
+                public_url: None,
+                tls: HttpTlsConfig::plain(),
+            },
+            |address| {
+                ready_tx
+                    .send(address)
+                    .map_err(|_| "receiver closed".to_string())
+            },
+        )
+        .await;
+    assert!(result.is_err(), "an occupied port must fail");
+    assert!(
+        ready_rx.await.is_err(),
+        "a failed bind must not report readiness"
+    );
+
+    let (_dir, server) = pipeline_server(TEST_PIPELINE);
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let result = Arc::new(server)
+        .run_http_with_ready(
+            ApiHttpServeOptions {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                public_url: None,
+                tls: HttpTlsConfig::plain(),
+            },
+            |address| {
+                ready_tx.send(address).unwrap();
+                Err("readiness delivery failed".to_string())
+            },
+        )
+        .await;
+    assert!(result.unwrap_err().contains("readiness delivery failed"));
+    let address = ready_rx.await.unwrap();
+    assert!(std::net::TcpListener::bind(address).is_ok());
+}
+
+#[tokio::test]
 async fn openapi_json_is_served_from_canonical_spec() {
     let (_dir, server) = pipeline_server(TEST_PIPELINE);
     let app = api_router(server.state);

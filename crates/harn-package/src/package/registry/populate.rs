@@ -20,14 +20,23 @@ pub(crate) fn ensure_git_cache_populated_in(
     }
     if cache_dir.exists() {
         if let Some(expected) = expected_hash {
-            verify_and_record_content_hash(cache_dir, expected)?;
-            write_cache_metadata(cache_dir, source, commit, expected)?;
-            return Ok(entry.verified(expected.to_string()));
+            match content_hash_mismatch(cache_dir, expected)? {
+                None => {
+                    record_content_hash(cache_dir, expected)?;
+                    write_cache_metadata(cache_dir, source, commit, expected)?;
+                    return Ok(entry.verified(expected.to_string()));
+                }
+                Some(actual) if offline => {
+                    return Err(content_hash_mismatch_error(cache_dir, expected, &actual));
+                }
+                Some(_) => {}
+            }
+        } else {
+            let hash = compute_content_hash(cache_dir)?;
+            write_cached_content_hash(cache_dir, &hash)?;
+            write_cache_metadata(cache_dir, source, commit, &hash)?;
+            return Ok(entry.verified(hash));
         }
-        let hash = compute_content_hash(cache_dir)?;
-        write_cached_content_hash(cache_dir, &hash)?;
-        write_cache_metadata(cache_dir, source, commit, &hash)?;
-        return Ok(entry.verified(hash));
     }
 
     if offline {
@@ -56,13 +65,7 @@ pub(crate) fn ensure_git_cache_populated_in(
         }
         write_cached_content_hash(&temp_dir, &hash)?;
         write_cache_metadata(&temp_dir, source, commit, &hash)?;
-        fs::rename(&temp_dir, cache_dir).map_err(|error| {
-            format!(
-                "failed to move {} to {}: {error}",
-                temp_dir.display(),
-                cache_dir.display()
-            )
-        })?;
+        publish_cache_entry(&temp_dir, cache_dir)?;
         Ok(hash)
     })();
     let hash = match populated {
@@ -218,9 +221,21 @@ pub(crate) fn ensure_archive_cache_populated_in(
             .map_err(|error| format!("failed to remove {}: {error}", cache_dir.display()))?;
     }
     if cache_dir.exists() {
-        verify_and_record_content_hash(cache_dir, expected_hash)?;
-        write_cache_metadata(cache_dir, source, expected_hash, expected_hash)?;
-        return Ok(entry.verified(expected_hash.to_string()));
+        match content_hash_mismatch(cache_dir, expected_hash)? {
+            None => {
+                record_content_hash(cache_dir, expected_hash)?;
+                write_cache_metadata(cache_dir, source, expected_hash, expected_hash)?;
+                return Ok(entry.verified(expected_hash.to_string()));
+            }
+            Some(actual) if offline => {
+                return Err(content_hash_mismatch_error(
+                    cache_dir,
+                    expected_hash,
+                    &actual,
+                ));
+            }
+            Some(_) => {}
+        }
     }
     if offline {
         return Err(format!(
@@ -242,13 +257,7 @@ pub(crate) fn ensure_archive_cache_populated_in(
         unpack_package_archive_bytes(&bytes, &temp_dir)?;
         verify_and_record_content_hash(&temp_dir, expected_hash)?;
         write_cache_metadata(&temp_dir, source, expected_hash, expected_hash)?;
-        fs::rename(&temp_dir, cache_dir).map_err(|error| {
-            format!(
-                "failed to move {} to {}: {error}",
-                temp_dir.display(),
-                cache_dir.display()
-            )
-        })?;
+        publish_cache_entry(&temp_dir, cache_dir)?;
         Ok(expected_hash.to_string())
     })();
     match populated {
@@ -258,4 +267,43 @@ pub(crate) fn ensure_archive_cache_populated_in(
             Err(error)
         }
     }
+}
+
+// The entry lock stays held throughout staging and publication. Never discard a
+// damaged entry until the replacement has been fetched and verified.
+fn publish_cache_entry(staged: &Path, destination: &Path) -> Result<(), PackageError> {
+    let backup = if destination.exists() {
+        let parent = destination
+            .parent()
+            .ok_or_else(|| format!("invalid cache path {}", destination.display()))?;
+        let backup = unique_temp_dir(parent, "invalid")?;
+        fs::rename(destination, &backup)
+            .map_err(|error| format!("failed to preserve {}: {error}", destination.display()))?;
+        Some(backup)
+    } else {
+        None
+    };
+    if let Err(error) = fs::rename(staged, destination) {
+        if let Some(backup) = &backup {
+            fs::rename(backup, destination).map_err(|restore| {
+                format!(
+                    "failed to publish {}: {error}; failed to restore {} from {}: {restore}",
+                    destination.display(),
+                    destination.display(),
+                    backup.display()
+                )
+            })?;
+        }
+        return Err(format!(
+            "failed to move {} to {}: {error}",
+            staged.display(),
+            destination.display()
+        )
+        .into());
+    }
+    if let Some(backup) = backup {
+        fs::remove_dir_all(&backup)
+            .map_err(|error| format!("failed to remove {}: {error}", backup.display()))?;
+    }
+    Ok(())
 }

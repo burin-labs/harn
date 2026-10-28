@@ -48,6 +48,12 @@ fn cleanup_report_fixture(signal: i32) -> ProcessCleanupReport {
     ProcessCleanupReport {
         root_pid: Some(99_999),
         attempted_signals: vec![signal],
+        census: harn_vm::op_interrupt::ProcessCleanupCensus {
+            control_read: true,
+            scanned_processes: 1,
+            unreadable_processes: 0,
+        },
+        omitted_children: 0,
         children: vec![ProcessCleanupChild {
             pid: 100_001,
             parent_pid: Some(99_999),
@@ -217,6 +223,92 @@ fn run_command_pipes_stdin_into_child() {
 }
 
 #[test]
+fn run_command_cleanup_counts_unknown_liveness_and_refuses_unmeasured_zero() {
+    let schema = |method| {
+        serde_json::from_str::<serde_json::Value>(
+            harn_hostlib::schemas::lookup(
+                "tools",
+                method,
+                harn_hostlib::schemas::SchemaKind::Response,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let run_schema = schema("run_command");
+    let wait_schema = schema("wait_command");
+    for name in ["process_cleanup", "process_cleanup_child"] {
+        assert_eq!(run_schema["$defs"][name], wait_schema["$defs"][name]);
+    }
+    let cleanup_schema = serde_json::json!({
+        "$ref": "#/$defs/process_cleanup", "$defs": run_schema["$defs"].clone()
+    });
+    let validator = jsonschema::validator_for(&cleanup_schema).unwrap();
+    for case in [
+        "complete",
+        "unknown",
+        "unavailable",
+        "no_control",
+        "partial",
+        "omitted",
+        "merged_unavailable",
+    ] {
+        let mut report = cleanup_report_fixture(9);
+        match case {
+            "unknown" => report.children[0].alive_after_cleanup = None,
+            "unavailable" => report = ProcessCleanupReport::default(),
+            "no_control" => report.census.control_read = false,
+            "partial" => report.census.unreadable_processes = 1,
+            "omitted" => report.omitted_children = 1,
+            "merged_unavailable" => {
+                report.census = harn_vm::op_interrupt::ProcessCleanupCensus::default();
+                report.merge(cleanup_report_fixture(9));
+            }
+            _ => {}
+        }
+        let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig {
+            force_timeout: true,
+            cleanup_report: Some(report),
+            ..MockProcessConfig::running()
+        });
+        let mut request = dict_map();
+        request.insert("argv".into(), vlist_str(&["sleep", "30"]));
+        request.put_int("timeout_ms", 150);
+        let response = call_tool("hostlib_tools_run_command", request).unwrap();
+        assert_response_matches_schema("run_command", &response);
+        let response = require_dict(response);
+        assert!(controller.was_killed(), "{case}: cleanup was not reached");
+        assert!(require_bool(&response, "timed_out"));
+        let cleanup = require_nested_dict(&response, "process_cleanup");
+        let mut cleanup_json = harn_vm::value::json::vm_value_dict_to_json(&cleanup);
+        assert!(
+            validator.is_valid(&cleanup_json),
+            "{case}: published cleanup schema mismatch"
+        );
+        if case == "complete" {
+            assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+            assert!(require_bool(&cleanup, "census_complete"));
+        } else if case == "unknown" {
+            assert_eq!(require_int(&cleanup, "survivor_count"), 1);
+            assert_eq!(require_list(&cleanup, "surviving_children").len(), 1);
+        } else {
+            assert!(
+                matches!(cleanup.get("survivor_count"), Some(VmValue::Nil)),
+                "{case}"
+            );
+            assert!(!require_bool(&cleanup, "census_complete"), "{case}");
+        }
+        if case != "complete" {
+            cleanup_json["survivor_count"] = 0.into();
+            assert!(
+                !validator.is_valid(&cleanup_json),
+                "{case}: false zero accepted by schema"
+            );
+        }
+    }
+}
+
+#[test]
 fn run_command_kills_child_when_timeout_elapses() {
     // No exit set + force_timeout = `wait_with_timeout` reports timeout
     // immediately, no wall-clock dependence.
@@ -321,6 +413,27 @@ fn run_command_kills_child_when_scope_interrupt_fires() {
     let cleanup = require_nested_dict(&resp, "process_cleanup");
     assert_eq!(require_int(&cleanup, "root_pid"), 99_999);
     assert!(controller.was_killed(), "interrupt must kill the child");
+}
+
+#[test]
+fn run_command_background_without_guardian_measurement_reports_unavailable() {
+    let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::completed(0));
+    let mut request = dict_map();
+    request.insert("argv".into(), vlist_str(&["true"]));
+    request.put_bool("background", true);
+    let started = require_dict(call_tool("hostlib_tools_run_command", request).unwrap());
+    let mut wait = dict_map();
+    wait.insert(
+        "handle_id".into(),
+        vm_string(&require_str(&started, "handle_id")),
+    );
+    wait.put_int("timeout_ms", 10_000);
+    let result = require_dict(call_tool("hostlib_tools_wait_command", wait).unwrap());
+    assert_eq!(require_str(&result, "status"), "completed");
+    assert!(!controller.was_killed());
+    let cleanup = require_nested_dict(&result, "process_cleanup");
+    assert!(!require_bool(&cleanup, "census_complete"));
+    assert!(matches!(cleanup.get("survivor_count"), Some(VmValue::Nil)));
 }
 
 #[test]

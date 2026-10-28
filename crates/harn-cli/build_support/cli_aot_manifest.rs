@@ -109,7 +109,7 @@ pub fn canonical_manifest_bytes(manifest: &CliAotManifest) -> Result<Vec<u8>, St
 
 pub fn sha256_bytes(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    hex::encode(digest)
 }
 
 pub fn canonical_source_text(source: &str) -> String {

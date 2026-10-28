@@ -252,7 +252,7 @@ fn merge_unique(into: &mut Vec<String>, source: &[String]) {
 }
 
 fn hex_short(bytes: &[u8]) -> String {
-    bytes.iter().take(12).map(|b| format!("{b:02x}")).collect()
+    hex::encode(&bytes[..bytes.len().min(12)])
 }
 
 #[derive(Serialize)]

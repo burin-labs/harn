@@ -326,6 +326,12 @@ fn temp_sibling_name(file_name: &str) -> String {
     format!(".{stem}.{}.tmp", uuid::Uuid::now_v7().simple())
 }
 
+/// Whether `name` has the shape [`temp_sibling_name`] produces, so directory
+/// scans can skip an interrupted write's leftover.
+pub fn is_temp_sibling_name(name: &str) -> bool {
+    name.starts_with('.') && name.ends_with(".tmp")
+}
+
 /// [`temp_sibling_name`] for a raw `OsStr` file name. On Unix the kept prefix is
 /// the first [`TEMP_STEM_MAX`] raw bytes, so invalid UTF-8 cannot lengthen the
 /// result and the name stays bounded by a small constant.

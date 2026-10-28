@@ -1539,6 +1539,7 @@ pub enum HarnAgentEventKind {
     OrchestrationDecision,
     PackThinkingStripped,
     ProgressReported,
+    ProviderUsage,
     PurposeLabel,
     RepairOutputContractApplied,
     RequireSuccessfulToolsViolation,
@@ -1592,6 +1593,7 @@ impl HarnAgentEventKind {
             Self::OrchestrationDecision => "orchestration_decision",
             Self::PackThinkingStripped => "pack_thinking_stripped",
             Self::ProgressReported => "progress_reported",
+            Self::ProviderUsage => "provider_usage",
             Self::PurposeLabel => "purpose_label",
             Self::RepairOutputContractApplied => "repair_output_contract_applied",
             Self::RequireSuccessfulToolsViolation => "require_successful_tools_violation",
@@ -1660,6 +1662,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "orchestration_decision" => Self::OrchestrationDecision,
             "pack_thinking_stripped" => Self::PackThinkingStripped,
             "progress_reported" => Self::ProgressReported,
+            "provider_usage" => Self::ProviderUsage,
             "purpose_label" => Self::PurposeLabel,
             "repair_output_contract_applied" => Self::RepairOutputContractApplied,
             "require_successful_tools_violation" => Self::RequireSuccessfulToolsViolation,
@@ -2348,6 +2351,7 @@ pub const HARN_AGENT_EVENT_KIND_MODEL_JOB: &str = "model_job";
 pub const HARN_AGENT_EVENT_KIND_ORCHESTRATION_DECISION: &str = "orchestration_decision";
 pub const HARN_AGENT_EVENT_KIND_PACK_THINKING_STRIPPED: &str = "pack_thinking_stripped";
 pub const HARN_AGENT_EVENT_KIND_PROGRESS_REPORTED: &str = "progress_reported";
+pub const HARN_AGENT_EVENT_KIND_PROVIDER_USAGE: &str = "provider_usage";
 pub const HARN_AGENT_EVENT_KIND_PURPOSE_LABEL: &str = "purpose_label";
 pub const HARN_AGENT_EVENT_KIND_REPAIR_OUTPUT_CONTRACT_APPLIED: &str =
     "repair_output_contract_applied";
@@ -2401,6 +2405,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "orchestration_decision",
     "pack_thinking_stripped",
     "progress_reported",
+    "provider_usage",
     "purpose_label",
     "repair_output_contract_applied",
     "require_successful_tools_violation",
@@ -5310,6 +5315,21 @@ pub struct HarnACPPromptCorrelation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "messageId")]
     pub message_id: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnProviderUsage {
+    pub run_id: String,
+    pub parent_session_id: String,
+    pub lineage_known: bool,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub provider_call_count: i64,
+    pub unpriced_calls: i64,
+    pub usage_unknown_calls: i64,
+    pub known_cost_usd: serde_json::Number,
+    pub cost_usd: Option<serde_json::Number>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

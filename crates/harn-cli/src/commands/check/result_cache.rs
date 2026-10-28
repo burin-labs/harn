@@ -490,7 +490,7 @@ fn cache_path(key: &[u8; 32]) -> Option<PathBuf> {
     Some(
         bytecode_cache::cache_dir()?
             .join("check")
-            .join(format!("{}.harncheck", hex(key))),
+            .join(format!("{}.harncheck", hex::encode(key))),
     )
 }
 
@@ -582,27 +582,10 @@ pub(super) fn store(key: &[u8; 32], checked: &CheckedFile, probes: Vec<Probe>) {
     let Some(path) = cache_path(key) else {
         return;
     };
-    let Some(parent) = path.parent() else {
-        return;
-    };
-    if std::fs::create_dir_all(parent).is_err() {
-        return;
-    }
     let Ok(bytes) = serde_json::to_vec(&cached) else {
         return;
     };
-    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-    if std::fs::write(&tmp, bytes).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
-    }
-}
-
-fn hex(bytes: &[u8; 32]) -> String {
-    let mut out = String::with_capacity(64);
-    for byte in bytes {
-        out.push_str(&format!("{byte:02x}"));
-    }
-    out
+    let _ = harn_vm::atomic_io::atomic_write(&path, &bytes);
 }
 
 #[cfg(test)]

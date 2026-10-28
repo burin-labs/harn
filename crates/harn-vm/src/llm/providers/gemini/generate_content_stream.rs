@@ -69,26 +69,22 @@ pub(crate) async fn consume_generate_content_sse<R: tokio::io::AsyncBufRead + Un
     delta_tx: Option<DeltaSender>,
     dialect: DialectContract,
 ) -> Result<Value, VmError> {
-    use tokio::io::AsyncBufReadExt;
-
     if dialect.stream_protocol() != StreamProtocol::GeminiJson {
         return Err(vm_err(
             "Gemini GenerateContent stream received a mismatched dialect",
         ));
     }
 
-    let mut lines = reader.lines();
+    let mut frames = crate::sse_frames::SseFrames::new(reader);
     let mut stream = GenerateContentStream::new();
     let mut saw_provider_frame = false;
     let mut saw_terminal_frame = false;
-    while let Some(line) = lines
-        .next_line()
+    while let Some(frame) = frames
+        .next()
         .await
         .map_err(|error| vm_err(format!("gemini stream read error: {error}")))?
     {
-        let Some(payload) = line.strip_prefix("data:").map(str::trim) else {
-            continue;
-        };
+        let payload = frame.data.trim();
         if payload.is_empty() || payload == "[DONE]" {
             continue;
         }

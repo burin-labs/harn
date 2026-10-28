@@ -26,6 +26,7 @@ mod mcp_events;
 mod mutation_audit;
 mod observation_fixtures;
 mod plan_document;
+mod provider_usage;
 mod registration_fixtures;
 mod repair_claim;
 mod schema_contract;
@@ -458,7 +459,8 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn protocol_conformance_agent_event_fixture_is_adapter_generated() {
-    let actual = collect_notifications(agent_event_ext_fixture_events()).await;
+    let mut actual = collect_notifications(agent_event_ext_fixture_events()).await;
+    actual.push(provider_usage::provider_usage_notification().await);
     crate::protocol_fixture_tests::assert_fixture_documents_match(
         "conformance/protocols/fixtures/acp/agent_event_ext_notifications.valid.json",
         actual,

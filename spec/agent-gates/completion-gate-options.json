@@ -1,5 +1,22 @@
 [
   {
+    "default": "absent; non-discriminating verification retains the strict veto",
+    "evidence": "conformance/tests/mechanisms/completion_behavior_evidence.contract.harn drives a scripted refactor through the completion gate and rejects an unrelated target. Downstream host adoption remains unproven.",
+    "expiry": "2026-11-28",
+    "kind": "configuration",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.behavior_evidence",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "reader": "__completion_gate_evaluate"
+      }
+    ],
+    "reason": "A typed provider supplies goal-bound before-and-after verification evidence; the gate rereads its inputs before applying the preserving-task exception.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "allow soft failures after the cap; strict failures keep retrying",
     "evidence": "conformance/tests/mechanisms/completion_gate_budget.contract.harn drives the live completion gate through red exhaustion and a passing negative control.",
     "expiry": "2026-11-18",

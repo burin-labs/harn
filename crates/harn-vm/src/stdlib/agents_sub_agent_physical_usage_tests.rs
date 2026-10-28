@@ -6,6 +6,24 @@ use crate::value::{VmClosure, VmEnv, VmValue};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::{Arc, Mutex};
 
+struct LiveUsageSink(Arc<Mutex<Vec<(String, crate::llm::usage::ProviderUsage)>>>);
+
+impl crate::agent_events::AgentEventSink for LiveUsageSink {
+    fn handle_event(&self, event: &crate::agent_events::AgentEvent) {
+        if let crate::agent_events::AgentEvent::ProviderUsage {
+            session_id,
+            run_usage,
+            ..
+        } = event
+        {
+            self.0
+                .lock()
+                .unwrap()
+                .push((session_id.clone(), run_usage.as_ref().clone()));
+        }
+    }
+}
+
 struct ProviderOverrides;
 
 impl Drop for ProviderOverrides {
@@ -264,15 +282,19 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
         NestedExecutionKind::SubAgentRun,
         "physical-usage-worker",
     );
+    let parent_session_id = "physical-usage-parent".to_string();
+    crate::agent_sessions::open_or_create(Some(parent_session_id.clone())).unwrap();
+    let child_session_id = format!("child-physical-usage-{}", uuid::Uuid::now_v7());
+    let child_run_id = format!("agent_run_physical_usage_{}", uuid::Uuid::now_v7());
     let spec = SubAgentRunSpec {
         name: "physical-usage-worker".to_string(),
         task: "Call probe, then return the declared answer.".to_string(),
         system: None,
         options,
         returns_schema: Some(crate::schema::json_to_vm_value(&schema)),
-        session_id: format!("child-physical-usage-{}", uuid::Uuid::now_v7()),
-        run_id: format!("agent_run_physical_usage_{}", uuid::Uuid::now_v7()),
-        parent_session_id: None,
+        session_id: child_session_id.clone(),
+        run_id: child_run_id.clone(),
+        parent_session_id: Some(parent_session_id.clone()),
         parent_run_id: None,
         reminder_propagation: Vec::new(),
         workspace_anchor: None,
@@ -283,9 +305,22 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
     vm.set_harness(crate::Harness::real());
     crate::register_vm_stdlib(&mut vm);
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
-    let result = execute_sub_agent(&ctx, spec)
+    let live_usage = Arc::new(Mutex::new(Vec::new()));
+    let transport =
+        crate::agent_events::AgentEventTransport::new(Arc::new(LiveUsageSink(live_usage.clone())));
+    let result = transport
+        .scope(execute_sub_agent(&ctx, spec))
         .await
         .expect("child execution should return a terminal envelope");
+
+    let live_usage = live_usage.lock().unwrap();
+    assert_eq!(live_usage.len(), 2, "each child request reports live usage");
+    for (session_id, usage) in live_usage.iter() {
+        assert_eq!(session_id, &child_session_id);
+        assert_eq!(usage.run_id, child_run_id);
+        assert!(usage.lineage_known);
+        assert_eq!(usage.parent_session_id, parent_session_id);
+    }
 
     assert_eq!(
         result.payload["status"].as_str(),

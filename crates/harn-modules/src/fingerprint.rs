@@ -16,7 +16,6 @@
 //! (alphabetized, single source of truth so trivial reorderings don't
 //! flip the fingerprint either).
 
-use std::fmt::Write as _;
 use std::path::Path;
 
 use harn_parser::{
@@ -58,11 +57,7 @@ pub fn fingerprint_source(source: &str) -> Option<Fingerprint> {
 /// Hex-encode a fingerprint for human-readable output (NDJSON events,
 /// logs, etc.).
 pub fn fingerprint_hex(fp: &Fingerprint) -> String {
-    let mut out = String::with_capacity(fp.len() * 2);
-    for b in fp {
-        write!(&mut out, "{b:02x}").expect("write to String is infallible");
-    }
-    out
+    hex::encode(fp)
 }
 
 fn canonicalize_program(program: &[SNode]) -> String {

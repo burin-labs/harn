@@ -23,17 +23,32 @@ pub(crate) fn is_canonical_content_hash(hash: &str) -> bool {
     harn_modules::package_execution::is_canonical_package_content_hash(hash)
 }
 
-pub(crate) fn verify_content_hash(dir: &Path, expected: &str) -> Result<(), PackageError> {
+pub(crate) fn content_hash_mismatch(
+    dir: &Path,
+    expected: &str,
+) -> Result<Option<String>, PackageError> {
     let actual = harn_modules::package_execution::verify_package_content_hash(dir, expected)
         .map_err(|error| PackageError::Registry(error.to_string()))?;
-    if actual != expected {
-        return Err(format!(
-            "content hash mismatch for {}: expected {}, got {}",
-            dir.display(),
-            expected,
-            actual
-        )
-        .into());
+    Ok((actual != expected).then_some(actual))
+}
+
+pub(crate) fn content_hash_mismatch_error(
+    dir: &Path,
+    expected: &str,
+    actual: &str,
+) -> PackageError {
+    format!(
+        "content hash mismatch for {}: expected {}, got {}",
+        dir.display(),
+        expected,
+        actual
+    )
+    .into()
+}
+
+pub(crate) fn verify_content_hash(dir: &Path, expected: &str) -> Result<(), PackageError> {
+    if let Some(actual) = content_hash_mismatch(dir, expected)? {
+        return Err(content_hash_mismatch_error(dir, expected, &actual));
     }
     Ok(())
 }
@@ -43,6 +58,10 @@ pub(crate) fn verify_and_record_content_hash(
     expected: &str,
 ) -> Result<(), PackageError> {
     verify_content_hash(dir, expected)?;
+    record_content_hash(dir, expected)
+}
+
+pub(crate) fn record_content_hash(dir: &Path, expected: &str) -> Result<(), PackageError> {
     if read_cached_content_hash(dir)?.as_deref() != Some(expected) {
         write_cached_content_hash(dir, expected)?;
     }

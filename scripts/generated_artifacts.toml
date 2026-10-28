@@ -410,6 +410,25 @@ make_all = true
 # ---------------------------------------------------------------------------
 
 [[artifact]]
+id = "portal-types"
+description = "The portal web client's TypeScript API types (crates/harn-cli/portal/src/types.ts), rendered with ts-rs from the Rust DTOs that serialize the portal API."
+gen = "gen-portal-types"
+check = "check-portal-types"
+outputs = ["crates/harn-cli/portal/src/types.ts"]
+sources = [
+  "crates/harn-cli/src/commands/portal/",
+  "crates/harn-cli/src/commands/generate.rs",
+  "crates/harn-vm/src/orchestration/records/types.rs",
+  "crates/harn-vm/src/personas/types.rs",
+  "crates/harn-vm/src/trust_graph.rs",
+  "crates/harn-vm/src/security/session_environment.rs",
+  "crates/harn-vm-core/src/vm/flight_recorder.rs",
+  "crates/harn-execution-policy/src/autonomy.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
 id = "protocol-artifacts"
 description = "Harn Agents Protocol bindings (Rust/TS/Swift + manifest) generated from crates/harn-serve/openapi.yaml and Harn-owned typed wire registries, including external-action receipt vocabulary."
 gen = "gen-protocol-artifacts"
@@ -796,6 +815,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-builtin-methods" = "binary"
 "check-operator-precedence" = "binary"
 "check-protocol-artifacts" = "binary"
+"check-portal-types" = "binary"
 "check-connector-schemas" = "binary"
 # The table is read out of the linked runtime registry, so a stale executable
 # reports a stale verdict.

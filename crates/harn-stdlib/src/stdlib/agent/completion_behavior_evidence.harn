@@ -1,0 +1,320 @@
+import {
+  VerificationInputState,
+  VerificationRecordedCheck,
+  VerificationReuse,
+  verification_run_check,
+} from "std/verification"
+import { __verification_reuse_inputs } from "std/verification_reuse"
+
+/** Task intent is declared by the caller, never inferred from a file change. */
+pub type CompletionBehaviorIntent = "behavior_preserving" | "behavior_change" | "unknown"
+
+/** Host-resolved identity and current content of the task's requested target. */
+pub type CompletionBehaviorTarget = {identity: string, digest: string}
+
+/** A verification performed while one canonical goal remained unchanged. */
+pub type CompletionBehaviorCheck = {
+  session_id: string,
+  goal_id: string,
+  goal_generation: int,
+  goal_digest: string,
+  workspace_digest: string,
+  target: CompletionBehaviorTarget,
+  command: string,
+  check: VerificationRecordedCheck,
+}
+
+/** One fresh reading of the goal and complete verifier input identities. */
+pub type CompletionBehaviorEvidence = {
+  intent: CompletionBehaviorIntent,
+  session_id: string,
+  before: CompletionBehaviorCheck,
+  after: CompletionBehaviorCheck,
+  active_goal_id: string,
+  active_goal_generation: int,
+  active_goal_digest: string,
+  active_workspace_digest: string,
+  current_inputs: VerificationInputState,
+  current_target: CompletionBehaviorTarget,
+}
+
+/** Inputs the gate uses to refresh behavior evidence at the decision boundary. */
+pub type CompletionBehaviorRequest = {
+  agent: HarnessAgent,
+  active_goal_id: string,
+  intent: CompletionBehaviorIntent,
+  before: CompletionBehaviorCheck?,
+  after: CompletionBehaviorCheck?,
+  reuse: VerificationReuse?,
+  target: fn() -> CompletionBehaviorTarget?,
+}
+
+fn __completion_behavior_target(
+  read: fn() -> CompletionBehaviorTarget?,
+) -> CompletionBehaviorTarget? {
+  const target = try {
+    read()
+  } catch {
+    nil
+  }
+  if target == nil || trim(target.identity) == "" || trim(target.digest) == "" {
+    return nil
+  }
+  return target
+}
+
+fn __completion_behavior_goal(agent: HarnessAgent, goal_id: string) -> dict? {
+  if trim(goal_id) == "" {
+    return nil
+  }
+  const exists = try {
+    agent.exists(goal_id)
+  } catch {
+    false
+  }
+  if !exists {
+    return nil
+  }
+  const state = try {
+    agent.goal(goal_id)
+  } catch {
+    nil
+  }
+  if state?.spec == nil || trim(to_string(state.spec?.objective ?? "")) == ""
+    || to_int(state?.generation) == nil {
+    return nil
+  }
+  return state
+}
+
+fn __completion_behavior_goal_digest(goal: dict) -> string {
+  return sha256(json_stringify({spec: goal.spec, metadata: goal.metadata}))
+}
+
+fn __completion_behavior_workspace(agent: HarnessAgent, session_id: string) -> dict? {
+  return try {
+    agent.workspace_anchor(session_id)
+  } catch {
+    nil
+  }
+}
+
+fn __completion_behavior_inside(fs: HarnessFs, anchor: dict?, cwd: string) -> bool {
+  if anchor == nil || trim(cwd) == "" {
+    return false
+  }
+  let roots = [to_string(anchor?.primary ?? "")]
+  for mounted in anchor?.additional_roots ?? [] {
+    roots.push(to_string(mounted?.path ?? ""))
+  }
+  for root in roots {
+    if trim(root) != "" {
+      const inside = try {
+        fs.workspace_canonicalize_existing(cwd, root) != nil
+      } catch {
+        false
+      }
+      if inside {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+fn __completion_behavior_goal_command(goal: dict?, spec: any) -> string? {
+  const metadata = goal?.metadata
+  const verifier = metadata?.verification
+  const declared = trim(to_string(verifier?.command ?? ""))
+  if declared == "" || type_of(spec) != "dict" || spec?.mode != "shell"
+    || to_string(spec?.command ?? "") != declared {
+    return nil
+  }
+  return declared
+}
+
+/**
+ * Run a real verification and bind it only if the goal and all verifier inputs
+ * remained stable. The check result is returned even when binding is impossible.
+ * Reused checks do not count as before-or-after executions for this contract.
+ * The shell command must exactly match the active goal's declared verifier.
+ *
+ * @effects: [process, host, fs, state]
+ * @errors: [backend, invalid_argument]
+ */
+pub fn completion_behavior_run_check(
+  harness: Harness,
+  session_id: string,
+  goal_id: string,
+  target: fn() -> CompletionBehaviorTarget?,
+  row_id: string,
+  spec: any,
+  options: dict,
+) -> dict {
+  const before = __completion_behavior_goal(harness.agent, goal_id)
+  const workspace_before = __completion_behavior_workspace(harness.agent, session_id)
+  const target_before = __completion_behavior_target(target)
+  const check = verification_run_check(harness, row_id, spec, options)
+  const after = __completion_behavior_goal(harness.agent, goal_id)
+  const workspace_after = __completion_behavior_workspace(harness.agent, session_id)
+  const target_after = __completion_behavior_target(target)
+  const command = __completion_behavior_goal_command(before, spec)
+  const bound = if trim(session_id) != ""
+    && goal_id == session_id
+    && before != nil
+    && before == after
+    && workspace_before != nil
+    && workspace_before == workspace_after
+    && target_before != nil
+    && target_before == target_after
+    && target_before.identity == to_string(before.metadata?.target ?? "")
+    && __completion_behavior_inside(harness.fs, workspace_before, check.result.cwd)
+    && command != nil
+    && check.execution == "executed"
+    && check.binding != nil
+    && check.result.status == "completed"
+    && check.result.exit_code == 0
+    && check.result.ok
+    && check.result.success {
+    {
+      session_id: session_id,
+      goal_id: goal_id,
+      goal_generation: to_int(before.generation),
+      goal_digest: __completion_behavior_goal_digest(before),
+      workspace_digest: sha256(json_stringify(workspace_before)),
+      target: target_before,
+      command: command,
+      check: check,
+    }
+  } else {
+    nil
+  }
+  return {check: check, behavior_check: bound}
+}
+
+/**
+ * Read the active goal and input identities at the completion decision. A
+ * missing or unstable reader returns nil; callers must not cache this reading.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn completion_behavior_evidence(
+  agent: HarnessAgent,
+  session_id: string,
+  active_goal_id: string,
+  intent: CompletionBehaviorIntent,
+  before: CompletionBehaviorCheck?,
+  after: CompletionBehaviorCheck?,
+  reuse: VerificationReuse?,
+  target: fn() -> CompletionBehaviorTarget?,
+) -> CompletionBehaviorEvidence? {
+  if trim(session_id) == ""
+    || before == nil
+    || after == nil
+    || reuse == nil
+    || active_goal_id != session_id
+    || active_goal_id != after.goal_id {
+    return nil
+  }
+  const goal_before = __completion_behavior_goal(agent, active_goal_id)
+  const workspace_before = __completion_behavior_workspace(agent, session_id)
+  const inputs = __verification_reuse_inputs(reuse)
+  const target_before = __completion_behavior_target(target)
+  const inputs_after = __verification_reuse_inputs(reuse)
+  const target_after = __completion_behavior_target(target)
+  const goal_after = __completion_behavior_goal(agent, active_goal_id)
+  const workspace_after = __completion_behavior_workspace(agent, session_id)
+  if goal_before == nil || goal_before != goal_after || inputs == nil || inputs != inputs_after
+    || workspace_before == nil
+    || workspace_before != workspace_after
+    || target_before == nil
+    || target_before != target_after
+    || target_before.identity != to_string(goal_before.metadata?.target ?? "") {
+    return nil
+  }
+  return {
+    intent: intent,
+    session_id: session_id,
+    before: before,
+    after: after,
+    active_goal_id: active_goal_id,
+    active_goal_generation: to_int(goal_before.generation),
+    active_goal_digest: __completion_behavior_goal_digest(goal_before),
+    active_workspace_digest: sha256(json_stringify(workspace_before)),
+    current_inputs: inputs,
+    current_target: target_before,
+  }
+}
+
+fn __completion_behavior_positive(check: VerificationRecordedCheck) -> bool {
+  return check.execution == "executed" && check.result.status == "completed"
+    && check.result.ok
+    && check.result.success
+    && check.result.exit_code == 0
+    && trim(check.result.cwd) != ""
+}
+
+fn __completion_behavior_same_goal(evidence: CompletionBehaviorEvidence) -> bool {
+  const before = evidence.before
+  const after = evidence.after
+  return trim(before.session_id) != "" && before.session_id == after.session_id
+    && after.session_id == evidence.session_id
+    && trim(before.goal_id) != ""
+    && before.goal_generation > 0
+    && trim(before.goal_digest) != ""
+    && trim(before.workspace_digest) != ""
+    && before.workspace_digest == after.workspace_digest
+    && after.workspace_digest == evidence.active_workspace_digest
+    && trim(before.command) != ""
+    && before.command == after.command
+    && before.goal_id == after.goal_id
+    && after.goal_id == evidence.active_goal_id
+    && before.goal_generation == after.goal_generation
+    && after.goal_generation == evidence.active_goal_generation
+    && before.goal_digest == after.goal_digest
+    && after.goal_digest == evidence.active_goal_digest
+    && before.target.identity == after.target.identity
+    && after.target.identity == evidence.current_target.identity
+    && before.target.digest != after.target.digest
+    && after.target.digest == evidence.current_target.digest
+}
+
+fn __completion_behavior_known_inputs(inputs: VerificationInputState) -> bool {
+  return inputs.revision >= 0 && trim(inputs.workspace) != "" && trim(inputs.source) != ""
+    && trim(inputs.dependencies) != ""
+    && trim(inputs.environment) != ""
+}
+
+/**
+ * A declared preserving task may use a fresh pair of successful checks.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn completion_behavior_evidence_allows(evidence: CompletionBehaviorEvidence?) -> bool {
+  if evidence == nil || evidence.intent != "behavior_preserving"
+    || !__completion_behavior_same_goal(evidence) {
+    return false
+  }
+  const before = evidence.before
+  const after = evidence.after
+  const old = before.check.binding
+  const fresh = after.check.binding
+  if old == nil || fresh == nil || !__completion_behavior_positive(before.check)
+    || !__completion_behavior_positive(after.check)
+    || before.check.result.cwd != after.check.result.cwd
+    || !__completion_behavior_known_inputs(old.inputs)
+    || !__completion_behavior_known_inputs(fresh.inputs)
+    || trim(old.invocation) == ""
+    || old.invocation != fresh.invocation
+    || old.inputs.workspace != fresh.inputs.workspace
+    || old.inputs.dependencies != fresh.inputs.dependencies
+    || old.inputs.environment != fresh.inputs.environment
+    || old.inputs.source == fresh.inputs.source
+    || old.inputs.revision >= fresh.inputs.revision
+    || fresh.inputs != evidence.current_inputs {
+    return false
+  }
+  return true
+}

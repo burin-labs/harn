@@ -30,12 +30,8 @@ pub(crate) fn claim(dir: &Path, session_id: &str) -> Result<Option<WatcherLock>,
 
 /// Hex keeps any session id a safe file name.
 fn lock_name(session_id: &str) -> String {
-    let hex: String = session_id
-        .bytes()
-        .take(120)
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    format!("{hex}.lock")
+    let bytes = session_id.as_bytes();
+    format!("{}.lock", hex::encode(&bytes[..bytes.len().min(120)]))
 }
 
 /// Lock `path` without waiting. A holder, or a sweep, removes the file as it

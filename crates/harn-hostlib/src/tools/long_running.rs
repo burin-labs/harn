@@ -111,11 +111,19 @@ impl CancelState {
         Some(state)
     }
 
-    fn complete_wait(&self) -> CancellationSnapshot {
+    fn complete_wait(
+        &self,
+        report: Option<process_handle::ProcessCleanupReport>,
+    ) -> CancellationSnapshot {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(report) = report {
+            state.record_cleanup(report);
+        } else if state.process_cleanup.is_none() {
+            state.record_cleanup(process_handle::ProcessCleanupReport::default());
+        }
         state.completed = true;
         CancellationSnapshot {
             cancelled: state.cancelled,
@@ -325,6 +333,8 @@ pub(crate) struct LongRunningSpawnOptions {
     pub(crate) env_remove: Vec<String>,
     pub(crate) capture: CaptureConfig,
     pub(crate) session_id: String,
+    /// An explicit lifetime limit, independent of the foreground wait window.
+    pub(crate) hard_timeout: Option<Duration>,
     pub(crate) progress_interval: Option<Duration>,
     pub(crate) progress_max_interval: Option<Duration>,
     pub(crate) progress_max_inline_bytes: usize,
@@ -421,6 +431,7 @@ pub fn spawn_long_running(
             env_remove: Vec::new(),
             capture: CaptureConfig::default(),
             session_id,
+            hard_timeout: None,
             progress_interval: None,
             progress_max_interval: None,
             progress_max_inline_bytes: CaptureConfig::default().max_inline_bytes,
@@ -438,6 +449,7 @@ pub(crate) fn spawn_long_running_with_options(
     env: BTreeMap<String, String>,
     options: LongRunningSpawnOptions,
 ) -> Result<LongRunningHandleInfo, HostlibError> {
+    let started = std::time::Instant::now();
     let requested_cwd = cwd.as_ref().map(to_agent_path);
     let effective_cwd = proc::resolve_effective_cwd(builtin, cwd.as_deref())?;
     let sandbox_reporting = harn_vm::process_sandbox::ProcessSandboxReportingContext::current();
@@ -530,6 +542,34 @@ pub(crate) fn spawn_long_running_with_options(
             builtin,
             message: format!("failed to spawn waiter thread: {e}"),
         })?;
+
+    if let Some(limit) = options.hard_timeout {
+        let deadline_handle = handle_id.clone();
+        let remaining = limit.saturating_sub(started.elapsed());
+        if let Err(error) = harn_parser::runtime_stack::builder()
+            .name(format!("hto-deadline-{deadline_handle}"))
+            .spawn(move || {
+                if matches!(
+                    wait_for_result(&deadline_handle, remaining),
+                    BackgroundWaitOutcome::Running
+                ) {
+                    cancel_handle_with_options(
+                        &deadline_handle,
+                        CancelOptions {
+                            timed_out: true,
+                            wait_result: None,
+                        },
+                    );
+                }
+            })
+        {
+            cancel_handle(&handle_id);
+            return Err(HostlibError::Backend {
+                builtin,
+                message: format!("failed to start background deadline: {error}"),
+            });
+        }
+    }
 
     Ok(LongRunningHandleInfo {
         command_id,
@@ -653,7 +693,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
             .extend_from_slice(format!("\nharn: process completion refused: {error}\n").as_bytes());
     }
 
-    let cancellation = cancel_state.complete_wait();
+    let cancellation = cancel_state.complete_wait(handle.cleanup_report());
     let cancelled = cancellation.cancelled;
     let timed_out = cancelled && cancellation.timed_out;
     let process_cleanup = cancellation.process_cleanup;
@@ -1351,7 +1391,7 @@ mod tests {
         let waiter = harn_parser::runtime_stack::spawn(move || {
             started_tx.send(()).expect("test waiter start receiver");
             snapshot_tx
-                .send(waiter_state.complete_wait())
+                .send(waiter_state.complete_wait(None))
                 .expect("test snapshot receiver");
         });
 
@@ -1361,7 +1401,13 @@ mod tests {
             Err(mpsc::TryRecvError::Empty)
         ));
 
-        publication.record_cleanup(ProcessCleanupReport::for_signal(Some(42), 9));
+        let mut report = ProcessCleanupReport::for_signal(Some(42), 9);
+        report.census = harn_vm::op_interrupt::ProcessCleanupCensus {
+            control_read: true,
+            scanned_processes: 1,
+            unreadable_processes: 0,
+        };
+        publication.record_cleanup(report);
         publication.publish_cancellation();
         drop(publication);
 
@@ -1369,12 +1415,14 @@ mod tests {
         waiter.join().expect("test waiter panicked");
         assert!(snapshot.cancelled);
         assert!(snapshot.timed_out);
+        let report = snapshot
+            .process_cleanup
+            .expect("cleanup must publish with cancellation");
+        assert_eq!(report.root_pid, Some(42));
         assert_eq!(
-            snapshot
-                .process_cleanup
-                .expect("cleanup must publish with cancellation")
-                .root_pid,
-            Some(42)
+            report.survivor_count(),
+            Some(0),
+            "missing guardian receipt must preserve measured cancellation"
         );
         assert!(
             state.begin_cancellation(false).is_none(),
