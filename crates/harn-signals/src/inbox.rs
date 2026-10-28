@@ -20,7 +20,7 @@ use crate::router::{Router, RuleRouter};
 use crate::watcher::{self, WatcherLock};
 use crate::SignalsError;
 
-pub const INBOX_SCHEMA: &str = "harn.signals.inbox.v2";
+pub const INBOX_SCHEMA: &str = "harn.signals.inbox.v3";
 pub const SIGNALS_DIR_ENV: &str = "HARN_EXT_SIGNALS_DIR";
 
 const INBOX_FILE: &str = "inbox.json";
@@ -41,6 +41,8 @@ pub const MAX_WAKES_PER_REMINDER: u32 = 3;
 pub struct InboxSnapshot {
     pub signals: BTreeMap<String, Signal>,
     pub sessions: BTreeMap<String, Session>,
+    #[serde(default)]
+    pub dispatch: BTreeMap<String, crate::dispatch::DispatchState>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -140,6 +142,31 @@ impl Inbox {
         &self,
         session_id: &str,
         event_id: &str,
+        input: SignalInput,
+        now: OffsetDateTime,
+    ) -> Result<Transition, SignalsError> {
+        self.capture_inner(session_id, None, event_id, input, now)
+    }
+
+    /// Capture output from an explicitly started execution epoch. Late output
+    /// from a cancelled or replaced epoch is refused without acknowledging it.
+    pub fn capture_execution(
+        &self,
+        session_id: &str,
+        execution_id: &str,
+        event_id: &str,
+        input: SignalInput,
+        now: OffsetDateTime,
+    ) -> Result<Transition, SignalsError> {
+        crate::dispatch::validate_identity(execution_id)?;
+        self.capture_inner(session_id, Some(execution_id), event_id, input, now)
+    }
+
+    fn capture_inner(
+        &self,
+        session_id: &str,
+        execution_id: Option<&str>,
+        event_id: &str,
         mut input: SignalInput,
         now: OffsetDateTime,
     ) -> Result<Transition, SignalsError> {
@@ -160,6 +187,7 @@ impl Inbox {
             return Err(SignalsError::InvalidInput("capture summary exceeds the storage bound; capture smaller chunks or reference the full output".into()));
         }
         let identity = CaptureIdentity {
+            execution_id: execution_id.map(str::to_owned),
             session_id: session_id.into(),
             monitor_key,
             event_id: event_id.into(),
@@ -212,6 +240,9 @@ impl Inbox {
         let expires_at = Some(expires_at.unwrap_or(now + self.config.fired_ttl));
         let max_signals = self.config.max_signals;
         self.transact(now, |state| {
+            if let Some(identity) = &capture {
+                crate::dispatch::validate_capture(state, identity)?;
+            }
             if let Some(signal) = state.signals.get(&key) {
                 refuse_weaker(signal, provenance.signature)?;
                 if signal.capture != capture {
@@ -251,6 +282,7 @@ impl Inbox {
                     state.signals.insert(
                         key.clone(),
                         Signal {
+                            cancelled_at: None,
                             capture,
                             capture_order,
                             key: key.clone(),
@@ -349,6 +381,20 @@ impl Inbox {
     pub fn end_session(&self, session_id: &str, now: OffsetDateTime) -> Result<(), SignalsError> {
         self.transact(now, |state| {
             state.sessions.remove(session_id);
+            if let Some(gate) = state.dispatch.get_mut(session_id) {
+                gate.close();
+                for signal in state.signals.values_mut() {
+                    if signal.is_pending()
+                        && signal
+                            .capture
+                            .as_ref()
+                            .is_some_and(|c| c.session_id == session_id)
+                    {
+                        signal.cancelled_at = Some(now);
+                        signal.delivery = None;
+                    }
+                }
+            }
         })
     }
 
@@ -445,6 +491,7 @@ impl Inbox {
                 .values()
                 .filter(|signal| {
                     signal.is_pending()
+                        && !(signal.capture.is_some() && state.dispatch.contains_key(session_id))
                         && CheckInScope::UrgentOnly.admits(signal.severity)
                         && signal.delivery.as_ref().is_some_and(|delivery| {
                             delivery.session_id == session_id
@@ -524,7 +571,7 @@ impl Inbox {
         self.transact(now, |state| state.clone())
     }
 
-    fn transact<T>(
+    pub(crate) fn transact<T>(
         &self,
         now: OffsetDateTime,
         apply: impl FnOnce(&mut InboxSnapshot) -> T,
@@ -629,7 +676,8 @@ fn upsert_session(
 /// sessions.
 fn maintain(state: &mut InboxSnapshot, config: &Config, now: OffsetDateTime) {
     for signal in state.signals.values_mut() {
-        if signal.state == SignalState::Fired
+        if signal.capture.is_none()
+            && signal.state == SignalState::Fired
             && signal
                 .expires_at
                 .is_some_and(|expires_at| expires_at <= now)
@@ -757,11 +805,13 @@ fn lease(
     lease_for: time::Duration,
     now: OffsetDateTime,
 ) -> (Vec<Reminder>, usize) {
+    let gated = state.dispatch.contains_key(session_id);
     let mut ready: Vec<&mut Signal> = state
         .signals
         .values_mut()
         .filter(|signal| {
             signal.is_pending()
+                && !(gated && signal.capture.is_some())
                 && signal.delivery.as_ref().is_some_and(|delivery| {
                     delivery.session_id == session_id && !delivery.lease_active(now)
                 })

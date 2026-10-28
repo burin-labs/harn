@@ -112,7 +112,7 @@ The inbox directory is `$HARN_EXT_SIGNALS_DIR` when set, else
 
 | File | Contents |
 |---|---|
-| `inbox.json` | Signals and sessions, schema `harn.signals.inbox.v2`. Replaced atomically on every change. |
+| `inbox.json` | Signals and sessions, schema `harn.signals.inbox.v3`. Replaced atomically on every change. |
 | `inbox.lock` | Advisory lock file every transaction holds exclusively. |
 | `watchers/<hex session id>.lock` | Held by the running `--rewake` watcher for a session. The watcher removes it as it exits; `SessionEnd` removes one a killed watcher left, and so does the next write to the inbox once the session is no longer registered. |
 | `.inbox.json.*.tmp` | A write in progress. The next write removes one a killed process left. |
@@ -122,7 +122,7 @@ The inbox directory is `$HARN_EXT_SIGNALS_DIR` when set, else
 
 ```json
 {
-  "schema": "harn.signals.inbox.v2",
+  "schema": "harn.signals.inbox.v3",
   "signals": {
     "<key>": {
       "key": "<key>",
@@ -278,3 +278,76 @@ mocked clock moves signal lifecycles too.
 [`examples/triggers/ambient-signals`](https://github.com/burin-labs/harn/tree/main/examples/triggers/ambient-signals)
 wires the monitors to a five-minute cron trigger and the alert normalizers to
 webhook triggers.
+
+## Captured-output dispatch
+
+The durable dispatch API separates capturing output from accepting a monitor
+batch. It does not launch a command, start a model turn, or install another
+watcher. Hosts use their existing scheduler and safe dispatch boundaries.
+
+Start an execution with a stable host session ID and a new execution ID:
+
+```sh
+harn signals dispatch --session session-A --execution run-1 start
+harn signals fire --session session-A --execution run-1 --event-id file-offset-0 \
+  --key build-log --summary 'Build finished' --source-url file:///workspace/build.log
+harn signals dispatch --session session-A --execution run-1 claim
+```
+
+The first deadline is the oldest eligible capture plus 60 seconds. Later
+deadlines are the last accepted batch plus 60 seconds. New captures do not
+slide a deadline. A busy host waits until it can dispatch; one claim then
+includes every eligible captured occurrence, ordered by ingestion across all
+monitors in that session. It does not drain three events per minute. Ordinary
+signal hooks cannot lease captures belonging to a dispatch-managed session.
+
+`start --interval-seconds N` selects 1–86400 seconds; the default is 60.
+The interval is persisted for the stable session. Repeating `start` with the
+same execution is idempotent and cannot reset pacing or reopen a closed epoch.
+Replacing the execution cancels its outstanding captures and preserves the
+session's last acceptance time. Producers must supply the active execution ID;
+unscoped or stale output is refused once a session is dispatch-managed.
+
+A successful claim has a stable batch ID, immutable captured occurrences, a claim token,
+and a lease expiry. Another claimant waits. After expiry, recovery claims the
+same batch ID and content with a new token. Captures arriving after a claim
+remain pending for a trailing batch. Pending captured output does not expire
+under the ambient-condition TTL; capacity exhaustion returns backpressure.
+The existing shared mute, severity, and quiet-hours policy controls eligibility.
+
+Before initiating inference, the receiver must durably and idempotently accept
+the batch ID and its complete content into the owning session. It then commits
+that acceptance with `dispatch ... accept --batch ID --token TOKEN`. This
+atomically acknowledges the batch's occurrences and advances pacing. Repeating
+the latest acceptance returns `accepted: false`. A host recovering after a
+crash between acceptance and acknowledgment must consult its own durable
+acceptance record before initiating inference again. The inbox alone cannot
+guarantee exactly-once inference across that boundary.
+
+Hosts should render a bounded preview with the batch's total count and owned
+references to the complete accepted content. The complete batch must reach
+durable context before acknowledgment; rendering only a prefix and dropping
+the remainder is not acceptance. Treat source text as advisory data through
+the existing escaped reminder renderer.
+
+`dispatch ... cancel --monitor KEY` invalidates that monitor's outstanding
+captures and refuses its later output within the epoch. Other monitors remain
+eligible. Omitting `--monitor` closes the epoch. Ending a managed session also
+closes it and invalidates outstanding claims. Cancelled captures keep an
+explicit `cancelled_at` disposition rather than pretending they were delivered.
+Cancellation does not retract content a host has already accepted.
+
+The same operations are available to scripts through
+`harness.runtime.signal_dispatch`, with `session_id`, `execution_id`, `dir`,
+and `operation` (`start`, `claim`, `accept`, or `cancel`). Start accepts
+`interval_seconds`, acceptance requires `batch_id` and `token`, and cancellation
+optionally accepts `monitor_key`. `signal_fire` accepts `session_id`,
+`execution_id`, and `event_id` for epoch-scoped capture.
+
+Pacing, execution state, and outstanding claims survive inbox reopening under
+the must-understand v3 schema. A persisted observed-time high-water mark holds
+dispatch during wall-clock rollback; hosts should use a reliable clock.
+Session scopes, retired execution identities, and cancelled-monitor identities
+share a `max_signals` metadata bound and refuse new entries at capacity. A
+replayed start cannot reactivate a retired execution. Native command restart, process termination,
+and host model-wake integration are separate responsibilities.

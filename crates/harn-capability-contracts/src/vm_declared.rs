@@ -252,6 +252,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("runtime", "shared_snapshot"),
     ("runtime", "signal_ack"),
     ("runtime", "signal_check_in"),
+    ("runtime", "signal_dispatch"),
     ("runtime", "signal_end_session"),
     ("runtime", "signal_fire"),
     ("runtime", "signal_register"),

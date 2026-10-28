@@ -179,6 +179,8 @@ pub struct Lease {
 /// Stable identity of one captured monitor occurrence, scoped to its session.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CaptureIdentity {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     pub session_id: String,
     pub monitor_key: String,
     pub event_id: String,
@@ -218,6 +220,9 @@ impl Delivery {
 /// One condition and its lifecycle.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Signal {
+    /// A cancelled occurrence remains auditable and is never delivered.
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub cancelled_at: Option<OffsetDateTime>,
     /// Present for immutable occurrences; these never route to another session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture: Option<CaptureIdentity>,
@@ -255,6 +260,9 @@ pub struct Signal {
 impl Signal {
     /// Whether the current generation still owes an acked delivery.
     pub fn is_pending(&self) -> bool {
+        if self.cancelled_at.is_some() {
+            return false;
+        }
         if self
             .delivery
             .as_ref()

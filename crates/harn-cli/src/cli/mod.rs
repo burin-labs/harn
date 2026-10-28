@@ -250,8 +250,8 @@ pub(crate) use session::{
     SessionViewFixturesArgs,
 };
 pub(crate) use signals::{
-    SignalSeverityArg, SignalSignatureArg, SignalsArgs, SignalsCommand, SignalsFireArgs,
-    SignalsHookArgs, SignalsHookEvent, SignalsHookFormat,
+    SignalSeverityArg, SignalSignatureArg, SignalsArgs, SignalsCommand, SignalsDispatchCommand,
+    SignalsFireArgs, SignalsHookArgs, SignalsHookEvent, SignalsHookFormat,
 };
 pub(crate) use skill::{
     SkillArgs, SkillCommand, SkillEndorseArgs, SkillKeyCommand, SkillKeyGenerateArgs,

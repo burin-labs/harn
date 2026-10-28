@@ -243,7 +243,7 @@ fn previous_schema_is_refused_without_rewriting() {
     std::fs::write(&path, original).unwrap();
     let inbox = Inbox::open(dir.path()).unwrap();
     let error = inbox.snapshot(now()).unwrap_err().to_string();
-    assert!(error.contains("harn.signals.inbox.v2"), "{error}");
+    assert!(error.contains("harn.signals.inbox.v3"), "{error}");
     assert_eq!(std::fs::read(path).unwrap(), original);
 }
 
