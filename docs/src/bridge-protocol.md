@@ -289,6 +289,19 @@ canonical ACP content block, not the session-update envelope. Example:
 }
 ```
 
+### Provider usage events
+
+After a provider attempt settles, `_harn/agentEvent` emits `provider_usage` with
+`sessionId`, `call_id`, `provider`, `model`, and `run_usage`. The cumulative
+ledger includes preparation calls and retries. Its `provider_call_count` counts
+dispatched requests, including concurrent requests still in flight. A positive
+`unpriced_calls` means `known_cost_usd` is a floor and `cost_usd` is null.
+When `usage_unknown_calls` is positive, token totals include only reported usage.
+`run_id` identifies the cumulative ledger. `lineage_known` says whether the
+session ancestry was measured; `parent_session_id` is empty for a known root
+or unknown lineage and otherwise names the parent.
+A refusal before dispatch emits no provider-usage event.
+
 ### Composition event migration note
 
 Governed Code Mode composition runs are represented on the Harn

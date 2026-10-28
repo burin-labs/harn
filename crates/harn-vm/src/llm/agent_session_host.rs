@@ -525,37 +525,15 @@ pub(crate) fn record_provider_dispatch(session_id: &str) {
     }
 }
 
-/// Persist completed-call usage at its observed boundary, independently of
-/// purpose labels or acceptance by an agent turn. The accepted-turn counters
-/// behind `result.llm` remain separate and keep their declared scope.
-#[inline(never)]
-pub(crate) fn record_completed_call_usage(
-    opts: &super::api::LlmCallOptions,
-    result: &super::api::LlmResult,
+/// Record one settled physical attempt and publish the owning session ledger.
+pub(crate) fn record_provider_attempt_usage(
+    session_id: &str,
     call_id: &str,
+    provider: &str,
+    model: &str,
+    usage: &crate::llm::usage::LlmUsage,
 ) {
-    let Some(session_id) = opts.session_id.as_deref() else {
-        return;
-    };
-    let usage = result.usage();
-    let mut metadata = usage.to_vm_dict(&result.attempts);
-    metadata.put_str("call_id", call_id);
-    metadata.put_str("call_role", opts.context_manifest.call_role());
-    metadata.put_str("provider", &result.provider);
-    metadata.put_str("model", &result.model);
-    metadata.put_bool("cache_counts_reported", usage.cache_counts_reported());
-    metadata.put(
-        "provider_stop_reason",
-        result
-            .stop_reason
-            .as_deref()
-            .map_or(VmValue::Nil, VmValue::string),
-    );
-    metadata.put_str(
-        "canonical_stop_reason",
-        canonical_provider_stop_reason(result.stop_reason.as_deref()),
-    );
-    if with_session(session_id, "record_completed_call_usage", |session| {
+    if with_session(session_id, "record_provider_attempt_usage", |session| {
         session.physical_usage = Some(match session.physical_usage.take() {
             Some(previous) => crate::llm::usage::LlmUsage::aggregate(&[previous, usage.clone()]),
             None => usage.clone(),
@@ -566,11 +544,100 @@ pub(crate) fn record_completed_call_usage(
     {
         crate::agent_session_journal::with_initialization_accounting(session_id, |accounting| {
             accounting.physical_usage = Some(match accounting.physical_usage.take() {
-                Some(previous) => crate::llm::usage::LlmUsage::aggregate(&[previous, usage]),
-                None => usage,
+                Some(previous) => {
+                    crate::llm::usage::LlmUsage::aggregate(&[previous, usage.clone()])
+                }
+                None => usage.clone(),
             });
         });
     }
+    if let Some(snapshot) = physical_usage_snapshot_for_session(session_id) {
+        let run_id = crate::agent_sessions::active_run_id(session_id)
+            .or_else(|| active_run_id(session_id))
+            .unwrap_or_default();
+        let ancestry = crate::agent_sessions::ancestry(session_id);
+        let lineage_known = ancestry.is_some();
+        let parent_session_id = ancestry
+            .and_then(|lineage| lineage.parent_id)
+            .unwrap_or_default();
+        emit_event(&AgentEvent::ProviderUsage {
+            session_id: session_id.to_string(),
+            call_id: call_id.to_string(),
+            provider: provider.to_string(),
+            model: model.to_string(),
+            run_usage: Box::new(crate::llm::usage::ProviderUsage::from_ledger(
+                &snapshot.usage,
+                run_id,
+                parent_session_id,
+                lineage_known,
+            )),
+        });
+    }
+}
+
+/// Persist the logical call's audit record after its physical attempts settle.
+#[inline(never)]
+pub(crate) fn record_completed_call_usage(
+    opts: &super::api::LlmCallOptions,
+    result: &super::api::LlmResult,
+    call_id: &str,
+) {
+    let usage = result.usage();
+    record_call_usage(
+        opts,
+        &usage,
+        &result.attempts,
+        call_id,
+        &result.provider,
+        &result.model,
+        result.stop_reason.as_deref(),
+    );
+}
+
+/// Persist a terminal failed call's measured or explicitly unknown attempts.
+pub(crate) fn record_failed_call_usage(
+    opts: &super::api::LlmCallOptions,
+    usage: &crate::llm::usage::LlmUsage,
+    attempts: &super::api::ProviderAttempts,
+    call_id: &str,
+) {
+    record_call_usage(
+        opts,
+        usage,
+        attempts,
+        call_id,
+        &opts.provider,
+        &opts.model,
+        None,
+    );
+}
+
+fn record_call_usage(
+    opts: &super::api::LlmCallOptions,
+    usage: &crate::llm::usage::LlmUsage,
+    attempts: &super::api::ProviderAttempts,
+    call_id: &str,
+    provider: &str,
+    model: &str,
+    stop_reason: Option<&str>,
+) {
+    let Some(session_id) = opts.session_id.as_deref() else {
+        return;
+    };
+    let mut metadata = usage.to_vm_dict(attempts);
+    metadata.put_str("call_id", call_id);
+    metadata.put_str("call_role", opts.context_manifest.call_role());
+    metadata.put_str("provider", provider);
+    metadata.put_str("model", model);
+    metadata.put_bool("cache_counts_reported", usage.cache_counts_reported());
+    metadata.put(
+        "provider_stop_reason",
+        stop_reason.map_or(VmValue::Nil, VmValue::string),
+    );
+    metadata.put_str(
+        "canonical_stop_reason",
+        canonical_provider_stop_reason(stop_reason),
+    );
     // Accounting durability must survive a full or trimmed transcript. The
     // session owner also retains its existing bounded snapshot projection.
     // The session owner admits the append and refuses unknown IDs atomically.

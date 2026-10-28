@@ -44,12 +44,12 @@ pub struct LlmUsageRecord {
     pub output_tokens: i64,
     pub total_duration_ms: i64,
     pub call_count: i64,
-    /// Calls without a known USD price. `total_cost` is a lower bound whenever
-    /// this is non-zero.
+    /// Provider attempts without a known USD price. `total_cost` is a lower
+    /// bound whenever this is non-zero.
     pub unpriced_calls: i64,
-    /// Calls whose provider did not report token/cost accounting facts.
+    /// Provider attempts without reported token/cost accounting facts.
     pub usage_unknown_calls: i64,
-    /// Exact total when every call has accounting and pricing; otherwise unknown.
+    /// Exact total when every call has a known price; token counts may be unknown.
     pub cost_usd: Option<f64>,
     /// Sum of priced calls, retained as a lower bound for mixed runs.
     pub known_cost_usd: f64,
@@ -74,7 +74,7 @@ struct LlmUsageRecordWire {
     output_tokens: i64,
     total_duration_ms: i64,
     call_count: i64,
-    unpriced_calls: i64,
+    unpriced_calls: Option<i64>,
     usage_unknown_calls: i64,
     cost_usd: Option<f64>,
     known_cost_usd: Option<f64>,
@@ -86,16 +86,21 @@ struct LlmUsageRecordWire {
 
 impl From<LlmUsageRecordWire> for LlmUsageRecord {
     fn from(wire: LlmUsageRecordWire) -> Self {
+        // Legacy records did not state price certainty. Unknown accounting or
+        // a missing price cannot be promoted to a measured free call.
+        let unpriced_calls = wire.unpriced_calls.unwrap_or_else(|| {
+            i64::from(
+                wire.call_count > 0 && (wire.cost_usd.is_none() || wire.usage_unknown_calls > 0),
+            )
+        });
         Self {
             input_tokens: wire.input_tokens,
             output_tokens: wire.output_tokens,
             total_duration_ms: wire.total_duration_ms,
             call_count: wire.call_count,
-            unpriced_calls: wire.unpriced_calls,
+            unpriced_calls,
             usage_unknown_calls: wire.usage_unknown_calls,
-            cost_usd: wire
-                .cost_usd
-                .filter(|_| wire.unpriced_calls == 0 && wire.usage_unknown_calls == 0),
+            cost_usd: wire.cost_usd.filter(|_| unpriced_calls == 0),
             known_cost_usd: wire.known_cost_usd.unwrap_or(wire.total_cost),
             total_cost: wire.total_cost,
             cache_read_tokens: wire.cache_read_tokens,

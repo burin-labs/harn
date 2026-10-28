@@ -115,6 +115,7 @@ public enum HarnProtocolConstants {
         "orchestration_decision",
         "pack_thinking_stripped",
         "progress_reported",
+        "provider_usage",
         "purpose_label",
         "repair_output_contract_applied",
         "require_successful_tools_violation",
@@ -5174,6 +5175,36 @@ public struct HarnCanonicalHistoryBoundaries: Codable, Sendable, Equatable {
 public struct HarnACPPromptCorrelation: Codable, Sendable, Equatable {
     public let messageId: String?
 }
+public struct HarnProviderUsage: Codable, Sendable, Equatable {
+    public let runId: String
+    public let parentSessionId: String
+    public let lineageKnown: Bool
+    public let inputTokens: Int
+    public let outputTokens: Int
+    public let cacheReadTokens: Int
+    public let cacheWriteTokens: Int
+    public let providerCallCount: Int
+    public let unpricedCalls: Int
+    public let usageUnknownCalls: Int
+    public let knownCostUsd: Double
+    public let costUsd: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case runId = "run_id"
+        case parentSessionId = "parent_session_id"
+        case lineageKnown = "lineage_known"
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case cacheReadTokens = "cache_read_tokens"
+        case cacheWriteTokens = "cache_write_tokens"
+        case providerCallCount = "provider_call_count"
+        case unpricedCalls = "unpriced_calls"
+        case usageUnknownCalls = "usage_unknown_calls"
+        case knownCostUsd = "known_cost_usd"
+        case costUsd = "cost_usd"
+    }
+}
+
 public enum HarnAgentsTaskStatus: String, Codable, Sendable, CaseIterable {
     case submitted = "SUBMITTED"
     case working = "WORKING"

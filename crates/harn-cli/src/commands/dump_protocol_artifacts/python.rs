@@ -279,6 +279,7 @@ pub(super) fn generate_python_with_payloads(payloads: &SessionUpdatePayloads) ->
     super::inference_admission::append(&mut out, super::records::Target::Python);
     super::canonical_history::append(&mut out, super::records::Target::Python);
     super::prompt_correlation::append(&mut out, super::records::Target::Python);
+    super::provider_usage::append(&mut out, super::records::Target::Python);
     out
 }
 

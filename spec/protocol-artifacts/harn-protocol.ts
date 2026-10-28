@@ -270,6 +270,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "orchestration_decision",
   "pack_thinking_stripped",
   "progress_reported",
+  "provider_usage",
   "purpose_label",
   "repair_output_contract_applied",
   "require_successful_tools_violation",
@@ -2592,6 +2593,21 @@ export interface HarnCanonicalHistoryBoundaries {
 export interface HarnACPPromptCorrelation {
   messageId?: string
 }
+export interface HarnProviderUsage {
+  run_id: string
+  parent_session_id: string
+  lineage_known: boolean
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  provider_call_count: number
+  unpriced_calls: number
+  usage_unknown_calls: number
+  known_cost_usd: number
+  cost_usd: number | null
+}
+
 export type HarnAgentsTaskStatus = "SUBMITTED" | "WORKING" | "INPUT_REQUIRED" | "AUTH_REQUIRED" | "COMPLETED" | "FAILED" | "CANCELED"
 export const HARN_AGENTS_TERMINAL_TASK_STATUSES: ReadonlyArray<HarnAgentsTaskStatus> = ["COMPLETED", "FAILED", "CANCELED"]
 

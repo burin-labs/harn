@@ -736,8 +736,7 @@ fn assemble(
     let known_cost_usd = fold.total_cost.to_f64().unwrap_or_default();
     let usage = LlmUsageRecord {
         models: fold.models.clone(),
-        cost_usd: (fold.usage.unpriced_calls == 0 && fold.usage.usage_unknown_calls == 0)
-            .then_some(known_cost_usd),
+        cost_usd: (fold.usage.unpriced_calls == 0).then_some(known_cost_usd),
         known_cost_usd,
         total_cost: known_cost_usd,
         cache_read_tokens: fold.cache.reported_read_tokens(),
@@ -991,6 +990,14 @@ impl SessionFold {
         let cache_read_tokens = integer(&metadata.cache_read_tokens).unwrap_or(0);
         let cache_write_tokens = integer(&metadata.cache_write_tokens).unwrap_or(0);
         let cost_usd = float(&metadata.cost_usd);
+        // New call records carry the physical ledger's certainty directly.
+        // Older records carry only a nullable total and accounting status.
+        let accounting_unknown =
+            nonblank(&metadata.accounting_status).as_deref() == Some("unknown");
+        let unpriced_calls = integer(&metadata.unpriced_calls)
+            .unwrap_or_else(|| i64::from(cost_usd.is_none() || accounting_unknown));
+        let usage_unknown_calls =
+            integer(&metadata.usage_unknown_calls).unwrap_or_else(|| i64::from(accounting_unknown));
         let model = nonblank(&metadata.model);
         let provider = nonblank(&metadata.provider);
         self.llm_calls.push(LlmCallFacts {
@@ -1001,18 +1008,14 @@ impl SessionFold {
             output_tokens,
             cache_read_tokens: cache_reported.then_some(cache_read_tokens),
             cache_write_tokens: cache_reported.then_some(cache_write_tokens),
-            cost_usd,
+            cost_usd: cost_usd.filter(|_| unpriced_calls == 0),
         });
         self.usage.call_count += 1;
-        if cost_usd.is_none() {
-            self.usage.unpriced_calls += 1;
-        }
-        if nonblank(&metadata.accounting_status).as_deref() == Some("unknown") {
-            self.usage.usage_unknown_calls += 1;
-        }
+        self.usage.unpriced_calls += unpriced_calls;
+        self.usage.usage_unknown_calls += usage_unknown_calls;
         self.usage.input_tokens += input_tokens;
         self.usage.output_tokens += output_tokens;
-        if let Some(cost) = cost_usd {
+        if let Some(cost) = float(&metadata.known_cost_usd).or(cost_usd) {
             self.total_cost += Decimal::from_f64_retain(cost).unwrap_or_default();
         }
         self.cache

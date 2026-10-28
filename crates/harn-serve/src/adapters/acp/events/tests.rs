@@ -41,6 +41,47 @@ use plan_document::fixture_plan_document_event;
 
 pub(super) use schema_contract::collect_notifications;
 
+fn fixture_provider_usage() -> AgentEvent {
+    let usage = serde_json::from_value(serde_json::json!({
+        "run_id": "run-1",
+        "parent_session_id": "",
+        "lineage_known": true,
+        "input_tokens": 3,
+        "output_tokens": 1,
+        "cost_usd": null,
+        "known_cost_usd": 0.002,
+        "provider_call_count": 2,
+        "unpriced_calls": 1,
+        "usage_unknown_calls": 1,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+    }))
+    .expect("usage fixture matches the runtime ledger");
+    AgentEvent::ProviderUsage {
+        session_id: "session-1".to_string(),
+        call_id: "call-1".to_string(),
+        provider: "openai".to_string(),
+        model: "model-1".to_string(),
+        run_usage: Box::new(usage),
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn provider_usage_projects_the_physical_ledger_on_the_extension_stream() {
+    let notifications = collect_notifications(vec![fixture_provider_usage()]).await;
+    assert_eq!(notifications.len(), 1);
+    let notification = &notifications[0];
+    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
+    assert_eq!(notification["params"]["kind"], "provider_usage");
+    assert_eq!(notification["params"]["call_id"], "call-1");
+    let usage = &notification["params"]["run_usage"];
+    assert_eq!(usage["provider_call_count"], 2);
+    assert_eq!(usage["known_cost_usd"], 0.002);
+    assert!(usage["cost_usd"].is_null());
+    assert_eq!(usage["unpriced_calls"], 1);
+    assert_eq!(usage["usage_unknown_calls"], 1);
+}
+
 fn fixture_handoff() -> HandoffArtifact {
     HandoffArtifact {
         type_name: "handoff_artifact".to_string(),
@@ -199,6 +240,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
     failed_error.duration_ms = Some(3);
 
     let mut events = vec![
+        fixture_provider_usage(),
         AgentEvent::IterationStart {
             session_id: "session-1".to_string(),
             iteration: 0,

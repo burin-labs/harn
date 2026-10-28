@@ -14,6 +14,8 @@ use super::api::{LlmResult, ProviderAttempts};
 
 mod billing;
 pub use billing::BillingUsage;
+mod live;
+pub use live::{provider_usage_schema, ProviderUsage};
 mod cost;
 pub(crate) use cost::register_settlement_builtin;
 pub use cost::{
@@ -618,6 +620,7 @@ impl LlmUsage {
         Self::aggregate(&usages)
     }
 
+    #[cfg(test)]
     pub(crate) fn known_zero_attempt() -> Self {
         Self {
             cost_usd: Some(0.0),

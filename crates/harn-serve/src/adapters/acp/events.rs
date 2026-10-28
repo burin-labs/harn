@@ -1022,6 +1022,19 @@ impl AgentEventSink for AcpAgentEventSink {
             AgentEvent::InferenceSpeed { .. } => {
                 self.write_notification(meta::inference_speed_notification(event));
             }
+            AgentEvent::ProviderUsage {
+                session_id,
+                call_id,
+                provider,
+                model,
+                run_usage,
+            } => {
+                self.emit_agent_event_ext(
+                    "provider_usage",
+                    session_id,
+                    serde_json::json!({"call_id": call_id, "provider": provider, "model": model, "run_usage": run_usage}),
+                );
+            }
             AgentEvent::IterationEnd {
                 session_id,
                 iteration,

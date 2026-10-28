@@ -789,6 +789,35 @@ fn generated_rust_agent_event_shapes_round_trip() {
 }
 
 #[test]
+fn generated_provider_usage_reads_the_runtime_record_and_rejects_missing_facts() {
+    let record = harn_vm::llm::usage::ProviderUsage {
+        run_id: "run-1".into(),
+        parent_session_id: "".into(),
+        lineage_known: true,
+        input_tokens: 12,
+        output_tokens: 3,
+        cache_read_tokens: 2,
+        cache_write_tokens: 0,
+        provider_call_count: 2,
+        unpriced_calls: 1,
+        usage_unknown_calls: 1,
+        known_cost_usd: 0.02,
+        cost_usd: None,
+    };
+    let mut wire = serde_json::to_value(record).unwrap();
+    let binding: generated_rust_binding::HarnProviderUsage =
+        serde_json::from_value(wire.clone()).expect("generated binding reads the runtime record");
+    assert_eq!(binding.provider_call_count, 2);
+    assert_eq!(binding.unpriced_calls, 1);
+    assert_eq!(binding.usage_unknown_calls, 1);
+    assert!(binding.cost_usd.is_none());
+    assert_eq!(binding.known_cost_usd.as_f64(), Some(0.02));
+    assert_eq!(serde_json::to_value(binding).unwrap(), wire);
+    wire.as_object_mut().unwrap().remove("known_cost_usd");
+    assert!(serde_json::from_value::<generated_rust_binding::HarnProviderUsage>(wire).is_err());
+}
+
+#[test]
 fn rust_const_name_sanitizes_wire_values() {
     assert_eq!(
         rust_const_name("ACP_AGENT_METHOD", "session/prompt"),

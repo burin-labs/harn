@@ -339,6 +339,14 @@ pub enum AgentEvent {
         model: String,
         speed: crate::llm::inference_speed::InferenceSpeed,
     },
+    /// The session's physical usage after a provider attempt settles.
+    ProviderUsage {
+        session_id: String,
+        call_id: String,
+        provider: String,
+        model: String,
+        run_usage: Box<crate::llm::usage::ProviderUsage>,
+    },
     /// Emitted when a first-class agent session is explicitly closed by
     /// `agent_session_close`. This gives event-log consumers a typed
     /// terminal marker even when no final model turn runs.
