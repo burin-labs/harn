@@ -8,6 +8,10 @@ To add a new subcommand or port an existing one off Rust, see
 machine-readable side of `--json` modes, see the
 [`harn --json` contract](./cli-json-contract.md).
 
+`harn run` and `harn bench` report short program errors on stderr by default. Pass `--explain`
+to include source excerpts and runtime stack details. The structured `--json`
+error event retains its detailed diagnostic.
+
 ## Durable provider allowance
 
 `--spend-policy PATH` applies a TOML policy to provider calls in the invocation's
@@ -35,6 +39,17 @@ Unknown pricing is refused before transport. An ordinary reopen can't change
 stored limits. Authorized host updates use `MachineSpendQuota::update_policy`
 and leave a durable audit receipt.
 
+An optional top-level `stop_on_unknown_usage = true` also refuses a new
+reservation while any attempt in the scope is unsettled or has no measured
+usage. This serializes provider attempts across processes and retains the
+refusal after a crash or an unpriced response. The first opener fixes this
+setting for the scope; a later opener with a different value is refused.
+Measured zero is settled usage. The lifetime receipt distinguishes
+`lifetime_unsettled_attempts` from `lifetime_unpriced_attempts`; the existing
+unknown count includes both. While the strict policy refuses new attempts,
+the effective budget query returns zero even if the receipt shows unused
+allowance. The default is `false`.
+
 Keep the policy and ledger outside an agent's writable roots. A host embedding
 Harn can install the same allowance through `MachineSpendQuota::scope`.
 
@@ -49,7 +64,7 @@ write a durable receipt before changing the named session's ceiling.
 `session/set_config_option` budget changes use the same audit ledger. A failed
 audit write refuses the change. Session changes never raise the machine limits;
 use `MachineSpendQuota::update_policy` for an approved machine-policy change.
-Ledger schema version 3 preserves existing reservations and policy history;
+Ledger schema version 4 preserves existing reservations and policy history;
 older Harn versions refuse to open the upgraded ledger.
 
 ## harn self

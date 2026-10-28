@@ -1,7 +1,6 @@
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process;
 
 use harn_vm::event_log::{EventLog, EventLogConfig, LogEvent, Topic};
 use sha2::{Digest, Sha256};
@@ -37,17 +36,18 @@ async fn run_publication_evidence(args: SessionPublicationEvidenceArgs) {
         Ok(Some(evidence)) => match serde_json::to_string_pretty(&evidence) {
             Ok(json) => println!("{json}"),
             Err(error) => {
-                eprintln!("error: failed to serialize publication evidence: {error}");
-                process::exit(1);
+                crate::fatal_error(format!("failed to serialize publication evidence: {error}"));
             }
         },
         Ok(None) => {
-            eprintln!("error: canonical publication evidence is unavailable for the requested workspace/session");
-            process::exit(1);
+            crate::fatal_error(
+                "canonical publication evidence is unavailable for the requested workspace/session",
+            );
         }
         Err(error) => {
-            eprintln!("error: failed to read canonical publication evidence: {error}");
-            process::exit(1);
+            crate::fatal_error(format!(
+                "failed to read canonical publication evidence: {error}"
+            ));
         }
     }
 }
@@ -60,16 +60,14 @@ async fn run_list(args: SessionListArgs) {
     let sessions = match harn_vm::orchestration::list_session_runs(&root, Some(args.limit)).await {
         Ok(sessions) => sessions,
         Err(error) => {
-            eprintln!("error: {error}");
-            process::exit(1);
+            crate::fatal_error(error);
         }
     };
     if args.json {
         match serde_json::to_string_pretty(&sessions) {
             Ok(rendered) => println!("{rendered}"),
             Err(error) => {
-                eprintln!("error: failed to render session list: {error}");
-                process::exit(1);
+                crate::fatal_error(format!("failed to render session list: {error}"));
             }
         }
         return;
@@ -125,11 +123,10 @@ fn run_export(args: SessionExportArgs) {
     let run = match harn_vm::orchestration::load_run_record(Path::new(&args.run_record)) {
         Ok(run) => run,
         Err(error) => {
-            eprintln!(
-                "error: failed to load run record {}: {error}",
+            crate::fatal_error(format!(
+                "failed to load run record {}: {error}",
                 args.run_record
-            );
-            process::exit(1);
+            ));
         }
     };
     let mode = if args.local {
@@ -147,15 +144,13 @@ fn run_export(args: SessionExportArgs) {
     let bundle = match harn_vm::session_bundle::export_run_record_bundle(&run, &options) {
         Ok(bundle) => bundle,
         Err(error) => {
-            eprintln!("error: failed to export session bundle: {error}");
-            process::exit(1);
+            crate::fatal_error(format!("failed to export session bundle: {error}"));
         }
     };
     let rendered = match serde_json::to_string_pretty(&bundle) {
         Ok(json) => format!("{json}\n"),
         Err(error) => {
-            eprintln!("error: failed to render session bundle: {error}");
-            process::exit(1);
+            crate::fatal_error(format!("failed to render session bundle: {error}"));
         }
     };
     if let Some(out) = args.out {
@@ -185,15 +180,13 @@ fn run_checkpoint(args: SessionCheckpointArgs) {
     ) {
         Ok(bundle) => bundle,
         Err(error) => {
-            eprintln!("error: failed to checkpoint worker snapshot: {error}");
-            process::exit(1);
+            crate::fatal_error(format!("failed to checkpoint worker snapshot: {error}"));
         }
     };
     let rendered = match serde_json::to_string_pretty(&bundle) {
         Ok(json) => format!("{json}\n"),
         Err(error) => {
-            eprintln!("error: failed to render session bundle: {error}");
-            process::exit(1);
+            crate::fatal_error(format!("failed to render session bundle: {error}"));
         }
     };
     if let Some(out) = args.out {
@@ -223,8 +216,7 @@ async fn run_import(args: SessionImportArgs) {
         match harn_vm::session_bundle::materialize_worker_snapshots(&bundle, &snapshot_dir) {
             Ok(materialized) => materialized,
             Err(error) => {
-                eprintln!("error: failed to materialize worker snapshots: {error}");
-                process::exit(1);
+                crate::fatal_error(format!("failed to materialize worker snapshots: {error}"));
             }
         };
     let run_record =
@@ -234,15 +226,13 @@ async fn run_import(args: SessionImportArgs) {
         ) {
             Ok(run_record) => run_record,
             Err(error) => {
-                eprintln!("error: failed to import session bundle: {error}");
-                process::exit(1);
+                crate::fatal_error(format!("failed to import session bundle: {error}"));
             }
         };
     let rendered = match serde_json::to_string_pretty(&run_record) {
         Ok(json) => format!("{json}\n"),
         Err(error) => {
-            eprintln!("error: failed to render imported run record: {error}");
-            process::exit(1);
+            crate::fatal_error(format!("failed to render imported run record: {error}"));
         }
     };
     let event_log = match EventLogConfig::for_base_dir(Path::new("."))
@@ -250,8 +240,7 @@ async fn run_import(args: SessionImportArgs) {
     {
         Ok(log) => log,
         Err(error) => {
-            eprintln!("error: failed to open session import event log: {error}");
-            process::exit(1);
+            crate::fatal_error(format!("failed to open session import event log: {error}"));
         }
     };
     write_text(&out, &rendered);
@@ -266,18 +255,17 @@ async fn run_import(args: SessionImportArgs) {
     )
     .await
     {
-        eprintln!("error: failed to record session import: {error}");
-        process::exit(1);
+        crate::fatal_error(format!("failed to record session import: {error}"));
     }
     if args.json {
         write_json_stdout(&session_import_report(&out, &snapshot_dir, &materialized));
     } else {
         if !materialized.is_empty() {
-            eprintln!(
+            harn_vm::events::log_status(&format!(
                 "materialized {} worker snapshot(s) under {}",
                 materialized.len(),
                 snapshot_dir.display()
-            );
+            ));
         }
         println!("{}", out.display());
     }
@@ -331,8 +319,7 @@ fn run_validate(args: SessionValidateArgs) {
         match serde_json::to_string_pretty(&summary) {
             Ok(json) => println!("{json}"),
             Err(error) => {
-                eprintln!("error: failed to render validation summary: {error}");
-                process::exit(1);
+                crate::fatal_error(format!("failed to render validation summary: {error}"));
             }
         }
     } else {
@@ -347,8 +334,7 @@ fn run_schema(args: SessionSchemaArgs) {
     let rendered = match harn_vm::session_bundle::session_bundle_schema_pretty() {
         Ok(schema) => schema,
         Err(error) => {
-            eprintln!("error: failed to render session bundle schema: {error}");
-            process::exit(1);
+            crate::fatal_error(format!("failed to render session bundle schema: {error}"));
         }
     };
     let write_to_file = args.out.is_some();
@@ -392,8 +378,7 @@ fn run_view_fixtures(args: SessionViewFixturesArgs) {
             summary.run_view_count,
         ),
         Err(error) => {
-            eprintln!("error: {error}");
-            process::exit(1);
+            crate::fatal_error(error);
         }
     }
 }
@@ -414,15 +399,13 @@ fn read_validated_bundle_with_content(
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) => {
-            eprintln!("error: failed to read session bundle {path}: {error}");
-            process::exit(1);
+            crate::fatal_error(format!("failed to read session bundle {path}: {error}"));
         }
     };
     match validated_bundle_from_str(&content, allow_unsafe_secret_markers) {
         Ok(bundle) => (bundle, content),
         Err(error) => {
-            eprintln!("error: {context}: {error}");
-            process::exit(1);
+            crate::fatal_error(format!("{context}: {error}"));
         }
     }
 }
@@ -455,15 +438,13 @@ fn validated_bundle_from_str(
 
 fn write_text(path: &Path, content: &str) {
     if let Err(error) = crate::commands::generated_artifact::write_file(path, content) {
-        eprintln!("error: {error}");
-        process::exit(1);
+        crate::fatal_error(error);
     }
 }
 
 fn write_stdout(content: &str) {
     if let Err(error) = io::stdout().write_all(content.as_bytes()) {
-        eprintln!("error: failed to write stdout: {error}");
-        process::exit(1);
+        crate::fatal_error(format!("failed to write stdout: {error}"));
     }
 }
 
@@ -471,8 +452,7 @@ fn write_json_stdout(value: &serde_json::Value) {
     match serde_json::to_string_pretty(value) {
         Ok(json) => println!("{json}"),
         Err(error) => {
-            eprintln!("error: failed to render import report: {error}");
-            process::exit(1);
+            crate::fatal_error(format!("failed to render import report: {error}"));
         }
     }
 }

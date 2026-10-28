@@ -155,7 +155,7 @@ pub fn run_inner_compile(args: PrecompileArgs) {
             }
             Err(err) => {
                 stats.failed += 1;
-                eprintln!("{}: {err}", source.display());
+                cli_diagnostic!("{}: {err}", source.display());
                 if !args.keep_going {
                     break;
                 }
@@ -164,9 +164,11 @@ pub fn run_inner_compile(args: PrecompileArgs) {
     }
 
     if !args.quiet {
-        eprintln!(
+        cli_diagnostic!(
             "precompile: {} compiled, {} reused, {} failed",
-            stats.compiled, stats.reused, stats.failed
+            stats.compiled,
+            stats.reused,
+            stats.failed
         );
     }
     if stats.failed > 0 {

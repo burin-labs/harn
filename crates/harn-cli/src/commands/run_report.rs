@@ -16,12 +16,12 @@ pub(crate) async fn run(args: RunsReportArgs) -> i32 {
                 0
             }
             Err(error) => {
-                eprintln!("error: failed to render run report: {error}");
+                cli_diagnostic!("error: failed to render run report: {error}");
                 1
             }
         },
         Err(error) => {
-            eprintln!("error: failed to build run report: {error}");
+            cli_diagnostic!("error: failed to build run report: {error}");
             1
         }
     }

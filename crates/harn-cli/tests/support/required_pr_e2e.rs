@@ -1,6 +1,4 @@
-pub(crate) const CASES: [&str; 22] = [
-    "provider_admission_privacy::admission_requires_account_evidence_for_conditional_provider_terms",
-    "provider_admission_privacy::unknown_gemini_account_is_refused_before_transport",
+pub(crate) const CASES: [&str; 28] = [
     "eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs",
     "models_dispatch::batch_execution::rejoin_cli_quarantines_an_artifact_without_matching_receipts",
     "models_dispatch::core::models_recommend_human_text_has_model_and_rationale",
@@ -24,4 +22,12 @@ pub(crate) const CASES: [&str; 22] = [
     "user_test_cli::process_egress::connector_http_get_uses_read_authority_and_preserves_retry",
     // An import outside the confined roots reports the denied read.
     "acp_confinement_cli::confined_import_outside_the_workspace_reports_the_denied_read",
+    "provider_admission_privacy::admission_requires_account_evidence_for_conditional_provider_terms",
+    "provider_admission_privacy::unknown_gemini_account_is_refused_before_transport",
+    "durable_spend_policy::strict_scope_refuses_a_new_process_after_unpriced_provider_usage",
+    "durable_spend_policy::agent_spend_guard_actor_unknown",
+    "durable_spend_policy::agent_spend_guard_actor_permissive",
+    "durable_spend_policy::agent_spend_guard_judge_unknown",
+    "durable_spend_policy::agent_spend_guard_judge_permissive",
+    "durable_spend_policy::agent_spend_guard_transcript_control",
 ];

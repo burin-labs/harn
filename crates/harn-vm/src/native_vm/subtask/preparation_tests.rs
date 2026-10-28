@@ -39,11 +39,17 @@ async fn prepared_verify_child_interpreter_preserves_read_only_restriction() {
 async fn prepared_verify_independent_session_cannot_reuse_invocation() {
     let fixture = Fixture::new();
     let (ctx, registry) = fixture.registry(false).await;
-    let binding =
-        preparation_dispatch::prepare(&ctx, Some(&registry), "verify", &json!({}), "test-session")
-            .await
-            .unwrap()
-            .unwrap();
+    let binding = preparation_dispatch::prepare(
+        &ctx,
+        Some(&registry),
+        "verify",
+        &json!({}),
+        "test-session",
+        crate::tool_registry::ToolAudience::Agent,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     scope(Some(binding), async {
         assert!(current_invocation().is_some());
         assert!(preparation_dispatch::validate_handler(
@@ -168,6 +174,7 @@ async fn prepared_verify_admits_pure_result_constructors_and_compiler_try_result
             "verify",
             &json!({}),
             "result-session",
+            crate::tool_registry::ToolAudience::Agent,
         )
         .await
         .unwrap_or_else(|error| panic!("{expression}: {error}"))
@@ -192,6 +199,7 @@ async fn prepared_verify_result_constructors_do_not_admit_mutation() {
             "verify",
             &json!({}),
             "result-session",
+            crate::tool_registry::ToolAudience::Agent,
         )
         .await
         {

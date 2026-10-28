@@ -236,12 +236,12 @@ fn fmt_error(path: &str, code: &str, message: String) -> FmtFileReport {
 #[deny(clippy::print_stdout)]
 fn print_text_report(report: &FmtReport) {
     if report.files.is_empty() {
-        eprintln!("No .harn files found");
+        cli_diagnostic!("No .harn files found");
         return;
     }
     for file in &report.files {
         match file.status {
-            FmtFileStatus::Formatted => eprintln!("formatted {}", file.path),
+            FmtFileStatus::Formatted => cli_diagnostic!("formatted {}", file.path),
             FmtFileStatus::Error => {
                 for diagnostic in &file.diagnostics {
                     if diagnostic.code == Code::FormatterWouldReformat.to_string() {

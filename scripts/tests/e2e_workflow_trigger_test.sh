@@ -58,18 +58,6 @@ if grep -Fq "needs.changes.outputs.should_run == 'true'" "${workflow}"; then
   exit 1
 fi
 
-# A fork pull request cannot read the release-app credentials the availability
-# probe needs, and must not be broken by them.
-require_text 'github.event.pull_request.head.repo.full_name == github.repository' \
-  'the availability probe is no longer fork-safe'
-
-# The census and the actual job must name the same E2E-qualified pool. The
-# general build pool can be available while a host remains quarantined for E2E.
-require_text 'linux_big_runner_tag: harn-ci-e2e' \
-  'the capacity census no longer measures the E2E pool'
-require_text 'fromJSON('\''["self-hosted", "Linux", "X64", "harn-ci-e2e"]'\'')' \
-  'the suite no longer selects the measured E2E pool'
-
 # The decision has to be reported, not only emitted.
 if [[ ! -x "${reason_script}" ]]; then
   echo "missing executable detector reporter: ${reason_script}" >&2

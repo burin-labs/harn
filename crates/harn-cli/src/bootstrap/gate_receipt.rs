@@ -16,7 +16,7 @@ pub(super) fn handle(raw_args: &[String]) -> bool {
         )),
     };
     if let Err(error) = result {
-        eprintln!("error: {error}");
+        cli_diagnostic!("error: {error}");
         process::exit(1);
     }
     true

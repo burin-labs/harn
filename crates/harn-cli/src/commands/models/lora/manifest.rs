@@ -25,13 +25,13 @@ pub(super) async fn manifest(args: &ModelsLoraManifestArgs) -> i32 {
     let report = match manifest_report(args) {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
     if let Some(path) = args.out.as_deref() {
         if let Err(error) = write_manifest(path, &report) {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     }

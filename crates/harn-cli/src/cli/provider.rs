@@ -266,7 +266,7 @@ pub(crate) async fn refresh_provider_catalog_if_requested(args: &ProviderCatalog
     )
     .await;
     if let Some(warning) = report.warning.as_deref() {
-        eprintln!(
+        cli_diagnostic!(
             "warning: provider catalog refresh {}: {warning}",
             report.status
         );

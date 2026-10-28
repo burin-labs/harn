@@ -17,7 +17,7 @@ use super::artifacts::load_overlay_config;
 pub(crate) fn run_overlay_audit(args: &ProvidersOverlayAuditArgs) -> Result<(), String> {
     let overlay = load_overlay_config(&args.overlay)?;
     for warning in &overlay.diagnostics {
-        eprintln!("warning: {warning}");
+        cli_diagnostic!("warning: {warning}");
     }
     let Some(config) = overlay.config else {
         return Err(format!("overlay {} is empty", args.overlay.display()));

@@ -221,7 +221,9 @@ impl ConnectorSetupReporter {
         if self.json {
             match encode_event(&event) {
                 Ok(line) => println!("{line}"),
-                Err(error) => eprintln!("error: failed to encode connector setup event: {error}"),
+                Err(error) => {
+                    cli_diagnostic!("error: failed to encode connector setup event: {error}");
+                }
             }
         } else {
             println!("{}", event.message);

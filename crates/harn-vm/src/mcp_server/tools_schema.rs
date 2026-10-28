@@ -1,11 +1,15 @@
-use crate::value::{VmError, VmValue};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use crate::value::{DictMap, VmError, VmValue};
 
 use super::defs::McpToolDef;
 
 /// Executable MCP handlers bound to one immutable prepared catalog.
 pub struct McpToolSet {
     definitions: Vec<McpToolDef>,
-    prepared: crate::tool_registry::PreparedToolCatalog,
+    prepared: Arc<crate::tool_registry::PreparedToolCatalog>,
+    published_entries: BTreeMap<String, Arc<DictMap>>,
 }
 
 impl McpToolSet {
@@ -34,12 +38,21 @@ impl McpToolSet {
         let prepared = crate::tool_registry::PreparedToolCatalog::prepare(catalog)?;
         Ok(Self {
             definitions,
-            prepared,
+            prepared: Arc::new(prepared),
+            published_entries: BTreeMap::new(),
         })
     }
 
     pub(crate) fn prepared(&self) -> &crate::tool_registry::PreparedToolCatalog {
         &self.prepared
+    }
+
+    pub(crate) fn prepared_catalog(&self) -> Arc<crate::tool_registry::PreparedToolCatalog> {
+        Arc::clone(&self.prepared)
+    }
+
+    pub(crate) fn published_entries(&self) -> &BTreeMap<String, Arc<DictMap>> {
+        &self.published_entries
     }
 }
 
@@ -75,9 +88,25 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<McpToolSet, VmEr
             "executable MCP handlers do not match the prepared tool catalog".into(),
         ));
     }
+    let mut published_entries = BTreeMap::new();
+    if let Some(VmValue::List(entries)) = registry.as_dict().and_then(|dict| dict.get("tools")) {
+        for entry in entries.iter() {
+            if let VmValue::Dict(entry) = entry {
+                if let Some(VmValue::String(name)) = entry.get("name") {
+                    if definitions
+                        .iter()
+                        .any(|tool| tool.catalog.name.as_str() == name.as_str())
+                    {
+                        published_entries.insert(name.to_string(), Arc::clone(entry));
+                    }
+                }
+            }
+        }
+    }
     Ok(McpToolSet {
         definitions,
-        prepared,
+        prepared: Arc::new(prepared),
+        published_entries,
     })
 }
 

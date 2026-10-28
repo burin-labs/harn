@@ -1455,6 +1455,111 @@ fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>
   return false
 }
 
+/** Tree-sitter reports UTF-8 byte offsets; Harn substring indexes characters. */
+fn character_offset_at_byte(text: string, target: int) -> int {
+  let bytes = 0
+  for index in range(0, len(text)) {
+    if bytes == target {
+      return index
+    }
+    bytes = bytes + len(bytes_from_string(text.substring(index, index + 1)))
+    if bytes > target {
+      return -1
+    }
+  }
+  return if bytes == target {
+    len(text)
+  } else {
+    -1
+  }
+}
+
+/** Validate a capture before removing any text from the command. */
+fn heredoc_capture(command: string, found: dict, previous: int) -> dict {
+  const start_capture = found.captures?.start
+  const start = start_capture?.text
+  const body_capture = found.captures?.body
+  const body = body_capture?.text
+  const range = body_capture?.range
+  const redirect = found.captures?.redirect
+  if type_of(start) != "string" || type_of(body) != "string" || type_of(range) != "dict"
+    || type_of(start_capture?.range) != "dict"
+    || type_of(redirect?.text) != "string"
+    || type_of(redirect?.range) != "dict" {
+    return {ok: false}
+  }
+  const begin = character_offset_at_byte(command, redirect.range.start_byte)
+  const end = character_offset_at_byte(command, redirect.range.end_byte)
+  const body_begin = character_offset_at_byte(command, range.start_byte)
+  const body_end = character_offset_at_byte(command, range.end_byte)
+  const delimiter_begin = character_offset_at_byte(command, start_capture.range.start_byte)
+  const delimiter_end = character_offset_at_byte(command, start_capture.range.end_byte)
+  if begin < previous || end < begin || body_begin < begin || body_end < body_begin
+    || body_end > end
+    || delimiter_begin < begin
+    || delimiter_end < delimiter_begin
+    || delimiter_end > body_begin
+    || command.substring(begin, end) != redirect.text
+    || command.substring(delimiter_begin, delimiter_end) != start
+    || command.substring(body_begin, body_end) != body
+    || command.substring(delimiter_end, body_begin).trim() != "" {
+    return {ok: false}
+  }
+  return {ok: true, begin: begin, end: end, start: start, body: body}
+}
+
+/**
+ * Retry a heredoc denial with syntax-owned body boundaries. Outside each body, normal shell
+ * quotes apply; inside an expanding body, quote characters are data and substitutions still run.
+ * Any incomplete parse or unexpected capture keeps the original denial.
+ */
+fn heredoc_stash_write(
+  command: string,
+  alias_lookup: fn(list<string>) -> dict,
+  parse: fn(string, string) -> dict,
+) -> bool {
+  const redirects = parse(command, "(heredoc_redirect) @redirect")
+  const bodies = parse(
+    command,
+    "(heredoc_redirect (heredoc_start) @start (heredoc_body) @body) @redirect",
+  )
+  if redirects.result != "ok" || redirects.had_errors != false || redirects.truncated != false
+    || bodies.result != "ok"
+    || bodies.had_errors != false
+    || bodies.truncated != false
+    || redirects.match_count == 0
+    || redirects.match_count != bodies.match_count
+    || len(redirects.matches) != redirects.match_count
+    || len(bodies.matches) != bodies.match_count {
+    return true
+  }
+  let sanitized = ""
+  let previous = 0
+  for found in bodies.matches {
+    const capture = heredoc_capture(command, found, previous)
+    if !capture.ok {
+      return true
+    }
+    sanitized = sanitized + command.substring(previous, capture.begin)
+    previous = capture.end
+    // Any quoted delimiter suppresses expansion for the whole heredoc.
+    if !capture.start.contains("'") && !capture.start.contains("\"")
+      && !capture.start.contains("\\") {
+      const substitutions = substitution_bodies(capture.body, false)
+      if !substitutions.ok {
+        return true
+      }
+      for nested in substitutions.bodies {
+        if git_stash_write_in(nested, 1, alias_lookup) {
+          return true
+        }
+      }
+    }
+  }
+  sanitized = sanitized + command.substring(previous)
+  return git_stash_write_in(sanitized, 0, alias_lookup)
+}
+
 /**
  * Refuse `git stash` forms that write the stash list.
  *
@@ -1466,6 +1571,7 @@ fn git_stash_write_in(command: string, depth: int, alias_lookup: fn(list<string>
 pub fn git_stash_violation(
   command: string,
   alias_lookup: fn(list<string>) -> dict = NO_CONFIG_ALIASES,
+  parse: fn(string, string) -> dict = { source, query -> {} },
 ) -> string {
   // A command that may change git's environment runs git under a configuration the lookup, which
   // runs in the hook's own environment, cannot see. Its non-built-in subcommands are unreadable.
@@ -1475,6 +1581,12 @@ pub fn git_stash_violation(
     alias_lookup
   }
   if !git_stash_write_in(command, 0, lookup) {
+    return ""
+  }
+  // A resolved executed stage is authoritative, including a substitution whose shell comments
+  // make the fallback delimiter scanner ambiguous. Only retry a denial the scanner did not prove.
+  if command.contains("<<") && !executed_stages_write_stash(command, 0, lookup, false)
+    && !heredoc_stash_write(command, lookup, parse) {
     return ""
   }
   return "`git stash` is refused: the stash list is shared by every linked worktree, so a pop can apply "
@@ -1768,6 +1880,7 @@ pub fn decision(
   census: WorktreeAdmissionCensus,
   make_targets: MakeTargetCensus,
   alias_lookup: fn(list<string>) -> dict = NO_CONFIG_ALIASES,
+  parse: fn(string, string) -> dict = { source, query -> {} },
 ) -> ShellGuardDecision {
   let parsed = nil
   try {
@@ -1858,7 +1971,7 @@ pub fn decision(
   if make_owned != "" {
     return {allow: false, reason: make_owned}
   }
-  const stash = git_stash_violation(command, alias_lookup)
+  const stash = git_stash_violation(command, alias_lookup, parse)
   if stash != "" {
     return {allow: false, reason: stash}
   }
@@ -1883,6 +1996,7 @@ fn main(harness: Harness) {
     worktree_admission_census_from_env(harness.env),
     make_target_census_from_env(harness.env),
     { options -> git_config_aliases_for(harness.process, options) },
+    { source, query -> harness.ast.search({source: source, language: "bash", query: query}) },
   )
   if verdict.allow {
     return nil

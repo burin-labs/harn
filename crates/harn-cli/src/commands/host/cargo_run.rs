@@ -128,9 +128,10 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
     // and one that needed none otherwise produce the same terminal receipt,
     // which would hide the very failure the supervisor exists to absorb.
     if supervised.restarts > 0 {
-        eprintln!(
+        cli_diagnostic!(
             "note: host lease run {} replaced {} worker(s) that exited before acquiring",
-            run.run_id, supervised.restarts,
+            run.run_id,
+            supervised.restarts,
         );
     }
     match finalize_run(store, &run.run_id, supervised.completion, &binary) {
@@ -213,7 +214,7 @@ async fn supervise_worker(
                 remaining_ms,
             } => {
                 restarts += 1;
-                eprintln!(
+                cli_diagnostic!(
                     "warning: host lease worker for run {run_id} exited before acquiring; \
                      replacing it (attempt {restarts} of {MAX_PRE_ACQUIRE_WORKER_RESTARTS}, \
                      waited {}, {} of the configured wait remains)",
@@ -323,7 +324,7 @@ async fn wait_for_worker(
         result = &mut wait => worker_completion(result, killer.as_ref()),
         signal = wait_for_shutdown_signal() => {
             if let Err(error) = signal {
-                eprintln!("warning: host lease signal handler unavailable: {error}");
+                cli_diagnostic!("warning: host lease signal handler unavailable: {error}");
                 return worker_completion(wait.await, killer.as_ref());
             }
             interrupted.store(true, Ordering::SeqCst);
@@ -591,12 +592,12 @@ fn report_terminal_run(
     projection: TerminalProjection,
 ) -> Result<i32, String> {
     if let Some(diagnostic) = projection.diagnostic {
-        eprintln!("{diagnostic}");
+        cli_diagnostic!("{diagnostic}");
     }
     let path = store
         .run_receipt_path(run_id)
         .map_err(|error| error.to_string())?;
-    eprintln!("Cargo lease receipt: {}", path.display());
+    cli_diagnostic!("Cargo lease receipt: {}", path.display());
     Ok(projection.exit_code)
 }
 
@@ -606,7 +607,7 @@ fn fail_run_start(
     error: harn_hostlib::HostLeaseRunStartFailure,
     message: &str,
 ) -> i32 {
-    eprintln!("error: {message}");
+    cli_diagnostic!("error: {message}");
     let terminal = harn_hostlib::HostLeaseRunState::StartFailed {
         observed_at_ms: unix_now_ms(),
         error,
@@ -616,7 +617,7 @@ fn fail_run_start(
     let recorded = match store.transition_run(run_id, terminal.clone()) {
         Ok(receipt) => Some(receipt),
         Err(transition_error) => {
-            eprintln!("error: failed to record Cargo start failure: {transition_error}");
+            cli_diagnostic!("error: failed to record Cargo start failure: {transition_error}");
             None
         }
     };
@@ -625,7 +626,7 @@ fn fail_run_start(
     {
         Ok(exit_code) => exit_code,
         Err(report_error) => {
-            eprintln!("error: failed to report Cargo start failure: {report_error}");
+            cli_diagnostic!("error: failed to report Cargo start failure: {report_error}");
             EX_TEMPFAIL
         }
     }
@@ -668,14 +669,14 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
     ) {
         Ok(cargo) => cargo,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
     let store = match harn_hostlib::HostLeaseStore::from_env() {
         Ok(store) => store,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -687,7 +688,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
     let pending = match store.load_run(&args.run_id) {
         Ok(pending) => pending,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -699,13 +700,13 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
             &args.run_id,
             harn_hostlib::HostLeaseRunStartFailure::WorkerContextMismatch,
         );
-        eprintln!("error: worker context does not match its durable run receipt");
+        cli_diagnostic!("error: worker context does not match its durable run receipt");
         return EX_TEMPFAIL;
     }
     let saw_wait = Cell::new(false);
     let mut report_wait = |receipt: &harn_hostlib::HostLeaseAcquireReceipt| {
         saw_wait.set(true);
-        eprintln!("{}", format_lease_wait(receipt));
+        cli_diagnostic!("{}", format_lease_wait(receipt));
     };
     let acquisition = store.acquire_wait_for_run_with_progress(
         &args.run_id,
@@ -715,7 +716,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
     let acquisition = match acquisition {
         Ok(receipt) if receipt.status == harn_hostlib::HostLeaseAcquireStatus::Acquired => {
             if saw_wait.get() {
-                eprintln!(
+                cli_diagnostic!(
                     "Acquired rust-heavy lease after {}",
                     format_duration_ms(receipt.waited_ms)
                 );
@@ -727,7 +728,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
                 .defer
                 .as_ref()
                 .expect("deferred lease has a typed receipt");
-            eprintln!(
+            cli_diagnostic!(
                 "rust-heavy lease on {} remains held; retry after its next receipt wake",
                 deferred.host
             );
@@ -750,7 +751,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
                     worker_binary_replaced: None,
                 },
             );
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return EX_TEMPFAIL;
         }
     };
@@ -761,7 +762,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
             &acquisition,
             harn_hostlib::HostLeaseRunStartFailure::WorkerContract,
         );
-        eprintln!("error: acquired lease omitted its handle");
+        cli_diagnostic!("error: acquired lease omitted its handle");
         return EX_TEMPFAIL;
     };
     let Some(worker_pid) = handle.owner_pid else {
@@ -771,7 +772,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
             &acquisition,
             harn_hostlib::HostLeaseRunStartFailure::WorkerContract,
         );
-        eprintln!("error: acquired lease omitted its worker PID");
+        cli_diagnostic!("error: acquired lease omitted its worker PID");
         return EX_TEMPFAIL;
     };
     if let Err(error) = store.transition_run(
@@ -789,7 +790,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
             &acquisition,
             harn_hostlib::HostLeaseRunStartFailure::ReceiptTransition,
         );
-        eprintln!("error: {error}");
+        cli_diagnostic!("error: {error}");
         return EX_TEMPFAIL;
     }
     run_cargo_workload(
@@ -1063,7 +1064,7 @@ fn run_cargo_workload(
     }
     let status = wait_for_cargo_workload(child.as_mut(), workload_timeout_ms);
     if let Err(error) = job.disarm() {
-        eprintln!("error: failed to close Cargo process-tree supervision: {error}");
+        cli_diagnostic!("error: failed to close Cargo process-tree supervision: {error}");
         return 1;
     }
     status
@@ -1182,12 +1183,14 @@ fn wait_for_cargo_workload(
         Ok(harn_hostlib::process::WaitOutcome::Exited(status)) => status_code(status),
         Ok(harn_hostlib::process::WaitOutcome::TimedOut(_)) => {
             let timeout_ms = workload_timeout_ms.expect("timeout outcome requires a deadline");
-            eprintln!("error: Cargo workload timed out after {timeout_ms}ms after lease admission");
+            cli_diagnostic!(
+                "error: Cargo workload timed out after {timeout_ms}ms after lease admission"
+            );
             EX_TIMEOUT
         }
         Ok(harn_hostlib::process::WaitOutcome::Interrupted(_)) => EX_CANCELLED,
         Err(error) => {
-            eprintln!("error: failed to wait for Cargo: {error}");
+            cli_diagnostic!("error: failed to wait for Cargo: {error}");
             1
         }
     }
@@ -1233,7 +1236,7 @@ fn fail_cargo_launch(
     message: &str,
 ) -> i32 {
     let Some(handle) = acquisition.handle.as_ref() else {
-        eprintln!("error: {message}");
+        cli_diagnostic!("error: {message}");
         return 1;
     };
     match completed_release_outcome(
@@ -1256,9 +1259,9 @@ fn fail_cargo_launch(
                 },
             );
         }
-        Err(error) => eprintln!("error: failed to release launch lease: {error}"),
+        Err(error) => cli_diagnostic!("error: failed to release launch lease: {error}"),
     }
-    eprintln!("error: {message}");
+    cli_diagnostic!("error: {message}");
     EX_TEMPFAIL
 }
 

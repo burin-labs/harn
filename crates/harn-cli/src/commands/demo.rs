@@ -408,7 +408,7 @@ pub(crate) async fn run(args: DemoArgs) -> i32 {
     };
 
     let Some(scenario) = lookup_scenario(&scenario_id) else {
-        eprintln!("error: unknown scenario `{scenario_id}`");
+        cli_diagnostic!("error: unknown scenario `{scenario_id}`");
         eprintln!();
         print_list_table(false);
         return 2;
@@ -496,7 +496,7 @@ async fn interactive_pick(args: &DemoArgs) -> i32 {
         match trimmed.parse::<usize>() {
             Ok(n) if (1..=SCENARIOS.len()).contains(&n) => n,
             _ => {
-                eprintln!("error: invalid selection `{trimmed}`");
+                cli_diagnostic!("error: invalid selection `{trimmed}`");
                 return 2;
             }
         }
@@ -508,7 +508,7 @@ async fn run_scenario(args: &DemoArgs, scenario: Scenario) -> i32 {
     let staged = match stage_scenario(scenario) {
         Ok(s) => s,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
@@ -574,9 +574,10 @@ async fn run_scenario(args: &DemoArgs, scenario: Scenario) -> i32 {
 
     if outcome.exit_code != 0 {
         if !args.json {
-            eprintln!(
+            cli_diagnostic!(
                 "error: demo `{}` failed (exit {})",
-                scenario.id, outcome.exit_code
+                scenario.id,
+                outcome.exit_code
             );
             if args.live && live_failure_looks_like_provider_misconfig(&outcome) {
                 eprintln!();
@@ -596,7 +597,7 @@ async fn run_scenario(args: &DemoArgs, scenario: Scenario) -> i32 {
         match write_run_record(scenario, &outcome) {
             Ok(path) => Some(path),
             Err(error) => {
-                eprintln!("warning: failed to write demo run record: {error}");
+                cli_diagnostic!("warning: failed to write demo run record: {error}");
                 None
             }
         }
@@ -653,7 +654,7 @@ impl ScopedCwd {
     fn enter(dir: &Path) -> Self {
         let previous = std::env::current_dir().ok();
         if let Err(error) = std::env::set_current_dir(dir) {
-            eprintln!(
+            cli_diagnostic!(
                 "warning: failed to enter demo working dir {}: {error}",
                 dir.display()
             );

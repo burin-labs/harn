@@ -16,27 +16,27 @@ pub async fn run(args: EvalSkillGateArgs) -> i32 {
     let manifest = match load_skill_gate_manifest(&args.manifest) {
         Ok(manifest) => manifest,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
     let report = match evaluate_skill_gate_manifest(&manifest) {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
     let output_dir = args.output.unwrap_or_else(|| default_output_dir(&report));
     if let Err(error) = fs::create_dir_all(&output_dir) {
-        eprintln!("error: failed to create {}: {error}", output_dir.display());
+        cli_diagnostic!("error: failed to create {}: {error}", output_dir.display());
         return 1;
     }
     if let Err(error) = write_outputs(&output_dir, &report) {
-        eprintln!("error: failed to write skill gate outputs: {error}");
+        cli_diagnostic!("error: failed to write skill gate outputs: {error}");
         return 1;
     }
-    eprintln!(
+    cli_diagnostic!(
         "wrote {}, {}, {}, and {}",
         output_dir.join("summary.json").display(),
         output_dir.join("per_case.jsonl").display(),
@@ -47,7 +47,7 @@ pub async fn run(args: EvalSkillGateArgs) -> i32 {
         match serde_json::to_string_pretty(&report) {
             Ok(payload) => println!("{payload}"),
             Err(error) => {
-                eprintln!("error: failed to serialize skill gate report: {error}");
+                cli_diagnostic!("error: failed to serialize skill gate report: {error}");
                 return 1;
             }
         }

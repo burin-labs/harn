@@ -118,7 +118,7 @@ pub(crate) async fn run_changed_lint_command(args: &crate::cli::PathTargetsArgs)
                     JsonEnvelope::err(LINT_SCHEMA_VERSION, error.code(), error.message());
                 println!("{}", crate::json_envelope::to_string_pretty(&envelope));
             } else {
-                eprintln!("error: {error}");
+                cli_diagnostic!("error: {error}");
             }
             std::process::exit(1);
         }
@@ -237,7 +237,7 @@ fn render_changed_lint(outcome: &LintJsonCommandOutcome) {
     };
     for file in &report.files {
         if file.diagnostics.is_empty() {
-            eprintln!("{}: no issues found on added lines", file.path);
+            cli_diagnostic!("{}: no issues found on added lines", file.path);
             continue;
         }
         let source = report

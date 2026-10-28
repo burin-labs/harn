@@ -21,6 +21,7 @@ set -euo pipefail
 #      explicit override.
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+export HARN_TARGET_GC_HANDLE_PROBE="${HARN_TARGET_GC_HANDLE_PROBE:-$repo_root/scripts/tests/fixtures/target-gc-handle-probe.sh}"
 gc="$repo_root/scripts/prune_stale_targets.sh"
 tmp_root=$(mktemp -d)
 live_pids=()
@@ -172,21 +173,20 @@ grep -Fq "removing cold cache: ${repos_leaf}-stale-d" "$dead_lock" \
   || fail "the run behind a dead holder's lock did not collect" "$dead_lock"
 [[ -e "$lock" ]] && fail "the run that replaced a stale lock did not release it" "$dead_lock"
 
-# A live holder past the stale timeout is also replaced: a wedged run must not
-# block every later one.
+# A live holder past the stale timeout still owns the lock.
 add_stale_entry stale-e
-sleep 600 >/dev/null 2>&1 &
-wedged="$!"
-live_pids+=("$wedged")
+wedged="$$"
 mkdir "$lock"
 printf '%s %s\n' "$wedged" "1577836800" > "$lock/owner"
 wedged_out="$tmp_root/wedged.txt"
 HARN_TARGET_GC_LOCK_STALE_SECS=3600 run_gc --host-maintenance >"$wedged_out" 2>&1 \
-  || fail "a run behind a wedged holder's lock failed" "$wedged_out"
-grep -Fq "replacing stale run lock (holder_pid=$wedged" "$wedged_out" \
-  || fail "a lock held past the stale timeout was not replaced" "$wedged_out"
-grep -Fq "removing cold cache: ${repos_leaf}-stale-e" "$wedged_out" \
-  || fail "the run behind a wedged holder's lock did not collect" "$wedged_out"
+  || fail "a run behind a live holder's lock failed" "$wedged_out"
+grep -Eq "^harn-target GC: .*status=skipped reason=another-run-active holder_pid=$wedged .*removed=0 " "$wedged_out" \
+  || fail "a live holder's old lock was not retained" "$wedged_out"
+[[ -d "$targets/${repos_leaf}-stale-e" ]] || fail "a live holder's target was removed" "$wedged_out"
+[[ "$(cat "$lock/owner")" == "$wedged 1577836800" ]] || fail "the live holder's lock was modified" "$wedged_out"
+rm "$lock/owner"
+rmdir "$lock"
 
 echo "--- overlapping run (skipped) ---"
 cat "$skipped"

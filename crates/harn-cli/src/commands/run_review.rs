@@ -9,7 +9,7 @@ pub(crate) async fn run(args: RunsReviewArgs) -> i32 {
         Some(path) => match std::fs::read_to_string(&path) {
             Ok(rubric) => rubric,
             Err(error) => {
-                eprintln!("error: failed to read rubric {}: {error}", path.display());
+                cli_diagnostic!("error: failed to read rubric {}: {error}", path.display());
                 return 1;
             }
         },
@@ -34,7 +34,7 @@ pub(crate) async fn run(args: RunsReviewArgs) -> i32 {
             super::run_report::request_for_run_record(run_record_path, args.events_db),
         ),
         _ => {
-            eprintln!(
+            cli_diagnostic!(
                 "error: exactly one of --report, --run-record, or --from-session is required"
             );
             return 2;
@@ -63,7 +63,7 @@ fn render(value: &impl serde::Serialize, stderr: bool) -> i32 {
             }
         }
         Err(error) => {
-            eprintln!("error: failed to render run review: {error}");
+            cli_diagnostic!("error: failed to render run review: {error}");
             1
         }
     }

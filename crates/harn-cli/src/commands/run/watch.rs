@@ -1,19 +1,17 @@
 use std::collections::HashSet;
 use std::path::Path;
-use std::process;
 
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 
 use super::{run_file, CliLlmMockMode, RunProfileOptions};
 
-pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
+pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>, explain: bool) {
     let abs_path = std::fs::canonicalize(path).unwrap_or_else(|error| {
-        eprintln!("Error: {error}");
-        process::exit(1);
+        crate::fatal_error(error);
     });
     let watch_dir = abs_path.parent().unwrap_or(Path::new("."));
 
-    eprintln!("\x1b[2m[watch] running {path}...\x1b[0m");
+    harn_vm::events::log_info("watch", &format!("running {path}..."));
     run_file(
         path,
         false,
@@ -22,6 +20,7 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
         CliLlmMockMode::Off,
         None,
         RunProfileOptions::default(),
+        explain,
     )
     .await;
 
@@ -45,21 +44,22 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
             }
         })
         .unwrap_or_else(|error| {
-            eprintln!("Error setting up file watcher: {error}");
-            process::exit(1);
+            crate::fatal_error(format!("setting up file watcher: {error}"));
         });
         watcher
             .watch(watch_dir, RecursiveMode::Recursive)
             .unwrap_or_else(|error| {
-                eprintln!("Error watching directory: {error}");
-                process::exit(1);
+                crate::fatal_error(format!("watching directory: {error}"));
             });
         watcher
     };
 
-    eprintln!(
-        "\x1b[2m[watch] watching {} for .harn changes (ctrl-c to stop)\x1b[0m",
-        watch_dir.display()
+    harn_vm::events::log_info(
+        "watch",
+        &format!(
+            "watching {} for .harn changes (ctrl-c to stop)",
+            watch_dir.display()
+        ),
     );
 
     loop {
@@ -68,8 +68,7 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         while rx.try_recv().is_ok() {}
 
-        eprintln!();
-        eprintln!("\x1b[2m[watch] change detected, re-running {path}...\x1b[0m");
+        harn_vm::events::log_info("watch", &format!("change detected, re-running {path}..."));
         run_file(
             path,
             false,
@@ -78,6 +77,7 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
             CliLlmMockMode::Off,
             None,
             RunProfileOptions::default(),
+            explain,
         )
         .await;
     }

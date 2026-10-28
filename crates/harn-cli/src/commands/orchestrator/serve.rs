@@ -118,7 +118,6 @@ async fn wait_for_shutdown(
         })?;
     }
 
-    eprintln!("[harn] signal received, starting graceful shutdown...");
     harness
         .shutdown(Duration::from_secs(30))
         .await

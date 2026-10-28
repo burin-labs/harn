@@ -41,23 +41,23 @@ pub(super) async fn train(args: &ModelsLoraTrainArgs) -> i32 {
     let mut report = match train_report(args) {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
     if args.execute {
         if let Err(error) = execute_backend(&mut report, args.json) {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
         if let Err(error) = finalize_executed_trainer_provenance(&mut report) {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     }
     if let Some(path) = args.receipt_out.as_deref() {
         if let Err(error) = write_receipt(path, &report) {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     }
