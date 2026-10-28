@@ -100,30 +100,41 @@ fn preparation_and_actor_publish_each_settled_provider_usage() {
     );
     let root = tempfile::tempdir().unwrap();
     let events = Arc::new(Mutex::new(Vec::new()));
+    let loop_events = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::new(UsageEvents(events.clone()));
-    let transport = crate::agent_events::AgentEventTransport::new(sink);
+    let sinks = Arc::new(crate::agent_events::MultiSink::new());
+    sinks.push(sink);
+    let event_log = root.path().join("event_log.jsonl");
+    sinks.push(crate::agent_events::JsonlEventSink::open(&event_log).unwrap());
+    let transport = crate::agent_events::AgentEventTransport::new(sinks);
     let runtime = crate::test_support::current_thread_runtime();
     runtime.block_on(
         tokio::task::LocalSet::new().run_until(transport.scope(async {
-            execute(
-                root.path(),
-                r#"
+            crate::llm::scope_agent_event_sink(
+                Some(Arc::new(UsageEvents(loop_events.clone()))),
+                async {
+                    execute(
+                        root.path(),
+                        r#"
   harness.agent.with_run(session, options, { ->
     harness.llm.call("Classify this task.", nil, call_options)
     harness.llm.call("Prepare the task.", nil, call_options)
     agent_loop(harness, "Reply briefly.", nil, options)
   })
 "#,
+                    )
+                    .await
+                    .expect("preparation and actor finish");
+                    let record = project(root.path()).await;
+                    assert_eq!(record.evidence.trace_spans.len(), 3);
+                    assert!(record
+                        .evidence
+                        .trace_spans
+                        .iter()
+                        .all(|span| span.cost_usd.is_some()));
+                },
             )
-            .await
-            .expect("preparation and actor finish");
-            let record = project(root.path()).await;
-            assert_eq!(record.evidence.trace_spans.len(), 3);
-            assert!(record
-                .evidence
-                .trace_spans
-                .iter()
-                .all(|span| span.cost_usd.is_some()));
+            .await;
         })),
     );
     assert_eq!(
@@ -140,6 +151,16 @@ fn preparation_and_actor_publish_each_settled_provider_usage() {
         usage.len(),
         3,
         "each settled provider call publishes its ledger: {events:?}"
+    );
+    assert_eq!(
+        loop_events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event["type"] == "provider_usage")
+            .count(),
+        3,
+        "the dispatch-local observer receives the same provider events"
     );
     assert_eq!(usage[0]["run_usage"]["provider_call_count"], 1);
     assert_eq!(usage[1]["run_usage"]["provider_call_count"], 2);
@@ -159,6 +180,31 @@ fn preparation_and_actor_publish_each_settled_provider_usage() {
     assert_eq!(usage[0]["run_usage"]["lineage_known"], true);
     assert_ne!(usage[0]["call_id"], usage[1]["call_id"]);
     assert_ne!(usage[1]["call_id"], usage[2]["call_id"]);
+    let persisted = std::fs::read_to_string(&event_log).unwrap();
+    let persisted: Vec<crate::agent_events::PersistedAgentEvent> = persisted
+        .lines()
+        .map(|line| {
+            serde_json::from_str(line).expect("each event replays through the existing reader")
+        })
+        .collect();
+    assert!(
+        persisted.len() > 3,
+        "the same log also contains ordinary events"
+    );
+    assert!(persisted
+        .iter()
+        .enumerate()
+        .all(|(index, event)| event.index == index as u64));
+    let durable_usage: Vec<_> = persisted
+        .iter()
+        .filter_map(|event| match &event.event {
+            crate::agent_events::AgentEvent::ProviderUsage { run_usage, .. } => {
+                Some(run_usage.provider_call_count)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(durable_usage, vec![1, 2, 3]);
 }
 
 #[test]

@@ -10,7 +10,7 @@ use crate::llm::pairing_receipts::ToolResultOrigin;
 use crate::value::VmDictExt;
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
-use crate::agent_events::AgentEvent;
+use crate::agent_events::{emit_provider_usage, AgentEvent};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use harn_builtin_macros::harn_builtin;
@@ -552,26 +552,7 @@ pub(crate) fn record_provider_attempt_usage(
         });
     }
     if let Some(snapshot) = physical_usage_snapshot_for_session(session_id) {
-        let run_id = crate::agent_sessions::active_run_id(session_id)
-            .or_else(|| active_run_id(session_id))
-            .unwrap_or_default();
-        let ancestry = crate::agent_sessions::ancestry(session_id);
-        let lineage_known = ancestry.is_some();
-        let parent_session_id = ancestry
-            .and_then(|lineage| lineage.parent_id)
-            .unwrap_or_default();
-        emit_event(&AgentEvent::ProviderUsage {
-            session_id: session_id.to_string(),
-            call_id: call_id.to_string(),
-            provider: provider.to_string(),
-            model: model.to_string(),
-            run_usage: Box::new(crate::llm::usage::ProviderUsage::from_ledger(
-                &snapshot.usage,
-                run_id,
-                parent_session_id,
-                lineage_known,
-            )),
-        });
+        emit_provider_usage(session_id, call_id, provider, model, &snapshot.usage);
     }
 }
 

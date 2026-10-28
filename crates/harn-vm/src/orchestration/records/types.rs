@@ -97,7 +97,7 @@ impl From<LlmUsageRecordWire> for LlmUsageRecord {
         // a missing price cannot be promoted to a measured free call.
         let unpriced_calls = wire.unpriced_calls.unwrap_or_else(|| {
             i64::from(
-                wire.call_count > 0 && (wire.cost_usd.is_none() || wire.usage_unknown_calls > 0),
+                wire.usage_unknown_calls > 0 || (wire.call_count > 0 && wire.cost_usd.is_none()),
             )
         });
         Self {

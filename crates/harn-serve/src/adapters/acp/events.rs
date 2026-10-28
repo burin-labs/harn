@@ -1482,6 +1482,7 @@ impl AgentEventSink for AcpAgentEventSink {
             | AgentEvent::OrchestrationDecision { .. }) => {
                 orchestration_events::handle(self, event);
             }
+            _ => {}
         }
     }
 }

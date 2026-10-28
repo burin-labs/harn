@@ -138,7 +138,8 @@ async fn reserved_terminal_verify_preserves_its_payload_discriminator() {
 /// `_harn/agentEvent` because ACP has no canonical slot.
 #[tokio::test(flavor = "current_thread")]
 async fn agent_event_ext_notifications_use_advertised_wire_contract() {
-    let actual = collect_notifications(agent_event_ext_fixture_events()).await;
+    let mut actual = collect_notifications(agent_event_ext_fixture_events()).await;
+    actual.push(super::provider_usage::provider_usage_notification().await);
 
     let judge = actual
         .iter()

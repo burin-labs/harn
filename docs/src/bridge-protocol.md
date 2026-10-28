@@ -301,6 +301,8 @@ When `usage_unknown_calls` is positive, token totals include only reported usage
 session ancestry was measured; `parent_session_id` is empty for a known root
 or unknown lineage and otherwise names the parent.
 A refusal before dispatch emits no provider-usage event.
+These events share the ordered durable agent event log with other agent events.
+Durable call accounting also remains in the session journal.
 
 ### Composition event migration note
 

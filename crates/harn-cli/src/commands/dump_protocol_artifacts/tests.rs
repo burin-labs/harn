@@ -792,7 +792,7 @@ fn generated_rust_agent_event_shapes_round_trip() {
 fn generated_provider_usage_reads_the_runtime_record_and_rejects_missing_facts() {
     let record = harn_vm::llm::usage::ProviderUsage {
         run_id: "run-1".into(),
-        parent_session_id: "".into(),
+        parent_session_id: String::new(),
         lineage_known: true,
         input_tokens: 12,
         output_tokens: 3,

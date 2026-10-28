@@ -102,6 +102,7 @@ pub struct ToolBatchDispositionReceipt {
 /// extension stream.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum AgentEvent {
     AgentMessageChunk {
         session_id: String,

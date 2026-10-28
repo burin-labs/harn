@@ -204,6 +204,36 @@ pub fn emit_event(event: &AgentEvent) {
     }
 }
 
+/// Project a settled provider attempt into the same ordered agent event stream.
+pub(crate) fn emit_provider_usage(
+    session_id: &str,
+    call_id: &str,
+    provider: &str,
+    model: &str,
+    usage: &crate::llm::usage::LlmUsage,
+) {
+    let run_id = crate::agent_sessions::active_run_id(session_id)
+        .or_else(|| crate::llm::active_agent_run_id(session_id))
+        .unwrap_or_default();
+    let ancestry = crate::agent_sessions::ancestry(session_id);
+    let lineage_known = ancestry.is_some();
+    let parent_session_id = ancestry
+        .and_then(|lineage| lineage.parent_id)
+        .unwrap_or_default();
+    crate::llm::emit_live_agent_event_sync(&AgentEvent::ProviderUsage {
+        session_id: session_id.to_string(),
+        call_id: call_id.to_string(),
+        provider: provider.to_string(),
+        model: model.to_string(),
+        run_usage: Box::new(crate::llm::usage::ProviderUsage::from_ledger(
+            usage,
+            run_id,
+            parent_session_id,
+            lineage_known,
+        )),
+    });
+}
+
 /// Redact the tool-call arguments and output carried by an emitted event. Sinks persist
 /// and display events, so they see the copy masked by the current redaction
 /// policy; the handler and the model's own history keep the original arguments.
