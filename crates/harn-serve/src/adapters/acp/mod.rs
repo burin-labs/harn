@@ -13,6 +13,7 @@
 mod auth;
 mod bridge;
 mod builtins;
+mod checkpoint_tracking;
 mod checkpoints;
 mod commands;
 mod confinement;

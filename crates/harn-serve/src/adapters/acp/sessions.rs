@@ -568,11 +568,8 @@ pub(super) struct Session {
     pub(super) store_scope: harn_vm::SessionStoreScope,
     /// Whether admitted prompts capture workspace boundaries for this session.
     pub(super) workspace_checkpoint: bool,
-    /// Caller identities already reserved for this checkpoint lineage.
-    pub(super) checkpoint_prompt_ids: std::collections::HashSet<String>,
-    /// Failed automatic captures, so an older boundary with the same ID can't
-    /// be mistaken for the current prompt's snapshot.
-    pub(super) checkpoint_capture_failures: std::collections::HashMap<String, String>,
+    /// Caller identities and failed captures in this checkpoint lineage.
+    pub(super) checkpoint_tracking: super::checkpoint_tracking::CheckpointTracking,
     /// If a cancel was requested for the current prompt execution.
     pub(super) cancellation: SessionCancellation,
     /// Host bridge for the active prompt, if one is running.

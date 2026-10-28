@@ -310,6 +310,73 @@ async fn steer_is_inserted_mid_turn_and_answered_at_insertion() {
     .await;
 }
 
+#[cfg(feature = "hostlib")]
+#[tokio::test(flavor = "current_thread")]
+async fn steer_captures_the_workspace_at_transcript_insertion() {
+    harn_clock::test_support::with_local_tasks(async {
+        use harn_hostlib::workspace_checkpoint as checkpoint;
+        let mut h = DeliveryHarness::start_with_checkpoint(true).await;
+        h.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":3, "method":"session/prompt",
+            "params":{"sessionId":h.session_id, "messageId":"first", "prompt":[{"type":"text", "text":"tick"}]},
+        }));
+        h.ticks_reach(1).await;
+        h.prompt(4, "change course", Some("steer"));
+        h.open_gate();
+        let (_, receipt) = h.reply(4).await;
+        assert_eq!(receipt["result"]["messageId"], "m4", "{receipt}");
+        assert!(h.user_message("m4").is_some(), "steer did not reach the transcript");
+        let (_, turn) = h.reply(3).await;
+        assert_eq!(turn["result"]["stopReason"], "end_turn", "{turn}");
+        let begin = checkpoint::call_begin(&h.session_id, "probe").unwrap();
+        assert!(matches!(begin, checkpoint::Outcome::Ready(_)), "{begin:?}");
+        std::fs::write(&h.ticks, "later probe\n").unwrap();
+        let end = checkpoint::call_end(&h.session_id, "probe", None).unwrap();
+        assert!(matches!(end, checkpoint::Outcome::Ready(_)), "{end:?}");
+        let restored = checkpoint::restore(&h.session_id, "m4", None).unwrap();
+        assert!(matches!(restored, checkpoint::Outcome::Ready(_)), "{restored:?}");
+        assert_eq!(std::fs::read_to_string(&h.ticks).unwrap(), "tick\n");
+        checkpoint::drop_session(&h.session_id);
+        h.finish().await;
+    }).await;
+}
+
+#[cfg(feature = "hostlib")]
+#[tokio::test(flavor = "current_thread")]
+async fn failed_steer_capture_never_exposes_an_older_boundary() {
+    harn_clock::test_support::with_local_tasks(async {
+        use harn_hostlib::workspace_checkpoint as checkpoint;
+        let mut h = DeliveryHarness::start_with_checkpoint(true).await;
+        h.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":3, "method":"session/prompt",
+            "params":{"sessionId":h.session_id, "messageId":"first", "prompt":[{"type":"text", "text":"tick"}]},
+        }));
+        h.ticks_reach(1).await;
+        let old = checkpoint::capture(&h.session_id, "m4", Some(h._dir.path())).unwrap();
+        assert!(matches!(old, checkpoint::Outcome::Ready(_)), "{old:?}");
+        let begin = checkpoint::call_begin(&h.session_id, "in-flight").unwrap();
+        assert!(matches!(begin, checkpoint::Outcome::Ready(_)), "{begin:?}");
+        h.prompt(4, "change course", Some("steer"));
+        h.open_gate();
+        let (_, receipt) = h.reply(4).await;
+        assert_eq!(receipt["result"]["messageId"], "m4", "{receipt}");
+        assert!(h.user_message("m4").is_some(), "steer did not reach the transcript");
+        let end = checkpoint::call_end(&h.session_id, "in-flight", None).unwrap();
+        assert!(matches!(end, checkpoint::Outcome::Ready(_)), "{end:?}");
+        h.reply(3).await;
+        h.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":12, "method":"session/workspace_checkpoint",
+            "params":{"sessionId":h.session_id, "action":"plan", "boundaryId":"m4"},
+        }));
+        let (_, plan) = h.reply(12).await;
+        assert_eq!(plan["result"]["available"], false, "{plan}");
+        assert_eq!(plan["result"]["reason"], "capture_failed", "{plan}");
+        assert!(plan["result"]["detail"].as_str().unwrap_or_default().contains("calls_in_flight"), "{plan}");
+        checkpoint::drop_session(&h.session_id);
+        h.finish().await;
+    }).await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn queued_prompt_starts_its_own_turn_after_the_running_one() {
     harn_clock::test_support::with_local_tasks(async {

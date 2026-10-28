@@ -46,9 +46,11 @@ capture returns `{available: false, reason: "capture_failed"}` from `plan`
 and `restore`, even if an older boundary used that ID. Loading an already-live
 session cannot change its tracking setting. A cold load starts a new in-memory
 checkpoint history; it doesn't restore earlier file boundaries. A steer
-inserted into a running turn does not start a new turn and is not captured by
-this option. The host must bracket tool and shell calls with `call_begin` and
-`call_end` and capture any additional boundaries it needs.
+inserted into a running turn captures its own boundary immediately before its
+message enters the transcript. If a tool call is still in flight or capture
+otherwise fails, `plan` and `restore` report `capture_failed` for that message.
+The host must bracket tool and shell calls with `call_begin` and `call_end` and
+capture any additional boundaries it needs.
 After a session is reanchored, checkpoint actions other than `drop` return
 `{available: false, reason: "workspace_root_changed"}` while their recorded
 root differs from the session's current root.
