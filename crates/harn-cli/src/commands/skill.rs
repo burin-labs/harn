@@ -17,7 +17,7 @@ pub(crate) fn run_key_generate(args: &SkillKeyGenerateArgs) {
             println!("fingerprint: {}", outcome.fingerprint);
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             process::exit(1);
         }
     }
@@ -31,7 +31,7 @@ pub(crate) fn run_sign(args: &SkillSignArgs) {
             println!("skill_sha256: {}", outcome.skill_sha256);
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             process::exit(1);
         }
     }
@@ -45,7 +45,7 @@ pub(crate) fn run_endorse(args: &SkillEndorseArgs) {
             println!("skill_sha256: {}", outcome.skill_sha256);
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             process::exit(1);
         }
     }
@@ -69,11 +69,11 @@ pub(crate) fn run_verify(args: &SkillVerifyArgs) {
             if args.json {
                 print_json(&verification_output(report.clone(), Vec::new()));
             }
-            eprintln!("error: {}", report.human_summary());
+            cli_diagnostic!("error: {}", report.human_summary());
             process::exit(1);
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             process::exit(1);
         }
     }
@@ -96,7 +96,7 @@ pub(crate) async fn run_who_signed(args: &SkillWhoSignedArgs) {
             }
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             process::exit(1);
         }
     }
@@ -109,7 +109,7 @@ pub(crate) fn run_trust_add(args: &SkillTrustAddArgs) {
             println!("path: {}", record.path.display());
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             process::exit(1);
         }
     }
@@ -280,7 +280,7 @@ fn print_json<T: Serialize>(value: &T) {
     match serde_json::to_string_pretty(value) {
         Ok(rendered) => println!("{rendered}"),
         Err(error) => {
-            eprintln!("error: failed to encode JSON: {error}");
+            cli_diagnostic!("error: failed to encode JSON: {error}");
             process::exit(1);
         }
     }
@@ -298,7 +298,7 @@ pub(crate) fn run_trust_list(_args: &SkillTrustListArgs) {
             }
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             process::exit(1);
         }
     }

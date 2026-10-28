@@ -43,7 +43,7 @@ pub(super) fn handle(raw_args: &[String]) -> bool {
     ) {
         Ok(evidence) => print!("{evidence}"),
         Err(error) => {
-            eprintln!("error: cannot collect Harn artifact freshness evidence: {error}");
+            cli_diagnostic!("error: cannot collect Harn artifact freshness evidence: {error}");
             process::exit(1);
         }
     }

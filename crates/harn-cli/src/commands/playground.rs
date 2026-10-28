@@ -100,8 +100,8 @@ pub async fn execute_playground_inputs(inputs: PlaygroundInputs) -> Result<Strin
 async fn run_watch(config: &PlaygroundConfig) -> Result<(), String> {
     use notify::{Event, EventKind, RecursiveMode, Watcher};
 
-    eprintln!(
-        "\x1b[2m[playground] running {} with host {}...\x1b[0m",
+    cli_diagnostic!(
+        "playground: running {} with host {}...",
         config.script.display(),
         config.host.display()
     );
@@ -137,8 +137,8 @@ async fn run_watch(config: &PlaygroundConfig) -> Result<(), String> {
         watcher
     };
 
-    eprintln!(
-        "\x1b[2m[playground] watching {} (ctrl-c to stop)\x1b[0m",
+    cli_diagnostic!(
+        "playground: watching {} (ctrl-c to stop)",
         roots
             .iter()
             .map(|path| path.display().to_string())
@@ -151,9 +151,8 @@ async fn run_watch(config: &PlaygroundConfig) -> Result<(), String> {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         while rx.try_recv().is_ok() {}
 
-        eprintln!();
-        eprintln!(
-            "\x1b[2m[playground] change detected, re-running {}...\x1b[0m",
+        cli_diagnostic!(
+            "playground: change detected, re-running {}...",
             config.script.display()
         );
         emit_run_result(Box::pin(execute_playground(config)).await);
@@ -167,7 +166,7 @@ fn emit_run_result(result: Result<String, String>) {
                 let _ = io::stdout().write_all(output.as_bytes());
             }
         }
-        Err(error) => eprint!("{error}"),
+        Err(error) => cli_diagnostic!("{}", error.trim_end()),
     }
 }
 

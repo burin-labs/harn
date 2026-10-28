@@ -1267,7 +1267,7 @@ fn print_discovery_warnings(diagnostics: &[(String, &harn_flow::DiscoveryDiagnos
     for (path, diagnostic) in diagnostics.iter().filter(|(_, diagnostic)| {
         diagnostic.severity == harn_flow::DiscoveryDiagnosticSeverity::Warning
     }) {
-        eprintln!("warning: {path}: {}", diagnostic.message);
+        cli_diagnostic!("warning: {path}: {}", diagnostic.message);
     }
 }
 

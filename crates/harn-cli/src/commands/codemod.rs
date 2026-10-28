@@ -7,7 +7,7 @@ use crate::cli::CodemodArgs;
 
 #[cfg(not(feature = "hostlib"))]
 pub(crate) async fn run(_args: CodemodArgs) {
-    eprintln!(
+    cli_diagnostic!(
         "`harn codemod` requires the `hostlib` feature (default-on); it is unavailable in this build"
     );
     std::process::exit(2);
@@ -23,7 +23,7 @@ pub(crate) async fn run(args: CodemodArgs) {
     let resolved = match resolve(&args) {
         Ok(resolved) => resolved,
         Err(message) => {
-            eprintln!("codemod: {message}");
+            cli_diagnostic!("codemod: {message}");
             std::process::exit(2);
         }
     };

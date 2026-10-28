@@ -11,6 +11,19 @@ pub fn owned_paths(root: &Path) -> Vec<PathBuf> {
     let configured = configured
         .canonicalize()
         .unwrap_or_else(|_| crate::fs::paths::normalize_against(root, &configured));
+    // The walker emits paths using the workspace's spelling, which may be a
+    // symlink or an alias such as macOS /var. Project a physical state root
+    // back onto that spelling before comparing it with walker entries.
+    let configured = root
+        .canonicalize()
+        .ok()
+        .and_then(|physical_root| {
+            configured
+                .strip_prefix(physical_root)
+                .ok()
+                .map(|relative| root.join(relative))
+        })
+        .unwrap_or(configured);
     if configured != root.join(".harn") {
         paths.extend(harn_vm::runtime_paths::owned_state_paths(&configured));
     }

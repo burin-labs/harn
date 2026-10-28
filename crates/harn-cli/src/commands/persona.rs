@@ -777,6 +777,6 @@ fn comma_or_dash(values: &[String]) -> String {
 }
 
 fn fatal(message: &str) -> ! {
-    eprintln!("error: {message}");
+    cli_diagnostic!("error: {message}");
     process::exit(1);
 }

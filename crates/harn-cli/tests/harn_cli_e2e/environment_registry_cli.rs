@@ -252,6 +252,26 @@ fn script_mcp_rejects_malformed_host_ceiling_before_loading_registry() {
 }
 
 #[test]
+fn playground_setup_errors_use_stderr_diagnostics() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing.harn");
+    let output = run_harn_e2e(
+        &[
+            "playground",
+            "--host",
+            missing.to_str().unwrap(),
+            "--llm",
+            "test:model",
+        ],
+        &[],
+    );
+    assert_ne!(output.exit_code, 0);
+    assert!(output.stdout.is_empty(), "{}", output.stdout);
+    assert!(output.stderr.starts_with("[harn] "), "{}", output.stderr);
+    assert!(output.stderr.contains("missing.harn"), "{}", output.stderr);
+}
+
+#[test]
 fn playground_rejects_malformed_host_ceiling_before_provider_bootstrap_or_source_load() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let host = root.join("examples/playground/host.harn");

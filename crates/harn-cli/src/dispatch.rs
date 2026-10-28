@@ -155,26 +155,14 @@ pub async fn dispatch_to_embedded_script_no_sandbox(
         RunSandboxOptions::disabled(),
     )
     .await;
-    // The shared `execute_run` path prefixes a `warning: harn run
-    // --no-sandbox ...` banner whenever the sandbox is disabled. That
-    // banner is meant for direct `harn run --no-sandbox` invocations
-    // where the user explicitly opted out; here the sandbox is off by
-    // dispatch-wedge construction, not user choice, so the banner is
-    // noise — strip it before the outcome reaches the terminal.
-    outcome.stderr = strip_sandbox_warning(&outcome.stderr);
+    if let Some(rest) = outcome
+        .stderr
+        .strip_prefix(crate::commands::run::sandbox::NO_SANDBOX_WARNING)
+    {
+        outcome.stderr = rest.to_string();
+    }
     flush_outcome(&outcome);
     outcome.exit_code
-}
-
-const SANDBOX_WARNING: &str =
-    "warning: harn run --no-sandbox disables filesystem, process, and egress sandbox defaults\n";
-
-fn strip_sandbox_warning(stderr: &str) -> String {
-    if let Some(rest) = stderr.strip_prefix(SANDBOX_WARNING) {
-        rest.to_string()
-    } else {
-        stderr.to_string()
-    }
 }
 
 /// Capture-mode variant suitable for tests: returns the full
@@ -353,9 +341,12 @@ fn maybe_drop_adjacent_bytecode(
         Ok(()) => Some(AdjacentBytecodeGuard { path: adjacent }),
         Err(err) => {
             if cache_debug_enabled() {
-                eprintln!(
-                    "[harn] AOT bytecode drop failed for `{script_name}` at {}: {err}",
-                    adjacent.display()
+                harn_vm::events::log_info(
+                    "cache",
+                    &format!(
+                        "AOT bytecode drop failed for `{script_name}` at {}: {err}",
+                        adjacent.display()
+                    ),
                 );
             }
             None

@@ -311,6 +311,10 @@ use clap::{Parser, Subcommand};
     arg_required_else_help = true
 )]
 pub(crate) struct Cli {
+    /// Show error details; for config inspect, include per-field provenance.
+    #[arg(long, global = true)]
+    pub explain: bool,
+
     /// Consume a bounded parent secret-store frame from stdin before dispatch.
     /// Values remain in memory, without ambient store fallback or tool inheritance.
     #[arg(long = harn_vm::secrets::PARENT_SECRET_HANDOFF_OPTION, global = true)]

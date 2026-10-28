@@ -2,7 +2,7 @@
 //! `harn` invocation lands in, plus the argument shims and one-off subcommand
 //! runners it owns.
 
-use crate::cli::PackageRegistryCommand;
+use crate::cli::{ConfigCommand, PackageRegistryCommand};
 use crate::*;
 
 #[allow(clippy::large_stack_frames)] // dispatch entrypoint owns full Args + per-feature locals.
@@ -15,7 +15,7 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
     // local observability is opt-in and must never fail the run.
     if runtime_mode.enables_tokio_io() {
         if let Err(error) = harn_vm::events::install_otel_sink_from_env() {
-            eprintln!("[harn] OTel exporter disabled: {error}");
+            harn_vm::events::log_warn("telemetry", &format!("OTel exporter disabled: {error}"));
         }
     }
 
@@ -28,11 +28,20 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
         Err(error) => {
             if matches!(
                 error.kind(),
-                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+                ErrorKind::DisplayHelp
+                    | ErrorKind::DisplayVersion
+                    | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
             ) {
                 error.exit();
             }
-            error.exit();
+            let message = error.to_string();
+            let message = if raw_args.iter().any(|arg| arg == "--explain") {
+                message.trim_end()
+            } else {
+                message.lines().next().unwrap_or("invalid arguments")
+            };
+            harn_vm::events::log_status(message);
+            std::process::exit(error.exit_code());
         }
     };
 
@@ -46,7 +55,7 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
         return;
     }
 
-    let Some(subcommand) = cli.command else {
+    let Some(mut subcommand) = cli.command else {
         // `arg_required_else_help` already shows help when no args are
         // supplied. We only land here if a top-level flag (e.g. a
         // future `--version` long flag) parsed without a subcommand.
@@ -54,6 +63,11 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
         cmd.print_help().ok();
         return;
     };
+    if let Command::Config(args) = &mut subcommand {
+        if let ConfigCommand::Inspect(inspect) = &mut args.command {
+            inspect.explain = cli.explain;
+        }
+    }
     let parent_handoff = if cli.parent_secret_stdin {
         Some(
             harn_vm::secrets::ParentSecretHandoff::read_from(std::io::stdin().lock())
@@ -64,17 +78,22 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
     };
     if let Err(error) = harn_vm::secrets::with_parent_secret_handoff(
         parent_handoff,
-        crate::spend_policy::run(cli.spend_policy.as_deref(), Box::pin(dispatch(subcommand))),
+        crate::spend_policy::run(
+            cli.spend_policy.as_deref(),
+            Box::pin(crate::exit::with_diagnostic_detail(
+                cli.explain,
+                dispatch(subcommand, cli.explain),
+            )),
+        ),
     )
     .await
     {
-        eprintln!("error: {error}");
-        process::exit(1);
+        fatal_error(error);
     }
 }
 
 #[allow(clippy::large_stack_frames)]
-async fn dispatch(subcommand: Command) {
+async fn dispatch(subcommand: Command, explain: bool) {
     match subcommand {
         Command::Version(args) => {
             let exit = run_version(args).await;
@@ -84,23 +103,20 @@ async fn dispatch(subcommand: Command) {
         }
         Command::Upgrade(args) => {
             if let Err(error) = commands::upgrade::run(args).await {
-                eprintln!("error: {error}");
-                process::exit(1);
+                fatal_error(error);
             }
         }
         Command::SelfToolchain(args) => match commands::upgrade::toolchain::run(args).await {
             Ok(0) => {}
             Ok(code) => process::exit(code),
             Err(error) => {
-                eprintln!("error: {error}");
-                process::exit(1);
+                fatal_error(error);
             }
         },
         Command::Dap(_) => run_dap_adapter(),
         Command::ConformanceHelper(args) => {
             if let Err(error) = commands::conformance_helper::run(args).await {
-                eprintln!("error: {error}");
-                process::exit(1);
+                fatal_error(error);
             }
         }
         Command::NetnsLaunch(_) => {
@@ -110,11 +126,10 @@ async fn dispatch(subcommand: Command) {
             // namespace this helper exists to create cannot be created from
             // here: a user namespace is refused to a multi-threaded caller,
             // and the runtime's worker threads are already up.
-            eprintln!(
-                "error: the namespace helper must run before the runtime starts; reaching it \
-                 here means the pre-runtime dispatcher did not recognise the invocation"
+            fatal_error(
+                "the namespace helper must run before the runtime starts; reaching it \
+                 here means the pre-runtime dispatcher did not recognise the invocation",
             );
-            process::exit(1);
         }
         Command::Skill(args) => match args.command {
             SkillCommand::List(list) => commands::skills::run_list(&list),
@@ -213,6 +228,7 @@ async fn dispatch(subcommand: Command) {
                     json_options,
                     aux_options,
                     control_options,
+                    explain,
                 )
                 .await;
                 runtime::exit_on_error(exit_code);
@@ -257,6 +273,7 @@ async fn dispatch(subcommand: Command) {
                             aux_options.clone(),
                             control_options.clone(),
                             harnpack_options.clone(),
+                            explain,
                         )
                         .await
                     };
@@ -281,6 +298,7 @@ async fn dispatch(subcommand: Command) {
                             aux_options,
                             control_options,
                             harnpack_options,
+                            explain,
                         )
                         .await
                     };
@@ -324,8 +342,7 @@ async fn dispatch(subcommand: Command) {
         Command::Fix(args) => {
             if let Err(error) = commands::fix::run(&args) {
                 if error.is_partial_failure() {
-                    eprintln!("error: {}", error.message());
-                    process::exit(1);
+                    fatal_error(error.message());
                 }
                 command_error(error.message());
             }
@@ -445,13 +462,9 @@ async fn dispatch(subcommand: Command) {
                 // user at `--fix`. Emphasized when *every* finding is fixable.
                 if total_fixable > 0 {
                     if total_fixable == total_findings {
-                        eprintln!(
-                            "\nAll {total_fixable} finding(s) are auto-fixable — run `harn lint --fix` to apply them."
-                        );
+                        harn_vm::events::log_info("lint", &format!("All {total_fixable} finding(s) are auto-fixable — run `harn lint --fix` to apply them."));
                     } else {
-                        eprintln!(
-                            "\n{total_fixable} of {total_findings} finding(s) are auto-fixable — run `harn lint --fix` to apply them."
-                        );
+                        harn_vm::events::log_info("lint", &format!("{total_fixable} of {total_findings} finding(s) are auto-fixable — run `harn lint --fix` to apply them."));
                     }
                 }
                 if should_fail {
@@ -468,7 +481,7 @@ async fn dispatch(subcommand: Command) {
             let loaded = match project_config::load_for_path(anchor) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("warning: {e}");
+                    harn_vm::events::log_warn("config", &e.to_string());
                     project_config::HarnConfig::default()
                 }
             };
@@ -504,8 +517,7 @@ async fn dispatch(subcommand: Command) {
         Command::New(args) => match commands::init::resolve_new_args(&args) {
             Ok((name, template)) => commands::init::init_project(name.as_deref(), template).await,
             Err(error) => {
-                eprintln!("error: {error}");
-                process::exit(1);
+                fatal_error(error);
             }
         },
         Command::Doctor(args) => {
@@ -515,10 +527,10 @@ async fn dispatch(subcommand: Command) {
                 #[cfg(not(feature = "hostlib"))]
                 {
                     let _ = sandbox;
-                    eprintln!(
-                        "error: `harn doctor sandbox` needs a build with the hostlib feature"
+                    fatal_error_with_code(
+                        "`harn doctor sandbox` needs a build with the hostlib feature",
+                        2,
                     );
-                    process::exit(2);
                 }
             }
             commands::doctor::run_doctor_with_options(commands::doctor::DoctorOptions {
@@ -553,8 +565,7 @@ async fn dispatch(subcommand: Command) {
             }
             ProviderCommand::Admission(admission) => {
                 if let Err(error) = commands::inference_admission::run(admission) {
-                    eprintln!("{error}");
-                    process::exit(2);
+                    fatal_error_with_code(error, 2);
                 }
             }
             ProviderCommand::Capabilities(capabilities) => {
@@ -624,15 +635,14 @@ async fn dispatch(subcommand: Command) {
         Command::Serve(args) => commands::serve::run_command(args.command).await,
         Command::Connector(args) => {
             if let Err(error) = commands::connector::handle_connector_command(args).await {
-                eprintln!("error: {error}");
-                process::exit(1);
+                fatal_error(error);
             }
         }
         Command::Mcp(args) => commands::mcp::handle_mcp_command(&args.command).await,
         Command::Watch(args) => {
             let denied =
                 commands::run::build_denied_builtins(args.deny.as_deref(), args.allow.as_deref());
-            commands::run::run_watch(&args.file, denied).await;
+            commands::run::run_watch(&args.file, denied, explain).await;
         }
         Command::Dev(args) => {
             commands::dev::run(args).await;
@@ -651,8 +661,7 @@ async fn dispatch(subcommand: Command) {
         }
         Command::Trigger(args) => {
             if let Err(error) = commands::trigger::handle(args).await {
-                eprintln!("error: {error}");
-                process::exit(1);
+                fatal_error(error);
             }
         }
         Command::Graph(args) => {
@@ -703,39 +712,33 @@ async fn dispatch(subcommand: Command) {
         }
         Command::Supervisor(args) => {
             if let Err(error) = commands::supervisor::handle(args).await {
-                eprintln!("error: {error}");
-                process::exit(1);
+                fatal_error(error);
             }
         }
         Command::Trace(args) => {
             if let Err(error) = commands::trace::handle(args).await {
-                eprintln!("error: {error}");
-                process::exit(1);
+                fatal_error(error);
             }
         }
         Command::Crystallize(args) => {
             if let Err(error) = commands::crystallize::run(args) {
-                eprintln!("error: {error}");
-                process::exit(1);
+                fatal_error(error);
             }
         }
         Command::Trust(args) => {
             if let Err(error) = commands::trust::handle(args).await {
-                eprintln!("error: {error}");
-                process::exit(1);
+                fatal_error(error);
             }
         }
         Command::Verify(args) => {
             if let Err(error) = verify_provenance_receipt(&args.receipt, args.json) {
-                eprintln!("error: {error}");
-                process::exit(1);
+                fatal_error(error);
             }
         }
         Command::Completion(args) => print_completions(args.shell),
         Command::Orchestrator(args) => {
             if let Err(error) = commands::orchestrator::handle(args).await {
-                eprintln!("error: {error}");
-                process::exit(1);
+                fatal_error(error);
             }
         }
         Command::Playground(args) => {
@@ -751,7 +754,7 @@ async fn dispatch(subcommand: Command) {
                 commands::run::CliLlmMockMode::Off
             };
             if let Err(error) = commands::playground::run_command(args, llm_mock_mode).await {
-                eprint!("{error}");
+                cli_diagnostic!("{}", error.trim_end());
                 process::exit(1);
             }
         }
@@ -802,8 +805,7 @@ async fn dispatch(subcommand: Command) {
             }
             None => {
                 let Some(path) = args.path else {
-                    eprintln!("error: `harn eval` requires a path or a subcommand (e.g. `prompt`).\nSee `harn eval --help`.");
-                    process::exit(2);
+                    fatal_error_with_code("`harn eval` requires a path or a subcommand (e.g. `prompt`).\nSee `harn eval --help`.", 2);
                 };
                 let llm_mock_mode = if let Some(path) = args.llm_mock.as_ref() {
                     commands::run::CliLlmMockMode::Replay {
@@ -826,7 +828,7 @@ async fn dispatch(subcommand: Command) {
             }
         },
         Command::Repl => commands::repl::run_repl().await,
-        Command::Bench(args) => commands::bench::run(args).await,
+        Command::Bench(args) => commands::bench::run(args, explain).await,
         Command::Precompile(args) => commands::precompile::run(args).await,
         Command::Pack(args) => commands::pack::run(args),
         Command::TestBench(args) => commands::test_bench::run(args.command).await,
@@ -872,16 +874,14 @@ async fn dispatch(subcommand: Command) {
             }
             PackageCommand::Verify(verify) => {
                 if let Err(error) = commands::package_verify::handle_package_verify(verify).await {
-                    eprintln!("error: {error}");
-                    process::exit(1);
+                    fatal_error(error);
                 }
             }
             PackageCommand::TestInventory(inventory) => {
                 if let Err(error) =
                     commands::package_verify::handle_package_test_inventory(inventory)
                 {
-                    eprintln!("error: {error}");
-                    process::exit(1);
+                    fatal_error(error);
                 }
             }
             PackageCommand::Registry(registry) => match registry.command {
@@ -934,8 +934,7 @@ async fn dispatch(subcommand: Command) {
             PackageCommand::Scaffold(args) => match args.command {
                 PackageScaffoldCommand::Openapi(openapi) => {
                     if let Err(error) = commands::package_scaffold::run_openapi(&openapi).await {
-                        eprintln!("error: {error}");
-                        process::exit(1);
+                        fatal_error(error);
                     }
                 }
             },
@@ -1012,35 +1011,30 @@ async fn dispatch(subcommand: Command) {
         },
         Command::Persona(args) => {
             if let Err(error) = commands::persona_dispatch::run(args).await {
-                eprintln!("error: {error}");
-                process::exit(1);
+                fatal_error(error);
             }
         }
         Command::Tool(args) => match args.command {
             ToolCommand::New(new_args) => {
                 if let Err(error) = commands::tool::run_new(&new_args).await {
-                    eprintln!("error: {error}");
-                    process::exit(1);
+                    fatal_error(error);
                 }
             }
             ToolCommand::Run(run_args) => {
                 if let Err(error) = commands::tool::run_registry(&run_args).await {
-                    eprintln!("error: {error}");
-                    process::exit(error.exit_code);
+                    fatal_error_with_code(&error, error.exit_code);
                 }
             }
             ToolCommand::Completions(completion_args) => {
                 if let Err(error) =
                     commands::tool::print_registry_completions(&completion_args).await
                 {
-                    eprintln!("error: {error}");
-                    process::exit(error.exit_code);
+                    fatal_error_with_code(&error, error.exit_code);
                 }
             }
             ToolCommand::Schema(schema_args) => {
                 if let Err(error) = commands::tool::print_registry_schema(&schema_args).await {
-                    eprintln!("error: {error}");
-                    process::exit(error.exit_code);
+                    fatal_error_with_code(&error, error.exit_code);
                 }
             }
         },
@@ -1234,8 +1228,7 @@ pub(crate) async fn run_as_job(args: &cli::RunArgs) {
             }
         }
         Err(error) => {
-            eprintln!("[harn] job failed: {}", error.message());
-            process::exit(1);
+            fatal_error(format!("job failed: {}", error.message()));
         }
     }
 }

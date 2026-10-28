@@ -530,7 +530,7 @@ pub fn install_skills_global(vm: &mut harn_vm::Vm, loaded: &LoadedSkills) {
 /// simply doesn't participate in the registry.
 pub fn emit_loader_warnings(warnings: &[String]) {
     for w in warnings {
-        eprintln!("warning: {w}");
+        cli_diagnostic!("warning: {w}");
     }
 }
 

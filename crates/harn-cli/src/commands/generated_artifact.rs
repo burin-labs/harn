@@ -28,7 +28,7 @@ pub(crate) fn write_or_check(
         return;
     }
     if let Err(error) = write_file(path, generated) {
-        eprintln!("error: {error}");
+        cli_diagnostic!("error: {error}");
         process::exit(1);
     }
     println!("wrote {}", path.display());
@@ -39,10 +39,10 @@ pub(crate) fn write_or_check(
 pub(crate) fn check_or_exit(path: &Path, generated: &str, source: &str, make_target: &str) {
     match fs::read_to_string(path) {
         Ok(existing) if same_text(&existing, generated) => return,
-        Ok(_) => eprintln!("error: {} is stale relative to {source}.", path.display()),
-        Err(error) => eprintln!("error: cannot read {}: {error}", path.display()),
+        Ok(_) => cli_diagnostic!("error: {} is stale relative to {source}.", path.display()),
+        Err(error) => cli_diagnostic!("error: cannot read {}: {error}", path.display()),
     }
-    eprintln!("hint: run `make {make_target}` to regenerate.");
+    cli_diagnostic!("hint: run `make {make_target}` to regenerate.");
     process::exit(1);
 }
 
@@ -53,14 +53,14 @@ pub(crate) fn check_against(out: &Path, rendered: &str, regenerate: &str) -> i32
     match fs::read_to_string(out) {
         Ok(existing) if same_text(&existing, rendered) => 0,
         Ok(_) => {
-            eprintln!(
+            cli_diagnostic!(
                 "{} is out of date; regenerate with `{regenerate}`",
                 out.display()
             );
             1
         }
         Err(_) => {
-            eprintln!(
+            cli_diagnostic!(
                 "{} is missing; generate it with `{regenerate}`",
                 out.display()
             );

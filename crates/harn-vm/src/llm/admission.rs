@@ -67,6 +67,7 @@ enum DenialKind {
     ScopeUnavailable,
     LateActivation,
     InsufficientAllowance,
+    UnresolvedUsage,
     ProviderContractViolation,
 }
 

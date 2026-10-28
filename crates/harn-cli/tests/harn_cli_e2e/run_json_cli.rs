@@ -54,6 +54,175 @@ fn read_json_file(path: &std::path::Path) -> Value {
     })
 }
 
+#[test]
+fn runtime_error_details_are_opt_in_and_config_explain_still_works() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let script = write_script(
+        tmp.path(),
+        "failure.harn",
+        "pipeline main(harness: Harness) {\n  harness.stdio.println(\"before\")\n  let value = 1 / 0\n  harness.stdio.println(value)\n}\n",
+    );
+    let run = |explain: bool| {
+        let mut command = Command::new(binary_path());
+        command.arg("run");
+        if explain {
+            command.arg("--explain");
+        }
+        command.arg("--standalone").arg(&script);
+        command.env("HARN_EVENT_LOG_BACKEND", "memory");
+        command.output().expect("run script")
+    };
+    let short = run(false);
+    assert!(!short.status.success());
+    assert_eq!(short.stdout, b"before\n");
+    let short_stderr = String::from_utf8_lossy(&short.stderr);
+    assert!(short_stderr.contains("[harn] error:"), "{short_stderr}");
+    assert!(short_stderr.contains("Division by zero"), "{short_stderr}");
+    assert!(!short_stderr.contains("-->"), "{short_stderr}");
+
+    let detailed = run(true);
+    assert!(!detailed.status.success());
+    assert_eq!(detailed.stdout, short.stdout);
+    let detailed_stderr = String::from_utf8_lossy(&detailed.stderr);
+    assert!(
+        detailed_stderr.contains("Division by zero"),
+        "{detailed_stderr}"
+    );
+    assert!(detailed_stderr.contains("-->"), "{detailed_stderr}");
+    assert!(
+        detailed_stderr.contains("let value = 1 / 0"),
+        "{detailed_stderr}"
+    );
+
+    let bench = |explain: bool| {
+        let mut command = Command::new(binary_path());
+        command.arg("bench");
+        if explain {
+            command.arg("--explain");
+        }
+        command.args(["--iterations", "1"]).arg(&script);
+        command.env("HARN_EVENT_LOG_BACKEND", "memory");
+        command.output().expect("benchmark script")
+    };
+    let bench_short = bench(false);
+    assert!(!bench_short.status.success());
+    let bench_short_error = String::from_utf8_lossy(&bench_short.stderr);
+    assert!(
+        bench_short_error.contains("[harn] error:"),
+        "{bench_short_error}"
+    );
+    assert!(
+        bench_short_error.contains("Division by zero"),
+        "{bench_short_error}"
+    );
+    assert!(!bench_short_error.contains("-->"), "{bench_short_error}");
+    let bench_detail = bench(true);
+    assert!(!bench_detail.status.success());
+    assert!(String::from_utf8_lossy(&bench_detail.stderr).contains("let value = 1 / 0"));
+
+    let malformed = write_script(
+        tmp.path(),
+        "malformed.harn",
+        "pipeline main(harness: Harness) {\n  let value =\n}\n",
+    );
+    let malformed_short = Command::new(binary_path())
+        .arg("run")
+        .arg("--standalone")
+        .arg(&malformed)
+        .output()
+        .expect("run malformed script");
+    assert!(!malformed_short.status.success());
+    assert!(malformed_short.stdout.is_empty());
+    let malformed_error = String::from_utf8_lossy(&malformed_short.stderr);
+    assert!(
+        malformed_error.contains("[harn] error:"),
+        "{malformed_error}"
+    );
+    assert!(
+        malformed_error.contains("malformed.harn:"),
+        "{malformed_error}"
+    );
+    assert!(!malformed_error.contains("-->"), "{malformed_error}");
+    let malformed_detailed = Command::new(binary_path())
+        .args(["run", "--explain", "--standalone"])
+        .arg(&malformed)
+        .output()
+        .expect("explain malformed script");
+    assert!(!malformed_detailed.status.success());
+    assert!(String::from_utf8_lossy(&malformed_detailed.stderr).contains("-->"));
+
+    let bench_malformed = Command::new(binary_path())
+        .args(["bench", "--iterations", "1"])
+        .arg(&malformed)
+        .output()
+        .expect("benchmark malformed script");
+    assert!(!bench_malformed.status.success());
+    let bench_error = String::from_utf8_lossy(&bench_malformed.stderr);
+    assert!(bench_error.contains("[harn] error:"), "{bench_error}");
+    assert!(bench_error.contains("malformed.harn:"), "{bench_error}");
+    assert!(!bench_error.contains("-->"), "{bench_error}");
+    let bench_malformed_detail = Command::new(binary_path())
+        .args(["bench", "--explain", "--iterations", "1"])
+        .arg(&malformed)
+        .output()
+        .expect("explain malformed benchmark");
+    assert!(!bench_malformed_detail.status.success());
+    assert!(String::from_utf8_lossy(&bench_malformed_detail.stderr).contains("-->"));
+
+    let watch_detailed = Command::new(binary_path())
+        .args(["watch", "--explain"])
+        .arg(&malformed)
+        .env("HARN_LOG_LEVEL", "info")
+        .output()
+        .expect("watch malformed script");
+    assert!(!watch_detailed.status.success());
+    let watch_error = String::from_utf8_lossy(&watch_detailed.stderr);
+    assert!(
+        watch_error.contains("[harn] INFO [watch] running"),
+        "{watch_error}"
+    );
+    assert!(watch_error.contains("-->"), "{watch_error}");
+
+    let missing_import = write_script(
+        tmp.path(),
+        "missing-import.harn",
+        "import { absent } from \"./missing\"\npipeline main() { return 0 }\n",
+    );
+    let import_short = Command::new(binary_path())
+        .arg("run")
+        .arg(&missing_import)
+        .output()
+        .expect("run missing import");
+    assert!(!import_short.status.success());
+    let import_error = String::from_utf8_lossy(&import_short.stderr);
+    assert!(
+        import_error.contains("[harn] error: unresolved import"),
+        "{import_error}"
+    );
+    assert!(!import_error.contains("-->"), "{import_error}");
+    let import_detailed = Command::new(binary_path())
+        .args(["run", "--explain"])
+        .arg(&missing_import)
+        .output()
+        .expect("explain missing import");
+    assert!(!import_detailed.status.success());
+    assert!(String::from_utf8_lossy(&import_detailed.stderr).contains("-->"));
+
+    let config = Command::new(binary_path())
+        .args(["config", "inspect", "--explain", "--no-discovery"])
+        .output()
+        .expect("inspect config");
+    assert!(
+        config.status.success(),
+        "{}",
+        String::from_utf8_lossy(&config.stderr)
+    );
+    let inspected: Value = serde_json::from_slice(&config.stdout).expect("config JSON");
+    assert!(inspected["explain"]
+        .as_array()
+        .is_some_and(|rows| !rows.is_empty()));
+}
+
 fn write_llm_summary_script(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     write_script(
         dir,

@@ -217,6 +217,8 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
 // are the intended surface. `crates/harn-cli/tests/harn_cli_fast/orchestrator_http/`
 // is a prefix match; other files require an explicit entry.
 const E2E_SUBPROCESS_PATHS: list<string> = [
+  // Portal readiness and bind failure must be observed through real process streams and a live listener.
+  "crates/harn-cli/tests/harn_cli_e2e/portal_stderr.rs",
   // Agent harnesses run `harn signals hook` as a process and read its stdout,
   // stderr, and exit code; only the real binary proves that contract.
   "crates/harn-cli/tests/harn_cli_e2e/signals_hook_cli.rs",
@@ -333,6 +335,7 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // an in-process server would not prove the `serve api` runtime projection.
   "crates/harn-cli/tests/harn_cli_e2e/harn_serve_api_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/harn_serve_mcp_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/harn_serve_mcp_cli/publication.rs",
   // The generated command tree exists only after a real script publishes its
   // registry, so schema, help, validation, and handler dispatch cross the CLI
   // process boundary together.

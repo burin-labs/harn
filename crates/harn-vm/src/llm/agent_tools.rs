@@ -491,7 +491,7 @@ pub(super) async fn dispatch_tool_execution(
     tool_backoff_ms: u64,
 ) -> ToolDispatchOutcome {
     dispatch_tool_execution_with_mcp(
-        None,
+        (None, crate::tool_registry::ToolAudience::Agent),
         tool_name,
         tool_args,
         tools_val,
@@ -504,7 +504,10 @@ pub(super) async fn dispatch_tool_execution(
 }
 
 pub(super) async fn dispatch_tool_execution_with_mcp(
-    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    (ctx, audience): (
+        Option<&crate::vm::AsyncBuiltinCtx>,
+        crate::tool_registry::ToolAudience,
+    ),
     tool_name: &str,
     tool_args: &serde_json::Value,
     tools_val: Option<&VmValue>,
@@ -516,7 +519,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
     use super::tools::handle_tool_locally;
 
     if let Some(outcome) =
-        super::agent_tool_governance::registry_dispatch_rejection(tools_val, tool_name)
+        super::agent_tool_governance::registry_dispatch_rejection(tools_val, tool_name, audience)
     {
         return outcome;
     }

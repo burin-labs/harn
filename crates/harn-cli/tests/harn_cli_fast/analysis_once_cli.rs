@@ -19,7 +19,7 @@ struct Stats {
 fn stats(stderr: &str) -> Stats {
     let line = stderr
         .lines()
-        .find_map(|line| line.strip_prefix("analysis stats: "))
+        .find_map(|line| line.strip_prefix("[harn] analysis stats: "))
         .unwrap_or_else(|| panic!("no analysis stats line in:\n{stderr}"));
     let field = |name: &str| -> usize {
         line.split_whitespace()

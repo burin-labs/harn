@@ -48,7 +48,7 @@ pub(crate) fn run(args: SignalsArgs) -> Result<(), String> {
         // session, so it reports and exits 1, which harnesses treat as a
         // non-blocking hook error.
         if let Err(error) = result {
-            eprintln!("harn signals hook: {error}");
+            cli_diagnostic!("harn signals hook: {error}");
             process::exit(1);
         }
     }

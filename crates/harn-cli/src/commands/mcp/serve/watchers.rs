@@ -79,15 +79,18 @@ fn watch_with_deadline(
     match rx.recv_timeout(WATCH_REGISTRATION_TIMEOUT) {
         Ok(Ok(watcher)) => Some(watcher),
         Ok(Err(error)) => {
-            eprintln!("[harn] warning: filesystem watch unavailable: {error}");
+            harn_vm::events::log_warn("mcp", &format!("filesystem watch unavailable: {error}"));
             None
         }
         Err(_) => {
-            eprintln!(
-                "[harn] warning: registering a filesystem watch on {} did not complete within {}s; \
-                 continuing without automatic MCP catalog refresh",
-                project_root.display(),
-                WATCH_REGISTRATION_TIMEOUT.as_secs()
+            harn_vm::events::log_warn(
+                "mcp",
+                &format!(
+                    "registering a filesystem watch on {} did not complete within {}s; \
+                     continuing without automatic MCP catalog refresh",
+                    project_root.display(),
+                    WATCH_REGISTRATION_TIMEOUT.as_secs()
+                ),
             );
             None
         }

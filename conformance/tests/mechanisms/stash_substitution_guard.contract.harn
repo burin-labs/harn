@@ -1,6 +1,7 @@
 // A comment delimiter inside a substitution must not hide an executed stash
 // mutation. Read-only substitutions remain available.
 import {
+  NO_CONFIG_ALIASES,
   UNMEASURED_MAKE_TARGETS,
   decision,
   worktree_admission_census,
@@ -26,4 +27,33 @@ pipeline default(harness: Harness) {
   contract_effect(harness.stdio, "trigger_stash_mutation_is_denied", !write.allow)
   contract_effect(harness.stdio, "effect_denial_names_stash", write.reason.contains("git stash"))
   contract_negative(harness.stdio, "negative_read_only_substitution_is_not_denied", !read.allow)
+  const parse = { source, query ->
+    harness.ast.search({source: source, language: "bash", query: query})
+  }
+  const literal = decision(
+    payload("printf '%s' '$(git stash drop)'\ncat <<EOF\nhello\nEOF"),
+    census,
+    UNMEASURED_MAKE_TARGETS,
+    NO_CONFIG_ALIASES,
+    parse,
+  )
+  const expanding = decision(
+    payload("cat <<EOF\n'`git stash drop`'\nEOF"),
+    census,
+    UNMEASURED_MAKE_TARGETS,
+    NO_CONFIG_ALIASES,
+    parse,
+  )
+  const incomplete = decision(
+    payload("printf '%s' '$(git stash drop)'\ncat <<EOF\nhello\nEOF"),
+    census,
+    UNMEASURED_MAKE_TARGETS,
+    NO_CONFIG_ALIASES,
+    { source, query ->
+      {result: "ok", had_errors: false, truncated: false, match_count: 1, matches: []}
+    },
+  )
+  contract_effect(harness.stdio, "trigger_expanding_heredoc_mutation_is_denied", !expanding.allow)
+  contract_negative(harness.stdio, "negative_literal_outside_heredoc_is_allowed", !literal.allow)
+  contract_effect(harness.stdio, "effect_incomplete_parse_keeps_the_denial", !incomplete.allow)
 }

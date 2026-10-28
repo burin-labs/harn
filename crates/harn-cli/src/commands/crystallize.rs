@@ -153,7 +153,7 @@ fn run_validate(args: CrystallizeValidateArgs) -> Result<(), String> {
         Ok(())
     } else {
         for problem in &validation.problems {
-            eprintln!("- {problem}");
+            cli_diagnostic!("- {problem}");
         }
         Err(format!(
             "bundle validation failed with {} problem(s)",
@@ -172,7 +172,7 @@ fn run_shadow(args: CrystallizeShadowArgs) -> Result<(), String> {
     );
     if !shadow.failures.is_empty() {
         for failure in &shadow.failures {
-            eprintln!("- {failure}");
+            cli_diagnostic!("- {failure}");
         }
         return Err(format!(
             "shadow replay failed with {} failure(s)",
@@ -305,7 +305,7 @@ fn run_ingest(args: CrystallizeIngestArgs) -> Result<(), String> {
         );
         if !shadow.pass {
             for failure in &shadow.failures {
-                eprintln!("- {failure}");
+                cli_diagnostic!("- {failure}");
             }
             return Err(format!(
                 "shadow replay failed with {} failure(s)",

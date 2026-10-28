@@ -2891,6 +2891,13 @@ jobs:
     outputs:
       sha: ${{ steps.read.outputs.sha }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
       - name: Mint the consumer read credential
         id: token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -2900,17 +2907,14 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           permission-contents: read
-      - name: Read the consumer's default-branch head
+          permission-pull-requests: read
+      - name: Pin the selected consumer source
         id: read
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           CONSUMER: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
-        run: |
-          set -euo pipefail
-          branch="$(gh api "repos/$CONSUMER" --jq .default_branch)"
-          sha="$(gh api "repos/$CONSUMER/commits/$branch" --jq .sha)"
-          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::the consumer's head is not a 40-hex commit"; exit 1; }
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          PULL_REQUEST_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/ci/consumer-pin.mjs
 
   consumer-check:
     name: Consumer check

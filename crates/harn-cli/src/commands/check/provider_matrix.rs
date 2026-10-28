@@ -40,7 +40,7 @@ const FEATURES: &[&str] = &[
 pub(crate) fn run(format: CheckOutputFormat, filter: Option<&str>, deprecated_json_format: bool) {
     let rows = filtered_rows(filter);
     let catalog = load_catalog_for_docs(&[]).unwrap_or_else(|error| {
-        eprintln!("error: {error}");
+        cli_diagnostic!("error: {error}");
         process::exit(2);
     });
     match format {
@@ -167,7 +167,7 @@ pub(crate) fn filter_rows(
     };
     let normalized = normalize_feature(feature);
     if !FEATURES.contains(&normalized.as_str()) {
-        eprintln!(
+        cli_diagnostic!(
             "error: unknown provider matrix feature `{feature}`. Expected one of: {}",
             FEATURES.join(", ")
         );

@@ -7,6 +7,7 @@ use crate::value::{VmError, VmValue};
 use harn_builtin_macros::harn_builtin;
 
 use super::agent_runtime::{current_agent_session_id, current_host_bridge};
+use super::agent_tool_governance::validate_registered_input;
 use super::{
     agent_runtime, agent_session_host, agent_tools, compass_router, helpers, permissions, tools,
 };
@@ -639,20 +640,8 @@ pub(crate) async fn host_agent_dispatch_tool_call(
     let tool_result_max_chars =
         tool_result_budget::max_chars(agent_primitive_option_int(options, "tool_result_max_chars"));
     let bridge = current_host_bridge();
-    // Happy-path fast path: when NO policy/permission machinery is
-    // configured, the three blocks below — session policy guard install,
-    // execution-policy enforcement, and the dynamic-permission check — are
-    // provable no-ops, and together they dominate the diffuse per-dispatch
-    // overhead (guard key parsing, a `CapabilityPolicy::default()` per call,
-    // a boxed permission future plus grant-map churn per call). Skip them
-    // outright. The gate is deliberately conservative and O(1):
-    // - any policy-shaped option key (even nil/invalid) → slow path, so the
-    //   guard still validates/errors exactly as before;
-    // - any ambient execution-policy scope (e.g. an enclosing sub-agent
-    //   ceiling) → slow path;
-    // - any dynamic-permission scope or cached session grant → slow path.
-    // Approval policies, the trifecta gate, pre/post tool hooks, compass
-    // routing, and schema validation are NOT gated here and run unchanged.
+    // Skip policy setup only when no policy, execution ceiling, permission
+    // scope, cached grant, or precheck can affect this call.
     let policy_machinery_active = agent_session_host::options_request_session_policies(options)
         || crate::orchestration::execution_policy_active()
         || permissions::dynamic_permission_policy_active()
@@ -693,13 +682,21 @@ pub(crate) async fn host_agent_dispatch_tool_call(
         );
         return Ok(json_to_vm_value(&result));
     }
-    let prepared_invocation =
-        match prepared_consent::prepare(&ctx, tools, &tool_name, &tool_id, &tool_args, &session_id)
-            .await
-        {
-            Ok(prepared) => prepared,
-            Err(denied) => return Ok(denied),
-        };
+    let audience = super::agent_tool_governance::dispatch_audience(options);
+    let prepared_invocation = match prepared_consent::prepare(
+        &ctx,
+        tools,
+        &tool_name,
+        &tool_id,
+        &tool_args,
+        &session_id,
+        audience,
+    )
+    .await
+    {
+        Ok(prepared) => prepared,
+        Err(denied) => return Ok(denied),
+    };
     // These are observations for consent, not model arguments. The handler
     // keeps the separately retained binding and never consumes a host rewrite.
     let approval_args = prepared_invocation
@@ -1212,8 +1209,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
         }
     }
 
-    let tool_schemas = tools::collect_tool_schemas(tools, None);
-    if let Err(message) = tools::validate_tool_args(&tool_name, &tool_args, &tool_schemas) {
+    if let Err(message) = validate_registered_input(tools, &tool_name, &tool_args, audience) {
         // Argument-DELIVERY faults — a `{"__parse_error": "..."}` carrier from
         // the streamed-arg parser, or empty (`{}` / null) arguments — are a
         // provider-boundary fault class, not a model slip. Replace the
@@ -1310,6 +1306,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
             tool_name: &tool_name,
             tool_args: &tool_args,
             tools,
+            audience,
             mcp_clients: mcp_clients_ref,
             bridge: bridge.as_ref(),
             tool_retries,

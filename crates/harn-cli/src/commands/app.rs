@@ -125,13 +125,13 @@ pub(crate) async fn run_script_app_server(
         .layer(DefaultBodyLimit::max(MAX_APP_RPC_BYTES))
         .with_state(state);
 
-    eprintln!(
-        "[harn] app: serving {} at {host_origin}",
+    cli_diagnostic!(
+        "app: serving {} at {host_origin}",
         requested_resource.as_deref().unwrap_or("first declared UI")
     );
     if open {
         if let Err(error) = webbrowser::open(&host_origin) {
-            eprintln!("[harn] app: could not open browser: {error}");
+            cli_diagnostic!("warning: app: could not open browser: {error}");
         }
     }
     axum::serve(listener, router)

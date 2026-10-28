@@ -110,8 +110,12 @@ fn __composition_dispatch_value(result: dict, name: string) {
   if result?.ok ?? false {
     return result?.result
   }
-  throw result?.error ?? result?.rendered_result
-    ?? "composition_mcp_execute: tool failed: " + name
+  throw {
+    schema: "harn.composition.dispatch_error.v1",
+    message: result?.error ?? result?.rendered_result
+      ?? "composition_mcp_execute: tool failed: ${name}",
+    error_category: result?.error_category ?? "tool_error",
+  }
 }
 
 fn __composition_mcp_reduced_result(report: dict, opts: dict) {
@@ -127,6 +131,46 @@ fn __composition_mcp_reduced_result(report: dict, opts: dict) {
     run_id: run?.run_id,
     child_call_count: len(report?.child_calls ?? []),
   }
+}
+
+/** Select bindings without accepting caller-supplied policy or dispatch metadata. */
+fn __composition_profile_selection(manifest: dict, args: dict) -> dict {
+  if args?.tools != nil {
+    return {ok: false, error: "composition_mcp: tools are configured by the server"}
+  }
+  if args?.trusted_servers != nil || args?.trusted_mcp_servers != nil
+    || args?.trust_annotations != nil
+    || args?.trust_mcp_annotations != nil {
+    return {ok: false, error: "composition_mcp: trust is configured by the server"}
+  }
+  const requested = args?.manifest
+  if requested == nil {
+    return {ok: true, manifest: manifest}
+  }
+  if type_of(requested) != "dict" || type_of(requested?.bindings) != "list" {
+    return {ok: false, error: "composition_mcp: manifest must contain a list of bindings"}
+  }
+  let available_by_binding = {}
+  for available in manifest.bindings {
+    available_by_binding[available.binding] = available
+  }
+  let seen = {}
+  let selected = []
+  for binding in requested.bindings {
+    const binding_name = binding?.binding
+    if type_of(binding_name) != "string" {
+      return {ok: false, error: "composition_mcp: manifest contains an unregistered binding"}
+    }
+    const found = available_by_binding[binding_name]
+    if found == nil || found.name != binding?.name {
+      return {ok: false, error: "composition_mcp: manifest contains an unregistered binding"}
+    }
+    if seen[binding_name] != true {
+      selected.push(found)
+      seen[binding_name] = true
+    }
+  }
+  return {ok: true, manifest: manifest + {bindings: selected}}
 }
 
 /**
@@ -235,6 +279,18 @@ pub fn composition_mcp_tools(
   options: dict? = nil,
 ) {
   const opts = options ?? {}
+  const registry_source = __composition_registry(harness, opts?.tools ?? registry)
+  const projected_source = tool_project(registry_source, "mcp")
+  const source = registry_source + {tools: projected_source.tools}
+  const manifest_options = (opts?.manifest_options ?? opts) + {side_effect_ceiling: "read_only"}
+  const candidate_manifest = composition_binding_manifest(source, manifest_options)
+  let read_bindings = []
+  for binding in candidate_manifest.bindings {
+    if binding.side_effect_level == "read_only" {
+      read_bindings.push(binding)
+    }
+  }
+  const manifest = candidate_manifest + {bindings: read_bindings}
   let tools = registry ?? tool_registry()
   tools = tool_define(
     tools,
@@ -255,7 +311,7 @@ pub fn composition_mcp_tools(
   tools = tool_define(
     tools,
     "harn.code.generate_harn_api",
-    "Generate a typed Harn Code Mode API from an MCP tool surface or binding manifest",
+    "Generate a typed Harn Code Mode API for the server's registered tools",
     {
       parameters: {
         tools: {type: "array", required: false},
@@ -267,21 +323,39 @@ pub fn composition_mcp_tools(
       annotations: {kind: "search", side_effect_level: "read_only", inline_result: true},
       handler: { args ->
         const call_args = args ?? {}
-        const manifest = call_args?.manifest
-        if manifest != nil {
-          const result = {
-            manifest: manifest,
-            harn_api: composition_harn_api(manifest),
-            tool_count: len(manifest?.bindings ?? []),
-            servers: __composition_mcp_servers(manifest),
-          }
-          return agent_tool_handler_result(to_string(result), result)
+        const selection = __composition_profile_selection(manifest, call_args)
+        if !selection.ok {
+          return agent_tool_handler_result(selection.error, {error: selection.error}, "error")
         }
-        const result = composition_mcp_api(
-          harness,
-          call_args?.tools ?? opts?.tools,
+        let selected = selection.manifest
+        let selected_names = []
+        for binding in selected.bindings {
+          selected_names.push(binding.name)
+        }
+        const names = __composition_mcp_ranked_names(
+          tool_select(source, selected_names),
+          call_args?.query,
           opts + call_args,
         )
+        if names != nil {
+          let named = {}
+          for name in names {
+            named[name] = true
+          }
+          let bindings = []
+          for binding in selected.bindings {
+            if named[binding.name] == true {
+              bindings.push(binding)
+            }
+          }
+          selected = selected + {bindings: bindings}
+        }
+        const result = {
+          manifest: selected,
+          harn_api: composition_harn_api(selected),
+          tool_count: len(selected.bindings),
+          servers: __composition_mcp_servers(selected),
+        }
         return agent_tool_handler_result(to_string(result), result)
       },
     },
@@ -289,7 +363,7 @@ pub fn composition_mcp_tools(
   tools = tool_define(
     tools,
     "harn.code.execute_composition",
-    "Execute a read-only Harn composition snippet against a binding manifest",
+    "Execute a read-only Harn composition snippet against registered tools",
     {
       parameters: {
         snippet: {type: "string"},
@@ -302,8 +376,16 @@ pub fn composition_mcp_tools(
         max_output_bytes: {type: "integer", required: false},
         max_concurrent: {type: "integer", required: false},
         max_concurrent_per_server: {type: "integer", required: false},
-        trusted_servers: {type: "array", required: false},
-        trust_annotations: {type: "boolean", required: false},
+        trusted_servers: {
+          type: "array",
+          required: false,
+          description: "Server configuration only; client values are rejected.",
+        },
+        trust_annotations: {
+          type: "boolean",
+          required: false,
+          description: "Server configuration only; client values are rejected.",
+        },
         call_timeout_ms: {type: "integer", required: false},
         retry: {type: "object", required: false},
         tools: {type: "array", required: false},
@@ -313,16 +395,33 @@ pub fn composition_mcp_tools(
       annotations: {kind: "think", side_effect_level: "read_only", inline_result: true},
       handler: { args ->
         const call_args = args ?? {}
-        const result = if call_args?.tools != nil || opts?.tools != nil {
-          composition_mcp_execute(
-            harness,
-            call_args.snippet,
-            call_args?.tools ?? opts?.tools,
-            opts + call_args,
-          )
-        } else {
-          harness.tools.composition_execute(call_args.snippet, call_args.manifest, opts + call_args)
+        const selection = __composition_profile_selection(manifest, call_args)
+        if !selection.ok {
+          return agent_tool_handler_result(selection.error, {error: selection.error}, "error")
         }
+        const selected = selection.manifest
+        const dispatch = { name, input ->
+          const outcome = agent_dispatch_tool_call(
+            harness.tools,
+            {name: name, arguments: input},
+            source,
+            (opts?.dispatch_options ?? opts) + {_composition_mcp: true},
+          )
+          return __composition_dispatch_value(outcome, name)
+        }
+        const execution_opts = opts + call_args
+          + {
+            trusted_servers: opts?.trusted_servers,
+            trusted_mcp_servers: opts?.trusted_mcp_servers,
+            trust_annotations: opts?.trust_annotations,
+            trust_mcp_annotations: opts?.trust_mcp_annotations,
+          }
+        const report = harness.tools.composition_execute(
+          call_args.snippet,
+          selected,
+          __composition_execute_options(execution_opts, dispatch),
+        )
+        const result = __composition_mcp_reduced_result(report, execution_opts)
         return agent_tool_handler_result(to_string(result), result, result.ok ? "ok" : "error")
       },
     },
