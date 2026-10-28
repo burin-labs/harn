@@ -151,31 +151,9 @@ pub fn preserve_process_owner_token(command: &mut std::process::Command) {
     }
 }
 
-/// Return live processes carrying `token` as an operation or owner marker.
-///
-/// The current process is excluded. This audit deliberately does not consult
-/// the append-only process-group journal: exited groups can be reused by
-/// unrelated processes during a large suite. The journal is safe only for the
-/// guardian's abrupt-owner-death path, where reclaiming the whole lifetime
-/// takes precedence over a normal terminal report.
-pub fn process_owner_survivors(token: &str) -> Vec<ProcessCleanupChild> {
-    #[cfg(unix)]
-    {
-        let mut survivors = cleanup_token_processes(token)
-            .into_iter()
-            .filter(|child| child.pid != std::process::id())
-            .collect::<Vec<_>>();
-        survivors.sort_by_key(|child| child.pid);
-        survivors
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = token;
-        Vec::new()
-    }
-}
-
 /// Collect a final owner census without treating an unavailable scan as zero.
+/// The append-only group journal cannot establish normal completion: its exited
+/// groups may have been reused. Only the current token census supplies evidence.
 pub fn finish_process_owner_cleanup(report: &mut ProcessCleanupReport, token: &str) {
     #[cfg(unix)]
     {
@@ -186,7 +164,9 @@ pub fn finish_process_owner_cleanup(report: &mut ProcessCleanupReport, token: &s
             }
         }
         report.census = census;
-        wait_for_report_children_to_exit(report, SUBPROCESS_KILL_SETTLE);
+        if report.attempted_signals.contains(&libc::SIGKILL) {
+            wait_for_report_children_to_exit(report, SUBPROCESS_KILL_SETTLE);
+        }
         report.refresh_survivor_status();
     }
     #[cfg(not(unix))]

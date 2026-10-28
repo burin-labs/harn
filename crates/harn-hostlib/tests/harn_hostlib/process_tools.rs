@@ -223,6 +223,53 @@ fn run_command_pipes_stdin_into_child() {
 }
 
 #[test]
+fn run_command_cleanup_counts_unknown_liveness_and_refuses_unmeasured_zero() {
+    for case in [
+        "complete",
+        "unknown",
+        "unavailable",
+        "no_control",
+        "partial",
+        "omitted",
+    ] {
+        let mut report = cleanup_report_fixture(9);
+        match case {
+            "unknown" => report.children[0].alive_after_cleanup = None,
+            "unavailable" => report = ProcessCleanupReport::default(),
+            "no_control" => report.census.control_read = false,
+            "partial" => report.census.unreadable_processes = 1,
+            "omitted" => report.omitted_children = 1,
+            _ => {}
+        }
+        let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig {
+            force_timeout: true,
+            cleanup_report: Some(report),
+            ..MockProcessConfig::running()
+        });
+        let mut request = dict_map();
+        request.insert("argv".into(), vlist_str(&["sleep", "30"]));
+        request.put_int("timeout_ms", 150);
+        let response = require_dict(call_tool("hostlib_tools_run_command", request).unwrap());
+        assert!(controller.was_killed(), "{case}: cleanup was not reached");
+        assert!(require_bool(&response, "timed_out"));
+        let cleanup = require_nested_dict(&response, "process_cleanup");
+        if case == "complete" {
+            assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+            assert!(require_bool(&cleanup, "census_complete"));
+        } else if case == "unknown" {
+            assert_eq!(require_int(&cleanup, "survivor_count"), 1);
+            assert_eq!(require_list(&cleanup, "surviving_children").len(), 1);
+        } else {
+            assert!(
+                matches!(cleanup.get("survivor_count"), Some(VmValue::Nil)),
+                "{case}"
+            );
+            assert!(!require_bool(&cleanup, "census_complete"), "{case}");
+        }
+    }
+}
+
+#[test]
 fn run_command_kills_child_when_timeout_elapses() {
     // No exit set + force_timeout = `wait_with_timeout` reports timeout
     // immediately, no wall-clock dependence.

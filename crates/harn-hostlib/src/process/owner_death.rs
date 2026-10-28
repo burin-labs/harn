@@ -782,36 +782,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
                 reap_adopted_children()?;
                 harn_vm::op_interrupt::finish_process_owner_cleanup(&mut cleanup, &cleanup_token);
                 completion_receipt::write(&mut cleanup_receipt, &cleanup)?;
-                let survivors = harn_vm::op_interrupt::process_owner_survivors(&cleanup_token);
-                if !survivors.is_empty() {
-                    let guardian_pid = std::process::id();
-                    let guardian_pgid = unsafe { libc::getpgrp() };
-                    let summary = survivors
-                        .iter()
-                        .map(|process| {
-                            let process_group = unsafe { libc::getpgid(process.pid as i32) };
-                            let process_group = if process_group < 0 {
-                                "<unknown>".to_string()
-                            } else {
-                                process_group.to_string()
-                            };
-                            format!(
-                                "pid={} parent={} pgid={} command={}",
-                                process.pid,
-                                process
-                                    .parent_pid
-                                    .map_or_else(|| "<unknown>".to_string(), |pid| pid.to_string()),
-                                process_group,
-                                process.command_name.as_deref().unwrap_or("<unknown>")
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    return Err(io::Error::other(format!(
-                        "owner-death guardian pid={guardian_pid} pgid={guardian_pgid} left helper \
-                         processes alive after cleanup: {summary}"
-                    )));
-                }
+                completion_receipt::refuse_survivors(&cleanup)?;
             }
             GuardianEvent::OutputClosed => open_outputs = open_outputs.saturating_sub(1),
         }

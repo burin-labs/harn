@@ -72,3 +72,22 @@ pub(super) fn write(
     }
     writer.write_all(&bytes)
 }
+
+pub(super) fn refuse_survivors(
+    report: &harn_vm::op_interrupt::ProcessCleanupReport,
+) -> io::Result<()> {
+    let survivors = report
+        .children
+        .iter()
+        .filter(|child| child.alive_after_cleanup != Some(false))
+        .map(|child| format!("pid={} alive={:?}", child.pid, child.alive_after_cleanup))
+        .collect::<Vec<_>>();
+    if survivors.is_empty() {
+        return Ok(());
+    }
+    Err(io::Error::other(format!(
+        "owner-death guardian pid={} left helper processes alive or unmeasured after cleanup: {}",
+        std::process::id(),
+        survivors.join(", ")
+    )))
+}

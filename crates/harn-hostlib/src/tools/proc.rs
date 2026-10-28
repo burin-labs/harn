@@ -767,46 +767,6 @@ pub(crate) fn process_cleanup_to_json(
     crate::json::vm_dict_to_json(&dict)
 }
 
-#[cfg(test)]
-mod cleanup_receipt_tests {
-    use super::*;
-
-    #[test]
-    fn unknown_liveness_is_a_survivor_and_unavailable_census_is_not_zero() {
-        let mut report = process_handle::ProcessCleanupReport::default();
-        let unavailable = process_cleanup_to_json(&report);
-        assert!(unavailable["survivor_count"].is_null());
-        assert_eq!(unavailable["census_complete"], false);
-        report
-            .children
-            .push(harn_vm::op_interrupt::ProcessCleanupChild::new(
-                123,
-                None,
-                1,
-                Some("child".into()),
-            ));
-        let unknown = process_cleanup_to_json(&report);
-        assert_eq!(unknown["survivor_count"], 1);
-        assert_eq!(unknown["surviving_children"].as_array().unwrap().len(), 1);
-        report.children[0].alive_after_cleanup = Some(false);
-        assert!(process_cleanup_to_json(&report)["survivor_count"].is_null());
-        report.census = harn_vm::op_interrupt::ProcessCleanupCensus {
-            control_read: true,
-            scanned_processes: 1,
-            unreadable_processes: 0,
-        };
-        assert_eq!(process_cleanup_to_json(&report)["survivor_count"], 0);
-        report.census.control_read = false;
-        assert!(process_cleanup_to_json(&report)["survivor_count"].is_null());
-        report.census.control_read = true;
-        report.census.unreadable_processes = 1;
-        assert!(process_cleanup_to_json(&report)["survivor_count"].is_null());
-        report.census.unreadable_processes = 0;
-        report.omitted_children = 1;
-        assert!(process_cleanup_to_json(&report)["survivor_count"].is_null());
-    }
-}
-
 fn process_cleanup_child_to_value(child: &process_handle::ProcessCleanupChild) -> VmValue {
     let mut dict = harn_vm::value::DictMap::new();
     dict.put_int("pid", child.pid as i64);
