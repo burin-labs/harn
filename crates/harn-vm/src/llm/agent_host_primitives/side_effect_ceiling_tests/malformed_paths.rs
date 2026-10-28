@@ -13,7 +13,7 @@ struct Calls {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn reviewer_sensitive_path_grant_is_bound_to_the_reviewed_invocation() {
+async fn reviewer_grant_is_bound_to_the_reviewed_invocation() {
     struct PolicyCleanup;
     impl Drop for PolicyCleanup {
         fn drop(&mut self) {
@@ -27,7 +27,8 @@ async fn reviewer_sensitive_path_grant_is_bound_to_the_reviewed_invocation() {
     let root = tempfile::tempdir().unwrap();
     interception.workspace(root.path());
     std::fs::write(root.path().join(".env"), "fixture").unwrap();
-    std::fs::write(root.path().join(".env.other"), "other").unwrap();
+    std::fs::write(root.path().join("requested.txt"), "fixture").unwrap();
+    std::fs::write(root.path().join("other.txt"), "other").unwrap();
     std::fs::write(root.path().join("forbidden"), "denied").unwrap();
     let _bridge = HostBridgeGuard::replace(None);
     push_approval_policy(
@@ -38,11 +39,12 @@ async fn reviewer_sensitive_path_grant_is_bound_to_the_reviewed_invocation() {
         .unwrap(),
     );
     let _cleanup = PolicyCleanup;
-    for (reviewed, replacement, permitted, expected_hooks) in [
-        (false, ".env", false, 0),
-        (true, ".env", true, 1),
-        (true, ".env.other", false, 1),
-        (true, "forbidden", false, 1),
+    for (reviewed, initial, replacement, permitted, expected_hooks) in [
+        (false, "requested.txt", "requested.txt", false, 0),
+        (true, "requested.txt", "requested.txt", true, 1),
+        (true, "requested.txt", "other.txt", false, 1),
+        (true, "requested.txt", "forbidden", false, 1),
+        (true, ".env", ".env", false, 0),
     ] {
         clear_all_approval_policy_repeat_counts();
         let mut options = crate::value::DictMap::new();
@@ -61,7 +63,7 @@ async fn reviewer_sensitive_path_grant_is_bound_to_the_reviewed_invocation() {
         });
         let calls = Calls::new();
         let result = calls
-            .dispatch(serde_json::json!({"location": ".env"}), true, &options)
+            .dispatch(serde_json::json!({"location": initial}), true, &options)
             .await;
         assert_eq!(hooks.load(Ordering::SeqCst), expected_hooks, "{result}");
         assert_eq!(
@@ -69,11 +71,17 @@ async fn reviewer_sensitive_path_grant_is_bound_to_the_reviewed_invocation() {
             "{reviewed}/{replacement}: {result}"
         );
         assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(permitted));
-        assert_eq!(calls.reviews.load(Ordering::SeqCst), usize::from(reviewed));
-        if !reviewed || replacement == ".env.other" {
+        assert_eq!(
+            calls.reviews.load(Ordering::SeqCst),
+            usize::from(reviewed && initial != ".env")
+        );
+        if initial == ".env" {
             assert_eq!(result["denial"]["gate"], "sensitive_path");
         }
-        if replacement == "forbidden" {
+        if !reviewed {
+            assert_eq!(result["denial"]["gate"], "approval_unavailable");
+        }
+        if replacement == "forbidden" || replacement == "other.txt" {
             assert_eq!(result["denial"]["gate"], "approval_policy");
         }
         interception.clear_hooks();
@@ -81,11 +89,11 @@ async fn reviewer_sensitive_path_grant_is_bound_to_the_reviewed_invocation() {
     #[cfg(unix)]
     {
         // Identical JSON must not retain approval after its resolved resource
-        // changes. Both targets remain within the workspace and sensitive.
-        let alias = root.path().join(".env");
+        // changes. Both targets remain within the workspace and require an ask.
+        let alias = root.path().join("requested.txt");
         std::fs::remove_file(&alias).unwrap();
-        std::os::unix::fs::symlink(root.path().join(".env.other"), &alias).unwrap();
-        let target = root.path().join(".env.third");
+        std::os::unix::fs::symlink(root.path().join("other.txt"), &alias).unwrap();
+        let target = root.path().join("third.txt");
         std::fs::write(&target, "third").unwrap();
         let hooks = Arc::new(AtomicUsize::new(0));
         let observed = hooks.clone();
@@ -106,11 +114,15 @@ async fn reviewer_sensitive_path_grant_is_bound_to_the_reviewed_invocation() {
         clear_all_approval_policy_repeat_counts();
         let calls = Calls::new();
         let result = calls
-            .dispatch(serde_json::json!({"location": ".env"}), true, &options)
+            .dispatch(
+                serde_json::json!({"location": "requested.txt"}),
+                true,
+                &options,
+            )
             .await;
         assert_eq!(hooks.load(Ordering::SeqCst), 1, "retarget hook must fire");
         assert_eq!(result["ok"], false, "{result}");
-        assert_eq!(result["denial"]["gate"], "sensitive_path");
+        assert_eq!(result["denial"]["gate"], "approval_policy");
         assert_eq!(calls.effect.load(Ordering::SeqCst), 0);
         assert_eq!(calls.reviews.load(Ordering::SeqCst), 1);
     }

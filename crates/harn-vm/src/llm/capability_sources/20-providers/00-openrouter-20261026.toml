@@ -1,0 +1,33 @@
+# October 26: strict routing probes measured three newly supported top-k
+# routes and ten rejected options with successful same-model controls. This
+# shard precedes the read-only base rules, which stop capability resolution.
+# See docs/llm/provider-evidence/2026-10-26-portable-options.md (#10634).
+[[provider.openrouter]]
+model_match = [
+  "deepseek/deepseek-v4.1-flash-1017",
+  "elorian/glimpse",
+  "reflection/beam-1.0-501b-a23b",
+]
+extends = true
+top_k_supported = true
+
+[[provider.openrouter]]
+model_match = ["elorian/glimpse", "thinkingmachines/inkling"]
+extends = true
+seed_supported = false
+
+[[provider.openrouter]]
+model_match = "inception/mercury-3"
+extends = true
+presence_penalty_supported = false
+frequency_penalty_supported = false
+top_p_supported = false
+seed_supported = false
+
+[[provider.openrouter]]
+model_match = "unbiased/pareto-26.10"
+extends = true
+stop_supported = false
+presence_penalty_supported = false
+frequency_penalty_supported = false
+seed_supported = false

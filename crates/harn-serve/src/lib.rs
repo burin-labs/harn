@@ -72,13 +72,14 @@ pub use adapters::acp::{
     AcpMeta, AcpOutput, AcpProfileConfig, AcpPromptDelivery, AcpPromptErrorData,
     AcpPromptErrorSchema, AcpRuntimeConfigurator, AcpSandboxConfig, AcpServer, AcpServerConfig,
     AcpServerConfinement, AcpSessionCancelToolCallParams, AcpSessionEnvironmentConfig,
-    AcpSessionIdParams, AcpSessionLoadParams, AcpSessionNewParams, AcpSessionProjectRootError,
-    AcpSessionPromptParams, AcpSessionPromptReceipt, AcpSessionPromptResult,
-    AcpSessionRestoreResult, AcpWebSocketServeOptions, NoopAcpRuntimeConfigurator,
-    ACP_METHOD_CANCEL_REQUEST, ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL,
-    ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_LOAD,
-    ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_PROMPTS, ACP_METHOD_SESSION_PROMPT,
-    ACP_METHOD_SESSION_RESUME, ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_REQUEST_CANCELLED_CODE,
+    AcpSessionIdParams, AcpSessionLoadParams, AcpSessionLoadWithCheckpoint, AcpSessionNewParams,
+    AcpSessionProjectRootError, AcpSessionPromptParams, AcpSessionPromptReceipt,
+    AcpSessionPromptResult, AcpSessionRestoreResult, AcpWebSocketServeOptions,
+    NoopAcpRuntimeConfigurator, ACP_METHOD_CANCEL_REQUEST, ACP_METHOD_INITIALIZE,
+    ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE,
+    ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_PROMPTS,
+    ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_RESUME, ACP_PROMPT_ERROR_DATA_SCHEMA,
+    ACP_REQUEST_CANCELLED_CODE,
 };
 pub use adapters::api::{ApiHttpServeOptions, ApiServer, ApiServerConfig};
 pub use adapters::mcp::{

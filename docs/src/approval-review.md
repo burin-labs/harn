@@ -22,8 +22,11 @@ host authority that a nested scope may not widen.
 | `auto_review` | route to the reviewer | headless, evals |
 | `allow_all` | answer every ask yes | `yolo`, `full-auto` |
 
-`allow_all` does not lift the catastrophic floor. `rm -rf /` and its siblings
-are refused whoever is asking and whatever they answered.
+Matched deny rules never reach a reviewer, including `allow_all`. Their receipts
+record `auto_review.unavailable_reason: "deny_rule"` and `reviewer_answered: false`.
+Reviewers may answer asks and deliberately reviewable refusals such as side-effect
+ceilings. `allow_all` also preserves the catastrophic floor: `rm -rf /` and its
+siblings are refused whoever is asking and whatever they answered.
 
 ## Change the reviewer's policy
 
