@@ -198,6 +198,7 @@ impl AcpServer {
             .sessions
             .remove(session_id)
             .expect("validated session should still exist after sink flush");
+        closed.checkpoint_tracking.close();
         self.release_session_workspace_warm(&closed);
         self.session_cancellations
             .lock()
