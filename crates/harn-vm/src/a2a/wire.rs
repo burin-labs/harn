@@ -76,7 +76,7 @@ impl A2aWireVersion {
         }
     }
 
-    pub fn task_state<'a>(self, state: &'a str) -> Result<&'a str, A2aClientError> {
+    pub fn task_state(self, state: &str) -> Result<&str, A2aClientError> {
         if self == Self::V0_3 {
             return Ok(state);
         }
@@ -196,10 +196,10 @@ pub(super) fn message_response(message: &Value) -> Result<(String, Value), A2aCl
             "A2A message response must have ROLE_AGENT".to_string(),
         ));
     }
-    if !message
+    if message
         .get("contextId")
         .and_then(Value::as_str)
-        .is_some_and(|value| !value.is_empty())
+        .is_none_or(|value| value.is_empty())
     {
         return Err(A2aClientError::Protocol(
             "A2A message response missing contextId".to_string(),
@@ -214,10 +214,10 @@ pub(super) fn task_result(task: &Value) -> Result<Value, A2aClientError> {
             A2aClientError::Protocol("A2A task artifacts must be an array".to_string())
         })?;
         for artifact in artifacts {
-            if !artifact
+            if artifact
                 .get("artifactId")
                 .and_then(Value::as_str)
-                .is_some_and(|id| !id.is_empty())
+                .is_none_or(|id| id.is_empty())
             {
                 return Err(A2aClientError::Protocol(
                     "A2A artifact missing artifactId".to_string(),
