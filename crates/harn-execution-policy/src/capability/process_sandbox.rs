@@ -96,19 +96,10 @@ pub struct ProcessSandboxPolicy {
     /// Enforced on macOS, where the seatbelt filters sockets by path.
     ///
     /// Linux renders this grant as **serve-only** local IPC, which is a
-    /// deliberately different and narrower shape than the macOS one. The
-    /// kernel offers no access right governing connection to a filesystem
-    /// socket at any Landlock ABI, so a child that may `connect` can reach
-    /// every socket its uid can open — a container daemon's among them, which
-    /// is an escape and not a grant. Linux therefore admits socket creation,
-    /// `bind`, `listen` and `accept` for the Unix domain, scopes creation to
-    /// these roots, contains abstract sockets inside the sandbox domain, and
-    /// **refuses `connect` outright**. A build server that talks to itself is
-    /// served; a child reaching for somebody else's socket is not. Build
-    /// servers (sbt, Gradle's Kotlin daemon, MSBuild worker nodes) need only
-    /// the serving half, so this costs them nothing, and a policy that also
-    /// permits general networking keeps `connect` because it was already
-    /// reachable.
+    /// narrower shape than the macOS one. It admits Unix socket creation,
+    /// `bind`, `listen` and `accept` under these roots and contains abstract
+    /// sockets inside the sandbox domain. This grant alone withholds
+    /// `connect`; a separate SSH agent or general network grant can admit it.
     ///
     /// Windows and OpenBSD still reject a non-empty grant rather than widening
     /// it, the contract `allow_tcp_loopback` follows. Each backend's actual
@@ -119,7 +110,7 @@ pub struct ProcessSandboxPolicy {
     pub unix_socket_roots: Vec<String>,
     /// One host-authorized SSH agent socket. Children receive this exact path
     /// as `SSH_AUTH_SOCK`; the grant permits connection, never key-file reads.
-    /// Linux requires Landlock ABI 9 to enforce the path and refuses below it.
+    /// Linux requires Landlock ABI 9 without a broader network grant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_agent_socket: Option<String>,
     /// Permit a confined child to enumerate its own entries under the process
@@ -206,8 +197,8 @@ pub enum UnixSocketEnforcement {
     NotRequested,
     /// Creation, binding and connection are all scoped to the named roots.
     PathScoped,
-    /// Creation is scoped to the named roots and connection is refused
-    /// outright, because this kernel cannot scope a connection by path.
+    /// Creation and serving are scoped to the named roots. Connection
+    /// requires a separate grant.
     ServeOnly,
     /// The policy already permits general networking, so the socket
     /// operations (creation, binding, connection, and abstract sockets) are

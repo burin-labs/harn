@@ -383,17 +383,8 @@ fn profile_setup_for(
     // `resolve_netns_launcher` owns that decision so the spawn path and this
     // one cannot disagree about whether the grant is available.
     resolve_netns_launcher(policy)?;
-    // A Unix-socket grant is rendered here as serve-only local IPC rather than
-    // refused. seccomp filters the syscall and not the socket path, and no
-    // Landlock ABI Harn uses has an access right governing connection to a
-    // socket file, so `connect` is the one operation that cannot be scoped: a
-    // child allowed to make it reaches every socket its uid can open, a
-    // container daemon's among them, which is an escape and not a grant.
-    // Withholding `connect` removes that reach entirely while leaving the
-    // serving half — create, bind, listen, accept — which is all a build server
-    // needs to talk to itself. `unix_socket_local_ipc_grant` owns that
-    // decision; the seccomp and Landlock terms below both read it so they
-    // cannot disagree.
+    // Socket roots supply serving authority; the separate SSH agent grant
+    // scopes its connection by inode before seccomp admits connect.
     // The selected Landlock renderer must attach a filesystem boundary; it
     // cannot return a seccomp-only profile when that mechanism is unavailable.
     let landlock = landlock_profile_for(program, policy, support)?;
@@ -906,14 +897,8 @@ fn compile_seccomp_program(
     if unix_socket_local_ipc_grant(policy)
         || (policy.process_sandbox.ssh_agent_socket.is_some() && !policy_allows_network(policy))
     {
-        // `socket` is admitted only for the Unix domain. An argument condition
-        // is the whole protection: an unconditional entry here would hand the
-        // child every address family, which is the grant this term exists to
-        // avoid. `bind`, `listen` and `accept` take a descriptor rather than a
-        // family, so they cannot be filtered the same way and are admitted
-        // outright — safely, because the only descriptors the child can obtain
-        // are the Unix-domain ones this rule allowed. `connect` is absent by
-        // design and is what keeps a host daemon's socket out of reach.
+        // The family filter withholds IP networking. Landlock scopes any
+        // admitted connection; only a socket-root grant also admits serving.
         let unix_domain_only = SeccompRule::new(vec![SeccompCondition::new(
             0,
             SeccompCmpArgLen::Dword,
