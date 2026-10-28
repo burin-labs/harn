@@ -30,7 +30,7 @@ fn racing_first_capture_cannot_acknowledge_an_unstored_writer_policy() {
     let (scanned_tx, scanned_rx) = channel();
     let (published_tx, published_rx) = channel();
     let (finished_tx, finished_rx) = channel();
-    std::thread::scope(|scope| {
+    harn_parser::runtime_stack::scope(|scope| {
         let root = dir.path();
         let strict_id = &id;
         let strict = scope.spawn(move || {
