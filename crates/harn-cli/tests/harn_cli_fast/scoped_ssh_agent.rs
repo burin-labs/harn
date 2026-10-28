@@ -137,6 +137,10 @@ fn exact_agent_grant_signs_without_exposing_keys_or_other_sockets() {
     )
     .unwrap();
     for granted in [false, true, false] {
+        assert!(
+            key.is_file(),
+            "the private-key read control must name an existing file"
+        );
         let before = git(&repo, &home, &agent.socket, &["rev-parse", "HEAD"]);
         let mut command = harn_e2e_command();
         command
@@ -163,7 +167,9 @@ fn exact_agent_grant_signs_without_exposing_keys_or_other_sockets() {
         let proof: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(proof["confinement_fired"], true, "{proof}");
         assert_eq!(proof["key_read_exit"], 1, "{proof}");
+        assert_eq!(proof["key_read_denied"], true, "{proof}");
         assert_eq!(proof["other_agent_exit"], 2, "{proof}");
+        assert_eq!(proof["other_agent_denied"], true, "{proof}");
         let after = git(&repo, &home, &agent.socket, &["rev-parse", "HEAD"]);
         if granted {
             assert_eq!(proof["sign_exit"], 0, "{proof}");

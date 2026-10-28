@@ -15,7 +15,11 @@ fn main(harness: Harness) {
       {
         sign_exit: sign.exit_code,
         key_read_exit: read.exit_code,
+        key_read_denied: contains(read.stderr, "Permission denied")
+          || contains(read.stderr, "Operation not permitted"),
         other_agent_exit: other.exit_code,
+        other_agent_denied: contains(other.stderr, "Permission denied")
+          || contains(other.stderr, "Operation not permitted"),
         confinement_fired: sign.sandbox.enforced && read.sandbox.enforced && other.sandbox.enforced,
       },
     ),
