@@ -1817,10 +1817,23 @@ harn signals ack
 harn signals ack --generation
 harn signals ack --session
 harn signals ack <positional 1>
+harn signals dispatch
+harn signals dispatch --execution
+harn signals dispatch --session
+harn signals dispatch accept
+harn signals dispatch accept --batch
+harn signals dispatch accept --token
+harn signals dispatch cancel
+harn signals dispatch cancel --monitor
+harn signals dispatch claim
+harn signals dispatch start
+harn signals dispatch start --interval-seconds
 harn signals fire
 harn signals fire --action
 harn signals fire --cwd
 harn signals fire --event
+harn signals fire --event-id
+harn signals fire --execution
 harn signals fire --expires-in
 harn signals fire --json
 harn signals fire --key
@@ -1828,6 +1841,7 @@ harn signals fire --kind
 harn signals fire --producer
 harn signals fire --provider
 harn signals fire --repo
+harn signals fire --session
 harn signals fire --severity
 harn signals fire --signature
 harn signals fire --source-url
