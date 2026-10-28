@@ -44,6 +44,7 @@ use anchored_fs::{open_anchor, restore_one, Step};
 #[cfg(all(test, unix))]
 use anchored_fs::{Stage, RESTORE_HOOK};
 pub use fork::{fork_session, ForkReceipt};
+use receipts::unavailable;
 pub use receipts::{
     AttributedChange, CallBeginReceipt, CallEndReceipt, CaptureReceipt, ChangeWriter,
     ConfirmedPath, DropReceipt, IrreversibleEffect, ObservedFileState, Outcome, PlanEntry,
@@ -117,14 +118,6 @@ impl HostlibCapability for WorkspaceCheckpointCapability {
         registry.register_writer_fn("fs", RESTORE_BUILTIN, "checkpoint_restore", restore_builtin);
         registry.register_fn("fs", DROP_BUILTIN, "checkpoint_drop", drop_builtin);
     }
-}
-
-fn unavailable<T>(reason: &'static str, detail: impl Into<String>) -> Outcome<T> {
-    Outcome::Unavailable(Unavailable {
-        available: false,
-        reason,
-        detail: detail.into(),
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -398,6 +391,8 @@ pub fn capture_with_writer_policy(
         unrestorable,
     };
 
+    #[cfg(all(test, unix))]
+    tests::capture_hook(tests::CaptureStage::BeforePublish);
     let session = sessions()
         .lock()
         .expect("workspace checkpoint registry poisoned")
@@ -415,13 +410,17 @@ pub fn capture_with_writer_policy(
             }))
         })
         .clone();
+    #[cfg(all(test, unix))]
+    tests::capture_hook(tests::CaptureStage::AfterPublish);
     let mut state = lock(&session);
     if let Some(detail) = pending_calls_detail(&state) {
         return Ok(unavailable("calls_in_flight", detail));
     }
-    if initial_generation.map_or(!state.boundaries.is_empty(), |generation| {
-        generation != (state.revision, state.boundaries.len(), state.writer_policy)
-    }) {
+    if receipt.writer_policy != state.writer_policy
+        || initial_generation.map_or(!state.boundaries.is_empty(), |generation| {
+            generation != (state.revision, state.boundaries.len(), state.writer_policy)
+        })
+    {
         return Ok(unavailable(
             "concurrent_calls",
             "the session changed while the workspace boundary was being captured",

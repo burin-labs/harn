@@ -33,7 +33,7 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 /// A committed worktree with a.txt, b.txt, c.txt, d.txt, and a binary blob.
-fn repo() -> TempDir {
+pub(super) fn repo() -> TempDir {
     let dir = TempDir::new().unwrap();
     let root = dir.path();
     git(root, &["init", "-q"]);

@@ -26,6 +26,14 @@ pub struct Unavailable {
     pub detail: String,
 }
 
+pub(super) fn unavailable<T>(reason: &'static str, detail: impl Into<String>) -> Outcome<T> {
+    Outcome::Unavailable(Unavailable {
+        available: false,
+        reason,
+        detail: detail.into(),
+    })
+}
+
 /// Result of [`super::capture`].
 #[derive(Debug, Serialize)]
 pub struct CaptureReceipt {
