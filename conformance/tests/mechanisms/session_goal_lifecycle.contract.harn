@@ -19,6 +19,7 @@ pipeline default(harness: Harness) {
       acceptance_note: "Operator acceptance",
       criterion_sources: {verified: "operator"},
       verification: {command: "verify --literal", source: "operator"},
+      target: "src/calc.sh",
       source: "operator",
     },
   }
@@ -71,7 +72,10 @@ pipeline default(harness: Harness) {
           const unknown = try {
             harness.agent.set_goal(id, payload + {unknown: true})
           }
-          require is_err(missing) && is_err(malformed) && is_err(unknown),
+          const blank_target = try {
+            harness.agent.set_goal(id, payload + {metadata: payload.metadata + {target: "  "}})
+          }
+          require is_err(missing) && is_err(malformed) && is_err(unknown) && is_err(blank_target),
             "goal admission refuses missing, malformed and unknown fields"
           require harness.agent.goal(id).generation == saved.generation,
             "invalid input must not mutate the goal"
@@ -99,6 +103,7 @@ pipeline default(harness: Harness) {
       require restored.spec.objective == payload.spec.objective, "cold restore keeps the goal"
       require restored.metadata.verification.command == "verify --literal",
         "cold restore preserves the exact verifier"
+      require restored.metadata.target == "src/calc.sh", "cold restore preserves the goal target"
       require restored.turn == "idle", "normal completion closes the open marker"
       contract_negative(harness.stdio, "normal_terminal_keeps_goal", restored.spec == nil)
       harness.agent.begin_goal_turn(id)

@@ -539,6 +539,7 @@ fn __completion_gate_read_behavior(
         request.before,
         request.after,
         request.reuse,
+        request.target,
       )
     }
   } catch {

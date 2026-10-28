@@ -1,5 +1,6 @@
 import {
   CompletionBehaviorCheck,
+  CompletionBehaviorTarget,
   completion_behavior_run_check,
 } from "std/agent/completion_behavior_evidence"
 import {
@@ -216,6 +217,13 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
       const after_key = "refactor-bound.after.${sid}"
       const command = "test \"$(sh calc.sh)\" = 3"
       const check = {mode: "shell", command: command, cwd: root}
+      const target = { ->
+        const current: CompletionBehaviorTarget = {
+          identity: "calc.sh",
+          digest: sha256(harness.fs.read_text(source)),
+        }
+        return current
+      }
       const reuse = {
         scope: "refactor-bound/${sid}",
         inputs: { ->
@@ -265,6 +273,7 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
                 acceptance_note: "",
                 criterion_sources: {},
                 verification: {command: command, source: "test"},
+                target: "calc.sh",
                 source: "test",
               },
             },
@@ -289,6 +298,7 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
                 acceptance_note: "",
                 criterion_sources: {},
                 verification: {command: command, source: "test"},
+                target: "calc.sh",
                 source: "test",
               },
             },
@@ -296,14 +306,15 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
           const wrong_goal = completion_behavior_run_check(
             harness,
             sid,
-            sid,
+            other_sid,
+            target,
             "calc",
             check,
             verify_options + {reuse: reuse + {scope: "other-goal/${sid}"}},
           )
           assert(
-            wrong_goal.check.result.success && wrong_goal.behavior_check != nil,
-            "the unrelated goal verifier must run and bind to its own goal",
+            wrong_goal.check.result.success && wrong_goal.behavior_check == nil,
+            "a passing verifier from an unrelated goal session must not bind",
           )
           with_temp_dir(
             harness.fs,
@@ -312,7 +323,8 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
               const wrong_workspace = completion_behavior_run_check(
                 harness,
                 sid,
-                other_sid,
+                sid,
+                target,
                 "calc",
                 {mode: "shell", command: command, cwd: other},
                 verify_options,
@@ -334,7 +346,8 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
               const mounted = completion_behavior_run_check(
                 harness,
                 sid,
-                other_sid,
+                sid,
+                target,
                 "calc",
                 {mode: "shell", command: command, cwd: other},
                 verify_options + {reuse: reuse + {scope: "mounted-root/${sid}"}},
@@ -349,7 +362,8 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
           const unrelated = completion_behavior_run_check(
             harness,
             sid,
-            other_sid,
+            sid,
+            target,
             "calc",
             {mode: "shell", command: "true", cwd: root},
             verify_options,
@@ -358,12 +372,14 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
           const before = completion_behavior_run_check(
             harness,
             sid,
-            other_sid,
+            sid,
+            target,
             "calc",
             check,
             verify_options,
           )
           assert(before.check.result.success && before.behavior_check != nil)
+          const baseline = schema_expect(before.behavior_check, schema_of(CompletionBehaviorCheck))
           const tools = tool_define(
             tool_registry(),
             "refactor",
@@ -378,7 +394,8 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
                 const after = completion_behavior_run_check(
                   harness,
                   sid,
-                  other_sid,
+                  sid,
+                  target,
                   "calc",
                   check,
                   verify_options,
@@ -404,11 +421,12 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
               const after = schema_expect(stored, schema_of(CompletionBehaviorCheck))
               return {
                 agent: harness.agent,
-                active_goal_id: other_sid,
+                active_goal_id: sid,
                 intent: "behavior_preserving",
                 before: before.behavior_check,
                 after: after,
                 reuse: reuse,
+                target: target,
               }
             },
           }
@@ -469,7 +487,119 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
             harness.runtime.store_get(after_key),
             schema_of(CompletionBehaviorCheck),
           )
-          const wrong_active_goal = options
+          const unrelated_source = path_join(root, "unrelated.sh")
+          const unrelated_revision = path_join(root, "unrelated-revision")
+          harness.fs.write_text(unrelated_source, "before\n")
+          harness.fs.write_text(unrelated_revision, "0")
+          const broad_reuse = reuse
+            + {
+              scope: "unrelated-change/${sid}",
+              inputs: { ->
+                const current: VerificationInputState = {
+                  revision: to_int(harness.fs.read_text(unrelated_revision)) ?? -1,
+                  workspace: root,
+                  source: sha256(
+                    harness.fs.read_text(source) + harness.fs.read_text(unrelated_source),
+                  ),
+                  dependencies: "none",
+                  environment: "fixture",
+                }
+                return current
+              },
+            }
+          const broad_before = completion_behavior_run_check(
+            harness,
+            sid,
+            sid,
+            target,
+            "calc",
+            check,
+            verify_options + {reuse: broad_reuse},
+          )
+          harness.fs.write_text(unrelated_source, "after\n")
+          harness.fs.write_text(unrelated_revision, "1")
+          const broad_after = completion_behavior_run_check(
+            harness,
+            sid,
+            sid,
+            target,
+            "calc",
+            check,
+            verify_options + {reuse: broad_reuse},
+          )
+          assert(broad_before.check.result.success && broad_after.check.result.success)
+          const unrelated_change = options
+            + {
+              behavior_evidence: { _ctx ->
+                {
+                  agent: harness.agent,
+                  active_goal_id: sid,
+                  intent: "behavior_preserving",
+                  before: broad_before.behavior_check,
+                  after: broad_after.behavior_check,
+                  reuse: broad_reuse,
+                  target: target,
+                }
+              },
+            }
+          assert_eq(
+            agent_completion_gate_preview(harness.runtime, {session_id: sid}, unrelated_change)
+              .confirm,
+            false,
+            "an unrelated source change must not stand in for the requested target edit",
+          )
+          const unrelated_target = { ->
+            const current: CompletionBehaviorTarget = {
+              identity: "unrelated.sh",
+              digest: sha256(harness.fs.read_text(unrelated_source)),
+            }
+            return current
+          }
+          const wrong_reuse = broad_reuse + {scope: "wrong-target/${sid}"}
+          const unrelated_before = completion_behavior_run_check(
+            harness,
+            sid,
+            sid,
+            unrelated_target,
+            "calc",
+            check,
+            verify_options + {reuse: wrong_reuse},
+          )
+          harness.fs.write_text(unrelated_source, "after again\n")
+          harness.fs.write_text(unrelated_revision, "2")
+          const unrelated_after = completion_behavior_run_check(
+            harness,
+            sid,
+            sid,
+            unrelated_target,
+            "calc",
+            check,
+            verify_options + {reuse: wrong_reuse},
+          )
+          assert(unrelated_before.check.result.success && unrelated_after.check.result.success)
+          assert_eq(unrelated_before.check.execution, "executed")
+          assert_eq(unrelated_after.check.execution, "executed")
+          assert(unrelated_before.behavior_check == nil && unrelated_after.behavior_check == nil)
+          const wrong_target = options
+            + {
+              behavior_evidence: { _ctx ->
+                {
+                  agent: harness.agent,
+                  active_goal_id: sid,
+                  intent: "behavior_preserving",
+                  before: unrelated_before.behavior_check,
+                  after: unrelated_after.behavior_check,
+                  reuse: wrong_reuse,
+                  target: unrelated_target,
+                }
+              },
+            }
+          assert_eq(
+            agent_completion_gate_preview(harness.runtime, {session_id: sid}, wrong_target).confirm,
+            false,
+            "a changed file outside the goal's declared target cannot grant completion",
+          )
+          const missing_target = options
             + {
               behavior_evidence: { _ctx ->
                 {
@@ -479,6 +609,69 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
                   before: before.behavior_check,
                   after: saved_after,
                   reuse: reuse,
+                  target: { -> nil },
+                }
+              },
+            }
+          assert_eq(
+            agent_completion_gate_preview(harness.runtime, {session_id: sid}, missing_target)
+              .confirm,
+            false,
+            "an unresolved requested target must remain strict",
+          )
+          const replaced_target = options
+            + {
+              behavior_evidence: { _ctx ->
+                {
+                  agent: harness.agent,
+                  active_goal_id: sid,
+                  intent: "behavior_preserving",
+                  before: before.behavior_check,
+                  after: saved_after,
+                  reuse: reuse,
+                  target: { ->
+                    {identity: "unrelated.sh", digest: sha256(harness.fs.read_text(source))}
+                  },
+                }
+              },
+            }
+          assert_eq(
+            agent_completion_gate_preview(harness.runtime, {session_id: sid}, replaced_target)
+              .confirm,
+            false,
+            "a changed target identity must retire earlier evidence",
+          )
+          const cross_session = options
+            + {
+              behavior_evidence: { _ctx ->
+                {
+                  agent: harness.agent,
+                  active_goal_id: other_sid,
+                  intent: "behavior_preserving",
+                  before: baseline + {goal_id: other_sid},
+                  after: saved_after + {goal_id: other_sid},
+                  reuse: reuse,
+                  target: target,
+                }
+              },
+            }
+          assert_eq(
+            agent_completion_gate_preview(harness.runtime, {session_id: sid}, cross_session)
+              .confirm,
+            false,
+            "matching evidence from an unassociated goal session cannot complete this run",
+          )
+          const wrong_active_goal = options
+            + {
+              behavior_evidence: { _ctx ->
+                {
+                  agent: harness.agent,
+                  active_goal_id: other_sid,
+                  intent: "behavior_preserving",
+                  before: before.behavior_check,
+                  after: saved_after,
+                  reuse: reuse,
+                  target: target,
                 }
               },
             }
@@ -493,11 +686,12 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
               behavior_evidence: { _ctx ->
                 {
                   agent: harness.agent,
-                  active_goal_id: other_sid,
+                  active_goal_id: sid,
                   intent: "behavior_preserving",
-                  before: wrong_goal.behavior_check,
+                  before: baseline + {goal_id: other_sid},
                   after: saved_after,
                   reuse: reuse,
+                  target: target,
                 }
               },
             }
@@ -512,11 +706,12 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
               behavior_evidence: { _ctx ->
                 {
                   agent: harness.agent,
-                  active_goal_id: other_sid,
+                  active_goal_id: sid,
                   intent: "behavior_preserving",
                   before: nil,
                   after: saved_after,
                   reuse: reuse,
+                  target: target,
                 }
               },
             }
@@ -537,11 +732,12 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
               behavior_evidence: { _ctx ->
                 {
                   agent: harness.agent,
-                  active_goal_id: other_sid,
+                  active_goal_id: sid,
                   intent: "behavior_preserving",
                   before: before.behavior_check,
                   after: saved_after,
                   reuse: unreadable,
+                  target: target,
                 }
               },
             }
@@ -556,11 +752,12 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
               behavior_evidence: { _ctx ->
                 {
                   agent: harness.agent,
-                  active_goal_id: other_sid,
+                  active_goal_id: sid,
                   intent: "behavior_preserving",
                   before: saved_after,
                   after: saved_after,
                   reuse: reuse,
+                  target: target,
                 }
               },
             }
@@ -575,11 +772,12 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
                 behavior_evidence: { _ctx ->
                   {
                     agent: harness.agent,
-                    active_goal_id: other_sid,
+                    active_goal_id: sid,
                     intent: intent,
                     before: before.behavior_check,
                     after: saved_after,
                     reuse: reuse,
+                    target: target,
                   }
                 },
               }
@@ -640,7 +838,8 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
           const rechecked = completion_behavior_run_check(
             harness,
             sid,
-            other_sid,
+            sid,
+            target,
             "calc",
             check,
             verify_options,
@@ -671,11 +870,11 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
             "restoring the anchor isolates the goal replacement control",
           )
           harness.agent.with_run(
-            other_sid,
-            loop_options + {session_id: other_sid},
+            sid,
+            loop_options,
             { ->
               harness.agent.set_goal(
-                other_sid,
+                sid,
                 {
                   spec: {
                     objective: "Refactor calc.sh while preserving behavior",
@@ -688,6 +887,7 @@ pipeline test_bound_preserving_refactor_completes(harness: Harness) {
                     acceptance_note: "",
                     criterion_sources: {},
                     verification: {command: command, source: "test"},
+                    target: "calc.sh",
                     source: "test",
                   },
                 },

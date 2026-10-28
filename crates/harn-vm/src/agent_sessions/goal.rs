@@ -13,6 +13,8 @@ pub struct SessionGoalMetadata {
     pub acceptance_note: String,
     pub criterion_sources: BTreeMap<String, String>,
     pub verification: Option<SessionGoalVerification>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
     pub source: String,
 }
 
@@ -46,6 +48,14 @@ pub struct SessionGoalState {
 
 impl SessionGoalState {
     pub(crate) fn validate(&self) -> Result<(), String> {
+        if self
+            .metadata
+            .target
+            .as_ref()
+            .is_some_and(|target| target.trim().is_empty())
+        {
+            return Err("session goal target must be non-blank".into());
+        }
         let mut ids = HashSet::new();
         if let Some(spec) = &self.spec {
             if spec.objective.trim().is_empty() {
@@ -347,6 +357,11 @@ mod tests {
             .criterion_sources
             .insert("missing".into(), "caller".into());
         assert!(set_session_goal(&id, spec(), metadata).is_err());
+        let empty_target = SessionGoalMetadata {
+            target: Some("  ".into()),
+            ..Default::default()
+        };
+        assert!(set_session_goal(&id, spec(), empty_target).is_err());
         let mut oversized = spec();
         oversized.objective = "x".repeat(MAX_SESSION_GOAL_BYTES);
         assert!(set_session_goal(&id, oversized, SessionGoalMetadata::default()).is_err());
@@ -433,6 +448,7 @@ mod tests {
                 command: "printf '%s\\n' 'literal text'".into(),
                 source: "caller-origin".into(),
             }),
+            target: Some("src/calc.sh".into()),
             source: "operator".into(),
         };
         let mut input = spec();

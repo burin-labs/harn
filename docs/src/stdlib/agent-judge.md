@@ -95,19 +95,27 @@ For an explicitly declared `behavior_preserving` task, a check that passed befor
 the edit can count after the edit when both executions and the current workspace
 are bound to the same active goal. Use `completion_behavior_run_check` from
 `std/agent/completion_behavior_evidence` before and after the edit. Supply its
-two `behavior_check` records, agent capability, active goal ID, intent and
-`VerificationReuse` reader in the gate's `behavior_evidence` callback. At each
+two `behavior_check` records, agent capability, active goal ID, intent,
+task-target reader and `VerificationReuse` reader in the gate's
+`behavior_evidence` callback. Declare the requested target identity in the
+session goal's `metadata.target`; the target reader supplies that identity and
+its current digest, not a digest of arbitrary workspace changes. Use the same
+reader for each bound check. If the host cannot resolve or declare the target,
+the strict veto remains in place. At each
 decision, the gate reads the current goal and verifier inputs itself. The current
 supported check is a shell command matching the goal's declared verification
 command. Its working directory must resolve inside the session's workspace
 anchor, including an additional mounted root. A missing or changed anchor cannot
-bind the check. The active goal ID can differ from the run session ID; supply it
-from the host's current goal resolution, and both checks must name that goal.
+bind the check. Both checks must name the run session's own goal. A different
+goal session cannot grant this exception without a canonical association owned
+by the run; it retains the ordinary strict veto.
 
 The `VerificationReuse` input reader must read complete current workspace,
 source, dependency, environment and revision identities, including changes made
-outside the agent. Missing or unreadable inputs, an absent baseline, stale source,
-a replaced goal, or another session leave the ordinary strict veto in place.
+outside the agent. The target identity must stay the same, its digest must change
+between the checks, and the current digest must match the second check. Missing
+or unreadable inputs, an absent baseline, stale source, a replaced goal, or
+another session leave the ordinary strict veto in place.
 Run a fresh check after further changes. Neither a write nor a passing pair proves
 that behavior is preserved; the declaration and verifier express the caller's
 intent and evidence. `behavior_change` and `unknown` retain the strict rule.

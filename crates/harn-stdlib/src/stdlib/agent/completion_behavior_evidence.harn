@@ -9,6 +9,9 @@ import { __verification_reuse_inputs } from "std/verification_reuse"
 /** Task intent is declared by the caller, never inferred from a file change. */
 pub type CompletionBehaviorIntent = "behavior_preserving" | "behavior_change" | "unknown"
 
+/** Host-resolved identity and current content of the task's requested target. */
+pub type CompletionBehaviorTarget = {identity: string, digest: string}
+
 /** A verification performed while one canonical goal remained unchanged. */
 pub type CompletionBehaviorCheck = {
   session_id: string,
@@ -16,6 +19,7 @@ pub type CompletionBehaviorCheck = {
   goal_generation: int,
   goal_digest: string,
   workspace_digest: string,
+  target: CompletionBehaviorTarget,
   command: string,
   check: VerificationRecordedCheck,
 }
@@ -31,6 +35,7 @@ pub type CompletionBehaviorEvidence = {
   active_goal_digest: string,
   active_workspace_digest: string,
   current_inputs: VerificationInputState,
+  current_target: CompletionBehaviorTarget,
 }
 
 /** Inputs the gate uses to refresh behavior evidence at the decision boundary. */
@@ -41,6 +46,21 @@ pub type CompletionBehaviorRequest = {
   before: CompletionBehaviorCheck?,
   after: CompletionBehaviorCheck?,
   reuse: VerificationReuse?,
+  target: fn() -> CompletionBehaviorTarget?,
+}
+
+fn __completion_behavior_target(
+  read: fn() -> CompletionBehaviorTarget?,
+) -> CompletionBehaviorTarget? {
+  const target = try {
+    read()
+  } catch {
+    nil
+  }
+  if target == nil || trim(target.identity) == "" || trim(target.digest) == "" {
+    return nil
+  }
+  return target
 }
 
 fn __completion_behavior_goal(agent: HarnessAgent, goal_id: string) -> dict? {
@@ -126,21 +146,28 @@ pub fn completion_behavior_run_check(
   harness: Harness,
   session_id: string,
   goal_id: string,
+  target: fn() -> CompletionBehaviorTarget?,
   row_id: string,
   spec: any,
   options: dict,
 ) -> dict {
   const before = __completion_behavior_goal(harness.agent, goal_id)
   const workspace_before = __completion_behavior_workspace(harness.agent, session_id)
+  const target_before = __completion_behavior_target(target)
   const check = verification_run_check(harness, row_id, spec, options)
   const after = __completion_behavior_goal(harness.agent, goal_id)
   const workspace_after = __completion_behavior_workspace(harness.agent, session_id)
+  const target_after = __completion_behavior_target(target)
   const command = __completion_behavior_goal_command(before, spec)
   const bound = if trim(session_id) != ""
+    && goal_id == session_id
     && before != nil
     && before == after
     && workspace_before != nil
     && workspace_before == workspace_after
+    && target_before != nil
+    && target_before == target_after
+    && target_before.identity == to_string(before.metadata?.target ?? "")
     && __completion_behavior_inside(harness.fs, workspace_before, check.result.cwd)
     && command != nil
     && check.execution == "executed"
@@ -155,6 +182,7 @@ pub fn completion_behavior_run_check(
       goal_generation: to_int(before.generation),
       goal_digest: __completion_behavior_goal_digest(before),
       workspace_digest: sha256(json_stringify(workspace_before)),
+      target: target_before,
       command: command,
       check: check,
     }
@@ -179,23 +207,30 @@ pub fn completion_behavior_evidence(
   before: CompletionBehaviorCheck?,
   after: CompletionBehaviorCheck?,
   reuse: VerificationReuse?,
+  target: fn() -> CompletionBehaviorTarget?,
 ) -> CompletionBehaviorEvidence? {
   if trim(session_id) == ""
     || before == nil
     || after == nil
     || reuse == nil
+    || active_goal_id != session_id
     || active_goal_id != after.goal_id {
     return nil
   }
   const goal_before = __completion_behavior_goal(agent, active_goal_id)
   const workspace_before = __completion_behavior_workspace(agent, session_id)
   const inputs = __verification_reuse_inputs(reuse)
+  const target_before = __completion_behavior_target(target)
   const inputs_after = __verification_reuse_inputs(reuse)
+  const target_after = __completion_behavior_target(target)
   const goal_after = __completion_behavior_goal(agent, active_goal_id)
   const workspace_after = __completion_behavior_workspace(agent, session_id)
   if goal_before == nil || goal_before != goal_after || inputs == nil || inputs != inputs_after
     || workspace_before == nil
-    || workspace_before != workspace_after {
+    || workspace_before != workspace_after
+    || target_before == nil
+    || target_before != target_after
+    || target_before.identity != to_string(goal_before.metadata?.target ?? "") {
     return nil
   }
   return {
@@ -208,6 +243,7 @@ pub fn completion_behavior_evidence(
     active_goal_digest: __completion_behavior_goal_digest(goal_before),
     active_workspace_digest: sha256(json_stringify(workspace_before)),
     current_inputs: inputs,
+    current_target: target_before,
   }
 }
 
@@ -238,6 +274,10 @@ fn __completion_behavior_same_goal(evidence: CompletionBehaviorEvidence) -> bool
     && after.goal_generation == evidence.active_goal_generation
     && before.goal_digest == after.goal_digest
     && after.goal_digest == evidence.active_goal_digest
+    && before.target.identity == after.target.identity
+    && after.target.identity == evidence.current_target.identity
+    && before.target.digest != after.target.digest
+    && after.target.digest == evidence.current_target.digest
 }
 
 fn __completion_behavior_known_inputs(inputs: VerificationInputState) -> bool {
