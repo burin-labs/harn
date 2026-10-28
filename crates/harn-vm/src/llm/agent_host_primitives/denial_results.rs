@@ -180,7 +180,8 @@ pub(super) async fn deny_tool_call_value(
     escalated: bool,
     evidence: DenialEvidence,
 ) -> crate::value::VmValue {
-    let denied = deny_tool_call(
+    // Keep the denial future out of every caller's async dispatch frame.
+    let denied = Box::pin(deny_tool_call(
         ctx,
         session_id,
         tool_name,
@@ -189,7 +190,7 @@ pub(super) async fn deny_tool_call_value(
         denial,
         escalated,
         evidence,
-    )
+    ))
     .await;
     crate::schema::json_to_vm_value(&denied)
 }

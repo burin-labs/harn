@@ -377,6 +377,8 @@ jobs:
               - 'crates/harn-capability-contracts/**'
               - 'crates/harn-vm/src/secrets/**'
               - 'crates/harn-vm/src/egress/**'
+              - 'crates/harn-vm/src/llm/agent_host_primitives.rs'
+              - 'crates/harn-vm/src/llm/agent_host_primitives/**'
               - 'crates/harn-serve/src/permissions/**'
               - 'crates/harn-hostlib/schemas/secret_store/**'
               - 'crates/**/*sandbox*/**'
