@@ -819,7 +819,7 @@ fn copy_sha256_hex(
             .map_err(|error| error.to_string())?;
         hasher.update(&buf[..n]);
     }
-    Ok(hex_lower(&hasher.finalize()))
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// Parse a coreutils-style SHA256SUMS manifest and return the digest
@@ -843,14 +843,6 @@ fn find_expected_sha(manifest: &str, asset: &str) -> Option<String> {
         }
     }
     None
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        s.push_str(&format!("{b:02x}"));
-    }
-    s
 }
 
 /// First release that publishes macOS and Linux archives as `.tar.xz`; earlier ones are `.tar.gz`.

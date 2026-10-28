@@ -1139,7 +1139,7 @@ fn sha256_dir(path: &Path) -> Result<PathHash, String> {
         bytes_total += bytes.len();
     }
     Ok(PathHash {
-        sha256: bytes_to_hex(hasher.finalize().as_ref()),
+        sha256: hex::encode(hasher.finalize()),
         tokens,
         bytes: bytes_total,
     })
@@ -1148,11 +1148,7 @@ fn sha256_dir(path: &Path) -> Result<PathHash, String> {
 fn hex_digest(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    bytes_to_hex(hasher.finalize().as_ref())
-}
-
-fn bytes_to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    hex::encode(hasher.finalize())
 }
 
 fn pareto_frontier(variants: &[SkillGateVariantReport]) -> Vec<String> {

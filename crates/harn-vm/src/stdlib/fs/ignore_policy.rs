@@ -462,7 +462,7 @@ fn ensure_builtin_ignore_file(
 }
 
 fn materialize_builtin_ignore_file(text: &str) -> Result<PathBuf, String> {
-    let digest = hex16(Sha256::digest(text.as_bytes()).as_slice());
+    let digest = hex::encode(&Sha256::digest(text.as_bytes())[..8]);
     let dir = std::env::temp_dir();
     // Content-addressed, so concurrent Harn processes converge on one file
     // and a stale file from an older pattern list is never reused.
@@ -489,14 +489,6 @@ fn materialize_builtin_ignore_file(text: &str) -> Result<PathBuf, String> {
         Ok(()) => Ok(target),
         Err(_) => Ok(scratch),
     }
-}
-
-fn hex16(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .take(8)
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 #[cfg(test)]

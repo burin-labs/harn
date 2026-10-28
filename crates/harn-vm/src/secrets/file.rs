@@ -290,17 +290,11 @@ impl SecretProvider for FileSecretProvider {
 }
 
 fn encode_component(value: &str, allow_slash: bool) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) || (allow_slash && byte == b'/')
-        {
-            encoded.push(char::from(byte));
-        } else {
-            use std::fmt::Write;
-            write!(&mut encoded, "%{byte:02X}").expect("writing a String cannot fail");
-        }
+    if allow_slash {
+        crate::url_encoding::percent_encode_path(value)
+    } else {
+        crate::url_encoding::percent_encode_component(value)
     }
-    encoded
 }
 
 fn storage_key(id: &SecretId) -> String {

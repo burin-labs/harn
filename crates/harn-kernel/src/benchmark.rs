@@ -87,10 +87,7 @@ impl BenchmarkProvenance {
             kernel_version: crate::KERNEL_VERSION.to_string(),
             artifact_format_version: ARTIFACT_VERSION,
             semantic_abi_fingerprint: semantic_abi_fingerprint_hex(),
-            opcode_abi_fingerprint: opcode_abi_fingerprint()
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect(),
+            opcode_abi_fingerprint: hex::encode(opcode_abi_fingerprint()),
             build_profile,
             os: os.into(),
             arch: arch.into(),

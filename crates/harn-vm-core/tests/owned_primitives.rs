@@ -102,6 +102,29 @@ fn sse_framing_has_one_owner() {
     assert_no_matches(
         "SSE framing",
         "`crate::sse_frames::SseFrames` in harn-vm",
+
+/// The `hex` and `percent-encoding` crates own byte-to-hex and `%HH` encoding.
+/// Formatting bytes with `{:02x}` / `{:02X}` is a hand-rolled copy of one; the
+/// only legitimate uses print a single opcode as `0x..` in a diagnostic or
+/// encode a `char` code rather than a byte string.
+#[test]
+fn hex_and_percent_encoding_have_one_owner() {
+    const ALLOWED: &[&str] = &["harn-vm/src/metadata.rs"];
+    let mut offenders = Vec::new();
+    for (path, text) in production_sources() {
+        if ALLOWED.iter().any(|allowed| path.ends_with(allowed)) {
+            continue;
+        }
+        for (index, line) in text.lines().enumerate() {
+            let formats_byte = line.contains("02x}") || line.contains("02X}");
+            if formats_byte && !line.contains("0x{") {
+                offenders.push(format!("{}:{}", path.display(), index + 1));
+            }
+        }
+    }
+    assert_no_matches(
+        "hex / percent encoding",
+        "`hex::encode` or harn_vm::url_encoding (percent-encoding AsciiSet)",
         offenders,
     );
 }

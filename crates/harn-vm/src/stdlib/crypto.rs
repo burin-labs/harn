@@ -8,7 +8,7 @@ use zeroize::Zeroizing;
 
 use crate::stdlib::args::Args;
 use crate::stdlib::macros::harn_builtin;
-use crate::url_encoding::percent_encode_component;
+use crate::url_encoding::{percent_encode_component, percent_encode_path_keeping_escapes};
 use crate::value::{VmError, VmValue};
 
 fn jwt_error(message: impl Into<String>) -> VmError {
@@ -187,7 +187,7 @@ fn parse_url_parts(raw: &str, builtin: &str) -> Result<UrlParts, VmError> {
             "{builtin}: expected an absolute URL or an absolute path starting with `/`"
         )));
     }
-    let path = percent_encode_path(path);
+    let path = percent_encode_path_keeping_escapes(path);
     Ok(UrlParts {
         resource: path.clone(),
         output_prefix: path,
@@ -199,35 +199,6 @@ fn parse_query_pairs(raw: &str) -> Vec<(String, String)> {
     url::form_urlencoded::parse(raw.as_bytes())
         .map(|(key, value)| (key.into_owned(), value.into_owned()))
         .collect()
-}
-
-fn percent_encode_path(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = String::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        let byte = bytes[i];
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
-                out.push(byte as char);
-                i += 1;
-            }
-            b'%' if i + 2 < bytes.len()
-                && (bytes[i + 1] as char).is_ascii_hexdigit()
-                && (bytes[i + 2] as char).is_ascii_hexdigit() =>
-            {
-                out.push('%');
-                out.push((bytes[i + 1] as char).to_ascii_uppercase());
-                out.push((bytes[i + 2] as char).to_ascii_uppercase());
-                i += 3;
-            }
-            _ => {
-                out.push_str(&format!("%{byte:02X}"));
-                i += 1;
-            }
-        }
-    }
-    out
 }
 
 fn canonical_query(pairs: &[(String, String)]) -> String {
@@ -907,8 +878,7 @@ fn hmac_sha256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let key = args.first().map(|a| a.display()).unwrap_or_default();
     let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
     let mac = crate::connectors::hmac::hmac_sha256(key.as_bytes(), msg.as_bytes());
-    let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(VmValue::string(hex))
+    Ok(VmValue::string(hex::encode(mac)))
 }
 
 // HMAC-SHA256 returning standard base64 (used by Slack-style signatures).
@@ -939,8 +909,7 @@ fn hmac_sha1_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let key = args.first().map(|a| a.display()).unwrap_or_default();
     let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
     let mac = crate::connectors::hmac::hmac_sha1(key.as_bytes(), msg.as_bytes());
-    let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(VmValue::string(hex))
+    Ok(VmValue::string(hex::encode(mac)))
 }
 
 #[harn_builtin(
@@ -1004,16 +973,7 @@ fn constant_time_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 )]
 fn url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
-    let encoded: String = val
-        .bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (b as char).to_string()
-            }
-            _ => format!("%{b:02X}"),
-        })
-        .collect();
-    Ok(VmValue::string(encoded))
+    Ok(VmValue::string(percent_encode_component(&val)))
 }
 
 #[harn_builtin(

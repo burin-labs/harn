@@ -562,29 +562,10 @@ pub fn parse_query(query: &str) -> HashMap<String, String> {
             continue;
         }
         let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
-        out.insert(url_decode(k), url_decode(v));
-    }
-    out
-}
-
-fn url_decode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b == b'+' {
-            out.push(' ');
-            i += 1;
-        } else if b == b'%' && i + 2 < bytes.len() {
-            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("00");
-            let v = u8::from_str_radix(hex, 16).unwrap_or(b' ');
-            out.push(v as char);
-            i += 3;
-        } else {
-            out.push(b as char);
-            i += 1;
-        }
+        out.insert(
+            crate::http::percent_decode(k),
+            crate::http::percent_decode(v),
+        );
     }
     out
 }

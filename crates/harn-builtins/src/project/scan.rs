@@ -681,11 +681,7 @@ fn stable_sha256(mut entries: Vec<String>) -> String {
 }
 
 fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
-    bytes
-        .as_ref()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hex::encode(bytes)
 }
 
 pub(super) fn scan_exact_directory(

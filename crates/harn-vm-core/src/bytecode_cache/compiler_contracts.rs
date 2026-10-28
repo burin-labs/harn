@@ -69,7 +69,7 @@ fn with_identity<R>(read: impl FnOnce(&Cached) -> R) -> R {
         *cached = Some(Cached {
             manifest,
             contracts,
-            compiler: Arc::from(super::hex(&compiler.finalize())),
+            compiler: Arc::from(hex::encode(compiler.finalize())),
         });
     }
     read(cached.as_ref().expect("compiler identity initialized"))

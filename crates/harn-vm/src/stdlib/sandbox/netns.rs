@@ -104,7 +104,7 @@ pub(in crate::stdlib::sandbox) fn launcher_argv_with_ruleset(
         argv.push(tmp.display().to_string());
     }
     argv.push(NETNS_SECCOMP_FLAG.to_string());
-    argv.push(hex_encode(&confinement.seccomp_bytes()));
+    argv.push(hex::encode(confinement.seccomp_bytes()));
     argv.push("--".to_string());
     argv.push(payload_program.to_string());
     argv.extend(payload_args.iter().cloned());
@@ -129,16 +129,6 @@ pub(super) fn private_tmp_dir<'a>(
     super::super::workspace_local_tmpdir(policy)
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(DIGITS[usize::from(byte >> 4)] as char);
-        out.push(DIGITS[usize::from(byte & 0x0f)] as char);
-    }
-    out
-}
-
 /// Decode the filter the helper was handed. Rejects anything that is not a
 /// whole number of bytes rather than silently truncating, because a truncated
 /// filter still installs and still reports success while denying the wrong
@@ -149,21 +139,8 @@ pub fn decode_seccomp_hex(text: &str) -> io::Result<Vec<u8>> {
             "transferred seccomp program is not a whole number of bytes",
         ));
     }
-    let mut bytes = Vec::with_capacity(text.len() / 2);
-    let raw = text.as_bytes();
-    for pair in raw.chunks_exact(2) {
-        let hi = (pair[0] as char).to_digit(16);
-        let lo = (pair[1] as char).to_digit(16);
-        match (hi, lo) {
-            (Some(hi), Some(lo)) => bytes.push(((hi << 4) | lo) as u8),
-            _ => {
-                return Err(io::Error::other(
-                    "transferred seccomp program is not hexadecimal",
-                ));
-            }
-        }
-    }
-    Ok(bytes)
+    hex::decode(text)
+        .map_err(|_| io::Error::other("transferred seccomp program is not hexadecimal"))
 }
 
 /// Keep the ruleset descriptor open across the helper's `exec`.

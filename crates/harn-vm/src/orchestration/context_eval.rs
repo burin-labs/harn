@@ -1253,11 +1253,7 @@ fn stable_hash(parts: &[&str]) -> String {
         hasher.update((part.len() as u64).to_le_bytes());
         hasher.update(part.as_bytes());
     }
-    hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hex::encode(hasher.finalize())
 }
 
 fn round4(value: f64) -> f64 {
