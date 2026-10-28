@@ -306,20 +306,24 @@ pub(crate) fn launch_scope(
 }
 
 /// Declare a subprocess environment and apply the optional host inference ceiling.
+/// Capture launcher account confirmations at the same boundary for every host.
 /// Existing session policy stays in force.
 pub(crate) fn host_environment_scope(
     boundary: Option<harn_vm::llm::api::InferenceBoundary>,
-) -> harn_vm::stdlib::process::SessionEnvironmentGuard {
-    harn_vm::stdlib::process::declare_session_environment_if_absent(SessionEnvironment::inherited())
+) -> Result<harn_vm::stdlib::process::SessionEnvironmentGuard, String> {
+    let attestations = harn_vm::llm::api::capture_process_attestations()?;
+    Ok(
+        harn_vm::stdlib::process::declare_session_environment_if_absent(
+            SessionEnvironment::inherited(),
+        )
         .with_host_inference_boundary(boundary)
+        .with_host_account_attestations(attestations),
+    )
 }
 
 pub(crate) fn process_host_environment_scope(
 ) -> Result<harn_vm::stdlib::process::SessionEnvironmentGuard, String> {
-    Ok(
-        host_environment_scope(harn_vm::llm::api::InferenceBoundary::capture_process()?)
-            .with_host_account_attestations(harn_vm::llm::api::capture_process_attestations()?),
-    )
+    host_environment_scope(harn_vm::llm::api::InferenceBoundary::capture_process()?)
 }
 
 /// One line naming a launched environment policy for the run's

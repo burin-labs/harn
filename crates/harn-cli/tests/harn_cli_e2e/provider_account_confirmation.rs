@@ -194,6 +194,92 @@ sources = ["https://example.invalid/project-model-claim"]
     server.abort();
 }
 
+#[tokio::test]
+async fn script_server_applies_confirmations_before_provider_transport() {
+    let temp = tempfile::tempdir().unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let observed = requests.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let app = axum::Router::new().fallback(axum::routing::post(move || {
+        let observed = observed.clone();
+        async move {
+            observed.fetch_add(1, Ordering::SeqCst);
+            axum::Json(serde_json::json!({
+                "id": "local-server-confirmation",
+                "status": "completed",
+                "steps": [{"type": "model_output", "content": [{"type": "text", "text": "confirmed-server-response"}]}],
+                "usage": {"total_input_tokens": 1, "total_output_tokens": 1}
+            }))
+        }
+    }));
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let result = tokio::task::spawn_blocking(move || {
+        use crate::harn_serve_mcp_cli::stable_request;
+        use crate::test_util::stdio_jsonrpc::StdioJsonRpcClient;
+
+        let config = temp.path().join("host.toml");
+        std::fs::write(
+            &config,
+            format!("[providers.gemini]\nbase_url = 'http://{address}'\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("server.harn"),
+            r#"
+import { tool_registry_from } from "std/tools"
+fn main(harness: Harness) {
+  const tools = tool_registry_from([{
+    name: "ask",
+    description: "Exercise confirmed provider admission",
+    parameters: {},
+    handler: {_args -> to_string(harness.llm.call("probe", nil, {provider: "gemini", model: "gemini-4-argon", stream: false}))},
+  }])
+  harness.tools.mcp_tools(tools)
+}
+"#,
+        )
+        .unwrap();
+        let record = harn_e2e_command()
+            .current_dir(temp.path())
+            .env("XDG_CONFIG_HOME", temp.path())
+            .env("GEMINI_API_KEY", "synthetic")
+            .env_remove("HARN_PROVIDER_ACCOUNT_ATTESTATIONS_JSON")
+            .env_remove("HARN_INFERENCE_BOUNDARY_JSON")
+            .args(["provider", "attest-account", "--provider", "gemini", "--billing-enabled", "true", "--contributor-sharing-enabled", "false"])
+            .output()
+            .unwrap();
+        assert!(record.status.success(), "{}", String::from_utf8_lossy(&record.stderr));
+        let confirmation: serde_json::Value = serde_json::from_slice(&record.stdout).unwrap();
+        for (confirmation, allowed) in [(serde_json::json!([confirmation]), true), (serde_json::json!([]), false)] {
+            let mut command = harn_e2e_command();
+            command
+                .current_dir(temp.path())
+                .env("XDG_CONFIG_HOME", temp.path())
+                .env("HARN_HOST_PROVIDERS_CONFIG", &config)
+                .env("HARN_EGRESS_ALLOW_LOOPBACK", "1")
+                .env("HARN_LLM_CALLS_DISABLED", "0")
+                .env("HARN_LLM_RATE_LIMIT_DURABLE", "0")
+                .env("GEMINI_API_KEY", "synthetic")
+                .env("HARN_PROVIDER_ACCOUNT_ATTESTATIONS_JSON", confirmation.to_string())
+                .env("HARN_INFERENCE_BOUNDARY_JSON", r#"{"reach":"any_hosted","allow_training_discounts":false}"#)
+                .env_remove("HARN_PROVIDERS_CONFIG")
+                .env_remove("GEMINI_BASE_URL")
+                .args(["serve", "mcp", "--surface", "script", "server.harn"]);
+            let mut client = StdioJsonRpcClient::spawn("confirmed script server", command);
+            let reply = client.request(stable_request(1, "tools/call", serde_json::json!({"name": "ask", "arguments": {}})));
+            assert_eq!(reply["result"]["isError"], !allowed, "{reply}");
+            if allowed {
+                assert!(reply.to_string().contains("confirmed-server-response"), "{reply}");
+            }
+            assert_eq!(requests.load(Ordering::SeqCst), 1, "unconfirmed server must not reach provider");
+            client.shutdown_expect_success();
+        }
+    }).await;
+    server.abort();
+    result.unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn account_confirmation_is_not_exposed_to_scripts_or_child_processes() {
