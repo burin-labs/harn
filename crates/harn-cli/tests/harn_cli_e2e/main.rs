@@ -105,11 +105,13 @@ mod parse_tokens_cli;
 mod path_metadata_persistence_cli;
 mod persona_activation_cli_e2e;
 mod pg_codegen_cli;
+mod portal_stderr;
 mod precompile_dispatch;
 mod precompiled_interfaces;
 mod predicate_contract;
 #[cfg(target_os = "macos")]
 mod process_smoke_cli;
+mod provider_admission_privacy;
 mod provider_catalog_sources;
 mod provider_dispatch_audit;
 mod provider_option_qualification;

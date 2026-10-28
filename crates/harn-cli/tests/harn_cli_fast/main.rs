@@ -29,6 +29,7 @@ mod bytecode_cache;
 mod check_cli;
 mod crystallize_cli;
 mod demo_cli;
+mod diagnostic_policy;
 mod eval_prompt_cli;
 #[cfg(unix)]
 mod file_secrets;
@@ -52,7 +53,7 @@ fn required_pr_e2e_inventory_is_selected_by_every_pr_profile() {
         .expect("nextest configuration must parse");
     assert_eq!(
         required_pr_e2e::CASES.len(),
-        20,
+        22,
         "required PR E2E inventory must remain explicit",
     );
 

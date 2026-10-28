@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use super::convert::{prompt_value_to_messages, vm_value_to_content, vm_value_to_json};
 use super::defs::{
@@ -13,6 +14,35 @@ use crate::mcp_tasks::McpTaskSupport;
 use crate::stdlib::json_to_vm_value;
 use crate::value::VmError;
 use crate::vm::Vm;
+
+tokio::task_local! {
+    static SERVED_MCP_COMPOSITION: Option<BTreeMap<String, Arc<crate::value::DictMap>>>;
+}
+
+pub(crate) fn is_served_composition() -> bool {
+    SERVED_MCP_COMPOSITION
+        .try_with(Option::is_some)
+        .unwrap_or(false)
+}
+
+pub(crate) fn composition_allows_tool(name: &str, entry: &Arc<crate::value::DictMap>) -> bool {
+    SERVED_MCP_COMPOSITION
+        .try_with(|allowed| {
+            allowed
+                .as_ref()
+                .and_then(|entries| entries.get(name))
+                .is_some_and(|published| Arc::ptr_eq(published, entry))
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+pub(crate) async fn scope_composition_for_test<F: std::future::Future>(
+    entries: BTreeMap<String, Arc<crate::value::DictMap>>,
+    future: F,
+) -> F::Output {
+    SERVED_MCP_COMPOSITION.scope(Some(entries), future).await
+}
 
 /// Tools, resources, and prompts a script published for `harn serve mcp`.
 ///
@@ -148,7 +178,13 @@ impl McpScriptRegistry {
             client_capabilities(params),
             scope_context(
                 progress,
-                crate::tool_handler_scope::scope(vm.call_closure_pub(&tool.handler, &[args_vm])),
+                SERVED_MCP_COMPOSITION.scope(
+                    (tool.catalog.name == "harn.code.execute_composition")
+                        .then(|| self.tools.published_entries().clone()),
+                    crate::tool_handler_scope::scope(
+                        vm.call_closure_pub(&tool.handler, &[args_vm]),
+                    ),
+                ),
             ),
         )
         .await

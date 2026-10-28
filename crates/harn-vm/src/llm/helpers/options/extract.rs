@@ -1043,7 +1043,15 @@ pub fn extract_llm_options(args: &[VmValue]) -> Result<crate::llm::api::LlmCallO
         && opts.route_fallbacks.is_empty()
         && opts.fallback_chain.is_empty()
     {
-        opts.api_key = resolve_api_key_for_selection(&opts.provider, selection_source)?;
+        opts.api_key =
+            resolve_api_key_for_selection(&opts.provider, selection_source).map_err(|error| {
+                match error {
+                    VmError::Thrown(VmValue::String(message)) => {
+                        VmError::Thrown(VmValue::string(format!("model {}: {message}", opts.model)))
+                    }
+                    other => other,
+                }
+            })?;
     }
     Ok(opts)
 }

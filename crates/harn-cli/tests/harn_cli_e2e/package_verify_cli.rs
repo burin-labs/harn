@@ -589,6 +589,36 @@ fn package_test_directory_patterns_exclude_helpers_and_nested_fixture_programs()
 }
 
 #[test]
+fn package_test_discovery_errors_are_short_unless_explained() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("harn.toml"),
+        "[tests]\nreason = \"unused\"\n",
+    )
+    .unwrap();
+
+    let brief = run(Command::new(harn_e2e_binary())
+        .current_dir(temp.path())
+        .args(["test", "package"]));
+    assert_eq!(brief.status.code(), Some(2));
+    assert!(brief.stdout.is_empty());
+    let brief = String::from_utf8_lossy(&brief.stderr);
+    assert!(brief.starts_with("[harn] error:"), "{brief}");
+    assert_eq!(brief.lines().count(), 1, "{brief}");
+    assert!(brief.contains("--explain"), "{brief}");
+
+    let detailed = run(Command::new(harn_e2e_binary())
+        .current_dir(temp.path())
+        .args(["test", "--explain", "package"]));
+    assert_eq!(detailed.status.code(), Some(2));
+    assert!(detailed.stdout.is_empty());
+    let detailed = String::from_utf8_lossy(&detailed.stderr);
+    assert!(detailed.starts_with("[harn] error:"), "{detailed}");
+    assert!(detailed.contains("[tests].reason"), "{detailed}");
+    assert!(detailed.contains("no selected test"), "{detailed}");
+}
+
+#[test]
 fn intentionally_testless_packages_report_zero_execution_and_the_reason() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(

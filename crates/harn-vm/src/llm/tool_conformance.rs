@@ -1107,9 +1107,9 @@ async fn execute_live_probe_case(
         &mut body,
     );
     let client = if mode == ToolProbeMode::Streaming {
-        crate::llm::streaming_client_for_base_url(&base_url)
+        crate::llm::streaming_client_for_base_url(&base_url, None)
     } else {
-        crate::llm::blocking_client_for_base_url(&base_url)
+        crate::llm::blocking_client_for_base_url(&base_url, None)
     };
     let api_key = crate::llm::resolve_api_key(provider).unwrap_or_default();
     let request = client

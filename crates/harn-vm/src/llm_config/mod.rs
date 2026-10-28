@@ -33,7 +33,9 @@ mod tests;
 mod tool_format_fitness_tests;
 
 pub use catalog::*;
-pub(crate) use endpoint_data_controls::EndpointDataControls;
+pub(crate) use endpoint_data_controls::{
+    trusted_data_controls, trusted_local_runtime, trusted_open_weight, EndpointDataControls,
+};
 pub use escalation::*;
 pub use harn_provider_catalog::config::*;
 pub use loading::*;

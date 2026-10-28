@@ -231,9 +231,11 @@ struct DispatchAuditToolProbeCommandContext<'a> {
 pub(crate) fn run(args: &ProviderDispatchExplainArgs) {
     let resolved = harn_vm::llm_config::resolve_model_info(&args.model);
     if resolved.alias.is_some() && resolved.provider != args.provider {
-        eprintln!(
+        cli_diagnostic!(
             "error: model selector `{}` resolves to provider `{}`, not requested provider `{}`",
-            args.model, resolved.provider, args.provider
+            args.model,
+            resolved.provider,
+            args.provider
         );
         std::process::exit(1);
     }
@@ -1238,7 +1240,7 @@ fn print_json_or_exit(value: &impl Serialize, label: &str) {
     match serde_json::to_string_pretty(value) {
         Ok(json) => println!("{json}"),
         Err(error) => {
-            eprintln!("internal error: failed to render {label}: {error}");
+            cli_diagnostic!("error: failed to render {label}: {error}");
             process::exit(1);
         }
     }

@@ -183,7 +183,7 @@ fn print_json<T: serde::Serialize>(value: &T) {
     match serde_json::to_string_pretty(value) {
         Ok(rendered) => println!("{rendered}"),
         Err(error) => {
-            eprintln!("Failed to render JSON: {error}");
+            cli_diagnostic!("error: failed to render JSON: {error}");
             process::exit(1);
         }
     }

@@ -57,6 +57,41 @@ pub(super) fn prepared_handler_catalog(
     )?)
 }
 
+/// Validate the resolved tool against the same input contract as other adapters.
+/// Unknown names still reach the registry rejection path.
+pub(super) fn validate_registered_input(
+    registry: Option<&VmValue>,
+    name: &str,
+    arguments: &serde_json::Value,
+    audience: crate::tool_registry::ToolAudience,
+) -> Result<(), String> {
+    if audience == crate::tool_registry::ToolAudience::Mcp {
+        let Some(registry) = registry else {
+            return Ok(());
+        };
+        let present = registry.as_dict().and_then(|dict| dict.get("tools")).is_some_and(|tools| {
+            matches!(tools, VmValue::List(tools) if tools.iter().any(|tool| tool.as_dict().and_then(|entry| entry.get("name").map(VmValue::display)).as_deref() == Some(name)))
+        });
+        if !present {
+            return Ok(());
+        }
+        return prepared_handler_catalog(registry, name)
+            .map_err(|error| error.to_string())?
+            .validate_input(name, arguments)
+            .map_err(|error| error.to_string());
+    }
+    let schemas = super::tools::collect_tool_schemas(registry, None);
+    super::tools::validate_tool_args(name, arguments, &schemas)?;
+    let Some(registry) = registry.filter(|_| schemas.iter().any(|schema| schema.name == name))
+    else {
+        return Ok(());
+    };
+    prepared_handler_catalog(registry, name)
+        .map_err(|error| error.to_string())?
+        .validate_input(name, arguments)
+        .map_err(|error| error.to_string())
+}
+
 fn prepare_catalog(
     catalog: crate::tool_registry::ToolCatalog,
 ) -> Result<std::sync::Arc<PreparedToolCatalog>, VmError> {
@@ -161,8 +196,9 @@ fn host_agent_own_lifecycle_registry_impl(
 pub(super) fn registry_dispatch_rejection(
     tools_val: Option<&VmValue>,
     tool_name: &str,
+    audience: crate::tool_registry::ToolAudience,
 ) -> Option<ToolDispatchOutcome> {
-    require_registry_membership(tools_val, tool_name)
+    require_registry_membership_for(tools_val, tool_name, audience)
         .err()
         .map(|message| ToolDispatchOutcome {
             result: Err(VmError::CategorizedError {
@@ -174,12 +210,41 @@ pub(super) fn registry_dispatch_rejection(
         })
 }
 
+#[cfg(test)]
 pub(super) fn require_registry_membership(
     tools_val: Option<&VmValue>,
     tool_name: &str,
 ) -> Result<(), String> {
+    require_registry_membership_for(
+        tools_val,
+        tool_name,
+        crate::tool_registry::ToolAudience::Agent,
+    )
+}
+
+pub(super) fn dispatch_audience(
+    options: &crate::value::DictMap,
+) -> crate::tool_registry::ToolAudience {
+    if matches!(options.get("_composition_mcp"), Some(VmValue::Bool(true)))
+        && crate::mcp_server::is_served_composition()
+    {
+        crate::tool_registry::ToolAudience::Mcp
+    } else {
+        crate::tool_registry::ToolAudience::Agent
+    }
+}
+
+pub(super) fn require_registry_membership_for(
+    tools_val: Option<&VmValue>,
+    tool_name: &str,
+    audience: crate::tool_registry::ToolAudience,
+) -> Result<(), String> {
     let Some(tools_val) = tools_val else {
-        return Ok(());
+        return if audience == crate::tool_registry::ToolAudience::Agent {
+            Ok(())
+        } else {
+            Err(malformed_registry_message(tool_name))
+        };
     };
     let Some(dict) = tools_val.as_dict() else {
         return Err(malformed_registry_message(tool_name));
@@ -203,7 +268,9 @@ pub(super) fn require_registry_membership(
         (entry.get("name").map(VmValue::display).as_deref() == Some(tool_name)).then_some(entry)
     });
     let Some(entry) = entry else {
-        if origin == AgentRegistryOrigin::AmbientHost {
+        if origin == AgentRegistryOrigin::AmbientHost
+            && audience == crate::tool_registry::ToolAudience::Agent
+        {
             // `agent_loop` adds lifecycle controls to an otherwise absent
             // registry. That synthesized registry is not a declaration that
             // the host bridge has no other tools. Explicit caller registries
@@ -214,16 +281,28 @@ pub(super) fn require_registry_membership(
             "tool '{tool_name}' is not present in the active agent tool registry"
         ));
     };
-    match crate::tool_registry::tool_entry_allows_audience(
-        entry,
-        crate::tool_registry::ToolAudience::Agent,
-    ) {
+    if audience == crate::tool_registry::ToolAudience::Mcp
+        && !crate::mcp_server::composition_allows_tool(tool_name, entry)
+    {
+        return Err(format!(
+            "tool '{tool_name}' does not match the MCP server's published binding"
+        ));
+    }
+    match crate::tool_registry::tool_entry_allows_audience(entry, audience) {
         Ok(true) => Ok(()),
         Ok(false) => Err(format!(
-            "tool '{tool_name}' is not exposed to the agent/model adapter"
+            "tool '{tool_name}' is not exposed to the {} adapter",
+            if audience == crate::tool_registry::ToolAudience::Agent {
+                "agent/model"
+            } else {
+                "MCP"
+            }
+        )),
+        Err(error) if audience == crate::tool_registry::ToolAudience::Agent => Err(format!(
+            "tool '{tool_name}' has invalid agent/model governance: {error}"
         )),
         Err(error) => Err(format!(
-            "tool '{tool_name}' has invalid agent/model governance: {error}"
+            "tool '{tool_name}' has invalid MCP governance: {error}"
         )),
     }
 }
@@ -245,6 +324,42 @@ mod tests {
 
     use super::*;
     use crate::value::{DictMap, VmDictExt};
+
+    #[tokio::test]
+    async fn mcp_dispatch_requires_an_explicit_registry() {
+        let entry = crate::schema::json_to_vm_value(&serde_json::json!({
+            "name": "anything", "governance": {"audiences": ["mcp"]}
+        }));
+        let VmValue::Dict(published) = &entry else {
+            panic!("fixture must be a dictionary");
+        };
+        let published = published.clone();
+        crate::mcp_server::scope_composition_for_test(
+            std::collections::BTreeMap::from([("anything".to_string(), published)]),
+            async {
+                let allowed = registry(vec![entry]);
+                assert!(require_registry_membership_for(
+                    Some(&allowed),
+                    "anything",
+                    crate::tool_registry::ToolAudience::Mcp
+                )
+                .is_ok());
+                assert!(require_registry_membership_for(
+                    None,
+                    "anything",
+                    crate::tool_registry::ToolAudience::Mcp
+                )
+                .is_err());
+            },
+        )
+        .await;
+        assert!(require_registry_membership_for(
+            None,
+            "anything",
+            crate::tool_registry::ToolAudience::Agent
+        )
+        .is_ok());
+    }
 
     fn excluded_registry(name: &str, mut entry: DictMap) -> VmValue {
         let mut governance = DictMap::new();
@@ -362,7 +477,7 @@ mod tests {
         let bridge = responding_bridge(Arc::clone(&requests));
 
         let reached = super::super::agent_tools::dispatch_tool_execution_with_mcp(
-            None,
+            (None, crate::tool_registry::ToolAudience::Agent),
             "session_stop",
             &serde_json::json!({"reason": "operator stop"}),
             Some(&ambient),
@@ -388,7 +503,7 @@ mod tests {
         );
 
         let denied = super::super::agent_tools::dispatch_tool_execution_with_mcp(
-            None,
+            (None, crate::tool_registry::ToolAudience::Agent),
             "session_stop",
             &serde_json::json!({"reason": "operator stop"}),
             Some(&explicit_empty),

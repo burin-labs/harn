@@ -12,6 +12,10 @@ use std::path::{Path, PathBuf};
 /// What discovery reads from the process, so tests can supply their own.
 pub(crate) trait Probe {
     fn var(&self, name: &str) -> Option<OsString>;
+    /// A set but empty server override is distinct from an absent override.
+    fn raw_var(&self, name: &str) -> Option<OsString> {
+        self.var(name)
+    }
     fn home(&self) -> Option<PathBuf>;
     /// `CARGO_HOME` and `RUSTUP_HOME` by the sandbox's own rule.
     fn rust_homes(&self) -> (Option<PathBuf>, Option<PathBuf>);
@@ -25,6 +29,10 @@ pub(crate) struct ProcessProbe;
 impl Probe for ProcessProbe {
     fn var(&self, name: &str) -> Option<OsString> {
         std::env::var_os(name).filter(|value| !value.is_empty())
+    }
+
+    fn raw_var(&self, name: &str) -> Option<OsString> {
+        std::env::var_os(name)
     }
 
     fn home(&self) -> Option<PathBuf> {

@@ -76,6 +76,7 @@ pub(super) struct ToolDispatchRequest<'a> {
     pub(super) tool_name: &'a str,
     pub(super) tool_args: &'a serde_json::Value,
     pub(super) tools: Option<&'a VmValue>,
+    pub(super) audience: crate::tool_registry::ToolAudience,
     pub(super) mcp_clients:
         Option<&'a std::collections::BTreeMap<String, crate::mcp::VmMcpClientHandle>>,
     pub(super) bridge: Option<&'a std::sync::Arc<crate::bridge::HostBridge>>,
@@ -109,7 +110,7 @@ pub(super) fn pin_scoped_tool_dispatch<'a>(
             super::agent_tool_preparation::scope(
                 request.prepared_invocation,
                 agent_tools::dispatch_tool_execution_with_mcp(
-                    Some(request.ctx),
+                    (Some(request.ctx), request.audience),
                     request.tool_name,
                     request.tool_args,
                     request.tools,

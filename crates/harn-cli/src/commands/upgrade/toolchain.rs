@@ -229,7 +229,7 @@ fn run_version(root: &Path, requested: &str, args: &[OsString]) -> Result<i32, S
         ensure_installed(root, &version)?;
         let _lock = lock_version(root, &version, harn_flock::LockMode::Shared)?;
         if let Some(binary) = cached_binary(root, &version)? {
-            eprintln!("harn self run: {} {}", binary.version, binary.revision);
+            cli_diagnostic!("harn self run: {} {}", binary.version, binary.revision);
             let status = Command::new(&binary.path)
                 .args(args)
                 .status()

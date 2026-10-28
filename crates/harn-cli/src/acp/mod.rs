@@ -258,8 +258,8 @@ pub(crate) fn ensure_acp_event_log(pipeline: Option<&str>) {
             .and_then(Path::parent)
             .unwrap_or_else(|| Path::new("."));
         if let Err(error) = harn_vm::event_log::install_default_for_base_dir(base_dir) {
-            eprintln!(
-                "[harn] ACP session replay disabled: failed to initialize EventLog for {}: {error}",
+            cli_diagnostic!(
+                "warning: ACP session replay disabled: failed to initialize EventLog for {}: {error}",
                 base_dir.display()
             );
         }

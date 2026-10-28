@@ -158,12 +158,12 @@ async fn run_dispatch(args: &ModelRecommendArgs) -> i32 {
     let table = match load_recommendation_table() {
         Ok(table) => table,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 1;
         }
     };
     if let Err(error) = validate_recommendation_table(&table) {
-        eprintln!("error: {error}");
+        cli_diagnostic!("error: {error}");
         return 1;
     }
     let local_model = detect_local_model(&snapshot, &table);
@@ -180,7 +180,7 @@ async fn run_dispatch(args: &ModelRecommendArgs) -> i32 {
     let payload_json = match serde_json::to_string(&payload) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to serialise recommend payload: {error}");
+            cli_diagnostic!("error: failed to serialise recommend payload: {error}");
             return 1;
         }
     };

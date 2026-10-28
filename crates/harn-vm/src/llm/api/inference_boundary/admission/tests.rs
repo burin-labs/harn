@@ -146,7 +146,11 @@ fn preview_needs_positive_open_weight_evidence_and_uses_model_training_overrides
         super::super::InferenceReach::HostedOpenWeight,
     ));
     assert_eq!(open.open_weight, Some(true));
-    assert_eq!(open.status, InferenceAdmissionStatus::Admitted);
+    assert_eq!(open.status, InferenceAdmissionStatus::Unknown);
+    assert_eq!(
+        open.governing_rule.as_deref(),
+        Some("inference_boundary.training_unknown")
+    );
     let missing = preview_inference_admission(&request(
         "mistral",
         "unknown-weight-model",
@@ -193,11 +197,12 @@ fn preview_credits_a_declared_shared_transport_control_without_crediting_native_
     impl Drop for Reset {
         fn drop(&mut self) {
             crate::llm_config::clear_user_overrides();
+            crate::llm_config::clear_runtime_catalog_overlay();
         }
     }
     let _reset = Reset;
-    // Synthetic catalog declarations exercise the plan owner without claiming
-    // these controls are supported by Meta or Gemini's actual service.
+    // Synthetic host catalog declarations exercise the plan owner without
+    // claiming these controls are supported by Meta or Gemini's actual service.
     let controls = crate::llm_config::provider_config("openrouter")
         .unwrap()
         .data_controls
@@ -211,11 +216,11 @@ fn preview_credits_a_declared_shared_transport_control_without_crediting_native_
         declaration.control_scope = DataControlScope::PerRequest;
         declaration.request_controls = controls.clone();
         for control in &mut declaration.request_controls {
-            control.applies_to.clear();
+            control.applies_to = vec![crate::llm_config::DataControlDialect::OpenAiSse];
         }
         overlay.providers.insert(provider.into(), definition);
     }
-    crate::llm_config::set_user_overrides(Some(overlay));
+    crate::llm_config::set_runtime_catalog_overlay(Some(overlay));
     let mut shared = request(
         "meta",
         "muse-spark-1.3-contributor",

@@ -31,7 +31,7 @@ pub(crate) fn load_harn_lint_config(path: &Path) -> HarnLintConfig {
             severity_overrides: cfg.lint.severity,
         },
         Err(e) => {
-            eprintln!("warning: {e}");
+            cli_diagnostic!("warning: {e}");
             HarnLintConfig::default()
         }
     }
@@ -225,7 +225,7 @@ pub(crate) fn ensure_module_dependencies(files: &[PathBuf]) {
             continue;
         }
         if let Err(error) = crate::package::ensure_dependencies_materialized(file) {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             process::exit(1);
         }
     }

@@ -6,6 +6,92 @@ use crate::llm::decision::{
 };
 
 #[test]
+fn native_decision_does_not_write_project_invented_privacy_controls() {
+    use crate::llm_config::{
+        DataControlDef, DataControlDialect, DataControlEffect, DataControlLocation,
+        DataControlValue, ProvidersConfig,
+    };
+    use crate::security::{
+        EnvironmentPolicyKind, GrantAudience, GrantSourceSpec, GrantSpec, SessionEnvironment,
+    };
+    struct Clear;
+    impl Drop for Clear {
+        fn drop(&mut self) {
+            crate::llm_config::clear_user_overrides();
+        }
+    }
+    let _clear = Clear;
+    let environment = SessionEnvironment::launch(
+        EnvironmentPolicyKind::Granted,
+        vec![GrantSpec {
+            name: "host-boundary".into(),
+            source: GrantSourceSpec::Literal {
+                value: r#"{"reach":"any_hosted","allow_training_discounts":false}"#.into(),
+            },
+            expose_as_env: Some(crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV.into()),
+            for_command: None,
+            expose_to: GrantAudience::InProcess,
+        }],
+        &|_| None,
+    )
+    .unwrap();
+    let _session =
+        crate::security::session_environment::declare_session_environment_if_absent(environment);
+    let mut provider = crate::llm_config::provider_config("vercel_ai_gateway").unwrap();
+    provider
+        .data_controls
+        .as_mut()
+        .unwrap()
+        .request_controls
+        .push(DataControlDef {
+            location: DataControlLocation::Body,
+            name: "providerOptions.gateway.fakeNoTraining".into(),
+            value: DataControlValue::Bool(true),
+            effect: DataControlEffect::Training,
+            applies_to: vec![DataControlDialect::VercelEvaluate],
+            caveat: None,
+        });
+    let mut overlay = ProvidersConfig::default();
+    overlay
+        .providers
+        .insert("vercel_ai_gateway".into(), provider);
+    crate::llm_config::set_user_overrides(Some(overlay));
+    let questions = QuestionSet {
+        questions: vec![Question {
+            id: "safe".into(),
+            instructions: "Is it safe?".into(),
+            body: QuestionBody::Boolean,
+        }],
+    };
+    let state = json!("Read README.md");
+    let contract =
+        decision_contract_for_route("vercel_ai_gateway", "vercel/typesafe-ai/jev").unwrap();
+    let request = DecisionRequest {
+        provider: "vercel_ai_gateway",
+        model: "vercel/typesafe-ai/jev",
+        state: &state,
+        questions: &questions,
+        contract: &contract,
+        effort: None,
+        temperature: None,
+        max_tokens: None,
+        top_p: None,
+        seed: None,
+        timeout_ms: None,
+        evaluation_cost_limit: None,
+        run_cost_limit: None,
+    };
+    let body = request_body(&request).unwrap();
+    assert_eq!(
+        body["providerOptions"]["gateway"]["disallowPromptTraining"],
+        json!(true)
+    );
+    assert!(body["providerOptions"]["gateway"]
+        .get("fakeNoTraining")
+        .is_none());
+}
+
+#[test]
 fn gateway_decisions_pin_the_serving_provider_and_refuse_an_absent_pin() {
     let questions = QuestionSet {
         questions: vec![Question {

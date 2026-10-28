@@ -22,7 +22,7 @@ pub(super) fn run(args: &PrecompileArgs) {
     ensure_builtin_signatures_installed();
     let mut compiler = bytecode_cache::CachePrecompiler::default();
     if !args.quiet {
-        eprintln!("precompile cache: preparing the runtime stdlib");
+        cli_diagnostic!("precompile cache: preparing the runtime stdlib");
     }
     compiler
         .prepare_stdlib_catalog()
@@ -39,14 +39,14 @@ pub(super) fn run(args: &PrecompileArgs) {
             }
             Err(error) => {
                 failed += 1;
-                eprintln!("{}: {error}", source.display());
+                cli_diagnostic!("{}: {error}", source.display());
                 if !args.keep_going {
                     break;
                 }
             }
         }
     }
-    eprintln!(
+    cli_diagnostic!(
         "precompile cache: {prepared} entries, {} modules, {failed} failed",
         compiler.module_count()
     );

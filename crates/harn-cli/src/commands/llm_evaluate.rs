@@ -49,7 +49,7 @@ pub(crate) async fn run(args: LlmEvaluateArgs) -> i32 {
     let request = match request(&args) {
         Ok(request) => request,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 2;
         }
     };
@@ -65,7 +65,7 @@ pub(crate) async fn run(args: LlmEvaluateArgs) -> i32 {
     {
         Ok(session) => session,
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 2;
         }
     };
@@ -78,7 +78,7 @@ pub(crate) async fn run(args: LlmEvaluateArgs) -> i32 {
     let result = evaluation.await;
     if let Some(session) = tape_session {
         if let Err(error) = session.finish(result.is_ok()) {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             return 2;
         }
     }
@@ -108,7 +108,7 @@ pub(crate) async fn run(args: LlmEvaluateArgs) -> i32 {
             0
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             2
         }
     }
@@ -140,7 +140,7 @@ fn verify(request: &Request, path: &Path, json: bool) -> i32 {
             i32::from(!report.verified)
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            cli_diagnostic!("error: {error}");
             2
         }
     }

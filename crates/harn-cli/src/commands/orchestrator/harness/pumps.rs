@@ -477,7 +477,7 @@ pub(super) fn spawn_inbox_pump(
                             Ok(_) => ("completed", None),
                             Err(error) => {
                                 let message = error.to_string();
-                                eprintln!("[harn] inbox dispatch warning: {message}");
+                                harn_vm::events::log_warn("orchestrator", &format!("inbox dispatch: {message}"));
                                 ("failed", Some(message))
                             }
                         };
@@ -812,7 +812,10 @@ pub(super) async fn drain_pump_best_effort(
     {
         Ok(Ok(report)) => Ok(report),
         Ok(Err(error)) => {
-            eprintln!("[harn] warning: pump drain error for {topic_name}: {error}");
+            harn_vm::events::log_warn(
+                "orchestrator",
+                &format!("pump drain error for {topic_name}: {error}"),
+            );
             best_effort_pump_report(
                 log,
                 &topic,
@@ -824,7 +827,10 @@ pub(super) async fn drain_pump_best_effort(
             .await
         }
         Err(_) => {
-            eprintln!("[harn] warning: pump drain timed out for {topic_name} after {budget:?}");
+            harn_vm::events::log_warn(
+                "orchestrator",
+                &format!("pump drain timed out for {topic_name} after {budget:?}"),
+            );
             best_effort_pump_report(
                 log,
                 &topic,
@@ -871,11 +877,14 @@ pub(super) async fn emit_drain_truncated(
     if !report.truncated() {
         return Ok(());
     }
-    eprintln!(
-        "[harn] warning: pump drain truncated for {topic_name}: remaining_queued={} drain_items={} reason={}",
-        report.remaining_queued,
-        report.drain_items,
-        report.stop_reason.as_str()
+    harn_vm::events::log_warn(
+        "orchestrator",
+        &format!(
+            "pump drain truncated for {topic_name}: remaining_queued={} drain_items={} reason={}",
+            report.remaining_queued,
+            report.drain_items,
+            report.stop_reason.as_str()
+        ),
     );
     append_lifecycle_event(
         log,

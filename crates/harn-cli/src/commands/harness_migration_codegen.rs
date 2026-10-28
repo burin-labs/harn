@@ -34,7 +34,7 @@ pub(crate) fn run(args: &DumpHarnessMigrationsArgs) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
         Err(message) => {
-            eprintln!("harn dump-harness-migrations: {message}");
+            cli_diagnostic!("harn dump-harness-migrations: {message}");
             1
         }
     }
@@ -54,7 +54,7 @@ fn run_inner(args: &DumpHarnessMigrationsArgs) -> Result<i32, String> {
 
     harn_vm::atomic_io::atomic_write(out, rendered.as_bytes())
         .map_err(|error| format!("failed to write {}: {error}", out.display()))?;
-    eprintln!("wrote {}", out.display());
+    cli_diagnostic!("wrote {}", out.display());
     Ok(0)
 }
 

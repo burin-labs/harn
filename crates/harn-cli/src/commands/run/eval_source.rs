@@ -48,10 +48,8 @@ pub(super) fn create_eval_temp_file() -> Result<tempfile::NamedTempFile, String>
             .tempfile_in(dir)
         {
             Ok(tmp) => return Ok(tmp),
-            Err(error) => eprintln!(
-                "warning: harn run -e: could not create temp file in {}: {error}; \
-                 relative imports will not resolve",
-                dir.display()
+            Err(error) => harn_vm::events::log_status(
+                &format!("warning: harn run -e: could not create temp file in {}: {error}; relative imports will not resolve", dir.display()),
             ),
         }
     }

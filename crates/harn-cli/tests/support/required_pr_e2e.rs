@@ -1,4 +1,6 @@
-pub(crate) const CASES: [&str; 20] = [
+pub(crate) const CASES: [&str; 22] = [
+    "provider_admission_privacy::admission_requires_account_evidence_for_conditional_provider_terms",
+    "provider_admission_privacy::unknown_gemini_account_is_refused_before_transport",
     "eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs",
     "models_dispatch::batch_execution::rejoin_cli_quarantines_an_artifact_without_matching_receipts",
     "models_dispatch::core::models_recommend_human_text_has_model_and_rationale",

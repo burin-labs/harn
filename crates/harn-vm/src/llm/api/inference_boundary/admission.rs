@@ -138,7 +138,11 @@ pub fn preview_inference_admission(
         snapshot.governing_rule = Some("inference_boundary.route_unresolved".into());
         return snapshot;
     }
-    let evidence = match catalog_evidence(&request.provider, &request.model) {
+    let evidence = match catalog_evidence(
+        &request.provider,
+        &request.model,
+        snapshot.effective_boundary.is_some(),
+    ) {
         Ok(evidence) => evidence,
         Err(denial) => {
             snapshot.governing_rule = Some(denial.rule.as_str().into());

@@ -43,7 +43,7 @@ pub(crate) async fn run_explain(args: &ExplainArgs) -> i32 {
     // dimension, so this branch only fires when neither catalog nor an
     // invariant lookup was requested but the positional was supplied.
     let Some(target) = args.target.as_deref() else {
-        eprintln!(
+        cli_diagnostic!(
             "`harn explain` needs a diagnostic code (e.g. `harn explain HARN-TYP-014`), \
              `--catalog`, or `--invariant <NAME> <FN> <FILE>`."
         );
@@ -52,10 +52,10 @@ pub(crate) async fn run_explain(args: &ExplainArgs) -> i32 {
     let code = match Code::from_str(target) {
         Ok(code) => code,
         Err(_) => {
-            eprintln!(
+            cli_diagnostic!(
                 "Unknown Harn diagnostic code `{target}`. Expected `HARN-<CAT>-<NNN>` (e.g. `HARN-TYP-014`).",
             );
-            eprintln!("Run `harn explain HARN-TYP-001` for an example, or `harn explain --catalog` for the full registry.");
+            cli_diagnostic!("Run `harn explain HARN-TYP-001` for an example, or `harn explain --catalog` for the full registry.");
             return 2;
         }
     };
@@ -73,7 +73,7 @@ async fn run_explain_dispatch(code: Code, json: bool) -> i32 {
     let entry_json = match serde_json::to_string(&payload) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("failed to serialise diagnostic entry: {error}");
+            cli_diagnostic!("failed to serialise diagnostic entry: {error}");
             return 1;
         }
     };
@@ -137,13 +137,13 @@ fn run_catalog(format: CatalogFormat) -> i32 {
 
 fn run_invariant_explain(invariant: &str, args: &ExplainArgs) -> i32 {
     let Some(target) = args.target.as_deref() else {
-        eprintln!(
+        cli_diagnostic!(
             "`--invariant` requires a handler / function / tool / pipeline name and a file path. Usage: `harn explain --invariant <NAME> <FUNCTION> <FILE>`"
         );
         return 2;
     };
     let Some(file) = args.file.as_deref() else {
-        eprintln!(
+        cli_diagnostic!(
             "`--invariant` requires both a function name and a path. Usage: `harn explain --invariant <NAME> <FUNCTION> <FILE>`"
         );
         return 2;
@@ -177,7 +177,7 @@ fn run_invariant_explain(invariant: &str, args: &ExplainArgs) -> i32 {
             0
         }
         Err(message) => {
-            eprintln!("{message}");
+            cli_diagnostic!("{message}");
             1
         }
     }

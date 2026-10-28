@@ -86,7 +86,7 @@ pub(super) async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<()
     let progress_bus = harn_vm::mcp_progress::ProgressBus::from_mpsc(out_tx.clone());
     let _bus_guard = harn_vm::mcp_progress::ActiveBusGuard::install(Some(progress_bus));
 
-    eprintln!("[harn] MCP stdio server ready");
+    harn_vm::events::log_info("mcp", "MCP stdio server ready");
 
     loop {
         tokio::select! {

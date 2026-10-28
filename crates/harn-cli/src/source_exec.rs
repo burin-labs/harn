@@ -15,7 +15,7 @@ pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>)
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error reading {path}: {e}");
+            cli_diagnostic!("error: reading {path}: {e}");
             process::exit(1);
         }
     };
@@ -34,7 +34,11 @@ pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>)
                 Some("here"),
                 None,
             );
-            eprint!("{diagnostic}");
+            if diagnostic_detail_requested() {
+                cli_diagnostic!("{}", diagnostic.trim_end());
+            } else {
+                cli_diagnostic!("error: {path}: {e} (use --explain for details)");
+            }
             process::exit(1);
         }
     };
@@ -43,7 +47,12 @@ pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>)
     let program = match parser.parse() {
         Ok(p) => p,
         Err(err) => {
-            if parser.all_errors().is_empty() {
+            if !diagnostic_detail_requested() {
+                cli_diagnostic!(
+                    "error: {path}: {} (use --explain for details)",
+                    harn_parser::diagnostic::parser_error_message(&err)
+                );
+            } else if parser.all_errors().is_empty() {
                 let span = error_span_from_parse(&err);
                 let diagnostic = harn_parser::diagnostic::render_diagnostic_with_code(
                     &source,
@@ -55,7 +64,7 @@ pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>)
                     Some(harn_parser::diagnostic::parser_error_label(&err)),
                     harn_parser::diagnostic::parser_error_help(&err),
                 );
-                eprint!("{diagnostic}");
+                cli_diagnostic!("{}", diagnostic.trim_end());
             } else {
                 for e in parser.all_errors() {
                     let span = error_span_from_parse(e);
@@ -69,7 +78,7 @@ pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>)
                         Some(harn_parser::diagnostic::parser_error_label(e)),
                         harn_parser::diagnostic::parser_error_help(e),
                     );
-                    eprint!("{diagnostic}");
+                    cli_diagnostic!("{}", diagnostic.trim_end());
                 }
             }
             process::exit(1);

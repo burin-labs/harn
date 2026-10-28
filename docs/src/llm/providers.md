@@ -35,6 +35,18 @@ route facts, never credentials, endpoint URLs, or request-control values.
 preview does not apply it or establish model readiness. Inference enforces its
 boundary again at dispatch.
 
+When a host sets an inference ceiling, privacy and model facts come from the
+host and verified catalog. Project `[llm]` overrides can restrict a route but
+cannot create a no-training promise, a privacy control, or an open-weight
+classification. Redirecting a provider to an endpoint without a matching
+trusted declaration or remapping a model to a different wire identity makes
+its hosted privacy facts unknown.
+With a ceiling in effect, `provider_overrides.model` cannot replace the model
+selected for admission, and OpenRouter model fallback lists cannot delegate to
+unadmitted models. Inference requests do not follow HTTP redirects while a
+ceiling is active, because the redirect destination was not admitted. Select
+the intended model through the normal route.
+
 `data_posture` is the data posture inference will send on this route: the
 request's `data_controls` when given, otherwise the catalog's
 `[data_controls_policy] default_posture`, and `default` on a transport that

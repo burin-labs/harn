@@ -1,0 +1,22 @@
+import { catalog_version_error } from "../check_provider_catalog_schema_version.harn"
+
+pipeline test_nested_field_requires_version_change() {
+  const before = {
+    properties: {schema_version: {const: 13}},
+    "$defs": {region: {properties: {base_url: {type: "string"}}}},
+  }
+  const changed = {
+    properties: {schema_version: {const: 13}},
+    "$defs": {region: {properties: {base_url: {type: "string"}, data_controls: {type: "object"}}}},
+  }
+  const bumped = {
+    properties: {schema_version: {const: 14}},
+    "$defs": {region: {properties: {base_url: {type: "string"}, data_controls: {type: "object"}}}},
+  }
+  assert_eq(catalog_version_error(before, before), "")
+  assert(catalog_version_error(before, changed).contains("data_controls"))
+  assert_eq(catalog_version_error(before, bumped), "")
+  assert(catalog_version_error(bumped, before).contains("decreased"))
+  assert(catalog_version_error(changed, before).contains("removed"))
+  assert(catalog_version_error({}, {}).contains("integers"))
+}

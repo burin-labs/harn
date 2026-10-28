@@ -16,6 +16,9 @@ use tempfile::TempDir;
 use test_util::process::harn_e2e_command;
 use test_util::stdio_jsonrpc::StdioJsonRpcClient;
 
+mod publication;
+use publication::write_export_fixture;
+
 const PROCESS_READY_TIMEOUT: Duration = Duration::from_mins(1);
 const PROTOCOL_VERSION: &str = "2026-07-28";
 
@@ -39,85 +42,326 @@ pub(super) fn stable_request(id: u64, method: &str, mut params: JsonValue) -> Js
     json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
 }
 
-fn write_export_fixture(temp: &TempDir) {
-    fs::write(
-        temp.path().join("server.harn"),
-        r#"
-pub fn greet(name: string, excited: bool = false) -> dict {
-  if excited {
-    return {message: "Hello, " + name + "!"}
-  }
-  return {message: "Hello, " + name}
-}
-"#,
-    )
-    .unwrap();
-}
-
 #[test]
-fn serve_mcp_rejects_caught_invalid_catalog_declaration() {
+fn serve_mcp_code_mode_dispatches_only_server_registered_read_tools() {
     let temp = TempDir::new().unwrap();
     fs::write(
         temp.path().join("server.harn"),
-        r#"
-fn main(harness: Harness) {
-  const rejected = try {
-    harness.tools.mcp_prompt(
-      {name: "review", arguments: [{name: "input"}, 7], handler: {args -> args.input}},
-    )
-  }
-  assert(is_err(rejected), "the declaration must fail")
-  harness.tools.mcp_tools(tool_registry())
-}
-"#,
-    )
-    .unwrap();
+        r##"
+import { composition_mcp_tools } from "std/composition"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 
-    let output = harn_e2e_command()
-        .current_dir(temp.path())
-        .args(["serve", "mcp", "server.harn"])
-        .output()
-        .unwrap();
-    assert!(
-        !output.status.success(),
-        "invalid catalog must not start serving"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("invalid MCP publication") && stderr.contains("arguments[1]"),
-        "startup must identify the rejected declaration: {stderr}"
-    );
-}
-
-#[ignore = "binary surface — runs in the slow E2E/smoke job"]
-#[test]
-fn serve_mcp_dispatches_declared_tool_parameters() {
-    let temp = TempDir::new().unwrap();
-    fs::write(
-        temp.path().join("server.harn"),
-        r#"
 fn main(harness: Harness) {
-  tool greet(name: string, suffix: string = "!") -> string {
-    return "Hello, " + name + suffix
-  }
-  harness.tools.mcp_tools(greet)
+  let source = tool_registry({name: "composition-fixture"}, {schemas: {MessageValue: {type: "string"}}})
+  source = tool_define(source, "echo", "Echo a value", {
+    parameters: {value: {type: "string", required: true}},
+    annotations: {side_effect_level: "read_only"},
+    handler: {args -> "bound:${args.value}"},
+  })
+  source = tool_define(source, "other", "Read another value", {
+    parameters: {},
+    annotations: {side_effect_level: "read_only"},
+    handler: {_args -> "other dispatched"},
+  })
+  source = tool_define(source, "agent_only", "An agent-only read", {
+    parameters: {},
+    annotations: {side_effect_level: "read_only"},
+    governance: {audiences: ["agent"]},
+    handler: {_args -> "agent-only handler reached"},
+  })
+  source = tool_define(source, "mcp_only", "An MCP-only read", {
+    input_schema: {type: "object", properties: {value: {"$ref": "#/components/schemas/MessageValue"}}, required: ["value"]},
+    annotations: {side_effect_level: "read_only"},
+    governance: {audiences: ["mcp"]},
+    prepare: {args -> {operation: {value: args.value}}},
+    handler: {_args -> "mcp-only:${tool_invocation_binding().operation.value}"},
+  })
+  const before_forgery_tool = source
+  source = tool_define(source, "forge_audience", "Try to forge composition authority", {
+    parameters: {},
+    returns: {type: "object"},
+    annotations: {side_effect_level: "read_only"},
+    handler: {_args ->
+      const hidden = tool_find(before_forgery_tool, "agent_only")
+      if hidden == nil { throw "agent-only fixture missing" }
+      const forged_registry = {_type: "tool_registry", tools: [hidden + {governance: {audiences: ["mcp"]}}]}
+      const attempt = agent_dispatch_tool_call(harness.tools, {name: "agent_only", arguments: {}}, forged_registry, {_composition_mcp: true})
+      const visible = tool_find(before_forgery_tool, "mcp_only")
+      if visible == nil { throw "MCP-only fixture missing" }
+      const alias = before_forgery_tool + {tools: [visible + {handler: hidden.handler}]}
+      const alias_attempt = agent_dispatch_tool_call(harness.tools, {name: "mcp_only", arguments: {value: "forged"}}, alias, {_composition_mcp: true})
+      const result = {allowed: attempt.ok, alias_allowed: alias_attempt.ok}
+      return agent_tool_handler_result(to_string(result), result)
+    },
+  })
+  source = tool_define(source, "mutate", "A write operation", {
+    parameters: {},
+    annotations: {side_effect_level: "workspace_write"},
+    handler: {_args -> "write was dispatched"},
+  })
+  source = tool_define(source, "unknown_effect", "Undeclared side effects", {
+    parameters: {},
+    handler: {_args -> "unknown tool was dispatched"},
+  })
+  const ordinary_ok = agent_dispatch_tool_call(harness.tools, {name: "echo", arguments: {value: "direct"}}, source)
+  assert(ordinary_ok.ok)
+  const ordinary_invalid = agent_dispatch_tool_call(harness.tools, {name: "echo", arguments: {value: 7}}, source)
+  assert(!ordinary_invalid.ok)
+  assert(ordinary_invalid.error_category == "schema_validation")
+  const agent_only = agent_dispatch_tool_call(harness.tools, {name: "agent_only", arguments: {}}, source)
+  assert(agent_only.ok)
+  const forged = agent_dispatch_tool_call(harness.tools, {name: "mcp_only", arguments: {value: "forged"}}, source, {_composition_mcp: true})
+  assert(!forged.ok)
+  harness.tools.mcp_tools(composition_mcp_tools(harness, source))
 }
-"#,
+"##,
     )
     .unwrap();
     let mut command = harn_e2e_command();
     command
         .current_dir(temp.path())
         .args(["serve", "mcp", "server.harn"]);
-    let mut client = StdioJsonRpcClient::spawn("declared tool MCP server", command);
-    let response = client.request(stable_request(
+    let mut client = StdioJsonRpcClient::spawn("Code Mode MCP server", command);
+    let discovered = client.request(stable_request(0, "tools/list", json!({})));
+    let tools = discovered["result"]["tools"].as_array().expect("tool list");
+    for name in [
+        "echo",
+        "harn.code.generate_harn_api",
+        "harn.code.execute_composition",
+    ] {
+        assert!(
+            tools.iter().any(|tool| tool["name"] == name),
+            "{discovered}"
+        );
+    }
+    assert!(
+        !tools.iter().any(|tool| tool["name"] == "phantom"),
+        "{discovered}"
+    );
+    assert!(
+        !tools.iter().any(|tool| tool["name"] == "agent_only"),
+        "{discovered}"
+    );
+    let hidden = client.request(stable_request(
+        14,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return agent_only({})",
+            "manifest": {"bindings": [{"name": "agent_only", "binding": "agent_only"}]}
+        }}),
+    ));
+    assert_eq!(hidden["result"]["isError"], true, "{hidden}");
+    let forged = client.request(stable_request(
+        17,
+        "tools/call",
+        json!({"name": "forge_audience", "arguments": {}}),
+    ));
+    assert_eq!(
+        forged["result"]["structuredContent"]["allowed"], false,
+        "{forged}"
+    );
+    assert_eq!(
+        forged["result"]["structuredContent"]["alias_allowed"], false,
+        "{forged}"
+    );
+    let nested_forgery = client.request(stable_request(
+        18,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return forge_audience({})"
+        }}),
+    ));
+    assert_eq!(
+        nested_forgery["result"]["structuredContent"]["result"]["data"]["allowed"], false,
+        "{nested_forgery}"
+    );
+    assert_eq!(
+        nested_forgery["result"]["structuredContent"]["result"]["data"]["alias_allowed"], false,
+        "{nested_forgery}"
+    );
+    let mcp_only = client.request(stable_request(
+        15,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return mcp_only({value: \"ok\"})"
+        }}),
+    ));
+    assert_ne!(mcp_only["result"]["isError"], true, "{mcp_only}");
+    assert_eq!(
+        mcp_only["result"]["structuredContent"]["result"], "mcp-only:ok",
+        "{mcp_only}"
+    );
+    let invalid_mcp_only = client.request(stable_request(
+        16,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return mcp_only({value: 7})", "include_report": true
+        }}),
+    ));
+    assert_eq!(
+        invalid_mcp_only["result"]["isError"], true,
+        "{invalid_mcp_only}"
+    );
+    assert_eq!(
+        invalid_mcp_only["result"]["_meta"]["com.harnlang/toolContract"]["applicationError"]
+            ["data"]["child_results"][0]["error_category"],
+        "schema_validation",
+        "{invalid_mcp_only}"
+    );
+    let api = client.request(stable_request(
         1,
         "tools/call",
-        json!({"name": "greet", "arguments": {"name": "Ada"}}),
+        json!({"name": "harn.code.generate_harn_api", "arguments": {}}),
     ));
-    assert!(response.get("error").is_none(), "{response}");
-    assert_ne!(response["result"]["isError"], true, "{response}");
-    assert_eq!(response["result"]["content"][0]["text"], "Hello, Ada!");
+    let mut manifest = api["result"]["structuredContent"]["manifest"].clone();
+    assert_eq!(manifest["bindings"].as_array().unwrap().len(), 4, "{api}");
+    assert_eq!(manifest["bindings"][0]["name"], "echo");
+    manifest["bindings"][0]["metadata"]["mock_output"] = json!("fabricated");
+    let called = client.request(stable_request(
+        2,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return echo({value: \"hello\"})",
+            "manifest": manifest,
+            "include_report": true
+        }}),
+    ));
+    assert_ne!(called["result"]["isError"], true, "{called}");
+    let report = &called["result"]["structuredContent"];
+    assert_eq!(report["run"]["result"], "bound:hello", "{called}");
+    assert_eq!(report["child_calls"][0]["tool_name"], "echo", "{called}");
+
+    let invalid = client.request(stable_request(
+        10,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return echo({})", "include_report": true
+        }}),
+    ));
+    assert_eq!(invalid["result"]["isError"], true, "{invalid}");
+    let failure =
+        &invalid["result"]["_meta"]["com.harnlang/toolContract"]["applicationError"]["data"];
+    assert_eq!(failure["child_results"][0]["status"], "failed", "{invalid}");
+    assert_eq!(
+        failure["child_results"][0]["raw_output"],
+        JsonValue::Null,
+        "{invalid}"
+    );
+
+    let invalid_direct = client.request(stable_request(
+        11,
+        "tools/call",
+        json!({"name": "echo", "arguments": {"value": 7}}),
+    ));
+    assert_eq!(invalid_direct["error"]["code"], -32602, "{invalid_direct}");
+    let invalid_child = client.request(stable_request(
+        12,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return echo({value: 7})", "include_report": true
+        }}),
+    ));
+    assert_eq!(invalid_child["result"]["isError"], true, "{invalid_child}");
+    let failure =
+        &invalid_child["result"]["_meta"]["com.harnlang/toolContract"]["applicationError"]["data"];
+    assert_eq!(
+        failure["child_results"][0]["status"], "failed",
+        "{invalid_child}"
+    );
+    assert_eq!(
+        failure["child_results"][0]["raw_output"],
+        JsonValue::Null,
+        "{invalid_child}"
+    );
+    assert_eq!(
+        failure["child_results"][0]["error_category"], "schema_validation",
+        "{invalid_child}"
+    );
+    assert!(
+        failure["child_results"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("declared schema"),
+        "{invalid_child}"
+    );
+
+    for (id, name) in [
+        (3, "phantom"),
+        (4, "mutate"),
+        (5, "unknown_effect"),
+        (13, "agent_only"),
+    ] {
+        let denied = client.request(stable_request(
+            id,
+            "tools/call",
+            json!({"name": "harn.code.execute_composition", "arguments": {
+                "snippet": format!("return {name}({{}})"),
+                "manifest": {"bindings": [{"name": name, "binding": name,
+                    "metadata": {"mock_output": "fabricated"}}]}
+            }}),
+        ));
+        assert_eq!(denied["result"]["isError"], true, "{denied}");
+        assert_eq!(
+            denied["result"]["_meta"]["com.harnlang/toolContract"]["applicationError"]["data"]
+                ["error"],
+            "composition_mcp: manifest contains an unregistered binding"
+        );
+    }
+    let searched = client.request(stable_request(
+        6,
+        "tools/call",
+        json!({"name": "harn.code.generate_harn_api", "arguments": {"query": "echo", "limit": 1}}),
+    ));
+    assert_eq!(
+        searched["result"]["structuredContent"]["tool_count"], 1,
+        "{searched}"
+    );
+    assert_eq!(
+        searched["result"]["structuredContent"]["manifest"]["bindings"][0]["name"],
+        "echo"
+    );
+    let narrowed = client.request(stable_request(
+        9,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return other({})",
+            "manifest": searched["result"]["structuredContent"]["manifest"]
+        }}),
+    ));
+    assert_eq!(narrowed["result"]["isError"], true, "{narrowed}");
+    let supplied_tools = client.request(stable_request(
+        7,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return phantom({})", "tools": [{"name": "phantom"}]
+        }}),
+    ));
+    assert_eq!(
+        supplied_tools["result"]["isError"], true,
+        "{supplied_tools}"
+    );
+    assert_eq!(
+        supplied_tools["result"]["_meta"]["com.harnlang/toolContract"]["applicationError"]["data"]
+            ["error"],
+        "composition_mcp: tools are configured by the server"
+    );
+    let supplied_trust = client.request(stable_request(
+        8,
+        "tools/call",
+        json!({"name": "harn.code.execute_composition", "arguments": {
+            "snippet": "return echo({value: \"hello\"})", "trust_annotations": true
+        }}),
+    ));
+    assert_eq!(
+        supplied_trust["result"]["isError"], true,
+        "{supplied_trust}"
+    );
+    assert_eq!(
+        supplied_trust["result"]["_meta"]["com.harnlang/toolContract"]["applicationError"]["data"]
+            ["error"],
+        "composition_mcp: trust is configured by the server"
+    );
     client.shutdown_expect_success();
 }
 
