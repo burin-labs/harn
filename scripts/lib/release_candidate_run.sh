@@ -5,6 +5,38 @@
 # `candidate-manifest-<sha>` artifact is what makes it a candidate rather than
 # a warm or skipped build of the same commit.
 
+# Return 0 for a source dispatch, 1 for a non-candidate dispatch, and 2 when
+# the purpose cannot be established. New runs expose their input in their
+# immutable run name; older runs expose it in the setup job's conditional step.
+release_dispatch_is_candidate() {
+  local repository="${1:?repository required}" run_id="${2:?run required}" title="${3:-}"
+  local decision response
+  case "$title" in
+    'Build release binaries [source-candidate]') return 0 ;;
+    'Build release binaries [benchmark]'|'Build release binaries [warm]'|'Build release binaries [invalid]') return 1 ;;
+    'Build release binaries') ;;
+    *) return 2 ;;
+  esac
+  response="$(gh api "repos/${repository}/actions/runs/${run_id}/jobs?per_page=100" --paginate --slurp < /dev/null)" || return 2
+  decision="$(jq -r '
+    if type != "array" or length == 0 or (all(.[]; (.jobs | type) == "array") | not) or (.[0].total_count | type) != "number" or ([.[].jobs | length] | add) != .[0].total_count then error("incomplete jobs census") else . end |
+    [.[].jobs[] | select(.name == "Resolve release context")] as $jobs |
+    if ($jobs | length) != 1 then "unknown"
+    else $jobs[0].steps as $steps |
+      [$steps[] | select(.name | startswith("Run actions/checkout@"))] as $checkout |
+      [$steps[] | select(.name == "Install the source candidate decision runtime")] as $install |
+      if ($checkout | length) != 1 or $checkout[0].conclusion != "success" or ($install | length) != 1 then "unknown"
+      elif $install[0].conclusion == "skipped" then "other"
+      elif $install[0].conclusion == "success" or $install[0].conclusion == "failure" then "candidate"
+      else "unknown" end
+    end' <<< "$response")" || return 2
+  case "$decision" in
+    candidate) return 0 ;;
+    other) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
 # Prints the id of a successful "Build release binaries" run that built the
 # candidate at <sha>, or nothing when none has. Fails when GitHub cannot be
 # read, so a caller never mistakes an unread answer for "no candidate".
