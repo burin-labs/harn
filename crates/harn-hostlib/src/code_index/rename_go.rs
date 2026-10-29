@@ -128,8 +128,8 @@ pub(super) fn inspect(
         return Err("the current Go seed does not parse".into());
     }
     let package = package_name(&seed_symbols)?;
-    // Field and package identifiers have their own namespaces and cannot be
-    // shadowed by a package-level declaration.
+    // Field identifiers have their own namespace. Import aliases also use
+    // package_identifier nodes, which are distinct from the package clause.
     let kinds = &["identifier", "type_identifier"];
     let mut shadows = Vec::new();
     let mut members = BTreeSet::new();
@@ -159,20 +159,36 @@ pub(super) fn inspect(
         }) {
             constrained.insert(relative.clone());
         }
-        if relative == seed_path {
-            continue;
-        }
         let mut ignored: Vec<IdentifierSpan> = Vec::new();
-        collect_identifier_spans(
-            tree.root_node(),
-            source.as_bytes(),
-            "",
-            new_name,
-            kinds,
-            relative,
-            &mut ignored,
-            &mut shadows,
-        );
+        if relative != seed_path {
+            collect_identifier_spans(
+                tree.root_node(),
+                source.as_bytes(),
+                "",
+                new_name,
+                kinds,
+                relative,
+                &mut ignored,
+                &mut shadows,
+            );
+        }
+        let mut cursor = tree.root_node().walk();
+        for item in tree
+            .root_node()
+            .named_children(&mut cursor)
+            .filter(|n| n.kind() != "package_clause")
+        {
+            collect_identifier_spans(
+                item,
+                source.as_bytes(),
+                "",
+                new_name,
+                &["package_identifier"],
+                relative,
+                &mut ignored,
+                &mut shadows,
+            );
+        }
     }
     Ok((
         shadows,

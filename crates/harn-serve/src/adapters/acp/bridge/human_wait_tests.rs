@@ -7,6 +7,7 @@ fn bridge() -> (AcpBridge, tokio::sync::mpsc::UnboundedReceiver<String>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     (
         AcpBridge {
+            client_capabilities: Default::default(),
             session_id: "human-wait-session".into(),
             output: AcpOutput::Channel(tx),
             pending: Arc::new(Mutex::new(HashMap::new())),

@@ -372,11 +372,7 @@ pub fn tool_schema_hash(tool: &serde_json::Value) -> String {
     hasher.update(description.as_bytes());
     hasher.update([0u8]);
     hasher.update(schema.as_bytes());
-    hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    hex::encode(hasher.finalize())
 }
 
 /// Pin `tool_name`'s schema `hash` for `server` and report whether it changed
@@ -862,7 +858,7 @@ fn sentinel_for(observation: &str, origin: &str) -> String {
     hasher.update([0u8]);
     hasher.update(observation.as_bytes());
     let digest = hasher.finalize();
-    digest[..4].iter().map(|b| format!("{b:02x}")).collect()
+    hex::encode(&digest[..4])
 }
 
 /// In `Strict` mode, prefix every line of the untrusted body with the sentinel

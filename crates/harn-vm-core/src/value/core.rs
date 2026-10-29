@@ -780,9 +780,7 @@ impl VmValue {
                 const MAX_PREVIEW_BYTES: usize = 32;
 
                 out.push_str("b\"");
-                for byte in bytes.iter().take(MAX_PREVIEW_BYTES) {
-                    let _ = write!(out, "{byte:02x}");
-                }
+                out.push_str(&hex::encode(&bytes[..bytes.len().min(MAX_PREVIEW_BYTES)]));
                 if bytes.len() > MAX_PREVIEW_BYTES {
                     let _ = write!(out, "...+{}", bytes.len() - MAX_PREVIEW_BYTES);
                 }

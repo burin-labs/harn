@@ -24,6 +24,8 @@ pub(crate) enum SignalsCommand {
     Sessions(SignalsOutputArgs),
     /// Fire a signal by hand, or from a `harn.triage_event.v1` JSON document.
     Fire(Box<SignalsFireArgs>),
+    /// Pace captured monitor output at safe host boundaries.
+    Dispatch(SignalsDispatchArgs),
     /// Resolve a fired signal.
     Resolve(SignalsResolveArgs),
     /// Ack a leased reminder, so it is not redelivered.
@@ -52,6 +54,16 @@ pub(crate) struct SignalsPendingArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct SignalsFireArgs {
+    /// Active monitor execution epoch established by dispatch start.
+    #[arg(long, requires_all = ["event_id", "session"])]
+    pub execution: Option<String>,
+    /// Capture a distinct occurrence instead of updating a condition. Use a
+    /// stable file cursor or producer sequence; identical text may recur.
+    #[arg(long, requires = "session")]
+    pub event_id: Option<String>,
+    /// Exact recipient for a captured occurrence; no repository fallback.
+    #[arg(long, requires = "event_id")]
+    pub session: Option<String>,
     /// Read a `harn.triage_event.v1` document from this file, or `-` for stdin.
     #[arg(long, value_name = "FILE", conflicts_with_all = ["summary", "source_url"])]
     pub event: Option<PathBuf>,
@@ -186,4 +198,37 @@ pub(crate) enum SignalsHookEvent {
     Stop,
     #[value(name = "SessionEnd", alias = "session-end")]
     SessionEnd,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SignalsDispatchArgs {
+    #[arg(long)]
+    pub session: String,
+    #[arg(long)]
+    pub execution: String,
+    #[command(subcommand)]
+    pub command: SignalsDispatchCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum SignalsDispatchCommand {
+    /// Start an epoch; repeating it preserves its durable pacing state.
+    Start {
+        #[arg(long)]
+        interval_seconds: Option<u32>,
+    },
+    /// Claim one due batch only when the host can accept it safely.
+    Claim,
+    /// Commit idempotent durable host acceptance, before model dispatch.
+    Accept {
+        #[arg(long)]
+        batch: String,
+        #[arg(long)]
+        token: String,
+    },
+    /// Cancel a monitor, or close the epoch when no monitor is given.
+    Cancel {
+        #[arg(long)]
+        monitor: Option<String>,
+    },
 }

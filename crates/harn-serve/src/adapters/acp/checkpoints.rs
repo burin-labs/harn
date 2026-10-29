@@ -744,9 +744,20 @@ impl AcpServer {
             self.send_error(id, -32602, "session/set_config_option requires configId");
             return;
         };
-        let Some(value) = params.get("value").and_then(serde_json::Value::as_str) else {
-            self.send_error(id, -32602, "session/set_config_option requires value");
-            return;
+        let value = match modes::ConfigOptionValue::from_request(params) {
+            Ok(modes::ConfigOptionValue::ValueId(value)) => value,
+            Ok(modes::ConfigOptionValue::Boolean(value)) => {
+                self.send_error(
+                    id,
+                    -32602,
+                    &format!("config option '{config_id}' expects a string selection, got boolean {value}"),
+                );
+                return;
+            }
+            Err(message) => {
+                self.send_error(id, -32602, message);
+                return;
+            }
         };
 
         let session_id = session_id.to_string();

@@ -10,7 +10,7 @@ use super::support::*;
 async fn unknown_accounting_cannot_publish_a_zero_cost_run() {
     for (status, cost, unpriced, unknown, exact) in [
         ("unknown", None, 1, 1, None),
-        ("unknown", Some(0.0), 0, 1, None),
+        ("unknown", Some(0.0), 1, 1, None),
         ("reported", Some(0.0), 0, 0, Some(0.0)),
     ] {
         let store = MemorySessionStore::default();
@@ -50,6 +50,57 @@ async fn unknown_accounting_cannot_publish_a_zero_cost_run() {
         assert_eq!(usage.unpriced_calls, unpriced);
         assert_eq!(usage.usage_unknown_calls, unknown);
     }
+}
+
+#[tokio::test]
+async fn a_known_free_call_keeps_its_price_through_saved_and_combined_views() {
+    let store = MemorySessionStore::default();
+    let meta = store.create(CreateSession::default()).await.unwrap();
+    store
+        .append(
+            &meta.id,
+            AppendEvent::new(
+                custom("llm_call"),
+                transcript_event(
+                    "llm_call",
+                    json!({
+                        "provider": "llamacpp", "model": "local",
+                        "cost_usd": 0.0, "known_cost_usd": 0.0,
+                        "unpriced_calls": 0, "usage_unknown_calls": 1,
+                        "accounting_status": "unknown"
+                    }),
+                ),
+            ),
+        )
+        .await
+        .unwrap();
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .unwrap();
+    let saved = serde_json::to_value(&run).unwrap();
+    let restored: RunRecord = serde_json::from_value(saved).unwrap();
+    let usage = restored.usage.as_ref().unwrap();
+    assert_eq!(usage.cost_usd, Some(0.0));
+    assert_eq!(usage.unpriced_calls, 0);
+    assert_eq!(usage.usage_unknown_calls, 1);
+    assert_eq!(restored.evidence.trace_spans[0].cost_usd, Some(0.0));
+
+    let view = crate::orchestration::records::build_run_view(&restored);
+    let combined = crate::orchestration::records::build_session_view_from_run_views(
+        vec![view.clone()],
+        crate::orchestration::records::SessionViewOptions::default(),
+    );
+    assert_eq!(combined.usage.cost_usd, Some(0.0));
+    let mut missing = view.clone();
+    missing.usage.cost_usd = None;
+    let combined = crate::orchestration::records::build_session_view_from_run_views(
+        vec![view, missing],
+        crate::orchestration::records::SessionViewOptions::default(),
+    );
+    assert!(
+        combined.usage.cost_usd.is_none(),
+        "an unreported total is not zero"
+    );
 }
 
 /// A run report sources its per-call view from `trace_spans`. Leaving them

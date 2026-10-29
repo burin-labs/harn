@@ -272,6 +272,7 @@ mod completed_attempt;
 /// empty-under-load signal is detected separately (on the `Ok` empty path)
 /// because it is not a thrown error.
 mod detector;
+mod live_usage;
 mod provider_errors;
 #[cfg(test)]
 mod provider_errors_boundary_tests;
@@ -761,23 +762,45 @@ pub(crate) async fn observed_llm_call(
             provider_call,
         )
         .await;
-        // A call the budget refused at settlement still completed and was paid
-        // for, so it is recorded before its stop takes the error path.
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let mut settled_usage_recorded = false;
+        // A call refused at settlement was already paid for.
         let llm_result = match llm_result {
-            Ok(settled) => match settled.stop {
-                None => Ok(settled.result),
-                Some(stop) => {
-                    super::agent_session_host::record_completed_call_usage(
-                        opts,
-                        &settled.result,
-                        &call_id,
-                    );
-                    Err(super::api::settlement_stop_error(&stop, &settled.result))
+            Ok(settled) => {
+                settled_usage_recorded =
+                    live_usage::settled(&observed_attempt, &call_id, &settled.result);
+                match settled.stop {
+                    None => Ok(settled.result),
+                    Some(stop) => {
+                        super::agent_session_host::record_completed_call_usage(
+                            opts,
+                            &settled.result,
+                            &call_id,
+                        );
+                        Err(super::api::settlement_stop_error(&stop, &settled.result))
+                    }
                 }
-            },
+            }
             Err(error) => Err(error),
         };
-        let duration_ms = start.elapsed().as_millis() as u64;
+        let error_usage = llm_result.as_ref().err().and_then(|error| {
+            crate::llm::usage::ProviderUsageReceipt::from_error(error).map(|receipt| {
+                Box::new(crate::llm::usage::LlmUsage::from_provider_receipt(
+                    &opts.provider,
+                    &opts.model,
+                    &receipt,
+                ))
+            })
+        });
+        if llm_result.is_err() && !settled_usage_recorded {
+            live_usage::failed(
+                &observed_attempt,
+                &call_id,
+                &opts.provider,
+                &opts.model,
+                error_usage.as_deref(),
+            );
+        }
         let attempt_count = attempt + 1;
         physical_attempts = physical_attempts.saturating_add(
             usize::try_from(observed_attempt.dispatches.observed()).unwrap_or(usize::MAX),
@@ -1088,14 +1111,6 @@ pub(crate) async fn observed_llm_call(
                     "error"
                 };
                 let event_retryable = can_retry || (status == "error" && retryable);
-                let error_usage =
-                    crate::llm::usage::ProviderUsageReceipt::from_error(&error).map(|receipt| {
-                        crate::llm::usage::LlmUsage::from_provider_receipt(
-                            &opts.provider,
-                            &opts.model,
-                            &receipt,
-                        )
-                    });
                 // Admission denials have a typed owner record and occur
                 // before the provider boundary. They are a measured zero for
                 // this attempt; every other thrown error without a usage
@@ -1105,7 +1120,7 @@ pub(crate) async fn observed_llm_call(
                 .then(crate::llm::usage::LlmUsage::no_provider_request);
                 let terminal_usage = (!can_retry).then(|| {
                     let mut reported = completed_retry_usage.clone();
-                    if let Some(usage) = error_usage.as_ref() {
+                    if let Some(usage) = error_usage.as_deref() {
                         reported.push(usage.clone());
                     }
                     // A typed admission denial measures no provider request,
@@ -1154,7 +1169,7 @@ pub(crate) async fn observed_llm_call(
                     schema_failure: error.schema_stream_abort(),
                     usage: terminal_usage
                         .as_ref()
-                        .or(error_usage.as_ref())
+                        .or(error_usage.as_deref())
                         .or(admission_denial_usage.as_ref()),
                     retryable: event_retryable,
                     failover_eligible: false,
@@ -1214,6 +1229,19 @@ pub(crate) async fn observed_llm_call(
                         metrics.record_llm_call(&opts.provider, &opts.model, status, usage);
                     }
                     let usage = terminal_usage.expect("terminal error must own an attempt ledger");
+                    if physical_attempts > 0 && !settled_usage_recorded {
+                        let attempts = super::api::ProviderAttempts {
+                            total: u32::try_from(physical_attempts).unwrap_or(u32::MAX),
+                            rate_limited: rate_limited_retries,
+                            empty_completion: u32::try_from(empty_completion_retries)
+                                .unwrap_or(u32::MAX),
+                            other: other_retries,
+                            completed_retry_usage: completed_retry_usage.clone(),
+                        };
+                        super::agent_session_host::record_failed_call_usage(
+                            opts, &usage, &attempts, &call_id,
+                        );
+                    }
                     trace_llm_call(LlmTraceEntry {
                         model: opts.model.clone(),
                         provider: opts.provider.clone(),
@@ -1247,11 +1275,11 @@ pub(crate) async fn observed_llm_call(
                         empty_completion_reason.expect("empty retry has a classified reason"),
                         duration_ms,
                         &error.to_string(),
-                        error_usage.as_ref(),
+                        error_usage.as_deref(),
                     );
                 }
                 if let Some(usage) = error_usage {
-                    completed_retry_usage.push(usage);
+                    completed_retry_usage.push(*usage);
                 }
                 // Apply the runtime tool_format degrade for the next attempt:
                 // swap the working request to its text-channel form, flip the

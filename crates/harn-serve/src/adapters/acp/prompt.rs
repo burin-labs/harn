@@ -496,6 +496,7 @@ impl AcpServer {
             ),
         ));
         let bridge = Arc::new(AcpBridge {
+            client_capabilities: self.client_capabilities.clone(),
             session_id: session_id.clone(),
             output: output.clone(),
             pending: self.pending.clone(),

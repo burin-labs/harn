@@ -6,6 +6,9 @@ impl AcpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) {
+        if !self.validate_protocol_session_options(id, params) {
+            return;
+        }
         let workspace_checkpoint = match Self::parse_workspace_checkpoint(params) {
             Ok(value) => value.unwrap_or(false),
             Err(message) => {
@@ -558,6 +561,9 @@ impl AcpServer {
         params: &'a serde_json::Value,
     ) -> std::pin::Pin<Box<impl std::future::Future<Output = ()> + 'a>> {
         Box::pin(async move {
+            if !self.validate_protocol_session_options(id, params) {
+                return;
+            }
             let src_id = session_id_param(params);
             let Some(src_id) = src_id else {
                 self.send_error(id, -32602, "Missing session_id");

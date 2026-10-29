@@ -670,8 +670,8 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     assert_eq!(
         init["result"]["agentCapabilities"]["mcpCapabilities"],
         json!({
-            "http": true,
-            "sse": true,
+            "http": false,
+            "sse": false,
         })
     );
     let session_capabilities = init["result"]["agentCapabilities"]["sessionCapabilities"]

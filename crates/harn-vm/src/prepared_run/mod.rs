@@ -11,6 +11,7 @@ mod discovery;
 mod engine;
 mod evidence;
 mod identity;
+mod policy;
 mod receipt;
 mod session;
 mod session_bridge;

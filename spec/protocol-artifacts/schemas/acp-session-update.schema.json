@@ -73,6 +73,7 @@
       "properties": {
         "sessionUpdate": { "const": "tool_call_update" },
         "toolCallId": { "type": "string", "minLength": 1 },
+        "name": { "type": ["string", "null"] },
         "title": { "type": "string" },
         "kind": { "type": "string" },
         "content": {
@@ -185,6 +186,7 @@
                 "orchestration_decision",
                 "pack_thinking_stripped",
                 "progress_reported",
+                "provider_usage",
                 "purpose_label",
                 "repair_output_contract_applied",
                 "require_successful_tools_violation",
@@ -484,6 +486,7 @@
       "properties": {
         "sessionUpdate": { "const": "tool_call" },
         "toolCallId": { "type": "string", "minLength": 1 },
+        "name": { "type": ["string", "null"] },
         "title": { "type": "string" },
         "kind": { "type": "string" },
         "status": { "$ref": "#/$defs/ToolCallStatus" },
@@ -501,6 +504,7 @@
       "properties": {
         "sessionUpdate": { "const": "tool_call_update" },
         "toolCallId": { "type": "string", "minLength": 1 },
+        "name": { "type": ["string", "null"] },
         "title": { "type": ["string", "null"] },
         "status": { "$ref": "#/$defs/NullableToolCallStatus" },
         "kind": { "type": "string" },

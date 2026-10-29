@@ -5,18 +5,20 @@ import {fileURLToPath} from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {githubArchiveProducer,qualifyArchiveProducer} from '../lib/consumer-observer.mjs';
+import {createHash} from 'node:crypto';
+import {githubArchiveProducer,observerDeclarationName,observerDispatchActor,observerRunName,qualifyArchiveProducer} from '../lib/consumer-observer.mjs';
 
 const targets=JSON.parse(execFileSync('bash',[fileURLToPath(new URL('../lib/candidate_archive_contract.sh',import.meta.url)),'--targets-json'],{encoding:'utf8'}));
 const source='a'.repeat(40);
 const request={sourceRevision:source,runId:'42',attempt:1};
 const run={id:42,run_attempt:1,head_sha:source,head_branch:'main',event:'push',status:'in_progress',conclusion:null,
   repository:{full_name:'burin-labs/harn'},head_repository:{full_name:'burin-labs/harn'},path:'.github/workflows/build-release-binaries.yml'};
-const names=['Resolve release context','Prepare CLI AOT payload','Assemble candidate manifest','Release residual audit',
+const names=['Resolve release context','Prepare CLI AOT payload','Assemble candidate manifest',
   'Consumer release rehearsal / Decide whether main moved',...targets.map(target=>`Build ${target}`),
   ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)];
 const jobs=names.map((name,index)=>({id:index+1,run_id:42,run_attempt:1,head_sha:source,name,status:'completed',conclusion:'success'}));
 jobs.push({id:99,run_id:42,run_attempt:1,head_sha:source,name:'Consumer release rehearsal / Consumer canary',status:'in_progress',conclusion:null});
+jobs.push({id:98,run_id:42,run_attempt:1,head_sha:source,name:'Release residual audit',status:'completed',conclusion:'success'});
 const artifacts=[...targets.map(target=>`harn-${target}`),`candidate-manifest-${source}`,'harn-release-files'].map((name,index)=>({
   id:index+100,name,expired:false,size_in_bytes:100,digest:`sha256:${'b'.repeat(64)}`,workflow_run:{id:42,head_sha:source},
 }));
@@ -48,6 +50,21 @@ test('archive readiness is independent of a later consumer failure and requires 
   }
 });
 
+test('only the owning live candidate can observe a pending audit; failed or absent audits never qualify',()=>{
+  const pending=jobs.map(job=>job.id===98?{...job,status:'in_progress',conclusion:null}:job);
+  const liveRequest={...request,allowPendingAudit:true};
+  const proof=qualifyArchiveProducer(run,pending,artifacts,liveRequest,targets);
+  assert.equal(proof.pending,1);
+  assert.deepEqual(proof.pending_jobs,['Release residual audit']);
+  assert.throws(()=>qualifyArchiveProducer(run,pending,artifacts,request,targets),/builds_unproven/);
+  assert.throws(()=>qualifyArchiveProducer({...run,status:'completed',conclusion:'failure'},pending,artifacts,liveRequest,targets),/builds_unproven/);
+  assert.throws(()=>qualifyArchiveProducer(run,jobs.filter(job=>job.id!==98),artifacts,liveRequest,targets),/builds_unproven/);
+  for(const conclusion of ['failure','cancelled','timed_out','skipped',null]) {
+    const failed=jobs.map(job=>job.id===98?{...job,status:'completed',conclusion}:job);
+    assert.throws(()=>qualifyArchiveProducer(run,failed,artifacts,liveRequest,targets),/builds_unproven/);
+  }
+});
+
 test('the owning reader uses the producing attempt and refuses partial authenticated censuses',async()=>{
   const calls=[];
   const read=async(url)=>{
@@ -61,6 +78,72 @@ test('the owning reader uses the producing attempt and refuses partial authentic
   assert.ok(calls.includes('/repos/burin-labs/harn/actions/runs/42/attempts/1/jobs'));
   await assert.rejects(githubArchiveProducer('fixture-read',request,async(url,options)=>url.includes('/jobs')?
     {ok:true,json:async()=>({total_count:jobs.length+1,jobs})}:read(url,options)),/census_unmeasured/);
+});
+
+test('actual admission permits a pending audit only for its own live candidate',()=>{
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-candidate-admission-'));
+  try {
+    const context={schema:'harn.consumer_observer.v2',parent_repository:'burin-labs/harn',parent_run_id:'42',
+      parent_run_attempt:1,parent_head_sha:source,source_revision:source,started_at:1000,
+      dispatch_nonce:'01234567-89ab-4cde-8fab-0123456789ab'};
+    const child={id:73,run_attempt:1,head_sha:'c'.repeat(40),head_repository:{full_name:'acme/widget-host'},
+      path:'.github/workflows/rehearsal.yml',head_branch:'main',event:'workflow_dispatch',status:'in_progress',
+      actor:{login:observerDispatchActor,type:'Bot'},display_title:observerRunName(context)};
+    const declaration=path.join(scratch,'consumer-observer.json'),archive=path.join(scratch,'declaration.zip');
+    fs.writeFileSync(declaration,JSON.stringify(context));
+    const zipped=spawnSync('zip',['-j',archive,declaration],{encoding:'utf8'});
+    assert.equal(zipped.status,0,zipped.stderr);
+    const bytes=fs.readFileSync(archive);
+    const declarationArtifact={id:500,name:observerDeclarationName(context),expired:false,size_in_bytes:bytes.length,
+      digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,workflow_run:{id:42,head_sha:source}};
+    const fixture=path.join(scratch,'fixture.json'),preload=path.join(scratch,'fetch.mjs');
+    fs.writeFileSync(preload,`import fs from 'node:fs';
+      const data=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
+      globalThis.fetch=async(url)=>{
+        const endpoint=new URL(url),route=endpoint.pathname;
+        if(route.endsWith('/zip'))return {ok:true,arrayBuffer:async()=>fs.readFileSync(${JSON.stringify(archive)})};
+        const record=route.endsWith('/73')?data.child:route.endsWith('/jobs')?
+          {total_count:data.jobs.length,jobs:data.jobs}:route.endsWith('/artifacts')?
+          (endpoint.searchParams.has('name')?{total_count:1,artifacts:[data.declaration]}:
+            {total_count:data.artifacts.length,artifacts:data.artifacts}):data.run;
+        return {ok:true,json:async()=>record};
+      };`);
+    const event=path.join(scratch,'event.json');
+    fs.writeFileSync(event,JSON.stringify({inputs:{source_revision:source,observer:JSON.stringify(context),
+      release_producer_run_id:'42',release_producer_run_attempt:'1'}}));
+    const entry=fileURLToPath(new URL('../ci/consumer-observer-admit.mjs',import.meta.url));
+    let sequence=0;
+    const execute=(changes={})=>{
+      const directory=path.join(scratch,String(sequence++));fs.mkdirSync(directory);
+      const output=path.join(directory,'output');
+      fs.writeFileSync(fixture,JSON.stringify({run,jobs,artifacts,child,declaration:declarationArtifact,...changes}));
+      const result=spawnSync(process.execPath,[entry],{encoding:'utf8',env:{PATH:process.env.PATH,
+        NODE_OPTIONS:`--import=${preload}`,GH_TOKEN:'fixture-read',OBSERVER_CONTEXT:JSON.stringify(context),
+        GITHUB_REPOSITORY:'acme/widget-host',GITHUB_RUN_ID:'73',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:child.head_sha,
+        GITHUB_WORKFLOW_REF:'acme/widget-host/.github/workflows/rehearsal.yml@refs/heads/main',
+        GITHUB_EVENT_PATH:event,SOURCE_REVISION:source,RELEASE_PRODUCER_RUN_ID:'42',
+        RELEASE_PRODUCER_RUN_ATTEMPT:'1',RUNNER_TEMP:directory,GITHUB_OUTPUT:output}});
+      return {result,text:fs.existsSync(output)?fs.readFileSync(output,'utf8'):''};
+    };
+    const pending=jobs.map(job=>job.id===98?{...job,status:'in_progress',conclusion:null}:job);
+    const accepted=execute({jobs:pending});
+    assert.equal(accepted.result.status,0,accepted.result.stderr);
+    assert.match(accepted.text,/^owned=true\n/);
+    const receipt=JSON.parse(fs.readFileSync(/^receipt=(.+)$/m.exec(accepted.text)[1],'utf8'));
+    assert.equal(receipt.producer.producer_run,'42');
+    for(const changes of [
+      {run:{...run,path:'.github/workflows/promote-release.yml'},jobs:pending},
+      {jobs:jobs.filter(job=>job.id!==98)},
+      ...['failure','cancelled','timed_out','skipped',null].map(conclusion=>
+        ({jobs:jobs.map(job=>job.id===98?{...job,status:'completed',conclusion}:job)})),
+    ]) {
+      const refused=execute(changes);
+      assert.equal(refused.result.status,1);
+      assert.equal(refused.text,'','refusal must not publish a custody receipt');
+    }
+  } finally {
+    fs.rmSync(scratch,{recursive:true,force:true});
+  }
 });
 
 test('the actual recovery dispatcher authenticates its live promotion and preserves original archive identity',()=>{
@@ -101,6 +184,11 @@ test('the actual recovery dispatcher authenticates its live promotion and preser
       assert.equal(execute({parent:changed}).status,1,'an unrelated or ended observer cannot reuse producer evidence');
     }
     assert.equal(execute({jobs:jobs.filter(job=>job.name!=='Assemble candidate manifest')}).status,1);
+    for(const conclusion of ['failure','cancelled','timed_out','skipped',null]) {
+      const failedAudit=jobs.map(job=>job.id===98?{...job,status:'completed',conclusion}:job);
+      assert.equal(execute({jobs:failedAudit}).status,1,'recovery dispatch must reject an unsuccessful audit');
+    }
+    assert.equal(execute({jobs:jobs.map(job=>job.id===98?{...job,status:'in_progress',conclusion:null}:job)}).status,1);
     assert.equal(execute({artifacts:[]}).status,1);
   } finally {
     fs.rmSync(scratch,{recursive:true,force:true});
@@ -146,6 +234,10 @@ test('the actual promotion resolver admits only an explicit repair with complete
       [{},{COMPLETED_CONSUMER_RUN_ID:'123'}],
       [{run:{...run,status:'completed',conclusion:'cancelled'}},{}],
       [{jobs:jobs.filter(job=>job.name!=='Assemble candidate manifest')},{}],
+      [{jobs:jobs.filter(job=>job.id!==98)},{}],
+      ...['failure','cancelled','timed_out','skipped',null].map(conclusion=>
+        [{jobs:jobs.map(job=>job.id===98?{...job,status:'completed',conclusion}:job)},{}]),
+      [{jobs:jobs.map(job=>job.id===98?{...job,status:'in_progress',conclusion:null}:job)},{}],
       [{artifacts:[]},{}], [{run:{...run,head_repository:{full_name:'fork/harn'}}},{}],
     ]) {
       const refused=execute(changes,environment);

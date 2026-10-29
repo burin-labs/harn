@@ -194,6 +194,7 @@ mod tests {
         }))
         .observed_by(ModuleProgressGate::default());
         let bridge = Arc::new(AcpBridge {
+            client_capabilities: Default::default(),
             session_id: "s".to_string(),
             output,
             pending: Default::default(),

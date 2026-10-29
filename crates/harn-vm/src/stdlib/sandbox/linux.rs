@@ -383,17 +383,8 @@ fn profile_setup_for(
     // `resolve_netns_launcher` owns that decision so the spawn path and this
     // one cannot disagree about whether the grant is available.
     resolve_netns_launcher(policy)?;
-    // A Unix-socket grant is rendered here as serve-only local IPC rather than
-    // refused. seccomp filters the syscall and not the socket path, and no
-    // Landlock ABI Harn uses has an access right governing connection to a
-    // socket file, so `connect` is the one operation that cannot be scoped: a
-    // child allowed to make it reaches every socket its uid can open, a
-    // container daemon's among them, which is an escape and not a grant.
-    // Withholding `connect` removes that reach entirely while leaving the
-    // serving half — create, bind, listen, accept — which is all a build server
-    // needs to talk to itself. `unix_socket_local_ipc_grant` owns that
-    // decision; the seccomp and Landlock terms below both read it so they
-    // cannot disagree.
+    // Socket roots supply serving authority; the separate SSH agent grant
+    // scopes its connection by inode before seccomp admits connect.
     // The selected Landlock renderer must attach a filesystem boundary; it
     // cannot return a seccomp-only profile when that mechanism is unavailable.
     let landlock = landlock_profile_for(program, policy, support)?;
@@ -412,6 +403,11 @@ fn profile_setup_for(
 /// something it does not.
 fn unix_socket_local_ipc_grant(policy: &CapabilityPolicy) -> bool {
     !policy.process_sandbox.unix_socket_roots.is_empty() && !policy_allows_network(policy)
+}
+
+pub(super) fn ssh_agent_path_scope_available() -> bool {
+    Backend::filesystem_mechanism() == super::SandboxMechanism::LinuxLandlock
+        && LandlockSupport::negotiate(ABI::V9).is_some_and(|support| support.abi() >= ABI::V9)
 }
 
 fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {
@@ -451,7 +447,15 @@ fn landlock_profile_for(
     // descendants, which is the containment the grant claims. An older kernel
     // cannot express it, so the grant is refused there rather than issued
     // half-enforced.
-    let scope_abstract_unix = unix_socket_local_ipc_grant(policy);
+    super::enforcement::validate_ssh_agent(policy)?;
+    let scope_unix_paths =
+        policy.process_sandbox.ssh_agent_socket.is_some() && !policy_allows_network(policy);
+    if scope_unix_paths && support.abi() < ABI::V9 {
+        return Err(sandbox_rejection(
+            "SSH agent socket connection requires Landlock ABI 9 on this host".into(),
+        ));
+    }
+    let scope_abstract_unix = unix_socket_local_ipc_grant(policy) || scope_unix_paths;
     if scope_abstract_unix && !support.scopes_abstract_unix_sockets() {
         return Err(sandbox_rejection(format!(
             "serve-only Unix-domain sockets need Landlock ABI {} to contain abstract sockets; this host reports ABI {}",
@@ -465,6 +469,20 @@ fn landlock_profile_for(
         support.handled_access(),
         ProcessFilesystemScope::Host,
     )?;
+    if scope_unix_paths {
+        use std::os::unix::fs::OpenOptionsExt;
+        let path = PathBuf::from(policy.process_sandbox.ssh_agent_socket.as_ref().unwrap());
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_PATH | libc::O_CLOEXEC)
+            .open(&path)
+            .map_err(|error| sandbox_rejection(format!("cannot pin SSH agent socket: {error}")))?;
+        filesystem.rules.push(FilesystemRule {
+            file,
+            path,
+            allowed_access: AccessFs::ResolveUnix.into(),
+        });
+    }
     let private_tmp = netns::private_tmp_dir(
         policy,
         filesystem.rules.iter().map(|rule| rule.path.as_path()),
@@ -482,6 +500,7 @@ fn landlock_profile_for(
     let ruleset = support
         .populated_ruleset(
             scope_abstract_unix,
+            scope_unix_paths,
             filesystem
                 .rules
                 .iter()
@@ -876,34 +895,37 @@ fn compile_seccomp_program(
         landlock_support::filter_path_truncation(&mut rules)?;
     }
 
-    if unix_socket_local_ipc_grant(policy) {
-        // `socket` is admitted only for the Unix domain. An argument condition
-        // is the whole protection: an unconditional entry here would hand the
-        // child every address family, which is the grant this term exists to
-        // avoid. `bind`, `listen` and `accept` take a descriptor rather than a
-        // family, so they cannot be filtered the same way and are admitted
-        // outright — safely, because the only descriptors the child can obtain
-        // are the Unix-domain ones this rule allowed. `connect` is absent by
-        // design and is what keeps a host daemon's socket out of reach.
-        let unix_domain_only = SeccompRule::new(vec![SeccompCondition::new(
-            0,
-            SeccompCmpArgLen::Dword,
-            SeccompCmpOp::Eq,
-            libc::AF_UNIX as u64,
-        )
-        .map_err(|err| {
-            sandbox_rejection(format!("failed to build the Unix-domain condition: {err}"))
-        })?])
-        .map_err(|err| sandbox_rejection(format!("failed to build the socket rule: {err}")))?;
-        rules.insert(libc::SYS_socket, vec![unix_domain_only]);
-        for syscall in [
-            libc::SYS_bind,
-            libc::SYS_listen,
-            libc::SYS_accept,
-            libc::SYS_accept4,
-            libc::SYS_getsockname,
-        ] {
-            rules.entry(syscall).or_default();
+    if unix_socket_local_ipc_grant(policy)
+        || (policy.process_sandbox.ssh_agent_socket.is_some() && !policy_allows_network(policy))
+    {
+        // A separate loopback grant already owns IP socket creation inside
+        // its namespace. Landlock still scopes the agent connection by inode.
+        if !namespaced_loopback_grant(policy) {
+            let unix_domain_only = SeccompRule::new(vec![SeccompCondition::new(
+                0,
+                SeccompCmpArgLen::Dword,
+                SeccompCmpOp::Eq,
+                libc::AF_UNIX as u64,
+            )
+            .map_err(|err| {
+                sandbox_rejection(format!("failed to build the Unix-domain condition: {err}"))
+            })?])
+            .map_err(|err| sandbox_rejection(format!("failed to build the socket rule: {err}")))?;
+            rules.insert(libc::SYS_socket, vec![unix_domain_only]);
+        }
+        if policy.process_sandbox.ssh_agent_socket.is_some() {
+            rules.entry(libc::SYS_connect).or_default();
+        }
+        if unix_socket_local_ipc_grant(policy) {
+            for syscall in [
+                libc::SYS_bind,
+                libc::SYS_listen,
+                libc::SYS_accept,
+                libc::SYS_accept4,
+                libc::SYS_getsockname,
+            ] {
+                rules.entry(syscall).or_default();
+            }
         }
     }
     admit_own_identity_changes(&mut rules)?;

@@ -101,3 +101,41 @@ pub const MAKE_OWNED_COMMAND_RULES: list<MakeOwnedCommandRule> = [
   {program: "swift", verb: "build", target: "swift-build", escape: "HARN_ALLOW_RAW_SWIFT=1"},
   {program: "swift", verb: "test", target: "swift-test", escape: "HARN_ALLOW_RAW_SWIFT=1"},
 ]
+
+pub fn git_program_is_absolute(program: string, separator: string) -> bool {
+  if separator == ":" {
+    return program.starts_with("/")
+  }
+  if separator != ";" {
+    return false
+  }
+  return program.starts_with("\\\\")
+    || (len(program) > 2 && program.substring(1, 2) == ":"
+      && "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".contains(program.substring(0, 1))
+      && ["/", "\\"].contains(program.substring(2, 3)))
+}
+
+/** Preflight may query only executable locations already trusted by the hook. */
+pub fn git_program_in_hook_path(path: string, program: string, separator: string) -> bool {
+  const entries = path.split(separator)
+  if program == "git" || program == "git.exe" {
+    if path == "" || path.starts_with(separator) || path.ends_with(separator)
+      || path.contains("${separator}${separator}") {
+      return false
+    }
+    return entries.all({ entry -> git_program_is_absolute(entry, separator) })
+  }
+  const normalized = program.replace("\\", "/")
+  return entries.any(
+    { entry ->
+      if !git_program_is_absolute(entry, separator) {
+        return false
+      }
+      let directory = entry.replace("\\", "/")
+      if directory.ends_with("/") {
+        directory = directory.substring(0, len(directory) - 1)
+      }
+      return normalized == "${directory}/git" || normalized == "${directory}/git.exe"
+    },
+  )
+}

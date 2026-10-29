@@ -31,6 +31,7 @@ async fn tool_call_update_serializes_error_category_in_camel_case() {
         "tool_call_update"
     );
     assert_eq!(payload["params"]["update"]["status"], "failed");
+    assert_eq!(payload["params"]["update"]["name"], "read");
     let harn_meta = update_harn_meta(&payload);
     assert_eq!(harn_meta["errorCategory"], "schema_validation");
     assert_eq!(harn_meta["error"], "missing required arg `path`");
@@ -123,6 +124,7 @@ async fn tool_call_carries_parsing_flag_through_to_acp_wire() {
     let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
     assert_eq!(payload["params"]["update"]["sessionUpdate"], "tool_call");
     assert_eq!(update_harn_meta(&payload)["parsing"], true);
+    assert_eq!(payload["params"]["update"]["name"], "edit");
     assert!(payload["params"]["update"].get("parsing").is_none());
 
     sink.handle_event(&AgentEvent::ToolCallUpdate {

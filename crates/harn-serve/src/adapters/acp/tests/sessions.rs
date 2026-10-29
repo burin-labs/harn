@@ -116,8 +116,8 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
             assert_eq!(
                 initialize["result"]["agentCapabilities"]["mcpCapabilities"],
                 serde_json::json!({
-                    "http": true,
-                    "sse": true,
+                    "http": false,
+                    "sse": false,
                 })
             );
             assert!(
@@ -1009,6 +1009,7 @@ async fn acp_bridge_routes_session_request_permission_response() {
     let server =
         AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx.clone()));
     let bridge = Arc::new(AcpBridge {
+        client_capabilities: server.client_capabilities.clone(),
         session_id: "session-1".to_string(),
         output: AcpOutput::Channel(tx),
         pending: server.pending.clone(),

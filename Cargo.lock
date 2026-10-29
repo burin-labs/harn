@@ -3637,6 +3637,7 @@ dependencies = [
  "harn-source-fingerprint-build",
  "harn-stdlib",
  "harn-vm",
+ "hex",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -3796,6 +3797,7 @@ version = "0.10.181"
 dependencies = [
  "harn-modules",
  "harn-vm",
+ "hex",
  "ort",
  "serde",
  "serde_json",
@@ -3839,6 +3841,7 @@ dependencies = [
  "jsonschema",
  "libc",
  "notify",
+ "percent-encoding",
  "postcard",
  "regex",
  "regex-automata",
@@ -4021,6 +4024,7 @@ dependencies = [
  "harn-source-fingerprint-build",
  "harn-stdlib",
  "harn-stdlib-catalog",
+ "hex",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -4286,6 +4290,7 @@ name = "harn-signals"
 version = "0.10.181"
 dependencies = [
  "harn-flock",
+ "hex",
  "serde",
  "serde_json",
  "tempfile",
@@ -4445,6 +4450,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "parking_lot",
+ "percent-encoding",
  "pin-project-lite",
  "proptest",
  "rand 0.10.3",

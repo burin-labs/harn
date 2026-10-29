@@ -459,8 +459,8 @@ async fn acp_websocket_requires_configured_bearer_auth() {
     assert_eq!(
         response["result"]["agentCapabilities"]["mcpCapabilities"],
         json!({
-            "http": true,
-            "sse": true,
+            "http": false,
+            "sse": false,
         })
     );
     assert_eq!(

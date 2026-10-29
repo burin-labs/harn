@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde::{Deserialize, Serialize};
 
 use super::super::refactor_core::{EditSpan, IdentifierSpan};
@@ -149,6 +150,15 @@ pub(crate) fn lower_edits(
     Ok(spans)
 }
 
+/// RFC 3986 unreserved characters plus `/` and `:` (Windows drive letters).
+const FILE_URI_PATH: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'~')
+    .remove(b'/')
+    .remove(b':');
+
 /// `file://` URI for an absolute path, percent-encoding everything outside
 /// the RFC 3986 unreserved set and the path separator.
 pub(crate) fn path_to_uri(path: &Path) -> String {
@@ -157,13 +167,7 @@ pub(crate) fn path_to_uri(path: &Path) -> String {
     if !raw.starts_with('/') {
         out.push('/');
     }
-    for byte in raw.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-._~/:".contains(&byte) {
-            out.push(byte as char);
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
-    }
+    out.extend(utf8_percent_encode(&raw, FILE_URI_PATH));
     out
 }
 
@@ -172,28 +176,15 @@ pub(crate) fn uri_to_path(uri: &str) -> Result<PathBuf, String> {
         .strip_prefix("file://")
         .ok_or_else(|| format!("unsupported document URI `{uri}`"))?;
     let rest = rest.strip_prefix("localhost").unwrap_or(rest);
-    let bytes = rest.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut at = 0;
-    while at < bytes.len() {
-        if bytes[at] == b'%' && at + 2 < bytes.len() {
-            let hex = std::str::from_utf8(&bytes[at + 1..at + 3]).unwrap_or("");
-            if let Ok(value) = u8::from_str_radix(hex, 16) {
-                decoded.push(value);
-                at += 3;
-                continue;
-            }
-        }
-        decoded.push(bytes[at]);
-        at += 1;
-    }
-    let text = String::from_utf8(decoded).map_err(|_| format!("non-UTF-8 URI `{uri}`"))?;
+    let text = percent_decode_str(rest)
+        .decode_utf8()
+        .map_err(|_| format!("non-UTF-8 URI `{uri}`"))?;
     // `file:///C:/x` names `C:/x` on Windows.
     let windows_drive = text.len() > 2 && text.as_bytes()[2] == b':' && text.starts_with('/');
     Ok(PathBuf::from(if cfg!(windows) && windows_drive {
         text.strip_prefix('/').unwrap_or(&text)
     } else {
-        text.as_str()
+        &text
     }))
 }
 

@@ -91,6 +91,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "orchestration_decision",
     "pack_thinking_stripped",
     "progress_reported",
+    "provider_usage",
     "purpose_label",
     "repair_output_contract_applied",
     "require_successful_tools_violation",
@@ -279,8 +280,8 @@ pub(super) fn acp_agent_capabilities() -> serde_json::Value {
         },
         "promptCapabilities": acp_prompt_capabilities(),
         "mcpCapabilities": {
-            "http": true,
-            "sse": true,
+            "http": false,
+            "sse": false,
         },
         "sessionCapabilities": {
             "close": {},

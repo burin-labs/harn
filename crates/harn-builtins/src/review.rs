@@ -602,10 +602,7 @@ fn finding_id(finding: &ReviewFinding) -> String {
         finding.line_end
     );
     let digest = sha2::Sha256::digest(seed.as_bytes());
-    digest[..8]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hex::encode(&digest[..8])
 }
 
 fn ensure_review_event_log() -> Arc<AnyEventLog> {

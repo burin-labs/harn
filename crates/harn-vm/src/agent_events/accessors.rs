@@ -37,6 +37,7 @@ impl AgentEvent {
             | Self::IterationStart { session_id, .. }
             | Self::IterationEnd { session_id, .. }
             | Self::InferenceSpeed { session_id, .. }
+            | Self::ProviderUsage { session_id, .. }
             | Self::SessionClosed { session_id, .. }
             | Self::AnchorChanged { session_id, .. }
             | Self::JudgeStarted { session_id, .. }

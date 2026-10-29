@@ -8,6 +8,9 @@ use crate::stdlib::sandbox::{effective_fallback, handler_sandbox_test_guard, San
 #[path = "linux_process_introspection_tests.rs"]
 mod process_introspection;
 
+#[path = "linux_ssh_agent_tests.rs"]
+mod ssh_agent;
+
 /// Every right a write could use, through truncation.
 fn write_bits() -> FsAccess {
     AccessFs::from_write(ABI::V3)

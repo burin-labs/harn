@@ -33,6 +33,7 @@ impl AcpServer {
         concurrent_controls.machine_spend_quota = config.machine_spend_quota.clone();
 
         Self {
+            client_capabilities: client_capabilities::ClientCapabilities::default(),
             launcher_environment: config.launcher_environment,
             descriptor: AdapterDescriptor {
                 id: "acp".to_string(),

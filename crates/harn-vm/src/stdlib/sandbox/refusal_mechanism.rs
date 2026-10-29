@@ -118,7 +118,12 @@ impl ProcessSandboxMechanism {
                 } else {
                     "not granted (allow_tcp_loopback / --allow-process-loopback)"
                 },
-                if grants.unix_socket_roots.is_empty() {
+                if let Some(socket) = &grants.ssh_agent_socket {
+                    format!(
+                        "SSH agent connection granted at {socket}; socket roots: {:?}",
+                        grants.unix_socket_roots
+                    )
+                } else if grants.unix_socket_roots.is_empty() {
                     "not granted anywhere (process_sandbox.unix_socket_roots / \
                      --sandbox-unix-socket-root)"
                         .to_string()
@@ -161,6 +166,7 @@ impl ProcessSandboxMechanism {
 pub struct ProcessSandboxGrants {
     pub tcp_loopback: bool,
     pub unix_socket_roots: Vec<String>,
+    pub ssh_agent_socket: Option<String>,
     /// The policy lets its child processes write nowhere: a read-only role
     /// with no child write grant, where even a workspace write is refused and
     /// the fix is the grant, not another root. False by default, so a missing
@@ -177,6 +183,7 @@ impl ProcessSandboxGrants {
             tcp_loopback: super::super::policy::ProcessNetworkGrant::for_policy(policy)
                 .tcp_loopback(),
             unix_socket_roots: policy.process_sandbox.unix_socket_roots.clone(),
+            ssh_agent_socket: policy.process_sandbox.ssh_agent_socket.clone(),
             child_writes_withheld: !policy.children_may_write(),
             denied_home_path: None,
         }

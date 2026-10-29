@@ -48,6 +48,43 @@ fn provider_attempts_ride_in_the_usage_block() {
     );
 }
 
+#[test]
+fn unreported_rate_limited_attempt_remains_unpriced_after_success() {
+    let mut result = result_with(ProviderAttempts {
+        total: 2,
+        rate_limited: 1,
+        ..ProviderAttempts::default()
+    });
+    result.telemetry.provider_cost_usd = Some(0.02);
+    let usage = result.usage();
+    assert_eq!(usage.provider_call_count, Some(2));
+    assert_eq!(usage.usage_unknown_calls, 1);
+    assert_eq!(usage.unpriced_calls, 1);
+    assert_eq!(usage.cost_usd, Some(0.02));
+    assert_eq!(
+        usage.known_cost_usd, 0.02,
+        "the successful call remains priced"
+    );
+}
+
+#[test]
+fn reported_retry_is_counted_once_even_when_rate_limited() {
+    let mut retry = result_with(ProviderAttempts::default());
+    retry.telemetry.provider_cost_usd = Some(0.01);
+    let mut result = result_with(ProviderAttempts {
+        total: 2,
+        rate_limited: 1,
+        completed_retry_usage: vec![retry.usage()],
+        ..ProviderAttempts::default()
+    });
+    result.telemetry.provider_cost_usd = Some(0.02);
+    let usage = result.usage();
+    assert_eq!(usage.provider_call_count, Some(2));
+    assert_eq!(usage.unpriced_calls, 0);
+    assert_eq!(usage.usage_unknown_calls, 0);
+    assert!((usage.known_cost_usd - 0.03).abs() < 1e-10);
+}
+
 /// The overwhelming majority of calls succeed first try. Serializing a
 /// zero-valued object onto every one of them would grow a persisted
 /// transcript for no information.

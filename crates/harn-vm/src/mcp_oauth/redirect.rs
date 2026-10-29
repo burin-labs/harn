@@ -321,9 +321,8 @@ pub(super) fn generate_pkce_pair() -> (String, String) {
 }
 
 pub(super) fn random_hex(bytes: usize) -> String {
-    (0..bytes)
-        .map(|_| format!("{:02x}", rand::random::<u8>()))
-        .collect()
+    let raw: Vec<u8> = (0..bytes).map(|_| rand::random::<u8>()).collect();
+    hex::encode(raw)
 }
 
 #[cfg(test)]

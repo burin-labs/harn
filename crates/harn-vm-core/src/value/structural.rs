@@ -129,9 +129,7 @@ fn write_structural_hash_key(v: &VmValue, out: &mut String, purpose: KeyPurpose)
         }
         VmValue::Bytes(bytes) => {
             out.push('b');
-            for byte in bytes.iter() {
-                out.push_str(&format!("{byte:02x}"));
-            }
+            out.push_str(&hex::encode(bytes.as_ref()));
             out.push(';');
         }
         VmValue::Duration(ms) => {

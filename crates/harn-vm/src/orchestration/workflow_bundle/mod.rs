@@ -844,11 +844,7 @@ pub fn workflow_graph_digest(graph: &WorkflowGraph) -> String {
     canonical.audit_log.clear();
     let bytes = serde_json::to_vec(&canonical).expect("workflow graph serializes");
     let digest = Sha256::digest(bytes);
-    let hex = digest
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    format!("sha256:{hex}")
+    format!("sha256:{}", hex::encode(digest))
 }
 
 fn canonical_workflow_bundle_manifest(bundle: &WorkflowBundle) -> WorkflowBundle {

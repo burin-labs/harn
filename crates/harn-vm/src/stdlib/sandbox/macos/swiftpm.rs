@@ -164,7 +164,7 @@ pub(super) fn has_option(args: &[String], option: &str) -> bool {
 }
 
 pub(super) fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+    shell_words::quote(value).into_owned()
 }
 
 fn launcher_source(name: &str, real_program: &Path, toolset: Option<&Path>) -> String {

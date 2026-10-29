@@ -133,6 +133,7 @@ mod runs_export_training_cli;
 mod runs_view_cli;
 mod scaffold_dispatch;
 mod scan_dispatch;
+mod scoped_ssh_agent;
 mod secret_absence;
 mod shard_coverage_cli;
 #[cfg(unix)]

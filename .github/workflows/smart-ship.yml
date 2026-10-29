@@ -34,7 +34,8 @@ jobs:
     with:
       # .github/smart-ship.toml sets which problems are repaired. The repair
       # model's key is a secret of this environment, which admits main only.
-      repair: true
+      # Off until replays prove repairs land PRs; authors fix their own PRs meanwhile.
+      repair: false
       repair-environment: ship-repair
     # A called job sees its environment's secrets only when the caller
     # inherits secrets; an explicit secrets map hides them.

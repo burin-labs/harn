@@ -64,6 +64,7 @@ pub use lifecycle::{
     AgentLifecycle, AgentLifecycleEvent, AgentLifecycleProjection, AgentLifecycleState,
     LifecycleTransitionError,
 };
+pub(crate) use registry::emit_provider_usage;
 pub(crate) use registry::redact_for_emission;
 #[cfg(test)]
 pub use registry::reset_wildcard_sinks;

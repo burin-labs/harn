@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::ffi::OsStr;
-use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -88,7 +87,7 @@ fn compute_archive_content_hash_capturing(
         let contents = read_regular_file(&path)?;
         hasher.update(normalized.as_bytes());
         hasher.update([0]);
-        hasher.update(encode_hex(&Sha256::digest(&contents)).as_bytes());
+        hasher.update(hex::encode(Sha256::digest(&contents)).as_bytes());
         if capture == Some(relative.as_path()) {
             captured = Some(contents);
         }
@@ -96,7 +95,7 @@ fn compute_archive_content_hash_capturing(
     Ok((
         format!(
             "{ARCHIVE_CONTENT_HASH_PREFIX}{}",
-            encode_hex(&hasher.finalize())
+            hex::encode(hasher.finalize())
         ),
         captured,
     ))
@@ -142,7 +141,7 @@ fn compute_canonical_package_content_hash_capturing(
     Ok((
         format!(
             "{CANONICAL_CONTENT_HASH_PREFIX}{}",
-            encode_hex(&hasher.finalize())
+            hex::encode(hasher.finalize())
         ),
         captured,
     ))
@@ -284,13 +283,4 @@ pub(super) fn validate_content_hash(hash: &str) -> Result<(), PackageExecutionEr
 
 fn is_sha256_hex(hex: &str) -> bool {
     hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
-fn encode_hex(bytes: &[u8]) -> String {
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use fmt::Write as _;
-        let _ = write!(encoded, "{byte:02x}");
-    }
-    encoded
 }

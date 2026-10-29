@@ -23,6 +23,7 @@ mod manifest;
 mod plan_records;
 mod prepared_session;
 mod prompt_correlation;
+mod provider_usage;
 mod recap_records;
 mod records;
 mod schema_records;

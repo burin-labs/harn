@@ -111,11 +111,19 @@ impl CancelState {
         Some(state)
     }
 
-    fn complete_wait(&self) -> CancellationSnapshot {
+    fn complete_wait(
+        &self,
+        report: Option<process_handle::ProcessCleanupReport>,
+    ) -> CancellationSnapshot {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(report) = report {
+            state.record_cleanup(report);
+        } else if state.process_cleanup.is_none() {
+            state.record_cleanup(process_handle::ProcessCleanupReport::default());
+        }
         state.completed = true;
         CancellationSnapshot {
             cancelled: state.cancelled,
@@ -685,7 +693,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
             .extend_from_slice(format!("\nharn: process completion refused: {error}\n").as_bytes());
     }
 
-    let cancellation = cancel_state.complete_wait();
+    let cancellation = cancel_state.complete_wait(handle.cleanup_report());
     let cancelled = cancellation.cancelled;
     let timed_out = cancelled && cancellation.timed_out;
     let process_cleanup = cancellation.process_cleanup;
@@ -1383,7 +1391,7 @@ mod tests {
         let waiter = harn_parser::runtime_stack::spawn(move || {
             started_tx.send(()).expect("test waiter start receiver");
             snapshot_tx
-                .send(waiter_state.complete_wait())
+                .send(waiter_state.complete_wait(None))
                 .expect("test snapshot receiver");
         });
 
@@ -1393,7 +1401,13 @@ mod tests {
             Err(mpsc::TryRecvError::Empty)
         ));
 
-        publication.record_cleanup(ProcessCleanupReport::for_signal(Some(42), 9));
+        let mut report = ProcessCleanupReport::for_signal(Some(42), 9);
+        report.census = harn_vm::op_interrupt::ProcessCleanupCensus {
+            control_read: true,
+            scanned_processes: 1,
+            unreadable_processes: 0,
+        };
+        publication.record_cleanup(report);
         publication.publish_cancellation();
         drop(publication);
 
@@ -1401,12 +1415,14 @@ mod tests {
         waiter.join().expect("test waiter panicked");
         assert!(snapshot.cancelled);
         assert!(snapshot.timed_out);
+        let report = snapshot
+            .process_cleanup
+            .expect("cleanup must publish with cancellation");
+        assert_eq!(report.root_pid, Some(42));
         assert_eq!(
-            snapshot
-                .process_cleanup
-                .expect("cleanup must publish with cancellation")
-                .root_pid,
-            Some(42)
+            report.survivor_count(),
+            Some(0),
+            "missing guardian receipt must preserve measured cancellation"
         );
         assert!(
             state.begin_cancellation(false).is_none(),

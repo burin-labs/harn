@@ -28,6 +28,7 @@ macro_rules! close_env_for_session {
             }
             true
         } else {
+            $command.envs(crate::stdlib::process::granted_ssh_agent_env());
             false
         }
     };

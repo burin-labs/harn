@@ -1,0 +1,143 @@
+import { agent_capture_events } from "std/agent/events"
+import { inject_host_tool_result } from "std/agent/host_injection"
+import { agent_loop } from "std/agent/loop"
+import { agent_session_await_inbox } from "std/agent/state"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { with_llm_script } from "std/testing"
+
+fn run_case(harness: Harness, variant: string) {
+  const session = "edit-verify-guards-" + harness.random.uuid()
+  const edits = harness.runtime.atomic(0)
+  const checks = harness.runtime.atomic(0)
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Edit the workspace.",
+    {
+      handler: { _args ->
+        harness.runtime.atomic_add(edits, 1)
+        if variant == "pending" {
+          harness.agent.session_post_event(session, "user", "new instructions", "test")
+        }
+        if variant == "typed" {
+          const receipt = inject_host_tool_result(
+            harness.agent,
+            session,
+            {tool_name: "host_check", raw_output: "new information"},
+            {initiator: "user", source: "test", ts_ms: 1},
+            "after_next_tool_call",
+          )
+          require receipt.status == "queued", "the host injection must be queued"
+        }
+        if variant == "pending" || variant == "typed" {
+          require agent_session_await_inbox(harness.agent, session, 0),
+            "the real inbox must expose the pending entry"
+        }
+        return agent_tool_handler_result(
+          "edit result",
+          {
+            mutation_status: if variant == "failed" {
+              "not_applied"
+            } else if variant == "unknown" {
+              "unknown"
+            } else {
+              "applied"
+            },
+            requires_repair_before_verify: if variant == "malformed" {
+              "false"
+            } else if variant == "missing" {
+              nil
+            } else {
+              variant == "repair"
+            },
+          },
+          variant == "failed" ? "error" : "ok",
+        )
+      },
+      parameters: {},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "check",
+    "Check the workspace.",
+    {
+      handler: { _args ->
+        harness.runtime.atomic_add(checks, 1)
+        return agent_tool_handler_result("checked", {})
+      },
+      parameters: {},
+      annotations: if variant == "generic" {
+        {kind: "execute", side_effect_level: "process_exec"}
+      } else {
+        {
+          kind: "execute",
+          side_effect_level: variant == "handle" ? "read_only" : "process_exec",
+          completion_evidence_role: "verification",
+        }
+      },
+    },
+  )
+  const calls = if variant == "reverse" {
+    [{id: "check", name: "check", arguments: {}}, {id: "edit", name: "edit", arguments: {}}]
+  } else {
+    [{id: "edit", name: "edit", arguments: {}}, {id: "check", name: "check", arguments: {}}]
+  }
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [{tool_calls: calls}],
+        { ->
+          return agent_loop(
+            harness,
+            "Edit and check.",
+            nil,
+            {
+              provider: "mock",
+              tools: tools,
+              tool_format: "native",
+              loop_until_done: true,
+              max_iterations: 1,
+              session_id: session,
+            },
+          )
+        },
+      )
+    },
+  )
+  const handle = variant == "handle"
+  require harness.runtime.atomic_get(edits) == (handle ? 0 : 1), "the selected phase must run"
+  require harness.runtime.atomic_get(checks) == (handle ? 1 : 0),
+    "the check must fire only for the read-only handle observation"
+  const deferred = captured.events.filter(
+    { event ->
+      event?.type == "tool_batch_disposition"
+        && event?.receipt?.tool_name == (handle ? "edit" : "check")
+        && event?.receipt?.disposition == "deferred"
+    },
+  )
+  require len(deferred) == 1, "the deferred check must leave an observable receipt"
+}
+
+pipeline main(harness: Harness) {
+  for variant in [
+    "failed",
+    "unknown",
+    "repair",
+    "malformed",
+    "missing",
+    "pending",
+    "typed",
+    "generic",
+    "reverse",
+    "handle",
+  ] {
+    run_case(harness, variant)
+  }
+  harness.stdio.println("edit_then_verify_guards=ok")
+}
