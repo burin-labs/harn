@@ -264,7 +264,7 @@ async fn emitted_agent_events_validate_against_the_derived_schema() {
 }
 
 /// Pins the emitted agent events that host bindings decode in their own
-/// languages. Set `HARN_BLESS_AGENT_EVENT_FIXTURE=1` to rewrite it.
+/// languages. Set `HARN_UPDATE_SNAPSHOTS=1` to rewrite it.
 #[tokio::test(flavor = "current_thread")]
 async fn emitted_agent_event_fixture_is_pinned() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -276,7 +276,7 @@ async fn emitted_agent_event_fixture_is_pinned() {
             .map(|notification| notification["params"].clone())
             .collect(),
     );
-    if std::env::var_os("HARN_BLESS_AGENT_EVENT_FIXTURE").is_some() {
+    if std::env::var_os("HARN_UPDATE_SNAPSHOTS").is_some() {
         let text = serde_json::to_string_pretty(&actual).unwrap() + "\n";
         std::fs::write(&path, text).unwrap();
     }
