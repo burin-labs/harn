@@ -306,6 +306,15 @@ pub enum TapeRecordKind {
         request_payload: TapePayload,
         response_payload: TapePayload,
     },
+    /// An MCP server a run started: what it ran and the server info it
+    /// negotiated. A branch replays the server from these records instead of
+    /// starting it, and checks a live start against them.
+    McpServerStart {
+        server: String,
+        /// The stdio command line, or the HTTP URL.
+        command: String,
+        discovery: TapePayload,
+    },
     /// Asynchronous model-job lifecycle event (`harn.model_job_event.v1`)
     /// observed through the host event bridge. Asset digests named in the
     /// event payload let fidelity checks reason about media lineage without
@@ -345,6 +354,7 @@ impl TapeRecordKind {
             Self::FileDelete { .. } => "file_delete",
             Self::ProcessSpawn { .. } => "process_spawn",
             Self::McpJsonRpc { .. } => "mcp_json_rpc",
+            Self::McpServerStart { .. } => "mcp_server_start",
             Self::ModelJob { .. } => "model_job",
             Self::Unknown => "unknown",
         }
@@ -706,6 +716,7 @@ fn visit_payloads(kind: &TapeRecordKind, mut visit: impl FnMut(&TapePayload)) {
             visit(response_payload);
         }
         TapeRecordKind::ModelJob { event, .. } => visit(event),
+        TapeRecordKind::McpServerStart { discovery, .. } => visit(discovery),
         TapeRecordKind::ClockRead { .. }
         | TapeRecordKind::ClockSleep { .. }
         | TapeRecordKind::FileRead { .. }

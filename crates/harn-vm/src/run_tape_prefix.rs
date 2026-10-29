@@ -49,6 +49,8 @@ fn verdict(owner: Owner<'_>, effects: &[EffectSpec]) -> Verdict {
             EffectKind::Fs | EffectKind::Host | EffectKind::Secret | EffectKind::State if reads => {
             }
             EffectKind::Network if reads && gates_own_network_reads(owner) => {}
+            EffectKind::Mcp | EffectKind::Process | EffectKind::Network
+                if defers_mcp_starts(owner) => {}
             EffectKind::State
                 if branch_owns_state(owner) || process_local(effect) || session_entry(owner) => {}
             _ => return Verdict::Refuse(*effect),
@@ -78,6 +80,31 @@ fn gates_own_network_reads(owner: Owner<'_>) -> bool {
     matches!(
         owner,
         Some((CapabilityId::Llm, "probe_provider_capabilities"))
+    )
+}
+
+/// Methods that run one process to completion and return its result as data.
+/// Outside a tool dispatch they are taped like a tool call, result and
+/// workspace changes, so a branch prefix serves them instead of refusing.
+pub(crate) fn runs_a_process(owner: Owner<'_>) -> bool {
+    match owner {
+        Some((CapabilityId::Tools, method)) => method == "run_command",
+        Some((CapabilityId::Process, method)) => matches!(
+            method,
+            "run" | "exec" | "shell" | "exec_at" | "shell_at" | "git_status" | "git_diff"
+                | "git_merge_base" | "git_tag_list" | "git_describe" | "git_repo_discover"
+        ),
+        _ => false,
+    }
+}
+
+/// Methods that start MCP servers through the deferred connect: in a branch
+/// prefix the server does not start, and the recording answers its exchanges.
+/// `mcp_connect` starts a server directly and stays refused.
+fn defers_mcp_starts(owner: Owner<'_>) -> bool {
+    matches!(
+        owner,
+        Some((CapabilityId::Tools, "mcp_bootstrap" | "mcp_ensure_active"))
     )
 }
 

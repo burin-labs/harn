@@ -30,10 +30,46 @@ pub(crate) async fn host_agent_dispatch_tool_call(
         Taped::Served(result) => return result,
         Taped::Live(recording) => recording,
     };
-    let live = Box::pin(super::dispatch_tool_call_live(ctx, call, tools, options));
+    let live = Box::pin(IN_TOOL_DISPATCH.scope(
+        (),
+        super::dispatch_tool_call_live(ctx, call, tools, options),
+    ));
     let result = crate::run_tape::capture_tool_reminders(&mut recording, live).await;
     finish(recording, &result);
     result
+}
+
+tokio::task_local! {
+    /// Set while a tool dispatch runs: the dispatch is taped whole, so what
+    /// its hooks and handler run is not taped again.
+    static IN_TOOL_DISPATCH: ();
+}
+
+/// Run one process outside any tool dispatch, taped like a tool call: its
+/// result and the workspace changes it made are recorded, and a branch prefix
+/// serves them instead of running it.
+pub(crate) async fn taped_process_run(
+    name: &str,
+    args: &[VmValue],
+    live: impl std::future::Future<Output = Result<VmValue, VmError>>,
+) -> Result<VmValue, VmError> {
+    if IN_TOOL_DISPATCH.try_with(|()| ()).is_ok() {
+        return live.await;
+    }
+    let tool = format!("process:{name}");
+    let args = serde_json::Value::Array(
+        args.iter()
+            .map(crate::llm::helpers::vm_value_to_json)
+            .collect(),
+    );
+    match begin_with("", &tool, &args, false) {
+        Taped::Served(result) => result,
+        Taped::Live(recording) => {
+            let result = live.await;
+            finish(recording, &result);
+            result
+        }
+    }
 }
 
 enum Taped {
@@ -63,10 +99,14 @@ fn begin(call: &DictMap, tools: Option<&VmValue>) -> Taped {
             SideEffectLevel::ReadOnly | SideEffectLevel::NetworkRead
         )
     });
+    begin_with(&id, &name, &args, read_only)
+}
+
+fn begin_with(id: &str, name: &str, args: &serde_json::Value, read_only: bool) -> Taped {
     // Recording starts before serving, so a branch's own tape keeps what it
     // served and the effects it re-applied.
-    let recording = crate::run_tape::begin_tool_call(&id, &name, &args, read_only);
-    match crate::run_tape::serve_tool_call(&id, &name, &args) {
+    let recording = crate::run_tape::begin_tool_call(id, name, args, read_only);
+    match crate::run_tape::serve_tool_call(id, name, args) {
         ToolServe::Live => Taped::Live(recording),
         ToolServe::Served(recorded, reminders) => {
             if let Some(mut recording) = recording {

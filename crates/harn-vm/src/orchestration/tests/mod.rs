@@ -9,7 +9,7 @@ mod compaction;
 mod hooks;
 mod payload_errors;
 mod policy;
-mod provider_capabilities;
+pub(crate) mod provider_capabilities;
 mod registered_closures;
 mod replay_eval;
 mod run_observability;

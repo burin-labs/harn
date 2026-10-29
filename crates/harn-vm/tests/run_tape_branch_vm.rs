@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use harn_vm::run_tape::{
-    start_branch, start_recording, BranchPlan, BranchReport, BranchScope, EffectScan,
+    start_branch, start_recording, Bounded, BranchPlan, BranchReport, BranchScope, BranchStatus,
+    EffectScan, StepFidelity,
     RecordingLevel, TapeWorkspace, ToolEffectObserver, TAPE_FILE_NAME,
 };
 use harn_vm::testbench::tape::EventTape;
@@ -70,15 +71,32 @@ fn leave_run() {
 
 /// Run `source` inside `branch`, when there is one.
 fn run_in(source: &str, workspace: &Path, branch: Option<BranchScope>) -> Result<String, String> {
+    match run_bounded_in(source, workspace, branch, false) {
+        Bounded::Finished(output) => output,
+        Bounded::Stopped | Bounded::TimedOut => unreachable!("an unbounded run finishes"),
+    }
+}
+
+/// [`run_in`] through [`BranchScope::run_bounded`], stopped at once when
+/// `stop_now`.
+fn run_bounded_in(
+    source: &str,
+    workspace: &Path,
+    branch: Option<BranchScope>,
+    stop_now: bool,
+) -> Bounded<Result<String, String>> {
     let source = source.to_string();
     let workspace = workspace.to_path_buf();
     harn_vm::on_vm_stack(move || {
         harn_vm::reset_thread_local_state();
-        let chunk = harn_vm::compile_source(&source)?;
+        let chunk = match harn_vm::compile_source(&source) {
+            Ok(chunk) => chunk,
+            Err(error) => return Bounded::Finished(Err(error)),
+        };
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .map_err(|error| error.to_string())?;
+            .unwrap();
         let body = async move {
             // The run's write jail is the temp root holding the workspace and
             // the markers, not the test binary's cwd.
@@ -97,8 +115,15 @@ fn run_in(source: &str, workspace: &Path, branch: Option<BranchScope>) -> Result
         };
         rt.block_on(harn_clock::test_support::with_local_tasks(async move {
             match branch {
-                Some(branch) => branch.run(Box::pin(body)).await,
-                None => Box::pin(body).await,
+                Some(branch) => {
+                    let stop = async move {
+                        if !stop_now {
+                            std::future::pending::<()>().await;
+                        }
+                    };
+                    branch.run_bounded(Box::pin(body), stop, None).await
+                }
+                None => Bounded::Finished(Box::pin(body).await),
             }
         }))
     })
@@ -424,28 +449,32 @@ fn a_branch_live_tail_continues_the_mock_script_after_the_served_prefix() {
     );
 }
 
+/// A script-level process run in the prefix is served from the tape like a
+/// tool call; a run the recording did not make diverges instead of running.
 #[test]
-fn a_script_level_exec_in_the_prefix_is_refused_not_run() {
+fn a_script_level_exec_in_the_prefix_is_served_not_run() {
     let _serial = SERIAL
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let dirs = dirs();
     let exec_marker = dirs.markers.join("script-exec-marker");
-    let source = format!(
-        r#"
+    let other_marker = dirs.markers.join("other-exec-marker");
+    let script = |marker: &Path| {
+        format!(
+            r#"
 import {{ agent_loop }} from "std/agent/loop"
 import {{ llm_text, with_llm_script }} from "std/testing"
 
 pipeline main(harness: Harness, task: unknown) {{
   const id = harness.random.uuid()
-  harness.process.run({{program: "touch", args: [{exec_marker}]}})
+  const touched = harness.process.run({{program: "touch", args: [{marker}]}})
   const result = with_llm_script(
     harness.llm,
     [llm_text("<user_response>Done.</user_response><done>##DONE##</done>")],
     {{ ->
       return agent_loop(
         harness,
-        "finish run " + id,
+        "finish run " + id + " exit " + to_string(touched.status),
         nil,
         {{provider: "mock", max_iterations: 1, loop_until_done: true, session_id: "branch-" + id}},
       )
@@ -454,8 +483,10 @@ pipeline main(harness: Harness, task: unknown) {{
   harness.stdio.log(result.status)
 }}
 "#,
-        exec_marker = quote(&exec_marker),
-    );
+            marker = quote(marker),
+        )
+    };
+    let source = script(&exec_marker);
 
     let recorded = record(&source, &dirs.tapes, &dirs.workspace);
     assert!(
@@ -467,15 +498,20 @@ pipeline main(harness: Harness, task: unknown) {{
     remove_marker(&exec_marker, &dirs.tapes);
 
     let Branched { output, report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 1);
-    assert!(output.is_err(), "a refused exec fails the run: {output:?}");
-    assert!(
-        !exec_marker.exists(),
-        "the branch ran the script-level exec"
-    );
-    assert_eq!(report.served_calls, 0, "report: {report:?}");
-    let divergence = report.divergence.expect("the refusal is the divergence");
-    assert_eq!(divergence.what, "refused effect", "{divergence:?}");
-    assert_eq!(divergence.call, 1, "the refusal came before model call 1");
+    let output = output.expect("the branched run succeeds");
+    assert!(output.contains("[harn] done"), "branch output: {output}");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(report.served_calls, 1, "report: {report:?}");
+    assert_eq!(report.served_tool_calls, 1, "report: {report:?}");
+    assert!(!exec_marker.exists(), "the branch ran the script-level exec");
+
+    let Branched { output, report, .. } =
+        branch(&script(&other_marker), &dirs.tapes, &dirs.workspace, 1);
+    assert!(output.is_err(), "an unrecorded exec fails the run: {output:?}");
+    assert!(!other_marker.exists(), "the branch ran an unrecorded exec");
+    let divergence = report.divergence.expect("the unrecorded exec diverges");
+    assert_eq!(divergence.what, "tool call", "{divergence:?}");
+    assert!(divergence.detail.contains("process:process.run"), "{divergence:?}");
 }
 
 /// One `mark` tool call, then done, with a post-turn session reset.
@@ -1351,4 +1387,184 @@ fn a_served_tool_call_replays_its_pre_hook_reminder() {
         !hook_marker.exists(),
         "the branch re-ran the served tool's hook"
     );
+}
+
+/// A stdio MCP server that leaves a `spawned` line in `marks` when it starts
+/// and a `called` line per tool call.
+fn write_mcp_server(path: &Path, version: &str, tool: &str) {
+    let script = r#"
+import json, os, sys
+marks = sys.argv[1]
+with open(os.path.join(marks, "spawned"), "a") as f:
+    f.write("x\n")
+for line in sys.stdin:
+    msg = json.loads(line)
+    if "id" not in msg:
+        continue
+    method = msg["method"]
+    if method == "initialize":
+        result = {"protocolVersion": msg["params"]["protocolVersion"], "capabilities": {"tools": {}},
+                  "serverInfo": {"name": "pinger", "version": "VERSION"}}
+    elif method == "tools/list":
+        result = {"tools": [{"name": "TOOL", "description": "Answer pong.",
+                             "inputSchema": {"type": "object", "properties": {}}}]}
+    elif method == "tools/call":
+        with open(os.path.join(marks, "called"), "a") as f:
+            f.write("x\n")
+        result = {"content": [{"type": "text", "text": "pong"}]}
+    else:
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": method}}), flush=True)
+        continue
+    print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}), flush=True)
+"#
+    .replace("VERSION", version)
+    .replace("TOOL", tool);
+    std::fs::write(path, script).unwrap();
+}
+
+/// Two `pinger__ping` calls through the agent's MCP server, then done.
+fn mcp_script(server: &Path, marks: &Path) -> String {
+    format!(
+        r#"
+import {{ agent_loop }} from "std/agent/loop"
+import {{ llm_text, with_llm_script }} from "std/testing"
+
+pipeline main(harness: Harness, task: unknown) {{
+  const result = with_llm_script(
+    harness.llm,
+    [
+      {{tool_calls: [{{id: "ping-1", name: "pinger__ping", arguments: {{}}}}]}},
+      {{tool_calls: [{{id: "ping-2", name: "pinger__ping", arguments: {{}}}}]}},
+      llm_text("<user_response>Pinged.</user_response><done>##DONE##</done>"),
+    ],
+    {{ ->
+      return agent_loop(
+        harness,
+        "ping twice",
+        nil,
+        {{
+          provider: "mock",
+          tool_format: "native",
+          max_iterations: 4,
+          loop_until_done: true,
+          verify_completion: {{ _payload -> return true }},
+          mcp_servers: [{{name: "pinger", command: "python3", args: ["-u", {server}, {marks}]}}],
+        }},
+      )
+    }},
+  )
+  harness.stdio.log(result.status)
+}}
+"#,
+        server = quote(server),
+        marks = quote(marks),
+    )
+}
+
+fn marker_lines(path: &Path) -> usize {
+    std::fs::read_to_string(path).map_or(0, |text| text.lines().count())
+}
+
+/// A branch never starts an MCP server inside its prefix: the recording
+/// answers every exchange. The server starts when the branch first needs it
+/// live, and must be the server the recording ran.
+#[test]
+fn a_branch_starts_an_mcp_server_only_when_it_goes_live() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let server = dirs.markers.join("server.py");
+    let spawned = dirs.markers.join("spawned");
+    let called = dirs.markers.join("called");
+    write_mcp_server(&server, "1.0.0", "ping");
+    let source = mcp_script(&server, &dirs.markers);
+
+    let recorded = record(&source, &dirs.tapes, &dirs.workspace);
+    assert!(
+        recorded.contains("[harn] done"),
+        "recorded output: {recorded}"
+    );
+    assert_eq!(marker_lines(&spawned), 1, "the recording starts the server");
+    assert_eq!(marker_lines(&called), 2, "the recording calls the tool twice");
+    let clear = || {
+        let _ = std::fs::remove_file(&spawned);
+        let _ = std::fs::remove_file(&called);
+    };
+    clear();
+
+    // Both tool calls precede the third model call, so the server never starts.
+    let Branched { output, report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 2);
+    let output = output.expect("the branched run succeeds");
+    assert!(output.contains("[harn] done"), "branch output: {output}");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(report.served_calls, 2, "report: {report:?}");
+    assert!(!spawned.exists(), "the prefix started the MCP server");
+    assert!(!called.exists(), "the prefix called the MCP server");
+
+    // The second tool call follows the first live model call.
+    let Branched { output, report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+    let output = output.expect("the branched run succeeds");
+    assert!(output.contains("[harn] done"), "branch output: {output}");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(report.live_calls, 2, "report: {report:?}");
+    assert_eq!(marker_lines(&spawned), 1, "the live tail starts the server");
+    assert_eq!(marker_lines(&called), 1, "only the live tool call runs");
+    clear();
+
+    for (version, tool, what) in [("2.0.0", "ping", "is version"), ("1.0.0", "pong", "lists different tools")] {
+        write_mcp_server(&server, version, tool);
+        let Branched { report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+        let divergence = report.divergence.expect("another server diverges");
+        assert_eq!(divergence.what, "MCP server identity", "{divergence:?}");
+        assert!(divergence.detail.contains(what), "{divergence:?}");
+        assert_eq!(marker_lines(&called), 0, "a diverged branch called the server");
+        clear();
+    }
+}
+
+/// The verdict a host reads: per-call fidelity, and a stop that ends the run
+/// before it executes anything is reported as stopped, not as an under-run.
+#[test]
+fn a_branch_verdict_badges_each_call_and_reports_a_stop() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let hook_marker = dirs.markers.join("hook-marker");
+    let exec_marker = dirs.markers.join("exec-marker");
+    let source = mark_script(&hook_marker, &exec_marker);
+    record(&source, &dirs.tapes, &dirs.workspace);
+    std::fs::remove_file(&exec_marker).unwrap();
+
+    let plan = |n: u64| BranchPlan {
+        tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: dirs.workspace.clone(),
+        state_root: dirs.workspace.parent().unwrap().join(format!("verdict-state-{n}")),
+    };
+    name_session_store(&dirs.workspace);
+    let guard = start_branch(plan(0)).unwrap();
+    let ended = run_bounded_in(&source, &dirs.workspace, Some(guard.scope()), false);
+    let ended = match ended {
+        Bounded::Finished(output) => Bounded::Finished(output.is_ok()),
+        other => panic!("an unstopped run finishes: {}", matches!(other, Bounded::Stopped)),
+    };
+    let verdict = guard.verdict(ended);
+    drop(guard);
+    assert_eq!(verdict.status, BranchStatus::Completed, "{verdict:?}");
+    let badges: Vec<_> = verdict.steps.iter().map(|step| step.fidelity).collect();
+    assert_eq!(badges, [StepFidelity::Served, StepFidelity::Live], "{verdict:?}");
+    let json = serde_json::to_value(&verdict).unwrap();
+    assert_eq!(json["schema"], "harn.branch_verdict.v1");
+    assert_eq!(json["steps"][1]["fidelity"], "live");
+
+    name_session_store(&dirs.workspace);
+    let guard = start_branch(plan(1)).unwrap();
+    let ended = run_bounded_in(&source, &dirs.workspace, Some(guard.scope()), true);
+    assert!(matches!(ended, Bounded::Stopped), "a ready stop wins");
+    let verdict = guard.verdict(Bounded::Stopped);
+    assert_eq!(verdict.status, BranchStatus::Stopped, "{verdict:?}");
+    assert!(verdict.steps.is_empty(), "{verdict:?}");
+    assert!(!exec_marker.exists(), "a stopped branch ran its exec");
 }

@@ -866,9 +866,9 @@ fn every_named_state_a_capability_method_writes_is_classified_for_the_prefix() {
 }
 
 /// Hosted providers never probe, so a branch passes through; a self-hosted
-/// probe is not on the tape and is refused rather than sent.
+/// probe the tape does not hold diverges rather than being sent.
 #[test]
-fn a_prefix_refuses_only_a_capability_probe_that_would_reach_the_network() {
+fn a_prefix_refuses_a_capability_probe_the_recording_does_not_hold() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let tmp = tempfile::tempdir().unwrap();
     {
@@ -888,10 +888,66 @@ fn a_prefix_refuses_only_a_capability_probe_that_would_reach_the_network() {
         );
         let refused = crate::llm::capabilities::ensure_runtime_probe("ollama", "qwen")
             .await
-            .expect_err("a self-hosted probe is refused");
+            .expect_err("an unrecorded self-hosted probe is refused");
         assert!(
-            format!("{refused:?}").contains("capability probe"),
+            format!("{refused:?}").contains("capability_probe"),
             "{refused:?}"
         );
     });
+}
+
+/// A recorded probe answer is served to the branch prefix: the runtime is
+/// measured once, by the recording, and the branch sees the same capabilities.
+#[test]
+fn a_prefix_serves_the_recorded_capability_probe() {
+    use crate::llm_config::RuntimeProviderEndpointOverrides;
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let provider = "llamacpp";
+    let model = format!("taped-probe-{}", uuid::Uuid::now_v7());
+    let (base_url, hits) = rt.block_on(crate::orchestration::tests::provider_capabilities::one_response(
+        "200 OK",
+        r#"{"chat_template_caps":{"supports_tools":true,"supports_tool_calls":false}}"#,
+    ));
+    let endpoints = RuntimeProviderEndpointOverrides::single(provider, base_url)
+        .expect("verified fixture endpoint");
+    let probe = || {
+        rt.block_on(crate::orchestration::scope_llm_runtime_overrides_with_provider_endpoints(
+            None,
+            None,
+            endpoints.clone(),
+            async {
+                let installed = crate::llm::capabilities::ensure_runtime_probe(provider, &model).await;
+                (installed, crate::llm::capabilities::lookup(provider, &model))
+            },
+        ))
+    };
+    {
+        let _guard = record_full(tmp.path());
+        let (installed, caps) = probe();
+        assert!(installed.unwrap(), "the recording measures the runtime");
+        assert!(!caps.native_tools, "{caps:?}");
+        record_llm_call(&request("one"), &result("a", None));
+    }
+    assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+    crate::llm::capabilities::forget_measurements();
+    let branch = branch(tmp.path(), 1, tmp.path());
+    let (installed, caps) = probe();
+    assert!(installed.unwrap(), "the branch installs the recorded answer");
+    assert!(!caps.native_tools, "{caps:?}");
+    assert_eq!(
+        caps.runtime_probe.map(|receipt| receipt.status),
+        Some(crate::llm::capabilities::CapabilityProbeStatus::Measured)
+    );
+    assert_eq!(
+        hits.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the branch reached the runtime"
+    );
+    assert_eq!(branch.report().divergence, None);
+    crate::llm::capabilities::forget_measurements();
 }

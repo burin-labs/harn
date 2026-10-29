@@ -83,6 +83,7 @@ pub(crate) async fn mcp_connect_stdio_impl(
         last_roots: Arc::new(Mutex::new(Vec::new())),
         discovery_result: Arc::new(Mutex::new(Some(discovery_result))),
         cache_hints: Arc::new(Mutex::new(BTreeMap::new())),
+        deferred: Arc::new(Mutex::new(None)),
     };
     Ok(handle)
 }
@@ -120,6 +121,7 @@ pub(crate) async fn mcp_connect_http_impl(
         last_roots: Arc::new(Mutex::new(Vec::new())),
         discovery_result: Arc::new(Mutex::new(None)),
         cache_hints: Arc::new(Mutex::new(BTreeMap::new())),
+        deferred: Arc::new(Mutex::new(None)),
     };
 
     discover_server(&handle).await?;
@@ -177,6 +179,23 @@ pub(crate) async fn discover_server(handle: &VmMcpClientHandle) -> Result<(), Vm
 pub async fn connect_mcp_server_from_spec(
     spec: &McpServerSpec,
 ) -> Result<VmMcpClientHandle, VmError> {
+    let command = spec.command_line();
+    if let crate::run_tape::McpStart::Deferred(recorded) =
+        crate::run_tape::mcp_start(&spec.name, &command)?
+    {
+        return Ok(VmMcpClientHandle {
+            name: spec.name.clone(),
+            inner: Arc::new(Mutex::new(None)),
+            last_roots: Arc::new(Mutex::new(Vec::new())),
+            discovery_result: Arc::new(Mutex::new(Some(recorded.discovery.clone()))),
+            cache_hints: Arc::new(Mutex::new(BTreeMap::new())),
+            deferred: Arc::new(Mutex::new(Some(DeferredStart {
+                spec: spec.clone(),
+                recorded,
+                fixtures: None,
+            }))),
+        });
+    }
     let mut handle = match spec.transport {
         McpTransport::Stdio => {
             let options = resolve_connect_protocol_options(spec.protocol_version.as_deref())?;
@@ -192,6 +211,9 @@ pub async fn connect_mcp_server_from_spec(
         McpTransport::Http => mcp_connect_http_impl(spec).await?,
     };
     handle.name = spec.name.clone();
+    if let Some(discovery) = handle.discovery_result.lock().await.as_ref() {
+        crate::run_tape::record_mcp_start(&spec.name, &command, discovery);
+    }
     Ok(handle)
 }
 

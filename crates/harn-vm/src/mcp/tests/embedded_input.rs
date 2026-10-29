@@ -113,6 +113,7 @@ async fn roots_list_changed_notification_is_sent_once_per_snapshot() {
                 last_roots: Arc::new(Mutex::new(Vec::new())),
                 discovery_result: Arc::new(Mutex::new(None)),
                 cache_hints: Arc::new(Mutex::new(BTreeMap::new())),
+                deferred: Arc::new(Mutex::new(None)),
             };
 
             handle.notify_roots_list_changed_if_needed().await.unwrap();

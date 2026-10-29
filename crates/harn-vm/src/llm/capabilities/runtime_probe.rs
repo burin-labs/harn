@@ -31,8 +31,10 @@ impl ProbeKind {
 /// are a cached, explicit result; they do not prevent the real model call.
 /// Returns true when this call installed a result that later capability
 /// lookups must observe. A cached result was already visible to the caller.
-/// A branch prefix refuses a probe that would reach the network: the tape
-/// does not hold its answer.
+///
+/// On a run tape every answer is recorded, cached or not, so a branch prefix
+/// is served the answer its recording used at the same point and never
+/// reaches the runtime; an answer the recording does not hold diverges.
 pub(crate) async fn ensure_runtime_probe(
     provider: &str,
     model: &str,
@@ -41,15 +43,76 @@ pub(crate) async fn ensure_runtime_probe(
         return Ok(false);
     };
     let resolved = crate::llm::helpers::ResolvedProvider::resolve(provider);
-    if crate::run_tape::prefix_active()
-        && cached_measurement_with(model, kind, &resolved.base_url).is_none()
-    {
-        crate::run_tape::refuse_in_prefix(
-            "self-hosted capability probe",
-            "it measures the runtime over the network",
-        )?;
+    if !crate::run_tape::taping() {
+        return Ok(ensure_runtime_probe_with(provider, model, kind, resolved).await);
     }
-    Ok(ensure_runtime_probe_with(provider, model, kind, resolved).await)
+    let Some(endpoint) = probe_endpoint(&resolved.base_url, kind, true) else {
+        return Ok(false);
+    };
+    let key = cache_key(model, &endpoint, kind);
+    let base_url = resolved.base_url.clone();
+    let installed_live = std::sync::atomic::AtomicBool::new(false);
+    let answer = crate::run_tape::taped_lookup(PROBE_NAMESPACE, &key, async {
+        installed_live.store(
+            ensure_runtime_probe_with(provider, model, kind, resolved).await,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        cached_measurement_with(model, kind, &base_url).map(|receipt| receipt_json(&receipt))
+    })
+    .await?;
+    if installed_live.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok(true);
+    }
+    Ok(answer
+        .as_ref()
+        .and_then(receipt_from_json)
+        .is_some_and(|receipt| probe_cell(key).set(receipt).is_ok()))
+}
+
+/// Tape namespace for probe answers, keyed like the process cache.
+const PROBE_NAMESPACE: &str = "capability_probe";
+
+fn receipt_json(receipt: &CapabilityProbeReceipt) -> serde_json::Value {
+    serde_json::json!({
+        "status": receipt.status.as_str(),
+        "endpoint": receipt.endpoint,
+        "native_tools": receipt.native_tools,
+        "supports_parallel_tool_calls": receipt.supports_parallel_tool_calls,
+        "detail": receipt.detail,
+    })
+}
+
+fn receipt_from_json(value: &serde_json::Value) -> Option<CapabilityProbeReceipt> {
+    let status = match value.get("status")?.as_str()? {
+        "measured" => CapabilityProbeStatus::Measured,
+        "unavailable" => CapabilityProbeStatus::Unavailable,
+        _ => return None,
+    };
+    Some(CapabilityProbeReceipt {
+        status,
+        endpoint: value.get("endpoint")?.as_str()?.to_string(),
+        native_tools: value.get("native_tools")?.as_bool(),
+        supports_parallel_tool_calls: value.get("supports_parallel_tool_calls")?.as_bool(),
+        detail: value.get("detail")?.as_str()?.to_string(),
+    })
+}
+
+fn probe_cell(key: String) -> ProbeCell {
+    PROBES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .expect("runtime capability probe cache poisoned")
+        .entry(key)
+        .or_insert_with(|| Arc::new(OnceCell::new()))
+        .clone()
+}
+
+/// Forget every measurement, as a new process would.
+#[cfg(test)]
+pub(crate) fn forget_measurements() {
+    if let Some(probes) = PROBES.get() {
+        probes.lock().expect("runtime capability probe cache poisoned").clear();
+    }
 }
 
 async fn ensure_runtime_probe_with(
@@ -64,17 +127,7 @@ async fn ensure_runtime_probe_with(
     let Some(public_endpoint) = probe_endpoint(&resolved.base_url, kind, true) else {
         return false;
     };
-    let cache_key = cache_key(model, &public_endpoint, kind);
-    let cell = {
-        let mut probes = PROBES
-            .get_or_init(|| Mutex::new(HashMap::new()))
-            .lock()
-            .expect("runtime capability probe cache poisoned");
-        probes
-            .entry(cache_key)
-            .or_insert_with(|| Arc::new(OnceCell::new()))
-            .clone()
-    };
+    let cell = probe_cell(cache_key(model, &public_endpoint, kind));
     let provider_label = provider.to_string();
     let model_label = model.to_string();
     let provider_for_probe = provider_label.clone();

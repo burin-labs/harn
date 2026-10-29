@@ -79,6 +79,8 @@ pub use model::{
     ThinkingOffType, ToolFormatJustification, ToolFormatMirror, WireDialect,
 };
 pub(crate) use runtime_probe::ensure_runtime_probe;
+#[cfg(test)]
+pub(crate) use runtime_probe::forget_measurements;
 
 /// Resolve the effective placement for an interleaved `system`/`developer`
 /// message on this route. An explicit `system_message_placement` capability

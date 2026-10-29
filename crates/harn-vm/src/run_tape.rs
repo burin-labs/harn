@@ -699,6 +699,7 @@ struct BranchState {
     recorded_keys: BTreeSet<(String, String)>,
     /// Each runtime store's contents when the recorded run opened it.
     store_seeds: BTreeMap<String, Option<serde_json::Value>>,
+    mcp: mcp::BranchMcp,
     /// Set by the first live model call; nothing is served after it.
     live: bool,
     workspace_root: PathBuf,
@@ -937,6 +938,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
         cache_lookups,
         recorded_keys,
         store_seeds,
+        mcp: mcp::recorded_mcp(&tape, k)?,
         live: false,
         workspace_root: plan.workspace_root,
         report: BranchReport {
@@ -1146,6 +1148,37 @@ fn recorded_lookup(
     unknown_is_live: bool,
     live: impl FnOnce() -> Result<Option<serde_json::Value>, crate::value::VmError>,
 ) -> Result<Option<serde_json::Value>, crate::value::VmError> {
+    let value = match serve_lookup(namespace, key, unknown_is_live)? {
+        Some(value) => value,
+        None => live()?,
+    };
+    record_lookup(namespace, key, value.as_ref());
+    Ok(value)
+}
+
+/// [`recorded_lookup`] for an async read the recording must hold: in a
+/// branch prefix a key it did not read there diverges.
+pub(crate) async fn taped_lookup(
+    namespace: &str,
+    key: &str,
+    live: impl std::future::Future<Output = Option<serde_json::Value>>,
+) -> Result<Option<serde_json::Value>, crate::value::VmError> {
+    let value = match serve_lookup(namespace, key, false)? {
+        Some(value) => value,
+        None => live.await,
+    };
+    record_lookup(namespace, key, value.as_ref());
+    Ok(value)
+}
+
+/// The recorded answer to `key` at this point of a branch prefix; `None`
+/// reads it live.
+#[allow(clippy::option_option)]
+fn serve_lookup(
+    namespace: &str,
+    key: &str,
+    unknown_is_live: bool,
+) -> Result<Option<Option<serde_json::Value>>, crate::value::VmError> {
     let served = {
         let branch = current_branch();
         let mut guard = branch.as_ref().map(|branch| branch.state());
@@ -1194,12 +1227,12 @@ fn recorded_lookup(
             _ => None,
         }
     };
-    let value = match served {
-        Some(value) => value,
-        None => live()?,
-    };
+    Ok(served)
+}
+
+fn record_lookup(namespace: &str, key: &str, value: Option<&serde_json::Value>) {
     if let Some(tape) = process_tape().filter(|tape| tape.level == RecordingLevel::Full) {
-        let payload = value.as_ref().map(|value| {
+        let payload = value.map(|value| {
             tape.recorder
                 .payload_from_bytes(crate::canonical_json::to_vec(value))
         });
@@ -1210,7 +1243,6 @@ fn recorded_lookup(
             value: payload,
         });
     }
-    Ok(value)
 }
 
 /// What a branch does with one tool dispatch.
@@ -1342,10 +1374,23 @@ pub(crate) use scope::{
     branch_event_log, branch_path, current_branch, durable_path, scoped_state_root, BranchHandle,
 };
 
+#[path = "run_tape_verdict.rs"]
+mod verdict;
+pub use verdict::{
+    Bounded, BranchStatus, BranchStep, BranchVerdict, StepFidelity, BRANCH_VERDICT_SCHEMA,
+};
+
+#[path = "run_tape_mcp.rs"]
+mod mcp;
+pub(crate) use mcp::{
+    check_mcp_identity, mcp_start, record_mcp_start, serve_mcp_exchange, McpStart,
+    RecordedMcpServer,
+};
+
 #[path = "run_tape_prefix.rs"]
 mod prefix;
 pub(crate) use prefix::{
-    prefix_active, record_read, records_reads, refuse_in_prefix, serve_read, store_seed,
+    prefix_active, record_read, records_reads, refuse_in_prefix, runs_a_process, serve_read, store_seed,
     taped_random, taping, Owner,
 };
 

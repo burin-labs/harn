@@ -90,6 +90,19 @@ pub struct McpServerSpec {
     pub proxy_server_name: Option<String>,
 }
 
+impl McpServerSpec {
+    /// What the server runs as: the stdio command line, or the HTTP URL.
+    pub(crate) fn command_line(&self) -> String {
+        match self.transport {
+            McpTransport::Stdio => std::iter::once(self.command.as_str())
+                .chain(self.args.iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(" "),
+            McpTransport::Http => self.url.clone(),
+        }
+    }
+}
+
 fn default_transport() -> McpTransport {
     McpTransport::Stdio
 }
@@ -164,6 +177,15 @@ pub struct VmMcpClientHandle {
     last_roots: Arc<Mutex<Vec<McpRoot>>>,
     pub(crate) discovery_result: Arc<Mutex<Option<serde_json::Value>>>,
     cache_hints: Arc<Mutex<BTreeMap<String, McpCacheHint>>>,
+    /// Set for a client created inside a branch prefix: the server has not
+    /// started, and starts on the first exchange the recording cannot serve.
+    deferred: Arc<Mutex<Option<DeferredStart>>>,
+}
+
+pub(crate) struct DeferredStart {
+    pub(crate) spec: McpServerSpec,
+    pub(crate) recorded: crate::run_tape::RecordedMcpServer,
+    pub(crate) fixtures: Option<Arc<crate::harness::CapabilityFixtureState>>,
 }
 
 impl From<VmMcpClientHandle> for crate::value::VmMcpClientHandle {
@@ -199,6 +221,9 @@ impl VmMcpClientHandle {
         &self,
         fixtures: Arc<crate::harness::CapabilityFixtureState>,
     ) {
+        if let Some(start) = self.deferred.lock().await.as_mut() {
+            start.fixtures = Some(fixtures.clone());
+        }
         let mut guard = self.inner.lock().await;
         match guard.as_mut() {
             Some(McpClientInner::Sdk(inner)) => inner.handler.set_fixtures(fixtures).await,
@@ -249,9 +274,51 @@ impl VmMcpClientHandle {
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, VmError> {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params.clone(),
+        });
+        if let Some(served) = crate::run_tape::serve_mcp_exchange(&self.name, method, &request) {
+            return served;
+        }
+        self.start_deferred().await?;
         if method != "server/discover" {
             self.notify_roots_list_changed_if_needed().await?;
         }
+        self.call_live(method, params).await
+    }
+
+    /// Start a server deferred by a branch prefix, now that the branch is
+    /// live, and check it is the server the recording ran.
+    async fn start_deferred(&self) -> Result<(), VmError> {
+        let Some(start) = self.deferred.lock().await.take() else {
+            return Ok(());
+        };
+        let live = Box::pin(connect_mcp_server_from_spec(&start.spec)).await?;
+        let discovery = live
+            .discovery_result
+            .lock()
+            .await
+            .clone()
+            .unwrap_or(serde_json::Value::Null);
+        *self.inner.lock().await = live.inner.lock().await.take();
+        *self.discovery_result.lock().await = Some(discovery.clone());
+        if let Some(fixtures) = start.fixtures {
+            self.set_capability_fixtures(fixtures).await;
+        }
+        let tools = match start.recorded.tools_digest {
+            Some(_) => Some(self.call_live("tools/list", serde_json::json!({})).await?),
+            None => None,
+        };
+        crate::run_tape::check_mcp_identity(&self.name, &start.recorded, &discovery, tools.as_ref())
+    }
+
+    async fn call_live(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, VmError> {
         let record_request = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
@@ -291,6 +358,10 @@ impl VmMcpClientHandle {
     }
 
     async fn notify(&self, method: &str, params: serde_json::Value) -> Result<(), VmError> {
+        if self.deferred.lock().await.is_some() {
+            // Nothing is running to hear it; a deferred server starts fresh.
+            return Ok(());
+        }
         let mut guard = self.inner.lock().await;
         let inner = guard
             .as_mut()
@@ -303,6 +374,7 @@ impl VmMcpClientHandle {
     }
 
     pub(crate) async fn disconnect(&self) -> Result<(), VmError> {
+        self.deferred.lock().await.take();
         let mut guard = self.inner.lock().await;
         if let Some(inner) = guard.take() {
             match inner {

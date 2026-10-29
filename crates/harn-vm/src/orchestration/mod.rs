@@ -322,7 +322,7 @@ pub(crate) fn parse_json_value<T: for<'de> Deserialize<'de>>(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 mod policy_restriction_tests;
