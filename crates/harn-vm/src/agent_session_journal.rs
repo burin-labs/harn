@@ -326,7 +326,7 @@ pub(crate) async fn prepare_standalone(
     open_journal(
         state_dir,
         session_id,
-        None,
+        crate::agent_sessions::parent_id(session_id),
         SessionType::User,
         JournalConfigIdentity {
             turn_id: run_id.clone(),

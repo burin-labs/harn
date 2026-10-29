@@ -2,6 +2,39 @@ use crate::agent_sessions::{open_retained_with_actor_chain, PreparedWorkspaceRoo
 use harn_session_store::{SessionStore, SessionType, SessionWriteLease};
 
 #[tokio::test(flavor = "current_thread")]
+async fn first_standalone_mutation_preserves_the_live_parent() {
+    crate::reset_thread_local_state();
+    let root = tempfile::tempdir().unwrap();
+    let launcher = crate::security::LauncherEnvironment::from_snapshot(
+        [(
+            "HARN_STATE_DIR".into(),
+            root.path().join("state").to_str().unwrap().into(),
+        )]
+        .into(),
+    );
+    let scope = crate::SessionStoreScope::resolve(root.path(), &launcher).unwrap();
+    let (parent, _retention) = open_retained_with_actor_chain(None, None).unwrap();
+    let child = crate::agent_sessions::open_child_session(&parent, None).unwrap();
+    let journal = scope
+        .run(async {
+            let state_dir = crate::stdlib::session_store::canonical_store_state_dir(None).unwrap();
+            super::prepare_standalone(&child, Some(state_dir), None, "workspace_root_mount").await
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        journal
+            .store()
+            .describe(&child)
+            .await
+            .unwrap()
+            .parent_session_id,
+        Some(parent)
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn mounted_root_audit_is_durable_once_with_or_without_a_live_journal() {
     for live in [false, true] {
         crate::reset_thread_local_state();
@@ -42,6 +75,20 @@ async fn mounted_root_audit_is_durable_once_with_or_without_a_live_journal() {
             crate::stdlib::json_to_vm_value(&message),
         )
         .unwrap();
+        if !live {
+            use crate::value::VmDictExt;
+            let mut transcript = crate::agent_sessions::transcript(&session)
+                .unwrap()
+                .as_dict()
+                .unwrap()
+                .clone();
+            transcript.put_str("summary", "retained context summary");
+            crate::agent_sessions::store_transcript(
+                &session,
+                crate::value::VmValue::dict(transcript),
+            )
+            .unwrap();
+        }
         super::add_workspace_root_verified_persisted(
             &session,
             extra.path().to_str().unwrap(),
@@ -58,6 +105,10 @@ async fn mounted_root_audit_is_durable_once_with_or_without_a_live_journal() {
             .unwrap();
         let events = store.read_all(&session).await.unwrap();
         let hydrated = super::hydrate_events(events.clone());
+        assert_eq!(
+            hydrated.summary,
+            (!live).then(|| "retained context summary".to_string())
+        );
         assert_eq!(
             hydrated.messages,
             vec![message],

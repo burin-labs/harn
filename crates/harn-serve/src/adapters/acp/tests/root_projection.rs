@@ -1,6 +1,7 @@
+#![cfg(unix)]
+
 use super::*;
 
-#[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn live_session_list_refuses_a_non_utf8_legacy_root_instead_of_hiding_the_session() {
     use std::os::unix::ffi::OsStringExt;

@@ -82,7 +82,7 @@ pub(crate) async fn add_workspace_root_verified_persisted(
     };
     let (store, append) = match standalone.as_ref() {
         Some(journal) => prepare(journal),
-        None => agent_sessions::with_live_journal(id, |journal| prepare(journal))
+        None => agent_sessions::with_live_journal(id, prepare)
             .ok_or_else(|| "workspace root journal disappeared before persistence".to_string())?,
     }
     .map_err(|error| error.to_string())?;
@@ -117,7 +117,7 @@ pub(crate) async fn add_workspace_root_verified_persisted(
             .map(|record| record.transcript_event.id.clone())
             .collect();
         events.push(super::messages_replaced_event(
-            prompt.messages,
+            agent_sessions::messages_json(id),
             prompt.summary,
             source_event_ids,
         ));
