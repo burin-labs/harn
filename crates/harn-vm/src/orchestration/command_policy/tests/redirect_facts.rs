@@ -203,7 +203,17 @@ fn descriptor_duplication_keeps_shell_execution_resolved() {
     assert_eq!(both["shell_redirects"][0]["writes_file"], true);
     // A descriptor named at run time, or a non-descriptor input duplication,
     // stays unresolved.
-    for text in ["printf safe >&$fd", "printf safe 2>&\"$fd\"", "cat <&input"] {
+    // `{name}` before a redirect assigns the descriptor number to `name`.
+    for text in [
+        "printf safe >&$fd",
+        "printf safe 2>&\"$fd\"",
+        "cat <&input",
+        "true {PATH}>&2; git -C /w status",
+        "true {PATH}<&0; git -C /w status",
+        "true {PATH}>&-; git -C /w status",
+        "true {PATH}>/dev/null; git -C /w status",
+        "cat {PATH}<<<x; git -C /w status",
+    ] {
         let scan = command_risk_scan_json(&shell_ctx(text), None);
         assert_eq!(scan["execution_semantics"]["resolved"], false, "{text}");
         assert_eq!(

@@ -666,8 +666,14 @@ fn visit_tree(root: Node<'_>, source: &[u8], depth: usize, analysis: &mut ShellA
                 continue;
             }
             "command" => visit_command(node, source, depth, analysis),
-            "file_redirect" => collect_redirect(node, source, analysis),
-            "heredoc_redirect" | "herestring_redirect" => analysis.io_unresolved = true,
+            "file_redirect" => {
+                analysis.unresolved |= names_redirect_descriptor(node, source);
+                collect_redirect(node, source, analysis);
+            }
+            "heredoc_redirect" | "herestring_redirect" => {
+                analysis.unresolved |= names_redirect_descriptor(node, source);
+                analysis.io_unresolved = true;
+            }
             _ => {}
         }
         let mut cursor = node.walk();
@@ -779,6 +785,27 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
         source_argv: source_prefix,
         dynamic: word_dynamic[index..].to_vec(),
     });
+}
+
+/// Bash assigns the opened descriptor's number to `name` in `{name}>file`, so
+/// the redirect is a variable assignment the parser does not project.
+/// tree-sitter leaves `{name}` as the preceding word, adjacent to the operator.
+fn names_redirect_descriptor(redirect: Node<'_>, source: &[u8]) -> bool {
+    let Some(before) = source.get(..redirect.start_byte()) else {
+        return false;
+    };
+    let Some(inner) = before.strip_suffix(b"}") else {
+        return false;
+    };
+    let Some(open) = inner.iter().rposition(|byte| *byte == b'{') else {
+        return false;
+    };
+    let name = &inner[open + 1..];
+    name.first()
+        .is_some_and(|first| first.is_ascii_alphabetic() || *first == b'_')
+        && name
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
 }
 
 fn collect_redirect(redirect: Node<'_>, source: &[u8], analysis: &mut ShellAnalysis) {

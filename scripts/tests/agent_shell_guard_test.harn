@@ -1171,6 +1171,12 @@ fn scanner_resolves_descriptor_duplication() -> bool {
   return scan.execution_semantics?.resolved == true
 }
 
+/** Runtimes before named descriptors failed closed resolve `{name}>file`. */
+fn scanner_flags_named_descriptors() -> bool {
+  const scan = command_risk_scan({request: {mode: "shell", command: "true {PATH}>/dev/null"}})
+  return scan.execution_semantics?.resolved == false
+}
+
 @test
 pipeline test_descriptor_duplication_and_escapes_keep_git_builtins_allowed(
   harness: Harness,
@@ -1191,6 +1197,37 @@ pipeline test_descriptor_duplication_and_escapes_keep_git_builtins_allowed(
   assert(!guard_with_git_facts("git -C /w lg 2>&1").allow)
   assert(!guard_with_git_facts("git -C /w stash 2>&1").allow, "a stash write stays refused")
   assert(!guard_with_git_facts("cd /w && git stash pop 2>&1").allow)
+  // A name-assigning builtin sets the variable its operand names even when the name is escaped,
+  // quoted or expanded, and the scanner does not project it inside compound commands.
+  for command in [
+    "if true; then export PA\\TH=/evil; fi; git -C /w status",
+    "{ export PA\\TH=/evil; }; git -C /w status",
+    "for x in 1; do export PA\\TH=/evil; done; git -C /w status",
+    "if true; then declare -x PA\\TH=/evil; fi; git -C /w status",
+    "if true; then export \"PATH=/evil\"; fi; git -C /w status",
+    "if true; then export P'A'TH=/evil; fi; git -C /w status",
+    "if true; then typeset -x $name=/evil; fi; git -C /w status",
+    "if true; then readonly PA\\TH; fi; git -C /w status",
+    "if true; then unset PA\\TH; fi; git -C /w status",
+    "if true; then read PA\\TH < f; fi; git -C /w status",
+    "if true; then printf -v PA\\TH /evil; fi; git -C /w status",
+  ] {
+    assert(!guard_with_git_facts(command).allow, command + " can change PATH")
+  }
+  // POSITIVE CONTROL: a literal name with a quoted value is still a plain assignment.
+  const literal = guard_with_git_facts("if true; then export FOO=\"a b\"; fi; git -C /w status")
+  assert(literal.allow, "a literal name is not opaque: " + literal.reason)
+  if scanner_flags_named_descriptors() {
+    // `{name}` before any redirect assigns the descriptor number to `name`.
+    for command in [
+      "true {PATH}>&2; git -C /w status",
+      "true {PATH}<&0; git -C /w status",
+      "true {PATH}>&-; git -C /w status",
+      "true {PATH}>/dev/null; git -C /w status",
+    ] {
+      assert(!guard_with_git_facts(command).allow, command + " assigns PATH")
+    }
+  }
   if !scanner_resolves_descriptor_duplication() {
     return
   }

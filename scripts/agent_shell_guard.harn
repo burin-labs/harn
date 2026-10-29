@@ -959,8 +959,91 @@ type GitExecutableContext = {path_changed: bool, cwd_changed: bool}
 
 type GitExecutionStage = {argv: list<string>, source_argv?: list<string>}
 
+/** Builtins whose operands name the shell variables they assign or remove. */
+const NAME_ASSIGNING_BUILTINS: list<string> = [
+  "export",
+  "declare",
+  "typeset",
+  "readonly",
+  "local",
+  "unset",
+  "read",
+  "getopts",
+  "mapfile",
+  "readarray",
+  "let",
+]
+
+const WORD_SEPARATORS: string = " \t\n;&|()"
+
+const SEGMENT_SEPARATORS: string = "\n;&|()"
+
+/**
+ * Whether a name-assigning builtin (or `printf -v`) has an operand whose name part, before its
+ * first unquoted `=`, is quoted, escaped or expanded. `export PA\TH=/x` and `export "PATH=/x"`
+ * both set PATH, and the scanner does not project these builtins inside compound commands.
+ */
+fn opaque_variable_name(command: string) -> bool {
+  let single = false
+  let double = false
+  let word = ""
+  let opaque = false
+  let assigned = false
+  let naming = false
+  let printf_seen = false
+  let after_v = false
+  let index = 0
+  while index <= len(command) {
+    const char = index < len(command) ? command.substring(index, index + 1) : " "
+    if single {
+      single = char != "'"
+      word = word + char
+    } else if char == "\\" {
+      opaque = opaque || !assigned
+      word = word + command.substring(index, index + 2)
+      index = index + 1
+    } else if double {
+      double = char != "\""
+      if char == "$" || char == "`" {
+        opaque = opaque || !assigned
+      }
+      word = word + char
+    } else if char == "'" || char == "\"" || char == "$" || char == "`" {
+      single = char == "'"
+      double = char == "\""
+      opaque = opaque || !assigned
+      word = word + char
+    } else if WORD_SEPARATORS.contains(char) {
+      if word != "" {
+        if (naming || after_v) && opaque {
+          return true
+        }
+        naming = naming || NAME_ASSIGNING_BUILTINS.contains(word)
+        after_v = printf_seen && word == "-v"
+        printf_seen = printf_seen || word == "printf"
+      }
+      word = ""
+      opaque = false
+      assigned = false
+      if SEGMENT_SEPARATORS.contains(char) {
+        naming = false
+        printf_seen = false
+        after_v = false
+      }
+    } else {
+      assigned = assigned || char == "="
+      word = word + char
+    }
+    index = index + 1
+  }
+  return false
+}
+
 /** The older scanner can omit standalone assignments, including inside shell control flow. */
 fn unprojected_path_assignment(command: string) -> bool {
+  if opaque_variable_name(command) {
+    return true
+  }
   let single = false
   let double = false
   let index = 0
