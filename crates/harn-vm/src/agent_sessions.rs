@@ -344,6 +344,7 @@ pub(crate) mod session_event;
 mod text_tool_call_seq;
 mod transcript_lifecycle;
 mod types;
+mod workspace_roots;
 
 pub(crate) use text_tool_call_seq::next_text_tool_call_seq_for_parse;
 use text_tool_call_seq::{
@@ -375,6 +376,7 @@ pub(crate) use transcript_lifecycle::append_event_to_state;
 pub(crate) use transcript_lifecycle::settle_assistant_publication;
 pub use transcript_lifecycle::*;
 pub use types::*;
+pub use workspace_roots::PreparedWorkspaceRoots;
 
 thread_local! {
     static CURRENT_SESSION_STACK: RefCell<Vec<CurrentSessionFrame>> = const { RefCell::new(Vec::new()) };
