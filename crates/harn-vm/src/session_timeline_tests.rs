@@ -30,6 +30,61 @@ fn span(span_id: u64, parent_id: Option<u64>, metadata: serde_json::Value) -> Ru
 }
 
 #[tokio::test]
+async fn workspace_timeline_uses_live_events_for_metadata_and_keeps_empty_journal_authority() {
+    let workspace = tempfile::tempdir().unwrap();
+    let store = crate::open_canonical_store(workspace.path()).unwrap();
+    store
+        .create(CreateSession {
+            id: Some("metadata-only".into()),
+            additional_directories: vec!["/work/extra".into()],
+            ..CreateSession::default()
+        })
+        .await
+        .unwrap();
+    store
+        .fork(
+            "metadata-only",
+            harn_session_store::CanonicalSessionBoundary::empty("metadata-only"),
+            Some("empty-journal".into()),
+        )
+        .await
+        .unwrap();
+    let log = AnyEventLog::Memory(MemoryEventLog::new(16));
+    for id in ["metadata-only", "empty-journal"] {
+        log.append(
+            &agent_events_topic(id),
+            LogEvent::new(
+                "tool_call",
+                json!({
+                    "session_id": id,
+                    "event": {"type":"tool_call", "session_id":id, "tool_call_id":"live-tool",
+                        "tool_name":"read", "status":"pending", "raw_input":{}}
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    }
+    let live = query_workspace_session_timeline(
+        workspace.path(),
+        Some(&log),
+        SessionTimelineQuery::for_session("metadata-only"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(live.coverage.returned, 1);
+    let empty = query_workspace_session_timeline(
+        workspace.path(),
+        Some(&log),
+        SessionTimelineQuery::for_session("empty-journal"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(empty.coverage.returned, 0);
+    assert_eq!(empty.coverage.available, 0);
+}
+
+#[tokio::test]
 async fn persisted_transcript_projects_stable_tool_revision_and_identity_links() {
     let temp = tempfile::tempdir().expect("project root");
     std::fs::create_dir(temp.path().join(".harn")).expect("state dir");

@@ -4,6 +4,43 @@ use super::*;
 use harn_session_store::{AppendEvent, CreateSession, ReadRange, SessionEventKind, SessionStore};
 
 #[tokio::test(flavor = "current_thread")]
+async fn metadata_only_parent_refuses_forking_unpersisted_live_messages() {
+    harn_vm::reset_thread_local_state();
+    let root = tempfile::tempdir().unwrap();
+    let store = harn_vm::open_canonical_store(root.path()).unwrap();
+    let parent = "unpersisted-root-parent";
+    store
+        .create(CreateSession {
+            id: Some(parent.into()),
+            additional_directories: vec!["/work/extra".into()],
+            ..CreateSession::default()
+        })
+        .await
+        .unwrap();
+    harn_vm::agent_sessions::seed_from_messages(
+        Some(parent.into()),
+        &[serde_json::json!({"role":"assistant", "content":"live message"})],
+        serde_json::json!({}),
+        None,
+        None,
+    )
+    .unwrap();
+    let before = harn_vm::agent_sessions::transcript(parent).unwrap();
+    let fork = harn_vm::agent_sessions::fork_canonical(
+        &store,
+        root.path(),
+        parent,
+        None,
+        Some("unpersisted-child".into()),
+    )
+    .await;
+    assert!(fork.is_err());
+    assert_eq!(harn_vm::agent_sessions::transcript(parent), Some(before));
+    assert!(!harn_vm::agent_sessions::exists("unpersisted-child"));
+    assert!(store.describe("unpersisted-child").await.is_err());
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn acknowledged_tool_history_survives_compaction_and_child_restart() {
     harn_vm::reset_thread_local_state();
     let root = tempfile::tempdir().expect("root");
