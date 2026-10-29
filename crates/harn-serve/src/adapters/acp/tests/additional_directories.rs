@@ -49,6 +49,26 @@ async fn standard_directory_grants_replace_durably_and_refuse_partial_lists() {
         directories
     );
     let before = harn_vm::agent_sessions::workspace_anchor(session).unwrap();
+    let upstream_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/protocols/schemas/acp-1.26.0-upstream.schema.json");
+    let upstream: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(upstream_path).unwrap()).unwrap();
+    let schema = serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/SessionInfo",
+        "$defs": upstream["$defs"],
+    });
+    let validator = jsonschema::draft202012::new(&schema).unwrap();
+    let persisted = acp_persisted_session_item(store.describe(session).await.unwrap());
+    for item in [created["result"]["session"].clone(), persisted] {
+        assert!(validator.is_valid(&item), "upstream SessionInfo: {item}");
+        let mut invalid = item;
+        invalid["additionalDirectories"] = serde_json::json!([7]);
+        assert!(
+            !validator.is_valid(&invalid),
+            "the upstream schema must reject numeric roots"
+        );
+    }
     for (id, invalid) in [
         serde_json::json!([directories[0], workspace.join("missing")]),
         serde_json::json!([7]),

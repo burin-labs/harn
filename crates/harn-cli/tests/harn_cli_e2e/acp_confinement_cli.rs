@@ -43,7 +43,7 @@ fn scoped_write_source(workspace: &Path, target: &Path) -> String {
 }
 
 #[test]
-fn additional_directories_grant_real_writes_and_omission_revokes_after_reload() {
+pub(crate) fn additional_directories_grant_real_writes_and_omission_revokes_after_reload() {
     let temp = TempDir::new().unwrap();
     let base = temp.path().canonicalize().unwrap();
     let workspace = base.join("workspace");
@@ -154,6 +154,102 @@ fn request(client: &mut StdioJsonRpcClient, request: JsonValue) -> JsonValue {
             other => panic!("unexpected ACP server request: {other}"),
         })
         .response
+}
+
+#[test]
+pub(crate) fn additional_directories_refuse_process_escape_without_replacing_the_prior_grant() {
+    let temp = TempDir::new().unwrap();
+    let base = temp.path().canonicalize().unwrap();
+    let workspace = base.join("workspace");
+    let extra = base.join("extra");
+    let outside = TempDir::new().unwrap();
+    for path in [&workspace, &extra] {
+        fs::create_dir(path).unwrap();
+    }
+    #[cfg(target_os = "macos")]
+    if crate::test_util::process::unavailable_worktree_sandbox().is_some() {
+        return;
+    }
+    let alias = base.join("escape");
+    std::os::unix::fs::symlink(outside.path(), &alias).unwrap();
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(&workspace)
+        .args(["serve", "acp", "--obs", "off", "--confine-workspace"])
+        .arg(&base)
+        .env_clear()
+        .env("HOME", &base)
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default());
+    let mut client = StdioJsonRpcClient::spawn("ACP directory process ceiling", command);
+    let initialized = request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":1, "method":"initialize", "params":{}
+        }),
+    );
+    assert_eq!(
+        initialized["result"]["agentCapabilities"]["_meta"]["harn"]["processConfinement"]["state"],
+        "confined"
+    );
+    let invalid = request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":2, "method":"session/new", "params":{
+                "cwd":workspace, "additionalDirectories":[extra, outside.path()],
+                "environmentPolicy":{"kind":"isolated"}}
+        }),
+    );
+    assert_eq!(invalid["error"]["code"], -32602, "{invalid}");
+    assert_eq!(
+        invalid["error"]["data"]["code"],
+        "outside_process_confinement"
+    );
+    let created = request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":3, "method":"session/new", "params":{
+                "cwd":workspace, "additionalDirectories":[extra],
+                "environmentPolicy":{"kind":"isolated"}}
+        }),
+    );
+    let session = created["result"]["sessionId"]
+        .as_str()
+        .expect("valid root admitted");
+    let escaped = request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":4, "method":"session/resume", "params":{
+                "sessionId":session, "additionalDirectories":[extra, alias]}
+        }),
+    );
+    assert_eq!(escaped["error"]["code"], -32602, "{escaped}");
+    assert_eq!(
+        escaped["error"]["data"]["code"],
+        "outside_process_confinement"
+    );
+    let roots = request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":5, "method":"harn.session_workspace_roots",
+            "params":{"sessionId":session}
+        }),
+    );
+    let mounted = roots["result"]["workspaceAnchor"]["additional_roots"]
+        .as_array()
+        .expect("known root list");
+    assert_eq!(mounted.len(), 1);
+    assert_eq!(mounted[0]["path"], json!(extra));
+    let target = extra.join("retained-grant");
+    let permitted = request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":6, "method":"session/prompt", "params":{
+                "sessionId":session, "prompt":[{"type":"text", "text":scoped_write_source(&workspace, &target)}]}
+        }),
+    );
+    assert!(permitted.get("error").is_none(), "{permitted}");
+    assert_eq!(fs::read_to_string(target).unwrap(), "root-grant-probe");
+    client.shutdown_expect_success();
 }
 
 /// Serve a pipeline that writes one file inside the workspace and one outside
