@@ -1,1 +1,0 @@
-- **Session initialization failures.** Bound redacted failure details before writing them to the durable journal.

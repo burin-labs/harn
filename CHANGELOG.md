@@ -9,6 +9,460 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.182
+
+### Breaking
+
+- **Context-eval reports distinguish missing cost from measured zero (#10668).**
+  The default report is now v2: unmeasured run costs and incomplete totals are
+  null, with a known subtotal and coverage counts.
+
+  Migration: read `context-eval-report.v2.schema.json` and handle null cost
+  values. For one release, `harn eval context --report-version 1` emits the
+  deprecated v1 JSON format, whose numeric costs can be incomplete. Rust code
+  constructing `EvalContextArgs` must set `report_version` to 1 or 2, and
+  `ContextEvalObserved` literals must set the new `known_cost_usd` field.
+- **Endpoint-scoped provider policy adds fields to public catalog region structs (#10678).**
+  Downstream Rust code that constructs `ProviderRegionDef` or
+  `ProviderEndpointRegion` with struct literals must account for the new
+  `data_controls` field.
+
+  Migration: add `data_controls: None` to existing struct literals, or provide
+  `Some(controls)` when declaring endpoint-specific data handling.
+- **Background command cleanup receipts survive completion (#10720).** Waiting
+  and then cancelling a completed handle replays the guardian's bounded cleanup
+  receipt. Unknown child liveness counts as a survivor. An unavailable,
+  incomplete, or truncated census reports `survivor_count: null`, with explicit
+  census evidence, instead of an unmeasured zero.
+
+  Migration: require a non-null `survivor_count` and `census_complete: true`
+  before treating zero as a clean census. Rust callers should use
+  `finish_process_owner_cleanup` with a `ProcessCleanupReport` instead of
+  `process_owner_survivors`, and initialize the report's new census and omission
+  fields through `Default` until actual measurement supplies them.
+- Allow a confined child to use the host-authorized SSH agent through
+  `--allow-ssh-agent` or `process_sandbox.ssh_agent_socket`, including with an
+  isolated child environment. The grant admits the exact socket connection and
+  does not expose private-key files. Linux path enforcement requires Landlock
+  ABI 9; unsupported backends refuse the grant.
+
+  Migration: Rust hosts using exhaustive `ProcessSandboxPolicy` or
+  `ProcessSandboxGrants` literals must add `ssh_agent_socket: None`, or use
+  `..Default::default()`. Set the field to an absolute socket path when granting
+  the child access to an SSH agent.
+- ACP now honors the client's advertised terminal and filesystem capabilities
+  before requesting standard client operations. Tool updates also carry the
+  upstream `name` field. Session MCP transport capabilities are no longer advertised
+  without intake, and unsupported requested MCP servers or system prompts are
+  refused before session admission or restore.
+
+  Migration: clients that implement terminal operations must send
+  `clientCapabilities.terminal: true` in `initialize`. An omitted, false or invalid
+  capability no longer causes terminal requests to be sent anyway. Configure MCP
+  servers through the existing runtime configuration until session intake is
+  implemented.
+- Trusted launchers can confirm credential-bound provider account settings for
+  conditional no-training terms. Gemini requires both paid billing and disabled
+  Contributor Tier sharing; unknown settings continue to refuse no-training calls.
+  The reserved confirmation input is withheld from scripts and child processes,
+  including sessions that do not attach confirmations, and cannot be re-granted
+  under another environment name.
+
+  Migration: Rust callers constructing `DataControlsDef` or
+  `CatalogProviderDataControls` must supply `no_training_requires`, using an empty
+  vector when there are no account-dependent requirements. Callers constructing
+  `InferenceAdmissionSnapshot` must supply `required_account_facts` and
+  `account_confirmation_applied`; callers constructing `DataControlsReceipt` must
+  supply `account_confirmation_applied`. Use an empty vector and `false` when no
+  account confirmation is involved, and use the actual trusted policy and receipt
+  when one is involved.
+- Agent loop results and terminal transcript records now carry the same typed goal outcome,
+  distinguishing assessed requirement success, partial success, failure and unknown from the run's
+  lifecycle state. Unassessed and empty requirement contracts remain unknown without an additional judge call.
+
+  Migration: Rust callers of `AgentTerminalOutcome::checkpoint` must supply the finalized
+  goal outcome as the fourth argument after `stop_reason`. Pass the canonical assessment
+  projection, or JSON null when no assessment was performed. Harn callers constructing an
+  `AgentResult` must include its nullable `goal_outcome` field.
+- **Workspace checkpoints can require known writer evidence.** Strict
+  sessions require confirmation of scan-only changes and currently refuse
+  replacement or deletion of existing files to protect concurrent edits.
+
+  Migration: Rust code constructing `CaptureReceipt`, `AttributedChange`,
+  `PlanEntry`, or `PlanReceipt` literals must provide their new writer-policy,
+  writer, writers, observed-state, or session fields. Hosts selecting `require_known`
+  must verify the capture acknowledgement and present unknown-writer paths for
+  confirmation before supplying `confirmed_paths`.
+- Orchestrator JSON logs now go to stderr instead of stdout. `harn run` and
+  `harn bench` report concise errors by default. Common CLI diagnostics
+  use the `[harn]` prefix, and test-watch progress stays on stderr. The test
+  watcher no longer reruns itself when reading a test file.
+
+  Migration: Redirect stderr when consuming orchestrator JSON logs, and pass
+  `--explain` to recover source excerpts and runtime stack details.
+- Session goal metadata now includes the optional requested edit target used to
+  bind behavior-preserving verification evidence to the active goal.
+
+  Migration: Rust callers constructing `SessionGoalMetadata` with an exhaustive
+  struct literal must supply `target: None`, or `target: Some(identity)` when the
+  host has declared the requested target. Existing serialized goals without the
+  field continue to deserialize without a target.
+- Context-eval v2 reports use `null` for `aggregate.total_known_cost_usd` when no cost or lower bound was observed.
+  Migration: Consumers must handle `null` separately from a measured zero. Rust callers must handle
+  `ContextEvalAggregateV2::total_known_cost_usd` as `Option<f64>`; Harn callers must handle it as `float?`.
+- **Durable spend receipts distinguish unsettled and unpriced attempts.** Strict
+  scopes refuse new calls when an earlier attempt is unsettled or its usage is
+  unknown.
+
+  Migration: downstream code constructing `MachineSpendReceipt` with a struct
+  literal must provide `lifetime_unsettled_attempts` and
+  `lifetime_unpriced_attempts` from its spend accounting.
+- **Linux command cleanup can prove custody independently of the host census.**
+  A guardian reports `guardian_custody_complete` only after the kernel confirms
+  that it has reaped every adopted descendant. The host census remains separately
+  reported, including unreadable processes, and unknown or surviving children
+  still prevent a clean result.
+
+  Migration: consumers checking a zero `survivor_count` can accept either a
+  complete host census or `guardian_custody_complete: true`, while continuing to
+  reject omitted or surviving children. Rust callers constructing
+  `ProcessCleanupReport` literals must initialize the new boolean to `false`
+  unless they own the measured guardian proof.
+- A macOS refusal from a host that fails the environment-protection prerequisite now carries a typed
+  `host_protection_gap`; `harness.system.sandbox_confinement()` declares it as `host_protection_gap: string?`.
+
+  Migration: Rust code that builds `SandboxMechanismUnavailable` with a struct literal must add
+  `host_protection_gap: None`, or construct it with `SandboxMechanismUnavailable::new` or
+  `SandboxMechanismUnavailable::host_protection_unavailable`.
+- The signals inbox requires `harn.signals.inbox.v3` so older writers cannot
+  discard captured-output ownership, ordering, or durable dispatch state.
+  Incompatible schemas are refused without rewriting.
+
+  Migration: Upgrade all consumers together and select a new inbox directory
+  with `HARN_EXT_SIGNALS_DIR` or `harn signals --dir`. Before: consumers share a
+  v1/v2 inbox. After: upgraded consumers share a new v3 inbox. Preserve the old
+  directory for audit and finish its outstanding work through its matching
+  version; no automatic conversion or deletion is performed.
+- **Provider usage is part of the agent event stream.** Each settled provider
+  attempt produces a typed `ProviderUsage` event, including preparation calls
+  and unpriced attempts, in the existing ordered durable and ACP streams.
+
+  Migration: Rust consumers matching `AgentEvent` must add a wildcard arm because
+  the enum is now non-exhaustive. Consumers that account for provider costs can
+  handle `AgentEvent::ProviderUsage` using its cumulative run usage ledger.
+
+### Added
+
+- Trigger dispatch can discover A2A 1.0 JSON-RPC interfaces, send the correct wire
+  format and tenant, and interpret task, message, and push notification results.
+- **Bounded durable journal presence (#10689).** A live session-store owner can
+  answer whether another session has journal events without reading the events.
+  The result distinguishes missing state from an unavailable owner.
+- Embedders can receive the Agents API listener address when the HTTP server is ready.
+- Background commands can now declare `hard_timeout_ms` to bound their lifetime
+  and receive a timed-out result with process cleanup evidence.
+- Workspace checkpoint tracking captures a boundary when a steer enters the
+  agent transcript and reports an unavailable boundary if capture fails.
+- ACP sessions can opt in to capturing workspace boundaries when prompts start turns.
+- **Read executable selection without launching a process.**
+  `harness.process.find_executable` uses the process launcher's existing search
+  rules and returns a selected path or nil. Tool preparation can select an
+  executable without running a version probe or writing a cache.
+- GPT-6.1 Terra is available through direct OpenAI, OpenRouter and Vercel AI Gateway routes.
+  Model registrations now own request rules, route overrides, aliases and picker placement in one source entry;
+  `make gen-provider-catalog` updates every catalog projection.
+- Add durable per-session monitor dispatch with a 60-second default interval,
+  execution-scoped capture, ordered bulk claims, restart recovery, and explicit
+  cancellation through the signals CLI and runtime. Hosts must durably accept
+  batch identities before inference and acknowledgment.
+- Monitor producers can capture distinct session-owned occurrences with
+  `harn signals fire --event-id ID --session SESSION`, retaining repeated output
+  while deduplicating retries of one event. Existing condition-state deduplication
+  is unchanged. Captured occurrences remain in the existing durable, bounded inbox
+  and never fall back to another session.
+- `code_index.move_symbol` takes `allow_visibility_widening` (`pub(super)`,
+  `pub(crate)`, `pub`, or `export` for TypeScript). A move that would leave a
+  declaration unreachable still refuses by default and now names the narrowest
+  fix in `required_visibility`; with the parameter it widens exactly the blocking
+  declarations, each to the narrowest level within the allowance, and lists them
+  in `widened`. A refused `ast.insert_at_anchor` (`no_match`, `ambiguous`) now
+  lists the containers a retry can target in `candidates`. The qualification
+  probe's `insert_method` arm targets traits and interfaces, and its class query
+  no longer matches unrelated classes.
+  A Rust move no longer skips the source's own import of the moved item when only a
+  nested module, such as `mod tests`, already imported it.
+  A Rust `pub(super)` or `pub(in ...)` item is no longer treated as crate-wide: a move
+  that leaves it out of reach of the moved code, or of the modules using the moved
+  item, now refuses (or widens, when allowed) instead of applying an unusable import.
+  `edit_insert_at_anchor` returns the retry `candidates` of a refused insert, and the
+  refusal's `details` names the first few.
+  Rust member widening proves each receiver in its lexical scope. A nested
+  parameter, local shadow, generic type parameter, or unrelated qualified type
+  cannot authorize widening a same-named member of another type.
+  Custom derives and conditional macro attributes cannot supply an unseen type
+  that authorizes widening. Built-in derives and conditional inert attributes
+  retain the same lexical proof.
+  Imported macros cannot borrow a built-in attribute's name to bypass that proof.
+  Private method widening also proves the declaration is unconditional and the
+  receiver selects that method without an implicit adjustment. Specialized impls,
+  unproven receiver modes and conditional members refuse instead of exposing an
+  unrelated private API; generic fields and proven exact receivers remain usable.
+- The protocol artifacts now publish a typed body for every `_harn/agentEvent` kind:
+  `schemas/agent-event.schema.json`, a record per kind in every binding, a `HarnAgentEventPayload`
+  union in Swift, Rust, and TypeScript, and a decodable `HarnAgentEventParams` in Swift. The schema is
+  derived from the types the ACP adapter serializes, and the advertised kind list now names every
+  kind the adapter emits, including `anchor_changed`, `capability_gap`, `loop_checkpoint`,
+  `missing_tool_call_verdict`, and the handler diagnostics.
+- ACP session forks can carry an independent copy of their workspace checkpoint history.
+
+### Changed
+
+- `harness.fs.glob` now matches `*` within a single path segment, as a shell
+  does; use `**` to cross directories. Previously `glob("*.txt")` also returned
+  `sub/x.txt`.
+- The portal's TypeScript API types are now generated from the Rust DTOs (`make gen-portal-types`,
+  checked by `make check-portal-types`) instead of mirrored by hand.
+- The portal now fetches and refreshes run, cost, launch, and dead-letter data through one shared
+  query cache. Live action-graph updates on a running run no longer vanish at the next
+  five-second refresh.
+- Precompiling a source that imports packages walks its imports once
+  when package setup leaves the installed generation unchanged.
+  On a large package-importing tree this cuts CPU by about a fifth; artifacts are byte-identical.
+  If packages change during preparation, precompile retries the imported types and
+  their lock authority together. Another concurrent replacement fails clearly
+  before new artifacts are written.
+
+### Removed
+
+- **The agent shell guard no longer polices `git worktree add` (#10784).** The rule
+  pointed agents at an external admission script that has been retired, so every
+  agent worktree add failed. A plain `git worktree add` is allowed again; the
+  checkout's `scripts/fleet-worktree-admit.ts` entry is removed, and every other
+  guard rule, including the `git stash` refusal, is unchanged.
+
+### Fixed
+
+- Correct portable-option capability claims for six OpenRouter routes using
+  the October 26 strict-routing probe and its same-model controls.
+- **Tool preparation rejects configured process probes (#10650).** `toolchain_facts`
+  requires process authority because configured probes execute commands. Read-only
+  preparation can no longer launch them through a filesystem-read classification.
+- Fix ACP plan updates so clients receive required priorities and supported
+  statuses. Harn retains non-ACP plan values in extension metadata and marks
+  blocked or cancelled steps in their displayed content.
+- Include ACP's `currentModeId` in mode-change notifications while retaining
+  the legacy `modeId` field for existing clients.
+- Update the ACP adapter's pinned schema profile to v1.26.0.
+- Reject unsupported A2A protocol versions before dispatch instead of silently
+  handling them as version 0.3. Requests without a version continue to use 0.3.
+- Code Mode MCP execution now dispatches only server-registered read-only tools.
+  Client manifests can select registered bindings but cannot fabricate tools or
+  replace their dispatch metadata.
+  Agent tool calls now enforce the registered input schema before dispatch, as
+  direct MCP calls already do.
+- Fixed registered reminder providers and lifecycle hooks losing transitively imported functions after their original VM exits.
+  Session initialization failures now retain a redacted diagnostic cause in the durable terminal record.
+- Honor the automated-review opt-out before requesting a review, including
+  scheduled retries and labels added while a request is waiting.
+- Fix the release native qualification check so a cancelled duplicate run no longer
+  hides an older successful run for the same source. Cancelled and skipped runs
+  are ignored, and a source with only such runs reads as unmeasured.
+- **Go rename safety (#10747).** Source-backed renames now refuse a proposed name that conflicts with an identifier
+  in another file of the same Go package, and check that the package has not changed before writing.
+- **Release candidates no longer fail while the residual audit is still running (#10758).**
+  The consumer observer admits a candidate archive while `Release residual audit` runs
+  beside the canary. The candidate verdict still requires the audit to pass.
+- Retry the pinned language server installs in CI so a transient registry or
+  proxy failure no longer fails the rename fixture partitions.
+- TypeScript and TSX generic calls with import type queries no longer produce
+  false syntax errors or disappear from structural search.
+- Harn release recovery now resumes after a failed main candidate, so a later
+  eligible source can produce the pending release without waiting for an unrelated
+  successful build.
+- `harn run --allow` and `harn watch --allow` no longer deny pure builtins such as `range` and
+  `lowercase`. They declare no effects, so denying them narrowed no authority and only made ordinary
+  calls fault one name at a time, as the standalone agent shell guard did on every command with a
+  `NAME=value` word.
+- Approval reviewers, including `allow_all`, can no longer override matched deny rules.
+  Skipped reviews record `deny_rule` separately from reviewer declines.
+- Route the agent-state store, OAuth token file, signal inbox, daemon
+  snapshots and metadata, check-result cache, batch fixture receipts, and the
+  source gate receipt through the shared atomic-write helper, so each is
+  fsynced, replaced atomically, and (for OAuth) created owner-only. A workspace
+  test now fails when a new hand-rolled temp-file-and-rename appears.
+- Show bounded test and error context after CI audit failures, with a link to
+  complete logs and routine worker output folded for easier reading.
+- The bootstrap installer now uses the published XZ-capable runtime seed. Its
+  setup contract installs a published XZ release through the real public path,
+  so a gzip-only seed cannot silently qualify an XZ installation.
+- Online frozen installs recover damaged Git and archive cache entries from their
+  locked sources after verifying the replacement content.
+- Release candidate builds now keep compiler-only settings out of the pinned
+  bootstrap runtime, allowing candidate qualification to start successfully.
+- Added `make refresh-cargo-wrapper` to update an existing generated compiler-cache
+  wrapper from the current source without changing hooks, target paths, cache
+  policy or dependency seeds.
+- Keep Harn check-cache refreshes on the shared artifact download retry path,
+  preserving exact artifact identity and CLI source verification through transient
+  GitHub service failures.
+- Workspace checkpoint planning, capture, restore, and fork now refuse while a tool call's baseline scan is in progress.
+- Workspace checkpoints exclude Harn runtime files when the workspace is
+  opened through a symlink or another path alias.
+- Workspace checkpoint restores no longer treat the live session database or its coordination locks as agent edits.
+- Preserve Cargo's Clippy compiler arguments when the development compiler-cache
+  wrapper is enabled, so workspace lint reaches source checks.
+- Code index memory estimates now report the same live content consistently after snapshot restore, edits, and compaction.
+- **Completion gates accept bound behavior-preserving verification.** An
+  explicitly preserving task can use before-and-after checks tied to the active
+  goal and current workspace without treating a previously passing check as a
+  failure. Missing, stale or untyped evidence retains the strict veto.
+- Consumer observation retries transient GitHub reads against the original run and budget, preserving
+  checkpoints and server backoff across credential renewal. A failed observer no longer cancels a live
+  measurement unless cancellation was explicit or fresh authenticated jobs prove a timeout.
+- Paired consumer checks now pin the repair pull request's source once for both candidate and baseline rehearsals
+  instead of checking out the default branch.
+- Reduced stack use when a tool call is denied.
+- An explicitly declared verification proposed after an edit can now run in the
+  same batch when every preceding mutation succeeded, its producer confirms no
+  repair is needed, and no user control is pending. Failed or uncertain edits and
+  unclassified process calls still wait for the next observation boundary.
+- The shared shell guard now inspects executable substitution stages even when shell comments contain delimiter
+  characters, so it refuses stash mutations without rejecting read-only substitutions.
+- Replace hand-rolled hex and percent-encoding helpers across the workspace with
+  the `hex` and `percent-encoding` crates. This fixes the playground fake
+  server mangling multi-byte UTF-8 and malformed escapes in decoded query
+  strings, and file-URI decoding accepting `%+1`-style escapes. A workspace
+  test now fails when a new hand-rolled copy appears.
+- HTTP requests preserve raw byte bodies instead of transmitting their display text. Explicit bounded byte responses
+  and multipart part headers work through the shared HTTP owner. Connector responses carry bytes and honor
+  error-body redaction.
+  HTTP mock call records preserve exact request bytes alongside the text preview,
+  with private-input filtering applied to both views.
+  The filter stays bound to the prepared request when its private session closes.
+- **Session initialization failures.** Bound redacted failure details before writing them to the durable journal.
+- Java type renames now refuse before writing when their references and required
+  public-type file moves cannot be proven, instead of reporting success after
+  changing only the declaration.
+- Java type and constructor rename attempts now return `unsupported_language`
+  without changing files.
+- `json_decode` restores byte values from their existing base64 JSON envelope when the target schema calls for bytes,
+  including records, lists, maps and unions. Byte schemas now export valid JSON Schema and OpenAPI carrier objects.
+  Untyped JSON parsing preserves the envelope as a dictionary.
+- An explicitly selected Cargo lease runner now reports its native compatibility
+  probe error, so invalid caller settings are visible instead of appearing only as
+  an unsupported lease contract.
+- Lint autofixes no longer write unparseable or wrong code around parentheses.
+  A grouped expression's span now covers its parentheses, so `let-then-return`,
+  `constant-logical-operand`, `nil-coalesce-*`, and `redundant-clone` keep
+  `(a + b) * c` intact. `redundant-nil-ternary` groups a looser fallback as
+  `x ?? (a || b)`, `legacy-doc-comment` leaves a trailing `// comment` on a code
+  line alone instead of replacing that line, and `empty-block` no longer deletes
+  a block whose condition pipes into a call. `indent` also skips whitespace-only
+  and CRLF-blank lines, and `harn` reports a non-UTF-8 argument instead of
+  panicking.
+- Honor empty language-server overrides and reject TypeScript launchers whose version cannot be established, while
+  recognizing npm's Windows shims.
+- A macOS spawn refused because the host fails the environment-protection prerequisite now reports
+  `availability: host_protection_unavailable` with a `host_protection_gap` (`unrestricted_dtrace`,
+  `development_kernel`, or `kernel_configuration_unreadable`). A Mac with System Integrity Protection
+  disabled used to read as having no `sandbox-exec`.
+- **CI recovery tolerates transient metadata failures.** Explicit GitHub server errors retry within a bounded read budget,
+  and incomplete or malformed issue listings stop recovery before any issue changes.
+- Project scanning recognizes literal multi-target Make rules and default Makefile
+  precedence without advertising variable assignments as test commands. Shared
+  `makefile_parse` and `makefile_filenames` builtins expose the same source facts.
+- Code Mode validation binds to the server's prepared schemas, including shared
+  schema references, and refuses calls without a prepared catalog entry. A
+  caller-supplied schema cannot weaken or replace the published input contract.
+- Documentation and editor-only CI use the published bootstrap runtime pin, so
+  advancing the workspace version before publication no longer breaks runtime installation.
+- Prevent shared PostgreSQL pools from reusing a pool with different option types or nested values.
+- Permission denials now identify the prepared command that policy or a host
+  refused, including verifier commands derived from session state.
+- Fix releases stranding on one failed candidate. While main declares an
+  unpublished stable version, promotion publishes the first successful main
+  candidate of that version, whichever push, schedule or request built it, and
+  requests a fresh source candidate whenever none is in flight. Each candidate
+  still needs full-suite CI at its own source, so a red source never publishes.
+- The provider catalog schema now advances to version 14 for regional data
+  controls. A base-relative check rejects unversioned changes to nested fields.
+- Crate publication now orders normal and build dependencies without treating
+  test-only dependency cycles as upload prerequisites. The dry run checks the
+  same publication graph before packaging the workspace.
+- Crate publication stops immediately when registry state cannot be read, retains
+  accepted upload progress, and confirms each uploaded version is publicly visible
+  before advancing or reporting completion. A later recovery reuses confirmed
+  versions without uploading them again.
+- Release publication now orders versioned test dependencies before the packages that require them,
+  while excluding path-only test dependencies removed by Cargo.
+- Crate publication reuses the authenticated runtime from the published release
+  instead of compiling a second orchestration binary before package checks begin.
+- Resolve relative `PATH` entries against the lookup directory so selected executables still run when the child starts in
+  a different working directory.
+- **Release qualification retries transient GitHub failures.** Source CI reads retry bounded server errors without
+  accepting incomplete pages; exhausted reads remain unmeasured.
+- Release source and native qualification resume the same CI observation after a bounded number of transient server errors.
+  Permanent refusals and exhausted reads remain unmeasured and cannot authorize publication.
+- Release publication keeps compiler-only settings in toolchain setup so older
+  published runtimes can bootstrap without weakening environment validation.
+- Release cutover validation prevents background Git maintenance from outliving
+  temporary test fixtures and racing cleanup.
+- **Recording spend no longer re-indexes the whole session.** A session metadata update now
+  rebuilds search rows only when the title, cwd, model, or project scope changes. Every turn end
+  records spend this way, so a stopped turn on a loaded machine no longer waits on one embedding
+  per transcript event before its reply.
+- The shell guard resolves builtin commands from the selected Git executable and
+  refuses aliases whose configuration can change within the guarded payload.
+  Builtin and alias queries share the executable context, and preflight does not
+  execute payload paths outside the hook's trusted PATH.
+  Each guard decision reuses measured builtin facts per executable instead of
+  launching the same preflight repeatedly.
+- The agent shell guard now checks commands after quoted heredocs without treating
+  literal heredoc text as executed shell code.
+- **Agent shell guard.** Literal command substitutions outside an expanding
+  heredoc no longer cause a false stash-mutation denial; executable heredoc
+  substitutions remain protected.
+- `command_risk_scan` now resolves shell commands that duplicate or close a file
+  descriptor (`2>&1`, `>&2`, `2>&-`). They used to report
+  `dynamic_or_invalid_execution_syntax`, so fail-closed shell guards refused
+  ordinary commands such as `git -C dir commit -m x > log 2>&1`. A descriptor
+  named at run time (`>&$fd`) stays unresolved, and `>&file` is reported as the
+  `&>` file write it performs. A `{name}` word before any redirect, which
+  assigns the descriptor number to `name`, is now unresolved.
+- The agent shell guard no longer treats every backslash as a possible
+  `PATH` assignment, which refused `git -C dir grep "a\|b"` with a misleading
+  `git stash` message. It now fails closed on a line continuation, and on an
+  escaped, quoted or expanded variable name passed to a name-assigning builtin
+  (`export`, `declare`, `unset`, `read`, `printf -v` and similar), including
+  inside compound commands.
+- Read provider and MCP Server-Sent Events through one shared framer built on
+  `eventsource-stream`. The OpenAI-compatible stream reader no longer drops
+  `data:{...}` frames written without a space, and every reader now joins a
+  payload split across several `data:` lines and accepts CRLF line ends.
+- Nested tool restrictions preserve the host's scoped SSH agent endpoint, so signed commits keep working
+  without exposing private keys or other sockets.
+- **Target-cache maintenance protects active readers.** Cleanup retains build
+  artifacts held open by another process and preserves a running cleanup's lock
+  regardless of its age. Hosts can supply a complete handle census when the
+  current account cannot inspect every process.
+- The completion judge can now report goal achievement for requests without declared acceptance criteria.
+  An honest final refusal can end the turn while reporting that the goal was not achieved.
+  Missing or unsupported evidence remains unknown, and declared requirements retain authority over their outcome.
+- Apply the documented Z.ai global API no-training default to its endpoint. Other regional and custom endpoints remain unverified.
+
+### Security
+
+- **Zstandard dependency security.** Update `zstd` to 0.14.3 to address
+  RUSTSEC-2026-0391, which can expose data when a compression context is reused
+  after an abandoned stream (#10664).
+- Gemini and Mistral account-dependent data-use terms no longer appear as an
+  unconditional no-training promise. A no-training inference ceiling refuses
+  these routes until the account's policy can be confirmed.
+- Inference requests with a host or call-level ceiling no longer follow HTTP
+  redirects to destinations outside the admitted route.
+- Host inference ceilings no longer accept project-invented privacy or model claims,
+  or reuse trusted claims for an unverified endpoint or remapped model.
+
 ## v0.10.181
 
 ### Breaking
