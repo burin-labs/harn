@@ -966,67 +966,62 @@ impl Vm {
         crate::typecheck::validate_builtin_call(name, &args, None)?;
 
         // Behind a Harness method the capability call already owns the tape.
-        if !enforce_contract {
-            return self
-                .dispatch_admitted_builtin(name, args, direct_id, enforce_contract)
-                .await;
+        // Every caller holds this future by value, so the tape adds one boxed
+        // pointer across the await and a labeled block, not a nested future.
+        let mut kept: Option<Box<Vec<VmValue>>> = None;
+        if enforce_contract && self.runtime.tapes_builtin_calls() {
+            let effects = self.runtime.builtin_effects(name);
+            if let Some(served) = self.runtime.serve_builtin_call(name, effects, &args) {
+                return served;
+            }
+            if self.runtime.records_builtin_calls() {
+                kept = Some(Box::new(args.clone()));
+            }
         }
-        let effects = self.runtime.builtin_effects(name);
-        if let Some(served) = self.runtime.serve_builtin_call(name, effects, &args) {
-            return served;
-        }
-        let kept = self.runtime.records_builtin_calls().then(|| args.clone());
-        let result = self
-            .dispatch_admitted_builtin(name, args, direct_id, enforce_contract)
-            .await;
+        let result = 'dispatch: {
+            if let Some(id) = direct_id {
+                if let Some(entry) = self.builtins_by_id.get(&id).cloned() {
+                    if entry.name.as_ref() == name {
+                        break 'dispatch self.call_builtin_entry(name, entry.dispatch, args).await;
+                    }
+                }
+            }
+
+            if let Some(builtin) = self.builtins.get(name).cloned() {
+                self.call_builtin_entry(name, VmBuiltinDispatch::Sync(builtin), args)
+                    .await
+            } else if let Some(async_builtin) = self.async_builtins.get(name).cloned() {
+                self.call_builtin_entry(name, VmBuiltinDispatch::Async(async_builtin), args)
+                    .await
+            } else if let Some(result) = self.try_dispatch_runtime_context_builtin(name, &args) {
+                result
+            } else if let Some(bridge) = self.runtime.builtin_bridge() {
+                if enforce_contract {
+                    if let Err(error) = self.runtime.gate_bridge_builtin(name) {
+                        break 'dispatch Err(error);
+                    }
+                }
+                bridge.call_builtin(name, &args).await
+            } else {
+                let all_builtins = self
+                    .builtins
+                    .keys()
+                    .chain(self.async_builtins.keys())
+                    .map(|s| s.as_str());
+                if let Some(suggestion) = crate::value::closest_match(name, all_builtins) {
+                    break 'dispatch Err(VmError::Runtime(format!(
+                        "Undefined builtin: {name} (did you mean `{suggestion}`?)"
+                    )));
+                }
+                Err(VmError::UndefinedBuiltin(name.to_string()))
+            }
+        };
         if let Some(args) = kept {
+            let effects = self.runtime.builtin_effects(name);
             self.runtime
                 .record_builtin_call(name, effects, &args, &result);
         }
         result
-    }
-
-    async fn dispatch_admitted_builtin(
-        &mut self,
-        name: &str,
-        args: Vec<VmValue>,
-        direct_id: Option<BuiltinId>,
-        enforce_contract: bool,
-    ) -> Result<VmValue, VmError> {
-        if let Some(id) = direct_id {
-            if let Some(entry) = self.builtins_by_id.get(&id).cloned() {
-                if entry.name.as_ref() == name {
-                    return self.call_builtin_entry(name, entry.dispatch, args).await;
-                }
-            }
-        }
-
-        if let Some(builtin) = self.builtins.get(name).cloned() {
-            self.call_builtin_entry(name, VmBuiltinDispatch::Sync(builtin), args)
-                .await
-        } else if let Some(async_builtin) = self.async_builtins.get(name).cloned() {
-            self.call_builtin_entry(name, VmBuiltinDispatch::Async(async_builtin), args)
-                .await
-        } else if let Some(result) = self.try_dispatch_runtime_context_builtin(name, &args) {
-            result
-        } else if let Some(bridge) = self.runtime.builtin_bridge() {
-            if enforce_contract {
-                self.runtime.gate_bridge_builtin(name)?;
-            }
-            bridge.call_builtin(name, &args).await
-        } else {
-            let all_builtins = self
-                .builtins
-                .keys()
-                .chain(self.async_builtins.keys())
-                .map(|s| s.as_str());
-            if let Some(suggestion) = crate::value::closest_match(name, all_builtins) {
-                return Err(VmError::Runtime(format!(
-                    "Undefined builtin: {name} (did you mean `{suggestion}`?)"
-                )));
-            }
-            Err(VmError::UndefinedBuiltin(name.to_string()))
-        }
     }
 
     pub(crate) async fn call_builtin_entry(

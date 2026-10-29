@@ -50,6 +50,10 @@ pub(crate) async fn vm_call_completion_full(
     let request = completion_fixture_request(opts, prefix, suffix);
     if let Some(served) = crate::run_tape::serve_llm_call(&request) {
         let result = served?;
+        // Consume the scripted entry the recording consumed here.
+        if crate::llm::providers::MockProvider::fixture_active(request.cli_llm_mock_scope) {
+            let _ = crate::llm::mock::mock_llm_response(&request);
+        }
         crate::llm::mock::record_cli_llm_result(&request, &result);
         return Ok(result);
     }

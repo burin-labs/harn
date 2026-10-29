@@ -15,9 +15,6 @@ pub(crate) struct StoreState {
     data: BTreeMap<String, serde_json::Value>,
     path: PathBuf,
     loaded: bool,
-    /// Set when a branch opened this store: it lives in memory and never
-    /// writes its file.
-    overlay: bool,
 }
 
 impl StoreState {
@@ -34,7 +31,6 @@ impl StoreState {
             data: BTreeMap::new(),
             path,
             loaded: false,
-            overlay: false,
         }
     }
 
@@ -43,21 +39,22 @@ impl StoreState {
             return Ok(());
         }
         let path = self.path.clone();
-        let opened = crate::run_tape::store_seed(&path, || {
+        let contents = crate::run_tape::store_seed(&path, || {
             std::fs::read_to_string(&path)
                 .ok()
                 .and_then(|contents| serde_json::from_str(&contents).ok())
         })?;
         self.loaded = true;
-        self.overlay = opened.overlay;
-        if let Some(serde_json::Value::Object(map)) = opened.contents {
+        if let Some(serde_json::Value::Object(map)) = contents {
             self.data.extend(map);
         }
         Ok(())
     }
 
     fn save(&self) -> Result<(), VmError> {
-        if self.overlay {
+        // A replayed prefix must not touch the store the recorded run left
+        // behind; once the branch goes live, the store saves as any run's does.
+        if crate::run_tape::prefix_active() {
             return Ok(());
         }
         let obj: serde_json::Map<String, serde_json::Value> = self
@@ -186,7 +183,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         "store_save",
         move |_args, _out| {
             // Load first: saving an unopened store would overwrite its file
-            // with nothing, and a branch's open decides it is an overlay.
+            // with nothing, and a branch's open seeds it from the tape.
             let mut store = s.lock();
             store.ensure_loaded()?;
             store.save()?;

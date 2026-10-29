@@ -231,11 +231,33 @@ pub(crate) fn render_consumers(render_id: &str) -> Vec<u64> {
 /// - `session_id`: minted per run by the host.
 const REQUEST_DIGEST_DENYLIST: &[&str] = &["api_key", "session_id"];
 
+/// Payload fields serde skips that the digest still covers, because each
+/// shapes what the provider is sent or what the simulator answers.
+pub(crate) const REQUEST_DIGEST_UNSERIALIZED: &[&str] = &[
+    "reasoning_effort_source",
+    "provider_contract_probe",
+    "portable_option_intent",
+    "inference_boundary",
+    "mock_scope",
+    "done_sentinel",
+    "done_sentinel_form",
+];
+
+/// Payload fields serde skips that the digest leaves out, each never sent:
+/// - `reminder_lifecycle`: telemetry emitted after the call;
+/// - `cli_llm_mock_scope`: a process-local mock scope id.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the digest's exclusion record, checked by a test")
+)]
+pub(crate) const REQUEST_DIGEST_UNSERIALIZED_EXCLUDED: &[&str] =
+    &["reminder_lifecycle", "cli_llm_mock_scope"];
+
 /// The request a model call's digest covers: every field the payload
-/// serializes minus [`REQUEST_DIGEST_DENYLIST`], plus the fields it does not
-/// serialize but that still shape the run. The one definition of "the same
-/// request" that recording writes, the fidelity oracle compares and branch
-/// verification checks. A new payload field is covered by default.
+/// serializes minus [`REQUEST_DIGEST_DENYLIST`], plus
+/// [`REQUEST_DIGEST_UNSERIALIZED`]. The one definition of "the same request"
+/// that recording writes, the fidelity oracle compares and branch
+/// verification checks. A test fails when a skipped field is in neither list.
 fn request_surface(request: &LlmRequestPayload) -> serde_json::Map<String, serde_json::Value> {
     let mut whole = match serde_json::to_value(request) {
         Ok(serde_json::Value::Object(map)) => map,
@@ -244,12 +266,17 @@ fn request_surface(request: &LlmRequestPayload) -> serde_json::Map<String, serde
     for key in REQUEST_DIGEST_DENYLIST {
         whole.remove(*key);
     }
-    for (key, value) in [
-        ("done_sentinel", &request.done_sentinel),
-        ("done_sentinel_form", &request.done_sentinel_form),
-        ("mock_scope", &request.mock_scope),
-    ] {
-        whole.insert(key.to_string(), serde_json::json!(value));
+    let unserialized = [
+        serde_json::json!(request.reasoning_effort_source),
+        serde_json::json!(request.provider_contract_probe),
+        serde_json::json!(request.portable_option_intent),
+        serde_json::json!(request.inference_boundary),
+        serde_json::json!(request.mock_scope),
+        serde_json::json!(request.done_sentinel),
+        serde_json::json!(request.done_sentinel_form),
+    ];
+    for (key, value) in REQUEST_DIGEST_UNSERIALIZED.iter().zip(unserialized) {
+        whole.insert((*key).to_string(), value);
     }
     whole
 }
@@ -489,7 +516,8 @@ pub struct BranchPlan {
 /// The first point where a branch's prefix stopped matching its recording.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct BranchDivergence {
-    /// 1-based model call (or the model call whose tool call diverged).
+    /// 1-based model call: the one the prefix was about to serve, or for a
+    /// tool call the one that requested it.
     pub call: u64,
     pub what: String,
     pub detail: String,
@@ -1096,7 +1124,7 @@ mod prompts;
 mod prefix;
 pub(crate) use prefix::{
     prefix_active, record_read, records_reads, refuse_in_prefix, serve_read, store_seed,
-    taped_random,
+    taped_random, taping, Owner,
 };
 
 #[cfg(test)]

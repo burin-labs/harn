@@ -319,19 +319,12 @@ impl VmRuntime for NativeExecutionState {
         if !crate::run_tape::prefix_active() {
             return None;
         }
-        // No manifest contract at all (a host bridge builtin, say) is not the
-        // same as a pure one: its effects are unknown, so the prefix refuses it.
-        let Some(contract) = crate::stdlib::builtin_policy_metadata(name).1 else {
-            return crate::run_tape::serve_read(None, name, None, args);
-        };
-        let owner = match contract.exposure {
-            harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, method } => {
-                Some((capability, method))
-            }
-            _ => None,
-        };
-        let effects = Some(effects.unwrap_or(contract.effects));
+        let (owner, effects) = builtin_tape_contract(name, effects);
         crate::run_tape::serve_read(owner, name, effects, args)
+    }
+
+    fn tapes_builtin_calls(&self) -> bool {
+        crate::run_tape::taping()
     }
 
     fn records_builtin_calls(&self) -> bool {
@@ -345,7 +338,8 @@ impl VmRuntime for NativeExecutionState {
         args: &[VmValue],
         result: &Result<VmValue, VmError>,
     ) {
-        crate::run_tape::record_read(None, name, effects, args, result);
+        let (owner, effects) = builtin_tape_contract(name, effects);
+        crate::run_tape::record_read(owner, name, effects, args, result);
     }
 
     fn capability_effects(
@@ -356,6 +350,29 @@ impl VmRuntime for NativeExecutionState {
         crate::stdlib::capability_method_manifest_entry(capability, method)
             .map(|entry| entry.contract.effects)
     }
+}
+
+/// The owner and effects a builtin call is taped under, the same for serving
+/// and recording so a recorded read is found again by key. No manifest
+/// contract at all (a host bridge builtin, say) means unknown effects, which
+/// a prefix refuses.
+fn builtin_tape_contract(
+    name: &str,
+    recorded: Option<&'static [harn_builtin_meta::EffectSpec]>,
+) -> (
+    crate::run_tape::Owner<'static>,
+    Option<&'static [harn_builtin_meta::EffectSpec]>,
+) {
+    let Some(contract) = crate::stdlib::builtin_policy_metadata(name).1 else {
+        return (None, recorded);
+    };
+    let owner = match contract.exposure {
+        harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, method } => {
+            Some((capability, method))
+        }
+        _ => None,
+    };
+    (owner, Some(recorded.unwrap_or(contract.effects)))
 }
 
 struct NativeExecutionBaseline;

@@ -150,8 +150,15 @@ fn the_request_digest_covers_every_request_setting_but_the_credential_and_sessio
         record_llm_call(&request("first"), &result("ok", None));
     }
     type Edit = fn(&mut LlmRequestPayload);
-    let edits: [(&str, Edit); 5] = [
+    let edits: [(&str, Edit); 7] = [
         ("temperature", |r| r.temperature = Some(0.5)),
+        ("reasoning_effort_source", |r| {
+            r.reasoning_effort_source = harn_llm::effective_effort::ReasoningEffortSource::Operator;
+        }),
+        ("portable_option_intent", |r| {
+            r.portable_option_intent
+                .insert(harn_provider_catalog::capabilities::PortableOption::Seed);
+        }),
         ("provider", |r| r.provider = "openai".to_string()),
         ("output_schema", |r| {
             r.output_schema = Some(serde_json::json!({"type": "object"}));
@@ -173,6 +180,51 @@ fn the_request_digest_covers_every_request_setting_but_the_credential_and_sessio
     same.api_key = "another-key".to_string();
     same.session_id = Some("another-session".to_string());
     assert!(serve_llm_call(&same).unwrap().is_ok());
+}
+
+/// A field serde skips never reaches the digest by default, so each one
+/// must be named as covered or as deliberately left out.
+#[test]
+fn every_unserialized_request_field_is_covered_or_excluded_by_the_digest() {
+    let source = include_str!("../../harn-llm/src/request.rs");
+    let struct_body = source
+        .split("pub struct LlmRequestPayload {")
+        .nth(1)
+        .and_then(|rest| rest.split("\n}").next())
+        .expect("LlmRequestPayload is in request.rs");
+    let mut skipped = Vec::new();
+    let mut lines = struct_body.lines();
+    while let Some(line) = lines.next() {
+        if line.trim() != "#[serde(skip_serializing)]" {
+            continue;
+        }
+        let field = lines
+            .by_ref()
+            .map(str::trim)
+            .find(|line| line.starts_with("pub "))
+            .and_then(|line| line.strip_prefix("pub "))
+            .and_then(|line| line.split(':').next())
+            .expect("a skipped attribute precedes a field");
+        skipped.push(field.to_string());
+    }
+    assert!(skipped.len() >= 9, "parsed skipped fields: {skipped:?}");
+    for field in &skipped {
+        assert!(
+            REQUEST_DIGEST_UNSERIALIZED.contains(&field.as_str())
+                ^ REQUEST_DIGEST_UNSERIALIZED_EXCLUDED.contains(&field.as_str()),
+            "`{field}` is skipped by serde: list it in exactly one of \
+             REQUEST_DIGEST_UNSERIALIZED or REQUEST_DIGEST_UNSERIALIZED_EXCLUDED"
+        );
+    }
+    for field in REQUEST_DIGEST_UNSERIALIZED
+        .iter()
+        .chain(REQUEST_DIGEST_UNSERIALIZED_EXCLUDED)
+    {
+        assert!(
+            skipped.iter().any(|s| s == field),
+            "`{field}` is not skipped"
+        );
+    }
 }
 
 #[test]
@@ -500,4 +552,36 @@ fn a_prefix_cache_read_is_served_only_where_the_recording_made_it() {
     serve_llm_call(&request("one")).unwrap().unwrap();
     // The recording read `k` again only after call 2, so a read here is new.
     assert!(cache_lookup("intent", "k", || Ok(None)).is_err());
+}
+
+/// A misspelled entry would silently allow nothing; each must name a real
+/// `harness.agent` method whose state effects all target an argument.
+#[test]
+fn every_session_entry_method_is_a_harness_agent_method_scoped_to_an_argument() {
+    use harn_builtin_meta::{BuiltinExposure, CapabilityId, ResourceSelector};
+    for method in prefix::SESSION_ENTRY_METHODS {
+        let name = format!("__cap_agent_{method}");
+        let contract = crate::stdlib::builtin_policy_metadata(&name)
+            .1
+            .unwrap_or_else(|| panic!("`{name}` has no contract"));
+        assert!(
+            matches!(
+                contract.exposure,
+                BuiltinExposure::HarnessMethod { capability: CapabilityId::Agent, method: m } if m == *method
+            ),
+            "`{name}` is not harness.agent.{method}"
+        );
+        for effect in contract.effects {
+            if effect.kind == EffectKind::State {
+                assert!(
+                    effect.resources.iter().all(|resource| matches!(
+                        resource,
+                        ResourceSelector::Argument(_)
+                            | ResourceSelector::Constant("agent-sessions")
+                    )),
+                    "`{name}` writes state outside the session table: {effect:?}"
+                );
+            }
+        }
+    }
 }

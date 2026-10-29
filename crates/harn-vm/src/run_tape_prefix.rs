@@ -2,9 +2,9 @@
 //!
 //! While a branch replays its prefix, every builtin and capability call is
 //! checked against its registry effect contract. Clock, random and env reads
-//! are served from the recording. The runtime store runs on an overlay seeded
-//! with what the recorded run opened, and persistent cache writes were already
-//! made by the recorded run. Reads of the restored workspace, state, host facts
+//! are served from the recording. The runtime store opens with what the
+//! recorded run opened and does not save until the branch goes live, and
+//! persistent cache writes were already made by the recorded run. Reads of the restored workspace, state, host facts
 //! and secrets run. Anything else would act on the world a second time, so it
 //! is refused and the branch diverges.
 
@@ -49,7 +49,8 @@ fn verdict(owner: Owner<'_>, effects: &[EffectSpec]) -> Verdict {
             EffectKind::Clock | EffectKind::Env => {}
             EffectKind::Fs | EffectKind::Host | EffectKind::Secret | EffectKind::State if reads => {
             }
-            EffectKind::State if branch_owns_state(owner) || process_local(effect) => {}
+            EffectKind::State
+                if branch_owns_state(owner) || process_local(effect) || session_entry(owner) => {}
             _ => return Verdict::Refuse(*effect),
         }
     }
@@ -60,14 +61,52 @@ fn verdict(owner: Owner<'_>, effects: &[EffectSpec]) -> Verdict {
     }
 }
 
-/// State writes the branch itself absorbs: the runtime store's overlay and
-/// the persistent cache, whose prefix writes the recorded run already made.
+/// State writes the branch itself absorbs: the runtime store, which does not
+/// save during the prefix, and the persistent cache, whose prefix writes the
+/// recorded run already made.
 fn branch_owns_state(owner: Owner<'_>) -> bool {
     match owner {
         Some((CapabilityId::Runtime, method)) => method.starts_with("store_"),
         Some((CapabilityId::Llm, method)) => matches!(method, "cache_put" | "cache_clear"),
         _ => false,
     }
+}
+
+/// `harness.agent` methods whose state target, the session id argument, is one
+/// entry of the in-process session table that `agent-sessions` names. Durable
+/// agent state (`state_write`, `state_delete`, `state_handoff`) and live-client
+/// routing stay off this list and are refused.
+pub(super) const SESSION_ENTRY_METHODS: &[&str] = &[
+    "add_root",
+    "begin_goal_turn",
+    "claim_tool_format",
+    "clear_goal",
+    "clear_scratchpad",
+    "close",
+    "compact",
+    "compact_transcript",
+    "drain_inbox",
+    "end_goal_turn",
+    "fork",
+    "fork_at",
+    "inject",
+    "post_event",
+    "reanchor",
+    "redo",
+    "remove_root",
+    "reset",
+    "rollback",
+    "set_goal",
+    "set_scratchpad",
+    "set_workspace_anchor",
+    "set_workspace_policy",
+    "transcript_clear_reminders",
+    "transcript_inject_reminder",
+    "trim",
+];
+
+fn session_entry(owner: Owner<'_>) -> bool {
+    matches!(owner, Some((CapabilityId::Agent, method)) if SESSION_ENTRY_METHODS.contains(&method))
 }
 
 /// State that lives only in this process's VM, so rebuilding it during the
@@ -109,9 +148,15 @@ pub(crate) fn records_reads() -> bool {
     RECORDING_FULL.load(Ordering::Acquire) && !prefix_active()
 }
 
+/// True while a call may be served from or recorded on a tape.
+pub(crate) fn taping() -> bool {
+    RECORDING_FULL.load(Ordering::Acquire) || prefix_active()
+}
+
 /// Gate one builtin or capability call. `Some` is the call's answer in place
 /// of running it: a recorded read, or the divergence that refuses it.
 /// `effects: None` means the call declares no contract.
+#[inline]
 pub(crate) fn serve_read(
     owner: Owner<'_>,
     name: &str,
@@ -121,6 +166,18 @@ pub(crate) fn serve_read(
     if !prefix_active() {
         return None;
     }
+    serve_read_in_prefix(owner, name, effects, args)
+}
+
+// Out of line so the dispatch frames that call `serve_read` stay small.
+#[cold]
+#[inline(never)]
+fn serve_read_in_prefix(
+    owner: Owner<'_>,
+    name: &str,
+    effects: Option<&[EffectSpec]>,
+    args: &[VmValue],
+) -> Option<Result<VmValue, VmError>> {
     let Some(effects) = effects else {
         return refuse_in_prefix(name, "it declares no effect contract")
             .err()
@@ -160,6 +217,7 @@ pub(crate) fn serve_read(
 /// Record a clock, random or env read the program just made, if a full tape
 /// is recording. A failed read is not recorded, so a branch reaching it
 /// diverges instead of inventing an answer.
+#[inline]
 pub(crate) fn record_read(
     owner: Owner<'_>,
     name: &str,
@@ -167,9 +225,20 @@ pub(crate) fn record_read(
     args: &[VmValue],
     result: &Result<VmValue, VmError>,
 ) {
-    if !records_reads() {
-        return;
+    if records_reads() {
+        record_read_on_tape(owner, name, effects, args, result);
     }
+}
+
+#[cold]
+#[inline(never)]
+fn record_read_on_tape(
+    owner: Owner<'_>,
+    name: &str,
+    effects: Option<&[EffectSpec]>,
+    args: &[VmValue],
+    result: &Result<VmValue, VmError>,
+) {
     let (Some(effects), Ok(value)) = (effects, result) else {
         return;
     };
@@ -232,20 +301,12 @@ pub(crate) fn refuse_in_prefix(name: &str, reason: &str) -> Result<(), VmError> 
     if state.live {
         return Ok(());
     }
-    let call = state.report.served_calls;
+    let call = state.report.served_calls + 1;
     Err(state.diverge(
         call,
         "refused effect",
         format!("`{name}` would run in the replayed prefix: {reason}"),
     ))
-}
-
-/// What a runtime store opened at `path` starts from.
-pub(crate) struct OpenedStore {
-    pub(crate) contents: Option<serde_json::Value>,
-    /// The store lives in memory and never writes its file: a branch must not
-    /// touch the store the recorded run left behind.
-    pub(crate) overlay: bool,
 }
 
 /// Open the runtime store at `path`. A branch starts it from the recorded
@@ -255,7 +316,7 @@ pub(crate) struct OpenedStore {
 pub(crate) fn store_seed(
     path: &Path,
     read: impl FnOnce() -> Option<serde_json::Value>,
-) -> Result<OpenedStore, VmError> {
+) -> Result<Option<serde_json::Value>, VmError> {
     let seeded = {
         let mut guard = PROCESS_BRANCH.lock().expect("branch lock poisoned");
         match guard.as_mut() {
@@ -266,7 +327,7 @@ pub(crate) fn store_seed(
                     Some(seed) => Some(Some(seed.clone())),
                     None if state.live => Some(None),
                     None => {
-                        let call = state.report.served_calls;
+                        let call = state.report.served_calls + 1;
                         return Err(state.diverge(
                             call,
                             "runtime store",
@@ -279,7 +340,6 @@ pub(crate) fn store_seed(
             }
         }
     };
-    let overlay = seeded.is_some();
     let contents = match seeded {
         Some(Some(seed)) => seed,
         _ => read(),
@@ -295,7 +355,7 @@ pub(crate) fn store_seed(
             }),
         });
     }
-    Ok(OpenedStore { contents, overlay })
+    Ok(contents)
 }
 
 /// A store's identity across the recorded workspace and a branch's copy of it.

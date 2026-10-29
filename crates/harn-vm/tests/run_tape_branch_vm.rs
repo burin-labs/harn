@@ -1,6 +1,8 @@
 //! A branch replays a recorded run's prefix through the real agent loop
 //! without re-running any of its effects: exec, runtime store writes and
 //! tool hooks are served from the tape or refused, never run.
+// The scripts shell out to `touch`.
+#![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -131,16 +133,10 @@ fn dirs() -> Dirs {
     }
 }
 
-#[cfg(unix)]
-#[test]
-fn a_branch_prefix_serves_exec_store_write_and_hook_without_running_them() {
-    let _serial = SERIAL
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let dirs = dirs();
-    let hook_marker = dirs.markers.join("hook-marker");
-    let exec_marker = dirs.markers.join("exec-marker");
-    let source = format!(
+/// One `mark` tool call, then done: the hook and the tool's exec each touch a
+/// marker, and the tool writes the store.
+fn mark_script(hook_marker: &Path, exec_marker: &Path) -> String {
+    format!(
         r#"
 import {{ agent_loop }} from "std/agent/loop"
 import {{ llm_text, with_llm_script }} from "std/testing"
@@ -189,18 +185,33 @@ pipeline main(harness: Harness, task: unknown) {{
           tool_format: "native",
           max_iterations: 3,
           loop_until_done: true,
+          // Completion is not under test: a deterministic yes keeps the
+          // terminal status independent of the runner's verifier facts.
+          verify_completion: {{ _payload -> return true }},
           session_id: "branch-" + id,
         }},
       )
     }},
   )
   harness.tools.clear_hooks()
+  harness.runtime.store_set("after_key", result.status)
   harness.stdio.log(result.status)
 }}
 "#,
-        hook_marker = quote(&hook_marker),
-        exec_marker = quote(&exec_marker),
-    );
+        hook_marker = quote(hook_marker),
+        exec_marker = quote(exec_marker),
+    )
+}
+
+#[test]
+fn a_branch_prefix_serves_exec_store_write_and_hook_without_running_them() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let hook_marker = dirs.markers.join("hook-marker");
+    let exec_marker = dirs.markers.join("exec-marker");
+    let source = mark_script(&hook_marker, &exec_marker);
 
     let recorded = record(&source, &dirs.tapes, &dirs.workspace);
     assert!(
@@ -243,7 +254,52 @@ pipeline main(harness: Harness, task: unknown) {{
     );
 }
 
-#[cfg(unix)]
+/// The live tail answers from the mock script where the recording left off:
+/// each served call consumed its scripted response, so live call 2 gets the
+/// done text rather than a second `mark` tool call.
+#[test]
+fn a_branch_live_tail_continues_the_mock_script_after_the_served_prefix() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let hook_marker = dirs.markers.join("hook-marker");
+    let exec_marker = dirs.markers.join("exec-marker");
+    let source = mark_script(&hook_marker, &exec_marker);
+
+    record(&source, &dirs.tapes, &dirs.workspace);
+    std::fs::remove_file(&hook_marker).unwrap();
+    std::fs::remove_file(&exec_marker).unwrap();
+    std::fs::remove_file(harn_vm::runtime_paths::store_path(&dirs.workspace)).unwrap();
+
+    let (output, report) = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+    let output = output.expect("the branched run succeeds");
+    assert!(output.contains("[harn] done"), "branch output: {output}");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(report.served_calls, 1, "report: {report:?}");
+    assert_eq!(report.served_tool_calls, 1, "report: {report:?}");
+    assert_eq!(report.live_calls, 1, "report: {report:?}");
+    assert!(
+        !hook_marker.exists(),
+        "the branch re-ran the served tool's hook"
+    );
+    assert!(
+        !exec_marker.exists(),
+        "the branch re-ran the served tool's exec"
+    );
+    let store_path = harn_vm::runtime_paths::store_path(&dirs.workspace);
+    let store: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&store_path).unwrap()).unwrap();
+    assert_eq!(
+        store["after_key"], "done",
+        "a live-tail write saves: {store}"
+    );
+    assert!(
+        store["script_key"].is_string(),
+        "prefix writes carry over: {store}"
+    );
+}
+
 #[test]
 fn a_script_level_exec_in_the_prefix_is_refused_not_run() {
     let _serial = SERIAL
@@ -294,4 +350,5 @@ pipeline main(harness: Harness, task: unknown) {{
     assert_eq!(report.served_calls, 0, "report: {report:?}");
     let divergence = report.divergence.expect("the refusal is the divergence");
     assert_eq!(divergence.what, "refused effect", "{divergence:?}");
+    assert_eq!(divergence.call, 1, "the refusal came before model call 1");
 }

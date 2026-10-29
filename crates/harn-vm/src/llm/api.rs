@@ -438,6 +438,16 @@ enum ProviderExecution {
     Offthread,
 }
 
+/// The recording answered this call from a scripted mock, consuming one
+/// entry; a served call consumes it too, so a mocked live tail answers from
+/// where the recording left off rather than from the script's first entry.
+fn consume_served_mock(request: &LlmRequestPayload) {
+    if crate::llm::providers::MockProvider::should_intercept_request(request) {
+        let _ = mock_llm_response(request);
+        let _ = super::mock::take_mock_stream_chunks();
+    }
+}
+
 /// Project a completed local result without dispatching a provider stream.
 fn complete_bypass_result(
     request: &LlmRequestPayload,
@@ -465,9 +475,11 @@ async fn vm_call_llm_full_inner_request(
     execution: ProviderExecution,
 ) -> Result<LlmResult, VmError> {
     if let Some(served) = crate::run_tape::serve_llm_call(request) {
+        let served = served?;
+        consume_served_mock(request);
         observed.record_provider_dispatch();
         request.emit_reminder_lifecycle();
-        return Ok(complete_bypass_result(request, served?, delta_tx, None));
+        return Ok(complete_bypass_result(request, served, delta_tx, None));
     }
 
     if let Some(result) = super::trigger_predicate::lookup_cached_result(request) {

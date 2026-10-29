@@ -131,6 +131,11 @@ pub trait VmRuntime: Any + Send + Sync {
     ) -> Option<Result<VmValue, VmError>> {
         None
     }
+    /// True while a builtin call may be served from or recorded on a tape;
+    /// false lets callers skip the tape hooks entirely.
+    fn tapes_builtin_calls(&self) -> bool {
+        false
+    }
     /// True while builtin results may need recording, so callers keep the
     /// arguments for [`Self::record_builtin_call`].
     fn records_builtin_calls(&self) -> bool {
