@@ -29,7 +29,8 @@ async fn metadata_only_parent_refuses_forking_unpersisted_live_messages() {
         None,
     )
     .unwrap();
-    let before = harn_vm::agent_sessions::transcript(parent).unwrap();
+    let before =
+        harn_vm::llm::vm_value_to_json(&harn_vm::agent_sessions::transcript(parent).unwrap());
     let fork = harn_vm::agent_sessions::fork_canonical(
         &store,
         root.path(),
@@ -39,7 +40,10 @@ async fn metadata_only_parent_refuses_forking_unpersisted_live_messages() {
     )
     .await;
     assert!(fork.is_err());
-    assert_eq!(harn_vm::agent_sessions::transcript(parent), Some(before));
+    assert_eq!(
+        harn_vm::llm::vm_value_to_json(&harn_vm::agent_sessions::transcript(parent).unwrap()),
+        before
+    );
     assert!(!harn_vm::agent_sessions::exists("unpersisted-child"));
     assert!(store.describe("unpersisted-child").await.is_err());
 }
