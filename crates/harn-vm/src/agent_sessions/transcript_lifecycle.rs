@@ -237,6 +237,40 @@ pub fn prompt_state_json(id: &str) -> SessionPromptState {
     })
 }
 
+pub(crate) fn canonical_prompt_snapshot(
+    id: &str,
+) -> Result<super::session_event::CompactionRecord, String> {
+    use super::session_event::{CompactionRecord, TranscriptEvent, TranscriptKind};
+    let transcript = super::transcript(id).ok_or_else(|| format!("unknown session '{id}'"))?;
+    let messages = messages_json(id);
+    let mut source_event_ids = transcript
+        .as_dict()
+        .and_then(|dict| dict.get("events"))
+        .and_then(|events| match events {
+            VmValue::List(events) => Some(events.as_ref()),
+            _ => None,
+        })
+        .into_iter()
+        .flatten()
+        .map(|event| TranscriptEvent::from_json(crate::llm::helpers::vm_value_to_json(event)))
+        .filter(|event| {
+            matches!(
+                event.kind,
+                Some(TranscriptKind::Message | TranscriptKind::ToolResult)
+            )
+        })
+        .map(|event| event.id)
+        .collect::<Vec<_>>();
+    if source_event_ids.len() != messages.len() {
+        source_event_ids = vec![None; messages.len()];
+    }
+    Ok(CompactionRecord {
+        messages,
+        summary: prompt_state_json(id).summary,
+        source_event_ids,
+    })
+}
+
 /// Overwrite the transcript for this session. Used by `agent_loop` on
 /// exit to persist the synthesized transcript.
 pub fn store_transcript(id: &str, transcript: VmValue) -> Result<(), String> {

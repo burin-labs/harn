@@ -379,9 +379,9 @@ use runtime_store::{
     DEFAULT_TRANSCRIPT_BUDGET_POLICY, SESSIONS, SESSION_CAP,
 };
 pub use scratchpad::*;
-pub(crate) use transcript_lifecycle::append_event_to_state;
 pub(crate) use transcript_lifecycle::settle_assistant_publication;
 pub use transcript_lifecycle::*;
+pub(crate) use transcript_lifecycle::{append_event_to_state, canonical_prompt_snapshot};
 pub use types::*;
 pub use workspace_roots::{PreparedWorkspaceRoots, WorkspaceRootsError};
 

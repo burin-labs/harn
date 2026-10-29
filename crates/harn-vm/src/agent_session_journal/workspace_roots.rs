@@ -103,23 +103,11 @@ pub(crate) async fn add_workspace_root_verified_persisted(
             .has_canonical_journal()
     {
         // A first audit must not make an empty journal shadow existing live context.
-        let prompt = agent_sessions::prompt_state_json(id);
-        let transcript = agent_sessions::transcript(id)
-            .map(|value| crate::llm::helpers::vm_value_to_json(&value))
-            .ok_or_else(|| "workspace root session disappeared before persistence".to_string())?;
-        let source_event_ids = transcript
-            .get("events")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .map(|event| super::TranscriptRecord::new(event.clone(), None))
-            .filter(|record| record.is_history_position())
-            .map(|record| record.transcript_event.id.clone())
-            .collect();
+        let snapshot = agent_sessions::canonical_prompt_snapshot(id)?;
         events.push(super::messages_replaced_event(
-            agent_sessions::messages_json(id),
-            prompt.summary,
-            source_event_ids,
+            snapshot.messages,
+            snapshot.summary,
+            snapshot.source_event_ids,
         ));
     }
     events.push(append);

@@ -89,6 +89,17 @@ async fn mounted_root_audit_is_durable_once_with_or_without_a_live_journal() {
             )
             .unwrap();
         }
+        crate::agent_sessions::append_event(
+            &session,
+            crate::llm::helpers::transcript_event(
+                "tool_call",
+                "assistant",
+                "internal",
+                "",
+                Some(serde_json::json!({"tool_name":"audit-control"})),
+            ),
+        )
+        .unwrap();
         super::add_workspace_root_verified_persisted(
             &session,
             extra.path().to_str().unwrap(),

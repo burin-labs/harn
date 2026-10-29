@@ -204,6 +204,19 @@ async fn acp_websocket_lists_and_loads_a_store_only_session_from_its_project() {
             .as_object_mut()
             .expect("session object")
             .remove("createdAt");
+        assert!(session["workspaceAnchor"]["anchored_at"].is_string());
+        assert_eq!(
+            session["workspaceAnchor"],
+            session["_meta"]["harn"]["workspaceAnchor"]
+        );
+        for anchor in ["/workspaceAnchor", "/_meta/harn/workspaceAnchor"] {
+            session
+                .pointer_mut(anchor)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove("anchored_at");
+        }
     }
     assert_eq!(
         websocket_session, in_process_session,
