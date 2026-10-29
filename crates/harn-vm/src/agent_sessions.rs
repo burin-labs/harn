@@ -381,7 +381,7 @@ pub(crate) use transcript_lifecycle::append_event_to_state;
 pub(crate) use transcript_lifecycle::settle_assistant_publication;
 pub use transcript_lifecycle::*;
 pub use types::*;
-pub use workspace_roots::PreparedWorkspaceRoots;
+pub use workspace_roots::{PreparedWorkspaceRoots, WorkspaceRootsError};
 
 thread_local! {
     static CURRENT_SESSION_STACK: RefCell<Vec<CurrentSessionFrame>> = const { RefCell::new(Vec::new()) };

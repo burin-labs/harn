@@ -590,16 +590,30 @@ pub fn list_workspace_roots(id: &str) -> Result<(PathBuf, Vec<MountedRoot>), Str
 }
 
 pub(super) fn validate_workspace_root_path(root: &str) -> Result<PathBuf, String> {
-    let normalized = normalize_workspace_root_path(root);
-    let canonical = std::fs::canonicalize(&normalized)
-        .map_err(|error| format!("workspace root '{root}' must exist and be readable: {error}"))?;
-    let metadata = std::fs::metadata(&canonical)
-        .map_err(|error| format!("workspace root '{root}' must exist and be readable: {error}"))?;
+    validate_workspace_root_path_with(root, |_| Ok(()))
+}
+
+pub(super) fn validate_workspace_root_path_with<E: From<String>>(
+    root: &str,
+    validate_boundary: impl FnOnce(&Path) -> Result<(), E>,
+) -> Result<PathBuf, E> {
+    let normalized = crate::stdlib::process::normalize_context_path(Path::new(root));
+    let canonical = std::fs::canonicalize(&normalized).map_err(|error| {
+        E::from(format!(
+            "workspace root '{root}' must exist and be readable: {error}"
+        ))
+    })?;
+    validate_boundary(&canonical)?;
+    let metadata = std::fs::metadata(&canonical).map_err(|error| {
+        E::from(format!(
+            "workspace root '{root}' must exist and be readable: {error}"
+        ))
+    })?;
     if !metadata.is_dir() {
-        return Err(format!("workspace root '{root}' must be a directory"));
+        return Err(format!("workspace root '{root}' must be a directory").into());
     }
     std::fs::read_dir(&canonical)
-        .map_err(|error| format!("workspace root '{root}' must be readable: {error}"))?;
+        .map_err(|error| E::from(format!("workspace root '{root}' must be readable: {error}")))?;
     Ok(canonical)
 }
 

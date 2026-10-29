@@ -1,22 +1,5 @@
 use super::*;
-use harn_vm::agent_sessions::PreparedWorkspaceRoots;
-
-pub(super) enum RootGrantError {
-    Invalid(String),
-    OutsideProcess(PathBuf),
-}
-
-impl From<String> for RootGrantError {
-    fn from(message: String) -> Self {
-        Self::Invalid(message)
-    }
-}
-
-impl From<&str> for RootGrantError {
-    fn from(message: &str) -> Self {
-        Self::Invalid(message.into())
-    }
-}
+use harn_vm::agent_sessions::{PreparedWorkspaceRoots, WorkspaceRootsError};
 
 fn same_authority(
     current: &harn_vm::workspace_anchor::WorkspaceAnchor,
@@ -35,10 +18,10 @@ fn same_authority(
 }
 
 impl AcpServer {
-    pub(super) fn send_root_grant_error(&self, id: &serde_json::Value, error: RootGrantError) {
+    pub(super) fn send_root_grant_error(&self, id: &serde_json::Value, error: WorkspaceRootsError) {
         let (code, message) = match error {
-            RootGrantError::Invalid(message) => ("invalid_workspace_roots", message),
-            RootGrantError::OutsideProcess(path) => (
+            WorkspaceRootsError::Invalid(message) => ("invalid_workspace_roots", message),
+            WorkspaceRootsError::OutsideProcess(path) => (
                 "outside_process_confinement",
                 format!(
                     "workspace root '{}' is outside process confinement",
@@ -53,7 +36,7 @@ impl AcpServer {
         &self,
         params: &serde_json::Value,
         existing: Option<&str>,
-    ) -> Result<PreparedWorkspaceRoots, RootGrantError> {
+    ) -> Result<PreparedWorkspaceRoots, WorkspaceRootsError> {
         let declared_cwd = match params.get("cwd") {
             None => None,
             Some(serde_json::Value::String(cwd)) if !cwd.is_empty() => Some(cwd.as_str()),
@@ -61,9 +44,7 @@ impl AcpServer {
         };
         let live = existing.and_then(|id| self.sessions.get(id));
         let cwd = match (declared_cwd, live) {
-            (Some(cwd), _) => {
-                resolve_acp_session_cwd(Some(cwd)).map_err(|error| error.to_string())?
-            }
+            (Some(cwd), _) => std::path::absolute(cwd).map_err(|error| error.to_string())?,
             (None, Some(session)) => session.cwd.clone(),
             (None, None) if existing.is_some() => self
                 .restore_store_scope(params)
@@ -82,19 +63,6 @@ impl AcpServer {
         if let Some(session) = live {
             if prepared.anchor().primary != session.store_scope.workspace() {
                 return Err("session cwd cannot change during load or resume".into());
-            }
-        }
-        if let Some(confinement) = harn_vm::process_sandbox::current_process_confinement() {
-            for root in std::iter::once(&prepared.anchor().primary).chain(
-                prepared
-                    .anchor()
-                    .additional_roots
-                    .iter()
-                    .map(|root| &root.path),
-            ) {
-                if !confinement.covers(root) {
-                    return Err(RootGrantError::OutsideProcess(root.clone()));
-                }
             }
         }
         if let (Some(id), Some(session)) = (existing, live) {

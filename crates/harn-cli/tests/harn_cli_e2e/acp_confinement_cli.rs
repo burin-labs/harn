@@ -163,6 +163,7 @@ pub(crate) fn additional_directories_refuse_process_escape_without_replacing_the
     let workspace = base.join("workspace");
     let extra = base.join("extra");
     let outside = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
     for path in [&workspace, &extra] {
         fs::create_dir(path).unwrap();
     }
@@ -178,7 +179,7 @@ pub(crate) fn additional_directories_refuse_process_escape_without_replacing_the
         .args(["serve", "acp", "--obs", "off", "--confine-workspace"])
         .arg(&base)
         .env_clear()
-        .env("HOME", &base)
+        .env("HOME", home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default());
     let mut client = StdioJsonRpcClient::spawn("ACP directory process ceiling", command);
     let initialized = request(
