@@ -51,6 +51,7 @@ fn record_full(dir: &Path) -> RunTapeGuard {
     let workspace = TapeWorkspace {
         root: dir.to_path_buf(),
         observer: Box::new(FixedObserver),
+        state_roots: Vec::new(),
     };
     start_recording(dir, RecordingLevel::Full, Some(workspace))
         .unwrap()
@@ -79,6 +80,7 @@ fn branch(dir: &Path, k: u64, workspace: &Path) -> TestBranch {
         live_after_calls: k,
         workspace_root: workspace.to_path_buf(),
         state_root: state.path().join("branch"),
+        host_state_roots: Vec::new(),
     })
     .unwrap();
     let _scope = guard.scope().enter();
@@ -294,6 +296,7 @@ fn a_metadata_tape_refuses_to_branch() {
         live_after_calls: 1,
         workspace_root: tmp.path().to_path_buf(),
         state_root: fresh_branch_state(tmp.path()),
+        host_state_roots: Vec::new(),
     })
     .err()
     .unwrap();
@@ -315,6 +318,7 @@ fn a_tape_recorded_without_a_workspace_observer_refuses_to_branch() {
         live_after_calls: 1,
         workspace_root: tmp.path().to_path_buf(),
         state_root: fresh_branch_state(tmp.path()),
+        host_state_roots: Vec::new(),
     })
     .err()
     .unwrap();

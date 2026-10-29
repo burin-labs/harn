@@ -88,6 +88,9 @@ impl ProcessTape {
 pub struct TapeWorkspace {
     pub root: PathBuf,
     pub observer: Box<dyn ToolEffectObserver>,
+    /// Durable state the host keeps outside `root` for this run, such as a
+    /// per-user session store. A branch of the tape keeps out of them.
+    pub state_roots: Vec<PathBuf>,
 }
 
 /// How a production run tape was recorded, in its header. A branch reads
@@ -184,6 +187,7 @@ pub fn start_recording(
         state_roots: workspace_root.as_deref().map_or_else(Vec::new, |root| {
             host_state_roots(root)
                 .into_iter()
+                .chain(workspace.iter().flat_map(|w| w.state_roots.iter().cloned()))
                 .map(|path| {
                     crate::workspace_path::canonicalize_existing_ancestor(&path).unwrap_or(path)
                 })
@@ -642,6 +646,9 @@ pub struct BranchPlan {
     /// and event log. It must be absent or empty, so a branch never writes
     /// into the recording's state; the prefix rebuilds it by replaying.
     pub state_root: PathBuf,
+    /// Durable state the host keeps outside the workspace for this run, as
+    /// [`TapeWorkspace::state_roots`]. Writes under them land in `state_root`.
+    pub host_state_roots: Vec<PathBuf>,
 }
 
 /// The first point where a branch's prefix stopped matching its recording.
@@ -937,7 +944,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
             plan.live_after_calls
         ));
     }
-    let protected = recording_trees(&tape, &plan.workspace_root);
+    let protected = recording_trees(&tape, &plan.workspace_root, &plan.host_state_roots);
     let trees: Vec<PathBuf> = protected.iter().map(|(tree, _)| tree.clone()).collect();
     let state_root = scope::fresh_state_root(&plan.state_root, &trees)?;
     let state = BranchState {
@@ -962,10 +969,15 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
 /// The trees a recording's durable state may live in, canonical, with where
 /// each remaps under a branch's state root: the state roots it recorded and
 /// the ones the host names now, then the recorded and branch workspaces.
-fn recording_trees(tape: &EventTape, workspace: &Path) -> Vec<(PathBuf, PathBuf)> {
+fn recording_trees(
+    tape: &EventTape,
+    workspace: &Path,
+    host_roots: &[PathBuf],
+) -> Vec<(PathBuf, PathBuf)> {
     let run = tape.header.run.as_ref();
     let mut state_roots: Vec<PathBuf> = run.map(|run| run.state_roots.clone()).unwrap_or_default();
     state_roots.extend(host_state_roots(workspace));
+    state_roots.extend(host_roots.iter().cloned());
     let workspaces = run
         .and_then(|run| run.workspace_root.clone())
         .into_iter()
