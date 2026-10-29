@@ -827,9 +827,7 @@ const GIT_ALIASES_ASSUMED_ABSENT: string = "<assumed-absent>"
  * The lookup for deciding whether a command writes the stash list on its own words alone. A
  * command that changes git's environment still reads as unreadable under any other lookup.
  */
-const ALIASES_ASSUMED_ABSENT: fn(GitAliasContext) -> dict = { context ->
-  {"<assumed-absent>": ""}
-}
+const ALIASES_ASSUMED_ABSENT: fn(GitAliasContext) -> dict = { context -> {"<assumed-absent>": ""} }
 
 pub const NO_GIT_BUILTINS: fn(string) -> list<string> = { program -> [] }
 
@@ -1420,7 +1418,11 @@ pub fn git_stash_violation(
   if !git_stash_write_in(command, 0, ALIASES_ASSUMED_ABSENT, builtins) {
     return "Refused without a verdict: the policy could not establish whether this command writes the "
       + "git stash list, because it could not read the git alias configuration "
-      + (if unreadable_reason != "" { "(" + unreadable_reason + ")" } else { "the command selects" })
+      + if unreadable_reason != "" {
+        "(" + unreadable_reason + ")"
+      } else {
+        "the command selects"
+      }
       + ". This is a guard fault, not a stash refusal; retry from the repository root or run the "
       + "built-in git subcommand directly."
   }

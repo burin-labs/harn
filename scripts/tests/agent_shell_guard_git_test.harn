@@ -200,7 +200,11 @@ pipeline test_an_unreadable_alias_configuration_is_a_guard_fault_not_a_stash_ref
   assert(fault.reason.contains("cannot read"))
   assert(!fault.reason.contains("is refused: the stash list"))
   // Commands that change git's environment before it runs are unprovable the same way.
-  const unprovable = decision(claude_payload("cd /repo && git s"), NO_MAKE_TARGETS, NO_CONFIG_ALIASES)
+  const unprovable = decision(
+    claude_payload("cd /repo && git s"),
+    NO_MAKE_TARGETS,
+    NO_CONFIG_ALIASES,
+  )
   assert(!unprovable.allow)
   assert(!unprovable.reason.contains("is refused: the stash list"))
   // THE OTHER SIDE: a stash written in the command's own words keeps the stash refusal, whatever
