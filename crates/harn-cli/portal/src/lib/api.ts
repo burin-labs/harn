@@ -8,7 +8,6 @@ import type {
   PortalLaunchJobList,
   PortalLlmOptions,
   PortalMeta,
-  PersonaManifestSummary,
   PersonaStatus,
   PortalLaunchTargetList,
   PortalListResponse,
@@ -76,10 +75,6 @@ export function fetchRuns(params?: {
 
 export function fetchPortalMeta(): Promise<PortalMeta> {
   return fetchJson<PortalMeta>("/api/meta")
-}
-
-export function fetchPersonas(): Promise<PersonaManifestSummary[]> {
-  return fetchJson<PersonaManifestSummary[]>("/api/personas")
 }
 
 export function fetchPersonaStatus(name: string, at?: string): Promise<PersonaStatus> {

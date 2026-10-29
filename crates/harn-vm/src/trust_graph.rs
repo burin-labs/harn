@@ -55,6 +55,7 @@ pub use harn_execution_policy::AutonomyTier;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(ts_rs::TS)]
 pub enum TrustOutcome {
     Success,
     Failure,
@@ -73,7 +74,7 @@ impl TrustOutcome {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct TrustRecord {
     pub schema: String,
     pub record_id: String,
@@ -84,6 +85,7 @@ pub struct TrustRecord {
     pub trace_id: String,
     pub autonomy_tier: AutonomyTier,
     #[serde(with = "time::serde::rfc3339")]
+    #[ts(type = "string")]
     pub timestamp: OffsetDateTime,
     pub cost_usd: Option<f64>,
     #[serde(default)]
@@ -360,6 +362,7 @@ pub struct TrustQueryFilters {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
 pub struct TrustTraceGroup {
     pub trace_id: String,
     pub records: Vec<TrustRecord>,
@@ -367,6 +370,7 @@ pub struct TrustTraceGroup {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
 pub struct TrustAgentSummary {
     pub agent: String,
     pub total: u64,
@@ -396,6 +400,7 @@ pub struct TrustScore {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(ts_rs::TS)]
 pub struct TrustChainReport {
     pub topic: String,
     pub total: u64,

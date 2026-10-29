@@ -1,0 +1,39 @@
+import * as shell_guard from "../agent_shell_guard.harn"
+import {
+  GitAliasContext,
+  MakeTargetCensus,
+  NO_CONFIG_ALIASES,
+  ShellGuardDecision,
+  UNMEASURED_MAKE_TARGETS,
+} from "../agent_shell_guard.harn"
+
+pub const NO_MAKE_TARGETS: MakeTargetCensus = UNMEASURED_MAKE_TARGETS
+
+pub fn claude_payload(command: string) -> string {
+  return json_stringify({tool_name: "Bash", tool_input: {command: command}})
+}
+
+pub const TEST_GIT_BUILTINS: fn(string) -> list<string> = { _program ->
+  [
+    "config",
+    "diff",
+    "log",
+    "status",
+    "worktree",
+    "rev-parse",
+    "commit",
+    "show",
+    "version",
+    "init",
+    "stash",
+  ]
+}
+
+pub fn decision(
+  payload: string,
+  make_targets: MakeTargetCensus,
+  alias_lookup: fn(GitAliasContext) -> dict = NO_CONFIG_ALIASES,
+  builtin_lookup: fn(string) -> list<string> = TEST_GIT_BUILTINS,
+) -> ShellGuardDecision {
+  return shell_guard.decision(payload, make_targets, alias_lookup, builtin_lookup)
+}

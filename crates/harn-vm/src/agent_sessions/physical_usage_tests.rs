@@ -54,6 +54,13 @@ fn physical_usage_survives_a_rejected_transcript_projection() {
     };
 
     host::record_provider_dispatch(&bounded_session);
+    host::record_provider_attempt_usage(
+        &bounded_session,
+        "bounded-call",
+        "openai",
+        "gpt-5.6-luna",
+        &physical_usage_result().usage(),
+    );
     host::record_completed_call_usage(&options, &physical_usage_result(), "bounded-call");
 
     assert!(
@@ -78,6 +85,13 @@ fn physical_usage_survives_a_rejected_transcript_projection() {
     };
 
     host::record_provider_dispatch(&retained_session);
+    host::record_provider_attempt_usage(
+        &retained_session,
+        "retained-call",
+        "openai",
+        "gpt-5.6-luna",
+        &physical_usage_result().usage(),
+    );
     host::record_completed_call_usage(&options, &physical_usage_result(), "retained-call");
 
     assert!(

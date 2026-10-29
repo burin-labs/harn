@@ -78,13 +78,24 @@ Pass `--sandbox-unix-socket-root <path>` when a confined child needs a local
 socket file rather than a TCP port. Build servers are the common case: sbt,
 Gradle's Kotlin daemon, and MSBuild worker nodes talk to themselves over a
 Unix-domain socket under the project or the temp dir, and without this grant
-the build dies with a bare `Operation not permitted`. The grant is path-scoped:
-bind and connect are admitted only for socket files under the given roots, a
-socket anywhere else is still refused, and nothing here opens IP networking.
-macOS enforces it; other local backends reject a non-empty grant rather than
-widening. Granting the
-process write roots as socket roots is the natural pairing, since a socket file
-is a file.
+the build dies with a bare `Operation not permitted`. On macOS, bind and
+connect are scoped to socket files under the given roots. Linux grants the
+serving operations under these roots; connections require a separate SSH
+agent or general network grant. Other local backends reject a non-empty
+socket-root grant. Nothing in the socket-root grant opens IP networking.
+
+Pass `--allow-ssh-agent` to let a confined command sign Git commits through the
+launcher's `SSH_AUTH_SOCK`. The process policy records that one socket as
+`process_sandbox.ssh_agent_socket` and passes its path to children even with
+`--environment-policy isolated`. Nested tool policies inherit the host's exact
+endpoint and cannot invent or redirect it. It grants connection to that endpoint without
+granting private-key reads, directory reads under `~/.ssh`, socket creation, or
+IP networking. Other connections remain governed by their existing grants.
+macOS enforces the exact socket path. Linux requires an enforcing Landlock
+backend with ABI 9 for this path restriction. Older kernels and the bubblewrap
+fallback refuse the grant unless the policy already permits general networking.
+Other backends refuse it. The socket must
+exist and have an absolute path; an unset `SSH_AUTH_SOCK` is a CLI error.
 
 When a confined child fails, the refusal record names the boundary that
 refused it: `mechanism` is one of `egress`, `local_socket`, `home_read`,

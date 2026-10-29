@@ -1,0 +1,111 @@
+import { ast_search } from "std/ast"
+import { edit_fast_apply } from "std/edit"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn checked_edit(harness: Harness, extension: string, source: string) -> dict {
+  const root = harness.fs.mkdtemp_in_workspace("typescript-import-query")
+  const path = path_join(root, "example.${extension}")
+  harness.fs.write_text(path, "export const value = 1;\n")
+  return with_llm_script(
+    harness.llm,
+    [llm_text(json_stringify({content: source}))],
+    { ->
+      return edit_fast_apply(
+        harness.fs,
+        harness.random,
+        harness.ast,
+        harness.llm,
+        {path: path, intent: "Update the file", llm_options: {provider: "mock", model: "mock"}},
+      )
+    },
+  )
+}
+
+pipeline test_valid_generic_import_query_has_no_post_edit_diagnostic(harness: Harness) {
+  const source =
+    "const run = async () => {\n  const actual = await importOriginal<typeof import(\"x\")>()\n};\n"
+  for extension in ["ts", "tsx"] {
+    const result = checked_edit(harness, extension, source)
+    assert_eq(result.result, "applied")
+    assert_eq(len(result.validation.errors), 0)
+  }
+}
+
+pipeline test_invalid_generic_import_query_reports_post_edit_diagnostic(harness: Harness) {
+  const source =
+    "const run = async () => {\n  const actual = await importOriginal<typeof import(\"x\")>(;\n};\n"
+  for extension in ["ts", "tsx"] {
+    const result = checked_edit(harness, extension, source)
+    assert(!result.applied)
+    assert(len(result.validation.errors) > 0)
+  }
+}
+
+pipeline test_post_edit_syntax_check_reads_the_changed_file(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("post-edit-import-query")
+  for extension in ["ts", "tsx"] {
+    const path = path_join(root, "example.${extension}")
+    harness.fs.write_text(
+      path,
+      "const run = async () => {\n  const actual = await importOriginal<typeof import(\"x\")>()\n};\n",
+    )
+    const valid = harness.ast.parse_errors({path: path})
+    assert(valid.supported)
+    assert_eq(len(valid.errors), 0)
+    harness.fs.write_text(
+      path,
+      "const run = async () => {\n  const actual = await importOriginal<typeof import(\"x\")>(;\n};\n",
+    )
+    const invalid = harness.ast.parse_errors({path: path})
+    assert(invalid.supported && len(invalid.errors) > 0)
+  }
+}
+
+pipeline test_generic_import_query_keeps_call_tree(harness: Harness) {
+  for language in ["typescript", "tsx"] {
+    for call in [
+      "f<typeof import(\"x\")>(1)",
+      "f<typeof import(\"x\")>()",
+      "f<Foo, typeof import(\"x\")>()",
+      "f<Array<typeof import(\"x\")>>()",
+    ] {
+      const result = ast_search(
+        harness.ast,
+        {
+          source: call,
+          language: language,
+          query:
+            "(call_expression function: (identifier) @name type_arguments: (type_arguments)) @call",
+        },
+      )
+      assert(result.ok)
+      assert_eq(result.match_count, 1)
+      assert_eq(result.matches[0].text, call)
+      assert_eq(len(harness.ast.parse_errors({content: call, language: language}).errors), 0)
+    }
+    const constructor = "new F<typeof import(\"x\")>()"
+    const result = ast_search(
+      harness.ast,
+      {
+        source: constructor,
+        language: language,
+        query: "(new_expression type_arguments: (type_arguments)) @call",
+      },
+    )
+    assert(result.ok && result.match_count == 1)
+    assert_eq(result.matches[0].text, constructor)
+  }
+}
+
+pipeline test_typeof_import_comparison_remains_valid(harness: Harness) {
+  for language in ["typescript", "tsx"] {
+    const comparison = "const result = a < typeof import(\"x\") > b;"
+    const parsed = harness.ast.parse_errors({content: comparison, language: language})
+    assert_eq(len(parsed.errors), 0)
+    const binary = ast_search(
+      harness.ast,
+      {source: comparison, language: language, query: "(binary_expression) @comparison"},
+    )
+    assert(binary.ok && binary.match_count > 0)
+  }
+}

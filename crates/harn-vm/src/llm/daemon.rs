@@ -71,18 +71,10 @@ pub(crate) fn load_snapshot(path: &str) -> Result<DaemonSnapshot, VmError> {
 }
 
 pub(crate) fn persist_snapshot(path: &str, snapshot: &DaemonSnapshot) -> Result<String, VmError> {
-    let path_buf = Path::new(path);
-    if let Some(parent) = path_buf.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| VmError::Runtime(format!("daemon snapshot mkdir error: {error}")))?;
-    }
     let json = serde_json::to_string_pretty(&snapshot.clone().normalize())
         .map_err(|error| VmError::Runtime(format!("daemon snapshot encode error: {error}")))?;
-    let tmp = path_buf.with_extension("json.tmp");
-    std::fs::write(&tmp, json)
+    crate::atomic_io::atomic_write(Path::new(path), json.as_bytes())
         .map_err(|error| VmError::Runtime(format!("daemon snapshot write error: {error}")))?;
-    std::fs::rename(&tmp, path_buf)
-        .map_err(|error| VmError::Runtime(format!("daemon snapshot finalize error: {error}")))?;
     append_daemon_state_event(path, "snapshot_persisted", &snapshot.clone().normalize());
     Ok(path.to_string())
 }

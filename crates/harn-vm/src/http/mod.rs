@@ -354,41 +354,14 @@ fn normalize_headers(value: Option<&VmValue>) -> crate::value::DictMap {
     }
 }
 
-/// Decode `%XX` escapes and `+` spaces entirely in byte space.
+/// Decode `%XX` escapes and `+` spaces, replacing invalid UTF-8.
 ///
-/// Also the implementation behind the `url_decode` script builtin: indexing
-/// the `&str` by escape offsets panics when `%` is followed by a multi-byte
-/// character, so every decoder routes through this one byte-based copy.
+/// Also the implementation behind the `url_decode` script builtin and every
+/// internal query decoder. Malformed escapes pass through unchanged.
 pub fn percent_decode(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'+' {
-            out.push(b' ');
-            i += 1;
-            continue;
-        }
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
-                out.push((hi << 4) | lo);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-fn hex_val(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
+    percent_encoding::percent_decode_str(&input.replace('+', " "))
+        .decode_utf8_lossy()
+        .into_owned()
 }
 
 fn split_path_and_query(raw_path: &str) -> (String, crate::value::DictMap) {

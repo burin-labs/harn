@@ -678,6 +678,7 @@ require_declared_operations_served = true
         cancellation.cancelled.store(true, Ordering::SeqCst);
 
         let bridge = Arc::new(AcpBridge {
+            client_capabilities: Default::default(),
             session_id: "cancel-token-test".to_string(),
             output: super::super::AcpOutput::Channel(tx),
             pending: Arc::new(TokioMutex::new(std::collections::HashMap::new())),
@@ -787,6 +788,7 @@ require_declared_operations_served = true
             }
         });
         let bridge = Arc::new(AcpBridge {
+            client_capabilities: Default::default(),
             session_id: "module-progress-test".to_string(),
             output: super::super::AcpOutput::Channel(tx)
                 .observed_by(super::super::module_progress::ModuleProgressGate::default()),

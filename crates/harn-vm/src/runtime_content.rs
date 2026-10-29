@@ -163,9 +163,9 @@ fn fingerprint_from_parts(
     compatibility.build_features.update_digest(&mut hasher);
     RuntimeContentFingerprint {
         schema: FINGERPRINT_SCHEMA.to_string(),
-        content_sha256: hex(&hasher.finalize()),
+        content_sha256: hex::encode(hasher.finalize()),
         harn_version: harn_version.to_string(),
-        embedded_stdlib_sha256: hex(embedded_stdlib_digest),
+        embedded_stdlib_sha256: hex::encode(embedded_stdlib_digest),
         compatibility,
         source_revision,
     }
@@ -180,15 +180,6 @@ fn update_field(hasher: &mut Sha256, name: &str, value: &[u8]) {
     hasher.update(b"\0");
     hasher.update((value.len() as u64).to_le_bytes());
     hasher.update(value);
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(&mut output, "{byte:02x}").expect("writing to String cannot fail");
-    }
-    output
 }
 
 #[cfg(test)]
@@ -315,7 +306,7 @@ mod tests {
         assert_eq!(actual.harn_version, crate::bytecode_cache::HARN_VERSION);
         assert_eq!(
             actual.embedded_stdlib_sha256,
-            hex(embedded_stdlib_digest_bytes())
+            hex::encode(embedded_stdlib_digest_bytes())
         );
         assert_eq!(
             actual.compatibility.codegen_fingerprint,

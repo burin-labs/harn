@@ -30,6 +30,16 @@ pub(crate) struct DumpBuiltinMethodsArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct DumpPortalTypesArgs {
+    /// Generated TypeScript module the portal web client imports.
+    #[arg(long, default_value = "crates/harn-cli/portal/src/types.ts")]
+    pub output: String,
+    /// Verify the on-disk module matches the Rust DTOs; exit non-zero if stale.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct DumpOperatorPrecedenceArgs {
     /// Markdown files holding a generated precedence table region.
     #[arg(

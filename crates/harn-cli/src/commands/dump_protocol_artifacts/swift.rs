@@ -845,6 +845,7 @@ public struct HarnToolCallReceipt: Codable, Sendable, Equatable {
 public struct HarnACPToolCall: Codable, Sendable, Equatable {
     public var sessionUpdate: HarnACPSessionUpdate
     public var toolCallId: String
+    public var name: String?
     public var title: String
     public var kind: HarnACPToolKind?
     public var status: HarnACPToolCallStatus?
@@ -857,6 +858,7 @@ public struct HarnACPToolCall: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case sessionUpdate
         case toolCallId
+        case name
         case title
         case kind
         case status
@@ -880,6 +882,7 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
     public var newTipTurnId: String?
     public var reason: String?
     public var toolCallId: String?
+    public var name: String?
     public var title: String?
     public var kind: HarnACPToolKind?
     public var status: HarnACPToolCallStatus?
@@ -899,6 +902,7 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
         case newTipTurnId
         case reason
         case toolCallId
+        case name
         case title
         case kind
         case status
@@ -1211,5 +1215,6 @@ public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, E
     super::inference_admission::append(&mut out, super::records::Target::Swift);
     super::canonical_history::append(&mut out, super::records::Target::Swift);
     super::prompt_correlation::append(&mut out, super::records::Target::Swift);
+    super::provider_usage::append(&mut out, super::records::Target::Swift);
     out
 }

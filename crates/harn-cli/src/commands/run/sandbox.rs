@@ -25,6 +25,8 @@ pub struct RunSandboxOptions {
     /// Directories under which spawned subprocesses may bind and connect
     /// Unix-domain sockets. Path-scoped; grants no IP networking.
     pub process_unix_socket_roots: Vec<PathBuf>,
+    /// Exact host-authorized SSH agent endpoint, with its child environment.
+    pub ssh_agent_socket: Option<Box<String>>,
     /// Raise the direct-run side-effect ceiling to permit network-capable
     /// subprocesses without disabling filesystem or process confinement.
     pub allow_process_network: bool,
@@ -65,6 +67,7 @@ impl Default for RunSandboxOptions {
             process_read_roots: Vec::new(),
             process_write_roots: Vec::new(),
             process_unix_socket_roots: Vec::new(),
+            ssh_agent_socket: None,
             allow_process_network: false,
             allow_http_read: false,
             allow_process_loopback: false,
@@ -76,6 +79,11 @@ impl Default for RunSandboxOptions {
 }
 
 impl RunSandboxOptions {
+    pub fn with_ssh_agent_socket(mut self, socket: Option<String>) -> Self {
+        self.ssh_agent_socket = socket.map(Box::new);
+        self
+    }
+
     /// Construct the default sandbox with an explicit subprocess-network choice.
     pub fn sandboxed(allow_process_network: bool) -> Self {
         Self::default().with_process_network(allow_process_network)
@@ -199,6 +207,11 @@ pub(crate) fn sandbox_options_from_args(args: &crate::cli::SandboxArgs) -> RunSa
         RunSandboxOptions::sandboxed(args.allow_process_network)
     };
     options
+        .with_ssh_agent_socket(args.allow_ssh_agent.then(|| {
+            std::env::var("SSH_AUTH_SOCK").unwrap_or_else(|_| {
+                crate::command_error("--allow-ssh-agent requires SSH_AUTH_SOCK")
+            })
+        }))
         .with_process_loopback(args.allow_process_loopback)
         .with_http_read(args.allow_http_read)
         .with_write_roots(args.write_root.iter().cloned())
@@ -312,6 +325,7 @@ pub(super) fn install_run_sandbox_scope(
                 http_read: options.allow_http_read,
                 loopback: options.allow_process_loopback,
                 self_introspection: options.allow_process_self_introspection,
+                ssh_agent_socket: options.ssh_agent_socket.as_deref().cloned(),
                 netns_launcher: options.netns_launcher_path.as_deref().cloned(),
             },
         );
@@ -450,6 +464,7 @@ fn render_policy_roots(roots: &[String]) -> Vec<String> {
 /// silent transposition at a call site the type checker cannot catch.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct RunProcessGrants {
+    pub ssh_agent_socket: Option<String>,
     /// General outbound networking for child processes.
     pub network: bool,
     /// Direct HTTP reads without child-process network access.
@@ -548,6 +563,7 @@ pub(super) fn default_run_capability_policy(
                 .map(|path| normalize_run_workspace_root(path.as_path()))
                 .map(|path| path.display().to_string())
                 .collect(),
+            ssh_agent_socket: grants.ssh_agent_socket,
             allow_process_self_introspection: grants.self_introspection,
             // Not needed and not offered as a flag: this policy restricts no
             // capability, so its children already write their workspace, and
@@ -668,6 +684,9 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
             .as_ref()
             .map(|policy| policy.process_sandbox.unix_socket_roots.clone())
             .unwrap_or_default(),
+        "process_ssh_agent_socket": active_policy
+            .as_ref()
+            .and_then(|policy| policy.process_sandbox.ssh_agent_socket.clone()),
         // The roots alone do not say what was enforced over them: the same
         // grant is path-scoped on one backend and serve-only on another, and
         // on a backend that refuses it the roots are still listed above.

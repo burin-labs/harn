@@ -1,0 +1,5 @@
+effect_command_completed_before_cancel=true
+effect_guardian_receipt_retained=true
+effect_completed_handle_replays_same_receipt=true
+negative_completed_command_is_not_cancelled=true
+negative_unmeasured_census_is_not_zero=true

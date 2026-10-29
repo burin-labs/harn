@@ -10,6 +10,7 @@ mod execution_evidence;
 mod execution_persistence;
 mod from_session;
 mod json;
+mod observability_types;
 #[cfg(test)]
 mod payload_errors;
 mod persistence;

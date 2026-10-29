@@ -12,6 +12,7 @@
 //! target language owns that language's emitter.
 
 mod activity;
+mod agent_event_payloads;
 mod agents_api;
 mod canonical_history;
 mod connector_setup;
@@ -23,6 +24,7 @@ mod manifest;
 mod plan_records;
 mod prepared_session;
 mod prompt_correlation;
+mod provider_usage;
 mod recap_records;
 mod records;
 mod schema_records;
@@ -136,8 +138,11 @@ fn generate_artifacts(source: &ProtocolArtifactSource) -> Result<Vec<Artifact>, 
     let connector_setup = ConnectorSetupVocabulary::load(source)?;
     let activity = ActivityVocabulary::load(source)?;
     let session_updates = session_update_payloads::SessionUpdatePayloads::load(source)?;
-    let go_artifact =
-        format_go_source(agents.append(generate_go_artifact(&session_updates)?, Target::Go))?;
+    let agent_events = agent_event_payloads::AgentEventPayloads::load()?;
+    let go_artifact = format_go_source(agent_events.append(
+        agents.append(generate_go_artifact(&session_updates)?, Target::Go),
+        Target::Go,
+    ))?;
     let mut artifacts = vec![
         Artifact::new(
             run_session_view::SWIFT_ARTIFACT,
@@ -159,24 +164,30 @@ fn generate_artifacts(source: &ProtocolArtifactSource) -> Result<Vec<Artifact>, 
         ),
         Artifact::new(
             "harn-protocol.ts",
-            agents.append(
-                generate_typescript(
-                    &external_actions,
-                    &connector_setup,
-                    &activity,
-                    &session_updates,
+            agent_events.append(
+                agents.append(
+                    generate_typescript(
+                        &external_actions,
+                        &connector_setup,
+                        &activity,
+                        &session_updates,
+                    ),
+                    Target::Typescript,
                 ),
                 Target::Typescript,
             ),
         ),
         Artifact::new(
             "HarnProtocol.swift",
-            agents.append(
-                generate_swift(
-                    &external_actions,
-                    &connector_setup,
-                    &activity,
-                    &session_updates,
+            agent_events.append(
+                agents.append(
+                    generate_swift(
+                        &external_actions,
+                        &connector_setup,
+                        &activity,
+                        &session_updates,
+                    ),
+                    Target::Swift,
                 ),
                 Target::Swift,
             ),
@@ -184,12 +195,15 @@ fn generate_artifacts(source: &ProtocolArtifactSource) -> Result<Vec<Artifact>, 
         Artifact::new(
             "harn-protocol.rs",
             format_rust_source(
-                agents.append(
-                    generate_rust(
-                        &external_actions,
-                        &connector_setup,
-                        &activity,
-                        &session_updates,
+                agent_events.append(
+                    agents.append(
+                        generate_rust(
+                            &external_actions,
+                            &connector_setup,
+                            &activity,
+                            &session_updates,
+                        ),
+                        Target::Rust,
                     ),
                     Target::Rust,
                 ),
@@ -198,10 +212,17 @@ fn generate_artifacts(source: &ProtocolArtifactSource) -> Result<Vec<Artifact>, 
         ),
         Artifact::new(
             "python/harn_protocol.py",
-            agents.append(
-                generate_python_with_payloads(&session_updates),
+            agent_events.append(
+                agents.append(
+                    generate_python_with_payloads(&session_updates),
+                    Target::Python,
+                ),
                 Target::Python,
             ),
+        ),
+        Artifact::new(
+            agent_event_payloads::SCHEMA_ARTIFACT,
+            agent_events.schema_json()?,
         ),
         Artifact::new("python/__init__.py", PYTHON_INIT_STUB.to_string()),
         Artifact::new("go/harnprotocol/harnprotocol.go", go_artifact),

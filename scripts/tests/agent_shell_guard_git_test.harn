@@ -1,0 +1,193 @@
+import { with_temp_dir } from "std/testing"
+import {
+  NO_CONFIG_ALIASES,
+  git_builtin_commands,
+  git_config_aliases_for,
+} from "../agent_shell_guard.harn"
+import { git_program_in_hook_path } from "../agent_shell_guard_policy"
+import {
+  NO_MAKE_TARGETS,
+  TEST_GIT_BUILTINS,
+  claude_payload,
+  decision,
+} from "./agent_shell_guard_test_fixtures"
+
+pipeline test_git_builtin_facts_are_queried_once_per_executable(harness: Harness) {
+  const single = harness.runtime.atomic(0)
+  const once = decision(
+    claude_payload("bash -lc 'git status'"),
+    NO_MAKE_TARGETS,
+    NO_CONFIG_ALIASES,
+    { _program ->
+      harness.runtime.atomic_add(single, 1)
+      return ["status"]
+    },
+  )
+  assert(once.allow)
+  assert_eq(harness.runtime.atomic_get(single), 1)
+  assert(
+    decision(
+      claude_payload("git status"),
+      NO_MAKE_TARGETS,
+      NO_CONFIG_ALIASES,
+      { _program ->
+        harness.runtime.atomic_add(single, 1)
+        return ["status"]
+      },
+    ).allow,
+  )
+  assert_eq(harness.runtime.atomic_get(single), 2)
+  const multiple = harness.runtime.atomic(0)
+  const separate = decision(
+    claude_payload("/old/git status && /new/git status"),
+    NO_MAKE_TARGETS,
+    NO_CONFIG_ALIASES,
+    { _program ->
+      harness.runtime.atomic_add(multiple, 1)
+      return ["status"]
+    },
+  )
+  assert(separate.allow)
+  assert_eq(harness.runtime.atomic_get(multiple), 2)
+}
+
+pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
+  const aliases = { _options ->
+    {
+      history: "stash push",
+      hidden: "stash push",
+      rewrite: "!git config alias.future 'stash push'; git future",
+    }
+  }
+  assert(
+    !decision(claude_payload("git rewrite"), NO_MAKE_TARGETS, aliases, TEST_GIT_BUILTINS).allow,
+  )
+  assert(
+    !decision(claude_payload("git history"), NO_MAKE_TARGETS, aliases, { program -> ["status"] })
+      .allow,
+  )
+  assert(
+    decision(claude_payload("git history"), NO_MAKE_TARGETS, aliases, { program -> ["history"] })
+      .allow,
+  )
+  const versions = { program -> program == "/old/git" ? ["status"] : ["status", "history"] }
+  for command in [
+    "PATH=/older/bin:$PATH git history",
+    "PATH=/older/bin; git history",
+    "x=PATH; export $x=/older/bin; git history",
+    "A=PA; B=TH; eval \"$A$B=/older/bin\"; git history",
+    "if true; then PATH=/older/bin; fi; git history",
+    "{ PATH=/older/bin; }; git history",
+    "x=PATH; unset $x; git history",
+    "PATH='/older git/bin'; git history",
+    "env -i git history",
+    "export PATH=/older/bin; git history",
+    "PATH=/older/bin sh -c 'git history'",
+    "sh -c 'PATH=/older/bin; git history'",
+    "sh -c 'if true; then PATH=/older/bin; fi; git history'",
+  ] {
+    assert(!decision(claude_payload(command), NO_MAKE_TARGETS, aliases, versions).allow, command)
+  }
+  assert(decision(claude_payload("FOO=1 git status"), NO_MAKE_TARGETS, aliases, versions).allow)
+  assert(
+    decision(
+      claude_payload("git commit -m 'PATH=/older/bin'"),
+      NO_MAKE_TARGETS,
+      aliases,
+      TEST_GIT_BUILTINS,
+    ).allow,
+  )
+  assert(!decision(claude_payload("/old/git history"), NO_MAKE_TARGETS, aliases, versions).allow)
+  assert(decision(claude_payload("/new/git history"), NO_MAKE_TARGETS, aliases, versions).allow)
+  for command in [
+    "git config alias.hidden 'stash push'; git hidden",
+    "git -C /repo config alias.hidden 'stash push' && git -C /repo hidden",
+    "bash -c 'git config alias.hidden \"stash push\"; git hidden'",
+    "git config --file aliases alias.hidden 'stash push'; git --config-env=alias.hidden=VALUE hidden",
+  ] {
+    assert(
+      !decision(
+        claude_payload(command),
+        NO_MAKE_TARGETS,
+        NO_CONFIG_ALIASES,
+        { program -> ["config", "status"] },
+      ).allow,
+    )
+  }
+  assert(
+    decision(
+      claude_payload("git config user.name Agent; git status"),
+      NO_MAKE_TARGETS,
+      NO_CONFIG_ALIASES,
+      { program -> ["config", "status"] },
+    ).allow,
+  )
+}
+
+pipeline test_git_global_options_without_a_subcommand_cannot_execute_aliases() {
+  const unreadable = { _options -> {"<unreadable>": ""} }
+  for command in [
+    "git --version",
+    "/usr/bin/git --version",
+    "git --help",
+    "git -C /repo --list-cmds=builtins",
+  ] {
+    assert(decision(claude_payload(command), NO_MAKE_TARGETS, unreadable).allow)
+  }
+}
+
+pipeline test_git_queries_use_the_selected_trusted_executable() {
+  assert(git_program_in_hook_path("/usr/bin:/opt/git/bin/", "git", ":"))
+  assert(git_program_in_hook_path("/usr/bin:/opt/git/bin/", "/opt/git/bin/git", ":"))
+  assert(git_program_in_hook_path("C:\\Git\\bin;C:\\Windows", "C:\\Git\\bin\\git.exe", ";"))
+  assert(git_program_in_hook_path("\\\\server\\share\\bin", "\\\\server\\share\\bin\\git.exe", ";"))
+  assert(!git_program_in_hook_path("\\\\server\\share\\bin:/usr/bin", "git", ":"))
+  assert(
+    !git_program_in_hook_path("\\\\server\\share\\bin:/usr/bin", "\\\\server\\share\\bin/git", ":"),
+  )
+  assert(git_program_in_hook_path(".:/usr/bin:", "/usr/bin/git", ":"))
+  for program in ["./git", "../bin/git", "/payload/bin/git"] {
+    assert(!git_program_in_hook_path("/usr/bin:/opt/git/bin/", program, ":"))
+  }
+  for path in ["", ".:/usr/bin", "a:/usr/bin", "/usr/bin:", "relative/bin:/usr/bin"] {
+    assert(!git_program_in_hook_path(path, "git", ":"))
+  }
+  const selected = { context ->
+    assert(context.program == "/older/git")
+    assert(context.options == ["-C", "/repo"])
+    return {history: "stash push"}
+  }
+  assert(
+    !decision(
+      claude_payload("/older/git -C /repo history"),
+      NO_MAKE_TARGETS,
+      selected,
+      { program -> [] },
+    ).allow,
+  )
+}
+
+pipeline test_git_preflight_does_not_execute_a_payload_program(harness: Harness) {
+  if harness.env.get("OS") == "Windows_NT" {
+    skip("the executable side-effect control requires a POSIX shell fixture")
+  }
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const program = path_join(root, "git")
+      const marker = path_join(root, "executed")
+      harness.fs.write_text(program, "#!/bin/sh\nprintf reached > '${marker}'\n")
+      const executable = harness.process.run({program: "chmod", args: ["+x", program]})
+      assert(executable.exit_code == 0)
+      assert(git_builtin_commands(harness.process, harness.env, harness.system, program) == [])
+      const aliases = git_config_aliases_for(
+        harness.process,
+        harness.env,
+        harness.system,
+        {program: program, options: []},
+      )
+      assert(aliases.has("<unreadable>"))
+      assert(!harness.fs.exists(marker), "preflight must not execute an untrusted payload program")
+    },
+  )
+}

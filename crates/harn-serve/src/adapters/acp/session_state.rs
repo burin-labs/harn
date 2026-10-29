@@ -199,6 +199,9 @@ impl AcpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) {
+        if !self.validate_protocol_session_options(id, params) {
+            return;
+        }
         let Some(session_id) = self
             .session_id_param(id, params, "session/load")
             .map(str::to_owned)
@@ -398,6 +401,9 @@ impl AcpServer {
     }
 
     pub(super) fn handle_session_resume(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        if !self.validate_protocol_session_options(id, params) {
+            return;
+        }
         let Some(session_id) = self.restored_session_id(id, params, "session/resume") else {
             return;
         };

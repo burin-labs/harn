@@ -13,14 +13,14 @@ use time::OffsetDateTime;
 use crate::config::Config;
 use crate::event::TriageEvent;
 use crate::model::{
-    Activity, CheckIn, CheckInScope, Delivery, Lease, Reminder, ReminderId, Session,
-    SessionAnnouncement, Signal, SignalInput, SignalState, SignatureStatus,
+    Activity, CaptureIdentity, CheckIn, CheckInScope, Delivery, Lease, Reminder, ReminderId,
+    Session, SessionAnnouncement, Signal, SignalInput, SignalState, SignatureStatus,
 };
 use crate::router::{Router, RuleRouter};
 use crate::watcher::{self, WatcherLock};
 use crate::SignalsError;
 
-pub const INBOX_SCHEMA: &str = "harn.signals.inbox.v1";
+pub const INBOX_SCHEMA: &str = "harn.signals.inbox.v3";
 pub const SIGNALS_DIR_ENV: &str = "HARN_EXT_SIGNALS_DIR";
 
 const INBOX_FILE: &str = "inbox.json";
@@ -41,6 +41,8 @@ pub const MAX_WAKES_PER_REMINDER: u32 = 3;
 pub struct InboxSnapshot {
     pub signals: BTreeMap<String, Signal>,
     pub sessions: BTreeMap<String, Session>,
+    #[serde(default)]
+    pub dispatch: BTreeMap<String, crate::dispatch::DispatchState>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -130,6 +132,81 @@ impl Inbox {
         input: SignalInput,
         now: OffsetDateTime,
     ) -> Result<Transition, SignalsError> {
+        self.fire_inner(input, None, now)
+    }
+
+    /// Capture a distinct output occurrence. Retrying the same session,
+    /// monitor key and event id is idempotent for the retained record's lifetime.
+    /// Use a file cursor or producer sequence, not output text, as `event_id`.
+    pub fn capture(
+        &self,
+        session_id: &str,
+        event_id: &str,
+        input: SignalInput,
+        now: OffsetDateTime,
+    ) -> Result<Transition, SignalsError> {
+        self.capture_inner(session_id, None, event_id, input, now)
+    }
+
+    /// Capture output from an explicitly started execution epoch. Late output
+    /// from a cancelled or replaced epoch is refused without acknowledging it.
+    pub fn capture_execution(
+        &self,
+        session_id: &str,
+        execution_id: &str,
+        event_id: &str,
+        input: SignalInput,
+        now: OffsetDateTime,
+    ) -> Result<Transition, SignalsError> {
+        crate::dispatch::validate_identity(execution_id)?;
+        self.capture_inner(session_id, Some(execution_id), event_id, input, now)
+    }
+
+    fn capture_inner(
+        &self,
+        session_id: &str,
+        execution_id: Option<&str>,
+        event_id: &str,
+        mut input: SignalInput,
+        now: OffsetDateTime,
+    ) -> Result<Transition, SignalsError> {
+        let monitor_key = input
+            .key
+            .take()
+            .unwrap_or_else(|| input.event.dedupe_key.clone());
+        for value in [session_id, event_id, monitor_key.as_str()] {
+            if value.trim().is_empty() || value.len() > 1024 || value.chars().any(char::is_control)
+            {
+                return Err(SignalsError::InvalidInput(
+                    "capture identities must be nonempty, control-free and at most 1024 bytes"
+                        .into(),
+                ));
+            }
+        }
+        if input.event.summary.chars().count() > crate::MAX_SUMMARY_CHARS {
+            return Err(SignalsError::InvalidInput("capture summary exceeds the storage bound; capture smaller chunks or reference the full output".into()));
+        }
+        let identity = CaptureIdentity {
+            execution_id: execution_id.map(str::to_owned),
+            session_id: session_id.into(),
+            monitor_key,
+            event_id: event_id.into(),
+        };
+        let encoded = serde_json::to_vec(&identity)
+            .map_err(|error| SignalsError::InvalidInput(error.to_string()))?;
+        input.key = Some(format!(
+            "capture:{}",
+            uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, &encoded).simple()
+        ));
+        self.fire_inner(input, Some(identity), now)
+    }
+
+    fn fire_inner(
+        &self,
+        input: SignalInput,
+        capture: Option<CaptureIdentity>,
+        now: OffsetDateTime,
+    ) -> Result<Transition, SignalsError> {
         let SignalInput {
             key,
             mut event,
@@ -140,6 +217,11 @@ impl Inbox {
         } = input;
         event.prepare_for_storage()?;
         let key = key.unwrap_or_else(|| event.dedupe_key.clone());
+        if capture.is_none() && key.starts_with("capture:") {
+            return Err(SignalsError::InvalidInput(
+                "capture: keys are reserved for captured occurrences".into(),
+            ));
+        }
         if key.trim().is_empty() {
             return Err(SignalsError::InvalidInput("signal key is empty".into()));
         }
@@ -158,16 +240,51 @@ impl Inbox {
         let expires_at = Some(expires_at.unwrap_or(now + self.config.fired_ttl));
         let max_signals = self.config.max_signals;
         self.transact(now, |state| {
+            if let Some(identity) = &capture {
+                crate::dispatch::validate_capture(state, identity)?;
+            }
             if let Some(signal) = state.signals.get(&key) {
                 refuse_weaker(signal, provenance.signature)?;
+                if signal.capture != capture {
+                    return Err(SignalsError::InvalidInput(
+                        "capture identity conflicts with the stored occurrence".into(),
+                    ));
+                }
+                if capture.is_some() {
+                    return Ok(Transition::Unchanged {
+                        state: signal.state,
+                        generation: signal.generation,
+                    });
+                }
             }
             let signal = match state.signals.get_mut(&key) {
                 Some(signal) => signal,
                 None => {
                     make_room(state, max_signals)?;
+                    let capture_order = if capture.is_some() {
+                        Some(
+                            state
+                                .signals
+                                .values()
+                                .filter_map(|signal| signal.capture_order)
+                                .max()
+                                .unwrap_or(0)
+                                .checked_add(1)
+                                .ok_or_else(|| {
+                                    SignalsError::InvalidInput(
+                                        "capture ordering counter exhausted".into(),
+                                    )
+                                })?,
+                        )
+                    } else {
+                        None
+                    };
                     state.signals.insert(
                         key.clone(),
                         Signal {
+                            cancelled_at: None,
+                            capture,
+                            capture_order,
                             key: key.clone(),
                             state: SignalState::Fired,
                             generation: 1,
@@ -232,6 +349,11 @@ impl Inbox {
                 return Ok(Transition::Unknown);
             };
             refuse_weaker(signal, signature)?;
+            if signal.capture.is_some() {
+                return Err(SignalsError::InvalidInput(
+                    "captured occurrences cannot be resolved; acknowledge their delivery".into(),
+                ));
+            }
             if signal.state != SignalState::Fired {
                 return Ok(Transition::Unchanged {
                     state: signal.state,
@@ -259,6 +381,20 @@ impl Inbox {
     pub fn end_session(&self, session_id: &str, now: OffsetDateTime) -> Result<(), SignalsError> {
         self.transact(now, |state| {
             state.sessions.remove(session_id);
+            if let Some(gate) = state.dispatch.get_mut(session_id) {
+                gate.close();
+                for signal in state.signals.values_mut() {
+                    if signal.is_pending()
+                        && signal
+                            .capture
+                            .as_ref()
+                            .is_some_and(|c| c.session_id == session_id)
+                    {
+                        signal.cancelled_at = Some(now);
+                        signal.delivery = None;
+                    }
+                }
+            }
         })
     }
 
@@ -355,6 +491,7 @@ impl Inbox {
                 .values()
                 .filter(|signal| {
                     signal.is_pending()
+                        && !(signal.capture.is_some() && state.dispatch.contains_key(session_id))
                         && CheckInScope::UrgentOnly.admits(signal.severity)
                         && signal.delivery.as_ref().is_some_and(|delivery| {
                             delivery.session_id == session_id
@@ -434,7 +571,7 @@ impl Inbox {
         self.transact(now, |state| state.clone())
     }
 
-    fn transact<T>(
+    pub(crate) fn transact<T>(
         &self,
         now: OffsetDateTime,
         apply: impl FnOnce(&mut InboxSnapshot) -> T,
@@ -539,7 +676,8 @@ fn upsert_session(
 /// sessions.
 fn maintain(state: &mut InboxSnapshot, config: &Config, now: OffsetDateTime) {
     for signal in state.signals.values_mut() {
-        if signal.state == SignalState::Fired
+        if signal.capture.is_none()
+            && signal.state == SignalState::Fired
             && signal
                 .expires_at
                 .is_some_and(|expires_at| expires_at <= now)
@@ -580,6 +718,22 @@ fn route_pending(
             continue;
         }
         let held = config.policy.hold(signal, now).is_some();
+        if let Some(capture) = &signal.capture {
+            if signal
+                .delivery
+                .as_ref()
+                .is_some_and(|delivery| delivery.lease_active(now))
+            {
+                continue;
+            }
+            let owner_live = live.iter().any(|session| session.id == capture.session_id);
+            if held || !owner_live {
+                signal.delivery = None;
+            } else if signal.delivery.is_none() {
+                signal.delivery = Some(assign(signal.generation, capture.session_id.clone(), now));
+            }
+            continue;
+        }
         if let Some(delivery) = &signal.delivery {
             if let Some(holder) = live
                 .iter()
@@ -651,11 +805,13 @@ fn lease(
     lease_for: time::Duration,
     now: OffsetDateTime,
 ) -> (Vec<Reminder>, usize) {
+    let gated = state.dispatch.contains_key(session_id);
     let mut ready: Vec<&mut Signal> = state
         .signals
         .values_mut()
         .filter(|signal| {
             signal.is_pending()
+                && !(gated && signal.capture.is_some())
                 && signal.delivery.as_ref().is_some_and(|delivery| {
                     delivery.session_id == session_id && !delivery.lease_active(now)
                 })
@@ -665,6 +821,7 @@ fn lease(
         right
             .severity
             .cmp(&left.severity)
+            .then(left.capture_order.cmp(&right.capture_order))
             .then(left.changed_at.cmp(&right.changed_at))
             .then(left.key.cmp(&right.key))
     });
@@ -700,7 +857,10 @@ fn make_room(state: &mut InboxSnapshot, max_signals: usize) -> Result<(), Signal
         let oldest = state
             .signals
             .values()
-            .filter(|signal| signal.state != SignalState::Fired)
+            .filter(|signal| {
+                signal.state != SignalState::Fired
+                    || (signal.capture.is_some() && !signal.is_pending())
+            })
             .min_by(|left, right| {
                 left.changed_at
                     .cmp(&right.changed_at)
@@ -748,22 +908,18 @@ fn write_document(path: &Path, state: InboxSnapshot) -> Result<(), SignalsError>
         path: path.to_path_buf(),
         message: source.to_string(),
     })?;
-    let temp = path.with_file_name(format!(
-        ".{INBOX_FILE}.{}.{}.tmp",
-        std::process::id(),
-        uuid::Uuid::new_v4().simple()
-    ));
-    let written = (|| {
-        let mut file = open_private(&temp)?;
-        file.write_all(&bytes)
-            .and_then(|()| file.sync_all())
-            .map_err(|source| SignalsError::io(&temp, source))?;
-        fs::rename(&temp, path).map_err(|source| SignalsError::io(path, source))
-    })();
-    if written.is_err() {
-        let _ = fs::remove_file(&temp);
-    }
-    written
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temp = tempfile::Builder::new()
+        .prefix(&format!(".{INBOX_FILE}."))
+        .suffix(".tmp")
+        .tempfile_in(dir)
+        .map_err(|source| SignalsError::io(dir, source))?;
+    temp.write_all(&bytes)
+        .and_then(|()| temp.as_file().sync_all())
+        .map_err(|source| SignalsError::io(temp.path(), source))?;
+    temp.persist(path)
+        .map(|_| ())
+        .map_err(|error| SignalsError::io(path, error.error))
 }
 
 /// Remove what a killed process left: a temporary inbox file whose rename

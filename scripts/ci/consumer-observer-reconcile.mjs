@@ -1,6 +1,13 @@
 import fs from 'node:fs';
 import { githubParentDeclarations, reconcileOwnedChildren, reconcileStoppedObserver, sweepOwnedChildren, observerContext, parentHeadSha, observerRefusal } from '../lib/consumer-observer.mjs';
 
+function reportPending(result) {
+  if (result.pending > 0 || result.refused > 0) {
+    console.log(`::warning::Consumer cleanup remains pending: pending=${result.pending} refused=${result.refused}. No unverified child was cancelled.`);
+  }
+  if (result.errors > 0) process.exitCode = 1;
+}
+
 async function main() {
   const env = process.env;
   const configured = {
@@ -11,8 +18,7 @@ async function main() {
     if (env.GITHUB_REPOSITORY !== 'burin-labs/harn') throw new Error('CONSUMER_OBSERVER reason=cleanup_invocation_unproven');
     const result = await sweepOwnedChildren(env.GH_TOKEN, configured);
     console.log(`CONSUMER_OBSERVER cleanup=sweep ${Object.entries(result).map(([key,value])=>`${key}=${value}`).join(' ')}`);
-    // Authenticated retained work is normal until its next budget check.
-    if (result.pending > result.retained || result.refused > 0) process.exitCode = 1;
+    reportPending(result);
     return;
   }
   if (process.argv[2] === '--observer') {
@@ -41,13 +47,13 @@ async function main() {
     console.log('CONSUMER_OBSERVER cleanup=ordinary declarations=0');
     return;
   }
-  const total = { discovered: 0, owned: 0, terminal: 0, cancelled: 0, pending: 0, refused: 0 };
+  const total = { discovered: 0, owned: 0, terminal: 0, cancelled: 0, pending: 0, refused: 0, errors: 0 };
   for (const context of contexts) {
     const result = await reconcileOwnedChildren(env.GH_TOKEN, context, configured);
     for (const key of Object.keys(total)) total[key] += result[key];
   }
   console.log(`CONSUMER_OBSERVER cleanup=measured declarations=${contexts.length} ${Object.entries(total).map(([key, value]) => `${key}=${value}`).join(' ')}`);
-  if (total.pending > 0 || total.refused > 0) process.exitCode = 1;
+  reportPending(total);
 }
 
 main().catch(error => {

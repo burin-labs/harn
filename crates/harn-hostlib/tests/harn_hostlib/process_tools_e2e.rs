@@ -494,6 +494,9 @@ fn real_background_child_receives_explicit_credential_over_private_pipe() {
     );
 }
 
+#[path = "process_tools_e2e/completed_cleanup.rs"]
+mod completed_cleanup;
+
 #[test]
 fn real_background_hard_timeout_reaps_detached_descendant() {
     let session_id = format!("test-background-hard-timeout-{}", std::process::id());
@@ -521,7 +524,7 @@ fn real_background_hard_timeout_reaps_detached_descendant() {
         .unwrap_or_else(|| panic!("detached child did not report its PID: {stdout:?}"));
     assert!(pid > 0);
     let cleanup = require_nested_dict(&result, "process_cleanup");
-    assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+    completed_cleanup::assert_no_observed_survivors(&cleanup);
     // The actual detached child was reached, and the operating system no
     // longer reports it alive after the measured cleanup receipt.
     assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "detached child survived");
@@ -1128,7 +1131,7 @@ fn real_run_command_interrupt_kills_the_whole_process_group() {
         require_int(&cleanup, "observed_child_count") >= 1,
         "cleanup receipt should record the background sleep descendant"
     );
-    assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+    completed_cleanup::assert_no_observed_survivors(&cleanup);
     assert_process_gone(
         -pgid,
         &format!("process group {pgid} (incl. the sleep grandchild)"),
@@ -1232,7 +1235,7 @@ fn real_run_command_sigterm_immune_child_is_sigkilled_after_grace() {
         value,
         VmValue::String(value) if value.as_str() == "SIGKILL"
     )));
-    assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+    completed_cleanup::assert_no_observed_survivors(&cleanup);
     assert_process_gone(-pgid, &format!("SIGKILLed process group {pgid}"));
 }
 
@@ -1363,7 +1366,7 @@ print("parent-exit", flush=True)
         require_int(&cleanup, "reaped_child_count") >= 1,
         "same-token descendant should be reaped: {cleanup:?}"
     );
-    assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+    completed_cleanup::assert_no_observed_survivors(&cleanup);
     let observed_children = require_list(&cleanup, "observed_children");
     let observed_descendant = observed_children
         .iter()

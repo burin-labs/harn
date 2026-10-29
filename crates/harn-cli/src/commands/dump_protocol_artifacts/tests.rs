@@ -743,6 +743,33 @@ fn generated_rust_permission_shapes_round_trip() {
 }
 
 #[test]
+fn generated_rust_agent_event_payloads_decode_every_emitted_event() {
+    use generated_rust_binding::HarnAgentEventPayload;
+
+    let events: Vec<serde_json::Value> = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../harn-serve/tests/fixtures/acp/agent_events.json"
+    )))
+    .expect("emitted agent-event fixture parses");
+    for params in &events {
+        let decoded: HarnAgentEventPayload =
+            serde_json::from_value(params.clone()).unwrap_or_else(|error| {
+                panic!("{} does not decode: {error}", params["kind"]);
+            });
+        if params["kind"] == "judge_decision" {
+            assert!(matches!(decoded, HarnAgentEventPayload::JudgeDecision(_)));
+        }
+    }
+    let mut judge = events
+        .iter()
+        .find(|params| params["kind"] == "judge_decision")
+        .expect("judge_decision fixture")
+        .clone();
+    judge["iteration"] = json!("three");
+    assert!(serde_json::from_value::<HarnAgentEventPayload>(judge).is_err());
+}
+
+#[test]
 fn generated_rust_agent_event_shapes_round_trip() {
     use generated_rust_binding::{
         HarnAgentEventKind, HarnAgentEventNotification, HarnAgentEventParams,
@@ -786,6 +813,35 @@ fn generated_rust_agent_event_shapes_round_trip() {
         serde_json::to_value(decoded).expect("unknown agent event kind encodes"),
         future
     );
+}
+
+#[test]
+fn generated_provider_usage_reads_the_runtime_record_and_rejects_missing_facts() {
+    let record = harn_vm::llm::usage::ProviderUsage {
+        run_id: "run-1".into(),
+        parent_session_id: String::new(),
+        lineage_known: true,
+        input_tokens: 12,
+        output_tokens: 3,
+        cache_read_tokens: 2,
+        cache_write_tokens: 0,
+        provider_call_count: 2,
+        unpriced_calls: 1,
+        usage_unknown_calls: 1,
+        known_cost_usd: 0.02,
+        cost_usd: None,
+    };
+    let mut wire = serde_json::to_value(record).unwrap();
+    let binding: generated_rust_binding::HarnProviderUsage =
+        serde_json::from_value(wire.clone()).expect("generated binding reads the runtime record");
+    assert_eq!(binding.provider_call_count, 2);
+    assert_eq!(binding.unpriced_calls, 1);
+    assert_eq!(binding.usage_unknown_calls, 1);
+    assert!(binding.cost_usd.is_none());
+    assert_eq!(binding.known_cost_usd.as_f64(), Some(0.02));
+    assert_eq!(serde_json::to_value(binding).unwrap(), wire);
+    wire.as_object_mut().unwrap().remove("known_cost_usd");
+    assert!(serde_json::from_value::<generated_rust_binding::HarnProviderUsage>(wire).is_err());
 }
 
 #[test]

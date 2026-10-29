@@ -54,60 +54,7 @@ pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
 pub const HARN_AGENT_EVENT_METHOD: &str = "_harn/agentEvent";
 pub const HARN_PROVIDER_CATALOG_METHOD: &str = "_harn/providerCatalog";
 
-/// Harn event kinds the adapter currently emits via `_harn/agentEvent`.
-/// The list is stable wire vocabulary — adding a new kind is additive and
-/// SHOULD be treated by clients as "unknown kind, ignore." Keep it sorted
-/// for diff-friendliness and keep it in lockstep with the match arm in
-/// `events.rs`.
-pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
-    "boundary_failure",
-    "budget_circuit_breaker",
-    "budget_exhausted",
-    "code_librarian_query_nl_fallback",
-    "composition_child_call",
-    "composition_child_result",
-    "composition_error",
-    "composition_finish",
-    "composition_start",
-    "compass_routing_decision",
-    "control_outcome",
-    "daemon_watchdog_tripped",
-    "feedback_injected",
-    "final_wrapup",
-    "host_attachment",
-    "host_tool_result",
-    "input_guardrail_verdict",
-    "iteration_end",
-    "session_health",
-    "iteration_start",
-    "judge_decision",
-    "judge_started",
-    "loop_control_decision",
-    "loop_stuck",
-    "mcp_auth_required",
-    "mcp_catalog_changed",
-    "mcp_notification",
-    "model_job",
-    "orchestration_decision",
-    "pack_thinking_stripped",
-    "progress_reported",
-    "purpose_label",
-    "repair_output_contract_applied",
-    "require_successful_tools_violation",
-    "reserved_terminal_verify",
-    "scope_classifier_verdict",
-    "self_consistency_tie",
-    "session_closed",
-    "structural_validator_decision",
-    "subagent_join",
-    "subagent_stop",
-    "step_judge_decision",
-    "tool_batch_disposition",
-    "tool_call_audit",
-    "tool_format_override",
-    "turn_phase_changed",
-    "typed_checkpoint",
-];
+pub use super::agent_event_payloads::HARN_AGENT_EVENT_KINDS;
 
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "audit",
@@ -279,8 +226,8 @@ pub(super) fn acp_agent_capabilities() -> serde_json::Value {
         },
         "promptCapabilities": acp_prompt_capabilities(),
         "mcpCapabilities": {
-            "http": true,
-            "sse": true,
+            "http": false,
+            "sse": false,
         },
         "sessionCapabilities": {
             "close": {},

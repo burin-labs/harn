@@ -9,6 +9,17 @@ use std::sync::{Arc, Mutex};
 
 struct Cleanup;
 
+struct UsageEvents(Arc<Mutex<Vec<Value>>>);
+
+impl crate::agent_events::AgentEventSink for UsageEvents {
+    fn handle_event(&self, event: &crate::agent_events::AgentEvent) {
+        self.0
+            .lock()
+            .unwrap()
+            .push(serde_json::to_value(event).unwrap());
+    }
+}
+
 impl Drop for Cleanup {
     fn drop(&mut self) {
         crate::llm_config::clear_user_overrides();
@@ -60,6 +71,295 @@ async fn project(root: &std::path::Path) -> crate::orchestration::RunRecord {
     crate::orchestration::project_run_record_from_session(&store, "prepared-run")
         .await
         .expect("project the actual journal")
+}
+
+#[test]
+fn preparation_and_actor_publish_each_settled_provider_usage() {
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let _cleanup = Cleanup;
+    crate::agent_sessions::reset_session_store();
+    crate::reset_thread_local_state();
+    let wire = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let captured_wire = wire.clone();
+    let server = spawn_llm_stub_many("live provider usage", 3, move |_, stream| {
+        let (_, request) = read_http_request(stream);
+        captured_wire.lock().unwrap().push(request);
+        let body = json!({"id":"local", "model":"gpt-5.6-luna",
+            "choices":[{"index":0,"message":{"role":"assistant","content":"Finished."},"finish_reason":"stop"}],
+            "usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}).to_string();
+        write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    });
+    install_openai_stub_provider("openai", server.addr());
+    crate::llm_config::set_runtime_provider_endpoint_overrides(
+        crate::llm_config::RuntimeProviderEndpointOverrides::single(
+            "openai",
+            format!("http://{}/v1", server.addr()),
+        )
+        .unwrap(),
+    );
+    let root = tempfile::tempdir().unwrap();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let loop_events = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::new(UsageEvents(events.clone()));
+    let sinks = Arc::new(crate::agent_events::MultiSink::new());
+    sinks.push(sink);
+    let event_log = root.path().join("event_log.jsonl");
+    sinks.push(crate::agent_events::JsonlEventSink::open(&event_log).unwrap());
+    let transport = crate::agent_events::AgentEventTransport::new(sinks);
+    let runtime = crate::test_support::current_thread_runtime();
+    runtime.block_on(
+        tokio::task::LocalSet::new().run_until(transport.scope(async {
+            crate::llm::scope_agent_event_sink(
+                Some(Arc::new(UsageEvents(loop_events.clone()))),
+                async {
+                    execute(
+                        root.path(),
+                        r#"
+  harness.agent.with_run(session, options, { ->
+    harness.llm.call("Classify this task.", nil, call_options)
+    harness.llm.call("Prepare the task.", nil, call_options)
+    agent_loop(harness, "Reply briefly.", nil, options)
+  })
+"#,
+                    )
+                    .await
+                    .expect("preparation and actor finish");
+                    let record = project(root.path()).await;
+                    assert_eq!(record.evidence.trace_spans.len(), 3);
+                    assert!(record
+                        .evidence
+                        .trace_spans
+                        .iter()
+                        .all(|span| span.cost_usd.is_some()));
+                },
+            )
+            .await;
+        })),
+    );
+    assert_eq!(
+        wire.lock().unwrap().len(),
+        3,
+        "all three provider calls reached the wire"
+    );
+    let events = events.lock().unwrap();
+    let usage: Vec<_> = events
+        .iter()
+        .filter(|event| event["type"] == "provider_usage")
+        .collect();
+    assert_eq!(
+        usage.len(),
+        3,
+        "each settled provider call publishes its ledger: {events:?}"
+    );
+    assert_eq!(
+        loop_events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event["type"] == "provider_usage")
+            .count(),
+        3,
+        "the dispatch-local observer receives the same provider events"
+    );
+    assert_eq!(usage[0]["run_usage"]["provider_call_count"], 1);
+    assert_eq!(usage[1]["run_usage"]["provider_call_count"], 2);
+    assert_eq!(usage[2]["run_usage"]["provider_call_count"], 3);
+    assert!(usage[0]["run_usage"]["run_id"]
+        .as_str()
+        .is_some_and(|id| !id.is_empty()));
+    assert_eq!(
+        usage[0]["run_usage"]["run_id"],
+        usage[1]["run_usage"]["run_id"]
+    );
+    assert_eq!(
+        usage[1]["run_usage"]["run_id"],
+        usage[2]["run_usage"]["run_id"]
+    );
+    assert_eq!(usage[0]["run_usage"]["parent_session_id"], "");
+    assert_eq!(usage[0]["run_usage"]["lineage_known"], true);
+    assert_ne!(usage[0]["call_id"], usage[1]["call_id"]);
+    assert_ne!(usage[1]["call_id"], usage[2]["call_id"]);
+    let persisted = std::fs::read_to_string(&event_log).unwrap();
+    let persisted: Vec<crate::agent_events::PersistedAgentEvent> = persisted
+        .lines()
+        .map(|line| {
+            serde_json::from_str(line).expect("each event replays through the existing reader")
+        })
+        .collect();
+    assert!(
+        persisted.len() > 3,
+        "the same log also contains ordinary events"
+    );
+    assert!(persisted
+        .iter()
+        .enumerate()
+        .all(|(index, event)| event.index == index as u64));
+    let durable_usage: Vec<_> = persisted
+        .iter()
+        .filter_map(|event| match &event.event {
+            crate::agent_events::AgentEvent::ProviderUsage { run_usage, .. } => {
+                Some(run_usage.provider_call_count)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(durable_usage, vec![1, 2, 3]);
+}
+
+#[test]
+fn a_failed_provider_attempt_remains_unpriced_after_a_later_success() {
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let _cleanup = Cleanup;
+    crate::agent_sessions::reset_session_store();
+    crate::reset_thread_local_state();
+    let wire = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let captured_wire = wire.clone();
+    let server = spawn_llm_stub_many("unpriced provider attempt", 2, move |index, stream| {
+        let (_, request) = read_http_request(stream);
+        captured_wire.lock().unwrap().push(request);
+        let (status, body) = if index == 0 {
+            (
+                "429 Too Many Requests",
+                json!({"error":{"message":"rate limited"}}).to_string(),
+            )
+        } else {
+            ("200 OK", json!({"id":"local", "model":"gpt-5.6-luna",
+                "choices":[{"index":0,"message":{"role":"assistant","content":"Finished."},"finish_reason":"stop"}],
+                "usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}).to_string())
+        };
+        write!(stream, "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    });
+    install_openai_stub_provider("openai", server.addr());
+    crate::llm_config::set_runtime_provider_endpoint_overrides(
+        crate::llm_config::RuntimeProviderEndpointOverrides::single(
+            "openai",
+            format!("http://{}/v1", server.addr()),
+        )
+        .unwrap(),
+    );
+    let root = tempfile::tempdir().unwrap();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let transport =
+        crate::agent_events::AgentEventTransport::new(Arc::new(UsageEvents(events.clone())));
+    let runtime = crate::test_support::current_thread_runtime();
+    runtime.block_on(
+        tokio::task::LocalSet::new().run_until(transport.scope(async {
+            execute(
+                root.path(),
+                r#"
+  harness.agent.with_run(session, options, { ->
+    const refused = try { harness.llm.call("First attempt.", nil, call_options) }
+    require is_err(refused), "the first provider response must fail"
+    harness.llm.call("Second attempt.", nil, call_options)
+  })
+"#,
+            )
+            .await
+            .expect("the later provider call succeeds");
+            let persisted = project(root.path()).await.usage.expect("the run has usage");
+            assert_eq!(persisted.call_count, 2);
+            assert_eq!(persisted.unpriced_calls, 1);
+            assert!(persisted.known_cost_usd > 0.0);
+            assert!(persisted.cost_usd.is_none());
+        })),
+    );
+    assert_eq!(
+        wire.lock().unwrap().len(),
+        2,
+        "both requests reached the provider"
+    );
+    let events = events.lock().unwrap();
+    let usage: Vec<_> = events
+        .iter()
+        .filter(|event| event["type"] == "provider_usage")
+        .collect();
+    assert_eq!(usage.len(), 2, "one usage event per settled request");
+    assert_eq!(usage[0]["run_usage"]["provider_call_count"], 1);
+    assert_eq!(usage[0]["run_usage"]["unpriced_calls"], 1);
+    assert_eq!(usage[0]["run_usage"]["usage_unknown_calls"], 1);
+    assert_eq!(usage[1]["run_usage"]["provider_call_count"], 2);
+    assert_eq!(usage[1]["run_usage"]["unpriced_calls"], 1);
+    assert_eq!(usage[1]["run_usage"]["usage_unknown_calls"], 1);
+    assert!(usage[1]["run_usage"]["known_cost_usd"].as_f64().unwrap() > 0.0);
+    assert!(usage[1]["run_usage"]["cost_usd"].is_null());
+}
+
+#[test]
+fn an_unpriced_retry_keeps_the_later_priced_subtotal_in_the_durable_run() {
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let _cleanup = Cleanup;
+    crate::agent_sessions::reset_session_store();
+    crate::reset_thread_local_state();
+    let wire = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let captured_wire = wire.clone();
+    let server = spawn_llm_stub_many("unpriced retry", 2, move |index, stream| {
+        let (_, request) = read_http_request(stream);
+        captured_wire.lock().unwrap().push(request);
+        let body = if index == 0 {
+            json!({"id":"local-empty", "model":"gpt-5.6-luna",
+                "choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]})
+        } else {
+            json!({"id":"local-success", "model":"gpt-5.6-luna",
+                "choices":[{"index":0,"message":{"role":"assistant","content":"Finished."},"finish_reason":"stop"}],
+                "usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}})
+        }
+        .to_string();
+        write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    });
+    install_openai_stub_provider("openai", server.addr());
+    crate::llm_config::set_runtime_provider_endpoint_overrides(
+        crate::llm_config::RuntimeProviderEndpointOverrides::single(
+            "openai",
+            format!("http://{}/v1", server.addr()),
+        )
+        .unwrap(),
+    );
+    let root = tempfile::tempdir().unwrap();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let transport =
+        crate::agent_events::AgentEventTransport::new(Arc::new(UsageEvents(events.clone())));
+    let runtime = crate::test_support::current_thread_runtime();
+    runtime.block_on(
+        tokio::task::LocalSet::new().run_until(transport.scope(async {
+            execute(
+                root.path(),
+                r#"
+  harness.agent.with_run(session, options, { ->
+    harness.llm.call("Reply briefly.", nil, call_options)
+  })
+"#,
+            )
+            .await
+            .expect("the retry succeeds");
+            let record = project(root.path()).await;
+            assert_eq!(record.evidence.trace_spans.len(), 1);
+            assert!(record.evidence.trace_spans[0].cost_usd.is_none());
+            let persisted = record.usage.expect("the run has usage");
+            assert_eq!(persisted.call_count, 1, "one logical call");
+            assert_eq!(persisted.unpriced_calls, 1);
+            assert!(persisted.known_cost_usd > 0.0);
+            assert!(persisted.cost_usd.is_none());
+        })),
+    );
+    assert_eq!(
+        wire.lock().unwrap().len(),
+        2,
+        "both attempts reached the provider"
+    );
+    let events = events.lock().unwrap();
+    let usage: Vec<_> = events
+        .iter()
+        .filter(|event| event["type"] == "provider_usage")
+        .collect();
+    assert_eq!(usage.len(), 2, "each attempt publishes usage");
+    assert_eq!(usage[1]["run_usage"]["provider_call_count"], 2);
+    assert_eq!(usage[1]["run_usage"]["unpriced_calls"], 1);
+    assert_eq!(usage[1]["run_usage"]["usage_unknown_calls"], 1);
+    assert!(usage[1]["run_usage"]["known_cost_usd"].as_f64().unwrap() > 0.0);
+    assert!(usage[1]["run_usage"]["cost_usd"].is_null());
 }
 
 #[test]

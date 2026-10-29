@@ -46,6 +46,9 @@ impl ProcessSpawner for RealSpawner {
                 request,
                 missing_program,
                 verifier_witness,
+                cleanup_receipt,
+                #[cfg(target_os = "linux")]
+                cancel_request,
             } = super::owner_death::prepare_guardian(&spec, cleanup_token.clone())?;
             let mut child = match spawn_retrying_executable_busy(|| command.spawn(), thread::sleep)
             {
@@ -55,6 +58,7 @@ impl ProcessSpawner for RealSpawner {
                     return Err(map_spawn_error(error));
                 }
             };
+            drop(command);
             if let Err(error) =
                 harn_vm::op_interrupt::record_current_process_owner_group(child.id())
             {
@@ -125,6 +129,9 @@ impl ProcessSpawner for RealSpawner {
             } else {
                 None
             };
+            #[cfg(target_os = "linux")]
+            let reaper_identity =
+                super::owner_death::cancel_request::ChildIdentity::open(child.id()).ok();
             let mut process = real_process(
                 child,
                 cleanup_token,
@@ -137,6 +144,17 @@ impl ProcessSpawner for RealSpawner {
             process.missing_program = missing_program;
             process.payload_stdin = payload_stdin;
             process.verifier_witness = verifier_witness;
+            #[cfg(target_os = "linux")]
+            {
+                if let Some(reaper) = reaper_identity {
+                    process.killer = Arc::new(RealKiller {
+                        pid: payload_pid,
+                        cleanup_token: process.cleanup_token.clone(),
+                        guardian_cancel: Some((cancel_request, cleanup_receipt.clone(), reaper)),
+                    });
+                }
+            }
+            process.cleanup_receipt = Some(cleanup_receipt);
             return Ok(Box::new(process));
         }
 
@@ -586,6 +604,9 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
 }
 
 struct RealProcess {
+    cleanup_report: Option<ProcessCleanupReport>,
+    #[cfg(unix)]
+    cleanup_receipt: Option<super::owner_death::ReceiptReader>,
     verifier_receipt: Option<harn_vm::verifier_provenance::VerifierExecutionReceipt>,
     verifier_witness: Option<harn_vm::verifier_provenance::VerifierExecutionWitness>,
     missing_program: Option<String>,
@@ -621,10 +642,15 @@ fn real_process(
     let killer: Arc<dyn ProcessKiller> = Arc::new(RealKiller {
         pid: killer_pid.unwrap_or(pid),
         cleanup_token: cleanup_token.clone(),
+        #[cfg(target_os = "linux")]
+        guardian_cancel: None,
         #[cfg(target_os = "windows")]
         owner_job,
     });
     RealProcess {
+        cleanup_report: None,
+        #[cfg(unix)]
+        cleanup_receipt: None,
         verifier_witness: None,
         verifier_receipt: None,
         missing_program: None,
@@ -648,6 +674,10 @@ fn real_process(
 
 impl RealProcess {
     fn witnessed_exit(&mut self, status: std::process::ExitStatus) -> io::Result<ExitStatus> {
+        #[cfg(unix)]
+        if let Some(receipt) = self.cleanup_receipt.take() {
+            self.cleanup_report = receipt.finish();
+        }
         if let Some(witness) = self.verifier_witness.as_ref() {
             self.verifier_receipt = Some(witness.receipt()?);
         }
@@ -670,6 +700,10 @@ impl RealProcess {
 }
 
 impl ProcessHandle for RealProcess {
+    fn cleanup_report(&self) -> Option<ProcessCleanupReport> {
+        self.cleanup_report.clone()
+    }
+
     fn verifier_execution_receipt(
         &self,
     ) -> Option<harn_vm::verifier_provenance::VerifierExecutionReceipt> {
@@ -740,6 +774,10 @@ impl ProcessHandle for RealProcess {
                     if interrupt() {
                         if owner_death_contained {
                             let report = killer.kill();
+                            #[cfg(target_os = "linux")]
+                            if !report.guardian_custody_complete && child.try_wait()?.is_none() {
+                                let _ = child.kill();
+                            }
                             let _ = child.wait();
                             return Ok(WaitOutcome::Interrupted(report));
                         }
@@ -775,7 +813,11 @@ impl ProcessHandle for RealProcess {
                         // subsequent `child.wait()` cannot block forever on a
                         // timed-out process.
                         let mut report = killer.kill();
-                        if !owner_death_contained {
+                        if !owner_death_contained
+                            || (cfg!(target_os = "linux")
+                                && !report.guardian_custody_complete
+                                && child.try_wait()?.is_none())
+                        {
                             let _ = child.kill();
                         }
                         let _ = child.wait();
@@ -805,12 +847,30 @@ impl ProcessHandle for RealProcess {
 struct RealKiller {
     pid: u32,
     cleanup_token: String,
+    #[cfg(target_os = "linux")]
+    guardian_cancel: Option<(
+        super::owner_death::cancel_request::CancelRequest,
+        super::owner_death::ReceiptReader,
+        super::owner_death::cancel_request::ChildIdentity,
+    )>,
     #[cfg(target_os = "windows")]
     owner_job: Option<Arc<super::windows::KillOnCloseJob>>,
 }
 
 impl ProcessKiller for RealKiller {
     fn kill(&self) -> ProcessCleanupReport {
+        #[cfg(target_os = "linux")]
+        if let Some((request, receipt, reaper)) = &self.guardian_cancel {
+            let _ = request.request();
+            if let Some(report) = receipt.finish() {
+                return report;
+            }
+            // Break the reaper's relay if the guardian did not settle. The
+            // guardian then sees owner-pipe closure and cleans up, but this
+            // fallback has no receipt and cannot authorize continuation.
+            let _ = reaper.signal(libc::SIGKILL);
+            return ProcessCleanupReport::default();
+        }
         // Escalating, not immediate: SIGTERM, grace, then SIGKILL. A cancelled
         // background command is the well-behaved case far more often than not,
         // and it deserves the chance to flush and unlink before it is shot.

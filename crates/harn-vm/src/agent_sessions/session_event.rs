@@ -403,6 +403,13 @@ pub(crate) struct KnownMetadata {
     pub cache_counts_reported: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<Number>,
+    /// Measured subtotal and physical-attempt certainty for this call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub known_cost_usd: Option<Number>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unpriced_calls: Option<Number>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_unknown_calls: Option<Number>,
     /// Whether provider usage was reported or remains `"unknown"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accounting_status: Option<String>,

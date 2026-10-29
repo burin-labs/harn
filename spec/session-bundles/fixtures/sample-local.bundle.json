@@ -372,7 +372,7 @@
         "output_tokens": 17,
         "total_cost": 0.002,
         "total_duration_ms": 1200,
-        "unpriced_calls": 0,
+        "unpriced_calls": 1,
         "usage_unknown_calls": 0
       },
       "workflow_id": "wf_fixture_session_bundle",

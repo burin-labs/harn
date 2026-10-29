@@ -10,11 +10,13 @@
 //! `auth` owns ACP credential normalization, and `bridge` owns outbound host
 //! calls and update/log/progress emission.
 
+pub mod agent_event_payloads;
 mod auth;
 mod bridge;
 mod builtins;
 mod checkpoint_tracking;
 mod checkpoints;
+mod client_capabilities;
 mod commands;
 mod confinement;
 mod core;
@@ -37,6 +39,7 @@ mod prompt_owner;
 mod schema;
 mod session;
 mod session_inputs;
+mod session_options;
 mod session_state;
 mod session_watch;
 mod sessions;
@@ -917,6 +920,7 @@ impl AcpSandboxConfig {
             || !self.process.write_roots.is_empty()
             || self.process.allow_tcp_loopback
             || !self.process.unix_socket_roots.is_empty()
+            || self.process.ssh_agent_socket.is_some()
             || self.process.allow_child_workspace_write
     }
 
@@ -995,6 +999,7 @@ struct VmBaselineCacheEntry {
 /// ACP server that reads JSON-RPC requests from a transport and writes
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
+    client_capabilities: client_capabilities::ClientCapabilities,
     launcher_environment: harn_vm::security::LauncherEnvironment,
     host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
     machine_spend_quota: Option<harn_vm::llm::MachineSpendQuota>,

@@ -42,15 +42,12 @@ use super::super::enforcement::MechanismLimit;
 /// A set of Landlock filesystem rights.
 pub(crate) type FsAccess = BitFlags<AccessFs>;
 
-/// The newest ABI whose filesystem rights Harn's grants use. ABI 9 added
-/// `RESOLVE_UNIX`, which governs `connect` to a socket file; the seccomp filter
-/// already decides `connect`, and handling it here too would refuse socket
-/// connections a network-ceiling policy grants.
+/// Base filesystem rights. Exact SSH agent grants add `ResolveUnix` separately;
+/// handling it for every policy would narrow an existing general network grant.
 const VOCABULARY: ABI = ABI::V5;
 
-/// The newest ABI the negotiation tells apart. Later ABIs add only features
-/// Harn does not use, so a newer kernel reports as this one.
-pub(crate) const NEWEST_DISTINGUISHED: ABI = ABI::V6;
+/// The newest ABI the negotiation distinguishes for grants Harn renders.
+pub(crate) const NEWEST_DISTINGUISHED: ABI = ABI::V9;
 
 /// What the running kernel's Landlock offers Harn, at most up to the ceiling it
 /// was negotiated under.
@@ -74,11 +71,19 @@ impl LandlockSupport {
     /// kernel check is a parameter so the selection itself can be tested
     /// against kernels this host is not.
     pub(crate) fn negotiate_with(ceiling: ABI, accepts: impl Fn(ABI) -> bool) -> Option<Self> {
-        [ABI::V6, ABI::V5, ABI::V4, ABI::V3, ABI::V2, ABI::V1]
-            .into_iter()
-            .filter(|abi| *abi <= ceiling)
-            .find(|abi| accepts(*abi))
-            .map(|abi| Self { abi })
+        [
+            ABI::V9,
+            ABI::V6,
+            ABI::V5,
+            ABI::V4,
+            ABI::V3,
+            ABI::V2,
+            ABI::V1,
+        ]
+        .into_iter()
+        .filter(|abi| *abi <= ceiling)
+        .find(|abi| accepts(*abi))
+        .map(|abi| Self { abi })
     }
 
     /// Support as an ABI would offer it, without asking the kernel, for the
@@ -137,12 +142,18 @@ impl LandlockSupport {
     pub(crate) fn populated_ruleset<'a>(
         self,
         scope_abstract_unix_sockets: bool,
+        scope_unix_paths: bool,
         rules: impl IntoIterator<Item = (&'a File, FsAccess)>,
     ) -> Result<OwnedFd, String> {
         let mut ruleset = Ruleset::default()
             .set_compatibility(CompatLevel::HardRequirement)
             .handle_access(self.handled_access())
             .map_err(|error| error.to_string())?;
+        if scope_unix_paths {
+            ruleset = ruleset
+                .handle_access(AccessFs::ResolveUnix)
+                .map_err(|error| error.to_string())?;
+        }
         if scope_abstract_unix_sockets {
             ruleset = ruleset
                 .scope(Scope::AbstractUnixSocket)
@@ -173,6 +184,7 @@ fn kernel_creates_ruleset_for(abi: ABI) -> bool {
         ABI::V6 => ruleset
             .handle_access(AccessFs::Execute)
             .and_then(|ruleset| ruleset.scope(Scope::AbstractUnixSocket)),
+        ABI::V9 => ruleset.handle_access(AccessFs::ResolveUnix),
         _ => return false,
     };
     ruleset
@@ -268,7 +280,7 @@ fn restriction_holds(support: LandlockSupport) -> bool {
     let Some(witness) = super::nesting::landlock_probe_witness() else {
         return false;
     };
-    let Ok(ruleset) = support.populated_ruleset(false, []) else {
+    let Ok(ruleset) = support.populated_ruleset(false, false, []) else {
         return false;
     };
     // The child runs only raw async-signal-safe syscalls and _exit. No

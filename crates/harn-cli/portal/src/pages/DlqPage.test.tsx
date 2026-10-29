@@ -1,8 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { QueryClientProvider } from "@tanstack/react-query"
 import { IntlProvider } from "react-intl"
 import { MemoryRouter } from "react-router"
 import { afterEach, expect, it, vi } from "vitest"
 
+import { createQueryClient } from "../lib/query"
 import { DlqPage } from "./DlqPage"
 
 afterEach(() => {
@@ -21,7 +23,7 @@ function renderQueue(query = "") {
   vi.stubGlobal("fetch", fetchMock)
   render(
     <MemoryRouter initialEntries={[`/dlq${query}`]}>
-      <IntlProvider locale="en"><DlqPage /></IntlProvider>
+      <QueryClientProvider client={createQueryClient()}><IntlProvider locale="en"><DlqPage /></IntlProvider></QueryClientProvider>
     </MemoryRouter>,
   )
   return fetchMock

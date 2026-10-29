@@ -1044,6 +1044,7 @@ async fn dispatch(subcommand: Command, explain: bool) {
         | Command::DumpPortableBenchmarkSchema(_)
         | Command::DumpPromptGrammar(_)
         | Command::DumpBuiltinMethods(_)
+        | Command::DumpPortalTypes(_)
         | Command::DumpTriggerQuickref(_)
         | Command::DumpCliSurface(_)
         | Command::DumpConnectorMatrix(_)

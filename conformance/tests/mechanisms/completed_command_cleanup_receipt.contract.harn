@@ -1,0 +1,38 @@
+import { command_cancel, command_run, command_wait } from "std/command"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn main(harness: Harness) {
+  const started = command_run(harness.tools, ["/bin/echo", "receipt"], {background: true})
+  const waited = command_wait(harness.tools, started, {timeout_ms: 15000})
+  const receipt = waited?.process_cleanup
+  contract_effect(
+    harness.stdio,
+    "effect_command_completed_before_cancel",
+    waited.status == "completed" && waited.exit_code == 0 && trim(waited.stdout) == "receipt",
+  )
+  contract_effect(
+    harness.stdio,
+    "effect_guardian_receipt_retained",
+    receipt != nil && receipt.root_pid > 0 && receipt.census_scanned_processes >= 0,
+  )
+  const cancelled = command_cancel(harness.tools, started, {wait_result_ms: 15000})
+  contract_effect(
+    harness.stdio,
+    "effect_completed_handle_replays_same_receipt",
+    receipt != nil && cancelled?.result?.process_cleanup == receipt,
+  )
+  contract_negative(
+    harness.stdio,
+    "negative_completed_command_is_not_cancelled",
+    cancelled.cancelled,
+  )
+  contract_negative(
+    harness.stdio,
+    "negative_unmeasured_census_is_not_zero",
+    receipt != nil
+      && receipt.survivor_count == 0
+      && !receipt.guardian_custody_complete
+      && (!receipt.census_complete || !receipt.census_control_read
+        || receipt.census_scanned_processes == 0),
+  )
+}

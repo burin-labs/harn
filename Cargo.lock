@@ -3616,6 +3616,7 @@ dependencies = [
  "toml",
  "tower 0.5.3",
  "tracing",
+ "ts-rs",
  "unicode-width",
  "url",
  "uuid",
@@ -3636,6 +3637,7 @@ dependencies = [
  "harn-source-fingerprint-build",
  "harn-stdlib",
  "harn-vm",
+ "hex",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -3754,6 +3756,7 @@ name = "harn-grammars"
 version = "0.10.181"
 dependencies = [
  "cc",
+ "sha2 0.10.9",
  "toml",
  "tree-sitter",
  "tree-sitter-bash",
@@ -3783,7 +3786,6 @@ dependencies = [
  "tree-sitter-sequel",
  "tree-sitter-swift",
  "tree-sitter-toml-ng",
- "tree-sitter-typescript",
  "tree-sitter-yaml",
  "tree-sitter-zig",
  "zstd",
@@ -3795,6 +3797,7 @@ version = "0.10.181"
 dependencies = [
  "harn-modules",
  "harn-vm",
+ "hex",
  "ort",
  "serde",
  "serde_json",
@@ -3838,6 +3841,7 @@ dependencies = [
  "jsonschema",
  "libc",
  "notify",
+ "percent-encoding",
  "postcard",
  "regex",
  "regex-automata",
@@ -4020,6 +4024,7 @@ dependencies = [
  "harn-source-fingerprint-build",
  "harn-stdlib",
  "harn-stdlib-catalog",
+ "hex",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -4285,6 +4290,7 @@ name = "harn-signals"
 version = "0.10.181"
 dependencies = [
  "harn-flock",
+ "hex",
  "serde",
  "serde_json",
  "tempfile",
@@ -4444,6 +4450,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "parking_lot",
+ "percent-encoding",
  "pin-project-lite",
  "proptest",
  "rand 0.10.3",
@@ -4559,6 +4566,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "ts-rs",
  "uuid",
  "walkdir",
  "windows-sys 0.61.2",
@@ -9762,16 +9770,6 @@ name = "tree-sitter-toml-ng"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9adc2c898ae49730e857d75be403da3f92bb81d8e37a2f918a08dd10de5ebb1"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
-name = "tree-sitter-typescript"
-version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c5f76ed8d947a75cc446d5fccd8b602ebf0cde64ccf2ffa434d873d7a575eff"
 dependencies = [
  "cc",
  "tree-sitter-language",

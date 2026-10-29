@@ -202,6 +202,15 @@ the model-visible observation, so changing the prose does not change the
 structured facts. Unmarked dict returns are rejected with `schema_validation`;
 they don't gain promoted `data` or a success verdict.
 
+When a mutation can establish whether its feedback requires repair before a
+check, its result may include the boolean `requires_repair_before_verify`.
+For a batch that proposes mutations followed by a `process_exec` tool annotated
+with `completion_evidence_role: "verification"`, the agent loop can run that check
+after the mutations only if every mutation succeeds, reports `applied` or
+`unchanged`, and explicitly reports this fact as `false`. A `true`, missing,
+or non-boolean fact leaves the check deferred for the next observation. An
+untagged process command is not classified as verification.
+
 Tool handlers cannot call the privileged `host_call(...)` wire, including
 through a helper. The wire is serviceable only while the host-selected trusted
 entry graph is assembling the run; a model- or client-invoked handler executes

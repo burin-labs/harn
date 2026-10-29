@@ -15,6 +15,10 @@
 
 use serde::Serialize;
 
+#[path = "ssh_agent.rs"]
+mod ssh_agent;
+pub(super) use ssh_agent::validate as validate_ssh_agent;
+
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
 
@@ -232,6 +236,7 @@ fn enforcement_for(filesystem_mechanism: &str) -> Option<&'static BackendEnforce
 pub(crate) fn ensure_spawn_enforceable<B: SandboxBackend + ?Sized>(
     policy: &CapabilityPolicy,
 ) -> Result<(), VmError> {
+    validate_ssh_agent(policy)?;
     if let Some(refusal) = refusal_for_mechanism(B::filesystem_mechanism().as_str(), policy) {
         return Err(refusal.into_error());
     }

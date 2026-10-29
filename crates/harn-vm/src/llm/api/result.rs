@@ -267,29 +267,15 @@ impl LlmResult {
         }
 
         let mut usages = attempts.completed_retry_usage.clone();
-        let completed_empty = u32::try_from(usages.len()).unwrap_or(u32::MAX);
-        let missing_empty = attempts.empty_completion.saturating_sub(completed_empty);
         let classified_retries = attempts
             .rate_limited
             .saturating_add(attempts.empty_completion)
             .saturating_add(attempts.other);
-        let unclassified = attempts
-            .total
-            .saturating_sub(1)
-            .saturating_sub(classified_retries);
-        usages.extend(
-            std::iter::repeat_with(crate::llm::usage::LlmUsage::known_zero_attempt)
-                .take(attempts.rate_limited as usize),
-        );
-        usages.extend(
-            std::iter::repeat_with(crate::llm::usage::LlmUsage::unknown_attempt).take(
-                missing_empty
-                    .saturating_add(attempts.other)
-                    .saturating_add(unclassified) as usize,
-            ),
-        );
         usages.push(current);
-        crate::llm::usage::LlmUsage::aggregate(&usages)
+        // Receipts are not tagged by retry reason. Count physical attempts
+        // once, then let the ledger owner fill only the unreported receipts.
+        let physical_attempts = attempts.total.max(classified_retries.saturating_add(1));
+        crate::llm::usage::LlmUsage::aggregate_attempt_ledger(&usages, physical_attempts as usize)
     }
 
     /// True when the completion carries nothing the agent loop can act on: no

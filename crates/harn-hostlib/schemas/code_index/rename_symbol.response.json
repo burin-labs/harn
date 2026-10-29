@@ -27,7 +27,7 @@
         "cancelled",
         "refused"
       ],
-      "description": "`declined`: the language server refused the rename. `scope_exceeded`: the server found references outside `scope`. `backend_unavailable`: `backend` was `language_server` and no server could answer. `cancelled`: the call was stopped before it wrote anything. `refused`: `deadline_ms` or the caller's deadline passed before anything was written."
+      "description": "`unsupported_language`: the language or this language-specific rename is unsupported. `declined`: the language server refused the rename. `scope_exceeded`: the server found references outside `scope`. `backend_unavailable`: `backend` was `language_server` and no server could answer. `cancelled`: the call was stopped before it wrote anything. `refused`: the call could not safely proceed before writing; `details` describes why."
     },
     "retry_after_ms": {
       "type": "integer",

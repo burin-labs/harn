@@ -176,6 +176,7 @@ pub mod session_timeline;
 pub mod sessions;
 pub mod shells;
 pub mod skills;
+mod sse_frames;
 pub mod stdlib;
 pub mod verifier_provenance;
 pub use harn_vm_core::stdlib_modules;

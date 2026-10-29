@@ -109,6 +109,7 @@ mod refactor_backend;
 mod refactor_core;
 mod rename;
 mod rename_binding;
+mod rename_go;
 mod rename_java;
 mod rename_reach;
 mod rename_rust_residue;

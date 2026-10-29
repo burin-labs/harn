@@ -395,28 +395,9 @@ pub(crate) fn parse_sse_jsonrpc_body(
     body: &str,
     request_id: Option<u64>,
 ) -> Result<serde_json::Value, VmError> {
-    let mut current_data = Vec::new();
-    let mut messages = Vec::new();
-
-    for line in body.lines() {
-        if line.is_empty() {
-            if !current_data.is_empty() {
-                messages.push(current_data.join("\n"));
-                current_data.clear();
-            }
-            continue;
-        }
-        if let Some(data) = line.strip_prefix("data:") {
-            current_data.push(data.trim_start().to_string());
-        }
-    }
-    if !current_data.is_empty() {
-        messages.push(current_data.join("\n"));
-    }
-
     let mut fallback = None;
-    for message in messages {
-        if let Ok(value) = parse_jsonrpc_message(message.as_bytes()) {
+    for frame in crate::sse_frames::frames_in_body(body) {
+        if let Ok(value) = parse_jsonrpc_message(frame.data.as_bytes()) {
             if request_id.is_some()
                 && value["id"].as_u64() == request_id
                 && (value.get("result").is_some() || value.get("error").is_some())

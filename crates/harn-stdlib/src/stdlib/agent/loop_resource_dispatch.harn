@@ -1,4 +1,8 @@
 import {
+  __batch_control_boundary_clear,
+  __batch_mutation_needs_observation,
+} from "std/agent/loop_batch_continuation"
+import {
   __loop_dispatch_options,
   __resolve_max_concurrent_tools,
 } from "std/agent/loop_dispatch_options"
@@ -75,6 +79,16 @@ fn __tool_batch_call_classification(call: any, tools: any, options: any = {}) {
     || contains(__TOOL_BATCH_TERMINAL_KINDS, kind)
     || contains(options?._stop_after_successful_tools ?? [], tool_name) {
     return {phase: "terminal", declared_mutation: false}
+  }
+  // A verification can be read-only and still depend on an earlier edit. Its
+  // declared role takes precedence over command-level read classification.
+  if annotations?.completion_evidence_role == "verification"
+    && side_effect == "process_exec"
+    && !(annotations?.destructiveHint ?? false)
+    && !contains(__TOOL_BATCH_MUTATION_KINDS, kind)
+    && !contains(__TOOL_BATCH_MUTATING_SIDE_EFFECTS, side_effect)
+    && mutation != "workspace_write" {
+    return {phase: "process_verification", declared_mutation: false, declared_verification: true}
   }
   if !(annotations?.destructiveHint ?? false)
     && ((annotations?.readOnlyHint
@@ -159,6 +173,7 @@ fn __tool_batch_plan(clock: HarnessClock, tool_calls: list, tools: any, options:
         call: call,
         phase: phase,
         declared_mutation: classification.declared_mutation,
+        declared_verification: classification?.declared_verification ?? false,
         signature: signature,
         selected: false,
         proposal_status: if contains(previous_deferred, signature) {
@@ -381,7 +396,7 @@ fn __tool_batch_process_is_read_effect(call: dict) -> bool {
 fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options: dict, cap: int) {
   const plan = __tool_batch_plan(harness.clock, tool_calls, tools, options)
   const selected = __tool_batch_selected_entries(plan)
-  const deferred = __tool_batch_deferred_entries(plan)
+  let deferred = __tool_batch_deferred_entries(plan)
   if __tool_batch_blocking_barrier_applies(plan) {
     let blocked_results = []
     for entry in plan.entries {
@@ -472,6 +487,42 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
       blocking_result = __tool_batch_blocking_result(entry, raw_result)
     }
   }
+  // A model may explicitly request a verification after its mutations. Run it
+  // only when the producer established a usable state, all mutations precede
+  // it in the response, and the normal control queues have nothing to deliver.
+  let executed = selected
+  if plan.selected_phase == "mutation" && len(deferred) == 1
+    && deferred[0].declared_verification
+    && selected.all({ entry -> entry.declared_mutation && entry.index < deferred[0].index })
+    && raw_selected.all(
+      { result ->
+        __tool_result_ok(result)
+          && contains(["applied", "unchanged"], __intra_turn_result_mutation_status(result))
+          && !__batch_mutation_needs_observation(result)
+      },
+    )
+    && __batch_control_boundary_clear(harness.agent, to_string(options?.session_id ?? "")) {
+    const entry = deferred[0]
+    const verified = __dispatch_tool_calls_with_middleware(
+      harness,
+      [entry.call],
+      tools,
+      options,
+      cap,
+      [entry.index],
+    )[0]
+    const receipt = __tool_batch_receipt(
+      plan,
+      entry,
+      "executed",
+      "verification_after_mutation",
+      verified?._tool_dispatch_timing,
+    )
+    ordered.push({index: entry.index, result: verified + {dispatch_receipt: receipt}})
+    __tool_batch_emit_receipt(harness.agent, options, receipt)
+    executed = executed + [entry]
+    deferred = []
+  }
   for entry in deferred {
     ordered.push(
       {
@@ -497,7 +548,7 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
       deferred_signatures: if explicit_terminal_succeeded {
         []
       } else {
-        __tool_batch_merge_deferred_signatures(plan.previous, deferred, selected)
+        __tool_batch_merge_deferred_signatures(plan.previous, deferred, executed)
       },
       blocking_result: blocking_result,
     },

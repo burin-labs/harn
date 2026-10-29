@@ -1034,10 +1034,8 @@ fn write_json_atomic(path: &Path, value: &Value) -> Result<(), String> {
     let text = serde_json::to_string_pretty(value)
         .map_err(|error| format!("failed to serialize fixture receipt: {error}"))?
         + "\n";
-    let temp = path.with_extension(format!("json.{}.tmp", std::process::id()));
-    fs::write(&temp, text)
-        .map_err(|error| format!("failed to write fixture receipt temp file: {error}"))?;
-    fs::rename(&temp, path).map_err(|error| format!("failed to replace fixture receipt: {error}"))
+    harn_vm::atomic_io::atomic_write(path, text.as_bytes())
+        .map_err(|error| format!("failed to replace fixture receipt: {error}"))
 }
 
 fn execution_paths(execution_dir: &Path, requests: &Path) -> ExecutionPaths {

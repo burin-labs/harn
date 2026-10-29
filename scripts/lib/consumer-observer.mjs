@@ -75,6 +75,12 @@ export function observerRefusal(error, fallback) {
   return {reason, line: ['CONSUMER_OBSERVER', `reason=${reason}`, ...fields].join(' ')};
 }
 
+function cleanupReadFailed(error) {
+  const reason = observerRefusal(error, 'unclassified').reason;
+  return reason === 'unclassified' || reason === 'github_read_unavailable'
+    || reason === 'observer_census_unmeasured' || reason.endsWith('_read_refused');
+}
+
 /** Normalize once. Unknown fields cannot silently alter the ownership contract.
  * @param {unknown} value
  * @returns {ObserverContext} */
@@ -608,10 +614,18 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     || targets.some(target => typeof target !== 'string' || !/^[a-z0-9_-]+$/.test(target))
     || !Array.isArray(jobs) || jobs.length === 0 || new Set(jobs.map(job=>job.id)).size !== jobs.length
     || new Set(jobs.map(job=>job.name)).size !== jobs.length) refuse('archive_producer_identity_unproven');
+  // Only a child of this live candidate can proceed while its audit runs. Recovery and
+  // standalone promotion require a completed, successful audit before using the archives.
+  const audit=jobs.find(job=>job.name==='Release residual audit');
+  const auditPending=request.allowPendingAudit===true && liveStates.has(run.status)
+    && audit && liveStates.has(audit.status) && audit.conclusion===null;
+  if (!audit || !(audit.status==='completed' && audit.conclusion==='success' || auditPending)) {
+    refuse('archive_producer_builds_unproven');
+  }
   const deferred = new Set(['Consumer release rehearsal / Consumer canary',
     'Consumer release rehearsal / Settled verdict','Release candidate verdict']);
   const required = ['Resolve release context','Prepare CLI AOT payload','Assemble candidate manifest',
-    'Release residual audit','Consumer release rehearsal / Decide whether main moved',
+    'Consumer release rehearsal / Decide whether main moved',
     ...targets.map(target=>`Build ${target}`),
     ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)];
   if (required.some(name=>!jobs.some(job=>job.name===name && job.status==='completed' && job.conclusion==='success'))
@@ -619,6 +633,7 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
       || job.run_attempt!==attempt || job.head_sha!==sourceRevision || typeof job.name!=='string'
       || !(job.status==='completed' && job.conclusion==='success'
         || job.name==='Report cache budget' && job.status==='completed' && job.conclusion==='skipped'
+        || job.name==='Release residual audit' && auditPending
         || deferred.has(job.name) && (liveStates.has(job.status) && job.conclusion===null
           || job.status==='completed' && ['success','failure','skipped'].includes(job.conclusion))))) {
     refuse('archive_producer_builds_unproven');
@@ -636,7 +651,8 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     producer_run:runId,producer_attempt:attempt,verdict:'pass',observed_jobs:jobs.length,
     proven_artifacts:names.length,manifest:{id:artifacts.find(artifact=>artifact.name===`candidate-manifest-${sourceRevision}`).id,
       digest:artifacts.find(artifact=>artifact.name===`candidate-manifest-${sourceRevision}`).digest},
-    pending:0,failed_jobs:[],next_action:'measure-consumer-repair'};
+    pending:auditPending?1:0,pending_jobs:auditPending?['Release residual audit']:[],
+    failed_jobs:[],next_action:'measure-consumer-repair'};
 }
 
 export async function githubArchiveProducer(token, request, fetchRecord=fetch) {
@@ -1048,7 +1064,7 @@ export async function sweepOwnedChildren(token, expected, fetchRecord = fetch, e
     // A run can change state between the bounded status censuses.
     for (const run of census) runs.set(run.id, run);
   }
-  const total = {scanned:runs.size, declarations:0, discovered:0, owned:0, terminal:0, cancelled:0, pending:0, refused:0, retained:0};
+  const total = {scanned:runs.size, declarations:0, discovered:0, owned:0, terminal:0, cancelled:0, pending:0, refused:0, retained:0, errors:0};
   const contexts = new Map();
   for (const candidate of runs.values()) {
     if (!candidate.display_title?.startsWith('Consumer observer ')) continue;
@@ -1067,8 +1083,9 @@ export async function sweepOwnedChildren(token, expected, fetchRecord = fetch, e
       const context = observerContext(receipt?.observer);
       if (observerRunName(context) !== candidate.display_title) refuse('dispatch_declaration_mismatch');
       contexts.set(JSON.stringify(context), context);
-    } catch {
+    } catch (error) {
       total.refused += 1;
+      if (cleanupReadFailed(error)) total.errors += 1;
     }
   }
   for (const context of contexts.values()) {
@@ -1076,8 +1093,9 @@ export async function sweepOwnedChildren(token, expected, fetchRecord = fetch, e
     try {
       const result = await reconcileStoppedObserver(token, context, expected, fetchRecord, extract, wait, now);
       for (const key of Object.keys(result)) total[key] += result[key];
-    } catch {
+    } catch (error) {
       total.refused += 1;
+      if (cleanupReadFailed(error)) total.errors += 1;
     }
   }
   return total;
@@ -1110,7 +1128,7 @@ async function reconcileChildren(token, context, expected, fetchRecord, extract,
   const runs = await githubChildCensus(token, expected.repository, expected.workflow,
     parent.created_at, fetchRecord);
   const matching = runs.filter(run => run.display_title === observerRunName(observer));
-  const result = { discovered: matching.length, owned: 0, terminal: 0, cancelled: 0, pending: matching.length === 0 ? 1 : 0, refused: 0, retained: 0 };
+  const result = { discovered: matching.length, owned: 0, terminal: 0, cancelled: 0, pending: matching.length === 0 ? 1 : 0, refused: 0, retained: 0, errors: 0 };
   for (const candidate of matching) {
     try {
       const runId = String(candidate.id);
@@ -1154,6 +1172,7 @@ async function reconcileChildren(token, context, expected, fetchRecord, extract,
       });
       if (response.status !== 202) {
         result.refused += 1;
+        result.errors += 1;
         continue;
       }
       result.cancelled += 1;
@@ -1169,10 +1188,11 @@ async function reconcileChildren(token, context, expected, fetchRecord, extract,
         }
       }
       if (!settled) result.pending += 1;
-    } catch {
+    } catch (error) {
       // A failed read, invalid custody, or superseded attempt is visible as a
       // refusal. It cannot turn a partial ownership reading into a safe zero.
       result.refused += 1;
+      if (cleanupReadFailed(error)) result.errors += 1;
     }
   }
   // Dispatch can have been in flight when the parent ended. A fresh complete

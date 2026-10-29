@@ -8,6 +8,39 @@ private enum RecapBindingProbeError: Error {
     case wireMismatch(type: String, expected: String, actual: String)
     case incompleteSessionUpdateFixture
     case acceptedMissingSessionUpdateIdentity
+    case agentEventDecodedAsUntyped(String)
+    case acceptedMalformedAgentEvent(String)
+}
+
+/// Every emitted agent event decodes into its generated body and re-encodes
+/// to the same params; a missing typed field or an unknown kind is refused.
+private func checkAgentEvents(_ path: String) throws {
+    let events = try JSONSerialization.jsonObject(
+        with: Data(contentsOf: URL(fileURLWithPath: path))
+    ) as! [[String: Any]]
+    for params in events {
+        try roundTrip(HarnAgentEventParams.self, params, params)
+        let decoded = try JSONDecoder().decode(
+            HarnAgentEventParams.self, from: JSONSerialization.data(withJSONObject: params))
+        let body = Mirror(reflecting: decoded.payload).children.first?.value
+        let openKinds: Set<HarnAgentEventParams.Kind> = [.sessionHealth, .reservedTerminalVerify, .agentLoopStallWarning]
+        if body is [String: HarnACPValue], !openKinds.contains(decoded.kind) {
+            throw RecapBindingProbeError.agentEventDecodedAsUntyped(decoded.kind.rawValue)
+        }
+    }
+    let judge = events.first { $0["kind"] as? String == "judge_decision" }!
+    for invalid in [
+        judge.filter { $0.key != "verdict" },
+        judge.merging(["kind": "future_event_kind"]) { $1 },
+    ] {
+        do {
+            _ = try JSONDecoder().decode(
+                HarnAgentEventParams.self, from: JSONSerialization.data(withJSONObject: invalid))
+        } catch {
+            continue
+        }
+        throw RecapBindingProbeError.acceptedMalformedAgentEvent(String(describing: invalid))
+    }
 }
 
 private func roundTrip<T: Codable>(_ type: T.Type, _ input: [String: Any], _ expected: [String: Any]) throws {
@@ -35,9 +68,10 @@ private func optionalField<T: Codable>(_ type: T.Type, _ base: [String: Any], _ 
 @main
 private struct RecapBindingProbe {
     static func main() throws {
-        guard CommandLine.arguments.count == 4 else {
-            fatalError("usage: protocol-binding-session-recap FIXTURE SESSION_UPDATES SESSION_UPDATE_SCHEMA")
+        guard CommandLine.arguments.count == 5 else {
+            fatalError("usage: protocol-binding-session-recap FIXTURE SESSION_UPDATES SESSION_UPDATE_SCHEMA AGENT_EVENTS")
         }
+        try checkAgentEvents(CommandLine.arguments[4])
         let fixture = try JSONSerialization.jsonObject(
             with: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
         ) as! [String: Any]

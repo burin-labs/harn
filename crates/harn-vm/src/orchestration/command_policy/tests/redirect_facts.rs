@@ -168,3 +168,57 @@ fn deterministic_scan_projects_structural_shell_redirects() {
         serde_json::json!(["printf", "%s", "left right"])
     );
 }
+
+#[test]
+fn descriptor_duplication_keeps_shell_execution_resolved() {
+    // tree-sitter-bash gives `file_redirect` no operator field, so every
+    // operator must be recognized from its anonymous child token.
+    for text in [
+        "git -C /w commit -m x > log 2>&1; echo c=$?",
+        "cd /w && git log 2>&1",
+        "printf safe >&2",
+        "printf safe 2<&0",
+        "printf safe 2>&-",
+        "printf safe <&-",
+    ] {
+        let scan = command_risk_scan_json(&shell_ctx(text), None);
+        assert_eq!(scan["execution_semantics"]["resolved"], true, "{text}");
+        assert!(
+            scan["execution_semantics"]["unresolved_reason"].is_null(),
+            "{text}"
+        );
+    }
+    let commit = command_risk_scan_json(&shell_ctx("git -C /w commit -m x > log 2>&1"), None);
+    assert_eq!(
+        commit["shell_redirects"],
+        serde_json::json!([{
+            "operator": ">", "destination": "log",
+            "dynamic": false, "writes_file": true,
+        }])
+    );
+    // Bash reads `>&word` as `&>word`, which writes the file.
+    let both = command_risk_scan_json(&shell_ctx("printf safe >& output.log"), None);
+    assert_eq!(both["execution_semantics"]["resolved"], true);
+    assert_eq!(both["shell_redirects"][0]["operator"], "&>");
+    assert_eq!(both["shell_redirects"][0]["writes_file"], true);
+    // A descriptor named at run time, or a non-descriptor input duplication,
+    // stays unresolved.
+    // `{name}` before a redirect assigns the descriptor number to `name`.
+    for text in [
+        "printf safe >&$fd",
+        "printf safe 2>&\"$fd\"",
+        "cat <&input",
+        "true {PATH}>&2; git -C /w status",
+        "true {PATH}<&0; git -C /w status",
+        "true {PATH}>&-; git -C /w status",
+        "true {PATH}>/dev/null; git -C /w status",
+        "cat {PATH}<<<x; git -C /w status",
+    ] {
+        let scan = command_risk_scan_json(&shell_ctx(text), None);
+        assert_eq!(scan["execution_semantics"]["resolved"], false, "{text}");
+        assert_eq!(
+            scan["execution_semantics"]["unresolved_reason"], "dynamic_or_invalid_execution_syntax",
+            "{text}"
+        );
+    }
+}

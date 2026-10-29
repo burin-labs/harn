@@ -352,7 +352,9 @@ fn partial_provider_error_receipt_stays_explicitly_unknown() {
 
 #[test]
 fn cost_certainty_fold_preserves_known_floor_and_unknown_counts() {
-    let priced = accounted_result().usage();
+    let mut result = accounted_result();
+    result.attempts = ProviderAttempts::default();
+    let priced = result.usage();
     let mut unpriced = priced.clone();
     unpriced.cost_usd = None;
     unpriced.accounting_status = UsageAccountingStatus::Unknown;
@@ -692,8 +694,9 @@ fn missing_stream_usage_stays_unknown_instead_of_becoming_free() {
     // The stream attempt reported no usage, so it stays unpriced and
     // visible. It is not turned into a free zero, which is what this test
     // has always guarded.
-    assert_eq!(usage.unpriced_calls, 1);
-    assert_eq!(usage.usage_unknown_calls, 1);
+    // The stream and the rate-limited request both lack a usage receipt.
+    assert_eq!(usage.unpriced_calls, 2);
+    assert_eq!(usage.usage_unknown_calls, 2);
 
     // harn#7912: `accounted_result` carries one completed retry receipt
     // that WAS priced. Reporting the call as unmeasured because a sibling

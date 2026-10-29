@@ -45,6 +45,7 @@
         "sessionId": "session-1",
         "update": {
           "kind": "read",
+        "name": "read",
           "rawInput": {
             "path": "README.md"
           },
@@ -72,6 +73,7 @@
           "rawOutput": {
             "ok": true
           },
+        "name": "read",
           "sessionUpdate": "tool_call_update",
           "status": "completed",
           "title": "read",

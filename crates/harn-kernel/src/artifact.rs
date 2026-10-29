@@ -22,10 +22,7 @@ const SEMANTIC_ABI_DOMAIN: &[u8] = b"harn-portable-kernel-semantic-abi-v4\0";
 /// Hex fingerprint of every opcode, portable builtin, and capability contract
 /// that contributes to artifact execution semantics.
 pub fn semantic_abi_fingerprint_hex() -> String {
-    validation::semantic_abi_fingerprint()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hex::encode(validation::semantic_abi_fingerprint())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -168,10 +165,7 @@ impl ProgramArtifact {
         self.digest
     }
     pub fn digest_hex(&self) -> String {
-        self.digest
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        hex::encode(self.digest)
     }
     pub fn image(&self) -> &Arc<Chunk> {
         &self.image

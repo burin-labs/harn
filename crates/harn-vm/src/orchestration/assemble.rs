@@ -172,12 +172,7 @@ pub fn stable_chunk_id(artifact_id: &str, text: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(text.as_bytes());
     let digest = hasher.finalize();
-    let hex = digest
-        .iter()
-        .take(8)
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    format!("{artifact_id}#{hex}")
+    format!("{artifact_id}#{}", hex::encode(&digest[..8]))
 }
 
 /// Approximate token count using the same chars-per-token heuristic as

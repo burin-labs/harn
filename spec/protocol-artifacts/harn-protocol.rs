@@ -1508,16 +1508,22 @@ pub struct ACPSessionRequestPermissionResult {
 /// events while still proxying or recording the original notification.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum HarnAgentEventKind {
+    AgentLoopStallWarning,
+    AgentScratchpadReorganization,
+    AnchorChanged,
     BoundaryFailure,
     BudgetCircuitBreaker,
     BudgetExhausted,
+    CacheHit,
+    CacheMiss,
+    CapabilityGap,
     CodeLibrarianQueryNlFallback,
+    CompassRoutingDecision,
     CompositionChildCall,
     CompositionChildResult,
     CompositionError,
     CompositionFinish,
     CompositionStart,
-    CompassRoutingDecision,
     ControlOutcome,
     DaemonWatchdogTripped,
     FeedbackInjected,
@@ -1526,30 +1532,39 @@ pub enum HarnAgentEventKind {
     HostToolResult,
     InputGuardrailVerdict,
     IterationEnd,
-    SessionHealth,
     IterationStart,
     JudgeDecision,
     JudgeStarted,
+    LlmCallLog,
+    LlmFallbackAttempt,
+    LlmRoutingDecision,
+    LlmShadowDiff,
+    LoopCheckpoint,
     LoopControlDecision,
     LoopStuck,
     McpAuthRequired,
     McpCatalogChanged,
     McpNotification,
+    MissingToolCallVerdict,
     ModelJob,
     OrchestrationDecision,
     PackThinkingStripped,
     ProgressReported,
+    ProviderUsage,
     PurposeLabel,
     RepairOutputContractApplied,
     RequireSuccessfulToolsViolation,
     ReservedTerminalVerify,
     ScopeClassifierVerdict,
     SelfConsistencyTie,
+    SemanticCacheHit,
+    SemanticCacheMiss,
     SessionClosed,
+    SessionHealth,
+    StepJudgeDecision,
     StructuralValidatorDecision,
     SubagentJoin,
     SubagentStop,
-    StepJudgeDecision,
     ToolBatchDisposition,
     ToolCallAudit,
     ToolFormatOverride,
@@ -1561,16 +1576,22 @@ pub enum HarnAgentEventKind {
 impl HarnAgentEventKind {
     pub fn as_str(&self) -> &str {
         match self {
+            Self::AgentLoopStallWarning => "agent_loop_stall_warning",
+            Self::AgentScratchpadReorganization => "agent_scratchpad_reorganization",
+            Self::AnchorChanged => "anchor_changed",
             Self::BoundaryFailure => "boundary_failure",
             Self::BudgetCircuitBreaker => "budget_circuit_breaker",
             Self::BudgetExhausted => "budget_exhausted",
+            Self::CacheHit => "cache_hit",
+            Self::CacheMiss => "cache_miss",
+            Self::CapabilityGap => "capability_gap",
             Self::CodeLibrarianQueryNlFallback => "code_librarian_query_nl_fallback",
+            Self::CompassRoutingDecision => "compass_routing_decision",
             Self::CompositionChildCall => "composition_child_call",
             Self::CompositionChildResult => "composition_child_result",
             Self::CompositionError => "composition_error",
             Self::CompositionFinish => "composition_finish",
             Self::CompositionStart => "composition_start",
-            Self::CompassRoutingDecision => "compass_routing_decision",
             Self::ControlOutcome => "control_outcome",
             Self::DaemonWatchdogTripped => "daemon_watchdog_tripped",
             Self::FeedbackInjected => "feedback_injected",
@@ -1579,30 +1600,39 @@ impl HarnAgentEventKind {
             Self::HostToolResult => "host_tool_result",
             Self::InputGuardrailVerdict => "input_guardrail_verdict",
             Self::IterationEnd => "iteration_end",
-            Self::SessionHealth => "session_health",
             Self::IterationStart => "iteration_start",
             Self::JudgeDecision => "judge_decision",
             Self::JudgeStarted => "judge_started",
+            Self::LlmCallLog => "llm_call_log",
+            Self::LlmFallbackAttempt => "llm_fallback_attempt",
+            Self::LlmRoutingDecision => "llm_routing_decision",
+            Self::LlmShadowDiff => "llm_shadow_diff",
+            Self::LoopCheckpoint => "loop_checkpoint",
             Self::LoopControlDecision => "loop_control_decision",
             Self::LoopStuck => "loop_stuck",
             Self::McpAuthRequired => "mcp_auth_required",
             Self::McpCatalogChanged => "mcp_catalog_changed",
             Self::McpNotification => "mcp_notification",
+            Self::MissingToolCallVerdict => "missing_tool_call_verdict",
             Self::ModelJob => "model_job",
             Self::OrchestrationDecision => "orchestration_decision",
             Self::PackThinkingStripped => "pack_thinking_stripped",
             Self::ProgressReported => "progress_reported",
+            Self::ProviderUsage => "provider_usage",
             Self::PurposeLabel => "purpose_label",
             Self::RepairOutputContractApplied => "repair_output_contract_applied",
             Self::RequireSuccessfulToolsViolation => "require_successful_tools_violation",
             Self::ReservedTerminalVerify => "reserved_terminal_verify",
             Self::ScopeClassifierVerdict => "scope_classifier_verdict",
             Self::SelfConsistencyTie => "self_consistency_tie",
+            Self::SemanticCacheHit => "semantic_cache_hit",
+            Self::SemanticCacheMiss => "semantic_cache_miss",
             Self::SessionClosed => "session_closed",
+            Self::SessionHealth => "session_health",
+            Self::StepJudgeDecision => "step_judge_decision",
             Self::StructuralValidatorDecision => "structural_validator_decision",
             Self::SubagentJoin => "subagent_join",
             Self::SubagentStop => "subagent_stop",
-            Self::StepJudgeDecision => "step_judge_decision",
             Self::ToolBatchDisposition => "tool_batch_disposition",
             Self::ToolCallAudit => "tool_call_audit",
             Self::ToolFormatOverride => "tool_format_override",
@@ -1629,16 +1659,22 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
     {
         let value = String::deserialize(deserializer)?;
         Ok(match value.as_str() {
+            "agent_loop_stall_warning" => Self::AgentLoopStallWarning,
+            "agent_scratchpad_reorganization" => Self::AgentScratchpadReorganization,
+            "anchor_changed" => Self::AnchorChanged,
             "boundary_failure" => Self::BoundaryFailure,
             "budget_circuit_breaker" => Self::BudgetCircuitBreaker,
             "budget_exhausted" => Self::BudgetExhausted,
+            "cache_hit" => Self::CacheHit,
+            "cache_miss" => Self::CacheMiss,
+            "capability_gap" => Self::CapabilityGap,
             "code_librarian_query_nl_fallback" => Self::CodeLibrarianQueryNlFallback,
+            "compass_routing_decision" => Self::CompassRoutingDecision,
             "composition_child_call" => Self::CompositionChildCall,
             "composition_child_result" => Self::CompositionChildResult,
             "composition_error" => Self::CompositionError,
             "composition_finish" => Self::CompositionFinish,
             "composition_start" => Self::CompositionStart,
-            "compass_routing_decision" => Self::CompassRoutingDecision,
             "control_outcome" => Self::ControlOutcome,
             "daemon_watchdog_tripped" => Self::DaemonWatchdogTripped,
             "feedback_injected" => Self::FeedbackInjected,
@@ -1647,30 +1683,39 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "host_tool_result" => Self::HostToolResult,
             "input_guardrail_verdict" => Self::InputGuardrailVerdict,
             "iteration_end" => Self::IterationEnd,
-            "session_health" => Self::SessionHealth,
             "iteration_start" => Self::IterationStart,
             "judge_decision" => Self::JudgeDecision,
             "judge_started" => Self::JudgeStarted,
+            "llm_call_log" => Self::LlmCallLog,
+            "llm_fallback_attempt" => Self::LlmFallbackAttempt,
+            "llm_routing_decision" => Self::LlmRoutingDecision,
+            "llm_shadow_diff" => Self::LlmShadowDiff,
+            "loop_checkpoint" => Self::LoopCheckpoint,
             "loop_control_decision" => Self::LoopControlDecision,
             "loop_stuck" => Self::LoopStuck,
             "mcp_auth_required" => Self::McpAuthRequired,
             "mcp_catalog_changed" => Self::McpCatalogChanged,
             "mcp_notification" => Self::McpNotification,
+            "missing_tool_call_verdict" => Self::MissingToolCallVerdict,
             "model_job" => Self::ModelJob,
             "orchestration_decision" => Self::OrchestrationDecision,
             "pack_thinking_stripped" => Self::PackThinkingStripped,
             "progress_reported" => Self::ProgressReported,
+            "provider_usage" => Self::ProviderUsage,
             "purpose_label" => Self::PurposeLabel,
             "repair_output_contract_applied" => Self::RepairOutputContractApplied,
             "require_successful_tools_violation" => Self::RequireSuccessfulToolsViolation,
             "reserved_terminal_verify" => Self::ReservedTerminalVerify,
             "scope_classifier_verdict" => Self::ScopeClassifierVerdict,
             "self_consistency_tie" => Self::SelfConsistencyTie,
+            "semantic_cache_hit" => Self::SemanticCacheHit,
+            "semantic_cache_miss" => Self::SemanticCacheMiss,
             "session_closed" => Self::SessionClosed,
+            "session_health" => Self::SessionHealth,
+            "step_judge_decision" => Self::StepJudgeDecision,
             "structural_validator_decision" => Self::StructuralValidatorDecision,
             "subagent_join" => Self::SubagentJoin,
             "subagent_stop" => Self::SubagentStop,
-            "step_judge_decision" => Self::StepJudgeDecision,
             "tool_batch_disposition" => Self::ToolBatchDisposition,
             "tool_call_audit" => Self::ToolCallAudit,
             "tool_format_override" => Self::ToolFormatOverride,
@@ -2316,17 +2361,24 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "worker_update",
 ];
 
+pub const HARN_AGENT_EVENT_KIND_AGENT_LOOP_STALL_WARNING: &str = "agent_loop_stall_warning";
+pub const HARN_AGENT_EVENT_KIND_AGENT_SCRATCHPAD_REORGANIZATION: &str =
+    "agent_scratchpad_reorganization";
+pub const HARN_AGENT_EVENT_KIND_ANCHOR_CHANGED: &str = "anchor_changed";
 pub const HARN_AGENT_EVENT_KIND_BOUNDARY_FAILURE: &str = "boundary_failure";
 pub const HARN_AGENT_EVENT_KIND_BUDGET_CIRCUIT_BREAKER: &str = "budget_circuit_breaker";
 pub const HARN_AGENT_EVENT_KIND_BUDGET_EXHAUSTED: &str = "budget_exhausted";
+pub const HARN_AGENT_EVENT_KIND_CACHE_HIT: &str = "cache_hit";
+pub const HARN_AGENT_EVENT_KIND_CACHE_MISS: &str = "cache_miss";
+pub const HARN_AGENT_EVENT_KIND_CAPABILITY_GAP: &str = "capability_gap";
 pub const HARN_AGENT_EVENT_KIND_CODE_LIBRARIAN_QUERY_NL_FALLBACK: &str =
     "code_librarian_query_nl_fallback";
+pub const HARN_AGENT_EVENT_KIND_COMPASS_ROUTING_DECISION: &str = "compass_routing_decision";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_CHILD_CALL: &str = "composition_child_call";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_CHILD_RESULT: &str = "composition_child_result";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_ERROR: &str = "composition_error";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_FINISH: &str = "composition_finish";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_START: &str = "composition_start";
-pub const HARN_AGENT_EVENT_KIND_COMPASS_ROUTING_DECISION: &str = "compass_routing_decision";
 pub const HARN_AGENT_EVENT_KIND_CONTROL_OUTCOME: &str = "control_outcome";
 pub const HARN_AGENT_EVENT_KIND_DAEMON_WATCHDOG_TRIPPED: &str = "daemon_watchdog_tripped";
 pub const HARN_AGENT_EVENT_KIND_FEEDBACK_INJECTED: &str = "feedback_injected";
@@ -2335,19 +2387,25 @@ pub const HARN_AGENT_EVENT_KIND_HOST_ATTACHMENT: &str = "host_attachment";
 pub const HARN_AGENT_EVENT_KIND_HOST_TOOL_RESULT: &str = "host_tool_result";
 pub const HARN_AGENT_EVENT_KIND_INPUT_GUARDRAIL_VERDICT: &str = "input_guardrail_verdict";
 pub const HARN_AGENT_EVENT_KIND_ITERATION_END: &str = "iteration_end";
-pub const HARN_AGENT_EVENT_KIND_SESSION_HEALTH: &str = "session_health";
 pub const HARN_AGENT_EVENT_KIND_ITERATION_START: &str = "iteration_start";
 pub const HARN_AGENT_EVENT_KIND_JUDGE_DECISION: &str = "judge_decision";
 pub const HARN_AGENT_EVENT_KIND_JUDGE_STARTED: &str = "judge_started";
+pub const HARN_AGENT_EVENT_KIND_LLM_CALL_LOG: &str = "llm_call_log";
+pub const HARN_AGENT_EVENT_KIND_LLM_FALLBACK_ATTEMPT: &str = "llm_fallback_attempt";
+pub const HARN_AGENT_EVENT_KIND_LLM_ROUTING_DECISION: &str = "llm_routing_decision";
+pub const HARN_AGENT_EVENT_KIND_LLM_SHADOW_DIFF: &str = "llm_shadow_diff";
+pub const HARN_AGENT_EVENT_KIND_LOOP_CHECKPOINT: &str = "loop_checkpoint";
 pub const HARN_AGENT_EVENT_KIND_LOOP_CONTROL_DECISION: &str = "loop_control_decision";
 pub const HARN_AGENT_EVENT_KIND_LOOP_STUCK: &str = "loop_stuck";
 pub const HARN_AGENT_EVENT_KIND_MCP_AUTH_REQUIRED: &str = "mcp_auth_required";
 pub const HARN_AGENT_EVENT_KIND_MCP_CATALOG_CHANGED: &str = "mcp_catalog_changed";
 pub const HARN_AGENT_EVENT_KIND_MCP_NOTIFICATION: &str = "mcp_notification";
+pub const HARN_AGENT_EVENT_KIND_MISSING_TOOL_CALL_VERDICT: &str = "missing_tool_call_verdict";
 pub const HARN_AGENT_EVENT_KIND_MODEL_JOB: &str = "model_job";
 pub const HARN_AGENT_EVENT_KIND_ORCHESTRATION_DECISION: &str = "orchestration_decision";
 pub const HARN_AGENT_EVENT_KIND_PACK_THINKING_STRIPPED: &str = "pack_thinking_stripped";
 pub const HARN_AGENT_EVENT_KIND_PROGRESS_REPORTED: &str = "progress_reported";
+pub const HARN_AGENT_EVENT_KIND_PROVIDER_USAGE: &str = "provider_usage";
 pub const HARN_AGENT_EVENT_KIND_PURPOSE_LABEL: &str = "purpose_label";
 pub const HARN_AGENT_EVENT_KIND_REPAIR_OUTPUT_CONTRACT_APPLIED: &str =
     "repair_output_contract_applied";
@@ -2356,12 +2414,15 @@ pub const HARN_AGENT_EVENT_KIND_REQUIRE_SUCCESSFUL_TOOLS_VIOLATION: &str =
 pub const HARN_AGENT_EVENT_KIND_RESERVED_TERMINAL_VERIFY: &str = "reserved_terminal_verify";
 pub const HARN_AGENT_EVENT_KIND_SCOPE_CLASSIFIER_VERDICT: &str = "scope_classifier_verdict";
 pub const HARN_AGENT_EVENT_KIND_SELF_CONSISTENCY_TIE: &str = "self_consistency_tie";
+pub const HARN_AGENT_EVENT_KIND_SEMANTIC_CACHE_HIT: &str = "semantic_cache_hit";
+pub const HARN_AGENT_EVENT_KIND_SEMANTIC_CACHE_MISS: &str = "semantic_cache_miss";
 pub const HARN_AGENT_EVENT_KIND_SESSION_CLOSED: &str = "session_closed";
+pub const HARN_AGENT_EVENT_KIND_SESSION_HEALTH: &str = "session_health";
+pub const HARN_AGENT_EVENT_KIND_STEP_JUDGE_DECISION: &str = "step_judge_decision";
 pub const HARN_AGENT_EVENT_KIND_STRUCTURAL_VALIDATOR_DECISION: &str =
     "structural_validator_decision";
 pub const HARN_AGENT_EVENT_KIND_SUBAGENT_JOIN: &str = "subagent_join";
 pub const HARN_AGENT_EVENT_KIND_SUBAGENT_STOP: &str = "subagent_stop";
-pub const HARN_AGENT_EVENT_KIND_STEP_JUDGE_DECISION: &str = "step_judge_decision";
 pub const HARN_AGENT_EVENT_KIND_TOOL_BATCH_DISPOSITION: &str = "tool_batch_disposition";
 pub const HARN_AGENT_EVENT_KIND_TOOL_CALL_AUDIT: &str = "tool_call_audit";
 pub const HARN_AGENT_EVENT_KIND_TOOL_FORMAT_OVERRIDE: &str = "tool_format_override";
@@ -2370,16 +2431,22 @@ pub const HARN_AGENT_EVENT_KIND_TYPED_CHECKPOINT: &str = "typed_checkpoint";
 
 /// Pipeline-loop milestone kinds emitted via `_harn/agentEvent`.
 pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
+    "agent_loop_stall_warning",
+    "agent_scratchpad_reorganization",
+    "anchor_changed",
     "boundary_failure",
     "budget_circuit_breaker",
     "budget_exhausted",
+    "cache_hit",
+    "cache_miss",
+    "capability_gap",
     "code_librarian_query_nl_fallback",
+    "compass_routing_decision",
     "composition_child_call",
     "composition_child_result",
     "composition_error",
     "composition_finish",
     "composition_start",
-    "compass_routing_decision",
     "control_outcome",
     "daemon_watchdog_tripped",
     "feedback_injected",
@@ -2388,30 +2455,39 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "host_tool_result",
     "input_guardrail_verdict",
     "iteration_end",
-    "session_health",
     "iteration_start",
     "judge_decision",
     "judge_started",
+    "llm_call_log",
+    "llm_fallback_attempt",
+    "llm_routing_decision",
+    "llm_shadow_diff",
+    "loop_checkpoint",
     "loop_control_decision",
     "loop_stuck",
     "mcp_auth_required",
     "mcp_catalog_changed",
     "mcp_notification",
+    "missing_tool_call_verdict",
     "model_job",
     "orchestration_decision",
     "pack_thinking_stripped",
     "progress_reported",
+    "provider_usage",
     "purpose_label",
     "repair_output_contract_applied",
     "require_successful_tools_violation",
     "reserved_terminal_verify",
     "scope_classifier_verdict",
     "self_consistency_tie",
+    "semantic_cache_hit",
+    "semantic_cache_miss",
     "session_closed",
+    "session_health",
+    "step_judge_decision",
     "structural_validator_decision",
     "subagent_join",
     "subagent_stop",
-    "step_judge_decision",
     "tool_batch_disposition",
     "tool_call_audit",
     "tool_format_override",
@@ -5311,6 +5387,21 @@ pub struct HarnACPPromptCorrelation {
     #[serde(rename = "messageId")]
     pub message_id: Option<String>,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnProviderUsage {
+    pub run_id: String,
+    pub parent_session_id: String,
+    pub lineage_known: bool,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub provider_call_count: i64,
+    pub unpriced_calls: i64,
+    pub usage_unknown_calls: i64,
+    pub known_cost_usd: serde_json::Number,
+    pub cost_usd: Option<serde_json::Number>,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum HarnAgentsTaskStatus {
@@ -5339,4 +5430,902 @@ pub struct HarnAgentsEventProjection {
     pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventAgentScratchpadReorganization {
+    pub iteration: u64,
+    pub status: String,
+    pub details: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventAnchorChanged {
+    pub previous: Value,
+    pub current: Value,
+    #[serde(rename = "carryTranscript")]
+    pub carry_transcript: bool,
+    pub compacted: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventBoundaryFailure {
+    pub boundary: String,
+    #[serde(rename = "failureKind")]
+    pub failure_kind: String,
+    pub owner: String,
+    pub detail: String,
+    #[serde(rename = "droppedCount")]
+    pub dropped_count: u64,
+    #[serde(rename = "droppedBytes")]
+    pub dropped_bytes: u64,
+    pub unreported: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excerpt: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventBudgetCircuitBreaker {
+    #[serde(rename = "breakerKind")]
+    pub breaker_kind: String,
+    #[serde(rename = "consecutiveCount")]
+    pub consecutive_count: u64,
+    #[serde(rename = "pausedForMs")]
+    pub paused_for_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventBudgetExhausted {
+    #[serde(rename = "maxIterations")]
+    pub max_iterations: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "budgetKind")]
+    pub budget_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "costUsd")]
+    pub cost_usd: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "headroomUsd")]
+    pub headroom_usd: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iteration: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "limitValue")]
+    pub limit_value: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "projectedCostUsd")]
+    pub projected_cost_usd: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "projectedInputTokens")]
+    pub projected_input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "projectedOutputTokens")]
+    pub projected_output_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "projectionBasis")]
+    pub projection_basis: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "sessionCostUsd")]
+    pub session_cost_usd: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "wallClockMs")]
+    pub wall_clock_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventCapabilityGap {
+    pub level: String,
+    pub capability: String,
+    pub provider: String,
+    pub model: String,
+    #[serde(rename = "fallbackToolFormat")]
+    pub fallback_tool_format: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "requestedToolFormat")]
+    pub requested_tool_format: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventCodeLibrarianQueryNlFallback {
+    #[serde(rename = "attemptedCypher")]
+    pub attempted_cypher: Option<String>,
+    #[serde(rename = "mctsDepth")]
+    pub mcts_depth: u64,
+    #[serde(rename = "mctsExpansions")]
+    pub mcts_expansions: u64,
+    #[serde(rename = "resultCount")]
+    pub result_count: u64,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventCompassRoutingDecision {
+    #[serde(rename = "toolCallId")]
+    pub tool_call_id: String,
+    pub mode: String,
+    pub action: String,
+    pub persona: String,
+    #[serde(rename = "originalTool")]
+    pub original_tool: String,
+    #[serde(rename = "routedTool")]
+    pub routed_tool: String,
+    #[serde(rename = "targetTool")]
+    pub target_tool: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventCompositionChildCall {
+    #[serde(rename = "runId")]
+    pub run_id: String,
+    #[serde(rename = "toolCallId")]
+    pub tool_call_id: String,
+    #[serde(rename = "toolName")]
+    pub tool_name: String,
+    #[serde(rename = "operationIndex")]
+    pub operation_index: u64,
+    pub annotations: Value,
+    #[serde(rename = "requestedSideEffectLevel")]
+    pub requested_side_effect_level: String,
+    #[serde(rename = "policyContext")]
+    pub policy_context: Value,
+    #[serde(rename = "rawInput")]
+    pub raw_input: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventCompositionChildResult {
+    #[serde(rename = "runId")]
+    pub run_id: String,
+    #[serde(rename = "toolCallId")]
+    pub tool_call_id: String,
+    #[serde(rename = "toolName")]
+    pub tool_name: String,
+    #[serde(rename = "operationIndex")]
+    pub operation_index: u64,
+    pub status: String,
+    #[serde(rename = "rawOutput")]
+    pub raw_output: Value,
+    pub error: Option<String>,
+    #[serde(rename = "errorCategory")]
+    pub error_category: Option<String>,
+    pub executor: Value,
+    #[serde(rename = "durationMs")]
+    pub duration_ms: Option<u64>,
+    #[serde(rename = "executionDurationMs")]
+    pub execution_duration_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventCompositionError {
+    #[serde(rename = "runId")]
+    pub run_id: String,
+    pub language: String,
+    #[serde(rename = "snippetHash")]
+    pub snippet_hash: String,
+    #[serde(rename = "bindingManifestHash")]
+    pub binding_manifest_hash: String,
+    #[serde(rename = "requestedSideEffectCeiling")]
+    pub requested_side_effect_ceiling: String,
+    pub stdout: Option<String>,
+    pub stderr: Option<String>,
+    pub artifacts: Vec<Value>,
+    pub result: Value,
+    #[serde(rename = "failureCategory")]
+    pub failure_category: Option<String>,
+    pub error: Option<String>,
+    #[serde(rename = "durationMs")]
+    pub duration_ms: Option<u64>,
+    pub metadata: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventCompositionFinish {
+    #[serde(rename = "runId")]
+    pub run_id: String,
+    pub language: String,
+    #[serde(rename = "snippetHash")]
+    pub snippet_hash: String,
+    #[serde(rename = "bindingManifestHash")]
+    pub binding_manifest_hash: String,
+    #[serde(rename = "requestedSideEffectCeiling")]
+    pub requested_side_effect_ceiling: String,
+    pub stdout: Option<String>,
+    pub stderr: Option<String>,
+    pub artifacts: Vec<Value>,
+    pub result: Value,
+    #[serde(rename = "failureCategory")]
+    pub failure_category: Option<String>,
+    pub error: Option<String>,
+    #[serde(rename = "durationMs")]
+    pub duration_ms: Option<u64>,
+    pub metadata: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventCompositionStart {
+    #[serde(rename = "runId")]
+    pub run_id: String,
+    pub language: String,
+    #[serde(rename = "snippetHash")]
+    pub snippet_hash: String,
+    #[serde(rename = "bindingManifestHash")]
+    pub binding_manifest_hash: String,
+    #[serde(rename = "requestedSideEffectCeiling")]
+    pub requested_side_effect_ceiling: String,
+    pub stdout: Option<String>,
+    pub stderr: Option<String>,
+    pub artifacts: Vec<Value>,
+    pub result: Value,
+    #[serde(rename = "failureCategory")]
+    pub failure_category: Option<String>,
+    pub error: Option<String>,
+    #[serde(rename = "durationMs")]
+    pub duration_ms: Option<u64>,
+    pub metadata: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventControlOutcome {
+    #[serde(rename = "controlId")]
+    pub control_id: String,
+    pub method: String,
+    pub outcome: String,
+    pub status: String,
+    pub actor: Value,
+    pub target: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventDaemonWatchdogTripped {
+    pub attempts: u64,
+    #[serde(rename = "elapsedMs")]
+    pub elapsed_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventFeedbackInjected {
+    #[serde(rename = "feedbackKind")]
+    pub feedback_kind: String,
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivered: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iteration: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub streak: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "toolName")]
+    pub tool_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "turnClaimedForRepair")]
+    pub turn_claimed_for_repair: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventFinalWrapupUnconsumedToolCall {
+    #[serde(rename = "parseStatus")]
+    pub parse_status: String,
+    #[serde(rename = "parsedCallCount")]
+    pub parsed_call_count: u64,
+    #[serde(rename = "toolNames")]
+    pub tool_names: Vec<String>,
+    pub diagnostics: Vec<String>,
+    #[serde(rename = "evidenceLine")]
+    pub evidence_line: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventFinalWrapup {
+    #[serde(rename = "finalStatus")]
+    pub final_status: String,
+    #[serde(rename = "stopReason")]
+    pub stop_reason: String,
+    pub iteration: u64,
+    #[serde(rename = "hostDirective")]
+    pub host_directive: bool,
+    #[serde(rename = "terminalKind")]
+    pub terminal_kind: String,
+    #[serde(rename = "unconsumedToolCall")]
+    pub unconsumed_tool_call: Option<HarnAgentEventFinalWrapupUnconsumedToolCall>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventHostAttachment {
+    #[serde(rename = "injectionId")]
+    pub injection_id: String,
+    #[serde(rename = "mediaType")]
+    pub media_type: String,
+    pub flavor: Value,
+    #[serde(rename = "artifactPointer")]
+    pub artifact_pointer: String,
+    pub sha256: String,
+    #[serde(rename = "sizeBytes")]
+    pub size_bytes: u64,
+    pub rendered: Value,
+    pub description: Option<String>,
+    #[serde(rename = "descriptionModel")]
+    pub description_model: Option<String>,
+    pub delivery: Value,
+    #[serde(rename = "deliveredAtSeam")]
+    pub delivered_at_seam: Option<String>,
+    pub sequence: u64,
+    pub provenance: Value,
+    pub sanitization: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventHostToolResult {
+    #[serde(rename = "injectionId")]
+    pub injection_id: String,
+    #[serde(rename = "toolCallId")]
+    pub tool_call_id: String,
+    #[serde(rename = "toolName")]
+    pub tool_name: String,
+    #[serde(rename = "toolKind")]
+    pub tool_kind: Value,
+    #[serde(rename = "rawInput")]
+    pub raw_input: Value,
+    pub status: String,
+    #[serde(rename = "rawOutput")]
+    pub raw_output: Value,
+    #[serde(rename = "resultPointer")]
+    pub result_pointer: Option<String>,
+    pub error: Option<String>,
+    #[serde(rename = "durationMs")]
+    pub duration_ms: Option<u64>,
+    pub delivery: Value,
+    #[serde(rename = "deliveredAtSeam")]
+    pub delivered_at_seam: Option<String>,
+    pub sequence: u64,
+    pub provenance: Value,
+    pub sanitization: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventInputGuardrailVerdict {
+    pub iteration: u64,
+    pub tripwire: bool,
+    pub reason: String,
+    pub label: String,
+    pub confidence: serde_json::Number,
+    #[serde(rename = "confidenceThreshold")]
+    pub confidence_threshold: serde_json::Number,
+    #[serde(rename = "classifierKind")]
+    pub classifier_kind: Option<String>,
+    pub model: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventIterationEnd {
+    pub iteration: u64,
+    #[serde(rename = "iterationInfo")]
+    pub iteration_info: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventIterationStart {
+    pub iteration: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventJudgeDecision {
+    pub iteration: u64,
+    pub verdict: String,
+    pub reasoning: String,
+    #[serde(rename = "nextStep")]
+    pub next_step: Option<String>,
+    #[serde(rename = "judgeDurationMs")]
+    pub judge_duration_ms: u64,
+    pub source: Option<String>,
+    pub trigger: Option<String>,
+    pub reason: Option<String>,
+    pub confirm: Option<bool>,
+    #[serde(rename = "convertedFrom")]
+    pub converted_from: Option<String>,
+    #[serde(rename = "escalationRecommended")]
+    pub escalation_recommended: Option<bool>,
+    #[serde(rename = "escalationTarget")]
+    pub escalation_target: Option<String>,
+    #[serde(rename = "judgeVerdict")]
+    pub judge_verdict: Option<String>,
+    #[serde(rename = "override")]
+    pub override_value: Value,
+    #[serde(rename = "gapClass")]
+    pub gap_class: Option<String>,
+    #[serde(rename = "judgeOutcome")]
+    pub judge_outcome: Option<String>,
+    #[serde(rename = "terminalEvidencePreserved")]
+    pub terminal_evidence_preserved: Option<bool>,
+    #[serde(rename = "requirementReport")]
+    pub requirement_report: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventJudgeStarted {
+    pub iteration: u64,
+    pub trigger: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventLoopCheckpoint {
+    pub iteration: u64,
+    #[serde(rename = "checkpointKind")]
+    pub checkpoint_kind: String,
+    pub delivered: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "dispatchSkipped")]
+    pub dispatch_skipped: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "inboxDelivered")]
+    pub inbox_delivered: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "typedDelivered")]
+    pub typed_delivered: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventLoopControlDecision {
+    pub iteration: u64,
+    pub action: String,
+    #[serde(rename = "oldLimit")]
+    pub old_limit: u64,
+    #[serde(rename = "newLimit")]
+    pub new_limit: u64,
+    pub reason: String,
+    pub status: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventLoopStuck {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "lastIteration")]
+    pub last_iteration: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "maxNudges")]
+    pub max_nudges: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tailExcerpt")]
+    pub tail_excerpt: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventMcpAuthRequired {
+    pub server: String,
+    pub resource: String,
+    pub scope: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventMcpCatalogChanged {
+    pub server: Option<String>,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventMcpNotification {
+    pub server: String,
+    pub method: String,
+    pub direction: String,
+    pub params: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventMissingToolCallVerdict {
+    pub iteration: u64,
+    pub action: String,
+    #[serde(rename = "originalAction")]
+    pub original_action: String,
+    #[serde(rename = "toolName")]
+    pub tool_name: String,
+    pub confidence: serde_json::Number,
+    #[serde(rename = "confidenceThreshold")]
+    pub confidence_threshold: serde_json::Number,
+    pub evidence: String,
+    pub language: Option<String>,
+    #[serde(rename = "classifierKind")]
+    pub classifier_kind: Option<String>,
+    pub model: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventModelJob {
+    pub event: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventOrchestrationDecision {
+    pub decision: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventPackThinkingStripped {
+    pub model: String,
+    pub requested: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventProgressReported {
+    pub message: Option<String>,
+    pub entries: Value,
+    pub replace: bool,
+    pub metadata: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventProviderUsage {
+    pub call_id: String,
+    pub provider: String,
+    pub model: String,
+    pub run_usage: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventPurposeLabel {
+    pub label: String,
+    pub source: String,
+    pub iteration: Option<u64>,
+    #[serde(rename = "toolCallIds")]
+    pub tool_call_ids: Vec<String>,
+    #[serde(rename = "toolCallCount")]
+    pub tool_call_count: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventRepairOutputContractApplied {
+    pub iteration: u64,
+    #[serde(rename = "toolCount")]
+    pub tool_count: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventRequireSuccessfulToolsViolation {
+    #[serde(rename = "violationKind")]
+    pub violation_kind: String,
+    pub source: String,
+    pub actor: Option<String>,
+    #[serde(rename = "runId")]
+    pub run_id: Option<String>,
+    #[serde(rename = "redactedSummary")]
+    pub redacted_summary: String,
+    #[serde(rename = "recurrenceHints")]
+    pub recurrence_hints: Vec<String>,
+    pub metadata: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventScopeClassifierVerdict {
+    pub iteration: u64,
+    pub label: String,
+    #[serde(rename = "originalLabel")]
+    pub original_label: String,
+    pub confidence: serde_json::Number,
+    #[serde(rename = "confidenceThreshold")]
+    pub confidence_threshold: serde_json::Number,
+    pub evidence: String,
+    #[serde(rename = "skipMainTurn")]
+    pub skip_main_turn: bool,
+    #[serde(rename = "classifierKind")]
+    pub classifier_kind: Option<String>,
+    pub model: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventSelfConsistencyTie {
+    pub answer: String,
+    pub total: u64,
+    pub distribution: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventSessionClosed {
+    pub reason: String,
+    pub status: String,
+    pub metadata: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventStepJudgeDecision {
+    pub iteration: u64,
+    pub verdict: String,
+    pub reasoning: String,
+    pub critique: String,
+    pub confidence: serde_json::Number,
+    #[serde(rename = "judgeDurationMs")]
+    pub judge_duration_ms: u64,
+    pub vetoed: bool,
+    pub skipped: bool,
+    pub reason: Option<String>,
+    #[serde(rename = "judgeError")]
+    pub judge_error: bool,
+    #[serde(rename = "unavailableReason")]
+    pub unavailable_reason: Option<String>,
+    #[serde(rename = "unavailableCount")]
+    pub unavailable_count: u64,
+    #[serde(rename = "onVeto")]
+    pub on_veto: String,
+    #[serde(rename = "inputTokens")]
+    pub input_tokens: u64,
+    #[serde(rename = "outputTokens")]
+    pub output_tokens: u64,
+    #[serde(rename = "costUsd")]
+    pub cost_usd: serde_json::Number,
+    pub provider: String,
+    pub model: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventStructuralValidatorDecision {
+    pub iteration: u64,
+    pub rule: String,
+    pub diagnostic: String,
+    #[serde(rename = "recommendedAction")]
+    pub recommended_action: String,
+    pub vetoed: bool,
+    pub skipped: bool,
+    pub reason: Option<String>,
+    #[serde(rename = "onFailure")]
+    pub on_failure: String,
+    pub attempts: u64,
+    #[serde(rename = "maxAttempts")]
+    pub max_attempts: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventSubagentJoin {
+    #[serde(rename = "parentSessionId")]
+    pub parent_session_id: String,
+    #[serde(rename = "parentRunId")]
+    pub parent_run_id: String,
+    #[serde(rename = "childSessionId")]
+    pub child_session_id: String,
+    #[serde(rename = "childRunId")]
+    pub child_run_id: String,
+    #[serde(rename = "workerId")]
+    pub worker_id: String,
+    #[serde(rename = "completedAtMs")]
+    pub completed_at_ms: i64,
+    #[serde(rename = "joinedAtMs")]
+    pub joined_at_ms: i64,
+    #[serde(rename = "collectionLagMs")]
+    pub collection_lag_ms: i64,
+    #[serde(rename = "waitStartedAtMs")]
+    pub wait_started_at_ms: Option<i64>,
+    #[serde(rename = "waitMs")]
+    pub wait_ms: Option<u64>,
+    #[serde(rename = "resultProcessingStartedAtMs")]
+    pub result_processing_started_at_ms: Option<i64>,
+    #[serde(rename = "resultProcessingCompletedAtMs")]
+    pub result_processing_completed_at_ms: Option<i64>,
+    #[serde(rename = "resultProcessingMs")]
+    pub result_processing_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventSubagentStop {
+    #[serde(rename = "parentRunId")]
+    pub parent_run_id: String,
+    #[serde(rename = "childRunId")]
+    pub child_run_id: String,
+    #[serde(rename = "parentSessionId")]
+    pub parent_session_id: Option<String>,
+    #[serde(rename = "childSessionId")]
+    pub child_session_id: Option<String>,
+    #[serde(rename = "terminalStatus")]
+    pub terminal_status: String,
+    #[serde(rename = "terminalClass")]
+    pub terminal_class: String,
+    pub reason: String,
+    #[serde(rename = "resultRef")]
+    pub result_ref: Option<String>,
+    #[serde(rename = "receiptRef")]
+    pub receipt_ref: Option<String>,
+    pub cancellation: Value,
+    pub timeout: Value,
+    #[serde(rename = "completedAtMs")]
+    pub completed_at_ms: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventToolBatchDisposition {
+    pub receipt: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventToolCallAudit {
+    #[serde(rename = "toolCallId")]
+    pub tool_call_id: String,
+    #[serde(rename = "toolName")]
+    pub tool_name: String,
+    pub audit: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventToolFormatOverride {
+    pub provider: String,
+    pub model: String,
+    #[serde(rename = "requestedFormat")]
+    pub requested_format: String,
+    #[serde(rename = "recommendedFormat")]
+    pub recommended_format: String,
+    #[serde(rename = "catalogParity")]
+    pub catalog_parity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "appliedFormat")]
+    pub applied_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "overrideReason")]
+    pub override_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steered: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventTurnPhaseChanged {
+    pub phase: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_reply: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventTypedCheckpoint {
+    pub checkpoint: Value,
+}
+
+/// The typed body of one `_harn/agentEvent` notification, discriminated by
+/// its `kind`. The envelope's `sessionId` stays on [`HarnAgentEventParams`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum HarnAgentEventPayload {
+    #[serde(rename = "agent_loop_stall_warning")]
+    AgentLoopStallWarning(std::collections::BTreeMap<String, Value>),
+    #[serde(rename = "agent_scratchpad_reorganization")]
+    AgentScratchpadReorganization(HarnAgentEventAgentScratchpadReorganization),
+    #[serde(rename = "anchor_changed")]
+    AnchorChanged(HarnAgentEventAnchorChanged),
+    #[serde(rename = "boundary_failure")]
+    BoundaryFailure(HarnAgentEventBoundaryFailure),
+    #[serde(rename = "budget_circuit_breaker")]
+    BudgetCircuitBreaker(HarnAgentEventBudgetCircuitBreaker),
+    #[serde(rename = "budget_exhausted")]
+    BudgetExhausted(HarnAgentEventBudgetExhausted),
+    #[serde(rename = "cache_hit")]
+    CacheHit(std::collections::BTreeMap<String, Value>),
+    #[serde(rename = "cache_miss")]
+    CacheMiss(std::collections::BTreeMap<String, Value>),
+    #[serde(rename = "capability_gap")]
+    CapabilityGap(HarnAgentEventCapabilityGap),
+    #[serde(rename = "code_librarian_query_nl_fallback")]
+    CodeLibrarianQueryNlFallback(HarnAgentEventCodeLibrarianQueryNlFallback),
+    #[serde(rename = "compass_routing_decision")]
+    CompassRoutingDecision(HarnAgentEventCompassRoutingDecision),
+    #[serde(rename = "composition_child_call")]
+    CompositionChildCall(HarnAgentEventCompositionChildCall),
+    #[serde(rename = "composition_child_result")]
+    CompositionChildResult(HarnAgentEventCompositionChildResult),
+    #[serde(rename = "composition_error")]
+    CompositionError(HarnAgentEventCompositionError),
+    #[serde(rename = "composition_finish")]
+    CompositionFinish(HarnAgentEventCompositionFinish),
+    #[serde(rename = "composition_start")]
+    CompositionStart(HarnAgentEventCompositionStart),
+    #[serde(rename = "control_outcome")]
+    ControlOutcome(HarnAgentEventControlOutcome),
+    #[serde(rename = "daemon_watchdog_tripped")]
+    DaemonWatchdogTripped(HarnAgentEventDaemonWatchdogTripped),
+    #[serde(rename = "feedback_injected")]
+    FeedbackInjected(HarnAgentEventFeedbackInjected),
+    #[serde(rename = "final_wrapup")]
+    FinalWrapup(HarnAgentEventFinalWrapup),
+    #[serde(rename = "host_attachment")]
+    HostAttachment(HarnAgentEventHostAttachment),
+    #[serde(rename = "host_tool_result")]
+    HostToolResult(HarnAgentEventHostToolResult),
+    #[serde(rename = "input_guardrail_verdict")]
+    InputGuardrailVerdict(HarnAgentEventInputGuardrailVerdict),
+    #[serde(rename = "iteration_end")]
+    IterationEnd(HarnAgentEventIterationEnd),
+    #[serde(rename = "iteration_start")]
+    IterationStart(HarnAgentEventIterationStart),
+    #[serde(rename = "judge_decision")]
+    JudgeDecision(HarnAgentEventJudgeDecision),
+    #[serde(rename = "judge_started")]
+    JudgeStarted(HarnAgentEventJudgeStarted),
+    #[serde(rename = "llm_call_log")]
+    LlmCallLog(std::collections::BTreeMap<String, Value>),
+    #[serde(rename = "llm_fallback_attempt")]
+    LlmFallbackAttempt(std::collections::BTreeMap<String, Value>),
+    #[serde(rename = "llm_routing_decision")]
+    LlmRoutingDecision(std::collections::BTreeMap<String, Value>),
+    #[serde(rename = "llm_shadow_diff")]
+    LlmShadowDiff(std::collections::BTreeMap<String, Value>),
+    #[serde(rename = "loop_checkpoint")]
+    LoopCheckpoint(HarnAgentEventLoopCheckpoint),
+    #[serde(rename = "loop_control_decision")]
+    LoopControlDecision(HarnAgentEventLoopControlDecision),
+    #[serde(rename = "loop_stuck")]
+    LoopStuck(HarnAgentEventLoopStuck),
+    #[serde(rename = "mcp_auth_required")]
+    McpAuthRequired(HarnAgentEventMcpAuthRequired),
+    #[serde(rename = "mcp_catalog_changed")]
+    McpCatalogChanged(HarnAgentEventMcpCatalogChanged),
+    #[serde(rename = "mcp_notification")]
+    McpNotification(HarnAgentEventMcpNotification),
+    #[serde(rename = "missing_tool_call_verdict")]
+    MissingToolCallVerdict(HarnAgentEventMissingToolCallVerdict),
+    #[serde(rename = "model_job")]
+    ModelJob(HarnAgentEventModelJob),
+    #[serde(rename = "orchestration_decision")]
+    OrchestrationDecision(HarnAgentEventOrchestrationDecision),
+    #[serde(rename = "pack_thinking_stripped")]
+    PackThinkingStripped(HarnAgentEventPackThinkingStripped),
+    #[serde(rename = "progress_reported")]
+    ProgressReported(HarnAgentEventProgressReported),
+    #[serde(rename = "provider_usage")]
+    ProviderUsage(HarnAgentEventProviderUsage),
+    #[serde(rename = "purpose_label")]
+    PurposeLabel(HarnAgentEventPurposeLabel),
+    #[serde(rename = "repair_output_contract_applied")]
+    RepairOutputContractApplied(HarnAgentEventRepairOutputContractApplied),
+    #[serde(rename = "require_successful_tools_violation")]
+    RequireSuccessfulToolsViolation(HarnAgentEventRequireSuccessfulToolsViolation),
+    #[serde(rename = "reserved_terminal_verify")]
+    ReservedTerminalVerify(std::collections::BTreeMap<String, Value>),
+    #[serde(rename = "scope_classifier_verdict")]
+    ScopeClassifierVerdict(HarnAgentEventScopeClassifierVerdict),
+    #[serde(rename = "self_consistency_tie")]
+    SelfConsistencyTie(HarnAgentEventSelfConsistencyTie),
+    #[serde(rename = "semantic_cache_hit")]
+    SemanticCacheHit(std::collections::BTreeMap<String, Value>),
+    #[serde(rename = "semantic_cache_miss")]
+    SemanticCacheMiss(std::collections::BTreeMap<String, Value>),
+    #[serde(rename = "session_closed")]
+    SessionClosed(HarnAgentEventSessionClosed),
+    #[serde(rename = "session_health")]
+    SessionHealth(std::collections::BTreeMap<String, Value>),
+    #[serde(rename = "step_judge_decision")]
+    StepJudgeDecision(HarnAgentEventStepJudgeDecision),
+    #[serde(rename = "structural_validator_decision")]
+    StructuralValidatorDecision(HarnAgentEventStructuralValidatorDecision),
+    #[serde(rename = "subagent_join")]
+    SubagentJoin(HarnAgentEventSubagentJoin),
+    #[serde(rename = "subagent_stop")]
+    SubagentStop(HarnAgentEventSubagentStop),
+    #[serde(rename = "tool_batch_disposition")]
+    ToolBatchDisposition(HarnAgentEventToolBatchDisposition),
+    #[serde(rename = "tool_call_audit")]
+    ToolCallAudit(HarnAgentEventToolCallAudit),
+    #[serde(rename = "tool_format_override")]
+    ToolFormatOverride(HarnAgentEventToolFormatOverride),
+    #[serde(rename = "turn_phase_changed")]
+    TurnPhaseChanged(HarnAgentEventTurnPhaseChanged),
+    #[serde(rename = "typed_checkpoint")]
+    TypedCheckpoint(HarnAgentEventTypedCheckpoint),
 }

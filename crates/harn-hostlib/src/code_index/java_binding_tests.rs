@@ -94,6 +94,150 @@ const DOCUMENTS: &str = "package lab;\npublic final class DocumentStore {\n  pub
 const AUDIT: &str = "package lab;\npublic final class AuditStore {\n  // getById is a separate audit API.\n  public int getById(int id) { return id; }\n  public String label() { return \"getById\"; }\n}\n";
 const KNOWN_PAGE: &str = "package lab; final class KnownPage { int read(DocumentStore documents) { return documents.getById(1); } }";
 
+#[test]
+fn java_type_rename_refuses_unproven_references_before_writing() {
+    for scope in ["file", "workspace"] {
+        for dry_run in [false, true] {
+            for replacement in [false, true] {
+                for backend in ["syntax_tree", "auto", "language_server"] {
+                    let ws = Workspace::new(&[
+                        ("lab/DocumentStore.java", DOCUMENTS),
+                        ("lab/KnownPage.java", KNOWN_PAGE),
+                        ("lab/AuditStore.java", AUDIT),
+                    ]);
+                    let mut request = vec![
+                        (
+                            "symbol_ref",
+                            dict(&[
+                                ("name", vm_string("DocumentStore")),
+                                ("path", vm_string("lab/DocumentStore.java")),
+                                ("line", VmValue::Int(2)),
+                                ("kind", vm_string("Type")),
+                            ]),
+                        ),
+                        ("scope", vm_string(scope)),
+                        ("backend", vm_string(backend)),
+                        ("dry_run", VmValue::Bool(dry_run)),
+                    ];
+                    request.push(if replacement {
+                        ("replacement_text", vm_string("DocumentLibrary"))
+                    } else {
+                        ("new_name", vm_string("DocumentLibrary"))
+                    });
+                    let result = super::rename::run(&ws.index, &[dict(&request)]).unwrap();
+                    assert_eq!(
+                        s(field(&result, "result")),
+                        "unsupported_language",
+                        "{result:?}"
+                    );
+                    assert_eq!(n(field(&result, "match_count")), 0, "{result:?}");
+                    ws.assert_unchanged();
+                }
+            }
+        }
+    }
+
+    let ws = Workspace::new(&[("lab/DocumentStore.java", DOCUMENTS)]);
+    let result = super::rename::run(
+        &ws.index,
+        &[dict(&[
+            (
+                "symbol_ref",
+                dict(&[
+                    ("name", vm_string("DocumentStore")),
+                    ("path", vm_string("lab/DocumentStore.java")),
+                    ("line", VmValue::Int(2)),
+                ]),
+            ),
+            ("new_name", vm_string("not-valid")),
+            ("scope", vm_string("workspace")),
+        ])],
+    )
+    .unwrap();
+    assert_eq!(
+        s(field(&result, "result")),
+        "invalid_identifier",
+        "{result:?}"
+    );
+    ws.assert_unchanged();
+}
+
+#[test]
+fn java_constructor_seed_refuses_type_rename_before_writing() {
+    let caller =
+        "package lab; final class KnownPage { DocumentStore store = new DocumentStore(); }";
+    for (path, source, name, line) in [
+        ("lab/DocumentStore.java", "package lab;\npublic final class DocumentStore {\n  public DocumentStore() {}\n}\n", "DocumentStore", 3),
+        ("lab/Colour.java", "package lab;\nenum Colour {\n  RED;\n  Colour() {}\n}\n", "Colour", 4),
+        ("lab/Badge.java", "package lab;\nrecord Badge(int value) {\n  Badge {}\n}\n", "Badge", 3),
+        ("lab/Outer.java", "package lab;\nfinal class Outer {\n  static final class Inner {\n    Inner() {}\n  }\n}\n", "Inner", 4),
+    ] {
+        for backend in ["syntax_tree", "auto", "language_server"] {
+            for dry_run in [false, true] {
+                let ws = Workspace::new(&[(path, source), ("lab/KnownPage.java", caller)]);
+                let result = super::rename::run(
+                    &ws.index,
+                    &[dict(&[
+                        (
+                            "symbol_ref",
+                            dict(&[
+                                ("name", vm_string(name)),
+                                ("path", vm_string(path)),
+                                ("line", VmValue::Int(line)),
+                                ("kind", vm_string("Function")),
+                            ]),
+                        ),
+                        ("new_name", vm_string("DocumentLibrary")),
+                        ("scope", vm_string("workspace")),
+                        ("backend", vm_string(backend)),
+                        ("dry_run", VmValue::Bool(dry_run)),
+                    ])],
+                )
+                .unwrap();
+                assert_eq!(
+                    s(field(&result, "result")),
+                    "unsupported_language",
+                    "{result:?}"
+                );
+                assert_eq!(n(field(&result, "match_count")), 0, "{result:?}");
+                ws.assert_unchanged();
+            }
+        }
+    }
+}
+
+#[test]
+fn java_same_named_method_is_not_a_constructor() {
+    let source =
+        "package lab; final class DocumentStore { DocumentStore() {} void DocumentStore() {} }";
+    let ws = Workspace::new(&[("lab/DocumentStore.java", source)]);
+    let index = ws.index.lock().unwrap();
+    let state = index.as_ref().unwrap();
+    let seed = state
+        .symbols
+        .iter_nodes()
+        .find(|node| {
+            node.kind == NodeKind::Function
+                && node.name == "DocumentStore"
+                && node.col == Some(source.rfind("DocumentStore").unwrap() as u32 + 1)
+        })
+        .expect("the method is indexed");
+    let tree = crate::ast::api::parse_tree(source, crate::ast::Language::Java).unwrap();
+    assert!(!super::rename_java::is_constructor(&tree, source, seed));
+    drop(index);
+    let result = ws.rename(
+        "DocumentStore",
+        "lab/DocumentStore.java",
+        Some(1),
+        Some(source.rfind("DocumentStore").unwrap() as i64 + 1),
+    );
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    assert_eq!(
+        ws.read("lab/DocumentStore.java"),
+        source.replace("void DocumentStore()", "void loadById()")
+    );
+}
+
 fn assert_known_call(graph: &SymbolGraph, path: &str) {
     let sites: Vec<_> = graph
         .iter_nodes()

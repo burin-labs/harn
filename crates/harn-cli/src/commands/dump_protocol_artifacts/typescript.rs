@@ -523,6 +523,7 @@ export interface ToolCallReceipt {
 export interface ACPToolCall {
   sessionUpdate: "tool_call"
   toolCallId: string
+  name?: string | null
   title: string
   kind?: ACPToolKind
   status?: ACPToolCallStatus
@@ -536,6 +537,7 @@ export interface ACPToolCall {
 export interface ACPToolCallUpdate {
   sessionUpdate: "tool_call_update"
   toolCallId: string
+  name?: string | null
   title?: string | null
   kind?: ACPToolKind
   status?: ACPToolCallStatus | null
@@ -614,6 +616,7 @@ export interface HarnAgentEventNotification {
 export interface ACPPermissionToolCall {
   sessionUpdate?: "tool_call_update"
   toolCallId: string
+  name?: string | null
   title?: string
   kind?: ACPToolKind
   content?: ACPToolCallContent[]
@@ -960,6 +963,7 @@ export interface HarnSessionTimelineUpdate {
     super::inference_admission::append(&mut out, super::records::Target::Typescript);
     super::canonical_history::append(&mut out, super::records::Target::Typescript);
     super::prompt_correlation::append(&mut out, super::records::Target::Typescript);
+    super::provider_usage::append(&mut out, super::records::Target::Typescript);
     out
 }
 

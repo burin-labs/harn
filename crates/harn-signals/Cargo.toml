@@ -12,13 +12,12 @@ description = "Per-machine signal inbox, session registry, and router for delive
 harn-flock = { path = "../harn-flock", version = "=0.10.181" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+hex = "0.4"
+tempfile = "3"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 toml = "1.1"
 uuid = { version = "1", features = ["v4", "v5"] }
-
-[dev-dependencies]
-tempfile = "3"
 
 [lints]
 workspace = true

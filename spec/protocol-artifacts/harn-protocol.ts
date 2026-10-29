@@ -239,16 +239,22 @@ export const HARN_PROMPT_RESULT_EXTENSION_FIELDS = [
 export type HarnPromptResultExtensionField = (typeof HARN_PROMPT_RESULT_EXTENSION_FIELDS)[number]
 
 export const HARN_AGENT_EVENT_KINDS = [
+  "agent_loop_stall_warning",
+  "agent_scratchpad_reorganization",
+  "anchor_changed",
   "boundary_failure",
   "budget_circuit_breaker",
   "budget_exhausted",
+  "cache_hit",
+  "cache_miss",
+  "capability_gap",
   "code_librarian_query_nl_fallback",
+  "compass_routing_decision",
   "composition_child_call",
   "composition_child_result",
   "composition_error",
   "composition_finish",
   "composition_start",
-  "compass_routing_decision",
   "control_outcome",
   "daemon_watchdog_tripped",
   "feedback_injected",
@@ -257,30 +263,39 @@ export const HARN_AGENT_EVENT_KINDS = [
   "host_tool_result",
   "input_guardrail_verdict",
   "iteration_end",
-  "session_health",
   "iteration_start",
   "judge_decision",
   "judge_started",
+  "llm_call_log",
+  "llm_fallback_attempt",
+  "llm_routing_decision",
+  "llm_shadow_diff",
+  "loop_checkpoint",
   "loop_control_decision",
   "loop_stuck",
   "mcp_auth_required",
   "mcp_catalog_changed",
   "mcp_notification",
+  "missing_tool_call_verdict",
   "model_job",
   "orchestration_decision",
   "pack_thinking_stripped",
   "progress_reported",
+  "provider_usage",
   "purpose_label",
   "repair_output_contract_applied",
   "require_successful_tools_violation",
   "reserved_terminal_verify",
   "scope_classifier_verdict",
   "self_consistency_tie",
+  "semantic_cache_hit",
+  "semantic_cache_miss",
   "session_closed",
+  "session_health",
+  "step_judge_decision",
   "structural_validator_decision",
   "subagent_join",
   "subagent_stop",
-  "step_judge_decision",
   "tool_batch_disposition",
   "tool_call_audit",
   "tool_format_override",
@@ -1216,6 +1231,7 @@ export interface ToolCallReceipt {
 export interface ACPToolCall {
   sessionUpdate: "tool_call"
   toolCallId: string
+  name?: string | null
   title: string
   kind?: ACPToolKind
   status?: ACPToolCallStatus
@@ -1229,6 +1245,7 @@ export interface ACPToolCall {
 export interface ACPToolCallUpdate {
   sessionUpdate: "tool_call_update"
   toolCallId: string
+  name?: string | null
   title?: string | null
   kind?: ACPToolKind
   status?: ACPToolCallStatus | null
@@ -1738,6 +1755,7 @@ export interface HarnAgentEventNotification {
 export interface ACPPermissionToolCall {
   sessionUpdate?: "tool_call_update"
   toolCallId: string
+  name?: string | null
   title?: string
   kind?: ACPToolKind
   content?: ACPToolCallContent[]
@@ -2592,6 +2610,21 @@ export interface HarnCanonicalHistoryBoundaries {
 export interface HarnACPPromptCorrelation {
   messageId?: string
 }
+export interface HarnProviderUsage {
+  run_id: string
+  parent_session_id: string
+  lineage_known: boolean
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  provider_call_count: number
+  unpriced_calls: number
+  usage_unknown_calls: number
+  known_cost_usd: number
+  cost_usd: number | null
+}
+
 export type HarnAgentsTaskStatus = "SUBMITTED" | "WORKING" | "INPUT_REQUIRED" | "AUTH_REQUIRED" | "COMPLETED" | "FAILED" | "CANCELED"
 export const HARN_AGENTS_TERMINAL_TASK_STATUSES: ReadonlyArray<HarnAgentsTaskStatus> = ["COMPLETED", "FAILED", "CANCELED"]
 
@@ -2603,3 +2636,576 @@ export interface HarnAgentsEventProjection {
   session_id?: string | null
   task_id?: string | null
 }
+
+export interface HarnAgentEventAgentScratchpadReorganization {
+  iteration: number
+  status: string
+  details: ACPValue
+}
+
+export interface HarnAgentEventAnchorChanged {
+  previous: ACPValue
+  current: ACPValue
+  carryTranscript: boolean
+  compacted: boolean
+  reason: string | null
+}
+
+export interface HarnAgentEventBoundaryFailure {
+  boundary: string
+  failureKind: string
+  owner: string
+  detail: string
+  droppedCount: number
+  droppedBytes: number
+  unreported: boolean
+  excerpt?: string | null
+}
+
+export interface HarnAgentEventBudgetCircuitBreaker {
+  breakerKind: string
+  consecutiveCount: number
+  pausedForMs: number
+}
+
+export interface HarnAgentEventBudgetExhausted {
+  maxIterations: number
+  budgetKind?: string | null
+  costUsd?: number | null
+  headroomUsd?: number | null
+  iteration?: number | null
+  limit?: string | null
+  limitValue?: number | null
+  model?: string | null
+  projectedCostUsd?: number | null
+  projectedInputTokens?: number | null
+  projectedOutputTokens?: number | null
+  projectionBasis?: string | null
+  provider?: string | null
+  sessionCostUsd?: number | null
+  wallClockMs?: number | null
+}
+
+export interface HarnAgentEventCapabilityGap {
+  level: string
+  capability: string
+  provider: string
+  model: string
+  fallbackToolFormat: string
+  message: string
+  requestedToolFormat?: string | null
+}
+
+export interface HarnAgentEventCodeLibrarianQueryNlFallback {
+  attemptedCypher: string | null
+  mctsDepth: number
+  mctsExpansions: number
+  resultCount: number
+  text: string
+}
+
+export interface HarnAgentEventCompassRoutingDecision {
+  toolCallId: string
+  mode: string
+  action: string
+  persona: string
+  originalTool: string
+  routedTool: string
+  targetTool: string
+  path?: string | null
+}
+
+export interface HarnAgentEventCompositionChildCall {
+  runId: string
+  toolCallId: string
+  toolName: string
+  operationIndex: number
+  annotations: ACPValue
+  requestedSideEffectLevel: string
+  policyContext: ACPValue
+  rawInput: ACPValue
+}
+
+export interface HarnAgentEventCompositionChildResult {
+  runId: string
+  toolCallId: string
+  toolName: string
+  operationIndex: number
+  status: string
+  rawOutput: ACPValue
+  error: string | null
+  errorCategory: string | null
+  executor: ACPValue
+  durationMs: number | null
+  executionDurationMs: number | null
+}
+
+export interface HarnAgentEventCompositionError {
+  runId: string
+  language: string
+  snippetHash: string
+  bindingManifestHash: string
+  requestedSideEffectCeiling: string
+  stdout: string | null
+  stderr: string | null
+  artifacts: ACPValue[]
+  result: ACPValue
+  failureCategory: string | null
+  error: string | null
+  durationMs: number | null
+  metadata: ACPValue
+}
+
+export interface HarnAgentEventCompositionFinish {
+  runId: string
+  language: string
+  snippetHash: string
+  bindingManifestHash: string
+  requestedSideEffectCeiling: string
+  stdout: string | null
+  stderr: string | null
+  artifacts: ACPValue[]
+  result: ACPValue
+  failureCategory: string | null
+  error: string | null
+  durationMs: number | null
+  metadata: ACPValue
+}
+
+export interface HarnAgentEventCompositionStart {
+  runId: string
+  language: string
+  snippetHash: string
+  bindingManifestHash: string
+  requestedSideEffectCeiling: string
+  stdout: string | null
+  stderr: string | null
+  artifacts: ACPValue[]
+  result: ACPValue
+  failureCategory: string | null
+  error: string | null
+  durationMs: number | null
+  metadata: ACPValue
+}
+
+export interface HarnAgentEventControlOutcome {
+  controlId: string
+  method: string
+  outcome: string
+  status: string
+  actor: ACPValue
+  target: ACPValue
+  metadata?: ACPValue
+  reason?: string | null
+}
+
+export interface HarnAgentEventDaemonWatchdogTripped {
+  attempts: number
+  elapsedMs: number
+}
+
+export interface HarnAgentEventFeedbackInjected {
+  feedbackKind: string
+  content: string
+  delivered?: boolean | null
+  iteration?: number | null
+  streak?: number | null
+  toolName?: string | null
+  turnClaimedForRepair?: boolean | null
+}
+
+export interface HarnAgentEventFinalWrapupUnconsumedToolCall {
+  parseStatus: string
+  parsedCallCount: number
+  toolNames: string[]
+  diagnostics: string[]
+  evidenceLine: string
+}
+
+export interface HarnAgentEventFinalWrapup {
+  finalStatus: string
+  stopReason: string
+  iteration: number
+  hostDirective: boolean
+  terminalKind: string
+  unconsumedToolCall: HarnAgentEventFinalWrapupUnconsumedToolCall | null
+}
+
+export interface HarnAgentEventHostAttachment {
+  injectionId: string
+  mediaType: string
+  flavor: ACPValue
+  artifactPointer: string
+  sha256: string
+  sizeBytes: number
+  rendered: ACPValue
+  description: string | null
+  descriptionModel: string | null
+  delivery: ACPValue
+  deliveredAtSeam: string | null
+  sequence: number
+  provenance: ACPValue
+  sanitization: ACPValue
+}
+
+export interface HarnAgentEventHostToolResult {
+  injectionId: string
+  toolCallId: string
+  toolName: string
+  toolKind: ACPValue
+  rawInput: ACPValue
+  status: string
+  rawOutput: ACPValue
+  resultPointer: string | null
+  error: string | null
+  durationMs: number | null
+  delivery: ACPValue
+  deliveredAtSeam: string | null
+  sequence: number
+  provenance: ACPValue
+  sanitization: ACPValue
+}
+
+export interface HarnAgentEventInputGuardrailVerdict {
+  iteration: number
+  tripwire: boolean
+  reason: string
+  label: string
+  confidence: number
+  confidenceThreshold: number
+  classifierKind: string | null
+  model: string | null
+  error: string | null
+}
+
+export interface HarnAgentEventIterationEnd {
+  iteration: number
+  iterationInfo: ACPValue
+}
+
+export interface HarnAgentEventIterationStart {
+  iteration: number
+  model?: string
+  provider?: string
+}
+
+export interface HarnAgentEventJudgeDecision {
+  iteration: number
+  verdict: string
+  reasoning: string
+  nextStep: string | null
+  judgeDurationMs: number
+  source: string | null
+  trigger: string | null
+  reason: string | null
+  confirm: boolean | null
+  convertedFrom: string | null
+  escalationRecommended: boolean | null
+  escalationTarget: string | null
+  judgeVerdict: string | null
+  override: ACPValue
+  gapClass: string | null
+  judgeOutcome: string | null
+  terminalEvidencePreserved: boolean | null
+  requirementReport: ACPValue
+}
+
+export interface HarnAgentEventJudgeStarted {
+  iteration: number
+  trigger: string | null
+}
+
+export interface HarnAgentEventLoopCheckpoint {
+  iteration: number
+  checkpointKind: string
+  delivered: number
+  dispatchSkipped?: boolean
+  inboxDelivered?: number
+  typedDelivered?: number
+}
+
+export interface HarnAgentEventLoopControlDecision {
+  iteration: number
+  action: string
+  oldLimit: number
+  newLimit: number
+  reason: string
+  status: string
+}
+
+export interface HarnAgentEventLoopStuck {
+  lastIteration?: number | null
+  maxNudges?: number | null
+  tailExcerpt?: string | null
+}
+
+export interface HarnAgentEventMcpAuthRequired {
+  server: string
+  resource: string
+  scope: string | null
+}
+
+export interface HarnAgentEventMcpCatalogChanged {
+  server: string | null
+  reason: string
+}
+
+export interface HarnAgentEventMcpNotification {
+  server: string
+  method: string
+  direction: string
+  params: ACPValue
+}
+
+export interface HarnAgentEventMissingToolCallVerdict {
+  iteration: number
+  action: string
+  originalAction: string
+  toolName: string
+  confidence: number
+  confidenceThreshold: number
+  evidence: string
+  language: string | null
+  classifierKind: string | null
+  model: string | null
+  error: string | null
+}
+
+export interface HarnAgentEventModelJob {
+  event: ACPValue
+}
+
+export interface HarnAgentEventOrchestrationDecision {
+  decision: ACPValue
+}
+
+export interface HarnAgentEventPackThinkingStripped {
+  model: string
+  requested: string
+  reason: string
+}
+
+export interface HarnAgentEventProgressReported {
+  message: string | null
+  entries: ACPValue
+  replace: boolean
+  metadata: ACPValue
+}
+
+export interface HarnAgentEventProviderUsage {
+  call_id: string
+  provider: string
+  model: string
+  run_usage: ACPValue
+}
+
+export interface HarnAgentEventPurposeLabel {
+  label: string
+  source: string
+  iteration: number | null
+  toolCallIds: string[]
+  toolCallCount: number | null
+}
+
+export interface HarnAgentEventRepairOutputContractApplied {
+  iteration: number
+  toolCount: number
+}
+
+export interface HarnAgentEventRequireSuccessfulToolsViolation {
+  violationKind: string
+  source: string
+  actor: string | null
+  runId: string | null
+  redactedSummary: string
+  recurrenceHints: string[]
+  metadata: ACPValue
+}
+
+export interface HarnAgentEventScopeClassifierVerdict {
+  iteration: number
+  label: string
+  originalLabel: string
+  confidence: number
+  confidenceThreshold: number
+  evidence: string
+  skipMainTurn: boolean
+  classifierKind: string | null
+  model: string | null
+  error: string | null
+}
+
+export interface HarnAgentEventSelfConsistencyTie {
+  answer: string
+  total: number
+  distribution: ACPValue
+}
+
+export interface HarnAgentEventSessionClosed {
+  reason: string
+  status: string
+  metadata: ACPValue
+}
+
+export interface HarnAgentEventStepJudgeDecision {
+  iteration: number
+  verdict: string
+  reasoning: string
+  critique: string
+  confidence: number
+  judgeDurationMs: number
+  vetoed: boolean
+  skipped: boolean
+  reason: string | null
+  judgeError: boolean
+  unavailableReason: string | null
+  unavailableCount: number
+  onVeto: string
+  inputTokens: number
+  outputTokens: number
+  costUsd: number
+  provider: string
+  model: string
+}
+
+export interface HarnAgentEventStructuralValidatorDecision {
+  iteration: number
+  rule: string
+  diagnostic: string
+  recommendedAction: string
+  vetoed: boolean
+  skipped: boolean
+  reason: string | null
+  onFailure: string
+  attempts: number
+  maxAttempts: number
+}
+
+export interface HarnAgentEventSubagentJoin {
+  parentSessionId: string
+  parentRunId: string
+  childSessionId: string
+  childRunId: string
+  workerId: string
+  completedAtMs: number
+  joinedAtMs: number
+  collectionLagMs: number
+  waitStartedAtMs: number | null
+  waitMs: number | null
+  resultProcessingStartedAtMs: number | null
+  resultProcessingCompletedAtMs: number | null
+  resultProcessingMs: number | null
+}
+
+export interface HarnAgentEventSubagentStop {
+  parentRunId: string
+  childRunId: string
+  parentSessionId: string | null
+  childSessionId: string | null
+  terminalStatus: string
+  terminalClass: string
+  reason: string
+  resultRef: string | null
+  receiptRef: string | null
+  cancellation: ACPValue
+  timeout: ACPValue
+  completedAtMs: number
+}
+
+export interface HarnAgentEventToolBatchDisposition {
+  receipt: ACPValue
+}
+
+export interface HarnAgentEventToolCallAudit {
+  toolCallId: string
+  toolName: string
+  audit: ACPValue
+  receipt?: ACPValue
+}
+
+export interface HarnAgentEventToolFormatOverride {
+  provider: string
+  model: string
+  requestedFormat: string
+  recommendedFormat: string
+  catalogParity: string
+  appliedFormat?: string | null
+  overrideReason?: string | null
+  steered?: boolean | null
+}
+
+export interface HarnAgentEventTurnPhaseChanged {
+  phase: string
+  candidate_reply?: string | null
+  outcome?: ACPValue
+  reply?: string | null
+}
+
+export interface HarnAgentEventTypedCheckpoint {
+  checkpoint: ACPValue
+}
+
+/** The params of one `_harn/agentEvent` notification, discriminated by `kind`. */
+export type HarnAgentEvent =
+  | ({ sessionId: string; kind: "agent_loop_stall_warning" } & Record<string, ACPValue>)
+  | ({ sessionId: string; kind: "agent_scratchpad_reorganization" } & HarnAgentEventAgentScratchpadReorganization)
+  | ({ sessionId: string; kind: "anchor_changed" } & HarnAgentEventAnchorChanged)
+  | ({ sessionId: string; kind: "boundary_failure" } & HarnAgentEventBoundaryFailure)
+  | ({ sessionId: string; kind: "budget_circuit_breaker" } & HarnAgentEventBudgetCircuitBreaker)
+  | ({ sessionId: string; kind: "budget_exhausted" } & HarnAgentEventBudgetExhausted)
+  | ({ sessionId: string; kind: "cache_hit" } & Record<string, ACPValue>)
+  | ({ sessionId: string; kind: "cache_miss" } & Record<string, ACPValue>)
+  | ({ sessionId: string; kind: "capability_gap" } & HarnAgentEventCapabilityGap)
+  | ({ sessionId: string; kind: "code_librarian_query_nl_fallback" } & HarnAgentEventCodeLibrarianQueryNlFallback)
+  | ({ sessionId: string; kind: "compass_routing_decision" } & HarnAgentEventCompassRoutingDecision)
+  | ({ sessionId: string; kind: "composition_child_call" } & HarnAgentEventCompositionChildCall)
+  | ({ sessionId: string; kind: "composition_child_result" } & HarnAgentEventCompositionChildResult)
+  | ({ sessionId: string; kind: "composition_error" } & HarnAgentEventCompositionError)
+  | ({ sessionId: string; kind: "composition_finish" } & HarnAgentEventCompositionFinish)
+  | ({ sessionId: string; kind: "composition_start" } & HarnAgentEventCompositionStart)
+  | ({ sessionId: string; kind: "control_outcome" } & HarnAgentEventControlOutcome)
+  | ({ sessionId: string; kind: "daemon_watchdog_tripped" } & HarnAgentEventDaemonWatchdogTripped)
+  | ({ sessionId: string; kind: "feedback_injected" } & HarnAgentEventFeedbackInjected)
+  | ({ sessionId: string; kind: "final_wrapup" } & HarnAgentEventFinalWrapup)
+  | ({ sessionId: string; kind: "host_attachment" } & HarnAgentEventHostAttachment)
+  | ({ sessionId: string; kind: "host_tool_result" } & HarnAgentEventHostToolResult)
+  | ({ sessionId: string; kind: "input_guardrail_verdict" } & HarnAgentEventInputGuardrailVerdict)
+  | ({ sessionId: string; kind: "iteration_end" } & HarnAgentEventIterationEnd)
+  | ({ sessionId: string; kind: "iteration_start" } & HarnAgentEventIterationStart)
+  | ({ sessionId: string; kind: "judge_decision" } & HarnAgentEventJudgeDecision)
+  | ({ sessionId: string; kind: "judge_started" } & HarnAgentEventJudgeStarted)
+  | ({ sessionId: string; kind: "llm_call_log" } & Record<string, ACPValue>)
+  | ({ sessionId: string; kind: "llm_fallback_attempt" } & Record<string, ACPValue>)
+  | ({ sessionId: string; kind: "llm_routing_decision" } & Record<string, ACPValue>)
+  | ({ sessionId: string; kind: "llm_shadow_diff" } & Record<string, ACPValue>)
+  | ({ sessionId: string; kind: "loop_checkpoint" } & HarnAgentEventLoopCheckpoint)
+  | ({ sessionId: string; kind: "loop_control_decision" } & HarnAgentEventLoopControlDecision)
+  | ({ sessionId: string; kind: "loop_stuck" } & HarnAgentEventLoopStuck)
+  | ({ sessionId: string; kind: "mcp_auth_required" } & HarnAgentEventMcpAuthRequired)
+  | ({ sessionId: string; kind: "mcp_catalog_changed" } & HarnAgentEventMcpCatalogChanged)
+  | ({ sessionId: string; kind: "mcp_notification" } & HarnAgentEventMcpNotification)
+  | ({ sessionId: string; kind: "missing_tool_call_verdict" } & HarnAgentEventMissingToolCallVerdict)
+  | ({ sessionId: string; kind: "model_job" } & HarnAgentEventModelJob)
+  | ({ sessionId: string; kind: "orchestration_decision" } & HarnAgentEventOrchestrationDecision)
+  | ({ sessionId: string; kind: "pack_thinking_stripped" } & HarnAgentEventPackThinkingStripped)
+  | ({ sessionId: string; kind: "progress_reported" } & HarnAgentEventProgressReported)
+  | ({ sessionId: string; kind: "provider_usage" } & HarnAgentEventProviderUsage)
+  | ({ sessionId: string; kind: "purpose_label" } & HarnAgentEventPurposeLabel)
+  | ({ sessionId: string; kind: "repair_output_contract_applied" } & HarnAgentEventRepairOutputContractApplied)
+  | ({ sessionId: string; kind: "require_successful_tools_violation" } & HarnAgentEventRequireSuccessfulToolsViolation)
+  | ({ sessionId: string; kind: "reserved_terminal_verify" } & Record<string, ACPValue>)
+  | ({ sessionId: string; kind: "scope_classifier_verdict" } & HarnAgentEventScopeClassifierVerdict)
+  | ({ sessionId: string; kind: "self_consistency_tie" } & HarnAgentEventSelfConsistencyTie)
+  | ({ sessionId: string; kind: "semantic_cache_hit" } & Record<string, ACPValue>)
+  | ({ sessionId: string; kind: "semantic_cache_miss" } & Record<string, ACPValue>)
+  | ({ sessionId: string; kind: "session_closed" } & HarnAgentEventSessionClosed)
+  | ({ sessionId: string; kind: "session_health" } & Record<string, ACPValue>)
+  | ({ sessionId: string; kind: "step_judge_decision" } & HarnAgentEventStepJudgeDecision)
+  | ({ sessionId: string; kind: "structural_validator_decision" } & HarnAgentEventStructuralValidatorDecision)
+  | ({ sessionId: string; kind: "subagent_join" } & HarnAgentEventSubagentJoin)
+  | ({ sessionId: string; kind: "subagent_stop" } & HarnAgentEventSubagentStop)
+  | ({ sessionId: string; kind: "tool_batch_disposition" } & HarnAgentEventToolBatchDisposition)
+  | ({ sessionId: string; kind: "tool_call_audit" } & HarnAgentEventToolCallAudit)
+  | ({ sessionId: string; kind: "tool_format_override" } & HarnAgentEventToolFormatOverride)
+  | ({ sessionId: string; kind: "turn_phase_changed" } & HarnAgentEventTurnPhaseChanged)
+  | ({ sessionId: string; kind: "typed_checkpoint" } & HarnAgentEventTypedCheckpoint)

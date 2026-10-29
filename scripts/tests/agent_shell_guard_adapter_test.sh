@@ -135,84 +135,29 @@ if [[ "$discarded_blocked" != *'"permissionDecision":"deny"'* ]] \
   exit 1
 fi
 
-# The worktree rule answers differently depending on whether the repository the
-# guard is vendored in owns an admission command. The wrapper measures its own
-# tree, so both directions need their own fixture root rather than a different
-# payload, and both are exercised end to end through the adapter.
-# The rule answers for the repository the command targets, so each direction
-# points `-C` at a root this test built and knows the answer for. A repository
-# marker is what the wrapper walks up to find, and both roots need one before
-# they can be measured at all.
-mkdir -p "$fixture_root/.git"
-
-admitted_root="$(cd "$(mktemp -d)" && pwd -P)"
-trap 'rm -rf "$admitted_root"' EXIT
-mkdir -p "$admitted_root/scripts" "$admitted_root/.git"
-cp "$repo_root/scripts/agent-shell-guard.sh" "$admitted_root/scripts/"
-cp "$repo_root/scripts/agent_shell_guard.harn" "$admitted_root/scripts/"
-cp "$repo_root/scripts/agent_shell_guard_policy.harn" "$admitted_root/scripts/"
-printf '// admission\n' >"$admitted_root/scripts/fleet-worktree-admit.ts"
-worktree_blocked="$(
-  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"bash -lc 'git -C $admitted_root worktree add ../unowned origin/main'\"}}" \
-    | HARN_BIN="$HARN_BIN" "$admitted_root/scripts/agent-shell-guard.sh"
-)"
-if [[ "$worktree_blocked" != *'"permissionDecision":"deny"'* ]] \
-  || [[ "$worktree_blocked" != *'fleet-worktree-admit'* ]]; then
-  echo "adapter did not route nested raw worktree creation to Fleet admission" >&2
-  printf '%s\n' "$worktree_blocked" >&2
-  exit 1
-fi
-
-# The same command where the guard's own repository owns no admission command
-# must be allowed. Naming a command the operator cannot run is the failure this
-# direction guards, and an empty verdict is how the adapter says "allowed".
-worktree_allowed="$(
-  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"bash -lc 'git -C $fixture_root worktree add ../unowned origin/main'\"}}" \
+# Raw worktree creation is plain Git, however it is spelled, and the guard stays
+# live beside it: the stash refusal is the negative control for the allows.
+for worktree_command in \
+  "git worktree add -b lane ../lane origin/main" \
+  "git -C $fixture_root worktree add ../lane origin/main" \
+  "bash -lc 'git worktree add ../lane origin/main'" \
+  "cd $fixture_root && git worktree add ../lane origin/main"; do
+  worktree_allowed="$(
+    printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$worktree_command\"}}" \
+      | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+  )"
+  if [[ -n "$worktree_allowed" ]]; then
+    echo "adapter refused plain worktree creation: $worktree_command" >&2
+    printf '%s\n' "$worktree_allowed" >&2
+    exit 1
+  fi
+done
+worktree_control="$(
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git stash"}}' \
     | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
 )"
-if [[ -n "$worktree_allowed" ]]; then
-  echo "adapter refused raw worktree creation where the repository owns no admission command" >&2
-  printf '%s\n' "$worktree_allowed" >&2
-  exit 1
-fi
-
-# A target outside every measured root is not a target found to own nothing.
-# A path *inside* a measured repository is covered by that repository's row,
-# which is why this one points outside them all.
-# Without this arm the fix is a hole: the easy version of "answer for the
-# repository the command targets" allows anything it failed to resolve, which
-# is the whole absence-reads-as-success shape this rule exists to avoid.
-worktree_unmeasured="$(
-  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git -C /no-such-repository-8447/lane worktree add ../unowned origin/main\"}}" \
-    | HARN_BIN="$HARN_BIN" "$admitted_root/scripts/agent-shell-guard.sh"
-)"
-if [[ "$worktree_unmeasured" != *'"permissionDecision":"deny"'* ]] \
-  || [[ "$worktree_unmeasured" != *'could not tell'* ]]; then
-  echo "adapter treated an unmeasured target repository as one owning no admission command" >&2
-  printf '%s\n' "$worktree_unmeasured" >&2
-  exit 1
-fi
-
-wrapped_worktree_blocked="$(
-  printf '%s' \
-    '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/env -u GIT_DIR command git --no-pager worktree add ../unowned origin/main"}}' \
-    | HARN_BIN="$HARN_BIN" "$admitted_root/scripts/agent-shell-guard.sh"
-)"
-if [[ "$wrapped_worktree_blocked" != *'"permissionDecision":"deny"'* ]] \
-  || [[ "$wrapped_worktree_blocked" != *'fleet-worktree-admit'* ]]; then
-  echo "adapter allowed worktree creation through process launchers" >&2
-  printf '%s\n' "$wrapped_worktree_blocked" >&2
-  exit 1
-fi
-
-admission_allowed="$(
-  printf '%s' \
-    '{"tool_name":"Bash","tool_input":{"command":"./scripts/fleet-worktree-admit --issue-url https://github.com/acme/repo/issues/1"}}' \
-    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
-)"
-if [[ -n "$admission_allowed" ]]; then
-  echo "adapter denied the owning Fleet admission command" >&2
-  printf '%s\n' "$admission_allowed" >&2
+if [[ "$worktree_control" != *'"permissionDecision":"deny"'* ]]; then
+  echo "adapter did not refuse git stash beside the allowed worktree add" >&2
   exit 1
 fi
 
@@ -707,6 +652,34 @@ if [[ -n "$git_read" ]]; then
   exit 1
 fi
 
+# On POSIX, backslashes name a relative directory, even when they resemble a
+# Windows UNC path. A hook must not execute that directory's Git during preflight.
+mkdir -p "$make_root/\\\\untrusted"
+cat >"$make_root/\\\\untrusted/git" <<EOF
+#!/bin/sh
+printf reached > "$make_root/untrusted-git-ran"
+EOF
+chmod +x "$make_root/\\\\untrusted/git"
+untrusted_verdict="$(
+  cd "$make_root"
+  PATH='\\untrusted:/usr/bin:/bin' git --list-cmds=builtins
+  [[ -e "$make_root/untrusted-git-ran" ]] || { echo "fake Git control did not run" >&2; exit 1; }
+  rm "$make_root/untrusted-git-ran"
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git history"}}' \
+    | OS=Windows_NT PATH='\\untrusted:/usr/bin:/bin' standalone_verdict
+)"
+if [[ -e "$make_root/untrusted-git-ran" ]]; then
+  echo "preflight executed a POSIX relative directory disguised as a Windows path" >&2
+  exit 1
+fi
+if [[ "$untrusted_verdict" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$untrusted_verdict" != *'git stash'* ]] \
+  || [[ "$untrusted_verdict" == *'policy faulted'* ]]; then
+  echo "the guard did not refuse an unmeasured Git alias" >&2
+  printf '%s\n' "$untrusted_verdict" >&2
+  exit 1
+fi
+
 commented_substitution="$(
   standalone_verdict <<'PAYLOAD'
 {"tool_name":"Bash","tool_input":{"command":"echo \"$( # )\ngit stash drop\n)\""}}
@@ -778,5 +751,33 @@ for stash_command in 'WORKTREE_MODE=review git stash push' 'git -c alias.hidden=
     exit 1
   fi
 done
+
+config_alias_verdict="$(
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git config alias.hidden stash; git hidden push"}}' \
+    | standalone_verdict
+)"
+if [[ "$config_alias_verdict" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$config_alias_verdict" != *'git stash'* ]] \
+  || [[ "$config_alias_verdict" == *'policy faulted'* ]]; then
+  echo "standalone guard trusted alias configuration changed by the payload" >&2
+  exit 1
+fi
+
+system_builtins="$(/usr/bin/git --list-cmds=builtins)"
+if [[ $'\n'"$system_builtins"$'\n' != *$'\nhistory\n'* ]]; then
+  history_verdict="$(
+    printf '%s' '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/git history"}}' \
+      | GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.history GIT_CONFIG_VALUE_0='stash push' standalone_verdict
+  )"
+  if [[ "$history_verdict" != *'"permissionDecision":"deny"'* ]] \
+    || [[ "$history_verdict" != *'git stash'* ]] \
+    || [[ "$history_verdict" == *'policy faulted'* ]]; then
+    echo "standalone guard assumed a builtin absent from the selected Git" >&2
+    exit 1
+  fi
+  echo "selected-Git history alias control: reached"
+else
+  echo "selected-Git history alias control: unmeasured, this Git owns the builtin"
+fi
 
 echo "agent_shell_guard_adapter_test: ok"

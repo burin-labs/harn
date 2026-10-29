@@ -1071,8 +1071,7 @@ fn approval_receipt_signature(
         reason.unwrap_or("")
     );
     let hash = sha2::Sha256::digest(material.as_bytes());
-    let hex: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
-    format!("sha256:{hex}")
+    format!("sha256:{}", hex::encode(hash))
 }
 
 fn approval_record_from_waitpoint(

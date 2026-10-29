@@ -32,6 +32,23 @@ use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use super::{ProcessError, SpawnSpec};
 
+#[cfg(unix)]
+mod completion_receipt;
+#[cfg(unix)]
+mod journal_cleanup;
+#[cfg(unix)]
+use journal_cleanup::OwnerJournalCleanup;
+#[cfg(unix)]
+mod output_relay;
+#[cfg(unix)]
+mod owner_pipe;
+#[cfg(unix)]
+pub(crate) use completion_receipt::ReceiptReader;
+#[cfg(unix)]
+use owner_pipe::wait_for_owner_pipe_close;
+#[cfg(target_os = "linux")]
+pub(super) mod cancel_request;
+
 #[cfg(target_os = "linux")]
 #[path = "owner_death/adopted_children.rs"]
 mod adopted_children;
@@ -127,6 +144,11 @@ enum GuardianConfinement {
 #[derive(Deserialize, Serialize)]
 struct GuardianCommandRequest {
     #[serde(default)]
+    cleanup_receipt_fd: Option<i32>,
+    #[cfg(target_os = "linux")]
+    #[serde(default)]
+    cancel_request_fd: Option<i32>,
+    #[serde(default)]
     payload_stdin: bool,
     program: Vec<u8>,
     args: Vec<Vec<u8>>,
@@ -167,6 +189,9 @@ struct StartupMessage {
 /// Guardian launch and the parent's completion witness.
 #[cfg(unix)]
 pub(crate) struct PreparedGuardian {
+    pub(crate) cleanup_receipt: ReceiptReader,
+    #[cfg(target_os = "linux")]
+    pub(crate) cancel_request: cancel_request::CancelRequest,
     pub(crate) command: Command,
     pub(crate) request: Vec<u8>,
     pub(crate) missing_program: Option<String>,
@@ -234,15 +259,13 @@ pub(crate) fn prepare_guardian(
     // from the session's resolved set; sending the mode instead dropped that
     // clear in transfer, and the guardian's own environment reached the child
     // behind the explicit entries.
-    let request = GuardianCommandRequest::from_command(
+    let mut request = GuardianCommandRequest::from_command(
         &payload,
         prepared.env_cleared,
         cleanup_token.clone(),
         confinement.as_ref().map(TransferredConfinement::request),
         spec.use_stdin,
     );
-    #[cfg(target_os = "linux")]
-    let mut request = request;
     #[cfg(target_os = "linux")]
     if let Some(pinned) = pinned.as_ref() {
         if payload.get_program() != std::ffi::OsStr::new(&pinned.program) {
@@ -254,13 +277,8 @@ pub(crate) fn prepare_guardian(
             .map_err(ProcessError::Spawn)?;
         request.pinned_verifier_descriptors = pinned.descriptors.numbers();
     }
-    let request = serde_json::to_vec(&request)
-        .map_err(|error| ProcessError::Spawn(format!("encode guardian request: {error}")))?;
-
     let executable = std::env::current_exe()
         .map_err(|error| ProcessError::Spawn(format!("resolve guardian executable: {error}")))?;
-    harn_vm::op_interrupt::initialize_process_owner_group_journal(&cleanup_token)
-        .map_err(|error| ProcessError::Spawn(format!("create owner process journal: {error}")))?;
     let mut guardian = Command::new(executable);
     match REEXEC_ARGS.with(|slot| slot.borrow().clone()) {
         Some(args) => {
@@ -292,7 +310,27 @@ pub(crate) fn prepare_guardian(
     };
     #[cfg(not(target_os = "linux"))]
     let witness = None;
+    let (cleanup_receipt, receipt_fd) =
+        completion_receipt::prepare(&mut guardian).map_err(|error| {
+            ProcessError::Spawn(format!("create guardian cleanup receipt: {error}"))
+        })?;
+    request.cleanup_receipt_fd = Some(receipt_fd);
+    #[cfg(target_os = "linux")]
+    let cancel_request = {
+        let (cancel_request, fd) = cancel_request::prepare(&mut guardian).map_err(|error| {
+            ProcessError::Spawn(format!("create guardian cancellation pipe: {error}"))
+        })?;
+        request.cancel_request_fd = Some(fd);
+        cancel_request
+    };
+    let request = serde_json::to_vec(&request)
+        .map_err(|error| ProcessError::Spawn(format!("encode guardian request: {error}")))?;
+    harn_vm::op_interrupt::initialize_process_owner_group_journal(&cleanup_token)
+        .map_err(|error| ProcessError::Spawn(format!("create owner process journal: {error}")))?;
     Ok(PreparedGuardian {
+        cleanup_receipt,
+        #[cfg(target_os = "linux")]
+        cancel_request,
         command: guardian,
         request,
         missing_program,
@@ -460,6 +498,9 @@ impl GuardianCommandRequest {
         payload_stdin: bool,
     ) -> Self {
         Self {
+            cleanup_receipt_fd: None,
+            #[cfg(target_os = "linux")]
+            cancel_request_fd: None,
             payload_stdin,
             pinned_verifier_descriptors: Vec::new(),
             confinement,
@@ -636,6 +677,9 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     let raw = read_request()?;
     let request: GuardianCommandRequest = serde_json::from_slice(&raw)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let receipt_fd = request.cleanup_receipt_fd;
+    #[cfg(target_os = "linux")]
+    let cancel_fd = request.cancel_request_fd;
     // SAFETY: this is the re-executed guardian's private host request pipe.
     // The prepared parent launch retained the owning transfers through exec;
     // their named descriptors now belong exclusively to this startup process.
@@ -654,6 +698,9 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
             return Err(error);
         }
     };
+    let mut cleanup_receipt = completion_receipt::inherited_writer(receipt_fd)?;
+    #[cfg(target_os = "linux")]
+    let cancellation = cancel_request::inherited_reader(cancel_fd)?;
     let _journal_cleanup = OwnerJournalCleanup(cleanup_token.clone());
     configure_child_reaper()?;
     let mut payload = match payload_command.spawn() {
@@ -670,6 +717,8 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
         }
     };
     let payload_pid = payload.id();
+    #[cfg(target_os = "linux")]
+    let payload_identity = cancel_request::ChildIdentity::open(payload_pid).ok();
     write_startup(StartupMessage {
         ok: true,
         spawn_not_found: false,
@@ -682,6 +731,9 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     let stderr = payload.stderr.take();
     let payload_stdin = payload.stdin.take();
     let (event_tx, event_rx) = std::sync::mpsc::channel();
+
+    #[cfg(target_os = "linux")]
+    cancel_request::watch(cancellation, event_tx.clone());
 
     if payload_stdin.is_some() {
         let event_tx = event_tx.clone();
@@ -699,14 +751,14 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     if let Some(mut stdout) = stdout {
         let event_tx = event_tx.clone();
         harn_parser::runtime_stack::spawn(move || {
-            let _ = io::copy(&mut stdout, &mut io::stdout());
+            let _ = output_relay::copy(&mut stdout, io::stdout());
             let _ = event_tx.send(GuardianEvent::OutputClosed);
         });
     }
     if let Some(mut stderr) = stderr {
         let event_tx = event_tx.clone();
         harn_parser::runtime_stack::spawn(move || {
-            let _ = io::copy(&mut stderr, &mut io::stderr());
+            let _ = output_relay::copy(&mut stderr, io::stderr());
             let _ = event_tx.send(GuardianEvent::OutputClosed);
         });
     }
@@ -735,8 +787,15 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
 
     let mut payload_status = None;
     let mut open_outputs = 2_u8;
+    #[cfg(target_os = "linux")]
+    let mut cancellation_cleanup = None;
     while let Ok(event) = event_rx.recv() {
         match event {
+            #[cfg(target_os = "linux")]
+            GuardianEvent::CancelRequested => {
+                cancellation_cleanup =
+                    cancel_request::terminate(payload_identity.clone(), payload_pid);
+            }
             event @ (GuardianEvent::OwnerClosed | GuardianEvent::InputFailed(_)) => {
                 if let GuardianEvent::InputFailed(error) = event {
                     eprintln!("guardian input failed: {error}");
@@ -758,44 +817,27 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
             }
             GuardianEvent::PayloadExited(status) => {
                 payload_status = Some(status?);
-                let _ =
+                let mut cleanup =
                     harn_vm::op_interrupt::signal_pid_tree_and_token_preserving_group_with_report(
                         payload_pid,
                         Some(&cleanup_token),
                         unsafe { libc::getpgrp() as u32 },
                         libc::SIGKILL,
                     );
-                reap_adopted_children()?;
-                let survivors = harn_vm::op_interrupt::process_owner_survivors(&cleanup_token);
-                if !survivors.is_empty() {
-                    let guardian_pid = std::process::id();
-                    let guardian_pgid = unsafe { libc::getpgrp() };
-                    let summary = survivors
-                        .iter()
-                        .map(|process| {
-                            let process_group = unsafe { libc::getpgid(process.pid as i32) };
-                            let process_group = if process_group < 0 {
-                                "<unknown>".to_string()
-                            } else {
-                                process_group.to_string()
-                            };
-                            format!(
-                                "pid={} parent={} pgid={} command={}",
-                                process.pid,
-                                process
-                                    .parent_pid
-                                    .map_or_else(|| "<unknown>".to_string(), |pid| pid.to_string()),
-                                process_group,
-                                process.command_name.as_deref().unwrap_or("<unknown>")
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    return Err(io::Error::other(format!(
-                        "owner-death guardian pid={guardian_pid} pgid={guardian_pgid} left helper \
-                         processes alive after cleanup: {summary}"
-                    )));
+                #[cfg(target_os = "linux")]
+                if let Some(cancelled) = cancellation_cleanup.take() {
+                    cleanup.merge(cancelled);
                 }
+                reap_adopted_children()?;
+                harn_vm::op_interrupt::finish_process_owner_cleanup(&mut cleanup, &cleanup_token);
+                // Only Linux actually establishes subreaper custody and observes
+                // ECHILD in reap_adopted_children. Keep the host census unchanged.
+                #[cfg(target_os = "linux")]
+                {
+                    cleanup.guardian_custody_complete = true;
+                }
+                completion_receipt::write(&mut cleanup_receipt, &cleanup)?;
+                completion_receipt::refuse_survivors(&cleanup)?;
             }
             GuardianEvent::OutputClosed => open_outputs = open_outputs.saturating_sub(1),
         }
@@ -907,29 +949,6 @@ fn relay_payload_stdin(owner: &mut impl Read, mut payload: Option<impl Write>) -
                 result => result?,
             }
             remaining -= count;
-        }
-    }
-}
-
-#[cfg(unix)]
-fn wait_for_owner_pipe_close() -> io::Result<()> {
-    loop {
-        let mut pipe = libc::pollfd {
-            fd: libc::STDIN_FILENO,
-            // Hangup/error are reported even when no readable event is
-            // requested. Unconsumed payload bytes must not make us spin.
-            events: 0,
-            revents: 0,
-        };
-        if unsafe { libc::poll(&raw mut pipe, 1, -1) } < 0 {
-            let error = io::Error::last_os_error();
-            if error.kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-            return Err(error);
-        }
-        if pipe.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
-            return Ok(());
         }
     }
 }
@@ -1161,6 +1180,8 @@ fn wait_for_payload_exit(
                 | GuardianEvent::OwnerClosed
                 | GuardianEvent::InputFailed(_),
             ) => {}
+            #[cfg(target_os = "linux")]
+            Ok(GuardianEvent::CancelRequested) => {}
             Err(_) => {
                 return Err(io::Error::other(
                     "guardian events closed before payload exit",
@@ -1215,17 +1236,9 @@ pub fn guardian_requested() -> bool {
 }
 
 #[cfg(unix)]
-struct OwnerJournalCleanup(String);
-
-#[cfg(unix)]
-impl Drop for OwnerJournalCleanup {
-    fn drop(&mut self) {
-        harn_vm::op_interrupt::remove_process_owner_group_journal(&self.0);
-    }
-}
-
-#[cfg(unix)]
 enum GuardianEvent {
+    #[cfg(target_os = "linux")]
+    CancelRequested,
     OwnerClosed,
     InputFailed(io::Error),
     PayloadExited(io::Result<ExitStatus>),

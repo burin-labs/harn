@@ -17,10 +17,7 @@ const MANIFEST_NAME: &str = "manifest.json";
 
 /// SHA-256 of `bytes` as lowercase hex.
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    hex::encode(Sha256::digest(bytes))
 }
 
 /// A file recorded in an installed model's manifest.

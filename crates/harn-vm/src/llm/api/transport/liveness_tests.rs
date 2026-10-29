@@ -23,7 +23,7 @@ async fn expired_total_deadline_beats_an_immediately_ready_read() {
     tokio::time::advance(Duration::from_secs(2)).await;
 
     let error = liveness
-        .next_line(async { Ok(Some("data: ready".to_string())) })
+        .next_item(async { Ok(Some("data: ready".to_string())) })
         .await
         .expect_err("an already-expired total deadline must win");
     let failure = error
