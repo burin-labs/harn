@@ -265,7 +265,8 @@ fn scanner_capability_registers_documented_methods() {
         names,
         vec![
             "hostlib_scanner_scan_project",
-            "hostlib_scanner_scan_incremental"
+            "hostlib_scanner_scan_incremental",
+            "hostlib_scanner_discover_test_commands"
         ]
     );
     // Implemented scanner methods should refuse an empty payload with
@@ -275,6 +276,7 @@ fn scanner_capability_registers_documented_methods() {
     for name in &[
         "hostlib_scanner_scan_project",
         "hostlib_scanner_scan_incremental",
+        "hostlib_scanner_discover_test_commands",
     ] {
         let entry = registry.find(name).expect("registered");
         let err = (entry.handler)(&[]).expect_err("must reject empty args");
@@ -283,6 +285,27 @@ fn scanner_capability_registers_documented_methods() {
             "scanner method {name} should be implemented, got {err:?}"
         );
     }
+}
+
+#[test]
+fn scanner_discovery_schema_matches_the_full_scan_projection() {
+    let full: serde_json::Value = serde_json::from_str(
+        schemas::lookup("scanner", "scan_project", schemas::SchemaKind::Response).unwrap(),
+    )
+    .unwrap();
+    let discovery: serde_json::Value = serde_json::from_str(
+        schemas::lookup(
+            "scanner",
+            "discover_test_commands",
+            schemas::SchemaKind::Response,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        full["$defs"]["TestCommandDiscovery"]["oneOf"],
+        discovery["oneOf"]
+    );
 }
 
 #[test]

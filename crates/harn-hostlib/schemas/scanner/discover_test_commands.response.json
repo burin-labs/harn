@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/scanner/discover_test_commands.response.json",
+  "title": "scanner.discover_test_commands response",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "state": { "const": "complete" },
+        "commands": { "type": "object", "additionalProperties": { "type": "string" } },
+        "preferred": { "type": ["string", "null"] }
+      },
+      "required": ["state", "commands", "preferred"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "state": { "const": "unavailable" },
+        "detail": { "type": "string", "minLength": 1 }
+      },
+      "required": ["state", "detail"],
+      "additionalProperties": false
+    }
+  ]
+}

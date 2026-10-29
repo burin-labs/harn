@@ -17,9 +17,11 @@ use std::fs;
 use std::path::Path;
 
 use harn_hostlib::scanner::{
-    scan_incremental, scan_project, scan_project_with_git, FileRecord, GitCapabilities,
-    ProjectMetadata, ScanProjectOptions, ScanResult, SymbolKind, TestCommandDiscovery,
+    discover_test_commands, scan_incremental, scan_project, scan_project_with_git, FileRecord,
+    GitCapabilities, ProjectMetadata, ScanProjectOptions, ScanResult, SymbolKind,
+    TestCommandDiscovery,
 };
+use harn_vm::ignore_policy::IgnorePolicy;
 use tempfile::tempdir;
 
 #[cfg(unix)]
@@ -167,6 +169,31 @@ fn scan_without_git_history(root: &Path) -> ScanResult {
             ..ScanProjectOptions::default()
         },
     )
+}
+
+#[test]
+fn discovery_only_matches_full_scan_and_rechecks_without_a_snapshot() {
+    let tmp = tempdir().unwrap();
+    write(
+        tmp.path(),
+        "test_app.py",
+        "def test_value():\n    assert True\n",
+    );
+    let discovery = discover_test_commands(tmp.path(), false, IgnorePolicy::Project);
+    assert!(
+        matches!(&discovery, TestCommandDiscovery::Complete { commands, .. } if commands.contains_key("python -m pytest"))
+    );
+    assert!(!tmp
+        .path()
+        .join(".harn/hostlib/scanner-snapshot.json")
+        .exists());
+    let full = scan_without_git_history(tmp.path());
+    assert_eq!(discovery, full.project.test_command_discovery);
+    fs::remove_file(tmp.path().join("test_app.py")).unwrap();
+    assert!(matches!(
+        discover_test_commands(tmp.path(), false, IgnorePolicy::Project),
+        TestCommandDiscovery::Complete { commands, .. } if commands.is_empty()
+    ));
 }
 
 #[test]

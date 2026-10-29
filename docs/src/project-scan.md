@@ -77,6 +77,8 @@ the discovered `commands` and nullable `preferred` command; an empty map means
 the search completed without candidates. `unavailable` carries a short `detail`
 instead of a command map when the search could not inspect a relevant path.
 Candidates describe possible commands, not proof that a command ran or passed.
+Use `harness.scanner.discover_test_commands({root: path})` when only this
+fresh result is needed; it does not build the full index or write a snapshot.
 
 ```harn
 const targets = makefile_parse("unit test:\n\t@echo checked\n")

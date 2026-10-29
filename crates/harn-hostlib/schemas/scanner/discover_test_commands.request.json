@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/scanner/discover_test_commands.request.json",
+  "title": "scanner.discover_test_commands request",
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" },
+    "include_hidden": { "type": "boolean", "default": false },
+    "ignore_policy": { "type": "string", "enum": ["none", "builtin", "project"], "default": "project" }
+  },
+  "required": ["root"],
+  "additionalProperties": false
+}

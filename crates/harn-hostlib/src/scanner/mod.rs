@@ -61,6 +61,7 @@ pub use result::{
 
 const SCAN_PROJECT_BUILTIN: &str = "hostlib_scanner_scan_project";
 const SCAN_INCREMENTAL_BUILTIN: &str = "hostlib_scanner_scan_incremental";
+const DISCOVER_TEST_COMMANDS_BUILTIN: &str = "hostlib_scanner_discover_test_commands";
 
 /// Scanner capability handle.
 #[derive(Default)]
@@ -83,6 +84,12 @@ impl HostlibCapability for ScannerCapability {
             SCAN_INCREMENTAL_BUILTIN,
             "scan_incremental",
             scan_incremental_handler,
+        );
+        registry.register_fn(
+            "scanner",
+            DISCOVER_TEST_COMMANDS_BUILTIN,
+            "discover_test_commands",
+            discover_test_commands_handler,
         );
     }
 }
@@ -114,6 +121,21 @@ impl Default for ScanProjectOptions {
             repo_map_token_budget: 1200,
         }
     }
+}
+
+/// Discover test commands without indexing source files or writing a snapshot.
+pub fn discover_test_commands(
+    root: &Path,
+    include_hidden: bool,
+    ignore_policy: IgnorePolicy,
+) -> TestCommandDiscovery {
+    let canonical = canonicalize(root);
+    let options = discover::DiscoverOptions {
+        include_hidden,
+        ignore_policy,
+    };
+    let files = discover::discover_files(&canonical, options, &git::CliGitCapabilities);
+    commands::detect_test_commands(&canonical, options, &files)
 }
 
 /// Run a full scan of `root`, persist a snapshot, and return the result.
@@ -630,6 +652,24 @@ fn scan_incremental_handler(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     Ok(scan_result_to_value(&scan.result, Some(&scan.delta)))
 }
 
+fn discover_test_commands_handler(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let raw = dict_arg(DISCOVER_TEST_COMMANDS_BUILTIN, args)?;
+    let dict = raw.as_ref();
+    let root = require_string(DISCOVER_TEST_COMMANDS_BUILTIN, dict, "root")?;
+    let include_hidden = optional_bool(
+        DISCOVER_TEST_COMMANDS_BUILTIN,
+        dict,
+        "include_hidden",
+        false,
+    )?;
+    let ignore_policy = ignore_policy_arg(DISCOVER_TEST_COMMANDS_BUILTIN, dict)?;
+    Ok(test_discovery_to_value(&discover_test_commands(
+        Path::new(&root),
+        include_hidden,
+        ignore_policy,
+    )))
+}
+
 fn ignore_policy_arg(
     builtin: &'static str,
     dict: &harn_vm::value::DictMap,
@@ -749,8 +789,8 @@ fn list_of<T>(items: &[T], to_value: fn(&T) -> VmValue) -> VmValue {
     VmValue::list(list)
 }
 
-fn project_to_value(project: &ProjectMetadata) -> VmValue {
-    let test_discovery = match &project.test_command_discovery {
+fn test_discovery_to_value(discovery: &TestCommandDiscovery) -> VmValue {
+    match discovery {
         TestCommandDiscovery::Complete {
             commands,
             preferred,
@@ -773,8 +813,10 @@ fn project_to_value(project: &ProjectMetadata) -> VmValue {
             ("state", str_value("unavailable")),
             ("detail", str_value(detail)),
         ]),
-    };
+    }
+}
 
+fn project_to_value(project: &ProjectMetadata) -> VmValue {
     let code_patterns: Vec<VmValue> = project.code_patterns.iter().map(str_value).collect();
     let available_dependencies: Vec<VmValue> = project
         .available_dependencies
@@ -786,7 +828,10 @@ fn project_to_value(project: &ProjectMetadata) -> VmValue {
         ("name", str_value(&project.name)),
         ("root_path", str_value(&project.root_path)),
         ("languages", list_of(&project.languages, language_to_value)),
-        ("test_command_discovery", test_discovery),
+        (
+            "test_command_discovery",
+            test_discovery_to_value(&project.test_command_discovery),
+        ),
         ("code_patterns", VmValue::list(code_patterns)),
         ("total_files", VmValue::Int(project.total_files as i64)),
         ("total_lines", VmValue::Int(project.total_lines as i64)),

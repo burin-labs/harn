@@ -260,6 +260,9 @@ whose changes a subscriber may need.
 - `hostlib_scanner_scan_incremental({ snapshot_token, changed_paths?, … })`
   — refresh the snapshot. Falls back to a full rescan when the snapshot is
   missing or the diff exceeds ~30% of the workspace.
+- `hostlib_scanner_discover_test_commands({ root, include_hidden?, ignore_policy? })`
+  — return the same tagged test-command discovery without indexing source files,
+  collecting Git history, or writing a scanner snapshot.
 
 The Rust scanner API routes Git-backed file discovery and churn scoring through
 `GitCapabilities`. The default hostlib builtin uses the Git CLI only when the
