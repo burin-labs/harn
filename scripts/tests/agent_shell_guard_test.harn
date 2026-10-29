@@ -403,7 +403,6 @@ const COMMIT_LOG_GREP_BUILTINS: fn(string) -> list<string> = { _program ->
 fn guard_with_git_facts(command: string) -> ShellGuardDecision {
   return decision(
     claude_payload(command),
-    ADMITTED,
     NO_MAKE_TARGETS,
     ALIASES_UNREADABLE_UNDER_C,
     COMMIT_LOG_GREP_BUILTINS,
