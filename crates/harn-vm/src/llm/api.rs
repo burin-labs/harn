@@ -464,6 +464,12 @@ async fn vm_call_llm_full_inner_request(
     delta_tx: Option<DeltaSender>,
     execution: ProviderExecution,
 ) -> Result<LlmResult, VmError> {
+    if let Some(served) = crate::run_tape::serve_llm_call(request) {
+        observed.record_provider_dispatch();
+        request.emit_reminder_lifecycle();
+        return Ok(complete_bypass_result(request, served?, delta_tx, None));
+    }
+
     if let Some(result) = super::trigger_predicate::lookup_cached_result(request) {
         request.emit_reminder_lifecycle();
         return Ok(complete_bypass_result(request, result, delta_tx, None));

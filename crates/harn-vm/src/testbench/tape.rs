@@ -190,6 +190,34 @@ pub enum TapeRecordKind {
     LlmCall {
         request_digest: String,
         response: TapePayload,
+        /// 1-based order of this call in a production run tape. Absent on
+        /// testbench tapes, which order calls by `seq` alone.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_index: Option<u64>,
+        /// The digested request surface without its messages. Present only
+        /// at `recording: full`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request: Option<TapePayload>,
+        /// The request's messages in order, each its own CAS entry, so a
+        /// later call that repeats a prefix stores only its new messages.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        messages: Vec<TapePayload>,
+    },
+    /// One agent tool dispatch: what the handler returned and which files it
+    /// changed. A branch serves `outcome` and re-applies `effects` instead of
+    /// re-running the tool.
+    ToolCall {
+        call_id: String,
+        tool: String,
+        args_digest: String,
+        outcome: TapePayload,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        effects: Vec<FileEffect>,
+        /// Set when the outcome cannot be served faithfully (an error variant
+        /// with no recorded shape, or an incomplete effect scan). A branch
+        /// re-executes such a call and counts any difference as divergence.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unservable: Option<String>,
     },
     /// Completed typed evaluation, including its exact request and receipt.
     DecisionEvaluation {
@@ -266,6 +294,7 @@ impl TapeRecordKind {
             Self::ClockRead { .. } => "clock_read",
             Self::ClockSleep { .. } => "clock_sleep",
             Self::LlmCall { .. } => "llm_call",
+            Self::ToolCall { .. } => "tool_call",
             Self::DecisionEvaluation { .. } => "decision_evaluation",
             Self::FileRead { .. } => "file_read",
             Self::FileWrite { .. } => "file_write",
@@ -276,6 +305,15 @@ impl TapeRecordKind {
             Self::Unknown => "unknown",
         }
     }
+}
+
+/// One file a tool call changed, relative to the run's workspace root.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FileEffect {
+    pub path: String,
+    /// Post-call bytes; `None` means the call deleted the path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<TapePayload>,
 }
 
 /// Which face of the unified clock the script read. Captured so a
@@ -289,7 +327,7 @@ pub enum ClockSource {
 
 /// On-disk representation of a record payload. Inline for small values,
 /// CAS-by-hash for anything over [`MAX_INLINE_BYTES`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum TapePayload {
     /// Inline UTF-8 text payload. Carries a content hash so a fidelity
@@ -321,6 +359,16 @@ impl TapePayload {
 /// every record path keys CAS lookups identically.
 pub fn content_hash(bytes: &[u8]) -> String {
     blake3::hash(bytes).to_hex().to_string()
+}
+
+fn cas_payload(bytes: Vec<u8>, cas: &mut BTreeMap<String, Vec<u8>>) -> TapePayload {
+    let hash = content_hash(&bytes);
+    let len_bytes = bytes.len() as u64;
+    cas.entry(hash.clone()).or_insert(bytes);
+    TapePayload::Cas {
+        content_hash: hash,
+        len_bytes,
+    }
 }
 
 /// Build a [`TapePayload`] from raw bytes, spilling to the sidecar map
@@ -537,8 +585,28 @@ fn cas_dir_for(tape_path: &Path) -> PathBuf {
 
 fn visit_payloads(kind: &TapeRecordKind, mut visit: impl FnMut(&TapePayload)) {
     match kind {
-        TapeRecordKind::LlmCall { response, .. }
-        | TapeRecordKind::DecisionEvaluation { response, .. } => visit(response),
+        TapeRecordKind::LlmCall {
+            response,
+            request,
+            messages,
+            ..
+        } => {
+            visit(response);
+            if let Some(request) = request {
+                visit(request);
+            }
+            messages.iter().for_each(&mut visit);
+        }
+        TapeRecordKind::DecisionEvaluation { response, .. } => visit(response),
+        TapeRecordKind::ToolCall {
+            outcome, effects, ..
+        } => {
+            visit(outcome);
+            effects
+                .iter()
+                .filter_map(|effect| effect.content.as_ref())
+                .for_each(&mut visit);
+        }
         TapeRecordKind::ProcessSpawn {
             stdout_payload,
             stderr_payload,
@@ -581,6 +649,51 @@ pub struct TapeRecorder {
 struct RecorderInner {
     records: Vec<TapeRecord>,
     cas: BTreeMap<String, Vec<u8>>,
+    /// Set for a production run tape: every record and CAS entry is written
+    /// as it is made, so a killed run keeps its prefix.
+    sink: Option<StreamSink>,
+}
+
+#[derive(Debug)]
+struct StreamSink {
+    file: std::fs::File,
+    cas_dir: PathBuf,
+    error: Option<String>,
+}
+
+impl StreamSink {
+    fn write_line(&mut self, line: &TapeLine) {
+        use std::io::Write;
+        if self.error.is_some() {
+            return;
+        }
+        let result = serde_json::to_string(line)
+            .map_err(|err| err.to_string())
+            .and_then(|mut text| {
+                text.push('\n');
+                self.file
+                    .write_all(text.as_bytes())
+                    .map_err(|err| err.to_string())
+            });
+        if let Err(error) = result {
+            self.error = Some(format!("tape write failed: {error}"));
+        }
+    }
+
+    fn write_cas(&mut self, hash: &str, bytes: &[u8]) {
+        if self.error.is_some() {
+            return;
+        }
+        let entry = self.cas_dir.join(hash);
+        if entry.exists() {
+            return;
+        }
+        if let Err(error) =
+            std::fs::create_dir_all(&self.cas_dir).and_then(|()| std::fs::write(&entry, bytes))
+        {
+            self.error = Some(format!("tape CAS write {}: {error}", entry.display()));
+        }
+    }
 }
 
 impl Default for TapeRecorder {
@@ -619,15 +732,53 @@ impl TapeRecorder {
             monotonic_ms,
             kind,
         };
-        self.inner
-            .lock()
-            .expect("tape recorder mutex poisoned")
-            .records
-            .push(record);
+        let mut inner = self.inner.lock().expect("tape recorder mutex poisoned");
+        if let Some(sink) = inner.sink.as_mut() {
+            sink.write_line(&TapeLine::Record(record.clone()));
+        }
+        inner.records.push(record);
     }
 
     fn swap_phase(&self, phase: TapePhase) -> TapePhase {
         TapePhase::from_u8(self.phase.swap(phase.as_u8(), Ordering::SeqCst))
+    }
+
+    /// A recorder that streams to `path` (NDJSON) and `<path>.cas/` as it
+    /// records. CAS bodies go straight to disk and are not retained in
+    /// memory, so [`Self::snapshot`] of a streaming recorder has records only.
+    pub fn streaming(path: &Path, header: TapeHeader) -> Result<Self, String> {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)
+                .map_err(|err| format!("mkdir {}: {err}", parent.display()))?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|err| format!("create tape {}: {err}", path.display()))?;
+        let mut sink = StreamSink {
+            file,
+            cas_dir: cas_dir_for(path),
+            error: None,
+        };
+        sink.write_line(&TapeLine::Header(header));
+        if let Some(error) = sink.error.take() {
+            return Err(error);
+        }
+        let recorder = Self::new();
+        recorder
+            .inner
+            .lock()
+            .expect("tape recorder mutex poisoned")
+            .sink = Some(sink);
+        Ok(recorder)
+    }
+
+    /// The first write failure of a streaming recorder. A tape with a write
+    /// error is incomplete and must not be offered for branching.
+    pub fn sink_error(&self) -> Option<String> {
+        let inner = self.inner.lock().expect("tape recorder mutex poisoned");
+        inner.sink.as_ref().and_then(|sink| sink.error.clone())
     }
 
     /// Convenience wrapper: build a [`TapePayload`] from `bytes` (spilling
@@ -635,8 +786,35 @@ impl TapeRecorder {
     /// axes that have raw bodies on hand (subprocess stdout, LLM
     /// response JSON, file content).
     pub fn payload_from_bytes(&self, bytes: Vec<u8>) -> TapePayload {
-        let mut inner = self.inner.lock().expect("tape recorder mutex poisoned");
-        build_payload(bytes, &mut inner.cas)
+        self.payload(bytes, false)
+    }
+
+    /// Like [`Self::payload_from_bytes`], but always content-addressed, so
+    /// identical bodies recorded many times are stored once.
+    pub fn payload_cas(&self, bytes: Vec<u8>) -> TapePayload {
+        self.payload(bytes, true)
+    }
+
+    fn payload(&self, bytes: Vec<u8>, force_cas: bool) -> TapePayload {
+        let mut guard = self.inner.lock().expect("tape recorder mutex poisoned");
+        let inner = &mut *guard;
+        let Some(sink) = inner.sink.as_mut() else {
+            return if force_cas {
+                cas_payload(bytes, &mut inner.cas)
+            } else {
+                build_payload(bytes, &mut inner.cas)
+            };
+        };
+        let mut spilled = BTreeMap::new();
+        let payload = if force_cas {
+            cas_payload(bytes, &mut spilled)
+        } else {
+            build_payload(bytes, &mut spilled)
+        };
+        for (hash, bytes) in spilled {
+            sink.write_cas(&hash, &bytes);
+        }
+        payload
     }
 
     /// Snapshot the tape into a self-contained [`EventTape`]. Consumes
@@ -677,10 +855,13 @@ pub fn install_recorder(recorder: Arc<TapeRecorder>) -> TapeRecorderGuard {
     TapeRecorderGuard { previous }
 }
 
-/// Currently installed recorder, if any. Production callers stay
-/// untouched because nothing installs a recorder outside testbench mode.
+/// Currently installed recorder: the thread's testbench recorder, else the
+/// process run tape (see [`crate::run_tape`]), which every thread sees so
+/// offthread provider calls are recorded too.
 pub fn active_recorder() -> Option<Arc<TapeRecorder>> {
-    ACTIVE_RECORDER.with(|slot| slot.borrow().clone())
+    ACTIVE_RECORDER
+        .with(|slot| slot.borrow().clone())
+        .or_else(crate::run_tape::process_recorder)
 }
 
 /// Record a model-job lifecycle event in the active unified tape.

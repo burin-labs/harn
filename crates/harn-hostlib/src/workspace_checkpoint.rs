@@ -40,6 +40,7 @@ mod anchored_fs;
 mod fork;
 mod receipts;
 mod scan;
+mod tape_effects;
 use anchored_fs::{open_anchor, restore_one, Step};
 #[cfg(all(test, unix))]
 use anchored_fs::{Stage, RESTORE_HOOK};
@@ -101,6 +102,10 @@ impl HostlibCapability for WorkspaceCheckpointCapability {
     }
 
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
+        // The run tape's per-call file effects use this module's scanner.
+        harn_vm::run_tape::register_tool_effect_observer(
+            Box::<tape_effects::TapeEffectObserver>::default(),
+        );
         registry.register_fn("fs", CAPTURE_BUILTIN, "checkpoint_capture", capture_builtin);
         registry.register_fn(
             "fs",

@@ -161,6 +161,7 @@ pub mod receipts;
 pub mod record_filter;
 pub mod redact;
 pub mod run_events;
+pub mod run_tape;
 pub mod runtime_context;
 pub use harn_vm_core::runtime_limits;
 pub mod runtime_paths;

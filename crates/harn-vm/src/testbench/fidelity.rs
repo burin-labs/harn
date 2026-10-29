@@ -318,10 +318,12 @@ fn compare_kind(
             LlmCall {
                 request_digest: recorded_req,
                 response: recorded_res,
+                ..
             },
             LlmCall {
                 request_digest: replay_req,
                 response: replay_res,
+                ..
             },
         )
         | (
@@ -713,19 +715,7 @@ fn count_llm_calls(tape: &EventTape) -> usize {
 }
 
 fn record_kind_tag(kind: &TapeRecordKind) -> &'static str {
-    match kind {
-        TapeRecordKind::ClockRead { .. } => "clock_read",
-        TapeRecordKind::ClockSleep { .. } => "clock_sleep",
-        TapeRecordKind::LlmCall { .. } => "llm_call",
-        TapeRecordKind::DecisionEvaluation { .. } => "decision_evaluation",
-        TapeRecordKind::FileRead { .. } => "file_read",
-        TapeRecordKind::FileWrite { .. } => "file_write",
-        TapeRecordKind::FileDelete { .. } => "file_delete",
-        TapeRecordKind::ProcessSpawn { .. } => "process_spawn",
-        TapeRecordKind::McpJsonRpc { .. } => "mcp_json_rpc",
-        TapeRecordKind::ModelJob { .. } => "model_job",
-        TapeRecordKind::Unknown => "unknown",
-    }
+    kind.label()
 }
 
 #[cfg(test)]
