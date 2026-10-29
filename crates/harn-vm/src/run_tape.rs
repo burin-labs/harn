@@ -89,7 +89,9 @@ fn process_tape() -> Option<Arc<ProcessTape>> {
 /// [`crate::testbench::tape::active_recorder`] when no thread-local testbench
 /// recorder is installed.
 pub fn process_recorder() -> Option<Arc<TapeRecorder>> {
-    process_tape().map(|tape| tape.recorder.clone())
+    process_tape()
+        .filter(|tape| tape.level == RecordingLevel::Full)
+        .map(|tape| tape.recorder.clone())
 }
 
 /// Ends recording when dropped and reports any write failure.
@@ -260,7 +262,10 @@ fn surface_digest(surface: &serde_json::Map<String, serde_json::Value>) -> Strin
 
 /// Record one completed model call on the active tape, if any.
 pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
-    let Some(recorder) = crate::testbench::tape::active_recorder() else {
+    // A metadata tape is not an axis recorder, so look it up directly.
+    let Some(recorder) = crate::testbench::tape::active_recorder()
+        .or_else(|| process_tape().map(|tape| tape.recorder.clone()))
+    else {
         return;
     };
     let tape = process_tape().filter(|tape| Arc::ptr_eq(&tape.recorder, &recorder));
@@ -361,12 +366,15 @@ pub enum RecordedToolResult {
     Ok { value: serde_json::Value },
     Categorized { message: String, category: String },
     Thrown { message: String },
+    ThrownValue { value: serde_json::Value },
+    Runtime { message: String },
 }
 
 /// An in-flight tool call on the recording side.
 pub(crate) struct ToolCallRecording {
     tape: Arc<ProcessTape>,
     call_id: String,
+    after_calls: u64,
     observed: bool,
 }
 
@@ -381,6 +389,7 @@ pub(crate) fn begin_tool_call(call_id: &str) -> Option<ToolCallRecording> {
         _ => false,
     };
     Some(ToolCallRecording {
+        after_calls: tape.next_llm_call.load(Ordering::SeqCst),
         tape,
         call_id: call_id.to_string(),
         observed,
@@ -402,6 +411,7 @@ pub(crate) fn finish_tool_call(
     let ToolCallRecording {
         tape,
         call_id,
+        after_calls,
         observed,
     } = recording;
     let recorder = &tape.recorder;
@@ -443,6 +453,7 @@ pub(crate) fn finish_tool_call(
         call_id,
         tool: tool.to_string(),
         args_digest: args_digest(args),
+        after_calls,
         outcome,
         effects,
         unservable,
@@ -501,15 +512,28 @@ struct RecordedTool {
     unservable: Option<String>,
 }
 
+struct PrefixTool {
+    call_id: String,
+    recorded: RecordedTool,
+    used: bool,
+}
+
+/// Names the recorded prefix tool call a re-execution is compared with.
+pub(crate) struct ReexecutedTool {
+    after_calls: u64,
+    index: usize,
+}
+
 struct BranchState {
     calls: Vec<RecordedCall>,
-    tools: BTreeMap<String, RecordedTool>,
-    /// Tool-call ids named by served responses: the only calls the prefix
-    /// serves.
-    served_tool_ids: BTreeSet<String>,
-    /// Recorded cache lookups per (namespace, key), in recorded order.
+    /// Prefix tool calls by how many model calls preceded them.
+    tools: BTreeMap<u64, Vec<PrefixTool>>,
+    /// Prefix cache lookups per (model calls before, namespace, key), in
+    /// recorded order.
     cache_lookups:
-        BTreeMap<(String, String), std::collections::VecDeque<Option<serde_json::Value>>>,
+        BTreeMap<(u64, String, String), std::collections::VecDeque<Option<serde_json::Value>>>,
+    /// Set by the first live model call; nothing is served after it.
+    live: bool,
     workspace_root: PathBuf,
     report: BranchReport,
 }
@@ -546,6 +570,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
         return Err("a branch must serve at least one recorded call".to_string());
     }
     let tape = plan.tape;
+    let prefix = plan.live_after_calls;
     if !tape.header.argv.iter().any(|arg| arg == "recording=full") {
         return Err(
             "this tape was not recorded with `recording: full`, so it can be read but not branched"
@@ -553,15 +578,16 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
         );
     }
     let mut calls = Vec::new();
-    let mut tools = BTreeMap::new();
+    let mut tools: BTreeMap<u64, Vec<PrefixTool>> = BTreeMap::new();
     let mut cache_lookups: BTreeMap<_, std::collections::VecDeque<_>> = BTreeMap::new();
     for record in &tape.records {
         match &record.kind {
             TapeRecordKind::CacheLookup {
                 namespace,
                 key,
+                after_calls,
                 value,
-            } => {
+            } if *after_calls <= prefix => {
                 let value = match value {
                     Some(payload) => Some(
                         serde_json::from_slice(&tape.resolve_payload(payload)?)
@@ -570,7 +596,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
                     None => None,
                 };
                 cache_lookups
-                    .entry((namespace.clone(), key.clone()))
+                    .entry((*after_calls, namespace.clone(), key.clone()))
                     .or_default()
                     .push_back(value);
             }
@@ -594,10 +620,11 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
                 call_id,
                 tool,
                 args_digest,
+                after_calls,
                 outcome,
                 effects,
                 unservable,
-            } => {
+            } if *after_calls <= prefix => {
                 let bytes = tape.resolve_payload(outcome)?;
                 let outcome = if bytes.is_empty() {
                     None
@@ -615,16 +642,17 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
                     };
                     resolved.push((effect.path.clone(), content));
                 }
-                tools.insert(
-                    call_id.clone(),
-                    RecordedTool {
+                tools.entry(*after_calls).or_default().push(PrefixTool {
+                    call_id: call_id.clone(),
+                    recorded: RecordedTool {
                         tool: tool.clone(),
                         args_digest: args_digest.clone(),
                         outcome,
                         effects: resolved,
                         unservable: unservable.clone(),
                     },
-                );
+                    used: false,
+                });
             }
             _ => {}
         }
@@ -643,8 +671,8 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
     *slot = Some(BranchState {
         calls,
         tools,
-        served_tool_ids: BTreeSet::new(),
         cache_lookups,
+        live: false,
         workspace_root: plan.workspace_root,
         report: BranchReport {
             live_after_calls: plan.live_after_calls,
@@ -735,6 +763,7 @@ pub(crate) fn serve_llm_call(
         return Some(Err(divergence_error(divergence)));
     }
     if state.report.served_calls >= state.report.live_after_calls {
+        state.live = true;
         state.report.live_calls += 1;
         return None;
     }
@@ -758,32 +787,33 @@ pub(crate) fn serve_llm_call(
     }
     let mut result = recorded.result.clone();
     result.telemetry = Box::new(ProviderTelemetry::mock_replay(Some(0.0)));
-    for call in &result.tool_calls {
-        if let Some(id) = call.get("id").and_then(serde_json::Value::as_str) {
-            state.served_tool_ids.insert(id.to_string());
-        }
-    }
     state.report.served_calls += 1;
     Some(Ok(result))
 }
 
-/// One persistent cache lookup. In a branch prefix the recorded answer is
-/// returned without reading the cache; a lookup the recording never made
-/// diverges. Otherwise `live` answers and, when recording, the answer is
-/// taped.
+/// One persistent cache lookup. In a branch prefix the recorded answer at
+/// the same point in the run is returned without reading the cache; a
+/// lookup the recording never made there diverges. Otherwise `live` answers.
+/// Either way a recording tape keeps the answer.
 pub(crate) fn cache_lookup(
     namespace: &str,
     key: &str,
     live: impl FnOnce() -> Result<Option<serde_json::Value>, crate::value::VmError>,
 ) -> Result<Option<serde_json::Value>, crate::value::VmError> {
-    {
+    let served = {
         let mut guard = PROCESS_BRANCH.lock().expect("branch lock poisoned");
-        if let Some(state) = guard.as_mut() {
-            if let Some(divergence) = &state.report.divergence {
-                return Err(divergence_error(divergence));
+        match guard.as_mut() {
+            Some(state) if state.report.divergence.is_some() => {
+                return Err(divergence_error(
+                    state.report.divergence.as_ref().expect("checked"),
+                ));
             }
-            if state.report.served_calls < state.report.live_after_calls {
-                let slot = (namespace.to_string(), key.to_string());
+            Some(state) if !state.live => {
+                let slot = (
+                    state.report.served_calls,
+                    namespace.to_string(),
+                    key.to_string(),
+                );
                 let recorded = state
                     .cache_lookups
                     .get_mut(&slot)
@@ -793,18 +823,22 @@ pub(crate) fn cache_lookup(
                         call: state.report.served_calls + 1,
                         what: "cache_lookup".to_string(),
                         detail: format!(
-                            "the program read cache key `{key}` in `{namespace}`, which the recording never read"
+                            "the program read cache key `{key}` in `{namespace}` where the recording did not"
                         ),
                     };
                     let error = divergence_error(&divergence);
                     state.report.divergence = Some(divergence);
                     return Err(error);
                 };
-                return Ok(value);
+                Some(value)
             }
+            _ => None,
         }
-    }
-    let value = live()?;
+    };
+    let value = match served {
+        Some(value) => value,
+        None => live()?,
+    };
     if let Some(tape) = process_tape().filter(|tape| tape.level == RecordingLevel::Full) {
         let payload = value.as_ref().map(|value| {
             tape.recorder
@@ -813,6 +847,7 @@ pub(crate) fn cache_lookup(
         tape.recorder.record(TapeRecordKind::CacheLookup {
             namespace: namespace.to_string(),
             key: key.to_string(),
+            after_calls: tape.next_llm_call.load(Ordering::SeqCst),
             value: payload,
         });
     }
@@ -826,7 +861,7 @@ pub(crate) enum ToolServe {
     /// Served from the recording; effects already applied.
     Served(RecordedToolOutcome),
     /// Prefix call the recording cannot serve: run it, then compare.
-    Reexecute,
+    Reexecute(ReexecutedTool),
     /// The prefix diverged; refuse the call.
     Diverged(crate::value::VmError),
 }
@@ -839,7 +874,7 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
     if let Some(divergence) = &state.report.divergence {
         return ToolServe::Diverged(divergence_error(divergence));
     }
-    if !state.served_tool_ids.contains(call_id) {
+    if state.live {
         return ToolServe::Live;
     }
     let call = state.report.served_calls;
@@ -853,27 +888,39 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
         state.report.divergence = Some(divergence);
         ToolServe::Diverged(error)
     };
-    let Some(recorded) = state.tools.get(call_id) else {
+    // The same tool and arguments at the same point in the run, preferring
+    // the same provider id: text-format calls get fresh ids on every parse.
+    let digest = args_digest(args);
+    let candidates = state.tools.get(&call).map_or(&[][..], Vec::as_slice);
+    let same_call = |entry: &PrefixTool| {
+        !entry.used && entry.recorded.tool == tool && entry.recorded.args_digest == digest
+    };
+    let index = candidates
+        .iter()
+        .position(|entry| same_call(entry) && entry.call_id == call_id)
+        .or_else(|| candidates.iter().position(same_call));
+    let Some(index) = index else {
         return diverge(
             state,
             "tool call",
-            format!("`{tool}` call {call_id} has no recorded result"),
+            format!(
+                "the recording made no `{tool}` call with these arguments after model call {call}"
+            ),
         );
     };
-    if recorded.tool != tool || recorded.args_digest != args_digest(args) {
-        let detail = format!(
-            "call {call_id} recorded `{}` with different arguments than replayed `{tool}`",
-            recorded.tool
-        );
-        return diverge(state, "tool call", detail);
-    }
+    let entry = &mut state.tools.get_mut(&call).expect("matched above")[index];
+    entry.used = true;
+    let recorded = &entry.recorded;
     let Some(outcome) = recorded
         .outcome
         .clone()
         .filter(|_| recorded.unservable.is_none())
     else {
         state.report.reexecuted_tool_calls += 1;
-        return ToolServe::Reexecute;
+        return ToolServe::Reexecute(ReexecutedTool {
+            after_calls: call,
+            index,
+        });
     };
     let effects = recorded.effects.clone();
     let root = state.workspace_root.clone();
@@ -890,6 +937,7 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
 /// Compare a re-executed prefix tool call with its recording. A different
 /// outcome is a divergence: the prefix is no longer the recorded one.
 pub(crate) fn check_reexecuted_tool_call(
+    reexecuted: &ReexecutedTool,
     call_id: &str,
     outcome: &Result<RecordedToolOutcome, String>,
 ) {
@@ -897,7 +945,12 @@ pub(crate) fn check_reexecuted_tool_call(
     let Some(state) = guard.as_mut() else {
         return;
     };
-    let Some(recorded) = state.tools.get(call_id) else {
+    let Some(recorded) = state
+        .tools
+        .get(&reexecuted.after_calls)
+        .and_then(|entries| entries.get(reexecuted.index))
+        .map(|entry| &entry.recorded)
+    else {
         return;
     };
     let same = matches!((&recorded.outcome, outcome), (Some(a), Ok(b)) if a == b);
@@ -919,10 +972,9 @@ pub(crate) fn check_reexecuted_tool_call(
 
 fn apply_effect(root: &Path, path: &str, content: Option<&[u8]>) -> Result<(), String> {
     let relative = Path::new(path);
-    if relative.is_absolute()
-        || relative
-            .components()
-            .any(|part| matches!(part, std::path::Component::ParentDir))
+    if !relative
+        .components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)))
     {
         return Err(format!("refusing effect outside the workspace: {path}"));
     }

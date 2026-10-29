@@ -211,6 +211,9 @@ pub enum TapeRecordKind {
     CacheLookup {
         namespace: String,
         key: String,
+        /// Model calls the run had made before this lookup; a branch serves
+        /// the lookup only at the same point.
+        after_calls: u64,
         /// The cached value on a hit; absent on a miss.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         value: Option<TapePayload>,
@@ -232,6 +235,10 @@ pub enum TapeRecordKind {
         call_id: String,
         tool: String,
         args_digest: String,
+        /// Model calls the run had made when this dispatch began. Ids alone
+        /// cannot place a call: text-format calls carry none and providers
+        /// reuse generated ones.
+        after_calls: u64,
         outcome: TapePayload,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         effects: Vec<FileEffect>,

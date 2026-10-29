@@ -48,6 +48,11 @@ pub(crate) async fn vm_call_completion_full(
 ) -> Result<LlmResult, VmError> {
     crate::llm::admission::check_auxiliary(opts.budget.as_ref(), "fill-in-the-middle completion")?;
     let request = completion_fixture_request(opts, prefix, suffix);
+    if let Some(served) = crate::run_tape::serve_llm_call(&request) {
+        let result = served?;
+        crate::llm::mock::record_cli_llm_result(&request, &result);
+        return Ok(result);
+    }
     if crate::llm::providers::MockProvider::fixture_active(request.cli_llm_mock_scope) {
         request.emit_reminder_lifecycle();
         let result = crate::llm::mock::mock_llm_response(&request)?;

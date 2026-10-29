@@ -54,7 +54,7 @@ use render::{render_nodes, RenderCtx, Scope};
 
 // Thread-local registry of recent prompt renders keyed by `prompt_id`.
 // Every asset render lands here so the DAP adapter can serve
-// `burin/promptProvenance` and `burin/promptConsumers` reverse queries.
+// its prompt provenance and prompt consumer reverse queries.
 // Capped at 64 renders (FIFO) to bound memory; the run tape keeps the
 // durable record.
 thread_local! {
@@ -174,8 +174,8 @@ pub fn lookup_prompt_consumers(
 }
 
 /// The model calls (1-based run-tape call indices) whose request contained
-/// `prompt_id`'s rendered text. Feeds `eventIndices` in the DAP
-/// `burin/promptConsumers` response; empty when no run tape is recording.
+/// `prompt_id`'s rendered text. Feeds `eventIndices` in the DAP prompt
+/// consumer response; empty when no run tape is recording.
 pub fn prompt_render_indices(prompt_id: &str) -> Vec<u64> {
     let render_id = PROMPT_REGISTRY.with(|reg| {
         reg.borrow()

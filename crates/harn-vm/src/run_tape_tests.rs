@@ -274,3 +274,77 @@ fn a_branch_reads_the_recorded_runtime_store_value_not_the_live_one() {
     .unwrap();
     assert_eq!(store_get(&store, "memo").unwrap().display(), "recorded");
 }
+
+#[test]
+fn a_prefix_tool_call_with_a_fresh_id_is_served_by_tool_and_arguments() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let tape_dir = tmp.path().join("tape");
+    record_run(&tape_dir, &tmp.path().join("ws"));
+    let _branch = start_branch(BranchPlan {
+        tape: EventTape::load(&tape_dir.join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: tmp.path().join("branch"),
+    })
+    .unwrap();
+    serve_llm_call(&request("first")).unwrap().unwrap();
+    // A text-format parse names the same call `tc_7`; it must not run live.
+    let args = serde_json::json!({"path": "src/t1.txt"});
+    assert!(matches!(
+        serve_tool_call("tc_7", "write", &args),
+        ToolServe::Served(_)
+    ));
+    // A second identical call has no recording left to serve and diverges.
+    assert!(matches!(
+        serve_tool_call("tc_8", "write", &args),
+        ToolServe::Diverged(_)
+    ));
+}
+
+#[test]
+fn a_reused_tool_call_id_after_the_branch_goes_live_runs_live() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let tape_dir = tmp.path().join("tape");
+    record_run(&tape_dir, &tmp.path().join("ws"));
+    let _branch = start_branch(BranchPlan {
+        tape: EventTape::load(&tape_dir.join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: tmp.path().join("branch"),
+    })
+    .unwrap();
+    serve_llm_call(&request("first")).unwrap().unwrap();
+    assert!(serve_llm_call(&request("live")).is_none());
+    // The live response reuses `t1`; the recorded outcome must not answer it.
+    let args = serde_json::json!({"path": "src/t1.txt"});
+    assert!(matches!(
+        serve_tool_call("t1", "write", &args),
+        ToolServe::Live
+    ));
+}
+
+#[test]
+fn a_prefix_cache_read_is_served_only_where_the_recording_made_it() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    {
+        let _guard = start_recording(tmp.path(), RecordingLevel::Full, None)
+            .unwrap()
+            .unwrap();
+        cache_lookup("intent", "k", || Ok(Some(serde_json::json!("v1")))).unwrap();
+        record_llm_call(&request("one"), &result("a", None));
+        record_llm_call(&request("two"), &result("b", None));
+        cache_lookup("intent", "k", || Ok(Some(serde_json::json!("v2")))).unwrap();
+    }
+    let _branch = start_branch(BranchPlan {
+        tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 2,
+        workspace_root: tmp.path().to_path_buf(),
+    })
+    .unwrap();
+    let read = || cache_lookup("intent", "k", || Ok(None)).unwrap();
+    assert_eq!(read(), Some(serde_json::json!("v1")));
+    serve_llm_call(&request("one")).unwrap().unwrap();
+    // The recording read `k` again only after call 2, so a read here is new.
+    assert!(cache_lookup("intent", "k", || Ok(None)).is_err());
+}

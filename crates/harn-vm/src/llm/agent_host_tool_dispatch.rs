@@ -107,10 +107,21 @@ pub(super) fn pin_scoped_tool_dispatch<'a>(
     Box::pin(crate::orchestration::scope_agent_session(
         session_id,
         crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async move {
+            // Recording starts before serving, so a branch's own tape keeps
+            // the calls it served and the effects it re-applied.
+            let recording = crate::run_tape::begin_tool_call(&tool_id);
             let serve =
                 crate::run_tape::serve_tool_call(&tool_id, request.tool_name, request.tool_args);
             let reexecuted = match serve {
                 crate::run_tape::ToolServe::Served(recorded) => {
+                    if let Some(recording) = recording {
+                        crate::run_tape::finish_tool_call(
+                            recording,
+                            request.tool_name,
+                            request.tool_args,
+                            Ok(recorded.clone()),
+                        );
+                    }
                     return outcome_from_recorded(recorded);
                 }
                 crate::run_tape::ToolServe::Diverged(error) => {
@@ -120,10 +131,9 @@ pub(super) fn pin_scoped_tool_dispatch<'a>(
                         handler_outcome: None,
                     };
                 }
-                crate::run_tape::ToolServe::Reexecute => true,
-                crate::run_tape::ToolServe::Live => false,
+                crate::run_tape::ToolServe::Reexecute(reexecuted) => Some(reexecuted),
+                crate::run_tape::ToolServe::Live => None,
             };
-            let recording = crate::run_tape::begin_tool_call(&tool_id);
             let outcome = super::agent_tool_preparation::scope(
                 request.prepared_invocation,
                 agent_tools::dispatch_tool_execution_with_mcp(
@@ -138,10 +148,10 @@ pub(super) fn pin_scoped_tool_dispatch<'a>(
                 ),
             )
             .await;
-            if recording.is_some() || reexecuted {
+            if recording.is_some() || reexecuted.is_some() {
                 let recorded = recorded_from_outcome(&outcome);
-                if reexecuted {
-                    crate::run_tape::check_reexecuted_tool_call(&tool_id, &recorded);
+                if let Some(reexecuted) = &reexecuted {
+                    crate::run_tape::check_reexecuted_tool_call(reexecuted, &tool_id, &recorded);
                 }
                 if let Some(recording) = recording {
                     crate::run_tape::finish_tool_call(
@@ -174,6 +184,12 @@ fn recorded_from_outcome(
         },
         Err(VmError::Thrown(VmValue::String(message))) => RecordedToolResult::Thrown {
             message: message.to_string(),
+        },
+        Err(VmError::Thrown(value)) => RecordedToolResult::ThrownValue {
+            value: crate::llm::helpers::vm_value_to_json(value),
+        },
+        Err(VmError::Runtime(message)) => RecordedToolResult::Runtime {
+            message: message.clone(),
         },
         Err(other) => return Err(format!("tool error has no recorded shape: {other}")),
     };
@@ -213,6 +229,10 @@ fn outcome_from_recorded(
         RecordedToolResult::Thrown { message } => {
             Err(VmError::Thrown(VmValue::String(message.into())))
         }
+        RecordedToolResult::ThrownValue { value } => {
+            Err(VmError::Thrown(crate::schema::json_to_vm_value(&value)))
+        }
+        RecordedToolResult::Runtime { message } => Err(VmError::Runtime(message)),
     };
     agent_tools::ToolDispatchOutcome {
         result,
