@@ -155,7 +155,8 @@ fn read_package(
         if source.len() as u64 > super::walker::MAX_FILE_BYTES {
             return Err("a Go package source cannot be safely inspected".into());
         }
-        sources.push((relative.to_string(), source));
+        // Callers name the seed with `/`; Windows `strip_prefix` yields `\`.
+        sources.push((relative.replace('\\', "/"), source));
     }
     Ok(sources)
 }
