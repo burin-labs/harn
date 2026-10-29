@@ -39,6 +39,8 @@ mod journal_cleanup;
 #[cfg(unix)]
 use journal_cleanup::OwnerJournalCleanup;
 #[cfg(unix)]
+mod output_relay;
+#[cfg(unix)]
 mod owner_pipe;
 #[cfg(unix)]
 pub(crate) use completion_receipt::ReceiptReader;
@@ -749,14 +751,14 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     if let Some(mut stdout) = stdout {
         let event_tx = event_tx.clone();
         harn_parser::runtime_stack::spawn(move || {
-            let _ = io::copy(&mut stdout, &mut io::stdout());
+            let _ = output_relay::copy(&mut stdout, io::stdout());
             let _ = event_tx.send(GuardianEvent::OutputClosed);
         });
     }
     if let Some(mut stderr) = stderr {
         let event_tx = event_tx.clone();
         harn_parser::runtime_stack::spawn(move || {
-            let _ = io::copy(&mut stderr, &mut io::stderr());
+            let _ = output_relay::copy(&mut stderr, io::stderr());
             let _ = event_tx.send(GuardianEvent::OutputClosed);
         });
     }

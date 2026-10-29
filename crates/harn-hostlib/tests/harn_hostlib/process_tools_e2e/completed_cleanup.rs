@@ -46,6 +46,10 @@ os.close(w)
 assert os.read(r, 1) == b'R'
 os.close(r)
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
+sys.stdout.write('before')
+sys.stdout.flush()
+sys.stderr.write('warning')
+sys.stderr.flush()
 with open(sys.argv[1], 'w') as ready:
     ready.write(str(pid) + '\n')
     ready.flush()
@@ -107,6 +111,8 @@ while True: signal.pause()
         if deadline { "timed_out" } else { "killed" }
     );
     assert_eq!(require_bool(&terminal, "timed_out"), deadline);
+    assert_eq!(require_str(&terminal, "stdout"), "before");
+    assert_eq!(require_str(&terminal, "stderr"), "warning");
     let cleanup = require_nested_dict(&terminal, "process_cleanup");
     assert!(require_bool(&cleanup, "guardian_custody_complete"));
     assert_eq!(require_int(&cleanup, "survivor_count"), 0);
