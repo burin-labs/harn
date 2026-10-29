@@ -37,8 +37,13 @@ fn try_append_llm_transcript_entry_to_dir(entry: &serde_json::Value, dir: Option
         // event log there is nothing for this result to vouch for.
         return event_log_persisted && crate::event_log::active_event_log().is_some();
     };
-    let _ = std::fs::create_dir_all(dir);
-    let path = format!("{dir}/llm_transcript.jsonl");
+    let path = crate::run_tape::branch_path(
+        std::path::PathBuf::from(dir).join("llm_transcript.jsonl"),
+        "LLM transcript",
+    );
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     let Ok(line) = serde_json::to_string(&redacted) else {
         return false;
     };

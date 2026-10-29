@@ -62,6 +62,23 @@ where
     handle.spawn(scope_inline_subtask(future))
 }
 
+/// Run lifecycle cleanup on its own runtime inside the spawner's branch, if
+/// any, so a branch run's terminal persistence lands in the branch. Cleanup
+/// carries its session runtimes itself; outside a branch this adds nothing to
+/// the run-end path.
+pub(crate) fn spawn_lifecycle_cleanup<F>(future: F) -> JoinHandle<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    match crate::run_tape::current_branch() {
+        Some(branch) => crate::vm::subtask::spawn_lifecycle_cleanup(
+            crate::persistent_state::run_in_branch(branch, future),
+        ),
+        None => crate::vm::subtask::spawn_lifecycle_cleanup(future),
+    }
+}
+
 /// Run `f` on the blocking pool with the spawner's ambient scope.
 pub(crate) fn spawn_blocking<F, R>(f: F) -> JoinHandle<R>
 where

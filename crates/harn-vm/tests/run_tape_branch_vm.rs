@@ -4,6 +4,7 @@
 //! state root, never the recording's.
 // The scripts shell out to `touch`.
 #![cfg(unix)]
+#![allow(clippy::disallowed_methods)]
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -39,12 +40,36 @@ fn quote(value: &Path) -> String {
 /// Every run is pointed at the recording's session store, as a host reusing
 /// its configuration would be; a branch must keep out of it on its own.
 fn run(source: &str, workspace: &Path) -> Result<String, String> {
+    name_session_store(workspace);
     run_in(source, workspace, None)
+}
+
+/// Start a run rooted at `root`: its cwd, and a write jail with no OS
+/// confinement. These tests replay process runs rather than confine them,
+/// and hosted macOS runners refuse sandbox-exec (SIP allows unrestricted
+/// DTrace), so the default profile would reject every recorded exec there.
+fn enter_run(root: &Path) {
+    harn_vm::stdlib::process::set_thread_execution_context(Some(
+        harn_vm::orchestration::RunExecutionRecord {
+            cwd: Some(root.display().to_string()),
+            project_root: Some(root.display().to_string()),
+            ..Default::default()
+        },
+    ));
+    harn_vm::orchestration::push_execution_policy(harn_vm::orchestration::CapabilityPolicy {
+        workspace_roots: vec![root.display().to_string()],
+        sandbox_profile: harn_vm::orchestration::SandboxProfile::WorkspacePaths,
+        ..Default::default()
+    });
+}
+
+fn leave_run() {
+    harn_vm::orchestration::pop_execution_policy();
+    harn_vm::stdlib::process::set_thread_execution_context(None);
 }
 
 /// Run `source` inside `branch`, when there is one.
 fn run_in(source: &str, workspace: &Path, branch: Option<BranchScope>) -> Result<String, String> {
-    name_session_store(workspace);
     let source = source.to_string();
     let workspace = workspace.to_path_buf();
     harn_vm::on_vm_stack(move || {
@@ -58,13 +83,7 @@ fn run_in(source: &str, workspace: &Path, branch: Option<BranchScope>) -> Result
             // The run's write jail is the temp root holding the workspace and
             // the markers, not the test binary's cwd.
             let root = workspace.parent().expect("workspace has a parent");
-            harn_vm::stdlib::process::set_thread_execution_context(Some(
-                harn_vm::orchestration::RunExecutionRecord {
-                    cwd: Some(root.display().to_string()),
-                    project_root: Some(root.display().to_string()),
-                    ..Default::default()
-                },
-            ));
+            enter_run(root);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_store_builtins(&mut vm, &workspace);
@@ -72,7 +91,7 @@ fn run_in(source: &str, workspace: &Path, branch: Option<BranchScope>) -> Result
                 .execute(&chunk)
                 .await
                 .map_err(|error: VmError| format!("{error:?}"));
-            harn_vm::stdlib::process::set_thread_execution_context(None);
+            leave_run();
             result?;
             Ok(vm.output().to_string())
         };
@@ -855,13 +874,7 @@ fn state_built_before_the_branch_is_armed_stays_out_of_the_recording() {
             .unwrap();
         rt.block_on(harn_clock::test_support::with_local_tasks(async move {
             let root = workspace.parent().unwrap();
-            harn_vm::stdlib::process::set_thread_execution_context(Some(
-                harn_vm::orchestration::RunExecutionRecord {
-                    cwd: Some(root.display().to_string()),
-                    project_root: Some(root.display().to_string()),
-                    ..Default::default()
-                },
-            ));
+            enter_run(root);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_persistent_state_builtins_at_root(
@@ -881,7 +894,7 @@ fn state_built_before_the_branch_is_armed_stays_out_of_the_recording() {
                 .map(|_| vm.output().to_string())
                 .map_err(|error| format!("{error:?}"));
             harn_vm::event_log::reset_active_event_log();
-            harn_vm::stdlib::process::set_thread_execution_context(None);
+            leave_run();
             assert_eq!(
                 log_heads(&log).await,
                 heads,
@@ -968,13 +981,7 @@ pipeline main(harness: Harness, task: unknown) {{
             .unwrap();
         rt.block_on(harn_clock::test_support::with_local_tasks(async move {
             let root = workspace.parent().unwrap();
-            harn_vm::stdlib::process::set_thread_execution_context(Some(
-                harn_vm::orchestration::RunExecutionRecord {
-                    cwd: Some(root.display().to_string()),
-                    project_root: Some(root.display().to_string()),
-                    ..Default::default()
-                },
-            ));
+            enter_run(root);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_store_builtins(&mut vm, &workspace);
@@ -985,7 +992,7 @@ pipeline main(harness: Harness, task: unknown) {{
                 Box::pin(scope.run(vm.execute(&chunk))),
                 Box::pin(other_vm.execute(&other_chunk))
             );
-            harn_vm::stdlib::process::set_thread_execution_context(None);
+            leave_run();
             (
                 branched.map(|_| ()).map_err(|error| format!("{error:?}")),
                 other_run.map(|_| ()).map_err(|error| format!("{error:?}")),
@@ -1120,36 +1127,228 @@ fn a_parallel_race_task_in_the_prefix_belongs_to_the_branch() {
     assert_spawned_task_stays_in_the_branch(&spawned_script(&setup), &marker);
 }
 
+/// A supervisor child started in the branch's live tail writes the branch's
+/// store, not the recording's: the child task carries the branch scope.
 #[test]
-fn a_supervisor_child_in_the_prefix_belongs_to_the_branch() {
+fn a_supervisor_child_in_the_live_tail_writes_the_branch_store() {
     let _serial = SERIAL
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let marker = tempfile::tempdir()
-        .unwrap()
-        .keep()
-        .join("supervisor-marker");
-    let setup = format!(
-        r#"const done = harness.runtime.channel("child-done-" + id, 1)
-  const sup = harness.runtime.supervisor_start({{
+    let dirs = dirs();
+    // Two LLM calls come first; at K=1 the second goes live, so the
+    // supervisor starts in the live tail.
+    let source = r#"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness, task: unknown) {
+  const id = harness.random.uuid()
+  const result = with_llm_script(
+    harness.llm,
+    [llm_text("<user_response>Done.</user_response><done>##DONE##</done>")],
+    { ->
+      return agent_loop(
+        harness,
+        "finish run " + id,
+        nil,
+        {provider: "mock", max_iterations: 1, loop_until_done: true, session_id: "branch-" + id},
+      )
+    },
+  )
+  // At K=1 this second call is the first live one.
+  with_llm_script(
+    harness.llm,
+    [llm_text("<user_response>Again.</user_response><done>##DONE##</done>")],
+    { ->
+      return agent_loop(
+        harness,
+        "again " + id,
+        nil,
+        {provider: "mock", max_iterations: 1, loop_until_done: true, session_id: "again-" + id},
+      )
+    },
+  )
+  const done = harness.runtime.channel("child-done-" + id, 1)
+  const sup = harness.runtime.supervisor_start({
     name: "branch-sup",
     strategy: "one_for_one",
-    children: [{{
-      name: "toucher",
+    children: [{
+      name: "writer",
       restart: "never",
-      task: {{ _ctx ->
-        try {{
-          harness.process.run({{program: "touch", args: [{marker}]}})
-          harness.runtime.store_set("child_key", "ran")
-        }}
+      task: { _ctx ->
+        harness.runtime.store_set("child_key", harness.random.uuid())
         harness.runtime.send(done, "done")
         "done"
-      }},
-    }}],
-  }})
-  deadline 5s {{ harness.runtime.receive(done) }}
-  harness.runtime.supervisor_stop(sup, 2s)"#,
+      },
+    }],
+  })
+  deadline 5s { harness.runtime.receive(done) }
+  harness.runtime.supervisor_stop(sup, 2s)
+  harness.stdio.log(result.status)
+}
+"#
+    .to_string();
+    let recorded = record(&source, &dirs.tapes, &dirs.workspace);
+    assert!(
+        recorded.contains("[harn] done"),
+        "recorded output: {recorded}"
+    );
+    let store_path = harn_vm::runtime_paths::store_path(&dirs.workspace);
+    let recorded_store = std::fs::read_to_string(&store_path).unwrap();
+    let recorded_child: serde_json::Value = serde_json::from_str(&recorded_store).unwrap();
+
+    let Branched {
+        output,
+        report,
+        state,
+    } = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+    let output = output.expect("the live branch succeeds");
+    assert!(output.contains("[harn] done"), "branch output: {output}");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    let branch_store = store_at(&state);
+    assert!(
+        branch_store["child_key"].is_string(),
+        "the child's write reached the branch store: {branch_store}"
+    );
+    assert_ne!(
+        branch_store["child_key"], recorded_child["child_key"],
+        "the live child wrote its own run's id: {branch_store}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&store_path).unwrap(),
+        recorded_store,
+        "the supervisor child wrote the recording's store"
+    );
+}
+
+/// A host that names its session store only after the branch starts, such as
+/// a fresh home per run, still gets that store inside the branch.
+#[test]
+fn a_session_store_named_after_the_branch_starts_lands_in_the_branch() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let hook_marker = dirs.markers.join("hook-marker");
+    let exec_marker = dirs.markers.join("exec-marker");
+    let source = mark_script(&hook_marker, &exec_marker);
+    record(&source, &dirs.tapes, &dirs.workspace);
+    remove_marker(&hook_marker, &dirs.tapes);
+    remove_marker(&exec_marker, &dirs.tapes);
+
+    let state = dirs.workspace.parent().unwrap().join("late-branch-state");
+    let late_home = dirs.workspace.parent().unwrap().join("late-home");
+    name_session_store(&dirs.workspace);
+    let guard = start_branch(BranchPlan {
+        tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: dirs.workspace.clone(),
+        state_root: state.clone(),
+    })
+    .unwrap();
+    // SAFETY: tests here hold SERIAL, so no other thread reads the env.
+    unsafe { std::env::set_var("HARN_SESSION_STORE_ROOT", &late_home) };
+    let output = run_in(&source, &dirs.workspace, Some(guard.scope()));
+    let report = guard.finish();
+    output.expect("the branched run succeeds");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert!(
+        !late_home.exists(),
+        "the branch wrote the late-named session store in place"
+    );
+    assert!(
+        tree_bytes(&state)
+            .keys()
+            .any(|path| path.to_string_lossy().contains("session-store")),
+        "the session store landed in the branch: {:?}",
+        tree_bytes(&state).keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn the_llm_transcript_inside_the_recording_lands_in_the_branch() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let hook_marker = dirs.markers.join("hook-marker");
+    let exec_marker = dirs.markers.join("exec-marker");
+    let source = mark_script(&hook_marker, &exec_marker);
+    let transcripts = dirs.workspace.join("transcripts");
+    let recorded = transcripts.join("llm_transcript.jsonl");
+    // SAFETY: tests here hold SERIAL, so no other thread reads the env.
+    unsafe { std::env::set_var("HARN_LLM_TRANSCRIPT_DIR", &transcripts) };
+    record(&source, &dirs.tapes, &dirs.workspace);
+    let before = std::fs::read(&recorded).expect("the recording wrote its transcript");
+    remove_marker(&hook_marker, &dirs.tapes);
+    remove_marker(&exec_marker, &dirs.tapes);
+    let branched = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+    unsafe { std::env::remove_var("HARN_LLM_TRANSCRIPT_DIR") };
+    branched.output.expect("the branched run succeeds");
+    let report = branched.report;
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(
+        std::fs::read(&recorded).unwrap(),
+        before,
+        "the branch appended to the recording's transcript"
+    );
+    assert!(
+        tree_bytes(&branched.state)
+            .keys()
+            .any(|path| path.ends_with("llm_transcript.jsonl")),
+        "the transcript landed in the branch"
+    );
+}
+
+/// A generator body runs as its own task; in the prefix it belongs to the
+/// branch like any spawned task.
+#[test]
+fn a_generator_body_in_the_prefix_belongs_to_the_branch() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let marker = tempfile::tempdir().unwrap().keep().join("gen-marker");
+    let setup = format!(
+        r#"fn toucher(h: Harness) {{
+    try {{
+      h.process.run({{program: "touch", args: [{marker}]}})
+      h.runtime.store_set("gen_key", "ran")
+    }}
+    yield 1
+  }}
+  for _v in toucher(harness) {{
+    harness.stdio.log("gen yielded")
+  }}"#,
         marker = quote(&marker),
     );
     assert_spawned_task_stays_in_the_branch(&spawned_script(&setup), &marker);
+}
+
+/// A pre-tool hook's reminder is a transcript injection inside the dispatch:
+/// a served call replays it, so the next request matches the recording.
+#[test]
+fn a_served_tool_call_replays_its_pre_hook_reminder() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let hook_marker = dirs.markers.join("hook-marker");
+    let exec_marker = dirs.markers.join("exec-marker");
+    let source = mark_script(&hook_marker, &exec_marker).replace(
+        "        return nil\n",
+        "        return {reminder: {body: \"pre tool reminder\", tags: [\"tool\"]}}\n",
+    );
+    assert!(source.contains("pre tool reminder"));
+    record(&source, &dirs.tapes, &dirs.workspace);
+    remove_marker(&hook_marker, &dirs.tapes);
+    remove_marker(&exec_marker, &dirs.tapes);
+
+    let Branched { output, report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 2);
+    output.expect("the branched run succeeds");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(report.served_tool_calls, 1, "report: {report:?}");
+    assert!(
+        !hook_marker.exists(),
+        "the branch re-ran the served tool's hook"
+    );
 }

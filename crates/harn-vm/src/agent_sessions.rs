@@ -1280,6 +1280,7 @@ pub(crate) fn inject_message_with_source(
                 .into(),
         );
     }
+    crate::run_tape::note_injected_message(id, &message);
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {

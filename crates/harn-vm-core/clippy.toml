@@ -1,0 +1,21 @@
+too-many-arguments-threshold = 8
+
+# A raw spawn drops the spawner's execution scope, branch replay included.
+# Threads go through runtime_stack, which the thread census enforces.
+disallowed-methods = [
+  { path = "tokio::task::spawn_local", reason = "use vm::subtask so the task keeps its execution scope" },
+  { path = "tokio::task::JoinSet::spawn_local", reason = "use vm::subtask::spawn_into" },
+  { path = "tokio::task::JoinSet::spawn_local_on", reason = "use vm::subtask::spawn_into" },
+  { path = "tokio::task::LocalSet::spawn_local", reason = "use vm::subtask so the task keeps its execution scope" },
+  { path = "tokio::task::spawn", reason = "use vm::subtask::spawn" },
+  { path = "tokio::spawn", reason = "use vm::subtask::spawn" },
+  { path = "tokio::task::JoinSet::spawn", reason = "use vm::subtask::spawn_into" },
+  { path = "tokio::task::JoinSet::spawn_on", reason = "use vm::subtask::spawn_into" },
+  { path = "tokio::task::JoinSet::spawn_blocking", reason = "no blocking job may drop the execution scope" },
+  { path = "tokio::task::JoinSet::spawn_blocking_on", reason = "no blocking job may drop the execution scope" },
+  { path = "tokio::runtime::Handle::spawn", reason = "use vm::subtask::spawn" },
+  { path = "tokio::runtime::Runtime::spawn", reason = "use vm::subtask::spawn" },
+  { path = "tokio::task::spawn_blocking", reason = "no blocking job may drop the execution scope" },
+  { path = "tokio::runtime::Handle::spawn_blocking", reason = "no blocking job may drop the execution scope" },
+  { path = "tokio::runtime::Runtime::spawn_blocking", reason = "no blocking job may drop the execution scope" },
+]

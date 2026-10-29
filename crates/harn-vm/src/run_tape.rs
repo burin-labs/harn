@@ -459,7 +459,8 @@ pub(crate) fn begin_tool_call(
 }
 
 tokio::task_local! {
-    /// Reminders injected while the innermost recorded tool dispatch runs.
+    /// Transcript injections made while the innermost recorded tool dispatch
+    /// runs.
     static DISPATCH_REMINDERS: Arc<Mutex<Vec<serde_json::Value>>>;
 }
 
@@ -486,37 +487,61 @@ pub(crate) async fn capture_tool_reminders<F: std::future::Future>(
     output
 }
 
-/// Note a reminder injected into `session_id`, for the recorded dispatch
-/// running now, if any.
-pub(crate) fn note_injected_reminder(
-    session_id: &str,
-    reminder: &crate::llm::helpers::SystemReminder,
-) {
+/// Note a transcript injection for the recorded dispatch running now, if
+/// any. The two session writers, reminders and messages, call this, so every
+/// hook, provider and host path that injects during a dispatch is taped.
+fn note_injection(entry: serde_json::Value) {
     let _ = DISPATCH_REMINDERS.try_with(|frame| {
-        frame
-            .lock()
-            .expect("reminder frame poisoned")
-            .push(serde_json::json!({
-                "session_id": session_id,
-                "reminder": reminder,
-            }));
+        frame.lock().expect("reminder frame poisoned").push(entry);
     });
 }
 
-/// Inject the reminders a served dispatch's recording injected, into the
-/// sessions that still exist, and return them for the branch's own tape.
+pub(crate) fn note_injected_reminder(
+    session_id: &str,
+    reminder: &crate::llm::helpers::SystemReminder,
+    retain_unchanged: bool,
+) {
+    note_injection(serde_json::json!({
+        "session_id": session_id,
+        "reminder": reminder,
+        "retain_unchanged": retain_unchanged,
+    }));
+}
+
+pub(crate) fn note_injected_message(session_id: &str, message: &crate::value::VmValue) {
+    note_injection(serde_json::json!({
+        "session_id": session_id,
+        "message": crate::llm::helpers::vm_value_to_json(message),
+    }));
+}
+
+/// Replay the transcript injections a served dispatch's recording made,
+/// through the same writers, into the sessions that still exist, and return
+/// them for the branch's own tape.
 fn reinject_reminders(reminders: Vec<serde_json::Value>) -> Result<Vec<serde_json::Value>, String> {
     for entry in &reminders {
         let session_id = entry
             .get("session_id")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
+        if !crate::agent_sessions::exists(session_id) {
+            continue;
+        }
+        if let Some(message) = entry.get("message") {
+            crate::agent_sessions::inject_message(
+                session_id,
+                crate::schema::json_to_vm_value(message),
+            )?;
+            continue;
+        }
         let reminder: crate::llm::helpers::SystemReminder =
             serde_json::from_value(entry.get("reminder").cloned().unwrap_or_default())
                 .map_err(|error| format!("recorded reminder: {error}"))?;
-        if crate::agent_sessions::exists(session_id) {
-            crate::agent_sessions::inject_provider_reminder(session_id, reminder)?;
-        }
+        let retain = entry
+            .get("retain_unchanged")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        crate::agent_sessions::inject_reminder_with_policy(session_id, reminder, retain)?;
     }
     Ok(reminders)
 }

@@ -254,9 +254,10 @@ pub enum TapeRecordKind {
         /// re-executes such a call and counts any difference as divergence.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unservable: Option<String>,
-        /// Reminders the dispatch injected, each `{session_id, reminder}`. A
-        /// served dispatch runs no post-tool providers, so the branch injects
-        /// these instead.
+        /// Transcript injections the dispatch made, in order: each
+        /// `{session_id, reminder, retain_unchanged}` or `{session_id,
+        /// message}`. A served dispatch runs no hooks or providers, so the
+        /// branch replays these instead.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         reminders: Vec<serde_json::Value>,
     },

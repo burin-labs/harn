@@ -88,11 +88,22 @@ impl BranchHandle {
         if path.starts_with(&self.state_root) {
             return Some(path);
         }
-        self.protected.iter().find_map(|(tree, mount)| {
+        if let Some(mapped) = self.protected.iter().find_map(|(tree, mount)| {
             path.strip_prefix(tree)
                 .ok()
                 .map(|rest| self.state_root.join(mount).join(rest))
-        })
+        }) {
+            return Some(mapped);
+        }
+        // The session store the host names now, which it may set only after
+        // the branch starts, such as a fresh home per run.
+        let named = crate::stdlib::process::read_env_value("HARN_SESSION_STORE_ROOT")
+            .filter(|root| !root.trim().is_empty())?;
+        let named = PathBuf::from(named);
+        let named = crate::workspace_path::canonicalize_existing_ancestor(&named).unwrap_or(named);
+        path.strip_prefix(&named)
+            .ok()
+            .map(|rest| self.state_root.join(rest))
     }
 
     /// The branch's own event log, opened on first use at its state root.
