@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   ship:
-    uses: burin-labs/.github/.github/workflows/smart-ship.yml@a51931d6ed24b8fb4f7fd22de00bbab4dae4ee7f
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@814be67752cc3b352df24344d56d2e90978b8abd
     with:
       # Off until replays show repairs land pull requests; authors fix their own PRs meanwhile.
       repair: false
