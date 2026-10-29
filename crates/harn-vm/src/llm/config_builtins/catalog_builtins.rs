@@ -37,7 +37,7 @@ pub(super) async fn probe_provider_capabilities_builtin(
 ) -> Result<VmValue, VmError> {
     let provider = args.first().map(|a| a.display()).unwrap_or_default();
     let model = args.get(1).map(|a| a.display()).unwrap_or_default();
-    crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await;
+    crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await?;
     provider_capabilities_value(&args)
 }
 

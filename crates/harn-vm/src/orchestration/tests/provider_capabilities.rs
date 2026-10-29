@@ -61,8 +61,12 @@ async fn live_template_measurement_overrides_a_stale_catalog_answer_once() {
         Some(declared),
         endpoints,
         async {
-            assert!(capabilities::ensure_runtime_probe(provider, &model).await);
-            assert!(!capabilities::ensure_runtime_probe(provider, &model).await);
+            assert!(capabilities::ensure_runtime_probe(provider, &model)
+                .await
+                .unwrap());
+            assert!(!capabilities::ensure_runtime_probe(provider, &model)
+                .await
+                .unwrap());
             assert_eq!(
                 hits.load(Ordering::SeqCst),
                 1,
@@ -103,7 +107,9 @@ async fn unsupported_probe_keeps_the_conservative_answer_and_records_why() {
     let endpoints = RuntimeProviderEndpointOverrides::single(provider, base_url)
         .expect("verified fixture endpoint");
     scope_llm_runtime_overrides_with_provider_endpoints(None, None, endpoints, async {
-        assert!(capabilities::ensure_runtime_probe(provider, &model).await);
+        assert!(capabilities::ensure_runtime_probe(provider, &model)
+            .await
+            .unwrap());
         let caps = capabilities::lookup(provider, &model);
         assert!(!caps.native_tools);
         let receipt = caps.runtime_probe.expect("unavailable probe receipt");

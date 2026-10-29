@@ -124,7 +124,7 @@ async fn prepare_llm_options_result(
         Ok(initial) => {
             let (provider, model) =
                 crate::llm::managed_supply::logical_route(&initial.provider, &initial.model)?;
-            if crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await {
+            if crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await? {
                 extract_llm_options(args)
             } else {
                 Ok(initial)
@@ -139,7 +139,7 @@ async fn prepare_llm_options_result(
             let provider = vm_resolve_provider(&options);
             let model = vm_resolve_model(&options, &provider)?;
             let (provider, model) = crate::llm::managed_supply::logical_route(&provider, &model)?;
-            if crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await {
+            if crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await? {
                 extract_llm_options(args)
             } else {
                 Err(initial_error)

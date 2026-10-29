@@ -49,6 +49,7 @@ fn verdict(owner: Owner<'_>, effects: &[EffectSpec]) -> Verdict {
             EffectKind::Clock | EffectKind::Env => {}
             EffectKind::Fs | EffectKind::Host | EffectKind::Secret | EffectKind::State if reads => {
             }
+            EffectKind::Network if reads && gates_own_network_reads(owner) => {}
             EffectKind::State
                 if branch_owns_state(owner) || process_local(effect) || session_entry(owner) => {}
             _ => return Verdict::Refuse(*effect),
@@ -70,6 +71,16 @@ fn branch_owns_state(owner: Owner<'_>) -> bool {
         Some((CapabilityId::Llm, method)) => matches!(method, "cache_put" | "cache_clear"),
         _ => false,
     }
+}
+
+/// Methods whose network read is conditional and refused at its own seam when
+/// it would happen: the capability probe reaches the network only for a
+/// self-hosted provider it has not measured yet.
+fn gates_own_network_reads(owner: Owner<'_>) -> bool {
+    matches!(
+        owner,
+        Some((CapabilityId::Llm, "probe_provider_capabilities"))
+    )
 }
 
 /// `harness.agent` methods whose state target, the session id argument, is one

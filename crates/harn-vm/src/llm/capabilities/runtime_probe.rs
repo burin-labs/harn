@@ -31,12 +31,25 @@ impl ProbeKind {
 /// are a cached, explicit result; they do not prevent the real model call.
 /// Returns true when this call installed a result that later capability
 /// lookups must observe. A cached result was already visible to the caller.
-pub(crate) async fn ensure_runtime_probe(provider: &str, model: &str) -> bool {
+/// A branch prefix refuses a probe that would reach the network: the tape
+/// does not hold its answer.
+pub(crate) async fn ensure_runtime_probe(
+    provider: &str,
+    model: &str,
+) -> Result<bool, crate::value::VmError> {
     let Some(kind) = ProbeKind::for_provider(provider) else {
-        return false;
+        return Ok(false);
     };
     let resolved = crate::llm::helpers::ResolvedProvider::resolve(provider);
-    ensure_runtime_probe_with(provider, model, kind, resolved).await
+    if crate::run_tape::prefix_active()
+        && cached_measurement_with(model, kind, &resolved.base_url).is_none()
+    {
+        crate::run_tape::refuse_in_prefix(
+            "self-hosted capability probe",
+            "it measures the runtime over the network",
+        )?;
+    }
+    Ok(ensure_runtime_probe_with(provider, model, kind, resolved).await)
 }
 
 async fn ensure_runtime_probe_with(
