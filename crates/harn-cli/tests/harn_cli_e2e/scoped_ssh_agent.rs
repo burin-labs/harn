@@ -55,7 +55,7 @@ fn git(repo: &Path, home: &Path, socket: &Path, args: &[&str]) -> Vec<u8> {
 }
 
 #[test]
-fn exact_agent_grant_signs_without_exposing_keys_or_other_sockets() {
+pub(crate) fn exact_agent_grant_signs_without_exposing_keys_or_other_sockets() {
     let temp = tempfile::Builder::new()
         .prefix("harnssh-")
         .tempdir_in("/tmp")

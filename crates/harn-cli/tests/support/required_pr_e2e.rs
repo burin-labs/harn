@@ -1,37 +1,59 @@
-pub(crate) const CASES: [&str; 32] = [
-    "scoped_ssh_agent::exact_agent_grant_signs_without_exposing_keys_or_other_sockets",
-    "provider_account_confirmation::gemini_confirmation_requires_billing_and_contributor_sharing_off",
-    "provider_account_confirmation::account_confirmation_is_not_exposed_to_scripts_or_child_processes",
-    "eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs",
-    "models_dispatch::batch_execution::rejoin_cli_quarantines_an_artifact_without_matching_receipts",
-    "models_dispatch::core::models_recommend_human_text_has_model_and_rationale",
-    "models_dispatch::lora_inspect_plan::models_lora_inspect_human_text_includes_launch_hint",
-    "providers_dispatch::provider_tool_scorecard_human_reports_catalog_mismatch_codes",
-    "time_cli::time_run_setup_error_does_not_claim_a_lazy_module_load",
-    "trace_import_dispatch::converts_generic_trace_jsonl_to_cli_fixture",
-    "predicate_contract::predicate_helper_manifest_survives_warm_cache_and_tracks_changed_question",
-    "predicate_contract::predicate_checker_refuses_boolean_use_after_imported_helper",
-    "predicate_contract::predicate_census_refuses_an_invalid_imported_site",
-    "predicate_contract::predicate_embedding_model_is_refused_at_check_time",
-    "predicate_contract::predicate_operation_admission_invalidates_cached_success",
-    "typed_tool_outcomes::agent_validates_payload_without_losing_the_explicit_outcome",
-    "typed_tool_outcomes::cli_and_mcp_project_validated_payload_and_canonical_feedback",
-    "typed_tool_outcomes::exported_mcp_resolves_typed_payload_schema_and_preserves_feedback",
-    // A confined server's own process and its commands, on macOS and Linux.
-    "acp_confinement_cli::confine_workspace_holds_the_server_and_its_commands_to_the_workspace",
-    "acp_confinement_cli::without_confine_workspace_the_same_write_lands_outside",
-    // macOS must exercise the release fixture's supported or typed-refusal path.
-    "process_smoke_cli::process_smoke_matches_the_hosts_measured_confinement",
-    "user_test_cli::process_egress::connector_http_get_uses_read_authority_and_preserves_retry",
-    // An import outside the confined roots reports the denied read.
-    "acp_confinement_cli::confined_import_outside_the_workspace_reports_the_denied_read",
-    "provider_admission_privacy::admission_requires_account_evidence_for_conditional_provider_terms",
-    "provider_admission_privacy::unknown_gemini_account_is_refused_before_transport",
-    "durable_spend_policy::strict_scope_refuses_a_new_process_after_unpriced_provider_usage",
-    "durable_spend_policy::agent_spend_guard_actor_unknown",
-    "durable_spend_policy::agent_spend_guard_actor_permissive",
-    "durable_spend_policy::agent_spend_guard_judge_unknown",
-    "durable_spend_policy::agent_spend_guard_judge_permissive",
-    "durable_spend_policy::agent_spend_guard_transcript_control",
-    "provider_account_confirmation::script_server_applies_confirmations_before_provider_transport",
-];
+// One inventory generates profile coverage names and checks real test functions.
+macro_rules! required_pr_e2e_cases {
+    ($consumer:ident) => {
+        $consumer! {
+            #[cfg(target_os = "macos")]
+            scoped_ssh_agent::exact_agent_grant_signs_without_exposing_keys_or_other_sockets,
+            provider_account_confirmation::gemini_confirmation_requires_billing_and_contributor_sharing_off,
+            #[cfg(unix)]
+            provider_account_confirmation::account_confirmation_is_not_exposed_to_scripts_or_child_processes,
+            eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs,
+            models_dispatch::batch_execution::rejoin_cli_quarantines_an_artifact_without_matching_receipts,
+            models_dispatch::core::models_recommend_human_text_has_model_and_rationale,
+            models_dispatch::lora_inspect_plan::models_lora_inspect_human_text_includes_launch_hint,
+            providers_dispatch::provider_tool_scorecard_human_reports_catalog_mismatch_codes,
+            time_cli::time_run_setup_error_does_not_claim_a_lazy_module_load,
+            trace_import_dispatch::converts_generic_trace_jsonl_to_cli_fixture,
+            predicate_contract::predicate_helper_manifest_survives_warm_cache_and_tracks_changed_question,
+            predicate_contract::predicate_checker_refuses_boolean_use_after_imported_helper,
+            predicate_contract::predicate_census_refuses_an_invalid_imported_site,
+            predicate_contract::predicate_embedding_model_is_refused_at_check_time,
+            predicate_contract::predicate_operation_admission_invalidates_cached_success,
+            typed_tool_outcomes::agent_validates_payload_without_losing_the_explicit_outcome,
+            typed_tool_outcomes::cli_and_mcp_project_validated_payload_and_canonical_feedback,
+            typed_tool_outcomes::exported_mcp_resolves_typed_payload_schema_and_preserves_feedback,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            acp_confinement_cli::confine_workspace_holds_the_server_and_its_commands_to_the_workspace,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            acp_confinement_cli::without_confine_workspace_the_same_write_lands_outside,
+            #[cfg(target_os = "macos")]
+            process_smoke_cli::process_smoke_matches_the_hosts_measured_confinement,
+            user_test_cli::process_egress::connector_http_get_uses_read_authority_and_preserves_retry,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            acp_confinement_cli::confined_import_outside_the_workspace_reports_the_denied_read,
+            provider_admission_privacy::admission_requires_account_evidence_for_conditional_provider_terms,
+            provider_admission_privacy::unknown_gemini_account_is_refused_before_transport,
+            durable_spend_policy::strict_scope_refuses_a_new_process_after_unpriced_provider_usage,
+            durable_spend_policy::agent_spend_guard_actor_unknown,
+            durable_spend_policy::agent_spend_guard_actor_permissive,
+            durable_spend_policy::agent_spend_guard_judge_unknown,
+            durable_spend_policy::agent_spend_guard_judge_permissive,
+            durable_spend_policy::agent_spend_guard_transcript_control,
+            provider_account_confirmation::script_server_applies_confirmations_before_provider_transport,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            acp_confinement_cli::additional_directories_grant_real_writes_and_omission_revokes_after_reload,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            acp_confinement_cli::additional_directories_refuse_process_escape_without_replacing_the_prior_grant,
+        }
+    };
+}
+
+pub(crate) use required_pr_e2e_cases;
+
+macro_rules! case_names {
+    ($($(#[$attribute:meta])* $case:path,)*) => {
+        pub(crate) const CASES: &[&str] = &[$(stringify!($case)),*];
+    };
+}
+
+self::required_pr_e2e_cases!(case_names);

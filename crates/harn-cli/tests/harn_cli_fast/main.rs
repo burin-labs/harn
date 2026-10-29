@@ -53,7 +53,7 @@ fn required_pr_e2e_inventory_is_selected_by_every_pr_profile() {
         .expect("nextest configuration must parse");
     assert_eq!(
         required_pr_e2e::CASES.len(),
-        32,
+        34,
         "required PR E2E inventory must remain explicit",
     );
 
@@ -67,11 +67,24 @@ fn required_pr_e2e_inventory_is_selected_by_every_pr_profile() {
             filter.contains("binary(harn_cli_e2e)"),
             "{profile} must select required cases from harn_cli_e2e",
         );
+        let (_, predicate) = filter
+            .split_once("test(/")
+            .expect("required E2E selection must contain a regex predicate");
+        let (pattern, remainder) = predicate
+            .split_once("/)")
+            .expect("required E2E regex predicate must be closed");
+        assert!(
+            !remainder.contains("test(/"),
+            "coverage guard requires one E2E test regex predicate",
+        );
+        let selection = regex::Regex::new(pattern).expect("E2E selection regex must compile");
+        assert!(!selection.is_match("unrelated_module::unselected_case"));
+        let mut names = std::collections::HashSet::new();
         for name in required_pr_e2e::CASES {
-            assert_eq!(
-                filter.matches(name).count(),
-                1,
-                "{name} must be selected exactly once by the {profile} profile",
+            assert!(names.insert(name), "duplicate required case: {name}");
+            assert!(
+                selection.is_match(name),
+                "{name} must be selected by the {profile} profile",
             );
         }
     }
