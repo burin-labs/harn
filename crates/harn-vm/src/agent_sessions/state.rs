@@ -6,6 +6,7 @@ impl SessionState {
         let transcript = empty_transcript(&id);
         Self {
             admission_role: SessionAdmissionRole::Admitted,
+            retention: Arc::new(()),
             id,
             transcript,
             subscribers: Vec::new(),
@@ -46,6 +47,10 @@ impl SessionState {
 
     pub(super) fn touch(&mut self) {
         self.last_accessed = Instant::now();
+    }
+
+    pub(super) fn is_evictable(&self) -> bool {
+        self.transcript_journal.is_none() && Arc::strong_count(&self.retention) == 1
     }
 
     pub(crate) fn replace_transcript(&mut self, transcript: VmValue) -> Result<(), String> {

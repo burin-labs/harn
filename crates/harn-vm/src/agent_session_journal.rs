@@ -6,8 +6,8 @@
 //! observability-only: a filtered or failed sink can never alter durability.
 
 use harn_session_store::{
-    AppendEvent, EventIdentity, EventIdentityField, SessionEventKind, SessionType,
-    SessionWriteLease,
+    AppendEvent, EventIdentity, EventIdentityField, SessionEventKind, SessionStore, SessionType,
+    SessionWriteLease, UpdateSession,
 };
 
 use crate::agent_sessions::session_event::{
@@ -65,6 +65,7 @@ pub(crate) struct JournalState {
     /// `parallel settle`) would each append the same head.
     flush_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     state_dir: session_store::SessionStoreDir,
+    persisted_directories: Vec<String>,
     _writer_lease: SessionWriteLease,
 }
 
@@ -102,6 +103,14 @@ impl JournalState {
 
     pub(crate) fn state_dir(&self) -> &session_store::SessionStoreDir {
         &self.state_dir
+    }
+
+    pub(crate) fn persisted_directories(&self) -> &[String] {
+        &self.persisted_directories
+    }
+
+    pub(crate) fn record_persisted_directories(&mut self, directories: Vec<String>) {
+        self.persisted_directories = directories;
     }
 
     pub(crate) fn first_event_id(&self) -> Option<u64> {
@@ -376,6 +385,11 @@ async fn open_journal(
         session_type,
     )
     .await?;
+    let persisted_directories = store
+        .describe(session_id)
+        .await
+        .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?
+        .additional_directories;
     let JournalConfigIdentity {
         run_id,
         turn_id,
@@ -398,6 +412,7 @@ async fn open_journal(
         lifecycle_reservation: None,
         flush_lock: std::sync::Arc::default(),
         state_dir,
+        persisted_directories,
         _writer_lease: writer_lease,
     })
 }
@@ -499,15 +514,27 @@ pub(crate) async fn flush(session_id: &str) -> Result<(), VmError> {
     let Some((store, events)) = crate::agent_sessions::pending_journal_events(session_id)? else {
         return Ok(());
     };
-    if events.is_empty() {
-        return Ok(());
+    if !events.is_empty() {
+        let stored = store
+            .append_batch(session_id, events)
+            .await
+            .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?;
+        let event_ids: Vec<u64> = stored.iter().map(|event| event.event_id).collect();
+        crate::agent_sessions::record_persisted_journal_events(session_id, &event_ids);
     }
-    let stored = store
-        .append_batch(session_id, events)
-        .await
-        .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?;
-    let event_ids: Vec<u64> = stored.iter().map(|event| event.event_id).collect();
-    crate::agent_sessions::record_persisted_journal_events(session_id, &event_ids);
+    if let Some(directories) = crate::agent_sessions::pending_workspace_directories(session_id)? {
+        store
+            .update(
+                session_id,
+                UpdateSession {
+                    additional_directories: Some(directories.clone()),
+                    ..UpdateSession::default()
+                },
+            )
+            .await
+            .map_err(|error| VmError::Runtime(format!("workspace root metadata: {error}")))?;
+        crate::agent_sessions::record_persisted_workspace_directories(session_id, directories);
+    }
     Ok(())
 }
 

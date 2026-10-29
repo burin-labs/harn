@@ -693,11 +693,12 @@ impl AcpServer {
                     return;
                 }
             };
-            let new_session_id =
-                harn_vm::agent_sessions::fork_canonical(&store, root, &src_id, boundary, dst_id)
-                    .await;
-            let (new_session_id, source_boundary) = match new_session_id {
-                Ok(Some(fork)) => (fork.session_id, fork.source_boundary),
+            let new_session_id = harn_vm::agent_sessions::fork_canonical_retained(
+                &store, root, &src_id, boundary, dst_id,
+            )
+            .await;
+            let (new_session_id, source_boundary, retention) = match new_session_id {
+                Ok(Some((fork, retention))) => (fork.session_id, fork.source_boundary, retention),
                 Ok(None) => {
                     self.send_error(id, -32000, &format!("Failed to fork session: {src_id}"));
                     return;
@@ -765,6 +766,7 @@ impl AcpServer {
             self.sessions.insert(
                 new_session_id.clone(),
                 Session {
+                    _retention: retention,
                     cwd: fork_cwd,
                     project_root,
                     store_scope: scope.clone(),

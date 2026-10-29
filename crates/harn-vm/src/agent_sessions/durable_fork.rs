@@ -43,6 +43,19 @@ pub async fn fork_canonical(
     boundary: Option<super::CanonicalSessionBoundary>,
     destination: Option<String>,
 ) -> Result<Option<CanonicalForkResult>, CanonicalForkError> {
+    fork_canonical_retained(store, root, source, boundary, destination)
+        .await
+        .map(|fork| fork.map(|(receipt, _retention)| receipt))
+}
+
+/// Keep the admitted child alive until its host releases the generation handle.
+pub async fn fork_canonical_retained(
+    store: &dyn SessionStore,
+    root: &Path,
+    source: &str,
+    boundary: Option<super::CanonicalSessionBoundary>,
+    destination: Option<String>,
+) -> Result<Option<(CanonicalForkResult, super::SessionRetention)>, CanonicalForkError> {
     if !super::exists(source) {
         return Ok(None);
     }
@@ -72,8 +85,11 @@ pub async fn fork_canonical(
             .filter(|event| event_id.is_some_and(|tip| event.event_id <= tip))
             .collect(),
     );
-    let child = super::fork(source, destination).map_err(CanonicalForkError::Admission)?;
-    let Some(child) = child else { return Ok(None) };
+    let child = super::retention::fork_retained(source, destination)
+        .map_err(CanonicalForkError::Admission)?;
+    let Some((child, retention)) = child else {
+        return Ok(None);
+    };
     if let Err(error) = copied.restore(&child) {
         super::close(&child);
         return Err(VmError::Runtime(error).into());
@@ -85,10 +101,13 @@ pub async fn fork_canonical(
         super::close(&child);
         return Err(store_error(error));
     }
-    Ok(Some(CanonicalForkResult {
-        session_id: child,
-        source_boundary: boundary,
-    }))
+    Ok(Some((
+        CanonicalForkResult {
+            session_id: child,
+            source_boundary: boundary,
+        },
+        retention,
+    )))
 }
 
 /// A boundary lookup and a fork share the same admission for a live, unprompted

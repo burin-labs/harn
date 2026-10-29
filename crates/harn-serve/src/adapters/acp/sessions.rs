@@ -563,6 +563,7 @@ pub(super) enum PreparedSessionRequest {
 }
 
 pub(super) struct Session {
+    pub(super) _retention: harn_vm::agent_sessions::SessionRetention,
     pub(super) cwd: PathBuf,
     pub(super) project_root: PathBuf,
     pub(super) store_scope: harn_vm::SessionStoreScope,

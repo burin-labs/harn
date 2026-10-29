@@ -92,6 +92,19 @@ pub struct WorkspaceAnchor {
 }
 
 impl WorkspaceAnchor {
+    /// The ordered path projection, without restoring any mount authority.
+    pub fn additional_directories(&self) -> Result<Vec<String>, String> {
+        self.additional_roots
+            .iter()
+            .map(|root| {
+                root.path
+                    .to_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| "workspace root must be representable as UTF-8".to_string())
+            })
+            .collect()
+    }
+
     pub fn to_json(&self) -> JsonValue {
         serde_json::to_value(self).unwrap_or(JsonValue::Null)
     }

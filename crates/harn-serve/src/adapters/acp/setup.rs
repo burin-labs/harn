@@ -502,7 +502,7 @@ impl AcpServer {
                     reason: format!("session storage workspace: {error}"),
                 },
             )?;
-        harn_vm::agent_sessions::open_or_create_with_actor_chain(
+        let (_, retention) = harn_vm::agent_sessions::open_retained_with_actor_chain(
             Some(session_id.clone()),
             self.actor_chain(),
         )?;
@@ -515,6 +515,7 @@ impl AcpServer {
         self.sessions.insert(
             session_id.clone(),
             Session {
+                _retention: retention,
                 cwd,
                 project_root,
                 store_scope,
