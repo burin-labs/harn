@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/scanner/discover_test_commands.response.json",
   "title": "scanner.discover_test_commands response",
+  "type": "object",
   "oneOf": [
     {
       "type": "object",
