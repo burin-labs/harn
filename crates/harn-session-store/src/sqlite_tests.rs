@@ -8,6 +8,81 @@ static IMMEDIATE_BUSY_CALLBACKS: AtomicUsize = AtomicUsize::new(0);
 static DEFERRED_BUSY_CALLBACKS: AtomicUsize = AtomicUsize::new(0);
 
 #[tokio::test]
+async fn version_six_store_upgrades_directory_metadata_without_losing_history() {
+    use crate::{
+        AppendEvent, CreateSession, SessionEventKind, SessionStore, SqliteSessionStore,
+        UpdateSession,
+    };
+
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("version-six.sqlite");
+    let original = SqliteSessionStore::open(&database).unwrap();
+    original
+        .create(CreateSession {
+            id: Some("prior-session".into()),
+            title: Some("Retained title".into()),
+            ..CreateSession::default()
+        })
+        .await
+        .unwrap();
+    let event = original
+        .append(
+            "prior-session",
+            AppendEvent::new(
+                SessionEventKind::Message,
+                serde_json::json!({"content":"Retained history"}),
+            ),
+        )
+        .await
+        .unwrap();
+    drop(original);
+    let connection = Connection::open(&database).unwrap();
+    connection
+        .execute_batch(
+            "ALTER TABLE sessions DROP COLUMN additional_directories_json;
+         UPDATE main._harn_sqlite_schema_versions SET version = 6 WHERE name = 'session_store';",
+        )
+        .unwrap();
+    let marker: i64 = connection
+        .query_row(
+            "SELECT version FROM main._harn_sqlite_schema_versions WHERE name = 'session_store'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(marker, 6);
+    drop(connection);
+
+    let upgraded = SqliteSessionStore::open(&database).unwrap();
+    let metadata = upgraded.describe("prior-session").await.unwrap();
+    assert_eq!(metadata.title.as_deref(), Some("Retained title"));
+    assert!(metadata.additional_directories.is_empty());
+    assert_eq!(
+        upgraded.read_all("prior-session").await.unwrap(),
+        vec![event]
+    );
+    let directories = vec!["/work/second".to_string(), "/work/first".to_string()];
+    upgraded
+        .update(
+            "prior-session",
+            UpdateSession {
+                additional_directories: Some(directories.clone()),
+                ..UpdateSession::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        upgraded
+            .describe("prior-session")
+            .await
+            .unwrap()
+            .additional_directories,
+        directories
+    );
+}
+
+#[tokio::test]
 async fn additional_directories_survive_reopen_and_corrupt_lists_refuse() {
     use crate::{CreateSession, ListFilter, SessionStore, SqliteSessionStore};
 
