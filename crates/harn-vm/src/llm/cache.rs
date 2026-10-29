@@ -110,7 +110,9 @@ fn cache_envelope_base(options: &CacheOptions) -> crate::value::DictMap {
 fn cache_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = required_string_arg(args, 0, "__cache_get(key, options?)")?;
     let options = parse_cache_options(args.get(1))?;
-    let hit = cache_get_at(&options, &key, now_wall_ms())?;
+    let hit = crate::run_tape::cache_lookup(&options.namespace, &key, || {
+        cache_get_at(&options, &key, now_wall_ms())
+    })?;
     record_lookup(&options, hit.is_some());
 
     let mut envelope = cache_envelope_base(&options);

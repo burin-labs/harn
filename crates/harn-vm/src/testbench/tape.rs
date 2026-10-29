@@ -206,6 +206,15 @@ pub enum TapeRecordKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attribution: Option<CallAttribution>,
     },
+    /// One persistent LLM-cache lookup. The cache outlives runs, so a branch
+    /// replays these instead of reading a cache that has since changed.
+    CacheLookup {
+        namespace: String,
+        key: String,
+        /// The cached value on a hit; absent on a miss.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<TapePayload>,
+    },
     /// One prompt asset render, recorded once per distinct output. Model
     /// calls point at it through [`CallAttribution`] segments.
     PromptRender {
@@ -309,6 +318,7 @@ impl TapeRecordKind {
             Self::LlmCall { .. } => "llm_call",
             Self::ToolCall { .. } => "tool_call",
             Self::PromptRender { .. } => "prompt_render",
+            Self::CacheLookup { .. } => "cache_lookup",
             Self::DecisionEvaluation { .. } => "decision_evaluation",
             Self::FileRead { .. } => "file_read",
             Self::FileWrite { .. } => "file_write",
@@ -634,6 +644,7 @@ fn visit_payloads(kind: &TapeRecordKind, mut visit: impl FnMut(&TapePayload)) {
             }
             messages.iter().for_each(&mut visit);
         }
+        TapeRecordKind::CacheLookup { value, .. } => value.iter().for_each(&mut visit),
         TapeRecordKind::PromptRender {
             rendered, spans, ..
         } => {

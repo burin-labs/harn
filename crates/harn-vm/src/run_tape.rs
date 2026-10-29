@@ -507,6 +507,9 @@ struct BranchState {
     /// Tool-call ids named by served responses: the only calls the prefix
     /// serves.
     served_tool_ids: BTreeSet<String>,
+    /// Recorded cache lookups per (namespace, key), in recorded order.
+    cache_lookups:
+        BTreeMap<(String, String), std::collections::VecDeque<Option<serde_json::Value>>>,
     workspace_root: PathBuf,
     report: BranchReport,
 }
@@ -551,8 +554,26 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
     }
     let mut calls = Vec::new();
     let mut tools = BTreeMap::new();
+    let mut cache_lookups: BTreeMap<_, std::collections::VecDeque<_>> = BTreeMap::new();
     for record in &tape.records {
         match &record.kind {
+            TapeRecordKind::CacheLookup {
+                namespace,
+                key,
+                value,
+            } => {
+                let value = match value {
+                    Some(payload) => Some(
+                        serde_json::from_slice(&tape.resolve_payload(payload)?)
+                            .map_err(|err| format!("tape cache value: {err}"))?,
+                    ),
+                    None => None,
+                };
+                cache_lookups
+                    .entry((namespace.clone(), key.clone()))
+                    .or_default()
+                    .push_back(value);
+            }
             TapeRecordKind::LlmCall {
                 request_digest,
                 response,
@@ -623,6 +644,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
         calls,
         tools,
         served_tool_ids: BTreeSet::new(),
+        cache_lookups,
         workspace_root: plan.workspace_root,
         report: BranchReport {
             live_after_calls: plan.live_after_calls,
@@ -659,6 +681,12 @@ fn first_difference(
     recorded: &serde_json::Map<String, serde_json::Value>,
     replayed: &serde_json::Map<String, serde_json::Value>,
 ) -> String {
+    let excerpt = |value: Option<&serde_json::Value>| {
+        value.map_or_else(
+            || "<absent>".to_string(),
+            |value| crate::text::truncate_end(&value.to_string(), 400),
+        )
+    };
     let keys: BTreeSet<&String> = recorded.keys().chain(replayed.keys()).collect();
     for key in keys {
         let (a, b) = (recorded.get(key), replayed.get(key));
@@ -668,12 +696,6 @@ fn first_difference(
         if let (Some(serde_json::Value::Array(a)), Some(serde_json::Value::Array(b))) = (a, b) {
             for index in 0..a.len().max(b.len()) {
                 if a.get(index) != b.get(index) {
-                    let excerpt = |value: Option<&serde_json::Value>| {
-                        value.map_or_else(
-                            || "<absent>".to_string(),
-                            |value| crate::text::truncate_end(&value.to_string(), 400),
-                        )
-                    };
                     return format!(
                         "{key}[{index}] differs: recorded {} vs replayed {}",
                         excerpt(a.get(index)),
@@ -682,7 +704,11 @@ fn first_difference(
                 }
             }
         }
-        return format!("`{key}` differs");
+        return format!(
+            "`{key}` differs: recorded {} vs replayed {}",
+            excerpt(a),
+            excerpt(b)
+        );
     }
     "the digests differ but the surfaces match".to_string()
 }
@@ -739,6 +765,58 @@ pub(crate) fn serve_llm_call(
     }
     state.report.served_calls += 1;
     Some(Ok(result))
+}
+
+/// One persistent cache lookup. In a branch prefix the recorded answer is
+/// returned without reading the cache; a lookup the recording never made
+/// diverges. Otherwise `live` answers and, when recording, the answer is
+/// taped.
+pub(crate) fn cache_lookup(
+    namespace: &str,
+    key: &str,
+    live: impl FnOnce() -> Result<Option<serde_json::Value>, crate::value::VmError>,
+) -> Result<Option<serde_json::Value>, crate::value::VmError> {
+    {
+        let mut guard = PROCESS_BRANCH.lock().expect("branch lock poisoned");
+        if let Some(state) = guard.as_mut() {
+            if let Some(divergence) = &state.report.divergence {
+                return Err(divergence_error(divergence));
+            }
+            if state.report.served_calls < state.report.live_after_calls {
+                let slot = (namespace.to_string(), key.to_string());
+                let recorded = state
+                    .cache_lookups
+                    .get_mut(&slot)
+                    .and_then(|q| q.pop_front());
+                let Some(value) = recorded else {
+                    let divergence = BranchDivergence {
+                        call: state.report.served_calls + 1,
+                        what: "cache_lookup".to_string(),
+                        detail: format!(
+                            "the program read cache key `{key}` in `{namespace}`, which the recording never read"
+                        ),
+                    };
+                    let error = divergence_error(&divergence);
+                    state.report.divergence = Some(divergence);
+                    return Err(error);
+                };
+                return Ok(value);
+            }
+        }
+    }
+    let value = live()?;
+    if let Some(tape) = process_tape().filter(|tape| tape.level == RecordingLevel::Full) {
+        let payload = value.as_ref().map(|value| {
+            tape.recorder
+                .payload_from_bytes(crate::canonical_json::to_vec(value))
+        });
+        tape.recorder.record(TapeRecordKind::CacheLookup {
+            namespace: namespace.to_string(),
+            key: key.to_string(),
+            value: payload,
+        });
+    }
+    Ok(value)
 }
 
 /// What a branch does with one tool dispatch.

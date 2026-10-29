@@ -210,3 +210,36 @@ fn a_model_call_attributes_its_system_prompt_to_the_renders_it_contains() {
         .count();
     assert_eq!(renders, 2);
 }
+
+#[test]
+fn a_branch_replays_recorded_cache_misses_even_when_the_cache_now_hits() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    {
+        let _guard = start_recording(tmp.path(), RecordingLevel::Full, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(cache_lookup("intent", "k1", || Ok(None)).unwrap(), None);
+        record_llm_call(&request("classify"), &result("feature", None));
+    }
+    let branch = start_branch(BranchPlan {
+        tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: tmp.path().to_path_buf(),
+    })
+    .unwrap();
+    // Since the recording, another run stored an answer under k1. The branch
+    // must still see the recorded miss, or it skips the call it must serve.
+    let read = cache_lookup("intent", "k1", || Ok(Some(serde_json::json!("stale"))));
+    assert_eq!(read.unwrap(), None);
+    assert!(serve_llm_call(&request("classify")).unwrap().is_ok());
+    // A lookup the recording never made fails closed.
+    drop(branch);
+    let _branch = start_branch(BranchPlan {
+        tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: tmp.path().to_path_buf(),
+    })
+    .unwrap();
+    assert!(cache_lookup("intent", "other", || Ok(None)).is_err());
+}
