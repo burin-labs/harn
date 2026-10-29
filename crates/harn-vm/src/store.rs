@@ -15,6 +15,33 @@ pub(crate) struct StoreState {
     data: BTreeMap<String, serde_json::Value>,
     path: PathBuf,
     loaded: bool,
+    /// A save the replayed prefix skipped, owed once the branch goes live.
+    deferred: bool,
+}
+
+type SharedStore = Arc<parking_lot::Mutex<StoreState>>;
+
+/// Every store this process registered, so the switch to live can save the
+/// ones whose prefix writes it held back.
+static STORES: std::sync::Mutex<Vec<std::sync::Weak<parking_lot::Mutex<StoreState>>>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Save every store whose save the replayed prefix deferred. Called once, when
+/// a branch goes live, so prefix writes reach disk even if the live tail never
+/// writes again.
+pub(crate) fn save_deferred_stores() -> Result<(), VmError> {
+    let stores: Vec<SharedStore> = {
+        let mut stores = STORES.lock().expect("store registry poisoned");
+        stores.retain(|store| store.strong_count() > 0);
+        stores.iter().filter_map(std::sync::Weak::upgrade).collect()
+    };
+    for store in stores {
+        let mut store = store.lock();
+        if store.deferred {
+            store.save()?;
+        }
+    }
+    Ok(())
 }
 
 impl StoreState {
@@ -31,6 +58,7 @@ impl StoreState {
             data: BTreeMap::new(),
             path,
             loaded: false,
+            deferred: false,
         }
     }
 
@@ -51,12 +79,14 @@ impl StoreState {
         Ok(())
     }
 
-    fn save(&self) -> Result<(), VmError> {
+    fn save(&mut self) -> Result<(), VmError> {
         // A replayed prefix must not touch the store the recorded run left
         // behind; once the branch goes live, the store saves as any run's does.
         if crate::run_tape::prefix_active() {
+            self.deferred = true;
             return Ok(());
         }
+        self.deferred = false;
         let obj: serde_json::Map<String, serde_json::Value> = self
             .data
             .iter()
@@ -131,7 +161,11 @@ pub(crate) fn register_store_builtins_at_state_root(vm: &mut Vm, state_root: &Pa
 }
 
 fn register_store_state(vm: &mut Vm, state: StoreState) {
-    let state = Arc::new(parking_lot::Mutex::new(state));
+    let state: SharedStore = Arc::new(parking_lot::Mutex::new(state));
+    STORES
+        .lock()
+        .expect("store registry poisoned")
+        .push(Arc::downgrade(&state));
 
     let s = Arc::clone(&state);
     vm.register_capability_method(

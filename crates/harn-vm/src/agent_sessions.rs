@@ -751,6 +751,12 @@ pub(crate) fn open_or_create_for_test(id: Option<String>) -> String {
     open_or_create(id).expect("open fixture session")
 }
 
+/// A fresh session id. Taped, so a branch prefix replays the recorded id and
+/// later calls naming the session still find it.
+fn minted_session_id() -> String {
+    crate::run_tape::taped_random("session_id", || uuid::Uuid::now_v7().to_string())
+}
+
 #[cfg(test)]
 pub(crate) fn open_or_create_with_actor_chain_for_test(
     id: Option<String>,
@@ -763,7 +769,7 @@ pub fn open_or_create_with_actor_chain(
     id: Option<String>,
     requested_actor_chain: Option<ActorChain>,
 ) -> Result<String, SessionOpenError> {
-    let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    let resolved = id.unwrap_or_else(minted_session_id);
     let parent_session = current_session_id();
     let inherited_actor_chain = requested_actor_chain
         .clone()
@@ -839,7 +845,7 @@ pub fn open_child_session_with_actor(
     actor: Option<&str>,
 ) -> Result<String, SessionOpenError> {
     let actor_chain = ActorChain::delegated(actor_chain(parent_id), actor);
-    let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    let resolved = id.unwrap_or_else(minted_session_id);
     admit_linked_sessions(parent_id, &resolved, actor_chain, None)?;
     Ok(resolved)
 }
@@ -1105,7 +1111,7 @@ pub fn close_with_status(
 /// operation itself can't make `src` look stale and kick it out of
 /// the LRU just to make room for the new fork.
 pub fn fork(src_id: &str, dst_id: Option<String>) -> Result<Option<String>, SessionOpenError> {
-    let dst = dst_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    let dst = dst_id.unwrap_or_else(minted_session_id);
     if dst == src_id {
         return Ok(None);
     }
@@ -1346,7 +1352,7 @@ pub fn seed_from_messages(
     system_prompt: Option<String>,
     tool_format: Option<String>,
 ) -> Result<String, String> {
-    let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    let resolved = id.unwrap_or_else(minted_session_id);
     if exists(&resolved) {
         return Err(format!("agent session '{resolved}' already exists"));
     }

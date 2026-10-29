@@ -352,3 +352,140 @@ pipeline main(harness: Harness, task: unknown) {{
     assert_eq!(divergence.what, "refused effect", "{divergence:?}");
     assert_eq!(divergence.call, 1, "the refusal came before model call 1");
 }
+
+/// One `mark` tool call, then done, with a post-turn session reset: the reset
+/// runs inside the live run, so its durable write is the run journal's.
+fn reset_script(hook_marker: &Path, exec_marker: &Path) -> String {
+    mark_script(hook_marker, exec_marker).replace(
+        "          session_id: \"branch-\" + id,",
+        "          session_id: \"branch-\" + id,\n          post_turn_callback: { _turn -> \n            harness.agent.reset(\"branch-\" + id)\n            return nil\n          },",
+    )
+}
+
+/// Every event the durable session store under `state` holds, as `kind`
+/// joined with the payload's text, across every session in it.
+fn durable_events(workspace: &Path, state: &str) -> Vec<String> {
+    let root = workspace.parent().unwrap().join(state);
+    let mut found = Vec::new();
+    let mut dirs = vec![root];
+    while let Some(dir) = dirs.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path
+                .extension()
+                .is_some_and(|ext| ext == "sqlite" || ext == "db")
+            {
+                found.push(path);
+            }
+        }
+    }
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        use harn_session_store::SessionStore;
+        let mut events = Vec::new();
+        for path in found {
+            let store = harn_session_store::SqliteSessionStore::open(&path).unwrap();
+            for meta in store.list(Default::default()).await.unwrap() {
+                for event in store.read_all(&meta.id).await.unwrap() {
+                    events.push(format!("{:?} {}", event.kind, event.payload));
+                }
+            }
+        }
+        events
+    })
+}
+
+/// Session resets the durable store under `state` holds: a reset lands as an
+/// empty compaction.
+fn durable_resets(workspace: &Path, state: &str) -> usize {
+    durable_events(workspace, state)
+        .iter()
+        .filter(|event| event.starts_with("Compaction ") && event.contains("\"messages\":[]"))
+        .count()
+}
+
+/// A reset inside the replayed prefix changes the session in memory but
+/// writes nothing durable; once the branch goes live, the queued journal
+/// writes it, so the branch's history matches a real run's.
+#[test]
+fn a_session_reset_in_the_prefix_is_written_once_and_only_after_going_live() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let hook_marker = dirs.markers.join("hook-marker");
+    let exec_marker = dirs.markers.join("exec-marker");
+    let source = reset_script(&hook_marker, &exec_marker);
+    record(&source, &dirs.tapes, &dirs.workspace);
+    assert_eq!(
+        durable_resets(&dirs.workspace, "record-state"),
+        2,
+        "one reset per turn"
+    );
+
+    let (output, report) = branch(&source, &dirs.tapes, &dirs.workspace, 2);
+    output.expect("the replayed run succeeds");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(
+        durable_resets(&dirs.workspace, "branch-state"),
+        0,
+        "a fully replayed branch wrote a reset durably"
+    );
+
+    std::fs::remove_dir_all(dirs.workspace.parent().unwrap().join("branch-state")).unwrap();
+    let (output, report) = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+    output.expect("the branched run succeeds");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(report.live_calls, 1, "report: {report:?}");
+    assert_eq!(
+        durable_resets(&dirs.workspace, "branch-state"),
+        2,
+        "the prefix reset reaches the branch's history once, after going live"
+    );
+}
+
+/// Prefix store writes reach disk when the branch goes live, even when the
+/// live tail never writes the store itself.
+#[test]
+fn prefix_store_writes_are_saved_when_the_branch_goes_live() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let hook_marker = dirs.markers.join("hook-marker");
+    let exec_marker = dirs.markers.join("exec-marker");
+    let source = mark_script(&hook_marker, &exec_marker).replace(
+        "  harness.runtime.store_set(\"after_key\", result.status)\n",
+        "",
+    );
+    assert!(
+        !source.contains("after_key"),
+        "the live tail must not write"
+    );
+    record(&source, &dirs.tapes, &dirs.workspace);
+    let store_path = harn_vm::runtime_paths::store_path(&dirs.workspace);
+    let sentinel = "{\"sentinel\": true}";
+    std::fs::write(&store_path, sentinel).unwrap();
+
+    let (output, report) = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+    output.expect("the branched run succeeds");
+    assert_eq!(report.live_calls, 1, "report: {report:?}");
+    let store: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&store_path).unwrap()).unwrap();
+    assert!(
+        store["script_key"].is_string(),
+        "the prefix write was saved: {store}"
+    );
+    assert!(
+        store.get("sentinel").is_none(),
+        "the store started from the seed: {store}"
+    );
+}

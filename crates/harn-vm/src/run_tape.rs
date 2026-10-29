@@ -633,7 +633,7 @@ fn under_run(state: &BranchState) -> Option<BranchDivergence> {
         .iter()
         .find(|(_, queue)| !queue.is_empty())
         .map(|((after, namespace, key), _)| BranchDivergence {
-            call: *after,
+            call: *after + 1,
             what: "under-run prefix".to_string(),
             detail: format!("recorded read of `{key}` in `{namespace}` was never made"),
         })
@@ -891,9 +891,19 @@ pub(crate) fn serve_llm_call(
         return Some(Err(divergence_error(divergence)));
     }
     if state.report.served_calls >= state.report.live_after_calls {
+        let going_live = !state.live;
         state.live = true;
         PREFIX_ACTIVE.store(false, Ordering::Release);
         state.report.live_calls += 1;
+        drop(guard);
+        // Prefix writes the store held back reach disk now, whether or not
+        // the live tail writes again. Journal mutations stay queued and go
+        // out with the live tail's first flush.
+        if going_live {
+            if let Err(error) = crate::store::save_deferred_stores() {
+                return Some(Err(error));
+            }
+        }
         return None;
     }
     let index = usize::try_from(state.report.served_calls).expect("bounded by calls");

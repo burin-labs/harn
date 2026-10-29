@@ -476,8 +476,13 @@ async fn vm_call_llm_full_inner_request(
 ) -> Result<LlmResult, VmError> {
     if let Some(served) = crate::run_tape::serve_llm_call(request) {
         let served = served?;
-        consume_served_mock(request);
-        observed.record_provider_dispatch();
+        // Mirror the recording, which answered a predicate-cache hit without
+        // a mock or a dispatch, and otherwise cached what it got.
+        if super::trigger_predicate::lookup_cached_result(request).is_none() {
+            consume_served_mock(request);
+            super::trigger_predicate::note_result(request, &served);
+            observed.record_provider_dispatch();
+        }
         request.emit_reminder_lifecycle();
         return Ok(complete_bypass_result(request, served, delta_tx, None));
     }

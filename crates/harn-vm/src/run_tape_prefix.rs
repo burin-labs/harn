@@ -112,11 +112,13 @@ fn session_entry(owner: Owner<'_>) -> bool {
 /// State that lives only in this process's VM, so rebuilding it during the
 /// prefix touches nothing outside. Fails closed: a target not named here is
 /// refused until someone confirms it does not persist.
-const PROCESS_LOCAL_STATE: &[&str] = &[
+pub(super) const PROCESS_LOCAL_STATE: &[&str] = &[
     "agent-sessions",
     "capability-fixtures",
     "channel-guardrails",
     "command-policy",
+    "egress-policy",
+    "http-fixtures",
     "llm-cost-budget",
     "llm-fixture",
     "path-scope-guard",
@@ -126,12 +128,15 @@ const PROCESS_LOCAL_STATE: &[&str] = &[
     "security-policy",
     "session-hooks",
     "shared-state",
+    "sse-mocks",
     "step-hooks",
+    "streaming-transport-fixtures",
     "tool-hooks",
+    "websocket-mocks",
     "workflow-tool-hooks",
 ];
 
-fn process_local(effect: &EffectSpec) -> bool {
+pub(super) fn process_local(effect: &EffectSpec) -> bool {
     !effect.resources.is_empty()
         && effect.resources.iter().all(|resource| {
             matches!(resource, ResourceSelector::Constant(name) if PROCESS_LOCAL_STATE.contains(name))

@@ -194,15 +194,35 @@ fn every_unserialized_request_field_is_covered_or_excluded_by_the_digest() {
         .expect("LlmRequestPayload is in request.rs");
     let mut skipped = Vec::new();
     let mut lines = struct_body.lines();
+    // `skip_serializing_if` omits only a value it judges empty, so it stays in.
+    let skips_serializing = |line: &str| {
+        line.trim()
+            .strip_prefix("#[serde(")
+            .and_then(|args| args.strip_suffix(")]"))
+            .is_some_and(|args| {
+                args.split(',')
+                    .map(str::trim)
+                    .any(|arg| arg == "skip" || arg == "skip_serializing")
+            })
+    };
+    assert!(skips_serializing("    #[serde(default, skip)]"));
+    assert!(!skips_serializing(
+        r#"#[serde(skip_serializing_if = "Option::is_none")]"#
+    ));
     while let Some(line) = lines.next() {
-        if line.trim() != "#[serde(skip_serializing)]" {
+        if !skips_serializing(line) {
             continue;
         }
         let field = lines
             .by_ref()
             .map(str::trim)
-            .find(|line| line.starts_with("pub "))
-            .and_then(|line| line.strip_prefix("pub "))
+            .find(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with("//"))
+            .map(|line| {
+                ["pub ", "pub(crate) "]
+                    .iter()
+                    .find_map(|vis| line.strip_prefix(vis))
+                    .unwrap_or(line)
+            })
             .and_then(|line| line.split(':').next())
             .expect("a skipped attribute precedes a field");
         skipped.push(field.to_string());
@@ -554,34 +574,160 @@ fn a_prefix_cache_read_is_served_only_where_the_recording_made_it() {
     assert!(cache_lookup("intent", "k", || Ok(None)).is_err());
 }
 
-/// A misspelled entry would silently allow nothing; each must name a real
-/// `harness.agent` method whose state effects all target an argument.
+/// `harness.agent` methods that write state the prefix gate refuses, each for
+/// a reason. Together with [`prefix::SESSION_ENTRY_METHODS`] this classifies
+/// every state-writing agent method, so a new one fails the test below until
+/// someone decides which side it is on.
+const REFUSED_AGENT_STATE: &[(&str, &str)] = &[
+    ("attach", "routes a live client"),
+    ("client_inject_prompt", "routes a live client"),
+    ("detach", "routes a live client"),
+    ("heartbeat", "routes a live client"),
+    (
+        "record_changed_path",
+        "writes the durable session store directly",
+    ),
+    (
+        "route_permission",
+        "routes a permission prompt to a live client",
+    ),
+    (
+        "self_review",
+        "writes the durable review audit and trust graph",
+    ),
+    ("session_append", "writes the host's durable session store"),
+    ("session_close", "writes the host's durable session store"),
+    ("session_fork", "writes the host's durable session store"),
+    ("session_open", "writes the host's durable session store"),
+    ("session_update", "writes the host's durable session store"),
+    ("state_delete", "durable agent state"),
+    ("state_handoff", "durable agent state"),
+    ("state_write", "durable agent state"),
+    ("takeover", "routes a live client"),
+];
+
+/// Every `harness.agent` method whose contract writes state is classified:
+/// allowed as session-table state, allowed by a constant process-local
+/// resource, or refused with a reason. Read-only methods need no entry.
 #[test]
-fn every_session_entry_method_is_a_harness_agent_method_scoped_to_an_argument() {
+fn every_state_writing_agent_method_is_classified_for_the_prefix() {
     use harn_builtin_meta::{BuiltinExposure, CapabilityId, ResourceSelector};
-    for method in prefix::SESSION_ENTRY_METHODS {
+    let mut unclassified = Vec::new();
+    for method in harn_capability_contracts::declared_capability_method_names("agent") {
         let name = format!("__cap_agent_{method}");
-        let contract = crate::stdlib::builtin_policy_metadata(&name)
-            .1
-            .unwrap_or_else(|| panic!("`{name}` has no contract"));
+        let Some(contract) = crate::stdlib::builtin_policy_metadata(&name).1 else {
+            continue;
+        };
         assert!(
             matches!(
                 contract.exposure,
-                BuiltinExposure::HarnessMethod { capability: CapabilityId::Agent, method: m } if m == *method
+                BuiltinExposure::HarnessMethod { capability: CapabilityId::Agent, method: m } if m == method
             ),
             "`{name}` is not harness.agent.{method}"
         );
-        for effect in contract.effects {
-            if effect.kind == EffectKind::State {
+        let writes: Vec<_> = contract
+            .effects
+            .iter()
+            .filter(|effect| {
+                effect.kind == EffectKind::State
+                    && !matches!(effect.access, EffectAccess::Read | EffectAccess::Observe)
+            })
+            .collect();
+        if writes.is_empty() || writes.iter().all(|effect| prefix::process_local(effect)) {
+            continue;
+        }
+        let allowed = prefix::SESSION_ENTRY_METHODS.contains(&method);
+        let refused = REFUSED_AGENT_STATE.iter().any(|(name, _)| *name == method);
+        assert!(
+            !(allowed && refused),
+            "`{method}` is both allowed and refused"
+        );
+        if allowed {
+            for effect in &writes {
                 assert!(
                     effect.resources.iter().all(|resource| matches!(
                         resource,
                         ResourceSelector::Argument(_)
                             | ResourceSelector::Constant("agent-sessions")
                     )),
-                    "`{name}` writes state outside the session table: {effect:?}"
+                    "`{method}` writes state outside the session table: {effect:?}"
                 );
+            }
+        } else if !refused {
+            unclassified.push(method);
+        }
+    }
+    assert!(
+        unclassified.is_empty(),
+        "classify these state-writing harness.agent methods in SESSION_ENTRY_METHODS or \
+         REFUSED_AGENT_STATE: {unclassified:?}"
+    );
+    for method in prefix::SESSION_ENTRY_METHODS
+        .iter()
+        .chain(REFUSED_AGENT_STATE.iter().map(|(name, _)| name))
+    {
+        assert!(
+            crate::stdlib::builtin_policy_metadata(&format!("__cap_agent_{method}"))
+                .1
+                .is_some(),
+            "`{method}` is not a harness.agent method"
+        );
+    }
+}
+
+/// Named state a capability method writes that persists or leaves the
+/// process, so the prefix gate refuses it.
+const REFUSED_STATE_RESOURCES: &[(&str, &str)] = &[
+    ("llm-file-upload-cache", "uploads to the provider"),
+    ("oauth-registration", "registers a client with the provider"),
+    ("oauth-storage", "writes stored tokens"),
+    ("package-snapshot", "writes the package snapshot to disk"),
+    ("review-audit", "appends to the event log"),
+    ("run-store", "writes the run store to disk"),
+    ("trust-graph", "appends to the event log"),
+    ("vision-ocr-audit", "appends to the event log"),
+];
+
+#[test]
+fn every_named_state_a_capability_method_writes_is_classified_for_the_prefix() {
+    use harn_builtin_meta::{CapabilityId, ResourceSelector};
+    let mut unclassified = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for capability in CapabilityId::ALL {
+        let field = capability.field_name();
+        for method in harn_capability_contracts::declared_capability_method_names(field) {
+            let name = format!("__cap_{field}_{method}");
+            let Some(contract) = crate::stdlib::builtin_policy_metadata(&name).1 else {
+                continue;
+            };
+            for effect in contract.effects.iter().filter(|effect| {
+                effect.kind == EffectKind::State
+                    && !matches!(effect.access, EffectAccess::Read | EffectAccess::Observe)
+            }) {
+                for resource in effect.resources {
+                    let ResourceSelector::Constant(resource) = resource else {
+                        continue;
+                    };
+                    seen.insert(*resource);
+                    let local = prefix::PROCESS_LOCAL_STATE.contains(resource);
+                    let refused = REFUSED_STATE_RESOURCES.iter().any(|(r, _)| r == resource);
+                    assert!(
+                        !(local && refused),
+                        "`{resource}` is both local and refused"
+                    );
+                    if !local && !refused {
+                        unclassified.push(format!("{resource} ({field}.{method})"));
+                    }
+                }
             }
         }
     }
+    assert!(
+        unclassified.is_empty(),
+        "classify this state in PROCESS_LOCAL_STATE or REFUSED_STATE_RESOURCES: {unclassified:?}"
+    );
+    assert!(
+        seen.contains("egress-policy"),
+        "the scan reached no capability contracts"
+    );
 }
