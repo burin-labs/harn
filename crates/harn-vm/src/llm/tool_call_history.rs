@@ -308,6 +308,72 @@ fn unpaired_observation(content: serde_json::Value) -> serde_json::Value {
     }
 }
 
+/// Every tool result in a request's messages, in order, with the text the
+/// model reads and the tool that produced it. Reads the same shapes the
+/// repair does, so a run tape reader never has to.
+pub(crate) fn seen_tool_results(
+    messages: &[serde_json::Value],
+) -> Vec<crate::testbench::tape::SeenToolResult> {
+    let mut tools_by_call = std::collections::HashMap::new();
+    let mut seen = Vec::new();
+    for (index, message) in messages.iter().enumerate() {
+        if role(message) == "assistant" {
+            for call in assistant_calls(message) {
+                tools_by_call.insert(call.id, call.name);
+            }
+            continue;
+        }
+        let mut results = Vec::new();
+        if harn_orchestration::tool_messages::is_tool_result_role(role(message)) {
+            let tool = str_field(message, "name").or_else(|| str_field(message, "tool_name"));
+            results.push((result_role_id(message), tool, message.get("content")));
+        } else {
+            for block in content_blocks(message) {
+                let Some(id) = block_result_id(block) else {
+                    continue;
+                };
+                let response = block.get("functionResponse");
+                let payload = block
+                    .get("content")
+                    .or_else(|| block.get("output"))
+                    .or_else(|| response.and_then(|r| r.get("response")));
+                results.push((id, response.and_then(|r| str_field(r, "name")), payload));
+            }
+        }
+        for (id, tool, payload) in results {
+            let id = (!id.is_empty()).then(|| id.to_string());
+            let tool = tool
+                .map(str::to_string)
+                .or_else(|| id.as_ref().and_then(|id| tools_by_call.get(id).cloned()))
+                .filter(|tool: &String| !tool.is_empty());
+            seen.push(crate::testbench::tape::SeenToolResult {
+                message: index as u64,
+                tool_call_id: id,
+                tool,
+                text: payload.map(result_text).unwrap_or_default(),
+            });
+        }
+    }
+    seen
+}
+
+/// A result payload as text: strings verbatim, text parts joined in order,
+/// anything else as JSON.
+fn result_text(payload: &serde_json::Value) -> String {
+    match payload {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(parts) => parts
+            .iter()
+            .map(|part| match part.get("text") {
+                Some(serde_json::Value::String(text)) => text.clone(),
+                _ => result_text(part),
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        other => other.to_string(),
+    }
+}
+
 #[cfg(test)]
 #[path = "tool_call_history_tests.rs"]
 mod tests;

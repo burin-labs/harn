@@ -30,13 +30,13 @@ fn skill_entry() -> dict {
  * The block exactly as `agent_build_turn_system_fragments` pushes it into the
  * turn's system prompt, called directly so the case needs no live agent session.
  */
-fn active_skills_body(agent: HarnessAgent, session_id: string) -> string {
-  return __agent_active_skill_prompt(agent, session_id, [skill_entry()])
+fn active_skills_body(fs: HarnessFs, agent: HarnessAgent, session_id: string) -> string {
+  return __agent_active_skill_prompt(fs, agent, session_id, [skill_entry()])
 }
 
 /** The served active-skills block carries the session id, not the placeholder. */
 pipeline test_active_skills_block_substitutes_the_session(harness: Harness) {
-  const body = active_skills_body(harness.agent, SESSION_ID)
+  const body = active_skills_body(harness.fs, harness.agent, SESSION_ID)
   assert(body != "", "the active-skills fragment must be served at all")
   assert(
     body.contains(SESSION_ID),
@@ -58,7 +58,7 @@ pipeline test_fixture_prompt_really_carries_a_placeholder(harness: Harness) {
     skill_entry().prompt.contains(SESSION_PLACEHOLDER),
     "the fixture prompt must contain a placeholder, else the positive case is vacuous",
   )
-  const body = active_skills_body(harness.agent, "")
+  const body = active_skills_body(harness.fs, harness.agent, "")
   assert(
     body.contains(SESSION_PLACEHOLDER),
     "with no session id the placeholder must survive, proving substitution is what removed it",

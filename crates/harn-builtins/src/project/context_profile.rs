@@ -14,7 +14,34 @@ struct ContextProfileDef {
     skills: &'static [&'static str],
     tool_groups: &'static [&'static str],
     mcp_presets: &'static [&'static str],
-    body: &'static str,
+}
+
+/// Each profile's model-facing line, chosen by profile id.
+const CONTEXT_PROFILE_PROMPT: &str = "std/project/prompts/context_profile.harn.prompt";
+
+/// Render `id`'s profile line. A render the request will carry goes through
+/// the recorded path, so a run tape maps it to its template line; a size
+/// estimate does not.
+fn context_profile_body(id: &str, recorded: bool) -> String {
+    let mut bindings = harn_vm_core::value::DictMap::new();
+    bindings.put_str("id", id);
+    let body = if recorded {
+        harn_vm::render_stdlib_prompt_asset(CONTEXT_PROFILE_PROMPT, Some(&bindings))
+            .map_err(|error| error.to_string())
+    } else {
+        harn_vm::stdlib::template::TemplateAsset::render_target(CONTEXT_PROFILE_PROMPT).and_then(
+            |asset| {
+                harn_vm::stdlib::template::render_asset_with_provenance_result(
+                    &asset,
+                    Some(&bindings),
+                    false,
+                )
+                .map(|(rendered, _spans)| rendered)
+                .map_err(|error| error.message())
+            },
+        )
+    };
+    body.expect("the context profile prompt asset is embedded and must render")
 }
 
 const CONTEXT_PROFILE_DEFS: &[ContextProfileDef] = &[
@@ -24,7 +51,6 @@ const CONTEXT_PROFILE_DEFS: &[ContextProfileDef] = &[
         skills: &["git"],
         tool_groups: &["git"],
         mcp_presets: &[],
-        body: "Project profile: Git repository detected. Treat branch state, staged changes, and remote history as part of the working context before changing repository state.",
     },
     ContextProfileDef {
         id: "github",
@@ -32,7 +58,6 @@ const CONTEXT_PROFILE_DEFS: &[ContextProfileDef] = &[
         skills: &["github"],
         tool_groups: &["github"],
         mcp_presets: &["github"],
-        body: "Project profile: GitHub remote detected. Prefer GitHub-aware issue, pull request, and CI workflows when GitHub tools or MCP presets are available.",
     },
     ContextProfileDef {
         id: "rust",
@@ -40,7 +65,6 @@ const CONTEXT_PROFILE_DEFS: &[ContextProfileDef] = &[
         skills: &["rust"],
         tool_groups: &["cargo"],
         mcp_presets: &[],
-        body: "Project profile: Rust project detected. Prefer Cargo-native build, test, lint, and workspace workflows.",
     },
     ContextProfileDef {
         id: "node",
@@ -48,7 +72,6 @@ const CONTEXT_PROFILE_DEFS: &[ContextProfileDef] = &[
         skills: &["node", "typescript"],
         tool_groups: &["node"],
         mcp_presets: &[],
-        body: "Project profile: Node or TypeScript project detected. Prefer package-manager scripts and lockfile-aware dependency workflows.",
     },
     ContextProfileDef {
         id: "python",
@@ -56,7 +79,6 @@ const CONTEXT_PROFILE_DEFS: &[ContextProfileDef] = &[
         skills: &["python"],
         tool_groups: &["python"],
         mcp_presets: &[],
-        body: "Project profile: Python project detected. Prefer the detected environment manager and test runner before falling back to raw Python commands.",
     },
     ContextProfileDef {
         id: "swift",
@@ -64,7 +86,6 @@ const CONTEXT_PROFILE_DEFS: &[ContextProfileDef] = &[
         skills: &["swift"],
         tool_groups: &["swift"],
         mcp_presets: &[],
-        body: "Project profile: Swift package detected. Prefer SwiftPM build and test workflows.",
     },
 ];
 
@@ -364,7 +385,7 @@ pub(super) fn resolve_context_profile(
         .collect::<Vec<_>>();
     let always_on_prompt = CONTEXT_PROFILE_DEFS
         .iter()
-        .map(|profile| profile.body)
+        .map(|profile| context_profile_body(profile.id, false))
         .collect::<Vec<_>>()
         .join("\n\n");
     let activated_prompt = profiles
@@ -437,7 +458,7 @@ fn activate_context_profile(
         prompt_fragment: ContextProfileFragment {
             id: format!("profile:{}", profile.id),
             source: format!("profile:{}", profile.id),
-            body: profile.body.to_string(),
+            body: context_profile_body(profile.id, true),
             requires_caps: vec![profile.cap.to_string()],
         },
     }

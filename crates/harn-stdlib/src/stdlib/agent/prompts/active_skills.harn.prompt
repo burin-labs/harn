@@ -1,0 +1,11 @@
+## Active skills
+
+The user's instructions take precedence over a skill's guidance.
+{{ for skill in skills }}
+### {{ skill.name }}
+{{ if skill.description }}{{ skill.description }}
+{{ end }}{{ if skill.when_to_use }}When to use: {{ skill.when_to_use }}
+{{ end }}{{ if skill.tools }}Scoped tools: {{ skill.tools }}
+{{ end }}{{ if skill.prompt }}
+{{ skill.prompt }}
+{{ end }}{{ end -}}

@@ -271,3 +271,66 @@ fn prepend_meta_tool(native_tools: &mut Option<Vec<serde_json::Value>>, meta: se
         None => *native_tools = Some(vec![meta]),
     }
 }
+
+/// The provider-neutral list of tools a call offers. Names come from the
+/// provider tool list when the call has one, so meta-tools and audience
+/// filtering count; otherwise from the registry a text-format call lists in
+/// its prompt. Each title is read from the registry entry of that name.
+pub(crate) fn offered_tools(
+    registry: Option<&VmValue>,
+    native_tools: Option<&[serde_json::Value]>,
+) -> Vec<harn_llm::request::OfferedTool> {
+    let entries: Vec<&DictMap> = match registry {
+        Some(VmValue::Dict(dict)) => match dict.get("tools") {
+            Some(VmValue::List(list)) => list.iter().filter_map(VmValue::as_dict).collect(),
+            _ => Vec::new(),
+        },
+        Some(VmValue::List(list)) => list.iter().filter_map(VmValue::as_dict).collect(),
+        _ => Vec::new(),
+    };
+    let title_of = |name: &str| {
+        let entry = entries.iter().find(|entry| {
+            entry
+                .get("name")
+                .is_some_and(|value| value.display() == name)
+        })?;
+        let annotated = entry
+            .get("annotations")
+            .and_then(VmValue::as_dict)
+            .and_then(|annotations| annotations.get("title"));
+        match annotated.or_else(|| entry.get("title")) {
+            Some(VmValue::String(title)) if !title.trim().is_empty() => Some(title.to_string()),
+            _ => None,
+        }
+    };
+    match native_tools {
+        Some(native) if !native.is_empty() => native
+            .iter()
+            .filter_map(|tool| {
+                let name = tool
+                    .get("name")
+                    .or_else(|| {
+                        tool.get("function")
+                            .and_then(|function| function.get("name"))
+                    })
+                    .and_then(serde_json::Value::as_str)?;
+                Some(harn_llm::request::OfferedTool {
+                    name: name.to_string(),
+                    title: title_of(name),
+                    deferred: native_tool_is_deferred(tool),
+                })
+            })
+            .collect(),
+        _ => entries
+            .iter()
+            .filter_map(|entry| {
+                let name = entry.get("name")?.display();
+                Some(harn_llm::request::OfferedTool {
+                    title: title_of(&name),
+                    deferred: matches!(entry.get("defer_loading"), Some(VmValue::Bool(true))),
+                    name,
+                })
+            })
+            .collect(),
+    }
+}

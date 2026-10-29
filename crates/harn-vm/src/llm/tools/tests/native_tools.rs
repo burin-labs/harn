@@ -481,3 +481,38 @@ fn apply_tool_search_native_injection_creates_list_when_empty() {
         Some("tool_search_tool_bm25_20251119")
     );
 }
+
+/// The call record names each offered tool with its display title: a Harn
+/// tool's `annotations.title`, or the top-level `title` an MCP server sends.
+#[test]
+fn offered_tools_carry_annotation_and_mcp_titles() {
+    let registry = vm_list(vec![
+        vm_dict(&[
+            ("name", vm_str("look")),
+            ("description", vm_str("Read file contents")),
+            (
+                "annotations",
+                vm_dict(&[("title", vm_str("Look at a file"))]),
+            ),
+        ]),
+        vm_dict(&[
+            ("name", vm_str("docs__search")),
+            ("description", vm_str("Search the docs")),
+            ("title", vm_str("Search documentation")),
+            ("defer_loading", crate::value::VmValue::Bool(true)),
+        ]),
+    ]);
+    let native = vm_tools_to_native(&registry, "anthropic", "claude-opus-4-7").unwrap();
+    let offered = crate::llm::tools::offered_tools(Some(&registry), Some(&native));
+    let summary: Vec<_> = offered
+        .iter()
+        .map(|tool| (tool.name.as_str(), tool.title.as_deref(), tool.deferred))
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            ("look", Some("Look at a file"), false),
+            ("docs__search", Some("Search documentation"), true),
+        ]
+    );
+}

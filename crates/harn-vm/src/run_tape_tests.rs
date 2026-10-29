@@ -525,12 +525,12 @@ fn a_model_call_attributes_its_system_prompt_to_the_renders_it_contains() {
     assert_eq!(first.segments[0].field, "system");
     assert_eq!(first.segments[0].start, 0);
     assert_eq!(
-        first.system_attributed,
+        first.system_template_bytes,
         (floor.len() + tools.len()) as u64,
         "the separator and tail stay unattributed"
     );
     assert_eq!(
-        attributions[1].system_attributed,
+        attributions[1].system_template_bytes,
         attributions[1].system_bytes
     );
     let renders = tape
@@ -539,6 +539,72 @@ fn a_model_call_attributes_its_system_prompt_to_the_renders_it_contains() {
         .filter(|record| matches!(record.kind, TapeRecordKind::PromptRender { .. }))
         .count();
     assert_eq!(renders, 2);
+}
+
+fn value_span(output_start: usize, output_end: usize) -> crate::stdlib::template::PromptSourceSpan {
+    crate::stdlib::template::PromptSourceSpan {
+        template_line: 1,
+        template_col: 1,
+        output_start,
+        output_end,
+        kind: crate::stdlib::template::PromptSpanKind::Expr,
+        bound_value: None,
+        parent_span: None,
+        template_uri: "@/prompts/outer.harn.prompt".to_string(),
+        template_revision: String::new(),
+    }
+}
+
+#[test]
+fn a_render_filled_into_another_counts_as_template_text_and_assembly_trim_still_matches() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let guard = start_recording(tmp.path(), RecordingLevel::Full, None)
+        .unwrap()
+        .unwrap();
+    let inner = "Inner guidance rendered from its own template.";
+    let value = "repo-name-42";
+    let head = "Header text for the assembled prompt.\n";
+    let middle = "\nWorking in ";
+    // The outer render ends in a newline the assembler trims away.
+    let outer = format!("{head}{inner}{middle}{value}.\n");
+    let inner_at = head.len();
+    let value_at = inner_at + inner.len() + middle.len();
+    record_prompt_render("@/prompts/inner.harn.prompt", inner, &[]);
+    record_prompt_render(
+        "@/prompts/outer.harn.prompt",
+        &outer,
+        &[
+            value_span(inner_at, inner_at + inner.len()),
+            value_span(value_at, value_at + value.len()),
+        ],
+    );
+    let mut call = request("task");
+    call.system = Some(outer.trim().to_string());
+    record_llm_call(&call, &result("ok", None));
+    drop(guard);
+
+    let tape = EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap();
+    let attribution = tape
+        .records
+        .iter()
+        .find_map(|record| match &record.kind {
+            TapeRecordKind::LlmCall { attribution, .. } => attribution.clone(),
+            _ => None,
+        })
+        .unwrap();
+    let system = outer.trim().len() as u64;
+    assert_eq!(attribution.system_bytes, system);
+    assert_eq!(
+        attribution.system_value_bytes,
+        value.len() as u64,
+        "only the value no render produced is a filled-in value"
+    );
+    assert_eq!(
+        attribution.system_template_bytes,
+        system - value.len() as u64,
+        "the inner render's own template text wins over the outer value span"
+    );
 }
 
 #[test]

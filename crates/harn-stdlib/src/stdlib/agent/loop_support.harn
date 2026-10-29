@@ -620,13 +620,16 @@ pub fn __agent_loop_with_llm_render_context(harness: Harness, opts: dict?, rende
   return render(harness, effective)
 }
 
-fn __agent_loop_terminal_output_prompt(contract: AgentLoopOutputContract) -> string {
-  const instruction = "When you finish the task, your final answer must be a JSON value. "
-    + "Intermediate tool calls remain available; this contract applies to the final answer."
-  if contract.schema == nil {
-    return instruction
+fn __agent_loop_terminal_output_prompt(fs: HarnessFs, contract: AgentLoopOutputContract) -> string {
+  const schema = if contract.schema == nil {
+    nil
+  } else {
+    json_stringify(contract.schema)
   }
-  return instruction + " Match this JSON Schema:\n" + json_stringify(contract.schema)
+  return fs.render_prompt(
+    "std/agent/prompts/terminal_output_contract.harn.prompt",
+    {schema: schema},
+  )
 }
 
 pub fn __agent_loop_build_turn_prompt(
@@ -655,7 +658,7 @@ pub fn __agent_loop_build_turn_prompt(
           {
             id: "primary:terminal_output_contract",
             source: "primary",
-            body: __agent_loop_terminal_output_prompt(output_contract),
+            body: __agent_loop_terminal_output_prompt(render_harness.fs, output_contract),
           },
         )
       }

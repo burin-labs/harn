@@ -22,6 +22,7 @@ use state::ProgramState;
 fn serialize_span(span: &harn_vm::PromptSourceSpan) -> serde_json::Value {
     json!({
         "templateUri": span.template_uri,
+        "templateRevision": span.template_revision,
         "templateLine": span.template_line,
         "templateCol": span.template_col,
         "outputStart": span.output_start,

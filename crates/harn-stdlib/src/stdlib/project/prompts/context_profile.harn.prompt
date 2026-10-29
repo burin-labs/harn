@@ -1,0 +1,13 @@
+{{ if id == "git" -}}
+Project profile: Git repository detected. Treat branch state, staged changes, and remote history as part of the working context before changing repository state.
+{{- elif id == "github" -}}
+Project profile: GitHub remote detected. Prefer GitHub-aware issue, pull request, and CI workflows when GitHub tools or MCP presets are available.
+{{- elif id == "rust" -}}
+Project profile: Rust project detected. Prefer Cargo-native build, test, lint, and workspace workflows.
+{{- elif id == "node" -}}
+Project profile: Node or TypeScript project detected. Prefer package-manager scripts and lockfile-aware dependency workflows.
+{{- elif id == "python" -}}
+Project profile: Python project detected. Prefer the detected environment manager and test runner before falling back to raw Python commands.
+{{- elif id == "swift" -}}
+Project profile: Swift package detected. Prefer SwiftPM build and test workflows.
+{{- end -}}

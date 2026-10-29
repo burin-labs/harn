@@ -687,6 +687,10 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             mock_scope: opts.mock_scope.clone(),
             done_sentinel: opts.done_sentinel.clone(),
             done_sentinel_form: opts.done_sentinel_form.clone(),
+            offered_tools: crate::llm::tools::offered_tools(
+                opts.tools.as_ref(),
+                opts.native_tools.as_deref(),
+            ),
         };
         // Defang reads the durable `_harn` facts, so it runs before they are stripped.
         super::tool_result_provenance::defang_tool_result_directives(&mut payload.messages);

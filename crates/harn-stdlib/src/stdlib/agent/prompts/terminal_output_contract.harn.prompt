@@ -1,0 +1,4 @@
+When you finish the task, your final answer must be a JSON value. Intermediate tool calls remain available; this contract applies to the final answer.
+{{- if schema }} Match this JSON Schema:
+{{ schema }}
+{{- end -}}

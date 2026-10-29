@@ -326,7 +326,8 @@ pub(crate) fn record(
     });
 }
 
-fn describe(
+/// `(mode, effort, budget_tokens)` for a request's reasoning setting.
+pub(crate) fn describe(
     thinking: &crate::llm::api::ThinkingConfig,
 ) -> (&'static str, Option<String>, Option<u32>) {
     use crate::llm::api::ThinkingConfig;

@@ -28,6 +28,22 @@ const PROTECTED_PATHS = [
   "crates/harn-vm/src/orchestration/compaction.rs",
 ]
 
+/**
+ * Crates whose short literals still reach a prompt through a typed field, such
+ * as a context profile's `body`. Free-form prose under 200 chars is common
+ * there, so these paths get the field-keyed rule below instead of the length
+ * rule. A literal that flows into a prompt through any other route is caught
+ * dynamically: the run-tape coverage test fails on system-prompt bytes that
+ * no recorded render produced.
+ */
+const PROMPT_FIELD_PATHS = ["crates/harn-builtins/src", "crates/harn-vm/src"]
+
+const PROMPT_FIELD_THRESHOLD = 60
+
+/** Struct fields and arguments whose string value is model-facing text. */
+const PROMPT_FIELD_PATTERN =
+  r#"\b(body|prompt|system_prompt|instructions|nudge)\s*:\s*"((?:\\[\s\S]|[^"\\])*)""#
+
 const EXCLUDED_PROTECTED_FILES = [
   "crates/harn-vm/src/llm/api/transport.rs",
   "crates/harn-vm/src/llm/api/options.rs",
@@ -342,6 +358,18 @@ pub fn iter_literals_text(source: string) -> list {
 }
 
 /**
+ * Literals assigned to a prompt-bound field (`body: "..."`) as `{line, text}`
+ * records, for the field-keyed rule. Mirrors `iter_literals_text` decoding.
+ */
+pub fn prompt_field_literals(source: string) -> list {
+  let out: list = []
+  for m in regex_captures(PROMPT_FIELD_PATTERN, source, "") {
+    out = out + [{line: m.line, text: decode_normal_literal("\"" + m.groups[1] + "\"")}]
+  }
+  return out
+}
+
+/**
  * Single-line preview for a finding: normalized text truncated to 140 chars
  * with a `...` suffix (137 + "..."), matching `print_findings`.
  */
@@ -446,8 +474,10 @@ pipeline main(harness: Harness, task: unknown) {
       i = i + 1
     }
   }
+  let field_paths: list<string> = paths
   if paths.count == 0 {
     paths = PROTECTED_PATHS
+    field_paths = PROMPT_FIELD_PATHS
   }
   // Read allowlist (missing -> SystemExit(1)).
   if !harness.fs.exists(join_root(root, allowlist)) {
@@ -485,6 +515,20 @@ pipeline main(harness: Harness, task: unknown) {
       }
       findings = findings
         + [{location: location, length: length, text: lit.text}]
+    }
+  }
+  for rel in collect_files(harness.fs, root, field_paths) {
+    const source = harness.fs.read_text(join_root(root, rel))
+    for lit in prompt_field_literals(source) {
+      const length = normalized_length(lit.text)
+      const location = "${rel}:${lit.line}"
+      if length < PROMPT_FIELD_THRESHOLD || observed.contains(location) {
+        continue
+      }
+      observed = observed + [location]
+      if !allowed.contains(location) {
+        findings = findings + [{location: location, length: length, text: lit.text}]
+      }
     }
   }
   // Stale allowlist entries (sorted), then SystemExit(1).
@@ -531,9 +575,17 @@ fn run_self_test(stdio: HarnessStdio) -> int {
     + "threshold and prove the ratchet catches new Rust-owned prompts.\"; }\n"
   const ok_source = "const TAG: &str = \"<tool_call>\";\n"
     + "fn err() { let _ = \"tool_dispatch: missing tool name\"; }\n"
-  const bad_findings = scan_source("bad.rs", bad_source, DEFAULT_THRESHOLD)
+  const field_source = "const P: Def = Def { id: \"git\", body: \"Project profile: Git "
+    + "repository detected. Treat branch state as context.\" };\n"
+  let bad_findings = scan_source("bad.rs", bad_source, DEFAULT_THRESHOLD)
+  for lit in prompt_field_literals(field_source + ok_source) {
+    if normalized_length(lit.text) >= PROMPT_FIELD_THRESHOLD {
+      bad_findings = bad_findings
+        + [{location: "field.rs:${lit.line}", length: normalized_length(lit.text), text: lit.text}]
+    }
+  }
   const ok_findings = scan_source("ok.rs", ok_source, DEFAULT_THRESHOLD)
-  if bad_findings.count != 1 || ok_findings.count > 0 {
+  if bad_findings.count != 2 || ok_findings.count > 0 {
     stdio.eprintln("self-test failed")
     let all: list = []
     all = all + bad_findings

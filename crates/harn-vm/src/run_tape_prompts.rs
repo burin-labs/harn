@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use crate::stdlib::template::PromptSourceSpan;
+use crate::stdlib::template::{PromptSourceSpan, PromptSpanKind};
 use crate::testbench::tape::{
     content_hash, AttributedSegment, CallAttribution, TapeRecordKind, TapeRecorder,
 };
@@ -17,9 +17,19 @@ use crate::testbench::tape::{
 /// Shorter renders match too much unrelated text to be evidence.
 const MIN_ATTRIBUTABLE_BYTES: usize = 24;
 
+/// One recorded render, as a request carries it: the render without its
+/// surrounding whitespace, which assembly routinely trims, and the byte ranges
+/// in that text a filled-in value produced. Every other byte is template text.
+struct Render {
+    text: Arc<str>,
+    /// Where `text` starts in the full render.
+    offset: usize,
+    values: Arc<[(usize, usize)]>,
+}
+
 #[derive(Default)]
 pub(super) struct PromptLedger {
-    texts: BTreeMap<String, Arc<str>>,
+    renders: BTreeMap<String, Render>,
     /// Renders recorded since the previous model call.
     fresh: BTreeSet<String>,
     /// Renders the previous model call contained. A prompt rendered once and
@@ -36,6 +46,14 @@ pub(super) fn render_id(template_uri: &str, rendered: &str) -> String {
     content_hash(&bytes)
 }
 
+/// Where a request byte came from, innermost render first.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Origin {
+    Unmapped,
+    TemplateText,
+    FilledValue,
+}
+
 impl PromptLedger {
     pub(super) fn record(
         &mut self,
@@ -45,19 +63,40 @@ impl PromptLedger {
         rendered: &str,
         spans: &[PromptSourceSpan],
     ) {
-        if rendered.len() < MIN_ATTRIBUTABLE_BYTES {
+        let core = rendered.trim();
+        if core.len() < MIN_ATTRIBUTABLE_BYTES {
             return;
         }
-        if !self.texts.contains_key(render_id) {
-            let spans = serde_json::to_vec(spans).unwrap_or_default();
+        let offset = rendered.len() - rendered.trim_start().len();
+        if !self.renders.contains_key(render_id) {
+            let encoded = serde_json::to_vec(spans).unwrap_or_default();
             recorder.record(TapeRecordKind::PromptRender {
                 render_id: render_id.to_string(),
                 template_uri: template_uri.to_string(),
                 rendered: recorder.payload_cas(rendered.as_bytes().to_vec()),
-                spans: recorder.payload_cas(spans),
+                spans: recorder.payload_cas(encoded),
             });
-            self.texts
-                .insert(render_id.to_string(), Arc::from(rendered));
+            let end = offset + core.len();
+            let values = spans
+                .iter()
+                .filter(|span| {
+                    matches!(
+                        span.kind,
+                        PromptSpanKind::Expr | PromptSpanKind::LegacyBareInterp
+                    )
+                })
+                .map(|span| (span.output_start.max(offset), span.output_end.min(end)))
+                .filter(|(start, end)| start < end)
+                .map(|(start, end)| (start - offset, end - offset))
+                .collect();
+            self.renders.insert(
+                render_id.to_string(),
+                Render {
+                    text: Arc::from(core),
+                    offset,
+                    values,
+                },
+            );
         }
         self.fresh.insert(render_id.to_string());
     }
@@ -73,41 +112,51 @@ impl PromptLedger {
         call_index: u64,
     ) -> CallAttribution {
         let fields = text_fields(surface);
-        let mut candidates: Vec<(String, Arc<str>)> = self
+        // Longest first, so a render interpolated into another is painted
+        // after it and its own text wins for the bytes they share.
+        let mut candidates: Vec<(&String, &Render)> = self
             .fresh
             .iter()
             .chain(self.carried.iter())
-            .filter_map(|id| Some((id.clone(), self.texts.get(id)?.clone())))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter_map(|id| Some((id, self.renders.get(id)?)))
             .collect();
-        candidates.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(&b.0)));
-        candidates.dedup_by(|a, b| a.0 == b.0);
+        candidates.sort_by(|a, b| b.1.text.len().cmp(&a.1.text.len()).then(a.0.cmp(b.0)));
 
         let mut attribution = CallAttribution::default();
         let mut matched = BTreeSet::new();
         for field in &fields {
-            let mut covered: Vec<(usize, usize)> = Vec::new();
-            for (id, text) in &candidates {
-                for (start, _) in field.text.match_indices(&**text) {
-                    let end = start + text.len();
+            let mut origin = vec![Origin::Unmapped; field.text.len()];
+            for (id, render) in &candidates {
+                for (start, _) in field.text.match_indices(&*render.text) {
+                    let end = start + render.text.len();
                     attribution.segments.push(AttributedSegment {
                         field: field.name.clone(),
                         start: start as u64,
                         end: end as u64,
-                        render_id: id.clone(),
+                        render_id: (*id).clone(),
+                        render_offset: render.offset as u64,
                     });
-                    covered.push((start, end));
-                    matched.insert(id.clone());
+                    origin[start..end].fill(Origin::TemplateText);
+                    for &(value_start, value_end) in render.values.iter() {
+                        origin[start + value_start..start + value_end].fill(Origin::FilledValue);
+                    }
+                    matched.insert((*id).clone());
                 }
             }
             let bytes = field.text.len() as u64;
-            let attributed = union_len(&mut covered) as u64;
+            let count = |kind| origin.iter().filter(|&&o| o == kind).count() as u64;
+            let (template, value) = (count(Origin::TemplateText), count(Origin::FilledValue));
             if field.name == "system" {
                 attribution.system_bytes += bytes;
-                attribution.system_attributed += attributed;
+                attribution.system_template_bytes += template;
+                attribution.system_value_bytes += value;
             }
             if !field.tool_result {
                 attribution.prompt_bytes += bytes;
-                attribution.prompt_attributed += attributed;
+                attribution.prompt_template_bytes += template;
+                attribution.prompt_value_bytes += value;
             }
         }
         for id in &matched {
@@ -166,18 +215,4 @@ fn text_fields(surface: &serde_json::Map<String, serde_json::Value>) -> Vec<Text
         }
     }
     fields
-}
-
-fn union_len(ranges: &mut [(usize, usize)]) -> usize {
-    ranges.sort_unstable();
-    let mut total = 0;
-    let mut reach = 0;
-    for &(start, end) in ranges.iter() {
-        let start = start.max(reach);
-        if end > start {
-            total += end - start;
-            reach = end;
-        }
-    }
-    total
 }

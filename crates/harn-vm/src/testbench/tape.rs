@@ -212,6 +212,11 @@ pub enum TapeRecordKind {
         /// Which byte ranges of the request came from which prompt render.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attribution: Option<CallAttribution>,
+        /// What the call offered and showed the model, read once from the
+        /// request so a reader never parses a provider's shapes. Present only
+        /// at `recording: full`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        facts: Option<Box<CallFacts>>,
     },
     /// One persistent LLM-cache lookup. The cache outlives runs, so a branch
     /// replays these instead of reading a cache that has since changed.
@@ -351,12 +356,54 @@ impl TapeRecordKind {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CallAttribution {
     pub segments: Vec<AttributedSegment>,
-    /// Bytes of the system prompt, and how many fall in some segment.
+    /// Bytes of the system prompt, split by where its attributed bytes came
+    /// from: a template's own text, or a value filled into one. A byte takes
+    /// the innermost render that covers it, so a render interpolated into
+    /// another counts as template text. The rest is unmapped.
     pub system_bytes: u64,
-    pub system_attributed: u64,
+    pub system_template_bytes: u64,
+    pub system_value_bytes: u64,
     /// The same over every request text except tool results.
     pub prompt_bytes: u64,
-    pub prompt_attributed: u64,
+    pub prompt_template_bytes: u64,
+    pub prompt_value_bytes: u64,
+}
+
+/// One model call's request in provider-neutral terms.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CallFacts {
+    /// How much reasoning the call asked for; absent when it asked for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<CallReasoning>,
+    /// Every tool offered, in the order the provider received them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<harn_llm::request::OfferedTool>,
+    /// Every tool result in the request, as the model read it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_results: Vec<SeenToolResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CallReasoning {
+    /// `enabled`, `adaptive`, or `effort`.
+    pub mode: String,
+    /// The effort level, such as `medium`, when `mode` is `effort`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SeenToolResult {
+    /// Index of the request message that carries it.
+    pub message: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// The tool that produced it, from the result or the call it answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -366,6 +413,15 @@ pub struct AttributedSegment {
     pub start: u64,
     pub end: u64,
     pub render_id: String,
+    /// Where the segment starts in the render's text. Nonzero when the
+    /// request carries the render without its leading whitespace, so request
+    /// byte `start + k` is render byte `render_offset + k`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub render_offset: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// One file a tool call changed, relative to the run's workspace root.

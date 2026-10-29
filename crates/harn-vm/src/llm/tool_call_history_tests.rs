@@ -482,3 +482,27 @@ fn every_unrepaired_history_breaks_pairing_on_every_dialect() {
     }
     assert_eq!(paired_without_repair, ["bedrock / interleaved feedback"]);
 }
+
+/// A provider-shaped history still yields each result as the model saw it,
+/// named by the call it answers, so a host never parses the block dialect.
+#[test]
+fn seen_tool_results_reads_anthropic_result_blocks() {
+    let messages = vec![
+        user("read it"),
+        json!({"role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {}},
+        ]}),
+        json!({"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_1", "content": [
+                {"type": "text", "text": "fn main() {}"},
+                {"type": "text", "text": "// end"},
+            ]},
+        ]}),
+    ];
+    let seen = super::seen_tool_results(&messages);
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].message, 2);
+    assert_eq!(seen[0].tool_call_id.as_deref(), Some("toolu_1"));
+    assert_eq!(seen[0].tool.as_deref(), Some("read_file"));
+    assert_eq!(seen[0].text, "fn main() {}\n// end");
+}

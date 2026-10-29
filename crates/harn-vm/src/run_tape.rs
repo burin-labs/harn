@@ -262,13 +262,15 @@ pub(crate) const REQUEST_DIGEST_UNSERIALIZED: &[&str] = &[
 
 /// Payload fields serde skips that the digest leaves out, each never sent:
 /// - `reminder_lifecycle`: telemetry emitted after the call;
-/// - `cli_llm_mock_scope`: a process-local mock scope id.
+/// - `cli_llm_mock_scope`: a process-local mock scope id;
+/// - `offered_tools`: a projection of `native_tools` and the registry, whose
+///   titles never reach the provider.
 #[cfg_attr(
     not(test),
     expect(dead_code, reason = "the digest's exclusion record, checked by a test")
 )]
 pub(crate) const REQUEST_DIGEST_UNSERIALIZED_EXCLUDED: &[&str] =
-    &["reminder_lifecycle", "cli_llm_mock_scope"];
+    &["reminder_lifecycle", "cli_llm_mock_scope", "offered_tools"];
 
 /// The request a model call's digest covers: every field the payload
 /// serializes minus [`REQUEST_DIGEST_DENYLIST`], plus
@@ -376,7 +378,24 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
         request: request_payload,
         messages,
         attribution,
+        facts: full.then(|| Box::new(call_facts(request))),
     });
+}
+
+fn call_facts(request: &LlmRequestPayload) -> crate::testbench::tape::CallFacts {
+    let (mode, effort, budget_tokens) = crate::llm::reasoning_receipt::describe(&request.thinking);
+    crate::testbench::tape::CallFacts {
+        reasoning: request
+            .thinking
+            .is_enabled()
+            .then(|| crate::testbench::tape::CallReasoning {
+                mode: mode.to_string(),
+                effort,
+                budget_tokens,
+            }),
+        tools: request.offered_tools.clone(),
+        tool_results: crate::llm::tool_call_history::seen_tool_results(&request.messages),
+    }
 }
 
 // ---------------------------------------------------------------------------

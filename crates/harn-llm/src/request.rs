@@ -361,4 +361,22 @@ pub struct LlmRequestPayload {
     pub done_sentinel: Option<String>,
     #[serde(skip_serializing)]
     pub done_sentinel_form: Option<String>,
+    /// The tools this call offers, read once from the provider tool list and
+    /// the tool registry. Derived from fields the digest already covers.
+    #[serde(skip_serializing)]
+    pub offered_tools: Vec<OfferedTool>,
+}
+
+/// One tool a model call offered, in a provider-neutral shape.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct OfferedTool {
+    pub name: String,
+    /// The tool's plain-English title, such as "Read a file": its
+    /// `annotations.title`, or an MCP tool's own `title`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// The provider holds this tool's schema back until a tool search
+    /// surfaces it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deferred: bool,
 }

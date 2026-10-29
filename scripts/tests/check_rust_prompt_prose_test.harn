@@ -236,3 +236,16 @@ pipeline test_sort_by_path_parts(harness: Harness, task: unknown) {
   assert_eq(sorted[2], "crates/api.rs")
   assert_eq(sorted[3], "crates/api2.rs")
 }
+
+@test
+pipeline test_prompt_field_literals_reads_prompt_bound_fields(harness: Harness, task: unknown) {
+  // A short profile body reached the system prompt as a Rust literal, under
+  // the length rule's threshold; the field rule must see it and its line.
+  const src =
+    "Def {\n  id: \"git\",\n  body: \"Profile: Git repo \\\n    detected.\",\n  label: \"x\",\n}"
+  const lits = prompt_field_literals(src)
+  assert_eq(lits.count, 1)
+  assert_eq(lits[0].line, 3)
+  assert(lits[0].text.starts_with("Profile: Git repo"), lits[0].text)
+  assert(lits[0].text.ends_with("detected."), lits[0].text)
+}

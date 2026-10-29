@@ -1,6 +1,12 @@
 #[derive(Debug, Clone)]
 pub enum Node {
-    Text(String),
+    /// Literal template text. `line` and `col` (1-based) locate its first
+    /// rendered character in the template source.
+    Text {
+        text: String,
+        line: usize,
+        col: usize,
+    },
     Expr {
         expr: Expr,
         line: usize,
@@ -38,6 +44,8 @@ pub enum Node {
     /// text on miss — preserves pre-v2 semantics for back-compat.
     LegacyBareInterp {
         ident: String,
+        line: usize,
+        col: usize,
     },
 }
 

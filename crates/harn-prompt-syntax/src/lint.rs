@@ -125,7 +125,7 @@ fn walk_node(
     }
 
     match node {
-        Node::Text(_) | Node::Expr { .. } | Node::LegacyBareInterp { .. } => {}
+        Node::Text { .. } | Node::Expr { .. } | Node::LegacyBareInterp { .. } => {}
         Node::If {
             branches,
             else_branch,
@@ -256,7 +256,7 @@ fn node_location(node: &Node) -> Option<(usize, usize)> {
         | Node::For { line, col, .. }
         | Node::Include { line, col, .. }
         | Node::Section { line, col, .. } => Some((*line, *col)),
-        Node::Text(_) | Node::LegacyBareInterp { .. } => None,
+        Node::Text { .. } | Node::LegacyBareInterp { .. } => None,
     }
 }
 
