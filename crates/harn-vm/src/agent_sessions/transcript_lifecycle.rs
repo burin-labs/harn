@@ -819,12 +819,6 @@ pub async fn reset_session(
         }
         return Ok(reset);
     }
-    // No live journal to queue it on, so the reset would write the durable
-    // store directly.
-    crate::run_tape::refuse_in_prefix(
-        "agent reset",
-        "outside a live run it writes the durable session store directly",
-    )?;
     let Some(journal) =
         crate::agent_session_journal::prepare_standalone(id, known_dir, options, "agent_reset")
             .await?

@@ -491,14 +491,7 @@ fn enqueue(journal: &mut Option<JournalState>, payload: SessionEventPayload) {
 /// transaction. Mutations stay queued until that transaction commits, so a
 /// failure leaves every one of them queued, observable, and retryable without
 /// a background writer, a best-effort drop, or a duplicated prefix.
-///
-/// While a branch replays its prefix, nothing is written: the mutations stay
-/// queued, so the recorded run's history is not appended twice, and the live
-/// tail's first flush writes them.
 pub(crate) async fn flush(session_id: &str) -> Result<(), VmError> {
-    if crate::run_tape::prefix_active() {
-        return Ok(());
-    }
     let Some(lock) = crate::agent_sessions::journal_flush_lock(session_id) else {
         return Ok(());
     };

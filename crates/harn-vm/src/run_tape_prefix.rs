@@ -8,7 +8,7 @@
 //! and secrets run. Anything else would act on the world a second time, so it
 //! is refused and the branch diverges.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use harn_builtin_meta::{CapabilityId, EffectAccess, EffectKind, EffectSpec, ResourceSelector};
@@ -65,7 +65,7 @@ fn verdict(owner: Owner<'_>, effects: &[EffectSpec]) -> Verdict {
 /// State writes the branch itself absorbs: the runtime store, which does not
 /// save during the prefix, and the persistent cache, whose prefix writes the
 /// recorded run already made.
-fn branch_owns_state(owner: Owner<'_>) -> bool {
+pub(super) fn branch_owns_state(owner: Owner<'_>) -> bool {
     match owner {
         Some((CapabilityId::Runtime, method)) => method.starts_with("store_"),
         Some((CapabilityId::Llm, method)) => matches!(method, "cache_put" | "cache_clear"),
@@ -100,6 +100,8 @@ pub(super) const SESSION_ENTRY_METHODS: &[&str] = &[
     "end_goal_turn",
     "fork",
     "fork_at",
+    "inject_feedback",
+    "inject_host_event",
     "inject",
     "post_event",
     "reanchor",
@@ -125,14 +127,21 @@ fn session_entry(owner: Owner<'_>) -> bool {
 /// refused until someone confirms it does not persist.
 pub(super) const PROCESS_LOCAL_STATE: &[&str] = &[
     "agent-sessions",
+    "atomics",
     "capability-fixtures",
+    "checkpoint-hooks",
+    "circuits",
     "channel-guardrails",
+    "channels",
     "command-policy",
     "egress-policy",
     "http-fixtures",
     "llm-cost-budget",
     "llm-fixture",
+    "llm-config",
     "path-scope-guard",
+    "pipeline-hooks",
+    "provider-capabilities",
     "persona-hooks",
     "reminder-providers",
     "runtime-policy",
@@ -143,6 +152,7 @@ pub(super) const PROCESS_LOCAL_STATE: &[&str] = &[
     "step-hooks",
     "streaming-transport-fixtures",
     "tool-hooks",
+    "tool-synthesis-cache",
     "websocket-mocks",
     "workflow-tool-hooks",
 ];
@@ -338,7 +348,13 @@ pub(crate) fn store_seed(
         match guard.as_mut() {
             None => None,
             Some(state) => {
-                let id = store_identity(path, Some(&state.workspace_root));
+                let id = store_identity(
+                    path,
+                    &[
+                        super::branch_state_root(),
+                        Some(state.workspace_root.clone()),
+                    ],
+                );
                 match state.store_seeds.get(&id) {
                     Some(seed) => Some(Some(seed.clone())),
                     None if state.live => Some(None),
@@ -363,7 +379,13 @@ pub(crate) fn store_seed(
     if let Some(tape) = process_tape().filter(|tape| tape.level == RecordingLevel::Full) {
         tape.recorder.record(TapeRecordKind::CacheLookup {
             namespace: STORE_SEED_NAMESPACE.to_string(),
-            key: store_identity(path, tape.workspace_root()),
+            key: store_identity(
+                path,
+                &[
+                    tape.workspace_root().map(crate::runtime_paths::state_root),
+                    tape.workspace_root().map(Path::to_path_buf),
+                ],
+            ),
             after_calls: tape.next_llm_call.load(Ordering::SeqCst),
             value: contents.as_ref().map(|value| {
                 tape.recorder
@@ -374,9 +396,13 @@ pub(crate) fn store_seed(
     Ok(contents)
 }
 
-/// A store's identity across the recorded workspace and a branch's copy of it.
-fn store_identity(path: &Path, root: Option<&Path>) -> String {
-    root.and_then(|root| path.strip_prefix(root).ok())
+/// A store's identity across the recorded run and a branch: its path under
+/// the first of `roots` that holds it, the state root before the workspace.
+fn store_identity(path: &Path, roots: &[Option<PathBuf>]) -> String {
+    roots
+        .iter()
+        .flatten()
+        .find_map(|root| path.strip_prefix(root).ok())
         .unwrap_or(path)
         .display()
         .to_string()

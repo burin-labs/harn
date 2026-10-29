@@ -62,8 +62,16 @@ fn branch(dir: &Path, k: u64, workspace: &Path) -> BranchGuard {
         tape: EventTape::load(&dir.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: k,
         workspace_root: workspace.to_path_buf(),
+        state_root: fresh_branch_state(workspace),
     })
     .unwrap()
+}
+
+/// A new state root for each branch, as `start_branch` requires.
+fn fresh_branch_state(workspace: &Path) -> std::path::PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    workspace.join(format!("branch-state-{n}"))
 }
 
 fn record_tool(id: &str, args: &serde_json::Value, outcome: Result<RecordedToolResult, String>) {
@@ -261,6 +269,7 @@ fn a_metadata_tape_refuses_to_branch() {
         tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: tmp.path().to_path_buf(),
+        state_root: fresh_branch_state(tmp.path()),
     })
     .err()
     .unwrap();
@@ -281,6 +290,7 @@ fn a_tape_recorded_without_a_workspace_observer_refuses_to_branch() {
         tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: tmp.path().to_path_buf(),
+        state_root: fresh_branch_state(tmp.path()),
     })
     .err()
     .unwrap();
@@ -394,11 +404,11 @@ fn a_branch_store_starts_from_the_recording_and_never_writes_its_file() {
     use crate::store::{store_get, StoreState};
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("store.json");
+    let path = tmp.path().join(crate::runtime_paths::STORE_FILE);
     std::fs::write(&path, r#"{"memo": "recorded"}"#).unwrap();
     {
         let _guard = record_full(tmp.path());
-        let store = parking_lot::Mutex::new(StoreState::at_path(path.clone()));
+        let store = parking_lot::Mutex::new(StoreState::at_state_root(tmp.path()));
         assert_eq!(store_get(&store, "memo").unwrap().display(), "recorded");
         store
             .lock()
@@ -409,7 +419,8 @@ fn a_branch_store_starts_from_the_recording_and_never_writes_its_file() {
     // The recorded run, and others since, left the file holding a later value.
     std::fs::write(&path, r#"{"memo": "live"}"#).unwrap();
     let _branch = branch(tmp.path(), 1, tmp.path());
-    let store = parking_lot::Mutex::new(StoreState::at_path(path.clone()));
+    // Built for the recording's root, as a host reusing its configuration would.
+    let store = parking_lot::Mutex::new(StoreState::at_state_root(tmp.path()));
     assert_eq!(store_get(&store, "memo").unwrap().display(), "recorded");
     store
         .lock()
@@ -419,6 +430,13 @@ fn a_branch_store_starts_from_the_recording_and_never_writes_its_file() {
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
         r#"{"memo": "live"}"#
+    );
+    let branch_root = crate::run_tape::branch_state_root().unwrap();
+    assert!(
+        std::fs::read_to_string(branch_root.join(crate::runtime_paths::STORE_FILE))
+            .unwrap()
+            .contains("branch"),
+        "the branch saved into its own root"
     );
 }
 
@@ -580,7 +598,12 @@ fn a_prefix_cache_read_is_served_only_where_the_recording_made_it() {
 /// someone decides which side it is on.
 const REFUSED_AGENT_STATE: &[(&str, &str)] = &[
     ("attach", "routes a live client"),
+    ("cancel_in_flight_tool_call", "cancels a live tool call"),
     ("client_inject_prompt", "routes a live client"),
+    ("daemon_resume", "controls a daemon worker"),
+    ("daemon_spawn", "starts a daemon worker"),
+    ("daemon_stop", "controls a daemon worker"),
+    ("daemon_trigger", "controls a daemon worker"),
     ("detach", "routes a live client"),
     ("heartbeat", "routes a live client"),
     (
@@ -599,6 +622,10 @@ const REFUSED_AGENT_STATE: &[(&str, &str)] = &[
     ("session_close", "writes the host's durable session store"),
     ("session_fork", "writes the host's durable session store"),
     ("session_open", "writes the host's durable session store"),
+    (
+        "session_store_append",
+        "writes the durable session store directly",
+    ),
     ("session_update", "writes the host's durable session store"),
     ("state_delete", "durable agent state"),
     ("state_handoff", "durable agent state"),
@@ -609,13 +636,22 @@ const REFUSED_AGENT_STATE: &[(&str, &str)] = &[
 /// Every `harness.agent` method whose contract writes state is classified:
 /// allowed as session-table state, allowed by a constant process-local
 /// resource, or refused with a reason. Read-only methods need no entry.
+/// The registry contract behind `harness.agent.<method>`.
+fn agent_method_contract(method: &str) -> Option<&'static harn_builtin_meta::BuiltinContract> {
+    crate::stdlib::capability_method_manifest_entry(harn_builtin_meta::CapabilityId::Agent, method)
+        .map(|entry| &entry.contract)
+        .or_else(|| crate::stdlib::builtin_policy_metadata(&format!("__cap_agent_{method}")).1)
+}
+
 #[test]
 fn every_state_writing_agent_method_is_classified_for_the_prefix() {
     use harn_builtin_meta::{BuiltinExposure, CapabilityId, ResourceSelector};
     let mut unclassified = Vec::new();
+    let mut no_contract = Vec::new();
     for method in harn_capability_contracts::declared_capability_method_names("agent") {
-        let name = format!("__cap_agent_{method}");
-        let Some(contract) = crate::stdlib::builtin_policy_metadata(&name).1 else {
+        let name = format!("harness.agent.{method}");
+        let Some(contract) = agent_method_contract(method) else {
+            no_contract.push(method);
             continue;
         };
         assert!(
@@ -662,14 +698,36 @@ fn every_state_writing_agent_method_is_classified_for_the_prefix() {
         "classify these state-writing harness.agent methods in SESSION_ENTRY_METHODS or \
          REFUSED_AGENT_STATE: {unclassified:?}"
     );
+    // A method with no registry contract has unknown effects, so the gate
+    // refuses it: checked through the same lookup the dispatch makes.
+    assert!(
+        !no_contract.is_empty(),
+        "the scan found no uncontracted method"
+    );
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    {
+        let _guard = record_full(tmp.path());
+        record_llm_call(&request("one"), &result("a", None));
+    }
+    let _branch = branch(tmp.path(), 1, tmp.path());
+    for method in &no_contract {
+        let effects = crate::stdlib::capability_method_manifest_entry(CapabilityId::Agent, method)
+            .map(|entry| entry.contract.effects);
+        assert!(
+            matches!(
+                serve_read(Some((CapabilityId::Agent, method)), method, effects, &[]),
+                Some(Err(_))
+            ),
+            "uncontracted `harness.agent.{method}` would run in a prefix"
+        );
+    }
     for method in prefix::SESSION_ENTRY_METHODS
         .iter()
         .chain(REFUSED_AGENT_STATE.iter().map(|(name, _)| name))
     {
         assert!(
-            crate::stdlib::builtin_policy_metadata(&format!("__cap_agent_{method}"))
-                .1
-                .is_some(),
+            agent_method_contract(method).is_some(),
             "`{method}` is not a harness.agent method"
         );
     }
@@ -678,6 +736,8 @@ fn every_state_writing_agent_method_is_classified_for_the_prefix() {
 /// Named state a capability method writes that persists or leaves the
 /// process, so the prefix gate refuses it.
 const REFUSED_STATE_RESOURCES: &[(&str, &str)] = &[
+    ("checkpoints", "writes checkpoints to disk"),
+    ("llm-cache-stats", "lives with the persistent LLM cache"),
     ("llm-file-upload-cache", "uploads to the provider"),
     ("oauth-registration", "registers a client with the provider"),
     ("oauth-storage", "writes stored tokens"),
@@ -685,6 +745,7 @@ const REFUSED_STATE_RESOURCES: &[(&str, &str)] = &[
     ("review-audit", "appends to the event log"),
     ("run-store", "writes the run store to disk"),
     ("trust-graph", "appends to the event log"),
+    ("verification-profiles", "persists the profile record set"),
     ("vision-ocr-audit", "appends to the event log"),
 ];
 
@@ -696,10 +757,18 @@ fn every_named_state_a_capability_method_writes_is_classified_for_the_prefix() {
     for capability in CapabilityId::ALL {
         let field = capability.field_name();
         for method in harn_capability_contracts::declared_capability_method_names(field) {
-            let name = format!("__cap_{field}_{method}");
-            let Some(contract) = crate::stdlib::builtin_policy_metadata(&name).1 else {
+            let Some(contract) =
+                crate::stdlib::capability_method_manifest_entry(*capability, method)
+                    .map(|entry| &entry.contract)
+                    .or_else(|| {
+                        crate::stdlib::builtin_policy_metadata(&format!("__cap_{field}_{method}")).1
+                    })
+            else {
                 continue;
             };
+            if prefix::branch_owns_state(Some((*capability, method))) {
+                continue;
+            }
             for effect in contract.effects.iter().filter(|effect| {
                 effect.kind == EffectKind::State
                     && !matches!(effect.access, EffectAccess::Read | EffectAccess::Observe)
@@ -730,4 +799,35 @@ fn every_named_state_a_capability_method_writes_is_classified_for_the_prefix() {
         seen.contains("egress-policy"),
         "the scan reached no capability contracts"
     );
+}
+
+/// Hosted providers never probe, so a branch passes through; a self-hosted
+/// probe is not on the tape and is refused rather than sent.
+#[test]
+fn a_prefix_refuses_only_a_capability_probe_that_would_reach_the_network() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    {
+        let _guard = record_full(tmp.path());
+        record_llm_call(&request("one"), &result("a", None));
+    }
+    let _branch = branch(tmp.path(), 1, tmp.path());
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        assert!(
+            !crate::llm::capabilities::ensure_runtime_probe("openai", "gpt")
+                .await
+                .unwrap()
+        );
+        let refused = crate::llm::capabilities::ensure_runtime_probe("ollama", "qwen")
+            .await
+            .expect_err("a self-hosted probe is refused");
+        assert!(
+            format!("{refused:?}").contains("capability probe"),
+            "{refused:?}"
+        );
+    });
 }

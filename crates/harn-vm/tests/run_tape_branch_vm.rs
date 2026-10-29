@@ -1,6 +1,7 @@
 //! A branch replays a recorded run's prefix through the real agent loop
-//! without re-running any of its effects: exec, runtime store writes and
-//! tool hooks are served from the tape or refused, never run.
+//! without re-running any of its effects: exec and tool hooks are served from
+//! the tape or refused, never run, and durable state lands in the branch's own
+//! state root, never the recording's.
 // The scripts shell out to `touch`.
 #![cfg(unix)]
 
@@ -35,14 +36,10 @@ fn quote(value: &Path) -> String {
     serde_json::to_string(&value.display().to_string()).unwrap()
 }
 
-/// Each run keeps its own session store, as separate host runs do: the
-/// branch's session id is served from the tape, so a shared session store
-/// would hand it the recorded run's transcript.
-fn run(source: &str, workspace: &Path, state: &str) -> Result<String, String> {
-    let state_dir = workspace
-        .parent()
-        .expect("workspace has a parent")
-        .join(state);
+/// Every run is pointed at the recording's session store, as a host reusing
+/// its configuration would be; a branch must keep out of it on its own.
+fn run(source: &str, workspace: &Path) -> Result<String, String> {
+    let state_dir = recording_state(workspace);
     // SAFETY: tests here hold SERIAL, so no other thread reads the env.
     unsafe { std::env::set_var("HARN_SESSION_STORE_ROOT", &state_dir) };
     let source = source.to_string();
@@ -87,27 +84,51 @@ fn record(source: &str, tapes: &Path, workspace: &Path) -> String {
     let guard = start_recording(tapes, RecordingLevel::Full, Some(workspace_tape))
         .unwrap()
         .expect("a full tape records");
-    let output = run(source, workspace, "record-state").expect("the recorded run succeeds");
+    let output = run(source, workspace).expect("the recorded run succeeds");
     assert_eq!(guard.error(), None, "the tape wrote cleanly");
     drop(guard);
     output
 }
 
-fn branch(
-    source: &str,
-    tapes: &Path,
-    workspace: &Path,
-    k: u64,
-) -> (Result<String, String>, BranchReport) {
+/// The session store the host names for every run.
+fn recording_state(workspace: &Path) -> PathBuf {
+    workspace.parent().unwrap().join("record-state")
+}
+
+struct Branched {
+    output: Result<String, String>,
+    report: BranchReport,
+    /// The branch's own state root.
+    state: PathBuf,
+}
+
+fn branch(source: &str, tapes: &Path, workspace: &Path, k: u64) -> Branched {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let state = workspace
+        .parent()
+        .unwrap()
+        .join(format!("branch-state-{n}"));
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: k,
         workspace_root: workspace.to_path_buf(),
+        state_root: state.clone(),
     })
     .unwrap();
-    let output = run(source, workspace, "branch-state");
+    let output = run(source, workspace);
     let report = guard.finish();
-    (output, report)
+    Branched {
+        output,
+        report,
+        state: state.canonicalize().unwrap(),
+    }
+}
+
+/// The runtime store a run under `state` saved.
+fn store_at(state: &Path) -> serde_json::Value {
+    let path = state.join(harn_vm::runtime_paths::STORE_FILE);
+    serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
 }
 
 struct Dirs {
@@ -234,7 +255,11 @@ fn a_branch_prefix_serves_exec_store_write_and_hook_without_running_them() {
     let sentinel = "{\"sentinel\": true}";
     std::fs::write(&store_path, sentinel).unwrap();
 
-    let (output, report) = branch(&source, &dirs.tapes, &dirs.workspace, 2);
+    let Branched {
+        output,
+        report,
+        state,
+    } = branch(&source, &dirs.tapes, &dirs.workspace, 2);
     let output = output.expect("the branched run succeeds");
     assert!(output.contains("[harn] done"), "branch output: {output}");
     assert_eq!(report.divergence, None, "report: {report:?}");
@@ -250,7 +275,12 @@ fn a_branch_prefix_serves_exec_store_write_and_hook_without_running_them() {
     assert_eq!(
         std::fs::read_to_string(&store_path).unwrap(),
         sentinel,
-        "the branch wrote the store file"
+        "the branch wrote the recording's store file"
+    );
+    let branch_store = store_at(&state);
+    assert_eq!(
+        branch_store["script_key"], store["script_key"],
+        "the prefix rebuilt the store in the branch's root: {branch_store}"
     );
 }
 
@@ -270,9 +300,14 @@ fn a_branch_live_tail_continues_the_mock_script_after_the_served_prefix() {
     record(&source, &dirs.tapes, &dirs.workspace);
     std::fs::remove_file(&hook_marker).unwrap();
     std::fs::remove_file(&exec_marker).unwrap();
-    std::fs::remove_file(harn_vm::runtime_paths::store_path(&dirs.workspace)).unwrap();
+    let recorded_store =
+        std::fs::read_to_string(harn_vm::runtime_paths::store_path(&dirs.workspace)).unwrap();
 
-    let (output, report) = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+    let Branched {
+        output,
+        report,
+        state,
+    } = branch(&source, &dirs.tapes, &dirs.workspace, 1);
     let output = output.expect("the branched run succeeds");
     assert!(output.contains("[harn] done"), "branch output: {output}");
     assert_eq!(report.divergence, None, "report: {report:?}");
@@ -287,9 +322,7 @@ fn a_branch_live_tail_continues_the_mock_script_after_the_served_prefix() {
         !exec_marker.exists(),
         "the branch re-ran the served tool's exec"
     );
-    let store_path = harn_vm::runtime_paths::store_path(&dirs.workspace);
-    let store: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&store_path).unwrap()).unwrap();
+    let store = store_at(&state);
     assert_eq!(
         store["after_key"], "done",
         "a live-tail write saves: {store}"
@@ -297,6 +330,11 @@ fn a_branch_live_tail_continues_the_mock_script_after_the_served_prefix() {
     assert!(
         store["script_key"].is_string(),
         "prefix writes carry over: {store}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(harn_vm::runtime_paths::store_path(&dirs.workspace)).unwrap(),
+        recorded_store,
+        "the branch changed the recording's store"
     );
 }
 
@@ -341,7 +379,7 @@ pipeline main(harness: Harness, task: unknown) {{
     assert!(exec_marker.exists(), "the recorded run ran the exec");
     std::fs::remove_file(&exec_marker).unwrap();
 
-    let (output, report) = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+    let Branched { output, report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 1);
     assert!(output.is_err(), "a refused exec fails the run: {output:?}");
     assert!(
         !exec_marker.exists(),
@@ -353,8 +391,7 @@ pipeline main(harness: Harness, task: unknown) {{
     assert_eq!(divergence.call, 1, "the refusal came before model call 1");
 }
 
-/// One `mark` tool call, then done, with a post-turn session reset: the reset
-/// runs inside the live run, so its durable write is the run journal's.
+/// One `mark` tool call, then done, with a post-turn session reset.
 fn reset_script(hook_marker: &Path, exec_marker: &Path) -> String {
     mark_script(hook_marker, exec_marker).replace(
         "          session_id: \"branch-\" + id,",
@@ -362,12 +399,11 @@ fn reset_script(hook_marker: &Path, exec_marker: &Path) -> String {
     )
 }
 
-/// Every event the durable session store under `state` holds, as `kind`
-/// joined with the payload's text, across every session in it.
-fn durable_events(workspace: &Path, state: &str) -> Vec<String> {
-    let root = workspace.parent().unwrap().join(state);
+/// Every event the durable session stores under `root` hold for sessions whose
+/// id starts with `session`, as `kind` joined with the payload's text.
+fn durable_events(root: &Path, session: &str) -> Vec<String> {
     let mut found = Vec::new();
-    let mut dirs = vec![root];
+    let mut dirs = vec![root.to_path_buf()];
     while let Some(dir) = dirs.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
@@ -394,6 +430,9 @@ fn durable_events(workspace: &Path, state: &str) -> Vec<String> {
         for path in found {
             let store = harn_session_store::SqliteSessionStore::open(&path).unwrap();
             for meta in store.list(Default::default()).await.unwrap() {
+                if !meta.id.starts_with(session) {
+                    continue;
+                }
                 for event in store.read_all(&meta.id).await.unwrap() {
                     events.push(format!("{:?} {}", event.kind, event.payload));
                 }
@@ -403,20 +442,20 @@ fn durable_events(workspace: &Path, state: &str) -> Vec<String> {
     })
 }
 
-/// Session resets the durable store under `state` holds: a reset lands as an
+/// Session resets the durable stores under `root` hold: a reset lands as an
 /// empty compaction.
-fn durable_resets(workspace: &Path, state: &str) -> usize {
-    durable_events(workspace, state)
+fn durable_resets(root: &Path) -> usize {
+    durable_events(root, "")
         .iter()
         .filter(|event| event.starts_with("Compaction ") && event.contains("\"messages\":[]"))
         .count()
 }
 
-/// A reset inside the replayed prefix changes the session in memory but
-/// writes nothing durable; once the branch goes live, the queued journal
-/// writes it, so the branch's history matches a real run's.
+/// Replaying the prefix rebuilds the session's history in the branch's own
+/// store exactly once, and never touches the recording's, though the host
+/// still names the recording's store and the session id is the recorded one.
 #[test]
-fn a_session_reset_in_the_prefix_is_written_once_and_only_after_going_live() {
+fn a_session_reset_in_the_prefix_lands_once_in_the_branch_store_only() {
     let _serial = SERIAL
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -425,37 +464,127 @@ fn a_session_reset_in_the_prefix_is_written_once_and_only_after_going_live() {
     let exec_marker = dirs.markers.join("exec-marker");
     let source = reset_script(&hook_marker, &exec_marker);
     record(&source, &dirs.tapes, &dirs.workspace);
-    assert_eq!(
-        durable_resets(&dirs.workspace, "record-state"),
-        2,
-        "one reset per turn"
+    let recording = recording_state(&dirs.workspace);
+    assert_eq!(durable_resets(&recording), 2, "one reset per turn");
+
+    for k in [2, 1] {
+        let Branched {
+            output,
+            report,
+            state,
+        } = branch(&source, &dirs.tapes, &dirs.workspace, k);
+        output.expect("the branched run succeeds");
+        assert_eq!(report.divergence, None, "K={k} report: {report:?}");
+        assert_eq!(report.live_calls, 2 - k, "K={k} report: {report:?}");
+        assert_eq!(
+            durable_resets(&state),
+            2,
+            "K={k}: the branch's history holds each reset once"
+        );
+        assert_eq!(
+            durable_resets(&recording),
+            2,
+            "K={k}: the branch wrote into the recording's session store"
+        );
+    }
+}
+
+/// A branch handed a state root that already holds state, here the
+/// recording's own session store, is refused before anything runs.
+#[test]
+fn a_branch_refuses_a_state_root_that_already_holds_state() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let hook_marker = dirs.markers.join("hook-marker");
+    let exec_marker = dirs.markers.join("exec-marker");
+    record(
+        &reset_script(&hook_marker, &exec_marker),
+        &dirs.tapes,
+        &dirs.workspace,
+    );
+    let error = start_branch(BranchPlan {
+        tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: dirs.workspace.clone(),
+        state_root: recording_state(&dirs.workspace),
+    })
+    .err()
+    .expect("a non-empty state root is refused");
+    assert!(error.contains("is not empty"), "{error}");
+}
+
+/// Two agent loops, each with its own session; the first finishes inside the
+/// prefix, so its whole history must reach the branch's store.
+#[test]
+fn a_loop_that_finishes_in_the_prefix_keeps_its_history() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let source = r#"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness, task: unknown) {
+  const id = harness.random.uuid()
+  const done = llm_text("<user_response>Done.</user_response><done>##DONE##</done>")
+  let statuses = []
+  for name in ["first", "second"] {
+    const result = with_llm_script(
+      harness.llm,
+      [done],
+      { ->
+        return agent_loop(
+          harness,
+          name + " loop of " + id,
+          nil,
+          {
+            provider: "mock",
+            max_iterations: 1,
+            loop_until_done: true,
+            verify_completion: { _payload -> return true },
+            session_id: name + "-" + id,
+          },
+        )
+      },
+    )
+    statuses.push(result.status)
+  }
+  harness.stdio.log(join(statuses, ","))
+}
+"#;
+    let recorded = record(source, &dirs.tapes, &dirs.workspace);
+    assert!(
+        recorded.contains("done,done"),
+        "recorded output: {recorded}"
+    );
+    let first = durable_events(&recording_state(&dirs.workspace), "first-");
+    assert!(
+        !first.is_empty(),
+        "the recording kept the first loop's history"
     );
 
-    let (output, report) = branch(&source, &dirs.tapes, &dirs.workspace, 2);
-    output.expect("the replayed run succeeds");
-    assert_eq!(report.divergence, None, "report: {report:?}");
-    assert_eq!(
-        durable_resets(&dirs.workspace, "branch-state"),
-        0,
-        "a fully replayed branch wrote a reset durably"
-    );
-
-    std::fs::remove_dir_all(dirs.workspace.parent().unwrap().join("branch-state")).unwrap();
-    let (output, report) = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+    let Branched {
+        output,
+        report,
+        state,
+    } = branch(source, &dirs.tapes, &dirs.workspace, 1);
     output.expect("the branched run succeeds");
     assert_eq!(report.divergence, None, "report: {report:?}");
     assert_eq!(report.live_calls, 1, "report: {report:?}");
     assert_eq!(
-        durable_resets(&dirs.workspace, "branch-state"),
-        2,
-        "the prefix reset reaches the branch's history once, after going live"
+        durable_events(&state, "first-").len(),
+        first.len(),
+        "the branch lost the first loop's history"
     );
 }
 
-/// Prefix store writes reach disk when the branch goes live, even when the
-/// live tail never writes the store itself.
+/// Prefix store writes reach the branch's store even when the live tail never
+/// writes the store itself, and the recording's store keeps what it had.
 #[test]
-fn prefix_store_writes_are_saved_when_the_branch_goes_live() {
+fn prefix_store_writes_reach_the_branch_store() {
     let _serial = SERIAL
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -471,21 +600,24 @@ fn prefix_store_writes_are_saved_when_the_branch_goes_live() {
         "the live tail must not write"
     );
     record(&source, &dirs.tapes, &dirs.workspace);
-    let store_path = harn_vm::runtime_paths::store_path(&dirs.workspace);
-    let sentinel = "{\"sentinel\": true}";
-    std::fs::write(&store_path, sentinel).unwrap();
+    let recorded_store =
+        std::fs::read_to_string(harn_vm::runtime_paths::store_path(&dirs.workspace)).unwrap();
 
-    let (output, report) = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+    let Branched {
+        output,
+        report,
+        state,
+    } = branch(&source, &dirs.tapes, &dirs.workspace, 1);
     output.expect("the branched run succeeds");
     assert_eq!(report.live_calls, 1, "report: {report:?}");
-    let store: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&store_path).unwrap()).unwrap();
+    let store = store_at(&state);
     assert!(
         store["script_key"].is_string(),
         "the prefix write was saved: {store}"
     );
-    assert!(
-        store.get("sentinel").is_none(),
-        "the store started from the seed: {store}"
+    assert_eq!(
+        std::fs::read_to_string(harn_vm::runtime_paths::store_path(&dirs.workspace)).unwrap(),
+        recorded_store,
+        "the branch changed the recording's store"
     );
 }

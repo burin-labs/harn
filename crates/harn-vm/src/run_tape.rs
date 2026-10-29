@@ -107,6 +107,17 @@ static PROCESS_BRANCH: Mutex<Option<BranchState>> = Mutex::new(None);
 static PREFIX_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// Mirrors "a `recording: full` tape is active", for the same reason.
 static RECORDING_FULL: AtomicBool = AtomicBool::new(false);
+/// The armed branch's state root, which every default state path resolves to
+/// while the branch runs.
+static BRANCH_STATE_ROOT: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
+
+/// Where the armed branch keeps its durable state, if a branch is armed.
+pub(crate) fn branch_state_root() -> Option<PathBuf> {
+    BRANCH_STATE_ROOT
+        .read()
+        .expect("branch state root poisoned")
+        .clone()
+}
 
 fn process_tape() -> Option<Arc<ProcessTape>> {
     PROCESS_TAPE
@@ -511,6 +522,10 @@ pub struct BranchPlan {
     /// The branch's workspace, a copy of the recorded run's starting tree.
     /// Served tool calls re-apply their file effects here.
     pub workspace_root: PathBuf,
+    /// Where the branch keeps its durable state: runtime store, session store
+    /// and event log. It must be absent or empty, so a branch never writes
+    /// into the recording's state; the prefix rebuilds it by replaying.
+    pub state_root: PathBuf,
 }
 
 /// The first point where a branch's prefix stopped matching its recording.
@@ -643,6 +658,9 @@ impl Drop for BranchGuard {
     fn drop(&mut self) {
         *PROCESS_BRANCH.lock().expect("branch lock poisoned") = None;
         PREFIX_ACTIVE.store(false, Ordering::Release);
+        *BRANCH_STATE_ROOT
+            .write()
+            .expect("branch state root poisoned") = None;
     }
 }
 
@@ -793,6 +811,10 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
     if slot.is_some() {
         return Err("a branch is already replaying in this process".to_string());
     }
+    let state_root = fresh_state_root(&plan.state_root)?;
+    *BRANCH_STATE_ROOT
+        .write()
+        .expect("branch state root poisoned") = Some(state_root);
     *slot = Some(BranchState {
         calls,
         tools,
@@ -808,6 +830,21 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
     });
     PREFIX_ACTIVE.store(true, Ordering::Release);
     Ok(BranchGuard { _private: () })
+}
+
+/// Create the branch's state root, refusing one that already holds state: the
+/// recording's own root, or an earlier branch's.
+fn fresh_state_root(root: &Path) -> Result<PathBuf, String> {
+    let describe = |err: std::io::Error| format!("branch state root {}: {err}", root.display());
+    if root.exists() && std::fs::read_dir(root).map_err(describe)?.next().is_some() {
+        return Err(format!(
+            "branch state root {} is not empty; a branch keeps its state apart from the \
+             recording's, so give it a new directory",
+            root.display()
+        ));
+    }
+    std::fs::create_dir_all(root).map_err(describe)?;
+    root.canonicalize().map_err(describe)
 }
 
 fn recorded_surface(
@@ -891,19 +928,9 @@ pub(crate) fn serve_llm_call(
         return Some(Err(divergence_error(divergence)));
     }
     if state.report.served_calls >= state.report.live_after_calls {
-        let going_live = !state.live;
         state.live = true;
         PREFIX_ACTIVE.store(false, Ordering::Release);
         state.report.live_calls += 1;
-        drop(guard);
-        // Prefix writes the store held back reach disk now, whether or not
-        // the live tail writes again. Journal mutations stay queued and go
-        // out with the live tail's first flush.
-        if going_live {
-            if let Err(error) = crate::store::save_deferred_stores() {
-                return Some(Err(error));
-            }
-        }
         return None;
     }
     let index = usize::try_from(state.report.served_calls).expect("bounded by calls");

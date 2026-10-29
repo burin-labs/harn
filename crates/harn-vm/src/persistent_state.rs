@@ -131,6 +131,11 @@ impl Drop for ScopedPersistentStateRoot {
 }
 
 pub(crate) fn current_persistent_state_root() -> Option<PathBuf> {
+    // An armed branch owns the process's state, so it never writes into the
+    // recording's, whatever root the host scoped.
+    if let Some(root) = crate::run_tape::branch_state_root() {
+        return Some(root);
+    }
     SCOPED_PERSISTENT_STATE_ROOT.with(|slot| {
         slot.borrow()
             .as_ref()
