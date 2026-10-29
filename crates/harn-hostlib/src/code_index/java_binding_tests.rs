@@ -206,14 +206,19 @@ fn java_constructor_seed_refuses_type_rename_before_writing() {
 
 #[test]
 fn java_same_named_method_is_not_a_constructor() {
-    let source = "package lab;\nfinal class DocumentStore {\n  void DocumentStore() {}\n}\n";
+    let source =
+        "package lab; final class DocumentStore { DocumentStore() {} void DocumentStore() {} }";
     let ws = Workspace::new(&[("lab/DocumentStore.java", source)]);
     let index = ws.index.lock().unwrap();
     let state = index.as_ref().unwrap();
     let seed = state
         .symbols
         .iter_nodes()
-        .find(|node| node.kind == NodeKind::Function && node.name == "DocumentStore")
+        .find(|node| {
+            node.kind == NodeKind::Function
+                && node.name == "DocumentStore"
+                && node.col == Some(source.rfind("DocumentStore").unwrap() as u32 + 1)
+        })
         .expect("the method is indexed");
     let tree = crate::ast::api::parse_tree(source, crate::ast::Language::Java).unwrap();
     assert!(!super::rename_java::is_constructor(&tree, source, seed));

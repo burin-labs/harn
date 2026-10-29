@@ -13,6 +13,7 @@ pub(super) struct RenameSites {
 }
 
 pub(super) fn is_constructor(tree: &Tree, source: &str, seed: &Node) -> bool {
+    let positions = super::source_positions::LineIndex::new(source);
     let mut pending = vec![tree.root_node()];
     while let Some(node) = pending.pop() {
         if matches!(
@@ -23,6 +24,13 @@ pub(super) fn is_constructor(tree: &Tree, source: &str, seed: &Node) -> bool {
                 let line = seed.line as usize;
                 if (node.start_position().row + 1 == line || name.start_position().row + 1 == line)
                     && source.get(name.byte_range()) == Some(seed.name.as_str())
+                    && seed.col.is_none_or(|col| {
+                        positions
+                            .position(name.start_byte(), super::source_positions::Encoding::Utf16)
+                            .character
+                            + 1
+                            == col
+                    })
                 {
                     return true;
                 }
