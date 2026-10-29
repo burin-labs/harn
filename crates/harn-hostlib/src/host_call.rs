@@ -3,9 +3,8 @@
 //!
 //! The registry installs a context around every builtin that may wait on an
 //! external process; [`HostCallContext::current`] hands any other caller an
-//! empty one. Deadline and cancellation come from the VM's interrupt sources
-//! installed on the same thread, so a call stopped by its tool-call handle,
-//! its VM, or its scope deadline observes it the same way.
+//! empty one. The tool-call handle is retained across the worker handoff so
+//! the worker sees a stop immediately, alongside the VM interrupt sources.
 
 use std::cell::{Cell, RefCell};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -114,6 +113,8 @@ impl CallAddress {
 #[derive(Clone, Debug)]
 pub(crate) struct HostCallContext {
     call: Option<CallAddress>,
+    /// The live tool handle is signalled before asynchronous dispatch unwinds.
+    cancellation: Option<harn_vm::tool_call_cancellations::Handle>,
     /// The request's own budget, beside the caller's deadline.
     budget: Option<Instant>,
     started: Instant,
@@ -136,8 +137,12 @@ impl Drop for HostCallGuard {
 
 impl HostCallContext {
     pub(crate) fn new(call: Option<CallAddress>) -> Self {
+        let cancellation = call.as_ref().and_then(|call| {
+            harn_vm::tool_call_cancellations::lookup(&call.session_id, &call.tool_call_id)
+        });
         Self {
             call,
+            cancellation,
             budget: None,
             started: Instant::now(),
             last_report: Cell::new(None),
@@ -157,6 +162,13 @@ impl HostCallContext {
         HostCallGuard(CURRENT.with(|slot| slot.borrow_mut().replace(self)))
     }
 
+    /// A stopped call must not continue with later actions in its handler.
+    pub(crate) fn tool_call_cancelled(&self) -> bool {
+        self.cancellation
+            .as_ref()
+            .is_some_and(harn_vm::tool_call_cancellations::Handle::is_cancelled)
+    }
+
     #[cfg(feature = "ast")]
     /// This context, also bounded by a request's own `budget`.
     pub(crate) fn with_budget(mut self, budget: Duration) -> Self {
@@ -168,7 +180,12 @@ impl HostCallContext {
     #[cfg(feature = "ast")]
     /// Why the call must stop now, if it must.
     pub(crate) fn interrupted(&self) -> Option<Interrupt> {
-        if harn_vm::op_interrupt::cancel_requested() {
+        if self
+            .cancellation
+            .as_ref()
+            .is_some_and(harn_vm::tool_call_cancellations::Handle::is_cancelled)
+            || harn_vm::op_interrupt::cancel_requested()
+        {
             return Some(Interrupt::Cancelled);
         }
         let expired = harn_vm::op_interrupt::requested()
@@ -188,6 +205,10 @@ impl HostCallContext {
         write: impl FnOnce(&WorkspaceWrites) -> T,
     ) -> Result<T, Interrupt> {
         let writes = workspace_writes();
+        let _commit = self
+            .cancellation
+            .as_ref()
+            .map(|handle| handle.begin_write_commit());
         if let Some(interrupt) = self.interrupted() {
             return Err(interrupt);
         }
@@ -228,7 +249,7 @@ impl HostCallContext {
                     "phase": phase.as_str(),
                     "detail": detail,
                     "elapsed_ms": elapsed_ms,
-                    "cancellable": true,
+                    "cancellable": !matches!(phase, Phase::Applying),
                 },
             })),
             health: None,
@@ -250,5 +271,25 @@ impl HostCallContext {
         if quiet {
             self.report(phase, detail);
         }
+    }
+}
+
+#[cfg(all(test, feature = "ast"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_stop_is_observed_before_worker_dispatch_unwinds() {
+        let (handle, _guard) =
+            harn_vm::tool_call_cancellations::register("host-call-stop-test", "call", "rename")
+                .unwrap();
+        let context = HostCallContext::new(Some(CallAddress {
+            session_id: "host-call-stop-test".into(),
+            tool_call_id: "call".into(),
+            tool_name: "rename".into(),
+        }));
+        assert_eq!(context.interrupted(), None);
+        assert!(handle.cancel("stop", false));
+        assert_eq!(context.interrupted(), Some(Interrupt::Cancelled));
     }
 }

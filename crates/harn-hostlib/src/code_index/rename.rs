@@ -11,7 +11,8 @@
 //!
 //! - `applied`     — the rename succeeded (or, with `dry_run`, would).
 //! - `conflict`    — `new_name` already exists as an identifier in at
-//!   least one file the rename would have touched.
+//!   least one file the rename would have touched, or in a Go sibling
+//!   whose package scope may be affected by the new declaration.
 //! - `no_match`    — `symbol_ref` did not resolve to a node in the graph.
 //! - `ambiguous_symbol` — multiple distinct symbols match `symbol_ref`,
 //!   or an occurrence cannot be proved to refer to the seed binding.
@@ -214,7 +215,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         .expect("resolve_seed returned a node id present in the graph");
     let seed_path = seed_node.path.to_string();
 
-    let in_scope_files = files_in_scope(
+    let mut in_scope_files = files_in_scope(
         state,
         scope,
         &symbol_name,
@@ -270,6 +271,67 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     }
     env.backend.syntax_tree = true;
 
+    if is_rename && !is_identifier_token(&new_name) {
+        return Ok(invalid_identifier_response(
+            &env,
+            "must start with a letter or underscore and consist of identifier characters",
+        ));
+    }
+
+    let check_go_package = is_rename
+        && seed_node.language == "go"
+        && matches!(seed_node.kind, NodeKind::Function | NodeKind::Type);
+    let go_proof = if check_go_package {
+        match super::rename_go::inspect(
+            &state.root,
+            &seed_path,
+            &new_name,
+            session_id.as_deref(),
+            Some(&call),
+        ) {
+            Ok((package_shadows, _)) if !package_shadows.is_empty() => {
+                return Ok(conflict_response(&env, &package_shadows));
+            }
+            Ok((_, mut proof)) => {
+                if scope == Scope::Workspace {
+                    if let Err(detail) = proof.cover_workspace(
+                        &state.root,
+                        &symbol_name,
+                        session_id.as_deref(),
+                        &call,
+                    ) {
+                        if let Some(interrupt) = call.interrupted() {
+                            return Ok(interrupted_response(&env, interrupt, false));
+                        }
+                        return Ok(ambiguous_response_with_details(
+                            &env,
+                            &format!("rename aborted without writes: {detail}"),
+                        ));
+                    }
+                }
+                Some(proof)
+            }
+            Err(detail) => {
+                if let Some(interrupt) = call.interrupted() {
+                    return Ok(interrupted_response(&env, interrupt, false));
+                }
+                return Ok(ambiguous_response_with_details(
+                    &env,
+                    &format!("rename aborted without writes: {detail}"),
+                ));
+            }
+        }
+    } else {
+        None
+    };
+    if scope == Scope::Workspace {
+        if let Some(proof) = &go_proof {
+            in_scope_files.extend(proof.members().cloned());
+            in_scope_files.sort();
+            in_scope_files.dedup();
+        }
+    }
+
     // The identifier rewrite below would otherwise silently rename both
     // definitions and their unrelated uses.
     let competing =
@@ -287,13 +349,6 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     // The identifier-validity gate is a rename-only concern: an arbitrary
     // `replacement_text` (e.g. `client.fetch(`) is intentionally not an
     // identifier. Syntax validation (below) is the safety net for replace mode.
-    if is_rename && !is_identifier_token(&new_name) {
-        return Ok(invalid_identifier_response(
-            &env,
-            "must start with a letter or underscore and consist of identifier characters",
-        ));
-    }
-
     let mut plans: Vec<FilePlan> = Vec::new();
     let mut shadows: Vec<ShadowSite> = Vec::new();
 
@@ -381,6 +436,14 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             }
         }
 
+        if language == Language::Go
+            && go_proof.is_some()
+            && targets.is_empty()
+            && path != &seed_path
+        {
+            continue;
+        }
+
         if !local_shadows.is_empty() {
             shadows.extend(local_shadows);
             continue;
@@ -413,6 +476,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
                     state,
                     node: seed_node,
                     name: &symbol_name,
+                    go_package: go_proof.as_ref(),
                 },
                 path,
                 language,
@@ -461,7 +525,14 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let failed = if dry_run {
         Vec::new()
     } else {
-        match commit(&env, &call, &state.root, &plans, session_id.as_deref())? {
+        match commit(
+            &env,
+            &call,
+            &state.root,
+            &plans,
+            session_id.as_deref(),
+            go_proof.as_ref(),
+        )? {
             Ok(failed) => failed,
             Err(stopped) => return Ok(stopped),
         }
@@ -583,8 +654,19 @@ fn commit(
     root: &Path,
     plans: &[FilePlan],
     session_id: Option<&str>,
+    go_proof: Option<&super::rename_go::PackageProof>,
 ) -> Result<Result<Vec<(String, String)>, VmValue>, HostlibError> {
     let committed = call.commit(BUILTIN, |writes| {
+        if go_proof.is_some_and(|proof| !proof.unchanged(root, session_id)) {
+            return Ok(Err(emit_response(
+                env,
+                "refused",
+                ResponseExtras {
+                    details: "rename stopped without writes: the Go package changed after the rename read it; run it again".into(),
+                    ..Default::default()
+                },
+            )));
+        }
         let changed =
             super::refactor_core::changed_since_planned(BUILTIN, root, plans, session_id);
         if changed.is_empty() {

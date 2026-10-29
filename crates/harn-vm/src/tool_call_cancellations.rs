@@ -51,9 +51,11 @@ pub struct CancellationDetails {
 struct Inner {
     cancelled: AtomicBool,
     completed: AtomicBool,
+    write_commit_active: AtomicBool,
     details: Mutex<Option<CancellationDetails>>,
     notify: Notify,
     completion_notify: Notify,
+    write_commit_notify: Notify,
 }
 
 /// Per-tool-call cancellation handle. Cheap to clone (`Arc` inside).
@@ -74,15 +76,36 @@ impl Handle {
             inner: Arc::new(Inner {
                 cancelled: AtomicBool::new(false),
                 completed: AtomicBool::new(false),
+                write_commit_active: AtomicBool::new(false),
                 details: Mutex::new(None),
                 notify: Notify::new(),
                 completion_notify: Notify::new(),
+                write_commit_notify: Notify::new(),
             }),
         }
     }
 
     pub fn is_cancelled(&self) -> bool {
         self.inner.cancelled.load(Ordering::SeqCst)
+    }
+
+    /// Hold the active boundary until the committed write and its ledger finish.
+    pub fn begin_write_commit(&self) -> WriteCommitGuard {
+        self.inner.write_commit_active.store(true, Ordering::SeqCst);
+        WriteCommitGuard(self.clone())
+    }
+
+    /// Wait only for a write in progress, never the rest of its tool handler.
+    pub async fn wait_for_write_commit(&self) {
+        loop {
+            let notified = self.inner.write_commit_notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if !self.inner.write_commit_active.load(Ordering::SeqCst) {
+                return;
+            }
+            notified.await;
+        }
     }
 
     pub fn is_completed(&self) -> bool {
@@ -155,6 +178,19 @@ impl Handle {
             return;
         }
         notified.await;
+    }
+}
+
+/// Ends the in-progress write boundary even if a host worker unwinds.
+pub struct WriteCommitGuard(Handle);
+
+impl Drop for WriteCommitGuard {
+    fn drop(&mut self) {
+        self.0
+            .inner
+            .write_commit_active
+            .store(false, Ordering::SeqCst);
+        self.0.inner.write_commit_notify.notify_waiters();
     }
 }
 
@@ -401,6 +437,27 @@ pub fn clear_registry_for_test() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn write_commit_waits_only_for_the_active_guard() {
+        let (handle, _registration) = register("commit-test", "call", "tool").unwrap();
+        handle.wait_for_write_commit().await;
+        for _ in 0..2 {
+            let commit = handle.begin_write_commit();
+            let waiter = handle.clone();
+            let task = tokio::spawn(async move { waiter.wait_for_write_commit().await });
+            tokio::task::yield_now().await;
+            assert!(
+                !task.is_finished(),
+                "an active write must finish before stop returns"
+            );
+            drop(commit);
+            harn_clock::test_support::within("write commit finishing", task)
+                .await
+                .expect("waiter did not panic");
+            handle.wait_for_write_commit().await;
+        }
+    }
 
     #[tokio::test]
     async fn handle_resolves_cancelled_future() {

@@ -1220,11 +1220,8 @@ pub(crate) async fn host_agent_dispatch_tool_call(
     )
     .map(|(handle, guard)| (Some(handle), Some(guard)))
     .unwrap_or((None, None));
-    // Heap-pin the dispatch future on a frame that dies immediately. The
-    // tool-execution path builds large per-call state (e.g.
-    // `LlmCallOptions`/`LlmRequestPayload`), and both await arms below consume
-    // the `Pin<Box<_>>` directly, but the box alone is not enough: see
-    // `pin_scoped_tool_dispatch`.
+    // The scoped heap pin avoids retaining a large dispatch frame; the box
+    // alone is insufficient (see `pin_scoped_tool_dispatch`).
     let mut dispatch_future = pin_scoped_tool_dispatch(
         session_id.clone(),
         tool_id.clone(),
@@ -1243,36 +1240,32 @@ pub(crate) async fn host_agent_dispatch_tool_call(
     );
     let (outcome, preempted_by_cancel) = match cancel_handle.as_ref() {
         Some(handle) => {
-            // Race the dispatch against the cancellation signal. When the
-            // signal wins, the dispatch future is dropped immediately — the
-            // tool's own resources unwind via tokio's drop guarantees.
-            // Tools that hold non-droppable state (long-lived subprocesses)
-            // can additionally honor the per-call handle through
-            // `crate::tool_call_cancellations::lookup` to coordinate
-            // graceful shutdown.
-            //
-            // The dispatch arm is `biased`, so a dispatch that finishes in
-            // the same tick as cancellation still wins — the side effect
-            // already landed, so reporting "cancelled" then would lie about
-            // what actually happened.
+            // Committed writes finish and report their outcome; ties favor dispatch.
             let cancel_wait = handle.cancelled();
             tokio::pin!(cancel_wait);
             tokio::select! {
                 biased;
-                outcome = &mut dispatch_future => (outcome, false),
-                _ = &mut cancel_wait => (
-                    agent_tools::ToolDispatchOutcome {
-                        result: Err(VmError::CategorizedError {
-                            message: handle
-                                .reason()
-                                .unwrap_or_else(|| "tool call cancelled in-flight".to_string()),
-                            category: crate::value::ErrorCategory::Cancelled,
-                        }),
-                        executor: None,
-                        handler_outcome: None,
-                    },
-                    true,
-                ),
+                outcome = &mut dispatch_future => {
+                    let stopped = matches!(outcome.result.as_ref(), Err(VmError::ToolCallStopped));
+                    (outcome, stopped)
+                },
+                _ = &mut cancel_wait => {
+                    // Wait for an active atomic write, not the rest of the handler.
+                    handle.wait_for_write_commit().await;
+                    (
+                        agent_tools::ToolDispatchOutcome {
+                            result: Err(VmError::CategorizedError {
+                                message: handle
+                                    .reason()
+                                    .unwrap_or_else(|| "tool call cancelled in-flight".to_string()),
+                                category: crate::value::ErrorCategory::Cancelled,
+                            }),
+                            executor: None,
+                            handler_outcome: None,
+                        },
+                        true,
+                    )
+                },
             }
         }
         None => (dispatch_future.await, false),
