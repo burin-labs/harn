@@ -2,6 +2,65 @@
 
 use super::super::*;
 
+#[tokio::test]
+async fn additional_directories_preserve_order_and_replace_as_a_complete_list() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let original = vec!["/work/second".to_string(), "/work/first".to_string()];
+        store
+            .create(CreateSession {
+                id: Some("workspace-roots".into()),
+                additional_directories: original.clone(),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create with ordered roots");
+        let read = store.describe("workspace-roots").await.unwrap();
+        assert_eq!(read.additional_directories, original);
+        store
+            .update(
+                "workspace-roots",
+                UpdateSession {
+                    title: Some("Root projection control".into()),
+                    ..UpdateSession::default()
+                },
+            )
+            .await
+            .expect("unrelated metadata update");
+        assert_eq!(
+            store
+                .describe("workspace-roots")
+                .await
+                .unwrap()
+                .additional_directories,
+            original
+        );
+        for replacement in [vec!["/work/third".to_string()], Vec::new()] {
+            store
+                .update(
+                    "workspace-roots",
+                    UpdateSession {
+                        additional_directories: Some(replacement.clone()),
+                        ..UpdateSession::default()
+                    },
+                )
+                .await
+                .expect("replace the complete ordered root list");
+            assert_eq!(
+                store
+                    .describe("workspace-roots")
+                    .await
+                    .unwrap()
+                    .additional_directories,
+                replacement
+            );
+            let listed = store.list(ListFilter::default()).await.unwrap();
+            assert_eq!(listed.len(), 1);
+            assert_eq!(listed[0].additional_directories, replacement);
+        }
+    })
+    .await;
+}
+
 /// The pin exists so a person's title outranks a generated one. Walking the
 /// whole intent table in one session proves the rule holds in both directions
 /// and across repeated derived writes, not just on the first collision.

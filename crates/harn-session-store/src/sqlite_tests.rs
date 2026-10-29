@@ -7,6 +7,47 @@ use super::{write_transaction, StoreContention, StoreError};
 static IMMEDIATE_BUSY_CALLBACKS: AtomicUsize = AtomicUsize::new(0);
 static DEFERRED_BUSY_CALLBACKS: AtomicUsize = AtomicUsize::new(0);
 
+#[tokio::test]
+async fn additional_directories_survive_reopen_and_corrupt_lists_refuse() {
+    use crate::{CreateSession, ListFilter, SessionStore, SqliteSessionStore};
+
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("roots.sqlite");
+    let roots = vec!["/work/second".to_string(), "/work/first".to_string()];
+    {
+        let store = SqliteSessionStore::open(&database).unwrap();
+        store
+            .create(CreateSession {
+                id: Some("workspace-roots".into()),
+                additional_directories: roots.clone(),
+                ..CreateSession::default()
+            })
+            .await
+            .unwrap();
+    }
+    let reopened = SqliteSessionStore::open(&database).unwrap();
+    assert_eq!(
+        reopened
+            .describe("workspace-roots")
+            .await
+            .unwrap()
+            .additional_directories,
+        roots
+    );
+    let connection = Connection::open(&database).unwrap();
+    connection
+        .execute(
+            "UPDATE sessions SET additional_directories_json = '[7]' WHERE id = ?1",
+            params!["workspace-roots"],
+        )
+        .unwrap();
+    let error = reopened.describe("workspace-roots").await.unwrap_err();
+    assert!(
+        matches!(error, StoreError::Backend(message) if message.contains("invalid additional directories"))
+    );
+    reopened.list(ListFilter::default()).await.unwrap_err();
+}
+
 fn record_immediate_busy(_attempt: i32) -> bool {
     IMMEDIATE_BUSY_CALLBACKS.fetch_add(1, Ordering::SeqCst);
     false

@@ -234,6 +234,9 @@ impl SessionStore for MemorySessionStore {
         if let Some(value) = request.cwd {
             record.meta.cwd = Some(value);
         }
+        if let Some(value) = request.additional_directories {
+            record.meta.additional_directories = value;
+        }
         if let Some(value) = request.model {
             record.meta.model = Some(value);
         }

@@ -44,6 +44,7 @@ pub(crate) fn meta_for_create(request: CreateSession) -> SessionMeta {
         title: request.title,
         title_pinned: request.title_pinned,
         cwd: request.cwd,
+        additional_directories: request.additional_directories,
         model: request.model,
         session_type: request.session_type,
         project_scope: request.project_scope,

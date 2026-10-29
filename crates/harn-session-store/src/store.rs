@@ -63,6 +63,9 @@ pub struct SessionMeta {
     pub title_pinned: bool,
     #[serde(default)]
     pub cwd: Option<String>,
+    /// Last accepted roots for reporting, never authority for a new run.
+    #[serde(default)]
+    pub additional_directories: Vec<String>,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
@@ -112,6 +115,8 @@ pub struct CreateSession {
     #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default)]
+    pub additional_directories: Vec<String>,
+    #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
     pub session_type: Option<SessionType>,
@@ -156,6 +161,9 @@ pub struct UpdateSession {
     pub title_pinned: Option<bool>,
     #[serde(default)]
     pub cwd: Option<String>,
+    /// Replace the complete ordered list; an empty list clears it.
+    #[serde(default)]
+    pub additional_directories: Option<Vec<String>>,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]

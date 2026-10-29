@@ -157,6 +157,7 @@ mod tests {
             title: None,
             title_pinned: false,
             cwd: None,
+            additional_directories: Vec::new(),
             model: None,
             session_type: None,
             project_scope: None,
