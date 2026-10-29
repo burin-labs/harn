@@ -468,9 +468,13 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             }
             Ok((_, proof)) => Some(proof),
             Err(detail) => {
-                return Ok(ambiguous_response_with_details(
+                return Ok(emit_response(
                     &env,
-                    &format!("rename aborted without writes: {detail}"),
+                    "refused",
+                    ResponseExtras {
+                        details: format!("Go package could not be inspected; rename aborted without writes: {detail}"),
+                        ..Default::default()
+                    },
                 ));
             }
         }

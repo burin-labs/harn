@@ -648,6 +648,63 @@ fn go_workspace_rename_detects_name_collision_in_sibling_without_old_name() {
 }
 
 #[test]
+fn go_rename_refuses_import_alias_in_seed_or_sibling() {
+    for (alias_in_seed, import) in [
+        (false, "import url \"net/url\"\nvar _ = url.URL{}\n"),
+        (true, "import url \"net/url\"\nvar _ = url.URL{}\n"),
+        (false, "import \"net/url\"\nvar _ = url.URL{}\n"),
+    ] {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let declaration = format!(
+            "package lab\n{}\ntype DocumentStore struct{{}}\n",
+            if alias_in_seed { import } else { "" }
+        );
+        let sibling = format!("package lab\n{}", if alias_in_seed { "" } else { import });
+        fs::write(root.join("store.go"), &declaration).unwrap();
+        fs::write(root.join("other.go"), &sibling).unwrap();
+        let capability = build_index(root);
+        let symbol_ref = dict(&[
+            ("name", vm_string("DocumentStore")),
+            ("path", vm_string("store.go")),
+            ("kind", vm_string("Type")),
+        ]);
+        let result = rename(&capability, symbol_ref, "url", "workspace");
+        assert_eq!(s(field(&result, "result")), "conflict", "{result:?}");
+        assert!(list_len(field(&result, "conflicts")) >= 1);
+        assert_eq!(
+            fs::read_to_string(root.join("store.go")).unwrap(),
+            declaration
+        );
+        assert_eq!(fs::read_to_string(root.join("other.go")).unwrap(), sibling);
+    }
+}
+
+#[test]
+fn go_rename_refuses_uninspectable_sibling_without_writing() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    let declaration = "package lab\n\ntype DocumentStore struct{}\n";
+    let sibling = "package lab\nfunc broken(\n";
+    fs::write(root.join("store.go"), declaration).unwrap();
+    fs::write(root.join("other.go"), sibling).unwrap();
+    let capability = build_index(root);
+    let symbol_ref = dict(&[
+        ("name", vm_string("DocumentStore")),
+        ("path", vm_string("store.go")),
+        ("kind", vm_string("Type")),
+    ]);
+    let result = rename(&capability, symbol_ref, "DocumentLibrary", "workspace");
+    assert_eq!(s(field(&result, "result")), "refused", "{result:?}");
+    assert!(s(field(&result, "details")).contains("does not parse"));
+    assert_eq!(
+        fs::read_to_string(root.join("store.go")).unwrap(),
+        declaration
+    );
+    assert_eq!(fs::read_to_string(root.join("other.go")).unwrap(), sibling);
+}
+
+#[test]
 fn go_rename_commit_refuses_a_package_change_and_writes_when_unchanged() {
     let dir = tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
