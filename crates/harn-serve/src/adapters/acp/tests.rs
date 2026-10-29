@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::mpsc;
+mod additional_directories;
 mod client_capabilities;
 mod provider_default_tests;
 fn acp_env_lock() -> &'static Mutex<()> {
@@ -970,6 +971,7 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
     assert_eq!(
         capabilities["sessionCapabilities"],
         serde_json::json!({
+            "additionalDirectories": {},
             "close": {},
             "list": {},
             "resume": {},

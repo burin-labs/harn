@@ -670,6 +670,7 @@ pub(super) fn resolve_acp_session_cwd(
 pub fn acp_persisted_session_item(session: harn_session_store::SessionMeta) -> serde_json::Value {
     let mut item = serde_json::json!({
         "sessionId": session.id,
+        "additionalDirectories": session.additional_directories,
         "liveState": "persisted",
         "activePrompt": false,
         "attachableRoles": [],

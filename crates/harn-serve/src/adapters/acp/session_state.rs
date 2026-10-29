@@ -45,6 +45,10 @@ impl AcpServer {
         }
         if let Some(anchor) = workspace_anchor.as_ref() {
             item["workspaceAnchor"] = anchor.to_json();
+            item["additionalDirectories"] =
+                serde_json::json!(anchor.additional_directories().ok()?);
+        } else {
+            item["additionalDirectories"] = serde_json::json!([]);
         }
 
         let mut meta = session.info.meta.clone();
@@ -260,6 +264,14 @@ impl AcpServer {
             None
         };
 
+        let roots = match self.prepare_session_roots(params, Some(&session_id)) {
+            Ok(roots) => roots,
+            Err(error) => {
+                self.send_root_grant_error(id, error);
+                return;
+            }
+        };
+        let cold_admission = !self.sessions.contains_key(&session_id);
         if let Err(error) = flush_session_sinks(&session_id).await {
             self.send_error(
                 id,
@@ -343,6 +355,14 @@ impl AcpServer {
             }
         }
 
+        if let Err(message) = self.install_session_roots(&session_id, roots).await {
+            if cold_admission {
+                self.rollback_session_admission(&session_id);
+            }
+            self.send_error(id, -32000, &message);
+            return;
+        }
+
         if let Some(requested) = workspace_checkpoint {
             if let Some(session) = self.sessions.get_mut(&session_id) {
                 session.workspace_checkpoint = requested;
@@ -400,13 +420,28 @@ impl AcpServer {
         self.send_response(id, result);
     }
 
-    pub(super) fn handle_session_resume(&self, id: &serde_json::Value, params: &serde_json::Value) {
+    pub(super) async fn handle_session_resume(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
         if !self.validate_protocol_session_options(id, params) {
             return;
         }
         let Some(session_id) = self.restored_session_id(id, params, "session/resume") else {
             return;
         };
+        let roots = match self.prepare_session_roots(params, Some(session_id)) {
+            Ok(roots) => roots,
+            Err(error) => {
+                self.send_root_grant_error(id, error);
+                return;
+            }
+        };
+        if let Err(message) = self.install_session_roots(session_id, roots).await {
+            self.send_error(id, -32000, &message);
+            return;
+        }
         let result = self
             .session_restore_result(session_id)
             .expect("validated session should still exist");

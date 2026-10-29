@@ -1,7 +1,7 @@
 use super::*;
 
 impl AcpServer {
-    pub(super) fn handle_session_new(
+    pub(super) async fn handle_session_new(
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
@@ -16,34 +16,14 @@ impl AcpServer {
                 return;
             }
         };
-        let cwd = params
-            .get("cwd")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        // A confined server cannot work outside the roots it was confined to,
-        // and cannot widen them, so say that now rather than on the first
-        // denied write.
-        if let Some(confinement) = harn_vm::process_sandbox::current_process_confinement()
-            .filter(|confinement| !confinement.covers(&cwd))
-        {
-            self.send_error_with_data(
-                id,
-                -32602,
-                &format!(
-                    "this agent process is confined to {}, and `{}` is outside it",
-                    confinement
-                        .workspace_roots
-                        .iter()
-                        .map(|root| root.display().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    cwd.display()
-                ),
-                serde_json::json!({ "code": "outside_process_confinement" }),
-            );
-            return;
-        }
+        let roots = match self.prepare_session_roots(params, None) {
+            Ok(roots) => roots,
+            Err(error) => {
+                self.send_root_grant_error(id, error);
+                return;
+            }
+        };
+        let cwd = roots.anchor().primary.clone();
 
         // Resolve the declared environment policy at the launch
         // boundary, snapshotting the server environment for env-source grants.
@@ -67,6 +47,11 @@ impl AcpServer {
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.environment_policy = environment_policy;
             session.workspace_checkpoint = workspace_checkpoint;
+        }
+        if let Err(message) = self.install_session_roots(&session_id, roots).await {
+            self.rollback_session_admission(&session_id);
+            self.send_error(id, -32000, &message);
+            return;
         }
         let session = self
             .session_item_json(&session_id, "live", None)

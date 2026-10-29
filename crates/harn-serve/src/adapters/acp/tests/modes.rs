@@ -987,7 +987,10 @@ async fn acp_session_fork_inherits_parent_current_mode() {
         }
     }
     let fork_response = fork_response.expect("fork response");
-    assert_eq!(fork_response["result"]["state"], "forked");
+    assert_eq!(
+        fork_response["result"]["state"], "forked",
+        "{fork_response}"
+    );
     assert_eq!(
         fork_response["result"]["modes"]["currentModeId"],
         "architect"

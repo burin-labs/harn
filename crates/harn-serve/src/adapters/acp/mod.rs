@@ -49,6 +49,7 @@ mod task_admission;
 mod tests;
 mod transport;
 mod types;
+mod workspace_roots;
 
 use auth::acp_auth_request_for_method;
 pub fn is_supported_session_mode(mode_id: &str) -> bool {

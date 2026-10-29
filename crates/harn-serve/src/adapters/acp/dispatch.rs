@@ -89,7 +89,7 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_session_new(&id, &params);
+                self.handle_session_new(&id, &params).await;
             }
             "session/load" => {
                 if self.reject_unauthenticated(&id) {
@@ -101,7 +101,7 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_session_resume(&id, &params);
+                self.handle_session_resume(&id, &params).await;
             }
             "session/fork" => {
                 if self.reject_unauthenticated(&id) {

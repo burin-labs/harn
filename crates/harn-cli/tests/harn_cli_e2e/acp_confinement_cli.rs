@@ -13,6 +13,138 @@ use tempfile::TempDir;
 use crate::test_util::process::harn_e2e_command;
 use crate::test_util::stdio_jsonrpc::StdioJsonRpcClient;
 
+fn directory_client(workspace: &Path, home: &Path) -> StdioJsonRpcClient {
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(workspace)
+        .args(["serve", "acp", "--obs", "off"])
+        .env_clear()
+        .env("HOME", home)
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default());
+    let mut client = StdioJsonRpcClient::spawn("ACP directory grants", command);
+    let initialized = request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":1, "method":"initialize", "params":{}
+        }),
+    );
+    assert_eq!(
+        initialized["result"]["agentCapabilities"]["sessionCapabilities"]["additionalDirectories"],
+        json!({})
+    );
+    client
+}
+
+fn scoped_write_source(workspace: &Path, target: &Path) -> String {
+    format!(
+        "harness.runtime.with_execution_policy({{sandbox_profile: \"worktree\", workspace_roots: [{}], read_only_roots: [{}]}}, {{ -> harness.fs.write_text({}, \"root-grant-probe\") }})",
+        json!(workspace), json!(workspace), json!(target)
+    )
+}
+
+#[test]
+fn additional_directories_grant_real_writes_and_omission_revokes_after_reload() {
+    let temp = TempDir::new().unwrap();
+    let base = temp.path().canonicalize().unwrap();
+    let workspace = base.join("workspace");
+    let first = base.join("first");
+    let second = base.join("second");
+    for path in [&workspace, &first, &second] {
+        fs::create_dir(path).unwrap();
+    }
+    let directories = json!([second, first]);
+    let mut client = directory_client(&workspace, &base);
+    let created = request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":2, "method":"session/new", "params":{
+                "cwd":workspace, "additionalDirectories":directories,
+                "environmentPolicy":{"kind":"isolated"}}
+        }),
+    );
+    let session = created["result"]["sessionId"]
+        .as_str()
+        .expect("session admitted");
+    assert_eq!(
+        created["result"]["session"]["additionalDirectories"], directories,
+        "{created}"
+    );
+    for (id, directory) in [(3, &first), (4, &second)] {
+        let target = directory.join("accepted");
+        let response = request(
+            &mut client,
+            json!({
+                "jsonrpc":"2.0", "id":id, "method":"session/prompt", "params":{
+                    "sessionId":session, "prompt":[{"type":"text", "text":scoped_write_source(&workspace, &target)}]}
+            }),
+        );
+        assert!(response.get("error").is_none(), "{response}");
+        assert_eq!(fs::read_to_string(target).unwrap(), "root-grant-probe");
+    }
+    let invalid = request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":5, "method":"session/resume", "params":{
+                "sessionId":session, "additionalDirectories":[first, base.join("missing")]}
+        }),
+    );
+    assert_eq!(invalid["error"]["code"], -32602, "{invalid}");
+    assert_eq!(invalid["error"]["data"]["code"], "invalid_workspace_roots");
+    client.shutdown_expect_success();
+
+    let mut restored = directory_client(&workspace, &base);
+    let listed = request(
+        &mut restored,
+        json!({
+            "jsonrpc":"2.0", "id":2, "method":"session/list", "params":{"cwd":workspace}
+        }),
+    );
+    let rows = listed["result"]["sessions"]
+        .as_array()
+        .expect("persisted rows");
+    let row = rows
+        .iter()
+        .find(|row| row["sessionId"] == session)
+        .expect("accepted session persisted");
+    assert_eq!(row["additionalDirectories"], directories, "{listed}");
+    let loaded = request(
+        &mut restored,
+        json!({
+            "jsonrpc":"2.0", "id":3, "method":"session/load", "params":{
+                "sessionId":session, "cwd":workspace, "environmentPolicy":{"kind":"isolated"}}
+        }),
+    );
+    assert_eq!(
+        loaded["result"]["session"]["additionalDirectories"],
+        json!([]),
+        "{loaded}"
+    );
+    let denied = first.join("revoked");
+    let refused = request(
+        &mut restored,
+        json!({
+            "jsonrpc":"2.0", "id":4, "method":"session/prompt", "params":{
+                "sessionId":session, "prompt":[{"type":"text", "text":scoped_write_source(&workspace, &denied)}]}
+        }),
+    );
+    assert!(refused.get("error").is_some(), "{refused}");
+    assert!(
+        !denied.exists(),
+        "an omitted grant must not survive cold loading"
+    );
+    let inside = workspace.join("still-writable");
+    let permitted = request(
+        &mut restored,
+        json!({
+            "jsonrpc":"2.0", "id":5, "method":"session/prompt", "params":{
+                "sessionId":session, "prompt":[{"type":"text", "text":scoped_write_source(&workspace, &inside)}]}
+        }),
+    );
+    assert!(permitted.get("error").is_none(), "{permitted}");
+    assert_eq!(fs::read_to_string(inside).unwrap(), "root-grant-probe");
+    restored.shutdown_expect_success();
+}
+
 fn request(client: &mut StdioJsonRpcClient, request: JsonValue) -> JsonValue {
     client
         .exchange(request, |method| match method {

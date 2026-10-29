@@ -284,6 +284,7 @@ pub(super) fn acp_agent_capabilities() -> serde_json::Value {
             "sse": false,
         },
         "sessionCapabilities": {
+            "additionalDirectories": {},
             "close": {},
             "list": {},
             "resume": {},

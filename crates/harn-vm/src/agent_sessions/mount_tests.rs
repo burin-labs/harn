@@ -93,7 +93,10 @@ async fn workspace_root_replacement_persists_before_changing_authority() {
         .install(&session, &scope, SessionType::User)
         .await
         .unwrap();
-    let store = crate::stdlib::session_store::open_canonical_store(scope.state_root()).unwrap();
+    let store = scope
+        .run(async { crate::stdlib::session_store::open_canonical_store(scope.workspace()) })
+        .await
+        .unwrap();
     assert_eq!(
         store
             .describe(&session)
