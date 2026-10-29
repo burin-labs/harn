@@ -630,6 +630,42 @@ pipeline test_git_stash_writes_inside_command_substitution_are_denied(
 }
 
 @test
+pipeline test_a_backslash_in_an_argument_is_not_a_path_change(harness: Harness, task: unknown) {
+  // A lookup that cannot read the configuration refuses whenever a git verb might be an alias, so
+  // an allow below is only possible if the guard still knows `show` is a builtin.
+  const unreadable = { _options -> {"<unreadable>": ""} }
+  for command in [
+    "git -C /tmp show HEAD:a | grep \"x\\|y\"",
+    "git -C /tmp show HEAD:a | grep x\\|y",
+    "git -C /tmp show HEAD:a; echo \"x\\|y\"",
+    "git -C /tmp show HEAD:a | grep \"x\\.y\"",
+    "git -C /tmp show HEAD:a | grep -n -i \"admission\\|worktree\"",
+  ] {
+    const verdict_here = decision(claude_payload(command), NO_MAKE_TARGETS, unreadable)
+    assert(verdict_here.allow, command + " must be allowed: " + verdict_here.reason)
+  }
+  // NEGATIVE CONTROLS: an escape that builds an assignment or expansion name still drops the
+  // builtin knowledge, and a real stash write is refused with or without a backslash.
+  for command in [
+    "P\\ATH=/evil git -C /tmp show HEAD:a",
+    "env \"P\"\\ATH=/evil git -C /tmp show HEAD:a",
+    "echo $P\\ATH; git -C /tmp show HEAD:a",
+    "echo $" + "{P\\ATH}; git -C /tmp show HEAD:a",
+    "PATH=/evil git -C /tmp show HEAD:a",
+    "git -C /tmp show HEAD:a \\\n| cat",
+    "PATH=/evil git stash",
+    "P\\ATH=x git stash",
+    "git -C /tmp stash",
+    "git -C /tmp show HEAD:a | grep \"x\\|y\"; git stash",
+  ] {
+    assert(
+      !decision(claude_payload(command), NO_MAKE_TARGETS, unreadable).allow,
+      command + " must stay refused",
+    )
+  }
+}
+
+@test
 pipeline test_git_stash_reads_and_lookalikes_are_allowed(harness: Harness, task: unknown) {
   // THE CONTROL. Refusing every command that mentions `stash` would pass the
   // denial cases above, so the read-only verbs and unrelated words must pass.

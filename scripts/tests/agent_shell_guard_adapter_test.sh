@@ -161,6 +161,36 @@ if [[ "$worktree_control" != *'"permissionDecision":"deny"'* ]]; then
   exit 1
 fi
 
+# A backslash in an argument builds no variable name, so it must not make the guard
+# distrust the git builtin it is passed to. The payloads are JSON, hence the doubled slashes.
+for backslash_command in \
+  "git -C $fixture_root show HEAD:a | grep \\\"x\\\\|y\\\"" \
+  "git -C $fixture_root show HEAD:a | grep -n -i \\\"admission\\\\|worktree\\\"" \
+  "git -C $fixture_root show HEAD:a; echo x\\\\|y"; do
+  backslash_allowed="$(
+    printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$backslash_command\"}}" \
+      | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+  )"
+  if [[ -n "$backslash_allowed" ]]; then
+    echo "adapter refused a backslash in an argument: $backslash_command" >&2
+    printf '%s\n' "$backslash_allowed" >&2
+    exit 1
+  fi
+done
+for stash_command in \
+  "git -C $fixture_root stash" \
+  "P\\\\ATH=/evil git stash" \
+  "PATH=/evil git stash"; do
+  stash_denied="$(
+    printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$stash_command\"}}" \
+      | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+  )"
+  if [[ "$stash_denied" != *'"permissionDecision":"deny"'* ]]; then
+    echo "adapter allowed a stash write: $stash_command" >&2
+    exit 1
+  fi
+done
+
 quoted_pipeline="$({
   printf '%s' \
     '{"tool_name":"Bash","tool_input":{"command":"ps -axo command | rg '\''rustc .*harn_vm|cargo build --locked'\'' | head -n 20"}}'
