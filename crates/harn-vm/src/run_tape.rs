@@ -191,66 +191,76 @@ pub(crate) fn render_consumers(render_id: &str) -> Vec<u64> {
 // Request surface
 // ---------------------------------------------------------------------------
 
-/// The request fields that decide a model's answer. One owner for the digest
-/// that recording writes and branch verification checks.
-fn request_surface(request: &LlmRequestPayload) -> serde_json::Map<String, serde_json::Value> {
+/// The request fields that decide a model's answer, keyed by the model that
+/// served it. One owner for the digest that recording writes, the fidelity
+/// oracle compares, and branch verification checks. The field set and its
+/// presence rules are a tape compatibility contract: checked-in tapes carry
+/// digests of exactly this shape.
+fn request_surface(
+    request: &LlmRequestPayload,
+    model: &str,
+) -> serde_json::Map<String, serde_json::Value> {
+    use serde_json::json;
     let call = crate::llm::mock::LlmMockCall::from_request(request);
     let mut surface = serde_json::Map::new();
     let mut put = |key: &str, value: serde_json::Value| {
-        if !value.is_null() {
-            surface.insert(key.to_string(), value);
-        }
+        surface.insert(key.to_string(), value);
     };
-    put("model", serde_json::json!(request.model));
-    put("api_mode", serde_json::json!(call.api_mode));
+    put("messages", json!(call.messages));
+    put("system", json!(call.system));
+    put("tools", json!(call.tools));
+    put("tool_choice", json!(call.tool_choice));
+    put("thinking", json!(call.thinking));
     if call.mock_scope != crate::llm::mock::DEFAULT_MOCK_SCOPE {
-        put("mock_scope", serde_json::json!(call.mock_scope));
+        put("mock_scope", json!(call.mock_scope));
     }
-    put("system", serde_json::json!(call.system));
-    put("messages", serde_json::json!(call.messages));
-    put("tools", serde_json::json!(call.tools));
-    put("provider_tools", serde_json::json!(call.provider_tools));
-    put("tool_choice", serde_json::json!(call.tool_choice));
-    put("thinking", call.thinking.clone());
-    put("output_format", call.output_format.clone());
-    put("max_tokens", serde_json::json!(call.max_tokens));
-    put("temperature", serde_json::json!(call.temperature));
-    put("top_p", serde_json::json!(call.top_p));
-    put("top_k", serde_json::json!(call.top_k));
-    put("seed", serde_json::json!(call.seed));
-    put("stop", serde_json::json!(call.stop));
-    put("logprobs", serde_json::json!(call.logprobs));
+    put("model", json!(model));
+    if call.api_mode != "chat_completions" {
+        put("api_mode", json!(call.api_mode));
+    }
+    if call.logprobs.is_some() {
+        put("logprobs", json!(call.logprobs));
+    }
     if !call.logit_bias.is_empty() {
-        put("logit_bias", serde_json::json!(call.logit_bias));
+        put("logit_bias", json!(call.logit_bias));
     }
-    put("min_p", serde_json::json!(call.min_p));
-    put(
-        "repetition_penalty",
-        serde_json::json!(call.repetition_penalty),
-    );
-    put(
-        "frequency_penalty",
-        serde_json::json!(call.frequency_penalty),
-    );
-    put("presence_penalty", serde_json::json!(call.presence_penalty));
-    put("prediction", serde_json::json!(call.prediction));
-    put("verbosity", serde_json::json!(call.verbosity));
-    put("mirostat", serde_json::json!(call.mirostat));
-    put(
-        "parallel_tool_calls",
-        serde_json::json!(call.parallel_tool_calls),
-    );
-    put(
-        "previous_response_id",
-        serde_json::json!(call.previous_response_id),
-    );
-    put("store", serde_json::json!(call.store));
-    put("background", serde_json::json!(call.background));
-    put("truncation", serde_json::json!(call.truncation));
-    put("compact", serde_json::json!(call.compact));
-    put("include", serde_json::json!(call.include));
-    put("max_tool_calls", serde_json::json!(call.max_tool_calls));
-    put("prefill", serde_json::json!(call.prefill));
+    for (key, value) in [
+        ("min_p", json!(call.min_p)),
+        ("repetition_penalty", json!(call.repetition_penalty)),
+        ("prediction", json!(call.prediction)),
+        ("verbosity", json!(call.verbosity)),
+        ("mirostat", json!(call.mirostat)),
+        ("parallel_tool_calls", json!(call.parallel_tool_calls)),
+    ] {
+        if !value.is_null() {
+            put(key, value);
+        }
+    }
+    if call.provider_tools.is_some() {
+        put("provider_tools", json!(call.provider_tools));
+    }
+    if call
+        .output_format
+        .get("kind")
+        .and_then(|kind| kind.as_str())
+        != Some("text")
+    {
+        put("output_format", json!(call.output_format));
+    }
+    for (key, value) in [
+        ("previous_response_id", json!(call.previous_response_id)),
+        ("store", json!(call.store)),
+        ("background", json!(call.background)),
+        ("truncation", json!(call.truncation)),
+        ("compact", json!(call.compact)),
+        ("include", json!(call.include)),
+        ("max_tool_calls", json!(call.max_tool_calls)),
+        ("prefill", json!(call.prefill)),
+    ] {
+        if !value.is_null() {
+            put(key, value);
+        }
+    }
     surface
 }
 
@@ -275,7 +285,7 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
     let call_index = tape
         .as_ref()
         .map(|tape| tape.next_llm_call.fetch_add(1, Ordering::SeqCst) + 1);
-    let mut surface = request_surface(request);
+    let mut surface = request_surface(request, &result.model);
     let request_digest = surface_digest(&surface);
     let full = tape.is_some() && level == RecordingLevel::Full;
     let attribution = match (&tape, call_index) {
@@ -351,7 +361,7 @@ pub fn register_tool_effect_observer(observer: Box<dyn ToolEffectObserver>) {
 }
 
 /// A tool outcome in a shape a branch can hand back to the agent loop.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecordedToolOutcome {
     pub result: RecordedToolResult,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -360,7 +370,7 @@ pub struct RecordedToolOutcome {
     pub handler_outcome: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RecordedToolResult {
     Ok { value: serde_json::Value },
@@ -779,7 +789,7 @@ pub(crate) fn serve_llm_call(
     let index = usize::try_from(state.report.served_calls).expect("bounded by calls");
     let call_number = state.report.served_calls + 1;
     let recorded = &state.calls[index];
-    let surface = request_surface(request);
+    let surface = request_surface(request, &recorded.result.model);
     if surface_digest(&surface) != recorded.digest {
         let detail = recorded.surface.as_ref().map_or_else(
             || "the recorded request body was not kept".to_string(),
