@@ -157,7 +157,7 @@ pub fn scan_project_with_git(
     test_mapping::map_test_files(&mut files);
 
     let folder_records = folders::build_folder_records(&files, &symbols);
-    let test_commands = commands::detect_test_commands(&canonical);
+    let test_commands = commands::detect_test_commands(&canonical, &symbols);
     let code_patterns = commands::detect_code_patterns(&files, &canonical);
     let mut project = folders::build_project_metadata(
         &canonical,
@@ -317,7 +317,7 @@ pub fn scan_incremental_with_git(
     test_mapping::map_test_files(&mut files);
 
     let folder_records = folders::build_folder_records(&files, &symbols);
-    let test_commands = commands::detect_test_commands(&canonical);
+    let test_commands = commands::detect_test_commands(&canonical, &symbols);
     let code_patterns = commands::detect_code_patterns(&files, &canonical);
     let mut project = folders::build_project_metadata(
         &canonical,

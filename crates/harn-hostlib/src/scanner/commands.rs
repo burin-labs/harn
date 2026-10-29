@@ -2,21 +2,21 @@
 //! downstream "run tests" affordances without asking every host to
 //! rediscover package manifests.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
 
 use crate::scanner::extensions::should_include;
-use crate::scanner::result::FileRecord;
+use crate::scanner::result::{FileRecord, SymbolKind, SymbolRecord};
 
 /// Walk the project root looking for test/build manifest files and return a
 /// `command -> human label` map.
-pub fn detect_test_commands(root: &Path) -> BTreeMap<String, String> {
+pub fn detect_test_commands(root: &Path, symbols: &[SymbolRecord]) -> BTreeMap<String, String> {
     let mut commands: BTreeMap<String, String> = BTreeMap::new();
 
     scan_package_json(root, root, None, &mut commands);
     scan_monorepo_packages(root, &mut commands);
-    detect_language_test_commands(root, &mut commands);
+    detect_language_test_commands(root, symbols, &mut commands);
     detect_makefile_targets(root, &mut commands);
 
     commands
@@ -42,7 +42,11 @@ fn scan_monorepo_packages(root: &Path, commands: &mut BTreeMap<String, String>) 
     }
 }
 
-fn detect_language_test_commands(root: &Path, commands: &mut BTreeMap<String, String>) {
+fn detect_language_test_commands(
+    root: &Path,
+    symbols: &[SymbolRecord],
+    commands: &mut BTreeMap<String, String>,
+) {
     const MARKERS: &[(&str, &str, &str)] = &[
         ("Cargo.toml", "cargo test", "Rust test runner"),
         ("go.mod", "go test ./...", "Go test runner"),
@@ -77,14 +81,18 @@ fn detect_language_test_commands(root: &Path, commands: &mut BTreeMap<String, St
             commands.insert((*command).to_string(), (*label).to_string());
         }
     }
-    detect_python_test_command(root, commands);
+    detect_python_test_command(root, symbols, commands);
     detect_dart_test_command(root, commands);
     detect_dotnet_test_command(root, commands);
     detect_ruby_test_command(root, commands);
     detect_php_test_command(root, commands);
 }
 
-fn detect_python_test_command(root: &Path, commands: &mut BTreeMap<String, String>) {
+fn detect_python_test_command(
+    root: &Path,
+    symbols: &[SymbolRecord],
+    commands: &mut BTreeMap<String, String>,
+) {
     let pyproject = root.join("pyproject.toml");
     let uv_lock = root.join("uv.lock");
     let poetry_lock = root.join("poetry.lock");
@@ -96,6 +104,15 @@ fn detect_python_test_command(root: &Path, commands: &mut BTreeMap<String, Strin
         ("python -m pytest", "Python test runner")
     };
 
+    let pytest_function_paths: HashSet<&str> = symbols
+        .iter()
+        .filter(|symbol| {
+            symbol.kind == SymbolKind::Function
+                && symbol.container.is_none()
+                && symbol.name.starts_with("test_")
+        })
+        .map(|symbol| symbol.file_path.as_str())
+        .collect();
     let walker = walkdir::WalkDir::new(root).follow_links(false);
     for entry in walker.into_iter().filter_map(Result::ok) {
         if !entry.file_type().is_file() {
@@ -106,14 +123,15 @@ fn detect_python_test_command(root: &Path, commands: &mut BTreeMap<String, Strin
             Err(_) => continue,
         };
         let candidate = match rel.to_str() {
-            Some(s) => s,
+            Some(s) => s.replace('\\', "/"),
             None => continue,
         };
-        if !should_include(candidate) || !candidate.ends_with(".py") {
+        if !should_include(&candidate) || !candidate.ends_with(".py") {
             continue;
         }
         let lower = candidate.to_ascii_lowercase();
-        if !(lower.contains("/tests/")
+        if !(lower.starts_with("test_")
+            || lower.contains("/tests/")
             || lower.starts_with("tests/")
             || lower.contains("/test_")
             || lower.ends_with("_test.py")
@@ -122,6 +140,13 @@ fn detect_python_test_command(root: &Path, commands: &mut BTreeMap<String, Strin
             continue;
         }
         if pyproject.exists() {
+            commands.insert(preferred_command.to_string(), preferred_label.to_string());
+            return;
+        }
+        let file_name = lower.rsplit('/').next().unwrap_or_default();
+        let pytest_collects_file =
+            file_name.starts_with("test_") || file_name.ends_with("_test.py");
+        if pytest_collects_file && pytest_function_paths.contains(candidate.as_str()) {
             commands.insert(preferred_command.to_string(), preferred_label.to_string());
             return;
         }
@@ -507,7 +532,7 @@ mod tests {
     fn detects_cargo_via_marker() {
         let tmp = tempdir().unwrap();
         fs::write(tmp.path().join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
-        let cmds = detect_test_commands(tmp.path());
+        let cmds = detect_test_commands(tmp.path(), &[]);
         assert!(cmds.contains_key("cargo test"));
     }
 

@@ -17,7 +17,7 @@ use std::path::Path;
 
 use harn_hostlib::scanner::{
     scan_incremental, scan_project, scan_project_with_git, FileRecord, GitCapabilities,
-    ScanProjectOptions, SymbolKind,
+    ScanProjectOptions, ScanResult, SymbolKind,
 };
 use tempfile::tempdir;
 
@@ -149,6 +149,147 @@ fn write(root: &Path, rel: &str, content: &str) {
         fs::create_dir_all(parent).unwrap();
     }
     fs::write(&path, content).unwrap();
+}
+
+fn scan_without_git_history(root: &Path) -> ScanResult {
+    scan_project(
+        root,
+        ScanProjectOptions {
+            include_git_history: false,
+            ..ScanProjectOptions::default()
+        },
+    )
+}
+
+#[test]
+fn bare_root_pytest_with_import_has_a_discovered_test_command() {
+    let tmp = tempdir().unwrap();
+    write(
+        tmp.path(),
+        "test_app.py",
+        "import pytest\n\ndef test_value():\n    assert 2 + 2 == 4\n",
+    );
+    let result = scan_without_git_history(tmp.path());
+    assert!(result
+        .files
+        .iter()
+        .any(|file| file.relative_path == "test_app.py"));
+    assert!(result
+        .project
+        .test_commands
+        .contains_key("python -m pytest"));
+}
+
+#[test]
+fn bare_root_pytest_without_import_has_a_discovered_test_command() {
+    let tmp = tempdir().unwrap();
+    write(
+        tmp.path(),
+        "test_app.py",
+        "def test_value():\n    assert 2 + 2 == 4\n",
+    );
+    let result = scan_without_git_history(tmp.path());
+    assert!(result
+        .files
+        .iter()
+        .any(|file| file.relative_path == "test_app.py"));
+    assert!(result
+        .symbols
+        .iter()
+        .any(|symbol| symbol.name == "test_value"));
+    assert!(result
+        .project
+        .test_commands
+        .contains_key("python -m pytest"));
+}
+
+#[test]
+fn bare_source_without_tests_has_no_discovered_test_command() {
+    let tmp = tempdir().unwrap();
+    write(tmp.path(), "app.py", "def value():\n    return 4\n");
+    write(
+        tmp.path(),
+        "tests/helpers.py",
+        "def test_helper():\n    pass\n",
+    );
+    write(tmp.path(), "test_no_tests.py", "def helper():\n    pass\n");
+    let result = scan_without_git_history(tmp.path());
+    assert!(result
+        .files
+        .iter()
+        .any(|file| file.relative_path == "app.py"));
+    assert!(result
+        .symbols
+        .iter()
+        .any(|symbol| symbol.name == "test_helper"));
+    assert!(result.project.test_commands.is_empty());
+}
+
+#[test]
+fn nested_pytest_with_import_remains_a_discovered_test_command() {
+    let tmp = tempdir().unwrap();
+    write(
+        tmp.path(),
+        "tests/test_app.py",
+        "import pytest\n\ndef test_value():\n    assert 2 + 2 == 4\n",
+    );
+    let result = scan_without_git_history(tmp.path());
+    assert!(result
+        .files
+        .iter()
+        .any(|file| file.relative_path == "tests/test_app.py"));
+    assert!(result
+        .project
+        .test_commands
+        .contains_key("python -m pytest"));
+}
+
+#[test]
+fn nested_pytest_without_import_has_a_discovered_test_command() {
+    let tmp = tempdir().unwrap();
+    write(
+        tmp.path(),
+        "tests/test_app.py",
+        "def test_value():\n    assert 2 + 2 == 4\n",
+    );
+    let result = scan_without_git_history(tmp.path());
+    assert!(result
+        .files
+        .iter()
+        .any(|file| file.relative_path == "tests/test_app.py"));
+    assert!(result
+        .project
+        .test_commands
+        .contains_key("python -m pytest"));
+}
+
+#[test]
+fn a_test_added_after_scanning_updates_discovered_commands() {
+    let tmp = tempdir().unwrap();
+    write(tmp.path(), "app.py", "def value():\n    return 4\n");
+    let options = ScanProjectOptions {
+        include_git_history: false,
+        ..ScanProjectOptions::default()
+    };
+    let initial = scan_project(tmp.path(), options.clone());
+    assert!(initial.project.test_commands.is_empty());
+    write(
+        tmp.path(),
+        "test_app.py",
+        "def test_value():\n    assert 2 + 2 == 4\n",
+    );
+    let changed = vec!["test_app.py".to_string()];
+    let refreshed = scan_incremental(&initial.snapshot_token, Some(&changed), options);
+    assert!(refreshed
+        .result
+        .files
+        .iter()
+        .any(|file| file.relative_path == "test_app.py"));
+    assert!(refreshed
+        .result
+        .project
+        .test_commands
+        .contains_key("python -m pytest"));
 }
 
 fn build_fixture(root: &Path) {
