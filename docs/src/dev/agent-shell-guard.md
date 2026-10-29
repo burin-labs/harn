@@ -68,6 +68,12 @@ a separate shell call so the guard can read its effective configuration.
 Within one decision, repeated scans reuse measured builtin facts for the same
 executable. A new decision queries again; different executables keep separate facts.
 
+The verdict does not depend on the caller's working directory. The adapter grants
+the policy's Git queries read access to the repository of the caller's directory
+and of each absolute path in the command, including a linked worktree's Git
+directories. When Git still cannot read the configuration, the refusal says the
+guard faulted and names why; it never reads as a `git stash` refusal.
+
 ## Keep complete command output
 
 Do not send a build or test directly into `grep`, `head`, or another filter.

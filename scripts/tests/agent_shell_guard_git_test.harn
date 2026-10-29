@@ -191,3 +191,25 @@ pipeline test_git_preflight_does_not_execute_a_payload_program(harness: Harness)
     },
   )
 }
+
+pipeline test_an_unreadable_alias_configuration_is_a_guard_fault_not_a_stash_refusal() {
+  const unreadable = { _options -> {"<unreadable>": "`git config` exited 128: fatal: cannot read"} }
+  const fault = decision(claude_payload("git -C /repo s"), NO_MAKE_TARGETS, unreadable)
+  assert(!fault.allow)
+  assert(fault.reason.contains("guard fault"))
+  assert(fault.reason.contains("cannot read"))
+  assert(!fault.reason.contains("is refused: the stash list"))
+  // Commands that change git's environment before it runs are unprovable the same way.
+  const unprovable = decision(claude_payload("cd /repo && git s"), NO_MAKE_TARGETS, NO_CONFIG_ALIASES)
+  assert(!unprovable.allow)
+  assert(!unprovable.reason.contains("is refused: the stash list"))
+  // THE OTHER SIDE: a stash written in the command's own words keeps the stash refusal, whatever
+  // the alias lookup reports.
+  for lookup in [unreadable, NO_CONFIG_ALIASES] {
+    for command in ["git stash push", "git -C /repo stash", "cd /repo && git stash drop"] {
+      const refused = decision(claude_payload(command), NO_MAKE_TARGETS, lookup)
+      assert(!refused.allow)
+      assert(refused.reason.contains("is refused: the stash list"))
+    }
+  }
+}

@@ -123,6 +123,51 @@ for heredoc_payload in \
   fi
 done
 
+# The verdict must not depend on the caller's directory. `git -C <repo>` with a
+# backslash in the command resolves `worktree` through the alias lookup, which
+# runs git inside the interpreter sandbox. That sandbox used to read only the
+# caller's directory tree, so from a subdirectory the lookup exited 128 and the
+# command was refused with the stash message.
+cwd_repo="$repo_root"
+cat >"$fixture_root/standalone-harn" <<'SH'
+#!/usr/bin/env bash
+exec "$STANDALONE_GUARD_RUNTIME" "$@"
+SH
+chmod +x "$fixture_root/standalone-harn"
+printf '%s\n' 'harn-run-standalone-v1' >"$fixture_root/standalone-harn.standalone-v1"
+cwd_guard() {
+  env -u HARN_BIN STANDALONE_GUARD_RUNTIME="$HARN_BIN" \
+    AGENT_SHELL_GUARD_HARN_BIN="$fixture_root/standalone-harn" \
+    "$fixture_root/scripts/agent-shell-guard.sh"
+}
+cwd_read='{"tool_name":"Bash","tool_input":{"command":"gh pr view 1; git -C '"$cwd_repo"' worktree list | grep -i \"a\\|b\""}}'
+cwd_stash='{"tool_name":"Bash","tool_input":{"command":"git stash push"}}'
+for cwd_caller in "$cwd_repo" "$cwd_repo/scripts/tests"; do
+  cwd_allowed="$(cd "$cwd_caller" && printf '%s' "$cwd_read" | cwd_guard)"
+  if [[ -n "$cwd_allowed" ]]; then
+    echo "adapter refused an ordinary read from $cwd_caller" >&2
+    printf '%s\n' "$cwd_allowed" >&2
+    exit 1
+  fi
+  # The other side: the real stash rule still fires from the same directory.
+  cwd_denied="$(cd "$cwd_caller" && printf '%s' "$cwd_stash" | cwd_guard)"
+  if [[ "$cwd_denied" != *'"permissionDecision":"deny"'* ]] \
+    || [[ "$cwd_denied" != *'is refused: the stash list'* ]]; then
+    echo "adapter did not refuse git stash from $cwd_caller" >&2
+    printf '%s\n' "$cwd_denied" >&2
+    exit 1
+  fi
+done
+# A lookup git cannot complete is a guard fault, never a stash refusal.
+cwd_fault="$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git -C /nonexistent-guard-target s"}}' | cwd_guard)"
+if [[ "$cwd_fault" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$cwd_fault" != *'guard fault'* ]] \
+  || [[ "$cwd_fault" == *'is refused: the stash list'* ]]; then
+  echo "adapter reported an alias lookup fault as a stash refusal" >&2
+  printf '%s\n' "$cwd_fault" >&2
+  exit 1
+fi
+
 discarded_blocked="$(
   printf '%s' \
     '{"tool_name":"Bash","tool_input":{"command":"make test | tail -20"}}' \

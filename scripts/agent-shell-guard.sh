@@ -131,7 +131,61 @@ guard_command=(
 [[ "$harn_mode" == "standalone" ]] && guard_command+=(--standalone)
 # Standalone rules need explicit grants for case folding and assignment-name
 # iteration as well as the command parser.
-guard_command+=("--allow=bytes_from_string,command_risk_scan,hostlib_ast_search,lowercase,range" "$script_dir/agent_shell_guard.harn")
+guard_command+=("--allow=bytes_from_string,command_risk_scan,hostlib_ast_search,lowercase,range")
+
+# The policy's git child processes run inside the interpreter's sandbox, which by
+# default reads only the interpreter's own working directory tree. A
+# `git -C <repo>` aimed above or beside that directory then cannot read its own
+# working directory and exits 128, so the verdict used to depend on where the
+# caller stood. Grant read access to the repository of the caller's directory
+# and of every absolute path the command names. The grant is read-only and covers
+# what git must open to read alias configuration. An explicit HARN_BIN override
+# may name an older Harn without the flag and keeps its pinned argument list.
+guard_repository_root_of() {
+  local directory="$1" depth=0
+  [[ -d "$directory" ]] || return 1
+  directory="$(cd "$directory" 2>/dev/null && pwd -P)" || return 1
+  while ((depth < 12)); do
+    if [[ -e "$directory/.git" ]]; then
+      printf '%s\n' "$directory"
+      return 0
+    fi
+    [[ "$directory" == "/" ]] && return 1
+    directory="$(dirname "$directory")"
+    ((depth += 1))
+  done
+  return 1
+}
+# A linked worktree keeps its git directory, and the common directory it shares,
+# outside its own tree; git reads both when it reads configuration.
+guard_git_directories_of() {
+  local root="$1" gitdir="" common=""
+  [[ -f "$root/.git" ]] || return 0
+  IFS= read -r gitdir <"$root/.git" || true
+  gitdir="${gitdir#gitdir: }"
+  [[ -d "$gitdir" ]] || return 0
+  gitdir="$(cd "$gitdir" && pwd -P)"
+  printf '%s\n' "$gitdir"
+  if [[ -f "$gitdir/commondir" ]]; then
+    IFS= read -r common <"$gitdir/commondir" || true
+    [[ -n "$common" && -d "$gitdir/$common" ]] && (cd "$gitdir/$common" && pwd -P)
+  fi
+  return 0
+}
+if [[ "$harn_mode" == "standalone" || "$harn_runner" != "${HARN_BIN:-}" ]]; then
+  guard_read_roots="$(guard_repository_root_of "$PWD" || pwd -P)"
+  while IFS= read -r guard_token; do
+    guard_candidate="$(guard_repository_root_of "$guard_token" || true)"
+    [[ -n "$guard_candidate" ]] && guard_read_roots+=$'\n'"$guard_candidate"
+  done < <(tr -c '[:alnum:]/._@+~-' '\n' <"$payload_file" | grep '^/' | sort -u)
+  while IFS= read -r guard_root; do
+    [[ -n "$guard_root" ]] && guard_read_roots+=$'\n'"$(guard_git_directories_of "$guard_root")"
+  done < <(printf '%s\n' "$guard_read_roots" | sort -u)
+  while IFS= read -r guard_root; do
+    [[ -n "$guard_root" ]] && guard_command+=(--sandbox-read-root "$guard_root")
+  done < <(printf '%s\n' "$guard_read_roots" | sort -u)
+fi
+guard_command+=("$script_dir/agent_shell_guard.harn")
 
 guard_repo_root="$(cd "$script_dir/.." && pwd -P)"
 
