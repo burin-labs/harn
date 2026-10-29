@@ -125,8 +125,7 @@ Harn also enforces `workspace_roots` at runtime for filesystem builtins.
 Attempts to read, write, create, copy, stat, list, or delete paths outside
 the declared roots fail as typed `tool_rejected` sandbox violations.
 File-backed prompt-template rendering (`render`, `render_prompt`,
-`render_with_provenance`, `template.render`, and `include`) follows the
-same read boundary. Embedded `std/...` prompt assets are not filesystem
+`template.render`, and `include`) follows the same read boundary. Embedded `std/...` prompt assets are not filesystem
 reads.
 Path-backed `vision_ocr(...)` image inputs follow the same read boundary.
 Process cwd escapes through `exec_at` / `shell_at` are rejected the same way.

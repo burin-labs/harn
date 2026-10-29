@@ -52,7 +52,7 @@ use crate::clock_mock;
 
 /// Format version of the on-disk tape representation. Bump on any
 /// breaking change. Loaders refuse tapes with a higher version.
-pub const TAPE_FORMAT_VERSION: u32 = 1;
+pub const TAPE_FORMAT_VERSION: u32 = 2;
 
 /// Records whose serialized payload exceeds this size are spilled into
 /// the content-addressed sidecar. Picked to be larger than typical
@@ -202,6 +202,19 @@ pub enum TapeRecordKind {
         /// later call that repeats a prefix stores only its new messages.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         messages: Vec<TapePayload>,
+        /// Which byte ranges of the request came from which prompt render.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attribution: Option<CallAttribution>,
+    },
+    /// One prompt asset render, recorded once per distinct output. Model
+    /// calls point at it through [`CallAttribution`] segments.
+    PromptRender {
+        render_id: String,
+        template_uri: String,
+        rendered: TapePayload,
+        /// JSON list of the render's source spans (template line and column
+        /// per output byte range).
+        spans: TapePayload,
     },
     /// One agent tool dispatch: what the handler returned and which files it
     /// changed. A branch serves `outcome` and re-applies `effects` instead of
@@ -295,6 +308,7 @@ impl TapeRecordKind {
             Self::ClockSleep { .. } => "clock_sleep",
             Self::LlmCall { .. } => "llm_call",
             Self::ToolCall { .. } => "tool_call",
+            Self::PromptRender { .. } => "prompt_render",
             Self::DecisionEvaluation { .. } => "decision_evaluation",
             Self::FileRead { .. } => "file_read",
             Self::FileWrite { .. } => "file_write",
@@ -305,6 +319,29 @@ impl TapeRecordKind {
             Self::Unknown => "unknown",
         }
     }
+}
+
+/// Prompt provenance for one model call: each segment is a whole prompt
+/// render found verbatim in a request text field. Segments may nest when one
+/// render was interpolated into another.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CallAttribution {
+    pub segments: Vec<AttributedSegment>,
+    /// Bytes of the system prompt, and how many fall in some segment.
+    pub system_bytes: u64,
+    pub system_attributed: u64,
+    /// The same over every request text except tool results.
+    pub prompt_bytes: u64,
+    pub prompt_attributed: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AttributedSegment {
+    /// `system`, `messages[i]`, or `messages[i].content[j]`.
+    pub field: String,
+    pub start: u64,
+    pub end: u64,
+    pub render_id: String,
 }
 
 /// One file a tool call changed, relative to the run's workspace root.
@@ -596,6 +633,12 @@ fn visit_payloads(kind: &TapeRecordKind, mut visit: impl FnMut(&TapePayload)) {
                 visit(request);
             }
             messages.iter().for_each(&mut visit);
+        }
+        TapeRecordKind::PromptRender {
+            rendered, spans, ..
+        } => {
+            visit(rendered);
+            visit(spans);
         }
         TapeRecordKind::DecisionEvaluation { response, .. } => visit(response),
         TapeRecordKind::ToolCall {

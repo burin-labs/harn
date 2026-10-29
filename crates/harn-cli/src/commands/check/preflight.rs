@@ -288,12 +288,7 @@ fn scan_node_preflight(
                 tags: None,
             }),
         },
-        Node::MethodCall { method, args, .. }
-            if matches!(
-                method.as_str(),
-                "render_prompt" | "render_prompt_with_provenance"
-            ) =>
-        {
+        Node::MethodCall { method, args, .. } if matches!(method.as_str(), "render_prompt") => {
             if let Some(template_path) = args.first().and_then(literal_template_path) {
                 if scan_stdlib_prompt_target(
                     &template_path,

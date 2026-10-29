@@ -82,7 +82,7 @@ fn a_zero_edit_branch_serves_the_prefix_and_reapplies_tool_effects() {
     assert!(!tape_text.contains("secret-never-recorded"));
 
     let branch = start_branch(BranchPlan {
-        tape_path: tape_dir.join(TAPE_FILE_NAME),
+        tape: EventTape::load(&tape_dir.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: branch_ws.clone(),
     })
@@ -124,7 +124,7 @@ fn a_prefix_request_mismatch_fails_closed_and_never_goes_live() {
     record_run(&tape_dir, tmp.path());
 
     let branch = start_branch(BranchPlan {
-        tape_path: tape_dir.join(TAPE_FILE_NAME),
+        tape: EventTape::load(&tape_dir.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 2,
         workspace_root: tmp.path().join("branch"),
     })
@@ -149,11 +149,64 @@ fn a_metadata_tape_refuses_to_branch() {
         record_llm_call(&request("first"), &result("done", None));
     }
     let error = start_branch(BranchPlan {
-        tape_path: tmp.path().join(TAPE_FILE_NAME),
+        tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: tmp.path().to_path_buf(),
     })
     .err()
     .unwrap();
     assert!(error.contains("can be read but not branched"), "{error}");
+}
+
+#[test]
+fn a_model_call_attributes_its_system_prompt_to_the_renders_it_contains() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let guard = start_recording(tmp.path(), RecordingLevel::Full, None)
+        .unwrap()
+        .unwrap();
+    let floor = "You are a careful coding agent. Read before you edit.";
+    let tools = "Call one tool at a time and wait for its result.";
+    let floor_id = record_prompt_render("@/prompts/floor.harn.prompt", floor, &[]);
+    record_prompt_render("@/prompts/tools.harn.prompt", tools, &[]);
+    let mut first = request("task");
+    first.system = Some(format!("{floor}\n\n{tools}\nunattributed tail"));
+    record_llm_call(&first, &result("ok", None));
+    // The floor is not re-rendered, yet the second call that resends it still
+    // attributes it.
+    let mut second = request("task");
+    second.system = Some(floor.to_string());
+    record_llm_call(&second, &result("ok", None));
+    assert_eq!(guard.error(), None);
+    assert_eq!(render_consumers(&floor_id), vec![1, 2]);
+    drop(guard);
+
+    let tape = EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap();
+    let attributions: Vec<_> = tape
+        .records
+        .iter()
+        .filter_map(|record| match &record.kind {
+            TapeRecordKind::LlmCall { attribution, .. } => attribution.clone(),
+            _ => None,
+        })
+        .collect();
+    let first = &attributions[0];
+    assert_eq!(first.segments.len(), 2);
+    assert_eq!(first.segments[0].field, "system");
+    assert_eq!(first.segments[0].start, 0);
+    assert_eq!(
+        first.system_attributed,
+        (floor.len() + tools.len()) as u64,
+        "the separator and tail stay unattributed"
+    );
+    assert_eq!(
+        attributions[1].system_attributed,
+        attributions[1].system_bytes
+    );
+    let renders = tape
+        .records
+        .iter()
+        .filter(|record| matches!(record.kind, TapeRecordKind::PromptRender { .. }))
+        .count();
+    assert_eq!(renders, 2);
 }

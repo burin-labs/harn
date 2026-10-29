@@ -43,7 +43,6 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("agent", "pipeline_on_finish"),
     ("agent", "pop_llm_render_context"),
     ("agent", "prompt_explain"),
-    ("agent", "prompt_mark_rendered"),
     ("agent", "push_llm_render_context"),
     ("agent", "register_checkpoint_hook"),
     ("agent", "register_persona_hook"),

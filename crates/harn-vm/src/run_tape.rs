@@ -70,6 +70,7 @@ struct ProcessTape {
     level: RecordingLevel,
     workspace_root: Option<PathBuf>,
     next_llm_call: AtomicU64,
+    prompts: Mutex<prompts::PromptLedger>,
 }
 
 static PROCESS_TAPE: RwLock<Option<Arc<ProcessTape>>> = RwLock::new(None);
@@ -148,8 +149,40 @@ pub fn start_recording(
         level,
         workspace_root,
         next_llm_call: AtomicU64::new(0),
+        prompts: Mutex::default(),
     }));
     Ok(Some(RunTapeGuard { recorder, path }))
+}
+
+/// Record one prompt asset render and return its content identity. Renders
+/// reach the tape only at `recording: full`; the id is computed regardless so
+/// the live debugger registry shares it.
+pub(crate) fn record_prompt_render(
+    template_uri: &str,
+    rendered: &str,
+    spans: &[crate::stdlib::template::PromptSourceSpan],
+) -> String {
+    let render_id = prompts::render_id(template_uri, rendered);
+    if let Some(tape) = process_tape().filter(|tape| tape.level == RecordingLevel::Full) {
+        tape.prompts.lock().expect("prompt ledger poisoned").record(
+            &tape.recorder,
+            &render_id,
+            template_uri,
+            rendered,
+            spans,
+        );
+    }
+    render_id
+}
+
+/// The model calls (1-based) whose request contained this render.
+pub(crate) fn render_consumers(render_id: &str) -> Vec<u64> {
+    process_tape().map_or_else(Vec::new, |tape| {
+        tape.prompts
+            .lock()
+            .expect("prompt ledger poisoned")
+            .consumers(render_id)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +273,15 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
     let mut surface = request_surface(request);
     let request_digest = surface_digest(&surface);
     let full = tape.is_some() && level == RecordingLevel::Full;
+    let attribution = match (&tape, call_index) {
+        (Some(tape), Some(index)) if full => Some(
+            tape.prompts
+                .lock()
+                .expect("prompt ledger poisoned")
+                .attribute(&surface, index),
+        ),
+        _ => None,
+    };
     let (request_payload, messages) = if full {
         let messages = match surface.remove("messages") {
             Some(serde_json::Value::Array(messages)) => messages
@@ -273,6 +315,7 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
         call_index,
         request: request_payload,
         messages,
+        attribution,
     });
 }
 
@@ -413,8 +456,9 @@ pub(crate) fn finish_tool_call(
 /// Where a branch replays from and where its workspace lives.
 #[derive(Clone, Debug)]
 pub struct BranchPlan {
-    /// A run tape (`.../run.tape`).
-    pub tape_path: PathBuf,
+    /// The recorded run, loaded from wherever it is stored. Verification
+    /// needs only these bytes, never the place that recorded them.
+    pub tape: EventTape,
     /// Model calls served from the recording before the branch goes live.
     pub live_after_calls: u64,
     /// The branch's workspace, a copy of the recorded run's starting tree.
@@ -498,12 +542,12 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
     if plan.live_after_calls == 0 {
         return Err("a branch must serve at least one recorded call".to_string());
     }
-    let tape = EventTape::load(&plan.tape_path)?;
+    let tape = plan.tape;
     if !tape.header.argv.iter().any(|arg| arg == "recording=full") {
-        return Err(format!(
-            "{} was not recorded with `recording: full`, so it can be read but not branched",
-            plan.tape_path.display()
-        ));
+        return Err(
+            "this tape was not recorded with `recording: full`, so it can be read but not branched"
+                .to_string(),
+        );
     }
     let mut calls = Vec::new();
     let mut tools = BTreeMap::new();
@@ -515,6 +559,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
                 call_index: Some(_),
                 request,
                 messages,
+                ..
             } => {
                 let result: LlmResult = serde_json::from_slice(&tape.resolve_payload(response)?)
                     .map_err(|err| format!("tape model response: {err}"))?;
@@ -820,6 +865,9 @@ fn apply_effect(root: &Path, path: &str, content: Option<&[u8]>) -> Result<(), S
         },
     }
 }
+
+#[path = "run_tape_prompts.rs"]
+mod prompts;
 
 #[cfg(test)]
 #[path = "run_tape_tests.rs"]

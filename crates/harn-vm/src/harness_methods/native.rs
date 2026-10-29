@@ -262,7 +262,6 @@ async fn call_harness_fs_method(
         "find_text" => "find_text",
         "find_evidence" => "find_evidence",
         "render_prompt" => "render",
-        "render_prompt_with_provenance" => "render_with_provenance",
         "render_template" => "render_string",
         _ => return Err(method_unsupported(handle, method)),
     };

@@ -164,9 +164,6 @@ pub fn harness_migration_for_builtin(name: &str) -> Option<HarnessBuiltinMigrati
         "host_mock_calls" => return Some(forward(CapabilityId::Testing, "calls")),
         "llm_mock" => return Some(forward(CapabilityId::Llm, "mock_enqueue")),
         "render_string" => return Some(forward(CapabilityId::Fs, "render_template")),
-        "render_with_provenance" => {
-            return Some(forward(CapabilityId::Fs, "render_prompt_with_provenance"));
-        }
         "crypto_random_bytes" => return Some(forward(CapabilityId::Random, "bytes")),
         "emit_channel" => return Some(forward(CapabilityId::Channels, "append")),
         "flush_trigger_aggregations" => {
