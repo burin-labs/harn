@@ -1,2 +1,2 @@
-Java type and constructor renames now report that the operation is unsupported
-instead of asking callers to disambiguate a declaration.
+Java type and constructor rename attempts now return `unsupported_language`
+without changing files.

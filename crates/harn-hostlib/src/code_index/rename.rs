@@ -232,6 +232,17 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
                 .node(*id)
                 .is_some_and(|node| node.kind == NodeKind::Type && node.path == seed_node.path)
         }) {
+        if seed_node.col.is_none() {
+            return Ok(emit_response(
+                &env,
+                "unsupported_language",
+                ResponseExtras {
+                    details: "Java type and constructor renames are not supported: the declaration position is unavailable; no files changed".into(),
+                    fallback_suggestion: Some(TEXT_PATCH_FALLBACK.to_string()),
+                    ..Default::default()
+                },
+            ));
+        }
         let source = read_source(BUILTIN, &state.root, &seed_path, session_id.as_deref())?;
         let tree = match ast_api::parse_tree(&source, Language::Java) {
             Ok(tree) => tree,
