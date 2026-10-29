@@ -65,12 +65,9 @@ impl StoreState {
         Ok(())
     }
 
-    fn get(&mut self, key: &str) -> VmValue {
+    fn get(&mut self, key: &str) -> Option<serde_json::Value> {
         self.ensure_loaded();
-        match self.data.get(key) {
-            Some(v) => json_to_vm_value(v),
-            None => VmValue::Nil,
-        }
+        self.data.get(key).cloned()
     }
 
     fn set(&mut self, key: String, value: serde_json::Value) -> Result<(), String> {
@@ -100,6 +97,9 @@ impl StoreState {
 use crate::json_to_vm_value;
 use crate::value::vm_to_storage_json as vm_to_json;
 
+/// Run-tape namespace for `harness.runtime.store` reads.
+const STORE_TAPE_NAMESPACE: &str = "harn.runtime.store";
+
 /// Register persistent key-value store builtins on a VM.
 ///
 /// The store is backed by `<state-root>/store.json`, created lazily
@@ -125,7 +125,11 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         "store_get",
         move |args, _out| {
             let key = args.first().map(|a| a.display()).unwrap_or_default();
-            Ok(s.lock().get(&key))
+            // The store outlives the run, so a branch must read what the recording read.
+            let value = crate::run_tape::cache_lookup(STORE_TAPE_NAMESPACE, &key, || {
+                Ok(s.lock().get(&key))
+            })?;
+            Ok(value.as_ref().map_or(VmValue::Nil, json_to_vm_value))
         },
     );
 
