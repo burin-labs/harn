@@ -28,6 +28,27 @@ async fn completed_session(root: &Path) -> (ApiServerConfig, String, String) {
     (config, session, task)
 }
 
+fn completed_prompt_message_count(root: &Path) -> usize {
+    let calls: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("task-retry-provider-request.json")).unwrap(),
+    )
+    .unwrap();
+    let calls = calls.as_array().expect("captured provider calls");
+    assert_eq!(
+        calls.len(),
+        1,
+        "the fixture reaches exactly one provider call per task"
+    );
+    let messages = calls[0]["messages"]
+        .as_array()
+        .expect("actual provider request messages");
+    assert!(
+        !messages.is_empty(),
+        "the provider must receive real prompt context"
+    );
+    messages.len() + 1
+}
+
 async fn submit_completed_task(
     app: &Router,
     events: &mut tokio::sync::broadcast::Receiver<ApiEvent>,
@@ -339,6 +360,7 @@ async fn restored_session_mutations_preserve_policy_metadata_and_actual_transcri
     assert!(serde_json::to_string(&transcript)
         .unwrap()
         .contains("restored-transcript-canary"));
+    let message_count = completed_prompt_message_count(root.path());
     let response = request(
         &app,
         "POST",
@@ -350,8 +372,9 @@ async fn restored_session_mutations_preserve_policy_metadata_and_actual_transcri
     let truncated = read_json(response).await;
     assert_eq!(truncated["kept_turn_count"], 1);
     assert_eq!(
-        truncated["removed_turn_count"], 3,
-        "both agent loops stored a user message and an assistant message"
+        truncated["removed_turn_count"],
+        message_count - 1,
+        "truncate removes the measured provider context and reply after the retained prefix"
     );
     let app = api_router(ApiServer::new(config.clone()).state);
     let response = request(
@@ -422,6 +445,7 @@ async fn canonical_truncate_refuses_active_writers_and_failed_persistence() {
         let store = server.state.canonical_sessions.as_ref().unwrap();
         let before = store.read_all(&session).await.unwrap();
         assert!(!before.is_empty());
+        let message_count = completed_prompt_message_count(root.path());
         let path = harn_vm::open_canonical_store(root.path())
             .unwrap()
             .path()
@@ -457,7 +481,11 @@ async fn canonical_truncate_refuses_active_writers_and_failed_persistence() {
         }
         let response = request(&app, "POST", &path, json!({"keep_first":0})).await;
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(read_json(response).await["removed_turn_count"], 2);
+        assert_eq!(
+            read_json(response).await["removed_turn_count"],
+            message_count,
+            "truncate removes the actual provider context and reply"
+        );
         let app = api_router(ApiServer::new(config).state);
         let response = request(&app, "POST", &path, json!({"keep_first":0})).await;
         assert_eq!(response.status(), StatusCode::OK);

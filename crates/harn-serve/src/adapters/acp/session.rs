@@ -270,14 +270,14 @@ impl AcpServer {
             super::modes::policy_for_mode(&session.current_mode_id, &self.sandbox)
         });
         let scope = self.sessions[&session_id].store_scope.clone();
-        let mounted_at = match harn_vm::stdlib::add_workspace_root_persisted(
+        let mounted_at = match Box::pin(harn_vm::stdlib::add_workspace_root_persisted(
             &session_id,
             &path,
             mount_mode,
             reason,
             policy.as_ref(),
             &scope,
-        )
+        ))
         .await
         {
             Ok(mounted_at) => mounted_at,

@@ -612,14 +612,14 @@ fn record_workspace_mount(id: &str, audit: MountAudit) -> Result<(), String> {
         };
         match audit {
             MountAudit::Pending(event) => {
-                append_event_to_state(state, event, "add_workspace_root")?
+                append_event_to_state(state, event, "add_workspace_root")?;
             }
             MountAudit::Persisted(event) => {
                 super::transcript_lifecycle::apply_transcript_event_to_state(
                     state,
                     event,
                     "add_workspace_root",
-                )?
+                )?;
             }
         }
         crate::llm::permissions::clear_session_grants(id);

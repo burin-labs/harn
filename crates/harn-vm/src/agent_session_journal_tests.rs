@@ -104,7 +104,9 @@ async fn journal_records_explicit_workflow_learning_eligibility_at_creation() {
         .expect("describe eligible session");
 
     assert!(
-        meta.attributes.is_empty(),
+        !meta
+            .attributes
+            .contains_key(WORKFLOW_LEARNING_ELIGIBILITY_HEADER),
         "workflow eligibility belongs to each run, not the long-lived session"
     );
     let event = append_event_for_payload(
