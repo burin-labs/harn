@@ -2,7 +2,15 @@ use super::*;
 
 #[test]
 fn go_package_rename_refuses_unproven_bindings_without_writes() {
-    let cases: &[(&str, &[(&str, &str)], &str, &str, &str)] = &[
+    type Fixture = (&'static str, &'static str);
+    type Case = (
+        &'static str,
+        &'static [Fixture],
+        &'static str,
+        &'static str,
+        &'static str,
+    );
+    let cases: &[Case] = &[
         (
             "sibling dot import",
             &[
