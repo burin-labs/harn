@@ -73,10 +73,7 @@ pipeline default(harness: Harness) {
   )
   // The escape is per tool. It releases the tool it names and nothing else.
   const escaped = decision(payload("HARN_ALLOW_RAW_SWIFT=1 swift build"), owns)
-  const wrong_escape = decision(
-    payload("HARN_ALLOW_RAW_CARGO=1 swift build"),
-    owns,
-  )
+  const wrong_escape = decision(payload("HARN_ALLOW_RAW_CARGO=1 swift build"), owns)
   contract_effect(
     harness.stdio,
     "effect_escape_is_scoped_to_its_own_tool",

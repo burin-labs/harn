@@ -13,14 +13,8 @@ fn payload(command: string) -> string {
 }
 
 pipeline default(harness: Harness) {
-  const write = decision(
-    payload("echo \"$( # )\ngit stash drop\n)\""),
-    UNMEASURED_MAKE_TARGETS,
-  )
-  const read = decision(
-    payload("echo \"$( # )\ngit stash list\n)\""),
-    UNMEASURED_MAKE_TARGETS,
-  )
+  const write = decision(payload("echo \"$( # )\ngit stash drop\n)\""), UNMEASURED_MAKE_TARGETS)
+  const read = decision(payload("echo \"$( # )\ngit stash list\n)\""), UNMEASURED_MAKE_TARGETS)
   contract_effect(harness.stdio, "trigger_stash_mutation_is_denied", !write.allow)
   contract_effect(harness.stdio, "effect_denial_names_stash", write.reason.contains("git stash"))
   contract_negative(harness.stdio, "negative_read_only_substitution_is_not_denied", !read.allow)

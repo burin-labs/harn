@@ -60,24 +60,15 @@ pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
     }
   }
   assert(
-    !decision(claude_payload("git rewrite"), NO_MAKE_TARGETS, aliases, TEST_GIT_BUILTINS)
+    !decision(claude_payload("git rewrite"), NO_MAKE_TARGETS, aliases, TEST_GIT_BUILTINS).allow,
+  )
+  assert(
+    !decision(claude_payload("git history"), NO_MAKE_TARGETS, aliases, { program -> ["status"] })
       .allow,
   )
   assert(
-    !decision(
-      claude_payload("git history"),
-      NO_MAKE_TARGETS,
-      aliases,
-      { program -> ["status"] },
-    ).allow,
-  )
-  assert(
-    decision(
-      claude_payload("git history"),
-      NO_MAKE_TARGETS,
-      aliases,
-      { program -> ["history"] },
-    ).allow,
+    decision(claude_payload("git history"), NO_MAKE_TARGETS, aliases, { program -> ["history"] })
+      .allow,
   )
   const versions = { program -> program == "/old/git" ? ["status"] : ["status", "history"] }
   for command in [
@@ -95,15 +86,9 @@ pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
     "sh -c 'PATH=/older/bin; git history'",
     "sh -c 'if true; then PATH=/older/bin; fi; git history'",
   ] {
-    assert(
-      !decision(claude_payload(command), NO_MAKE_TARGETS, aliases, versions).allow,
-      command,
-    )
+    assert(!decision(claude_payload(command), NO_MAKE_TARGETS, aliases, versions).allow, command)
   }
-  assert(
-    decision(claude_payload("FOO=1 git status"), NO_MAKE_TARGETS, aliases, versions)
-      .allow,
-  )
+  assert(decision(claude_payload("FOO=1 git status"), NO_MAKE_TARGETS, aliases, versions).allow)
   assert(
     decision(
       claude_payload("git commit -m 'PATH=/older/bin'"),
@@ -112,14 +97,8 @@ pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
       TEST_GIT_BUILTINS,
     ).allow,
   )
-  assert(
-    !decision(claude_payload("/old/git history"), NO_MAKE_TARGETS, aliases, versions)
-      .allow,
-  )
-  assert(
-    decision(claude_payload("/new/git history"), NO_MAKE_TARGETS, aliases, versions)
-      .allow,
-  )
+  assert(!decision(claude_payload("/old/git history"), NO_MAKE_TARGETS, aliases, versions).allow)
+  assert(decision(claude_payload("/new/git history"), NO_MAKE_TARGETS, aliases, versions).allow)
   for command in [
     "git config alias.hidden 'stash push'; git hidden",
     "git -C /repo config alias.hidden 'stash push' && git -C /repo hidden",

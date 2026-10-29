@@ -11,11 +11,7 @@ import {
   program_of,
   segments_of,
 } from "../agent_shell_guard.harn"
-import {
-  NO_MAKE_TARGETS,
-  claude_payload,
-  decision,
-} from "./agent_shell_guard_test_fixtures"
+import { NO_MAKE_TARGETS, claude_payload, decision } from "./agent_shell_guard_test_fixtures"
 
 fn verdict(payload: string) -> ShellGuardDecision {
   return decision(payload, NO_MAKE_TARGETS)
@@ -277,10 +273,7 @@ pipeline test_make_owned_build_refusal_requires_a_measured_target(harness: Harne
   assert(decision(codex_payload("swift --version"), owns).allow)
   // The escape hatch is per tool, and must not open any other rule.
   assert(decision(codex_payload("HARN_ALLOW_RAW_SWIFT=1 swift build"), owns).allow)
-  assert(
-    !decision(codex_payload("HARN_ALLOW_RAW_SWIFT=1 trash /tmp/generated.log"), owns)
-      .allow,
-  )
+  assert(!decision(codex_payload("HARN_ALLOW_RAW_SWIFT=1 trash /tmp/generated.log"), owns).allow)
   // The Cargo escape does not release a Swift build, and vice versa.
   assert(!decision(codex_payload("HARN_ALLOW_RAW_CARGO=1 swift build"), owns).allow)
   assert(!decision(codex_payload("HARN_ALLOW_RAW_SWIFT=1 cargo build"), owns).allow)
@@ -505,16 +498,14 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
   }
   // A configuration git could not read is refused rather than read as having no aliases.
   const unreadable = { _options -> {"<unreadable>": ""} }
-  assert(
-    !decision(claude_payload("git -C /missing s"), NO_MAKE_TARGETS, unreadable).allow,
-  )
+  assert(!decision(claude_payload("git -C /missing s"), NO_MAKE_TARGETS, unreadable).allow)
   // A built-in is never an alias, so it triggers no lookup: a lookup that reports unreadable would
   // refuse it if it were consulted.
   for command in ["git -C /missing status", "git -C /missing log -1", "git diff"] {
     assert(
       decision(
         claude_payload(command),
-              NO_MAKE_TARGETS,
+        NO_MAKE_TARGETS,
         unreadable,
         { _program -> ["status", "log", "diff"] },
       ).allow,
@@ -553,7 +544,7 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
   assert(
     decision(
       claude_payload("GIT_CONFIG_GLOBAL=/tmp/aliases git status"),
-          NO_MAKE_TARGETS,
+      NO_MAKE_TARGETS,
       lookup,
       { _program -> ["status"] },
     ).allow,
