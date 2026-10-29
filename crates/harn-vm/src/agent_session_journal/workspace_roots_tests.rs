@@ -100,6 +100,7 @@ async fn mounted_root_audit_is_durable_once_with_or_without_a_live_journal() {
             ),
         )
         .unwrap();
+        let expected_prompt = crate::agent_sessions::prompt_state_json(&session);
         super::add_workspace_root_verified_persisted(
             &session,
             extra.path().to_str().unwrap(),
@@ -115,20 +116,35 @@ async fn mounted_root_audit_is_durable_once_with_or_without_a_live_journal() {
             .await
             .unwrap();
         let events = store.read_all(&session).await.unwrap();
+        if !live {
+            let snapshot = events
+                .iter()
+                .filter_map(super::SessionEventPayload::decode)
+                .find_map(|payload| match payload {
+                    super::SessionEventPayload::Compaction(snapshot) => Some(snapshot),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(snapshot.messages, vec![message]);
+            assert_eq!(
+                snapshot.source_event_ids,
+                vec![Some(injected.source_event_id.clone())]
+            );
+        }
         let hydrated = super::hydrate_events(events.clone());
         assert_eq!(
             hydrated.summary,
             (!live).then(|| "retained context summary".to_string())
         );
         assert_eq!(
-            hydrated.messages,
-            vec![message],
+            hydrated.messages, expected_prompt.messages,
             "live={live}: audit must preserve live context"
         );
-        assert_eq!(
-            hydrated.source_event_ids,
-            vec![Some(injected.source_event_id)]
-        );
+        let mut expected_sources = vec![Some(injected.source_event_id)];
+        if !live {
+            expected_sources.insert(0, None);
+        }
+        assert_eq!(hydrated.source_event_ids, expected_sources);
         let audits = events
             .iter()
             .filter(|event| {
