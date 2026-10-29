@@ -102,10 +102,7 @@ impl HostlibCapability for WorkspaceCheckpointCapability {
     }
 
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
-        // The run tape's per-call file effects use this module's scanner.
-        harn_vm::run_tape::register_tool_effect_observer(
-            Box::<tape_effects::TapeEffectObserver>::default(),
-        );
+        tape_effects::register();
         registry.register_fn("fs", CAPTURE_BUILTIN, "checkpoint_capture", capture_builtin);
         registry.register_fn(
             "fs",

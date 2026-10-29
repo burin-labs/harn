@@ -9,8 +9,13 @@ use harn_vm::run_tape::{EffectScan, ToolEffectObserver};
 
 use super::{scan::scan_tree, scan_blind_to, Scan, MAX_STORED_FILE_BYTES};
 
+/// Give the run tape's per-call file effects this module's scanner.
+pub(super) fn register() {
+    harn_vm::run_tape::register_tool_effect_observer(Box::<TapeEffectObserver>::default());
+}
+
 #[derive(Default)]
-pub(super) struct TapeEffectObserver {
+struct TapeEffectObserver {
     pending: Mutex<HashMap<String, Arc<Scan>>>,
 }
 
