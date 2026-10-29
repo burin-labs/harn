@@ -84,16 +84,22 @@ public enum HarnProtocolConstants {
         "worker_update",
     ]
     public static let harnAgentEventKinds: [String] = [
+        "agent_loop_stall_warning",
+        "agent_scratchpad_reorganization",
+        "anchor_changed",
         "boundary_failure",
         "budget_circuit_breaker",
         "budget_exhausted",
+        "cache_hit",
+        "cache_miss",
+        "capability_gap",
         "code_librarian_query_nl_fallback",
+        "compass_routing_decision",
         "composition_child_call",
         "composition_child_result",
         "composition_error",
         "composition_finish",
         "composition_start",
-        "compass_routing_decision",
         "control_outcome",
         "daemon_watchdog_tripped",
         "feedback_injected",
@@ -102,15 +108,20 @@ public enum HarnProtocolConstants {
         "host_tool_result",
         "input_guardrail_verdict",
         "iteration_end",
-        "session_health",
         "iteration_start",
         "judge_decision",
         "judge_started",
+        "llm_call_log",
+        "llm_fallback_attempt",
+        "llm_routing_decision",
+        "llm_shadow_diff",
+        "loop_checkpoint",
         "loop_control_decision",
         "loop_stuck",
         "mcp_auth_required",
         "mcp_catalog_changed",
         "mcp_notification",
+        "missing_tool_call_verdict",
         "model_job",
         "orchestration_decision",
         "pack_thinking_stripped",
@@ -122,11 +133,14 @@ public enum HarnProtocolConstants {
         "reserved_terminal_verify",
         "scope_classifier_verdict",
         "self_consistency_tie",
+        "semantic_cache_hit",
+        "semantic_cache_miss",
         "session_closed",
+        "session_health",
+        "step_judge_decision",
         "structural_validator_decision",
         "subagent_join",
         "subagent_stop",
-        "step_judge_decision",
         "tool_batch_disposition",
         "tool_call_audit",
         "tool_format_override",
@@ -5240,5 +5254,816 @@ public struct HarnAgentsEventProjection: Codable, Sendable, Equatable {
         case payload
         case sessionId = "session_id"
         case taskId = "task_id"
+    }
+}
+
+public struct HarnAgentEventAgentScratchpadReorganization: Codable, Sendable, Equatable {
+    public var iteration: Int
+    public var status: String
+    public var details: HarnACPValue
+}
+
+public struct HarnAgentEventAnchorChanged: Codable, Sendable, Equatable {
+    public var previous: HarnACPValue
+    public var current: HarnACPValue
+    public var carryTranscript: Bool
+    public var compacted: Bool
+    public var reason: String?
+}
+
+public struct HarnAgentEventBoundaryFailure: Codable, Sendable, Equatable {
+    public var boundary: String
+    public var failureKind: String
+    public var owner: String
+    public var detail: String
+    public var droppedCount: Int
+    public var droppedBytes: Int
+    public var unreported: Bool
+    public var excerpt: String?
+}
+
+public struct HarnAgentEventBudgetCircuitBreaker: Codable, Sendable, Equatable {
+    public var breakerKind: String
+    public var consecutiveCount: Int
+    public var pausedForMs: Int
+}
+
+public struct HarnAgentEventBudgetExhausted: Codable, Sendable, Equatable {
+    public var maxIterations: Int
+    public var budgetKind: String?
+    public var costUsd: Double?
+    public var headroomUsd: Double?
+    public var iteration: Int?
+    public var limit: String?
+    public var limitValue: Double?
+    public var model: String?
+    public var projectedCostUsd: Double?
+    public var projectedInputTokens: Int?
+    public var projectedOutputTokens: Int?
+    public var projectionBasis: String?
+    public var provider: String?
+    public var sessionCostUsd: Double?
+    public var wallClockMs: Int?
+}
+
+public struct HarnAgentEventCapabilityGap: Codable, Sendable, Equatable {
+    public var level: String
+    public var capability: String
+    public var provider: String
+    public var model: String
+    public var fallbackToolFormat: String
+    public var message: String
+    public var requestedToolFormat: String?
+}
+
+public struct HarnAgentEventCodeLibrarianQueryNlFallback: Codable, Sendable, Equatable {
+    public var attemptedCypher: String?
+    public var mctsDepth: Int
+    public var mctsExpansions: Int
+    public var resultCount: Int
+    public var text: String
+}
+
+public struct HarnAgentEventCompassRoutingDecision: Codable, Sendable, Equatable {
+    public var toolCallId: String
+    public var mode: String
+    public var action: String
+    public var persona: String
+    public var originalTool: String
+    public var routedTool: String
+    public var targetTool: String
+    public var path: String?
+}
+
+public struct HarnAgentEventCompositionChildCall: Codable, Sendable, Equatable {
+    public var runId: String
+    public var toolCallId: String
+    public var toolName: String
+    public var operationIndex: Int
+    public var annotations: HarnACPValue
+    public var requestedSideEffectLevel: String
+    public var policyContext: HarnACPValue
+    public var rawInput: HarnACPValue
+}
+
+public struct HarnAgentEventCompositionChildResult: Codable, Sendable, Equatable {
+    public var runId: String
+    public var toolCallId: String
+    public var toolName: String
+    public var operationIndex: Int
+    public var status: String
+    public var rawOutput: HarnACPValue
+    public var error: String?
+    public var errorCategory: String?
+    public var executor: HarnACPValue
+    public var durationMs: Int?
+    public var executionDurationMs: Int?
+}
+
+public struct HarnAgentEventCompositionError: Codable, Sendable, Equatable {
+    public var runId: String
+    public var language: String
+    public var snippetHash: String
+    public var bindingManifestHash: String
+    public var requestedSideEffectCeiling: String
+    public var stdout: String?
+    public var stderr: String?
+    public var artifacts: [HarnACPValue]
+    public var result: HarnACPValue
+    public var failureCategory: String?
+    public var error: String?
+    public var durationMs: Int?
+    public var metadata: HarnACPValue
+}
+
+public struct HarnAgentEventCompositionFinish: Codable, Sendable, Equatable {
+    public var runId: String
+    public var language: String
+    public var snippetHash: String
+    public var bindingManifestHash: String
+    public var requestedSideEffectCeiling: String
+    public var stdout: String?
+    public var stderr: String?
+    public var artifacts: [HarnACPValue]
+    public var result: HarnACPValue
+    public var failureCategory: String?
+    public var error: String?
+    public var durationMs: Int?
+    public var metadata: HarnACPValue
+}
+
+public struct HarnAgentEventCompositionStart: Codable, Sendable, Equatable {
+    public var runId: String
+    public var language: String
+    public var snippetHash: String
+    public var bindingManifestHash: String
+    public var requestedSideEffectCeiling: String
+    public var stdout: String?
+    public var stderr: String?
+    public var artifacts: [HarnACPValue]
+    public var result: HarnACPValue
+    public var failureCategory: String?
+    public var error: String?
+    public var durationMs: Int?
+    public var metadata: HarnACPValue
+}
+
+public struct HarnAgentEventControlOutcome: Codable, Sendable, Equatable {
+    public var controlId: String
+    public var method: String
+    public var outcome: String
+    public var status: String
+    public var actor: HarnACPValue
+    public var target: HarnACPValue
+    public var metadata: HarnACPValue?
+    public var reason: String?
+}
+
+public struct HarnAgentEventDaemonWatchdogTripped: Codable, Sendable, Equatable {
+    public var attempts: Int
+    public var elapsedMs: Int
+}
+
+public struct HarnAgentEventFeedbackInjected: Codable, Sendable, Equatable {
+    public var feedbackKind: String
+    public var content: String
+    public var delivered: Bool?
+    public var iteration: Int?
+    public var streak: Int?
+    public var toolName: String?
+    public var turnClaimedForRepair: Bool?
+}
+
+public struct HarnAgentEventFinalWrapupUnconsumedToolCall: Codable, Sendable, Equatable {
+    public var parseStatus: String
+    public var parsedCallCount: Int
+    public var toolNames: [String]
+    public var diagnostics: [String]
+    public var evidenceLine: String
+}
+
+public struct HarnAgentEventFinalWrapup: Codable, Sendable, Equatable {
+    public var finalStatus: String
+    public var stopReason: String
+    public var iteration: Int
+    public var hostDirective: Bool
+    public var terminalKind: String
+    public var unconsumedToolCall: HarnAgentEventFinalWrapupUnconsumedToolCall?
+}
+
+public struct HarnAgentEventHostAttachment: Codable, Sendable, Equatable {
+    public var injectionId: String
+    public var mediaType: String
+    public var flavor: HarnACPValue
+    public var artifactPointer: String
+    public var sha256: String
+    public var sizeBytes: Int
+    public var rendered: HarnACPValue
+    public var description: String?
+    public var descriptionModel: String?
+    public var delivery: HarnACPValue
+    public var deliveredAtSeam: String?
+    public var sequence: Int
+    public var provenance: HarnACPValue
+    public var sanitization: HarnACPValue
+}
+
+public struct HarnAgentEventHostToolResult: Codable, Sendable, Equatable {
+    public var injectionId: String
+    public var toolCallId: String
+    public var toolName: String
+    public var toolKind: HarnACPValue
+    public var rawInput: HarnACPValue
+    public var status: String
+    public var rawOutput: HarnACPValue
+    public var resultPointer: String?
+    public var error: String?
+    public var durationMs: Int?
+    public var delivery: HarnACPValue
+    public var deliveredAtSeam: String?
+    public var sequence: Int
+    public var provenance: HarnACPValue
+    public var sanitization: HarnACPValue
+}
+
+public struct HarnAgentEventInputGuardrailVerdict: Codable, Sendable, Equatable {
+    public var iteration: Int
+    public var tripwire: Bool
+    public var reason: String
+    public var label: String
+    public var confidence: Double
+    public var confidenceThreshold: Double
+    public var classifierKind: String?
+    public var model: String?
+    public var error: String?
+}
+
+public struct HarnAgentEventIterationEnd: Codable, Sendable, Equatable {
+    public var iteration: Int
+    public var iterationInfo: HarnACPValue
+}
+
+public struct HarnAgentEventIterationStart: Codable, Sendable, Equatable {
+    public var iteration: Int
+    public var model: String?
+    public var provider: String?
+}
+
+public struct HarnAgentEventJudgeDecision: Codable, Sendable, Equatable {
+    public var iteration: Int
+    public var verdict: String
+    public var reasoning: String
+    public var nextStep: String?
+    public var judgeDurationMs: Int
+    public var source: String?
+    public var trigger: String?
+    public var reason: String?
+    public var confirm: Bool?
+    public var convertedFrom: String?
+    public var escalationRecommended: Bool?
+    public var escalationTarget: String?
+    public var judgeVerdict: String?
+    public var override: HarnACPValue
+    public var gapClass: String?
+    public var judgeOutcome: String?
+    public var terminalEvidencePreserved: Bool?
+    public var requirementReport: HarnACPValue
+}
+
+public struct HarnAgentEventJudgeStarted: Codable, Sendable, Equatable {
+    public var iteration: Int
+    public var trigger: String?
+}
+
+public struct HarnAgentEventLoopCheckpoint: Codable, Sendable, Equatable {
+    public var iteration: Int
+    public var checkpointKind: String
+    public var delivered: Int
+    public var dispatchSkipped: Bool?
+    public var inboxDelivered: Int?
+    public var typedDelivered: Int?
+}
+
+public struct HarnAgentEventLoopControlDecision: Codable, Sendable, Equatable {
+    public var iteration: Int
+    public var action: String
+    public var oldLimit: Int
+    public var newLimit: Int
+    public var reason: String
+    public var status: String
+}
+
+public struct HarnAgentEventLoopStuck: Codable, Sendable, Equatable {
+    public var lastIteration: Int?
+    public var maxNudges: Int?
+    public var tailExcerpt: String?
+}
+
+public struct HarnAgentEventMcpAuthRequired: Codable, Sendable, Equatable {
+    public var server: String
+    public var resource: String
+    public var scope: String?
+}
+
+public struct HarnAgentEventMcpCatalogChanged: Codable, Sendable, Equatable {
+    public var server: String?
+    public var reason: String
+}
+
+public struct HarnAgentEventMcpNotification: Codable, Sendable, Equatable {
+    public var server: String
+    public var method: String
+    public var direction: String
+    public var params: HarnACPValue
+}
+
+public struct HarnAgentEventMissingToolCallVerdict: Codable, Sendable, Equatable {
+    public var iteration: Int
+    public var action: String
+    public var originalAction: String
+    public var toolName: String
+    public var confidence: Double
+    public var confidenceThreshold: Double
+    public var evidence: String
+    public var language: String?
+    public var classifierKind: String?
+    public var model: String?
+    public var error: String?
+}
+
+public struct HarnAgentEventModelJob: Codable, Sendable, Equatable {
+    public var event: HarnACPValue
+}
+
+public struct HarnAgentEventOrchestrationDecision: Codable, Sendable, Equatable {
+    public var decision: HarnACPValue
+}
+
+public struct HarnAgentEventPackThinkingStripped: Codable, Sendable, Equatable {
+    public var model: String
+    public var requested: String
+    public var reason: String
+}
+
+public struct HarnAgentEventProgressReported: Codable, Sendable, Equatable {
+    public var message: String?
+    public var entries: HarnACPValue
+    public var replace: Bool
+    public var metadata: HarnACPValue
+}
+
+public struct HarnAgentEventProviderUsage: Codable, Sendable, Equatable {
+    public var callId: String
+    public var provider: String
+    public var model: String
+    public var runUsage: HarnACPValue
+
+    enum CodingKeys: String, CodingKey {
+        case callId = "call_id"
+        case provider
+        case model
+        case runUsage = "run_usage"
+    }
+}
+
+public struct HarnAgentEventPurposeLabel: Codable, Sendable, Equatable {
+    public var label: String
+    public var source: String
+    public var iteration: Int?
+    public var toolCallIds: [String]
+    public var toolCallCount: Int?
+}
+
+public struct HarnAgentEventRepairOutputContractApplied: Codable, Sendable, Equatable {
+    public var iteration: Int
+    public var toolCount: Int
+}
+
+public struct HarnAgentEventRequireSuccessfulToolsViolation: Codable, Sendable, Equatable {
+    public var violationKind: String
+    public var source: String
+    public var actor: String?
+    public var runId: String?
+    public var redactedSummary: String
+    public var recurrenceHints: [String]
+    public var metadata: HarnACPValue
+}
+
+public struct HarnAgentEventScopeClassifierVerdict: Codable, Sendable, Equatable {
+    public var iteration: Int
+    public var label: String
+    public var originalLabel: String
+    public var confidence: Double
+    public var confidenceThreshold: Double
+    public var evidence: String
+    public var skipMainTurn: Bool
+    public var classifierKind: String?
+    public var model: String?
+    public var error: String?
+}
+
+public struct HarnAgentEventSelfConsistencyTie: Codable, Sendable, Equatable {
+    public var answer: String
+    public var total: Int
+    public var distribution: HarnACPValue
+}
+
+public struct HarnAgentEventSessionClosed: Codable, Sendable, Equatable {
+    public var reason: String
+    public var status: String
+    public var metadata: HarnACPValue
+}
+
+public struct HarnAgentEventStepJudgeDecision: Codable, Sendable, Equatable {
+    public var iteration: Int
+    public var verdict: String
+    public var reasoning: String
+    public var critique: String
+    public var confidence: Double
+    public var judgeDurationMs: Int
+    public var vetoed: Bool
+    public var skipped: Bool
+    public var reason: String?
+    public var judgeError: Bool
+    public var unavailableReason: String?
+    public var unavailableCount: Int
+    public var onVeto: String
+    public var inputTokens: Int
+    public var outputTokens: Int
+    public var costUsd: Double
+    public var provider: String
+    public var model: String
+}
+
+public struct HarnAgentEventStructuralValidatorDecision: Codable, Sendable, Equatable {
+    public var iteration: Int
+    public var rule: String
+    public var diagnostic: String
+    public var recommendedAction: String
+    public var vetoed: Bool
+    public var skipped: Bool
+    public var reason: String?
+    public var onFailure: String
+    public var attempts: Int
+    public var maxAttempts: Int
+}
+
+public struct HarnAgentEventSubagentJoin: Codable, Sendable, Equatable {
+    public var parentSessionId: String
+    public var parentRunId: String
+    public var childSessionId: String
+    public var childRunId: String
+    public var workerId: String
+    public var completedAtMs: Int
+    public var joinedAtMs: Int
+    public var collectionLagMs: Int
+    public var waitStartedAtMs: Int?
+    public var waitMs: Int?
+    public var resultProcessingStartedAtMs: Int?
+    public var resultProcessingCompletedAtMs: Int?
+    public var resultProcessingMs: Int?
+}
+
+public struct HarnAgentEventSubagentStop: Codable, Sendable, Equatable {
+    public var parentRunId: String
+    public var childRunId: String
+    public var parentSessionId: String?
+    public var childSessionId: String?
+    public var terminalStatus: String
+    public var terminalClass: String
+    public var reason: String
+    public var resultRef: String?
+    public var receiptRef: String?
+    public var cancellation: HarnACPValue
+    public var timeout: HarnACPValue
+    public var completedAtMs: Int
+}
+
+public struct HarnAgentEventToolBatchDisposition: Codable, Sendable, Equatable {
+    public var receipt: HarnACPValue
+}
+
+public struct HarnAgentEventToolCallAudit: Codable, Sendable, Equatable {
+    public var toolCallId: String
+    public var toolName: String
+    public var audit: HarnACPValue
+    public var receipt: HarnACPValue?
+}
+
+public struct HarnAgentEventToolFormatOverride: Codable, Sendable, Equatable {
+    public var provider: String
+    public var model: String
+    public var requestedFormat: String
+    public var recommendedFormat: String
+    public var catalogParity: String
+    public var appliedFormat: String?
+    public var overrideReason: String?
+    public var steered: Bool?
+}
+
+public struct HarnAgentEventTurnPhaseChanged: Codable, Sendable, Equatable {
+    public var phase: String
+    public var candidateReply: String?
+    public var outcome: HarnACPValue?
+    public var reply: String?
+
+    enum CodingKeys: String, CodingKey {
+        case phase
+        case candidateReply = "candidate_reply"
+        case outcome
+        case reply
+    }
+}
+
+public struct HarnAgentEventTypedCheckpoint: Codable, Sendable, Equatable {
+    public var checkpoint: HarnACPValue
+}
+
+/// The typed body of one `_harn/agentEvent` notification.
+public enum HarnAgentEventPayload: Sendable, Equatable {
+    case agentLoopStallWarning([String: HarnACPValue])
+    case agentScratchpadReorganization(HarnAgentEventAgentScratchpadReorganization)
+    case anchorChanged(HarnAgentEventAnchorChanged)
+    case boundaryFailure(HarnAgentEventBoundaryFailure)
+    case budgetCircuitBreaker(HarnAgentEventBudgetCircuitBreaker)
+    case budgetExhausted(HarnAgentEventBudgetExhausted)
+    case cacheHit([String: HarnACPValue])
+    case cacheMiss([String: HarnACPValue])
+    case capabilityGap(HarnAgentEventCapabilityGap)
+    case codeLibrarianQueryNlFallback(HarnAgentEventCodeLibrarianQueryNlFallback)
+    case compassRoutingDecision(HarnAgentEventCompassRoutingDecision)
+    case compositionChildCall(HarnAgentEventCompositionChildCall)
+    case compositionChildResult(HarnAgentEventCompositionChildResult)
+    case compositionError(HarnAgentEventCompositionError)
+    case compositionFinish(HarnAgentEventCompositionFinish)
+    case compositionStart(HarnAgentEventCompositionStart)
+    case controlOutcome(HarnAgentEventControlOutcome)
+    case daemonWatchdogTripped(HarnAgentEventDaemonWatchdogTripped)
+    case feedbackInjected(HarnAgentEventFeedbackInjected)
+    case finalWrapup(HarnAgentEventFinalWrapup)
+    case hostAttachment(HarnAgentEventHostAttachment)
+    case hostToolResult(HarnAgentEventHostToolResult)
+    case inputGuardrailVerdict(HarnAgentEventInputGuardrailVerdict)
+    case iterationEnd(HarnAgentEventIterationEnd)
+    case iterationStart(HarnAgentEventIterationStart)
+    case judgeDecision(HarnAgentEventJudgeDecision)
+    case judgeStarted(HarnAgentEventJudgeStarted)
+    case llmCallLog([String: HarnACPValue])
+    case llmFallbackAttempt([String: HarnACPValue])
+    case llmRoutingDecision([String: HarnACPValue])
+    case llmShadowDiff([String: HarnACPValue])
+    case loopCheckpoint(HarnAgentEventLoopCheckpoint)
+    case loopControlDecision(HarnAgentEventLoopControlDecision)
+    case loopStuck(HarnAgentEventLoopStuck)
+    case mcpAuthRequired(HarnAgentEventMcpAuthRequired)
+    case mcpCatalogChanged(HarnAgentEventMcpCatalogChanged)
+    case mcpNotification(HarnAgentEventMcpNotification)
+    case missingToolCallVerdict(HarnAgentEventMissingToolCallVerdict)
+    case modelJob(HarnAgentEventModelJob)
+    case orchestrationDecision(HarnAgentEventOrchestrationDecision)
+    case packThinkingStripped(HarnAgentEventPackThinkingStripped)
+    case progressReported(HarnAgentEventProgressReported)
+    case providerUsage(HarnAgentEventProviderUsage)
+    case purposeLabel(HarnAgentEventPurposeLabel)
+    case repairOutputContractApplied(HarnAgentEventRepairOutputContractApplied)
+    case requireSuccessfulToolsViolation(HarnAgentEventRequireSuccessfulToolsViolation)
+    case reservedTerminalVerify([String: HarnACPValue])
+    case scopeClassifierVerdict(HarnAgentEventScopeClassifierVerdict)
+    case selfConsistencyTie(HarnAgentEventSelfConsistencyTie)
+    case semanticCacheHit([String: HarnACPValue])
+    case semanticCacheMiss([String: HarnACPValue])
+    case sessionClosed(HarnAgentEventSessionClosed)
+    case sessionHealth([String: HarnACPValue])
+    case stepJudgeDecision(HarnAgentEventStepJudgeDecision)
+    case structuralValidatorDecision(HarnAgentEventStructuralValidatorDecision)
+    case subagentJoin(HarnAgentEventSubagentJoin)
+    case subagentStop(HarnAgentEventSubagentStop)
+    case toolBatchDisposition(HarnAgentEventToolBatchDisposition)
+    case toolCallAudit(HarnAgentEventToolCallAudit)
+    case toolFormatOverride(HarnAgentEventToolFormatOverride)
+    case turnPhaseChanged(HarnAgentEventTurnPhaseChanged)
+    case typedCheckpoint(HarnAgentEventTypedCheckpoint)
+}
+
+/// The params of one `_harn/agentEvent` notification. `fields` keeps every
+/// params member, including those of a body Harn does not type. Decoding
+/// fails for a kind this binding does not name.
+public struct HarnAgentEventParams: Codable, Sendable, Equatable {
+    public enum Kind: String, Codable, Sendable, CaseIterable {
+        case agentLoopStallWarning = "agent_loop_stall_warning"
+        case agentScratchpadReorganization = "agent_scratchpad_reorganization"
+        case anchorChanged = "anchor_changed"
+        case boundaryFailure = "boundary_failure"
+        case budgetCircuitBreaker = "budget_circuit_breaker"
+        case budgetExhausted = "budget_exhausted"
+        case cacheHit = "cache_hit"
+        case cacheMiss = "cache_miss"
+        case capabilityGap = "capability_gap"
+        case codeLibrarianQueryNlFallback = "code_librarian_query_nl_fallback"
+        case compassRoutingDecision = "compass_routing_decision"
+        case compositionChildCall = "composition_child_call"
+        case compositionChildResult = "composition_child_result"
+        case compositionError = "composition_error"
+        case compositionFinish = "composition_finish"
+        case compositionStart = "composition_start"
+        case controlOutcome = "control_outcome"
+        case daemonWatchdogTripped = "daemon_watchdog_tripped"
+        case feedbackInjected = "feedback_injected"
+        case finalWrapup = "final_wrapup"
+        case hostAttachment = "host_attachment"
+        case hostToolResult = "host_tool_result"
+        case inputGuardrailVerdict = "input_guardrail_verdict"
+        case iterationEnd = "iteration_end"
+        case iterationStart = "iteration_start"
+        case judgeDecision = "judge_decision"
+        case judgeStarted = "judge_started"
+        case llmCallLog = "llm_call_log"
+        case llmFallbackAttempt = "llm_fallback_attempt"
+        case llmRoutingDecision = "llm_routing_decision"
+        case llmShadowDiff = "llm_shadow_diff"
+        case loopCheckpoint = "loop_checkpoint"
+        case loopControlDecision = "loop_control_decision"
+        case loopStuck = "loop_stuck"
+        case mcpAuthRequired = "mcp_auth_required"
+        case mcpCatalogChanged = "mcp_catalog_changed"
+        case mcpNotification = "mcp_notification"
+        case missingToolCallVerdict = "missing_tool_call_verdict"
+        case modelJob = "model_job"
+        case orchestrationDecision = "orchestration_decision"
+        case packThinkingStripped = "pack_thinking_stripped"
+        case progressReported = "progress_reported"
+        case providerUsage = "provider_usage"
+        case purposeLabel = "purpose_label"
+        case repairOutputContractApplied = "repair_output_contract_applied"
+        case requireSuccessfulToolsViolation = "require_successful_tools_violation"
+        case reservedTerminalVerify = "reserved_terminal_verify"
+        case scopeClassifierVerdict = "scope_classifier_verdict"
+        case selfConsistencyTie = "self_consistency_tie"
+        case semanticCacheHit = "semantic_cache_hit"
+        case semanticCacheMiss = "semantic_cache_miss"
+        case sessionClosed = "session_closed"
+        case sessionHealth = "session_health"
+        case stepJudgeDecision = "step_judge_decision"
+        case structuralValidatorDecision = "structural_validator_decision"
+        case subagentJoin = "subagent_join"
+        case subagentStop = "subagent_stop"
+        case toolBatchDisposition = "tool_batch_disposition"
+        case toolCallAudit = "tool_call_audit"
+        case toolFormatOverride = "tool_format_override"
+        case turnPhaseChanged = "turn_phase_changed"
+        case typedCheckpoint = "typed_checkpoint"
+
+        public static let allCases: [Self] = [
+            "agent_loop_stall_warning",
+            "agent_scratchpad_reorganization",
+            "anchor_changed",
+            "boundary_failure",
+            "budget_circuit_breaker",
+            "budget_exhausted",
+            "cache_hit",
+            "cache_miss",
+            "capability_gap",
+            "code_librarian_query_nl_fallback",
+            "compass_routing_decision",
+            "composition_child_call",
+            "composition_child_result",
+            "composition_error",
+            "composition_finish",
+            "composition_start",
+            "control_outcome",
+            "daemon_watchdog_tripped",
+            "feedback_injected",
+            "final_wrapup",
+            "host_attachment",
+            "host_tool_result",
+            "input_guardrail_verdict",
+            "iteration_end",
+            "iteration_start",
+            "judge_decision",
+            "judge_started",
+            "llm_call_log",
+            "llm_fallback_attempt",
+            "llm_routing_decision",
+            "llm_shadow_diff",
+            "loop_checkpoint",
+            "loop_control_decision",
+            "loop_stuck",
+            "mcp_auth_required",
+            "mcp_catalog_changed",
+            "mcp_notification",
+            "missing_tool_call_verdict",
+            "model_job",
+            "orchestration_decision",
+            "pack_thinking_stripped",
+            "progress_reported",
+            "provider_usage",
+            "purpose_label",
+            "repair_output_contract_applied",
+            "require_successful_tools_violation",
+            "reserved_terminal_verify",
+            "scope_classifier_verdict",
+            "self_consistency_tie",
+            "semantic_cache_hit",
+            "semantic_cache_miss",
+            "session_closed",
+            "session_health",
+            "step_judge_decision",
+            "structural_validator_decision",
+            "subagent_join",
+            "subagent_stop",
+            "tool_batch_disposition",
+            "tool_call_audit",
+            "tool_format_override",
+            "turn_phase_changed",
+            "typed_checkpoint",
+        ].map { Self(rawValue: $0)! }
+    }
+
+    public let sessionId: String
+    public let kind: Kind
+    public let payload: HarnAgentEventPayload
+    public let fields: [String: HarnACPValue]
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let fields = try container.decode([String: HarnACPValue].self)
+        guard case .string(let sessionId)? = fields["sessionId"] else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "agent event without sessionId")
+        }
+        guard case .string(let rawKind)? = fields["kind"], let kind = Kind(rawValue: rawKind) else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "unknown agent event kind")
+        }
+        self.sessionId = sessionId
+        self.kind = kind
+        self.fields = fields
+        switch kind {
+        case .agentLoopStallWarning: self.payload = .agentLoopStallWarning(fields)
+        case .agentScratchpadReorganization: self.payload = .agentScratchpadReorganization(try container.decode(HarnAgentEventAgentScratchpadReorganization.self))
+        case .anchorChanged: self.payload = .anchorChanged(try container.decode(HarnAgentEventAnchorChanged.self))
+        case .boundaryFailure: self.payload = .boundaryFailure(try container.decode(HarnAgentEventBoundaryFailure.self))
+        case .budgetCircuitBreaker: self.payload = .budgetCircuitBreaker(try container.decode(HarnAgentEventBudgetCircuitBreaker.self))
+        case .budgetExhausted: self.payload = .budgetExhausted(try container.decode(HarnAgentEventBudgetExhausted.self))
+        case .cacheHit: self.payload = .cacheHit(fields)
+        case .cacheMiss: self.payload = .cacheMiss(fields)
+        case .capabilityGap: self.payload = .capabilityGap(try container.decode(HarnAgentEventCapabilityGap.self))
+        case .codeLibrarianQueryNlFallback: self.payload = .codeLibrarianQueryNlFallback(try container.decode(HarnAgentEventCodeLibrarianQueryNlFallback.self))
+        case .compassRoutingDecision: self.payload = .compassRoutingDecision(try container.decode(HarnAgentEventCompassRoutingDecision.self))
+        case .compositionChildCall: self.payload = .compositionChildCall(try container.decode(HarnAgentEventCompositionChildCall.self))
+        case .compositionChildResult: self.payload = .compositionChildResult(try container.decode(HarnAgentEventCompositionChildResult.self))
+        case .compositionError: self.payload = .compositionError(try container.decode(HarnAgentEventCompositionError.self))
+        case .compositionFinish: self.payload = .compositionFinish(try container.decode(HarnAgentEventCompositionFinish.self))
+        case .compositionStart: self.payload = .compositionStart(try container.decode(HarnAgentEventCompositionStart.self))
+        case .controlOutcome: self.payload = .controlOutcome(try container.decode(HarnAgentEventControlOutcome.self))
+        case .daemonWatchdogTripped: self.payload = .daemonWatchdogTripped(try container.decode(HarnAgentEventDaemonWatchdogTripped.self))
+        case .feedbackInjected: self.payload = .feedbackInjected(try container.decode(HarnAgentEventFeedbackInjected.self))
+        case .finalWrapup: self.payload = .finalWrapup(try container.decode(HarnAgentEventFinalWrapup.self))
+        case .hostAttachment: self.payload = .hostAttachment(try container.decode(HarnAgentEventHostAttachment.self))
+        case .hostToolResult: self.payload = .hostToolResult(try container.decode(HarnAgentEventHostToolResult.self))
+        case .inputGuardrailVerdict: self.payload = .inputGuardrailVerdict(try container.decode(HarnAgentEventInputGuardrailVerdict.self))
+        case .iterationEnd: self.payload = .iterationEnd(try container.decode(HarnAgentEventIterationEnd.self))
+        case .iterationStart: self.payload = .iterationStart(try container.decode(HarnAgentEventIterationStart.self))
+        case .judgeDecision: self.payload = .judgeDecision(try container.decode(HarnAgentEventJudgeDecision.self))
+        case .judgeStarted: self.payload = .judgeStarted(try container.decode(HarnAgentEventJudgeStarted.self))
+        case .llmCallLog: self.payload = .llmCallLog(fields)
+        case .llmFallbackAttempt: self.payload = .llmFallbackAttempt(fields)
+        case .llmRoutingDecision: self.payload = .llmRoutingDecision(fields)
+        case .llmShadowDiff: self.payload = .llmShadowDiff(fields)
+        case .loopCheckpoint: self.payload = .loopCheckpoint(try container.decode(HarnAgentEventLoopCheckpoint.self))
+        case .loopControlDecision: self.payload = .loopControlDecision(try container.decode(HarnAgentEventLoopControlDecision.self))
+        case .loopStuck: self.payload = .loopStuck(try container.decode(HarnAgentEventLoopStuck.self))
+        case .mcpAuthRequired: self.payload = .mcpAuthRequired(try container.decode(HarnAgentEventMcpAuthRequired.self))
+        case .mcpCatalogChanged: self.payload = .mcpCatalogChanged(try container.decode(HarnAgentEventMcpCatalogChanged.self))
+        case .mcpNotification: self.payload = .mcpNotification(try container.decode(HarnAgentEventMcpNotification.self))
+        case .missingToolCallVerdict: self.payload = .missingToolCallVerdict(try container.decode(HarnAgentEventMissingToolCallVerdict.self))
+        case .modelJob: self.payload = .modelJob(try container.decode(HarnAgentEventModelJob.self))
+        case .orchestrationDecision: self.payload = .orchestrationDecision(try container.decode(HarnAgentEventOrchestrationDecision.self))
+        case .packThinkingStripped: self.payload = .packThinkingStripped(try container.decode(HarnAgentEventPackThinkingStripped.self))
+        case .progressReported: self.payload = .progressReported(try container.decode(HarnAgentEventProgressReported.self))
+        case .providerUsage: self.payload = .providerUsage(try container.decode(HarnAgentEventProviderUsage.self))
+        case .purposeLabel: self.payload = .purposeLabel(try container.decode(HarnAgentEventPurposeLabel.self))
+        case .repairOutputContractApplied: self.payload = .repairOutputContractApplied(try container.decode(HarnAgentEventRepairOutputContractApplied.self))
+        case .requireSuccessfulToolsViolation: self.payload = .requireSuccessfulToolsViolation(try container.decode(HarnAgentEventRequireSuccessfulToolsViolation.self))
+        case .reservedTerminalVerify: self.payload = .reservedTerminalVerify(fields)
+        case .scopeClassifierVerdict: self.payload = .scopeClassifierVerdict(try container.decode(HarnAgentEventScopeClassifierVerdict.self))
+        case .selfConsistencyTie: self.payload = .selfConsistencyTie(try container.decode(HarnAgentEventSelfConsistencyTie.self))
+        case .semanticCacheHit: self.payload = .semanticCacheHit(fields)
+        case .semanticCacheMiss: self.payload = .semanticCacheMiss(fields)
+        case .sessionClosed: self.payload = .sessionClosed(try container.decode(HarnAgentEventSessionClosed.self))
+        case .sessionHealth: self.payload = .sessionHealth(fields)
+        case .stepJudgeDecision: self.payload = .stepJudgeDecision(try container.decode(HarnAgentEventStepJudgeDecision.self))
+        case .structuralValidatorDecision: self.payload = .structuralValidatorDecision(try container.decode(HarnAgentEventStructuralValidatorDecision.self))
+        case .subagentJoin: self.payload = .subagentJoin(try container.decode(HarnAgentEventSubagentJoin.self))
+        case .subagentStop: self.payload = .subagentStop(try container.decode(HarnAgentEventSubagentStop.self))
+        case .toolBatchDisposition: self.payload = .toolBatchDisposition(try container.decode(HarnAgentEventToolBatchDisposition.self))
+        case .toolCallAudit: self.payload = .toolCallAudit(try container.decode(HarnAgentEventToolCallAudit.self))
+        case .toolFormatOverride: self.payload = .toolFormatOverride(try container.decode(HarnAgentEventToolFormatOverride.self))
+        case .turnPhaseChanged: self.payload = .turnPhaseChanged(try container.decode(HarnAgentEventTurnPhaseChanged.self))
+        case .typedCheckpoint: self.payload = .typedCheckpoint(try container.decode(HarnAgentEventTypedCheckpoint.self))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(fields)
     }
 }

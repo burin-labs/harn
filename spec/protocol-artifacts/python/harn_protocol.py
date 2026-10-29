@@ -361,16 +361,22 @@ HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "worker_update",
 )
 HARN_AGENT_EVENT_KINDS: tuple = (
+    "agent_loop_stall_warning",
+    "agent_scratchpad_reorganization",
+    "anchor_changed",
     "boundary_failure",
     "budget_circuit_breaker",
     "budget_exhausted",
+    "cache_hit",
+    "cache_miss",
+    "capability_gap",
     "code_librarian_query_nl_fallback",
+    "compass_routing_decision",
     "composition_child_call",
     "composition_child_result",
     "composition_error",
     "composition_finish",
     "composition_start",
-    "compass_routing_decision",
     "control_outcome",
     "daemon_watchdog_tripped",
     "feedback_injected",
@@ -379,15 +385,20 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "host_tool_result",
     "input_guardrail_verdict",
     "iteration_end",
-    "session_health",
     "iteration_start",
     "judge_decision",
     "judge_started",
+    "llm_call_log",
+    "llm_fallback_attempt",
+    "llm_routing_decision",
+    "llm_shadow_diff",
+    "loop_checkpoint",
     "loop_control_decision",
     "loop_stuck",
     "mcp_auth_required",
     "mcp_catalog_changed",
     "mcp_notification",
+    "missing_tool_call_verdict",
     "model_job",
     "orchestration_decision",
     "pack_thinking_stripped",
@@ -399,11 +410,14 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "reserved_terminal_verify",
     "scope_classifier_verdict",
     "self_consistency_tie",
+    "semantic_cache_hit",
+    "semantic_cache_miss",
     "session_closed",
+    "session_health",
+    "step_judge_decision",
     "structural_validator_decision",
     "subagent_join",
     "subagent_stop",
-    "step_judge_decision",
     "tool_batch_disposition",
     "tool_call_audit",
     "tool_format_override",
@@ -2477,3 +2491,511 @@ class HarnAgentsEventProjection(_HarnDataclass):
     payload: Dict[str, JsonValue]
     session_id: Optional[str] = None
     task_id: Optional[str] = None
+
+@dataclass
+class HarnAgentEventAgentScratchpadReorganization(_HarnDataclass):
+    iteration: int
+    status: str
+    details: JsonValue
+
+@dataclass
+class HarnAgentEventAnchorChanged(_HarnDataclass):
+    previous: JsonValue
+    current: JsonValue
+    carryTranscript: bool
+    compacted: bool
+    reason: Optional[str]
+
+@dataclass
+class HarnAgentEventBoundaryFailure(_HarnDataclass):
+    boundary: str
+    failureKind: str
+    owner: str
+    detail: str
+    droppedCount: int
+    droppedBytes: int
+    unreported: bool
+    excerpt: Optional[str] = None
+
+@dataclass
+class HarnAgentEventBudgetCircuitBreaker(_HarnDataclass):
+    breakerKind: str
+    consecutiveCount: int
+    pausedForMs: int
+
+@dataclass
+class HarnAgentEventBudgetExhausted(_HarnDataclass):
+    maxIterations: int
+    budgetKind: Optional[str] = None
+    costUsd: Optional[float] = None
+    headroomUsd: Optional[float] = None
+    iteration: Optional[int] = None
+    limit: Optional[str] = None
+    limitValue: Optional[float] = None
+    model: Optional[str] = None
+    projectedCostUsd: Optional[float] = None
+    projectedInputTokens: Optional[int] = None
+    projectedOutputTokens: Optional[int] = None
+    projectionBasis: Optional[str] = None
+    provider: Optional[str] = None
+    sessionCostUsd: Optional[float] = None
+    wallClockMs: Optional[int] = None
+
+@dataclass
+class HarnAgentEventCapabilityGap(_HarnDataclass):
+    level: str
+    capability: str
+    provider: str
+    model: str
+    fallbackToolFormat: str
+    message: str
+    requestedToolFormat: Optional[str] = None
+
+@dataclass
+class HarnAgentEventCodeLibrarianQueryNlFallback(_HarnDataclass):
+    attemptedCypher: Optional[str]
+    mctsDepth: int
+    mctsExpansions: int
+    resultCount: int
+    text: str
+
+@dataclass
+class HarnAgentEventCompassRoutingDecision(_HarnDataclass):
+    toolCallId: str
+    mode: str
+    action: str
+    persona: str
+    originalTool: str
+    routedTool: str
+    targetTool: str
+    path: Optional[str] = None
+
+@dataclass
+class HarnAgentEventCompositionChildCall(_HarnDataclass):
+    runId: str
+    toolCallId: str
+    toolName: str
+    operationIndex: int
+    annotations: JsonValue
+    requestedSideEffectLevel: str
+    policyContext: JsonValue
+    rawInput: JsonValue
+
+@dataclass
+class HarnAgentEventCompositionChildResult(_HarnDataclass):
+    runId: str
+    toolCallId: str
+    toolName: str
+    operationIndex: int
+    status: str
+    rawOutput: JsonValue
+    error: Optional[str]
+    errorCategory: Optional[str]
+    executor: JsonValue
+    durationMs: Optional[int]
+    executionDurationMs: Optional[int]
+
+@dataclass
+class HarnAgentEventCompositionError(_HarnDataclass):
+    runId: str
+    language: str
+    snippetHash: str
+    bindingManifestHash: str
+    requestedSideEffectCeiling: str
+    stdout: Optional[str]
+    stderr: Optional[str]
+    artifacts: List[JsonValue]
+    result: JsonValue
+    failureCategory: Optional[str]
+    error: Optional[str]
+    durationMs: Optional[int]
+    metadata: JsonValue
+
+@dataclass
+class HarnAgentEventCompositionFinish(_HarnDataclass):
+    runId: str
+    language: str
+    snippetHash: str
+    bindingManifestHash: str
+    requestedSideEffectCeiling: str
+    stdout: Optional[str]
+    stderr: Optional[str]
+    artifacts: List[JsonValue]
+    result: JsonValue
+    failureCategory: Optional[str]
+    error: Optional[str]
+    durationMs: Optional[int]
+    metadata: JsonValue
+
+@dataclass
+class HarnAgentEventCompositionStart(_HarnDataclass):
+    runId: str
+    language: str
+    snippetHash: str
+    bindingManifestHash: str
+    requestedSideEffectCeiling: str
+    stdout: Optional[str]
+    stderr: Optional[str]
+    artifacts: List[JsonValue]
+    result: JsonValue
+    failureCategory: Optional[str]
+    error: Optional[str]
+    durationMs: Optional[int]
+    metadata: JsonValue
+
+@dataclass
+class HarnAgentEventControlOutcome(_HarnDataclass):
+    controlId: str
+    method: str
+    outcome: str
+    status: str
+    actor: JsonValue
+    target: JsonValue
+    metadata: Optional[JsonValue] = None
+    reason: Optional[str] = None
+
+@dataclass
+class HarnAgentEventDaemonWatchdogTripped(_HarnDataclass):
+    attempts: int
+    elapsedMs: int
+
+@dataclass
+class HarnAgentEventFeedbackInjected(_HarnDataclass):
+    feedbackKind: str
+    content: str
+    delivered: Optional[bool] = None
+    iteration: Optional[int] = None
+    streak: Optional[int] = None
+    toolName: Optional[str] = None
+    turnClaimedForRepair: Optional[bool] = None
+
+@dataclass
+class HarnAgentEventFinalWrapupUnconsumedToolCall(_HarnDataclass):
+    parseStatus: str
+    parsedCallCount: int
+    toolNames: List[str]
+    diagnostics: List[str]
+    evidenceLine: str
+
+@dataclass
+class HarnAgentEventFinalWrapup(_HarnDataclass):
+    finalStatus: str
+    stopReason: str
+    iteration: int
+    hostDirective: bool
+    terminalKind: str
+    unconsumedToolCall: Optional[HarnAgentEventFinalWrapupUnconsumedToolCall]
+
+@dataclass
+class HarnAgentEventHostAttachment(_HarnDataclass):
+    injectionId: str
+    mediaType: str
+    flavor: JsonValue
+    artifactPointer: str
+    sha256: str
+    sizeBytes: int
+    rendered: JsonValue
+    description: Optional[str]
+    descriptionModel: Optional[str]
+    delivery: JsonValue
+    deliveredAtSeam: Optional[str]
+    sequence: int
+    provenance: JsonValue
+    sanitization: JsonValue
+
+@dataclass
+class HarnAgentEventHostToolResult(_HarnDataclass):
+    injectionId: str
+    toolCallId: str
+    toolName: str
+    toolKind: JsonValue
+    rawInput: JsonValue
+    status: str
+    rawOutput: JsonValue
+    resultPointer: Optional[str]
+    error: Optional[str]
+    durationMs: Optional[int]
+    delivery: JsonValue
+    deliveredAtSeam: Optional[str]
+    sequence: int
+    provenance: JsonValue
+    sanitization: JsonValue
+
+@dataclass
+class HarnAgentEventInputGuardrailVerdict(_HarnDataclass):
+    iteration: int
+    tripwire: bool
+    reason: str
+    label: str
+    confidence: float
+    confidenceThreshold: float
+    classifierKind: Optional[str]
+    model: Optional[str]
+    error: Optional[str]
+
+@dataclass
+class HarnAgentEventIterationEnd(_HarnDataclass):
+    iteration: int
+    iterationInfo: JsonValue
+
+@dataclass
+class HarnAgentEventIterationStart(_HarnDataclass):
+    iteration: int
+    model: Optional[str] = None
+    provider: Optional[str] = None
+
+@dataclass
+class HarnAgentEventJudgeDecision(_HarnDataclass):
+    iteration: int
+    verdict: str
+    reasoning: str
+    nextStep: Optional[str]
+    judgeDurationMs: int
+    source: Optional[str]
+    trigger: Optional[str]
+    reason: Optional[str]
+    confirm: Optional[bool]
+    convertedFrom: Optional[str]
+    escalationRecommended: Optional[bool]
+    escalationTarget: Optional[str]
+    judgeVerdict: Optional[str]
+    override: JsonValue
+    gapClass: Optional[str]
+    judgeOutcome: Optional[str]
+    terminalEvidencePreserved: Optional[bool]
+    requirementReport: JsonValue
+
+@dataclass
+class HarnAgentEventJudgeStarted(_HarnDataclass):
+    iteration: int
+    trigger: Optional[str]
+
+@dataclass
+class HarnAgentEventLoopCheckpoint(_HarnDataclass):
+    iteration: int
+    checkpointKind: str
+    delivered: int
+    dispatchSkipped: Optional[bool] = None
+    inboxDelivered: Optional[int] = None
+    typedDelivered: Optional[int] = None
+
+@dataclass
+class HarnAgentEventLoopControlDecision(_HarnDataclass):
+    iteration: int
+    action: str
+    oldLimit: int
+    newLimit: int
+    reason: str
+    status: str
+
+@dataclass
+class HarnAgentEventLoopStuck(_HarnDataclass):
+    lastIteration: Optional[int] = None
+    maxNudges: Optional[int] = None
+    tailExcerpt: Optional[str] = None
+
+@dataclass
+class HarnAgentEventMcpAuthRequired(_HarnDataclass):
+    server: str
+    resource: str
+    scope: Optional[str]
+
+@dataclass
+class HarnAgentEventMcpCatalogChanged(_HarnDataclass):
+    server: Optional[str]
+    reason: str
+
+@dataclass
+class HarnAgentEventMcpNotification(_HarnDataclass):
+    server: str
+    method: str
+    direction: str
+    params: JsonValue
+
+@dataclass
+class HarnAgentEventMissingToolCallVerdict(_HarnDataclass):
+    iteration: int
+    action: str
+    originalAction: str
+    toolName: str
+    confidence: float
+    confidenceThreshold: float
+    evidence: str
+    language: Optional[str]
+    classifierKind: Optional[str]
+    model: Optional[str]
+    error: Optional[str]
+
+@dataclass
+class HarnAgentEventModelJob(_HarnDataclass):
+    event: JsonValue
+
+@dataclass
+class HarnAgentEventOrchestrationDecision(_HarnDataclass):
+    decision: JsonValue
+
+@dataclass
+class HarnAgentEventPackThinkingStripped(_HarnDataclass):
+    model: str
+    requested: str
+    reason: str
+
+@dataclass
+class HarnAgentEventProgressReported(_HarnDataclass):
+    message: Optional[str]
+    entries: JsonValue
+    replace: bool
+    metadata: JsonValue
+
+@dataclass
+class HarnAgentEventProviderUsage(_HarnDataclass):
+    call_id: str
+    provider: str
+    model: str
+    run_usage: JsonValue
+
+@dataclass
+class HarnAgentEventPurposeLabel(_HarnDataclass):
+    label: str
+    source: str
+    iteration: Optional[int]
+    toolCallIds: List[str]
+    toolCallCount: Optional[int]
+
+@dataclass
+class HarnAgentEventRepairOutputContractApplied(_HarnDataclass):
+    iteration: int
+    toolCount: int
+
+@dataclass
+class HarnAgentEventRequireSuccessfulToolsViolation(_HarnDataclass):
+    violationKind: str
+    source: str
+    actor: Optional[str]
+    runId: Optional[str]
+    redactedSummary: str
+    recurrenceHints: List[str]
+    metadata: JsonValue
+
+@dataclass
+class HarnAgentEventScopeClassifierVerdict(_HarnDataclass):
+    iteration: int
+    label: str
+    originalLabel: str
+    confidence: float
+    confidenceThreshold: float
+    evidence: str
+    skipMainTurn: bool
+    classifierKind: Optional[str]
+    model: Optional[str]
+    error: Optional[str]
+
+@dataclass
+class HarnAgentEventSelfConsistencyTie(_HarnDataclass):
+    answer: str
+    total: int
+    distribution: JsonValue
+
+@dataclass
+class HarnAgentEventSessionClosed(_HarnDataclass):
+    reason: str
+    status: str
+    metadata: JsonValue
+
+@dataclass
+class HarnAgentEventStepJudgeDecision(_HarnDataclass):
+    iteration: int
+    verdict: str
+    reasoning: str
+    critique: str
+    confidence: float
+    judgeDurationMs: int
+    vetoed: bool
+    skipped: bool
+    reason: Optional[str]
+    judgeError: bool
+    unavailableReason: Optional[str]
+    unavailableCount: int
+    onVeto: str
+    inputTokens: int
+    outputTokens: int
+    costUsd: float
+    provider: str
+    model: str
+
+@dataclass
+class HarnAgentEventStructuralValidatorDecision(_HarnDataclass):
+    iteration: int
+    rule: str
+    diagnostic: str
+    recommendedAction: str
+    vetoed: bool
+    skipped: bool
+    reason: Optional[str]
+    onFailure: str
+    attempts: int
+    maxAttempts: int
+
+@dataclass
+class HarnAgentEventSubagentJoin(_HarnDataclass):
+    parentSessionId: str
+    parentRunId: str
+    childSessionId: str
+    childRunId: str
+    workerId: str
+    completedAtMs: int
+    joinedAtMs: int
+    collectionLagMs: int
+    waitStartedAtMs: Optional[int]
+    waitMs: Optional[int]
+    resultProcessingStartedAtMs: Optional[int]
+    resultProcessingCompletedAtMs: Optional[int]
+    resultProcessingMs: Optional[int]
+
+@dataclass
+class HarnAgentEventSubagentStop(_HarnDataclass):
+    parentRunId: str
+    childRunId: str
+    parentSessionId: Optional[str]
+    childSessionId: Optional[str]
+    terminalStatus: str
+    terminalClass: str
+    reason: str
+    resultRef: Optional[str]
+    receiptRef: Optional[str]
+    cancellation: JsonValue
+    timeout: JsonValue
+    completedAtMs: int
+
+@dataclass
+class HarnAgentEventToolBatchDisposition(_HarnDataclass):
+    receipt: JsonValue
+
+@dataclass
+class HarnAgentEventToolCallAudit(_HarnDataclass):
+    toolCallId: str
+    toolName: str
+    audit: JsonValue
+    receipt: Optional[JsonValue] = None
+
+@dataclass
+class HarnAgentEventToolFormatOverride(_HarnDataclass):
+    provider: str
+    model: str
+    requestedFormat: str
+    recommendedFormat: str
+    catalogParity: str
+    appliedFormat: Optional[str] = None
+    overrideReason: Optional[str] = None
+    steered: Optional[bool] = None
+
+@dataclass
+class HarnAgentEventTurnPhaseChanged(_HarnDataclass):
+    phase: str
+    candidate_reply: Optional[str] = None
+    outcome: Optional[JsonValue] = None
+    reply: Optional[str] = None
+
+@dataclass
+class HarnAgentEventTypedCheckpoint(_HarnDataclass):
+    checkpoint: JsonValue

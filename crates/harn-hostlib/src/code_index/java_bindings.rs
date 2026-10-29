@@ -97,6 +97,12 @@ impl<'a> JavaBindings<'a> {
     }
 
     pub fn declaration_owner(&self, node: Node<'_>) -> Option<String> {
+        if matches!(
+            node.kind(),
+            "constructor_declaration" | "compact_constructor_declaration"
+        ) {
+            return None;
+        }
         if node.kind() == "method_declaration" {
             let name = text(node.child_by_field_name("name")?, self.source);
             if is_object_method(name) {

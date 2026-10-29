@@ -666,8 +666,14 @@ fn visit_tree(root: Node<'_>, source: &[u8], depth: usize, analysis: &mut ShellA
                 continue;
             }
             "command" => visit_command(node, source, depth, analysis),
-            "file_redirect" => collect_redirect(node, source, analysis),
-            "heredoc_redirect" | "herestring_redirect" => analysis.io_unresolved = true,
+            "file_redirect" => {
+                analysis.unresolved |= names_redirect_descriptor(node, source);
+                collect_redirect(node, source, analysis);
+            }
+            "heredoc_redirect" | "herestring_redirect" => {
+                analysis.unresolved |= names_redirect_descriptor(node, source);
+                analysis.io_unresolved = true;
+            }
             _ => {}
         }
         let mut cursor = node.walk();
@@ -781,22 +787,58 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
     });
 }
 
-fn collect_redirect(redirect: Node<'_>, source: &[u8], analysis: &mut ShellAnalysis) {
-    let Some(destination_node) = redirect.child_by_field_name("destination") else {
-        analysis.unresolved = true;
-        return;
+/// Bash assigns the opened descriptor's number to `name` in `{name}>file`, so
+/// the redirect is a variable assignment the parser does not project.
+/// tree-sitter leaves `{name}` as the preceding word, adjacent to the operator.
+fn names_redirect_descriptor(redirect: Node<'_>, source: &[u8]) -> bool {
+    let Some(before) = source.get(..redirect.start_byte()) else {
+        return false;
     };
+    let Some(inner) = before.strip_suffix(b"}") else {
+        return false;
+    };
+    let Some(open) = inner.iter().rposition(|byte| *byte == b'{') else {
+        return false;
+    };
+    let name = &inner[open + 1..];
+    name.first()
+        .is_some_and(|first| first.is_ascii_alphabetic() || *first == b'_')
+        && name
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+}
+
+fn collect_redirect(redirect: Node<'_>, source: &[u8], analysis: &mut ShellAnalysis) {
     let operator = redirect
         .child_by_field_name("operator")
         .and_then(|node| node_text(node, source))
         .map(ToString::to_string)
         .or_else(|| redirect_operator_from_children(redirect, source));
-    let Some(operator) = operator else {
+    let Some(mut operator) = operator else {
         analysis.unresolved = true;
+        return;
+    };
+    let Some(destination_node) = redirect.child_by_field_name("destination") else {
+        // `>&-` and `<&-` close a descriptor and take no destination.
+        analysis.unresolved |= !matches!(operator.as_str(), ">&-" | "<&-");
         return;
     };
     let (destination, dynamic) = shell_word(destination_node, source);
     analysis.unresolved |= dynamic;
+    if !dynamic && matches!(operator.as_str(), ">&" | "<&" | ">&-" | "<&-") {
+        match destination.as_deref() {
+            // Duplicating or closing a literal descriptor touches no file.
+            Some(fd) if fd == "-" || (!fd.is_empty() && fd.bytes().all(|b| b.is_ascii_digit())) => {
+                return;
+            }
+            // Bash reads `>&word` as `&>word`: both streams write the file.
+            Some(_) if operator == ">&" => operator = "&>".to_string(),
+            _ => {
+                analysis.unresolved = true;
+                return;
+            }
+        }
+    }
     if let Some(value) = destination.as_deref() {
         record_argument_word(analysis, value, false);
         record_argument_word(analysis, value, true);
@@ -814,7 +856,18 @@ fn redirect_operator_from_children(redirect: Node<'_>, source: &[u8]) -> Option<
         let text = node_text(child, source)?;
         matches!(
             text,
-            ">" | ">>" | ">|" | "&>" | "&>>" | "<>" | "<" | "<<" | "<<<"
+            ">" | ">>"
+                | ">|"
+                | "&>"
+                | "&>>"
+                | "<>"
+                | "<"
+                | "<<"
+                | "<<<"
+                | ">&"
+                | "<&"
+                | ">&-"
+                | "<&-"
         )
         .then(|| text.to_string())
     })

@@ -1,5 +1,6 @@
 //! Orchestration and diagnostic projections behind the canonical ACP event sink.
 
+use super::super::agent_event_payloads as payloads;
 use super::super::event_projection::has_progress_entries;
 use super::{ext_payloads, AcpAgentEventSink};
 use harn_vm::agent_events::AgentEvent;
@@ -14,16 +15,18 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             tool_call_ids,
             tool_call_count,
         } => {
-            sink.emit_agent_event_ext(
-                "purpose_label",
+            sink.emit_agent_event(
                 session_id,
-                serde_json::json!({
-                    "label": label,
-                    "source": source,
-                    "iteration": iteration,
-                    "toolCallIds": tool_call_ids,
-                    "toolCallCount": tool_call_count,
-                }),
+                &payloads::PurposeLabel {
+                    label: label.clone(),
+                    source: match super::to_wire(source) {
+                        serde_json::Value::String(source) => source,
+                        other => other.to_string(),
+                    },
+                    iteration: *iteration,
+                    tool_call_ids: tool_call_ids.clone(),
+                    tool_call_count: *tool_call_count,
+                },
             );
         }
         AgentEvent::ProgressReported {
@@ -50,15 +53,14 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
                     ),
                 }));
             } else {
-                sink.emit_agent_event_ext(
-                    "progress_reported",
+                sink.emit_agent_event(
                     session_id,
-                    serde_json::json!({
-                        "message": message,
-                        "entries": entries,
-                        "replace": replace,
-                        "metadata": metadata,
-                    }),
+                    &payloads::ProgressReported {
+                        message: message.clone(),
+                        entries: entries.clone(),
+                        replace: *replace,
+                        metadata: metadata.clone(),
+                    },
                 );
             }
         }
@@ -73,19 +75,19 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             target_tool,
             path,
         } => {
-            let mut payload = serde_json::json!({
-                "toolCallId": tool_call_id,
-                "mode": mode,
-                "action": action,
-                "persona": persona,
-                "originalTool": original_tool,
-                "routedTool": routed_tool,
-                "targetTool": target_tool,
-            });
-            if let Some(path) = path {
-                payload["path"] = serde_json::Value::String(path.clone());
-            }
-            sink.emit_agent_event_ext("compass_routing_decision", session_id, payload);
+            sink.emit_agent_event(
+                session_id,
+                &payloads::CompassRoutingDecision {
+                    tool_call_id: tool_call_id.clone(),
+                    mode: mode.clone(),
+                    action: action.clone(),
+                    persona: persona.clone(),
+                    original_tool: original_tool.clone(),
+                    routed_tool: routed_tool.clone(),
+                    target_tool: target_tool.clone(),
+                    path: path.clone(),
+                },
+            );
         }
         AgentEvent::AgentScratchpadReorganization {
             session_id,
@@ -93,14 +95,13 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             status,
             details,
         } => {
-            sink.emit_agent_event_ext(
-                "agent_scratchpad_reorganization",
+            sink.emit_agent_event(
                 session_id,
-                serde_json::json!({
-                    "iteration": iteration,
-                    "status": status,
-                    "details": details,
-                }),
+                &payloads::AgentScratchpadReorganization {
+                    iteration: *iteration,
+                    status: status.clone(),
+                    details: details.clone(),
+                },
             );
         }
         AgentEvent::FeedbackInjected {
@@ -113,31 +114,18 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             turn_claimed_for_repair,
             delivered,
         } => {
-            let mut payload = serde_json::json!({"feedbackKind": kind, "content": content});
-            if let Some(object) = payload.as_object_mut() {
-                if let Some(streak) = streak {
-                    object.insert("streak".to_string(), serde_json::json!(streak));
-                }
-                if let Some(iteration) = iteration {
-                    object.insert("iteration".to_string(), serde_json::json!(iteration));
-                }
-                if let Some(tool_name) = tool_name {
-                    object.insert("toolName".to_string(), serde_json::json!(tool_name));
-                }
-                if let Some(claimed) = turn_claimed_for_repair {
-                    object.insert(
-                        "turnClaimedForRepair".to_string(),
-                        serde_json::json!(claimed),
-                    );
-                }
-                // `false` is the load-bearing reading here: it is a mechanism
-                // reporting that it wrote a receipt and delivered nothing.
-                // Only an absent field means the question went unanswered.
-                if let Some(delivered) = delivered {
-                    object.insert("delivered".to_string(), serde_json::json!(delivered));
-                }
-            }
-            sink.emit_agent_event_ext("feedback_injected", session_id, payload);
+            sink.emit_agent_event(
+                session_id,
+                &payloads::FeedbackInjected {
+                    feedback_kind: kind.clone(),
+                    content: content.clone(),
+                    streak: *streak,
+                    iteration: *iteration,
+                    tool_name: tool_name.clone(),
+                    turn_claimed_for_repair: *turn_claimed_for_repair,
+                    delivered: *delivered,
+                },
+            );
         }
         AgentEvent::BudgetExhausted {
             session_id,
@@ -157,28 +145,26 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             provider,
             model,
         } => {
-            let mut payload = serde_json::json!({
-                "maxIterations": max_iterations,
-                "iteration": iteration,
-                "budgetKind": kind,
-                "costUsd": cost_usd,
-                "wallClockMs": wall_clock_ms,
-                "limit": limit,
-                "limitValue": limit_value,
-                "projectedCostUsd": projected_cost_usd,
-                "sessionCostUsd": session_cost_usd,
-                "projectedInputTokens": projected_input_tokens,
-                "projectedOutputTokens": projected_output_tokens,
-                "projectionBasis": projection_basis,
-                "headroomUsd": headroom_usd,
-                "provider": provider,
-                "model": model,
-            });
-            payload
-                .as_object_mut()
-                .expect("budget payload is an object")
-                .retain(|_, value| !value.is_null());
-            sink.emit_agent_event_ext("budget_exhausted", session_id, payload);
+            sink.emit_agent_event(
+                session_id,
+                &payloads::BudgetExhausted {
+                    max_iterations: *max_iterations,
+                    iteration: *iteration,
+                    budget_kind: kind.clone(),
+                    cost_usd: *cost_usd,
+                    wall_clock_ms: *wall_clock_ms,
+                    limit: limit.clone(),
+                    limit_value: limit_value.clone(),
+                    projected_cost_usd: *projected_cost_usd,
+                    session_cost_usd: *session_cost_usd,
+                    projected_input_tokens: *projected_input_tokens,
+                    projected_output_tokens: *projected_output_tokens,
+                    projection_basis: projection_basis.clone(),
+                    headroom_usd: *headroom_usd,
+                    provider: provider.clone(),
+                    model: model.clone(),
+                },
+            );
         }
         AgentEvent::BudgetCircuitBreaker {
             session_id,
@@ -186,14 +172,13 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             consecutive_count,
             paused_for_ms,
         } => {
-            sink.emit_agent_event_ext(
-                "budget_circuit_breaker",
+            sink.emit_agent_event(
                 session_id,
-                serde_json::json!({
-                    "breakerKind": kind,
-                    "consecutiveCount": consecutive_count,
-                    "pausedForMs": paused_for_ms,
-                }),
+                &payloads::BudgetCircuitBreaker {
+                    breaker_kind: kind.clone(),
+                    consecutive_count: *consecutive_count,
+                    paused_for_ms: *paused_for_ms,
+                },
             );
         }
         AgentEvent::LoopStuck {
@@ -202,37 +187,52 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             last_iteration,
             tail_excerpt,
         } => {
-            sink.emit_agent_event_ext(
-                "loop_stuck",
+            sink.emit_agent_event(
                 session_id,
-                serde_json::json!({
-                    "maxNudges": max_nudges,
-                    "lastIteration": last_iteration,
-                    "tailExcerpt": tail_excerpt,
-                }),
+                &payloads::LoopStuck {
+                    max_nudges: Some(*max_nudges),
+                    last_iteration: Some(*last_iteration),
+                    tail_excerpt: Some(tail_excerpt.clone()),
+                    signal: serde_json::Map::new(),
+                },
             );
         }
         AgentEvent::LoopStuckSignal {
             session_id,
             payload,
         } => {
-            sink.emit_agent_event_ext("loop_stuck", session_id, payload.clone());
+            let signal = match payload {
+                serde_json::Value::Object(fields) => fields.clone(),
+                _ => serde_json::Map::new(),
+            };
+            sink.emit_agent_event(
+                session_id,
+                &payloads::LoopStuck {
+                    signal,
+                    ..payloads::LoopStuck::default()
+                },
+            );
         }
         AgentEvent::ReservedTerminalVerify {
             session_id,
             payload,
         } => {
-            sink.emit_agent_event_ext("reserved_terminal_verify", session_id, payload.clone());
+            sink.emit_agent_event(
+                session_id,
+                &payloads::ReservedTerminalVerify::from_value(payload.clone()),
+            );
         }
         AgentEvent::DaemonWatchdogTripped {
             session_id,
             attempts,
             elapsed_ms,
         } => {
-            sink.emit_agent_event_ext(
-                "daemon_watchdog_tripped",
+            sink.emit_agent_event(
                 session_id,
-                serde_json::json!({"attempts": attempts, "elapsedMs": elapsed_ms}),
+                &payloads::DaemonWatchdogTripped {
+                    attempts: *attempts,
+                    elapsed_ms: *elapsed_ms,
+                },
             );
         }
         AgentEvent::LoopControlDecision {
@@ -244,38 +244,36 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             reason,
             status,
         } => {
-            sink.emit_agent_event_ext(
-                "loop_control_decision",
+            sink.emit_agent_event(
                 session_id,
-                serde_json::json!({
-                    "iteration": iteration,
-                    "action": action,
-                    "oldLimit": old_limit,
-                    "newLimit": new_limit,
-                    "reason": reason,
-                    "status": status,
-                }),
+                &payloads::LoopControlDecision {
+                    iteration: *iteration,
+                    action: action.clone(),
+                    old_limit: *old_limit,
+                    new_limit: *new_limit,
+                    reason: reason.clone(),
+                    status: status.clone(),
+                },
             );
         }
         AgentEvent::AgentLoopStallWarning {
             session_id,
             warning,
         } => {
-            sink.emit_agent_event_ext("agent_loop_stall_warning", session_id, warning.clone());
+            sink.emit_agent_event(
+                session_id,
+                &payloads::AgentLoopStallWarning::from_value(warning.clone()),
+            );
         }
         AgentEvent::CapabilityGap { session_id, .. } => {
-            sink.emit_agent_event_ext(
-                "capability_gap",
-                session_id,
-                ext_payloads::capability_gap(event),
-            );
+            if let Some(payload) = ext_payloads::capability_gap(event) {
+                sink.emit_agent_event(session_id, &payload);
+            }
         }
         AgentEvent::BoundaryFailure { session_id, .. } => {
-            sink.emit_agent_event_ext(
-                "boundary_failure",
-                session_id,
-                ext_payloads::boundary_failure(event),
-            );
+            if let Some(payload) = ext_payloads::boundary_failure(event) {
+                sink.emit_agent_event(session_id, &payload);
+            }
         }
         AgentEvent::ToolFormatOverride {
             session_id,
@@ -288,74 +286,93 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             applied_format,
             steered,
         } => {
-            let mut payload = serde_json::json!({
-                "provider": provider,
-                "model": model,
-                "requestedFormat": requested_format,
-                "recommendedFormat": recommended_format,
-                "catalogParity": catalog_parity,
-            });
-            if let Some(reason) = override_reason {
-                payload["overrideReason"] = serde_json::Value::String(reason.clone());
-            }
-            if let Some(applied) = applied_format {
-                payload["appliedFormat"] = serde_json::Value::String(applied.clone());
-            }
-            if let Some(steered) = steered {
-                payload["steered"] = serde_json::Value::Bool(*steered);
-            }
-            sink.emit_agent_event_ext("tool_format_override", session_id, payload);
+            sink.emit_agent_event(
+                session_id,
+                &payloads::ToolFormatOverride {
+                    provider: provider.clone(),
+                    model: model.clone(),
+                    requested_format: requested_format.clone(),
+                    recommended_format: recommended_format.clone(),
+                    catalog_parity: catalog_parity.clone(),
+                    override_reason: override_reason.clone(),
+                    applied_format: applied_format.clone(),
+                    steered: *steered,
+                },
+            );
         }
         AgentEvent::ToolCallAudit { session_id, .. } => {
-            sink.emit_agent_event_ext(
-                "tool_call_audit",
-                session_id,
-                ext_payloads::tool_call_audit(event),
-            );
+            if let Some(payload) = ext_payloads::tool_call_audit(event) {
+                sink.emit_agent_event(session_id, &payload);
+            }
         }
         AgentEvent::ToolBatchDisposition {
             session_id,
             receipt,
         } => {
-            sink.emit_agent_event_ext(
-                "tool_batch_disposition",
+            sink.emit_agent_event(
                 session_id,
-                serde_json::json!({"receipt": receipt}),
+                &payloads::ToolBatchDisposition {
+                    receipt: super::to_wire(receipt),
+                },
             );
         }
         AgentEvent::CompositionStart { session_id, run } => {
-            sink.emit_agent_event_ext(
-                "composition_start",
+            sink.emit_agent_event(
                 session_id,
-                AcpAgentEventSink::composition_run_to_json(run),
+                &payloads::CompositionStart(payloads::CompositionRun::new(run)),
             );
         }
         AgentEvent::CompositionChildCall { session_id, call } => {
-            sink.emit_agent_event_ext(
-                "composition_child_call",
+            sink.emit_agent_event(
                 session_id,
-                AcpAgentEventSink::composition_child_call_to_json(call),
+                &payloads::CompositionChildCall {
+                    run_id: call.run_id.clone(),
+                    tool_call_id: call.tool_call_id.clone(),
+                    tool_name: call.tool_name.clone(),
+                    operation_index: call.operation_index,
+                    annotations: call.annotations.as_ref().map(super::to_wire),
+                    requested_side_effect_level: call
+                        .requested_side_effect_level
+                        .as_str()
+                        .to_string(),
+                    policy_context: call.policy_context.clone(),
+                    raw_input: call.raw_input.clone(),
+                },
             );
         }
         AgentEvent::CompositionChildResult { session_id, result } => {
-            sink.emit_agent_event_ext(
-                "composition_child_result",
+            sink.emit_agent_event(
                 session_id,
-                AcpAgentEventSink::composition_child_result_to_json(result),
+                &payloads::CompositionChildResult {
+                    run_id: result.run_id.clone(),
+                    tool_call_id: result.tool_call_id.clone(),
+                    tool_name: result.tool_name.clone(),
+                    operation_index: result.operation_index,
+                    status: AcpAgentEventSink::status_str(result.status).to_string(),
+                    raw_output: result.raw_output.clone(),
+                    error: result.error.clone(),
+                    error_category: result
+                        .error_category
+                        .map(|category| category.as_str().to_string()),
+                    executor: result
+                        .executor
+                        .as_ref()
+                        .map(AcpAgentEventSink::executor_to_json),
+                    duration_ms: result.duration_ms,
+                    execution_duration_ms: result.execution_duration_ms,
+                },
             );
         }
         AgentEvent::CompositionFinish { session_id, run } => {
-            sink.emit_agent_event_ext(
-                "composition_finish",
+            sink.emit_agent_event(
                 session_id,
-                AcpAgentEventSink::composition_run_to_json(run),
+                &payloads::CompositionFinish(payloads::CompositionRun::new(run)),
             );
         }
         AgentEvent::CompositionError { session_id, run } => {
-            sink.emit_agent_event_ext(
-                "composition_error",
+            sink.emit_agent_event(
                 session_id,
-                AcpAgentEventSink::composition_run_to_json(run),
+                &payloads::CompositionError(payloads::CompositionRun::new(run)),
             );
         }
         AgentEvent::LoopCheckpoint {
@@ -367,23 +384,17 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             typed_delivered,
             dispatch_skipped,
         } => {
-            let mut payload = serde_json::json!({
-                "iteration": iteration,
-                "checkpointKind": kind,
-                "delivered": delivered,
-            });
-            if *inbox_delivered > 0 {
-                payload["inboxDelivered"] =
-                    serde_json::Value::Number(serde_json::Number::from(*inbox_delivered));
-            }
-            if *typed_delivered > 0 {
-                payload["typedDelivered"] =
-                    serde_json::Value::Number(serde_json::Number::from(*typed_delivered));
-            }
-            if *dispatch_skipped {
-                payload["dispatchSkipped"] = serde_json::Value::Bool(true);
-            }
-            sink.emit_agent_event_ext("loop_checkpoint", session_id, payload);
+            sink.emit_agent_event(
+                session_id,
+                &payloads::LoopCheckpoint {
+                    iteration: *iteration,
+                    checkpoint_kind: kind.clone(),
+                    delivered: *delivered,
+                    inbox_delivered: *inbox_delivered,
+                    typed_delivered: *typed_delivered,
+                    dispatch_skipped: *dispatch_skipped,
+                },
+            );
         }
         AgentEvent::McpNotification {
             session_id,
@@ -392,15 +403,14 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             direction,
             params,
         } => {
-            sink.emit_agent_event_ext(
-                "mcp_notification",
+            sink.emit_agent_event(
                 session_id,
-                serde_json::json!({
-                    "server": server,
-                    "method": method,
-                    "direction": direction,
-                    "params": params,
-                }),
+                &payloads::McpNotification {
+                    server: server.clone(),
+                    method: method.clone(),
+                    direction: direction.clone(),
+                    params: params.clone(),
+                },
             );
         }
         AgentEvent::McpCatalogChanged {
@@ -408,13 +418,12 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             server,
             reason,
         } => {
-            sink.emit_agent_event_ext(
-                "mcp_catalog_changed",
+            sink.emit_agent_event(
                 session_id,
-                serde_json::json!({
-                    "server": server,
-                    "reason": reason,
-                }),
+                &payloads::McpCatalogChanged {
+                    server: server.clone(),
+                    reason: reason.clone(),
+                },
             );
         }
         AgentEvent::McpAuthRequired {
@@ -423,24 +432,24 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             resource,
             scope,
         } => {
-            sink.emit_agent_event_ext(
-                "mcp_auth_required",
+            sink.emit_agent_event(
                 session_id,
-                serde_json::json!({
-                    "server": server,
-                    "resource": resource,
-                    "scope": scope,
-                }),
+                &payloads::McpAuthRequired {
+                    server: server.clone(),
+                    resource: resource.clone(),
+                    scope: scope.clone(),
+                },
             );
         }
         AgentEvent::OrchestrationDecision {
             session_id,
             decision,
         } => {
-            sink.emit_agent_event_ext(
-                "orchestration_decision",
+            sink.emit_agent_event(
                 session_id,
-                serde_json::json!({"decision": decision}),
+                &payloads::OrchestrationDecision {
+                    decision: decision.clone(),
+                },
             );
         }
         _ => unreachable!("event extension dispatcher received an unsupported event"),
