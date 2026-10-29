@@ -1,0 +1,83 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract.harn"
+
+fn run_case(harness: Harness, verification: dict) -> dict {
+  const callback_key = "discovery-contract-${harness.random.uuid()}"
+  const captured = with_llm_script(
+    harness.llm,
+    [llm_text("<user_response>Finished.</user_response><done>##DONE##</done>")],
+    { ->
+      const session = "discovery-contract-${harness.random.uuid()}"
+      return agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Finish the work.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "text",
+            loop_until_done: true,
+            max_iterations: 3,
+            done_sentinel: "##DONE##",
+            session_id: session,
+            verify_completion: { _ ->
+              harness.runtime.store_set(callback_key, true)
+              return {confirm: true, verification: verification}
+            },
+          },
+        ) },
+      )
+    },
+  )
+  assert(harness.runtime.store_get(callback_key) == true, "completion callback must run")
+  assert_eq(captured.result.llm.iterations, 1, "discovery must not add a turn")
+  assert_eq(captured.result.stop_reason, "sentinel", "natural stop must be preserved")
+  assert(to_string(captured.result.visible_text).contains("Finished."))
+  return captured
+}
+
+pipeline default(harness: Harness) {
+  const unavailable = {state: "unavailable", detail: "The test directory could not be read."}
+  const trigger = run_case(
+    harness,
+    {oracle_expected: false, command: "", observed: "not_run", discovery: unavailable},
+  )
+  const checkpoints = trigger.events.filter(
+    { event ->
+      event.type == "typed_checkpoint" && event?.checkpoint?.schema == "harn.agent_terminal.v1"
+    },
+  )
+    .to_list()
+  assert_eq(len(checkpoints), 1, "the terminal checkpoint must be emitted")
+  assert(
+    contract_effect(
+      harness.stdio,
+      "unavailable_discovery_is_unverified",
+      trigger.result.terminal.kind == "completion_unverified"
+        && checkpoints[0].checkpoint.goal_outcome.reason == "verification_discovery_unavailable",
+    ),
+  )
+  const readable = run_case(harness, {oracle_expected: false, command: "", observed: "not_run"})
+  assert(
+    contract_negative(
+      harness.stdio,
+      "readable_discovery_is_not_unverified",
+      readable.result.terminal.kind == "completion_unverified",
+    ),
+  )
+  const declared = run_case(
+    harness,
+    {oracle_expected: true, command: "declared-check", observed: "passed", discovery: unavailable},
+  )
+  assert(
+    contract_negative(
+      harness.stdio,
+      "declared_verifier_is_not_overridden",
+      declared.result.terminal.kind == "completion_unverified",
+    ),
+  )
+}
