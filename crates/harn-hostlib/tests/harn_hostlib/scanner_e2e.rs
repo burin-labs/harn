@@ -423,6 +423,25 @@ fn invalid_package_manifest_is_not_a_complete_empty_discovery() {
 }
 
 #[test]
+fn malformed_ignore_policy_cannot_claim_a_complete_discovery() {
+    let tmp = tempdir().unwrap();
+    fs::create_dir(tmp.path().join(".git")).unwrap();
+    write(tmp.path(), ".gitignore", "[z-a]\n");
+    write(tmp.path(), "app.py", "def value():\n    return 4\n");
+    let mut invalid = ignore::gitignore::GitignoreBuilder::new(tmp.path());
+    assert!(invalid.add(tmp.path().join(".gitignore")).is_some());
+    let result = scan_without_git_history(tmp.path());
+    assert!(
+        matches!(
+            &result.project.test_command_discovery,
+            TestCommandDiscovery::Unavailable { detail } if detail.contains(".gitignore")
+        ),
+        "actual discovery: {:?}",
+        result.project.test_command_discovery
+    );
+}
+
+#[test]
 fn discovery_status_is_required_in_the_serialized_project() {
     let tmp = tempdir().unwrap();
     let result = scan_without_git_history(tmp.path());

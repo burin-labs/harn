@@ -157,6 +157,12 @@ fn detect_python_test_command(
     for entry in walker.build() {
         let entry = entry
             .map_err(|error| unavailable("inspect", walk_error_path(&error).unwrap_or(root)))?;
+        if let Some(error) = entry.error() {
+            return Err(unavailable(
+                "inspect",
+                walk_error_path(error).unwrap_or(entry.path()),
+            ));
+        }
         if !entry.file_type().is_some_and(|kind| kind.is_file()) {
             continue;
         }
