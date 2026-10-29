@@ -1058,6 +1058,7 @@ fn every_session_dispatch_arm_checks_authentication() {
     );
 }
 
+mod batch_verification_stop;
 mod caching;
 mod canonical_fork;
 mod commands;

@@ -127,6 +127,12 @@ struct ProvenanceInput {
 #[serde(deny_unknown_fields)]
 struct FireRequest {
     #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    execution_id: Option<String>,
+    #[serde(default)]
+    event_id: Option<String>,
+    #[serde(default)]
     key: Option<String>,
     event: TriageEvent,
     #[serde(default = "default_severity")]
@@ -231,19 +237,31 @@ fn signal_fire_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             signature: SignatureStatus::Unverified,
         },
     };
-    let transition = open_inbox("signal_fire", request.dir)?
-        .fire(
-            SignalInput {
-                key: request.key,
-                event: request.event,
-                severity: request.severity,
-                routing: request.routing,
-                provenance,
-                expires_at,
-            },
-            now,
-        )
-        .map_err(|error| runtime_error("signal_fire", error))?;
+    let inbox = open_inbox("signal_fire", request.dir)?;
+    let input = SignalInput {
+        key: request.key,
+        event: request.event,
+        severity: request.severity,
+        routing: request.routing,
+        provenance,
+        expires_at,
+    };
+    let transition = match (request.session_id, request.execution_id, request.event_id) {
+        (None, None, None) => inbox.fire(input, now),
+        (Some(session), None, Some(event)) => inbox.capture(&session, &event, input, now),
+        (Some(session), Some(epoch), Some(event)) => {
+            inbox.capture_execution(&session, &epoch, &event, input, now)
+        }
+        _ => {
+            return Err(runtime_error(
+                "signal_fire",
+                harn_signals::SignalsError::InvalidInput(
+                    "capture requires session_id and event_id together".into(),
+                ),
+            ))
+        }
+    }
+    .map_err(|error| runtime_error("signal_fire", error))?;
     encode(&transition)
 }
 
@@ -562,5 +580,57 @@ mod tests {
             text.chars().count()
         );
         assert!(text.contains("[truncated]"));
+    }
+}
+
+#[derive(Deserialize)]
+struct DispatchRequest {
+    session_id: String,
+    execution_id: String,
+    #[serde(default)]
+    dir: Option<PathBuf>,
+    #[serde(flatten)]
+    operation: DispatchOperation,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+enum DispatchOperation {
+    Start { interval_seconds: Option<u32> },
+    Claim,
+    Accept { batch_id: String, token: String },
+    Cancel { monitor_key: Option<String> },
+}
+
+#[harn_builtin(
+    exposure = "harness.runtime.signal_dispatch",
+    effects = ["state.write@dynamic"],
+    sig = "signal_dispatch(request: dict) -> dict",
+    category = "triggers"
+)]
+fn signal_dispatch_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let request: DispatchRequest = decode("signal_dispatch", args.first())?;
+    let inbox = open_inbox("signal_dispatch", request.dir)?;
+    let now = vm_now();
+    let session = &request.session_id;
+    let epoch = &request.execution_id;
+    match request.operation {
+        DispatchOperation::Start { interval_seconds } => {
+            inbox
+                .dispatch_start(session, epoch, interval_seconds, now)
+                .map_err(|e| runtime_error("signal_dispatch", e))?;
+            encode(&serde_json::json!({"started": true}))
+        }
+        DispatchOperation::Claim => encode(
+            &inbox
+                .dispatch_claim(session, epoch, now)
+                .map_err(|e| runtime_error("signal_dispatch", e))?,
+        ),
+        DispatchOperation::Accept { batch_id, token } => encode(&serde_json::json!({
+            "accepted": inbox.dispatch_accept(session, epoch, &batch_id, &token, now).map_err(|e| runtime_error("signal_dispatch", e))?
+        })),
+        DispatchOperation::Cancel { monitor_key } => encode(&serde_json::json!({
+            "cancelled": inbox.dispatch_cancel(session, epoch, monitor_key.as_deref(), now).map_err(|e| runtime_error("signal_dispatch", e))?
+        })),
     }
 }

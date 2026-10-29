@@ -139,6 +139,7 @@ jobs:
     outputs:
       source_sha: ${{ needs.resolve.outputs.source_sha }}
       promote: ${{ steps.plan.outputs.promote }}
+      reconcile: ${{ steps.plan.outputs.reconcile }}
       run_id: ${{ steps.plan.outputs.run_id }}
       tag: ${{ steps.plan.outputs.tag }}
       version: ${{ steps.plan.outputs.version }}
@@ -294,25 +295,6 @@ jobs:
             echo "requires_rehearsal=$requires_rehearsal"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Mint candidate request token
-        # The release App starts the requested candidate, so its completion
-        # starts this workflow again.
-        id: reconcile-token
-        if: steps.plan.outputs.reconcile == 'true'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-actions: write
-          permission-issues: write
-      - name: Keep a candidate in flight while main owes a release
-        if: steps.plan.outputs.reconcile == 'true'
-        env:
-          GH_TOKEN: ${{ steps.reconcile-token.outputs.token }}
-          SELF_RUN_ID: ${{ github.run_id }}
-          SOURCE_DIRECTORY: release-source
-        run: MAIN_SHA="$(git rev-parse HEAD)" bash scripts/ci/release_candidate_reconcile.sh
-
       - name: Require source CI and native proof before consumer recovery
         if: steps.plan.outputs.promote == 'true'
         timeout-minutes: 90
@@ -322,6 +304,47 @@ jobs:
           SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
           WAIT_FOR_FULL_SUITE: 'true'
         run: bash scripts/ci/require_full_suite.sh
+
+  reconcile:
+    name: Keep release candidates moving
+    needs: [resolve, plan]
+    if: always() && (github.event_name == 'workflow_run' || needs.plan.outputs.reconcile == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: harn-release-candidate-reconcile
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Qualify reconciliation wake-up
+        id: wake
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          PLAN_RECONCILE: ${{ needs.plan.outputs.reconcile }}
+        run: node scripts/ci/release-reconcile-wake.mjs
+      - name: Mint candidate request token
+        id: reconcile-token
+        if: steps.wake.outputs.required == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-actions: write
+          permission-issues: write
+      - name: Keep a candidate in flight while main owes a release
+        if: steps.wake.outputs.required == 'true'
+        env:
+          GH_TOKEN: ${{ steps.reconcile-token.outputs.token }}
+          SELF_RUN_ID: ${{ github.run_id }}
+          SOURCE_DIRECTORY: .
+        run: MAIN_SHA="$(git rev-parse HEAD)" bash scripts/ci/release_candidate_reconcile.sh
 
   consumer-rehearsal:
     name: Recover missing consumer rehearsal

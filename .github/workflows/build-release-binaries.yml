@@ -1931,11 +1931,13 @@ jobs:
 
   consumer-rehearsal:
     name: Consumer release rehearsal
-    needs: [setup, build, collect_candidate_manifest, native-qualification]
+    # The observer admits the archive only after every smoke has passed, so wait for them here.
+    needs: [setup, build, collect_candidate_manifest, release-smoke, native-qualification]
     if: >-
       !cancelled() && needs.setup.result == 'success' && needs.setup.outputs.rehearsal_source_sha != '' &&
       (needs.setup.outputs.build_mode != 'candidate' ||
       (needs.build.result == 'success' && needs.collect_candidate_manifest.result == 'success' &&
+      needs.release-smoke.result == 'success' &&
       (needs.setup.outputs.candidate_purpose != 'release' || needs.native-qualification.result == 'success')))
     uses: ./.github/workflows/consumer-canary.yml
     with:

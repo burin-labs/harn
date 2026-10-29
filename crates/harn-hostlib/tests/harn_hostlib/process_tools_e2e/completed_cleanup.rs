@@ -184,13 +184,32 @@ fn real_completed_background_cancel_replays_guardian_cleanup_receipt() {
         std::process::id()
     ));
     let python = python3().expect("the process fixture requires Python 3");
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    let parent_file = tempfile::tempfile().unwrap();
+    let inherited_fd = unsafe { libc::fcntl(parent_file.as_raw_fd(), libc::F_DUPFD, 131) };
+    assert!(inherited_fd >= 131);
+    let _parent_descriptor = unsafe { OwnedFd::from_raw_fd(inherited_fd) };
     use std::os::unix::fs::MetadataExt;
     let inherited_descriptors = std::fs::read_dir("/dev/fd")
         .unwrap()
         .filter_map(Result::ok)
-        .filter_map(|entry| std::fs::metadata(entry.path()).ok())
-        .map(|metadata| (metadata.dev(), metadata.ino()))
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<libc::c_int>().ok())
+        .filter_map(|descriptor| {
+            let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
+            if unsafe { libc::fstat(descriptor, metadata.as_mut_ptr()) } != 0 {
+                return None;
+            }
+            let metadata = unsafe { metadata.assume_init() };
+            #[allow(
+                clippy::unnecessary_cast,
+                reason = "dev_t is signed on macOS and unsigned on Linux"
+            )]
+            let device = metadata.st_dev as u64;
+            Some((device, metadata.st_ino))
+        })
         .collect::<Vec<_>>();
+    let parent_metadata = parent_file.metadata().unwrap();
+    assert!(inherited_descriptors.contains(&(parent_metadata.dev(), parent_metadata.ino())));
     let script = r"
 import errno, os, signal
 inherited_descriptors = __INHERITED_DESCRIPTORS__
@@ -203,7 +222,7 @@ for name in os.listdir('/dev/fd'):
         assert error.errno == errno.EBADF
         continue
     if [stat.st_dev, stat.st_ino] in inherited_descriptors: continue
-    raise AssertionError('payload inherited descriptor ' + name + ': ' + os.readlink('/dev/fd/' + name))
+    raise AssertionError('payload inherited descriptor ' + name + ': ' + str((stat.st_dev, stat.st_ino)))
 r, w = os.pipe()
 pid = os.fork()
 if pid == 0:
