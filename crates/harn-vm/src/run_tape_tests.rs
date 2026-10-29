@@ -909,22 +909,30 @@ fn a_prefix_serves_the_recorded_capability_probe() {
         .unwrap();
     let provider = "llamacpp";
     let model = format!("taped-probe-{}", uuid::Uuid::now_v7());
-    let (base_url, hits) = rt.block_on(crate::orchestration::tests::provider_capabilities::one_response(
-        "200 OK",
-        r#"{"chat_template_caps":{"supports_tools":true,"supports_tool_calls":false}}"#,
-    ));
+    let (base_url, hits) = rt.block_on(
+        crate::orchestration::tests::provider_capabilities::one_response(
+            "200 OK",
+            r#"{"chat_template_caps":{"supports_tools":true,"supports_tool_calls":false}}"#,
+        ),
+    );
     let endpoints = RuntimeProviderEndpointOverrides::single(provider, base_url)
         .expect("verified fixture endpoint");
     let probe = || {
-        rt.block_on(crate::orchestration::scope_llm_runtime_overrides_with_provider_endpoints(
-            None,
-            None,
-            endpoints.clone(),
-            async {
-                let installed = crate::llm::capabilities::ensure_runtime_probe(provider, &model).await;
-                (installed, crate::llm::capabilities::lookup(provider, &model))
-            },
-        ))
+        rt.block_on(
+            crate::orchestration::scope_llm_runtime_overrides_with_provider_endpoints(
+                None,
+                None,
+                endpoints.clone(),
+                async {
+                    let installed =
+                        crate::llm::capabilities::ensure_runtime_probe(provider, &model).await;
+                    (
+                        installed,
+                        crate::llm::capabilities::lookup(provider, &model),
+                    )
+                },
+            ),
+        )
     };
     {
         let _guard = record_full(tmp.path());
@@ -937,7 +945,10 @@ fn a_prefix_serves_the_recorded_capability_probe() {
     crate::llm::capabilities::forget_measurements();
     let branch = branch(tmp.path(), 1, tmp.path());
     let (installed, caps) = probe();
-    assert!(installed.unwrap(), "the branch installs the recorded answer");
+    assert!(
+        installed.unwrap(),
+        "the branch installs the recorded answer"
+    );
     assert!(!caps.native_tools, "{caps:?}");
     assert_eq!(
         caps.runtime_probe.map(|receipt| receipt.status),

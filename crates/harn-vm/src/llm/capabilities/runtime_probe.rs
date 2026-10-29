@@ -111,7 +111,10 @@ fn probe_cell(key: String) -> ProbeCell {
 #[cfg(test)]
 pub(crate) fn forget_measurements() {
     if let Some(probes) = PROBES.get() {
-        probes.lock().expect("runtime capability probe cache poisoned").clear();
+        probes
+            .lock()
+            .expect("runtime capability probe cache poisoned")
+            .clear();
     }
 }
 

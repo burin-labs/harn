@@ -119,10 +119,12 @@ fn steps(report: &BranchReport) -> Vec<BranchStep> {
             call,
             fidelity: StepFidelity::Served,
         })
-        .chain((served + 1..=served + report.live_calls).map(|call| BranchStep {
-            call,
-            fidelity: StepFidelity::Live,
-        }))
+        .chain(
+            (served + 1..=served + report.live_calls).map(|call| BranchStep {
+                call,
+                fidelity: StepFidelity::Live,
+            }),
+        )
         .collect();
     if let Some(divergence) = &report.divergence {
         // A tool divergence names the served call that requested the tool.

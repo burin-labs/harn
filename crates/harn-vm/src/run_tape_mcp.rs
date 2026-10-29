@@ -249,16 +249,16 @@ mod tests {
 
     #[test]
     fn a_request_key_ignores_only_the_progress_token() {
-        let request = |meta: serde_json::Value| {
-            serde_json::json!({"method": "tools/call", "params": {"name": "a", "_meta": meta}})
-        };
+        let request = |meta: serde_json::Value| serde_json::json!({"method": "tools/call", "params": {"name": "a", "_meta": meta}});
         let plain = serde_json::json!({"method": "tools/call", "params": {"name": "a"}});
         assert_eq!(
             request_key(&request(serde_json::json!({"progressToken": "t-1"}))),
             request_key(&plain)
         );
         assert_ne!(
-            request_key(&request(serde_json::json!({"progressToken": "t-1", "trace": 1}))),
+            request_key(&request(
+                serde_json::json!({"progressToken": "t-1", "trace": 1})
+            )),
             request_key(&plain)
         );
     }

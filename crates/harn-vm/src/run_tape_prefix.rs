@@ -83,15 +83,25 @@ fn gates_own_network_reads(owner: Owner<'_>) -> bool {
     )
 }
 
-/// Methods that run one process to completion through the host's process
-/// dispatch, which tapes the run like a tool call, result and workspace
-/// changes, so a branch prefix serves them instead of refusing.
+/// Methods that run one process through the host's process dispatch or the
+/// hostlib command runner, which tape the run like a tool call, result and
+/// workspace changes, so a branch prefix serves them instead of refusing.
 pub(crate) fn runs_a_process(owner: Owner<'_>) -> bool {
     match owner {
+        Some((CapabilityId::Tools, method)) => method == "run_command",
         Some((CapabilityId::Process, method)) => matches!(
             method,
-            "run" | "exec" | "shell" | "exec_at" | "shell_at" | "git_status" | "git_diff"
-                | "git_merge_base" | "git_tag_list" | "git_describe" | "git_repo_discover"
+            "run"
+                | "exec"
+                | "shell"
+                | "exec_at"
+                | "shell_at"
+                | "git_status"
+                | "git_diff"
+                | "git_merge_base"
+                | "git_tag_list"
+                | "git_describe"
+                | "git_repo_discover"
         ),
         _ => false,
     }

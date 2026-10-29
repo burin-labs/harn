@@ -11,8 +11,7 @@ use std::sync::Mutex;
 
 use harn_vm::run_tape::{
     start_branch, start_recording, Bounded, BranchPlan, BranchReport, BranchScope, BranchStatus,
-    EffectScan, StepFidelity,
-    RecordingLevel, TapeWorkspace, ToolEffectObserver, TAPE_FILE_NAME,
+    EffectScan, RecordingLevel, StepFidelity, TapeWorkspace, ToolEffectObserver, TAPE_FILE_NAME,
 };
 use harn_vm::testbench::tape::EventTape;
 use harn_vm::value::VmError;
@@ -138,10 +137,18 @@ struct TreeDiff {
 impl ToolEffectObserver for TreeDiff {
     fn begin(&self, root: &Path, call_id: &str) {
         let tree = tree_bytes(root);
-        self.before.lock().unwrap().insert(call_id.to_string(), tree);
+        self.before
+            .lock()
+            .unwrap()
+            .insert(call_id.to_string(), tree);
     }
     fn end(&self, root: &Path, call_id: &str) -> EffectScan {
-        let before = self.before.lock().unwrap().remove(call_id).unwrap_or_default();
+        let before = self
+            .before
+            .lock()
+            .unwrap()
+            .remove(call_id)
+            .unwrap_or_default();
         let after = tree_bytes(root);
         let relative = |path: &Path| path.strip_prefix(root).unwrap().display().to_string();
         let mut changes: Vec<_> = after
@@ -545,15 +552,24 @@ pipeline main(harness: Harness, task: unknown) {{
     assert_eq!(report.divergence, None, "report: {report:?}");
     assert_eq!(report.served_calls, 1, "report: {report:?}");
     assert_eq!(report.served_tool_calls, 1, "report: {report:?}");
-    assert!(!exec_marker.exists(), "the branch ran the script-level exec");
+    assert!(
+        !exec_marker.exists(),
+        "the branch ran the script-level exec"
+    );
 
     let Branched { output, report, .. } =
         branch(&script(&other_marker), &dirs.tapes, &dirs.workspace, 1);
-    assert!(output.is_err(), "an unrecorded exec fails the run: {output:?}");
+    assert!(
+        output.is_err(),
+        "an unrecorded exec fails the run: {output:?}"
+    );
     assert!(!other_marker.exists(), "the branch ran an unrecorded exec");
     let divergence = report.divergence.expect("the unrecorded exec diverges");
     assert_eq!(divergence.what, "tool call", "{divergence:?}");
-    assert!(divergence.detail.contains("process:process.exec"), "{divergence:?}");
+    assert!(
+        divergence.detail.contains("process:process.exec"),
+        "{divergence:?}"
+    );
 }
 
 /// A prefix process run, then a live turn, then `tail` against the workspace.
@@ -595,7 +611,10 @@ fn a_served_read_only_process_run_returns_the_recorded_output() {
     let file = dirs.workspace.join("f");
     std::fs::write(&file, "recorded").unwrap();
     let source = process_then_tail_script(
-        &format!(r#"harness.process.run({{program: "cat", args: [{}]}})"#, quote(&file)),
+        &format!(
+            r#"harness.process.run({{program: "cat", args: [{}]}})"#,
+            quote(&file)
+        ),
         &format!("trim(harness.fs.read_text({}))", quote(&file)),
     );
 
@@ -1630,7 +1649,11 @@ fn a_branch_starts_an_mcp_server_only_when_it_goes_live() {
         "recorded output: {recorded}"
     );
     assert_eq!(marker_lines(&spawned), 1, "the recording starts the server");
-    assert_eq!(marker_lines(&called), 2, "the recording calls the tool twice");
+    assert_eq!(
+        marker_lines(&called),
+        2,
+        "the recording calls the tool twice"
+    );
     let clear = || {
         let _ = std::fs::remove_file(&spawned);
         let _ = std::fs::remove_file(&called);
@@ -1656,13 +1679,20 @@ fn a_branch_starts_an_mcp_server_only_when_it_goes_live() {
     assert_eq!(marker_lines(&called), 1, "only the live tool call runs");
     clear();
 
-    for (version, tool, what) in [("2.0.0", "ping", "is version"), ("1.0.0", "pong", "lists different tools")] {
+    for (version, tool, what) in [
+        ("2.0.0", "ping", "is version"),
+        ("1.0.0", "pong", "lists different tools"),
+    ] {
         write_mcp_server(&server, version, tool);
         let Branched { report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 1);
         let divergence = report.divergence.expect("another server diverges");
         assert_eq!(divergence.what, "MCP server identity", "{divergence:?}");
         assert!(divergence.detail.contains(what), "{divergence:?}");
-        assert_eq!(marker_lines(&called), 0, "a diverged branch called the server");
+        assert_eq!(
+            marker_lines(&called),
+            0,
+            "a diverged branch called the server"
+        );
         clear();
     }
 }
@@ -1685,20 +1715,31 @@ fn a_branch_verdict_badges_each_call_and_reports_a_stop() {
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: dirs.workspace.clone(),
-        state_root: dirs.workspace.parent().unwrap().join(format!("verdict-state-{n}")),
+        state_root: dirs
+            .workspace
+            .parent()
+            .unwrap()
+            .join(format!("verdict-state-{n}")),
     };
     name_session_store(&dirs.workspace);
     let guard = start_branch(plan(0)).unwrap();
     let ended = run_bounded_in(&source, &dirs.workspace, Some(guard.scope()), false);
     let ended = match ended {
         Bounded::Finished(output) => Bounded::Finished(output.is_ok()),
-        other => panic!("an unstopped run finishes: {}", matches!(other, Bounded::Stopped)),
+        other => panic!(
+            "an unstopped run finishes: {}",
+            matches!(other, Bounded::Stopped)
+        ),
     };
     let verdict = guard.verdict(ended);
     drop(guard);
     assert_eq!(verdict.status, BranchStatus::Completed, "{verdict:?}");
     let badges: Vec<_> = verdict.steps.iter().map(|step| step.fidelity).collect();
-    assert_eq!(badges, [StepFidelity::Served, StepFidelity::Live], "{verdict:?}");
+    assert_eq!(
+        badges,
+        [StepFidelity::Served, StepFidelity::Live],
+        "{verdict:?}"
+    );
     let json = serde_json::to_value(&verdict).unwrap();
     assert_eq!(json["schema"], "harn.branch_verdict.v1");
     assert_eq!(json["steps"][1]["fidelity"], "live");

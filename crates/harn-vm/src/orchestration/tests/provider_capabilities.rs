@@ -9,7 +9,10 @@ use std::sync::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-pub(crate) async fn one_response(status: &'static str, body: &'static str) -> (String, Arc<AtomicUsize>) {
+pub(crate) async fn one_response(
+    status: &'static str,
+    body: &'static str,
+) -> (String, Arc<AtomicUsize>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind probe stub");

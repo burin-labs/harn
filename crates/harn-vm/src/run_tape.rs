@@ -1397,6 +1397,22 @@ pub(crate) use mcp::{
 
 #[path = "run_tape_prefix.rs"]
 mod prefix;
+
+/// Run one host command through the tape: a branch prefix serves a recorded
+/// run, result and workspace changes, and refuses a background run, whose
+/// process would not exist in the branch.
+pub async fn taped_command_run(
+    name: &str,
+    args: &[crate::value::VmValue],
+    background: bool,
+    live: impl std::future::Future<Output = Result<crate::value::VmValue, crate::value::VmError>>,
+) -> Result<crate::value::VmValue, crate::value::VmError> {
+    if background {
+        refuse_in_prefix(name, "a background run outlives the served prefix")?;
+        return live.await;
+    }
+    crate::llm::agent_host_primitives::taped_process_run(name, args, live).await
+}
 pub(crate) use prefix::{
     prefix_active, record_read, records_reads, refuse_in_prefix, serve_read, store_seed,
     taped_random, taping, Owner,
