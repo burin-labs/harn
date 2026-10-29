@@ -16,6 +16,7 @@
 //! grammar's sources cannot be found the build links the upstream crates
 //! unchanged and says so.
 
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -78,13 +79,8 @@ const GRAMMARS: &[Grammar] = &[
     grammar("sql", "tree-sitter-sequel", "", "sql"),
     grammar("swift", "tree-sitter-swift", "", "swift"),
     grammar("toml", "tree-sitter-toml-ng", "", "toml"),
-    grammar(
-        "typescript",
-        "tree-sitter-typescript",
-        "typescript",
-        "typescript",
-    ),
-    grammar("typescript", "tree-sitter-typescript", "tsx", "tsx"),
+    grammar("typescript", "harn-grammars", "typescript", "typescript"),
+    grammar("typescript", "harn-grammars", "tsx", "tsx"),
     grammar("yaml", "tree-sitter-yaml", "", "yaml"),
     grammar("zig", "tree-sitter-zig", "", "zig"),
 ];
@@ -136,6 +132,9 @@ fn main() {
     if enabled.is_empty() {
         write_bindings(&out, &[]);
         return;
+    }
+    if feature_enabled("typescript") {
+        compile_typescript();
     }
     // The upstream crates carry the libc shims a wasm32 build needs.
     if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
@@ -190,6 +189,27 @@ fn fallback(why: &str) {
     println!("cargo:warning=harn-grammars: linking unpacked grammars because {why}");
 }
 
+fn compile_typescript() {
+    let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"))
+        .join("vendor/tree-sitter-typescript");
+    let mut build = cc::Build::new();
+    build.std("c11").warnings(false);
+    for dialect in ["typescript", "tsx"] {
+        let src = root.join(dialect).join("src");
+        build.include(&src);
+        for file in ["parser.c", "scanner.c"] {
+            let path = src.join(file);
+            println!("cargo:rerun-if-changed={}", path.display());
+            build.file(path);
+        }
+    }
+    println!(
+        "cargo:rerun-if-changed={}",
+        root.join("common/scanner.h").display()
+    );
+    build.compile("harn_typescript_grammars");
+}
+
 /// Finds each grammar's `src/` directory from the exact version this crate
 /// pins, in Cargo's registry or at the dependency's path.
 fn locate_sources(enabled: &[&Grammar]) -> Result<Vec<PathBuf>, String> {
@@ -203,10 +223,30 @@ fn locate_sources(enabled: &[&Grammar]) -> Result<Vec<PathBuf>, String> {
         .get("dependencies")
         .and_then(toml::Value::as_table)
         .ok_or("Cargo.toml has no [dependencies]")?;
+    let lock_path = manifest_dir
+        .ancestors()
+        .map(|dir| dir.join("Cargo.lock"))
+        .find(|path| path.is_file())
+        .ok_or("Cargo.lock is unavailable")?;
+    println!("cargo:rerun-if-changed={}", lock_path.display());
+    let lock: toml::Table = fs::read_to_string(&lock_path)
+        .map_err(|e| format!("Cargo.lock is unreadable: {e}"))?
+        .parse()
+        .map_err(|e| format!("Cargo.lock does not parse: {e}"))?;
+    let packages = lock
+        .get("package")
+        .and_then(toml::Value::as_array)
+        .ok_or("Cargo.lock has no packages")?;
     let registry = registry_roots();
     enabled
         .iter()
         .map(|grammar| {
+            if grammar.krate == "harn-grammars" {
+                return Ok(manifest_dir
+                    .join("vendor/tree-sitter-typescript")
+                    .join(grammar.dir)
+                    .join("src"));
+            }
             let dep = deps
                 .get(grammar.krate)
                 .and_then(toml::Value::as_table)
@@ -226,10 +266,43 @@ fn locate_sources(enabled: &[&Grammar]) -> Result<Vec<PathBuf>, String> {
                     .and_then(|v| v.strip_prefix('='))
                     .ok_or_else(|| format!("{} is not pinned with `=`", grammar.krate))?;
                 let dir = format!("{}-{version}", grammar.krate);
+                let matches: Vec<_> = packages
+                    .iter()
+                    .filter(|package| {
+                        package.get("name").and_then(toml::Value::as_str) == Some(grammar.krate)
+                            && package.get("version").and_then(toml::Value::as_str) == Some(version)
+                    })
+                    .collect();
+                let [package] = matches.as_slice() else {
+                    return Err(format!(
+                        "{} has an ambiguous resolved package",
+                        grammar.krate
+                    ));
+                };
+                if package.get("source").and_then(toml::Value::as_str)
+                    != Some("registry+https://github.com/rust-lang/crates.io-index")
+                {
+                    return Err(format!("{} has a non-registry override", grammar.krate));
+                }
+                let checksum = package
+                    .get("checksum")
+                    .and_then(toml::Value::as_str)
+                    .ok_or_else(|| format!("{} has no registry checksum", grammar.krate))?;
                 registry
                     .iter()
-                    .map(|index| index.join(&dir))
-                    .find(|root| root.is_dir())
+                    .find_map(|index| {
+                        let root = index.join(&dir);
+                        let archive = index
+                            .parent()?
+                            .parent()?
+                            .join("cache")
+                            .join(index.file_name()?)
+                            .join(format!("{dir}.crate"));
+                        let matches = fs::read(archive)
+                            .ok()
+                            .is_some_and(|data| format!("{:x}", Sha256::digest(data)) == checksum);
+                        (matches && root.is_dir()).then_some(root)
+                    })
                     .ok_or_else(|| format!("{dir} is not in Cargo's registry"))?
             };
             let src = root.join(grammar.dir).join("src");
@@ -501,7 +574,11 @@ fn write_bindings(out: &Path, packed: &[Packed]) {
     let mut rust = String::new();
     // Link each upstream crate for its external scanner object. Its parser
     // object stays out: nothing references the upstream entry point.
-    let crates: BTreeSet<&str> = packed.iter().map(|p| p.krate).collect();
+    let crates: BTreeSet<&str> = packed
+        .iter()
+        .map(|p| p.krate)
+        .filter(|name| *name != "harn-grammars")
+        .collect();
     for krate in crates {
         let _ = writeln!(rust, "extern crate {} as _;", krate.replace('-', "_"));
     }

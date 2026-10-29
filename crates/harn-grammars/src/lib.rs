@@ -10,6 +10,8 @@
 
 #[cfg(harn_grammars_packed)]
 mod packed;
+#[cfg(all(feature = "typescript", any(not(harn_grammars_packed), test)))]
+mod typescript;
 
 pub use tree_sitter::Language;
 
@@ -60,8 +62,8 @@ grammars! {
     "sql" => sql, SQL, tree_sitter_sequel::LANGUAGE;
     "swift" => swift, SWIFT, tree_sitter_swift::LANGUAGE;
     "toml" => toml, TOML, tree_sitter_toml_ng::LANGUAGE;
-    "typescript" => typescript, TYPESCRIPT, tree_sitter_typescript::LANGUAGE_TYPESCRIPT;
-    "typescript" => tsx, TSX, tree_sitter_typescript::LANGUAGE_TSX;
+    "typescript" => typescript, TYPESCRIPT, typescript::LANGUAGE_TYPESCRIPT;
+    "typescript" => tsx, TSX, typescript::LANGUAGE_TSX;
     "yaml" => yaml, YAML, tree_sitter_yaml::LANGUAGE;
     "zig" => zig, ZIG, tree_sitter_zig::LANGUAGE;
 }

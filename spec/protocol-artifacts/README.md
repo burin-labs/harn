@@ -31,6 +31,8 @@ profile (`agentclientprotocol/agent-client-protocol schema v1.26.0`).
 (`2026-07-28`).
 - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving
 `ToolCallReceipt` schema for audited tool calls.
+- `schemas/agent-event.schema.json`: the typed body of every
+`_harn/agentEvent` kind, derived from the types the ACP adapter emits.
 - `schemas/session-health.schema.json`: versioned observational per-turn
 and rolling agent health measurements.
 - `schemas/session-recap-v1.schema.json`: closed write contract for Harn's

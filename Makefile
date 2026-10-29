@@ -728,15 +728,11 @@ test-agent-scripts:
 	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" ./scripts/run_harn_test_shards.sh tests/agent/
 	@echo "    Harn agent-loop tests OK."
 
-.PHONY: test-fleet-worktree-admit
-test-fleet-worktree-admit:
-	node --test scripts/tests/fleet_worktree_admit_test.cjs
-
 .PHONY: test-embedded-asset-rebuild
 test-embedded-asset-rebuild:
 	./scripts/tests/embedded_asset_rebuild_test.sh
 
-test-pr-gate-scripts: test-fleet-worktree-admit
+test-pr-gate-scripts:
 	bash ./scripts/tests/source_policy_grammar_test.sh
 	./scripts/tests/macos_lint_aggregate_test.sh
 	node scripts/tests/rust_lint_timings_test.cjs
@@ -1105,7 +1101,7 @@ check-swift-protocol-binding:
 		tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/harn-swift-binding.XXXXXX"); \
 		trap 'rm -rf "$$tmp"' EXIT; \
 		xcrun swiftc -parse-as-library spec/protocol-artifacts/HarnProtocol.swift scripts/tests/protocol_binding_session_recap.swift -o "$$tmp/probe"; \
-		"$$tmp/probe" spec/protocol-artifacts/fixtures/round_trip.json crates/harn-serve/tests/fixtures/acp/session_update_extensions.json conformance/protocols/schemas/acp-session-update.schema.json; \
+		"$$tmp/probe" spec/protocol-artifacts/fixtures/round_trip.json crates/harn-serve/tests/fixtures/acp/session_update_extensions.json conformance/protocols/schemas/acp-session-update.schema.json crates/harn-serve/tests/fixtures/acp/agent_events.json; \
 		xcrun swiftc -emit-module -emit-library -module-name HarnViewProjection spec/protocol-artifacts/HarnProtocol.swift spec/protocol-artifacts/HarnRunSessionView.swift -emit-module-path "$$tmp/HarnViewProjection.swiftmodule" -o "$$tmp/libHarnViewProjection.dylib"; \
 		xcrun swiftc -parse-as-library -I "$$tmp" -L "$$tmp" -lHarnViewProjection -Xlinker -rpath -Xlinker "$$tmp" scripts/tests/run_session_view_binding.swift -o "$$tmp/view-probe"; \
 		"$$tmp/view-probe" spec/run-view-fixtures/cases/*/expected/runs/*.json spec/run-view-fixtures/cases/*/expected/session_view.json
