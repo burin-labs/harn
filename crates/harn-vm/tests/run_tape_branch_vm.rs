@@ -129,10 +129,52 @@ fn run_bounded_in(
     })
 }
 
+/// Sees every file change under the workspace, by tree diff.
+#[derive(Default)]
+struct TreeDiff {
+    before: Mutex<std::collections::HashMap<String, std::collections::BTreeMap<PathBuf, Vec<u8>>>>,
+}
+
+impl ToolEffectObserver for TreeDiff {
+    fn begin(&self, root: &Path, call_id: &str) {
+        let tree = tree_bytes(root);
+        self.before.lock().unwrap().insert(call_id.to_string(), tree);
+    }
+    fn end(&self, root: &Path, call_id: &str) -> EffectScan {
+        let before = self.before.lock().unwrap().remove(call_id).unwrap_or_default();
+        let after = tree_bytes(root);
+        let relative = |path: &Path| path.strip_prefix(root).unwrap().display().to_string();
+        let mut changes: Vec<_> = after
+            .iter()
+            .filter(|(path, bytes)| before.get(*path) != Some(bytes))
+            .map(|(path, bytes)| (relative(path), Some(bytes.clone())))
+            .collect();
+        changes.extend(
+            before
+                .keys()
+                .filter(|path| !after.contains_key(*path))
+                .map(|path| (relative(path), None)),
+        );
+        EffectScan {
+            changes,
+            incomplete: false,
+        }
+    }
+}
+
 fn record(source: &str, tapes: &Path, workspace: &Path) -> String {
+    record_with(source, tapes, workspace, Box::new(NoChanges))
+}
+
+fn record_with(
+    source: &str,
+    tapes: &Path,
+    workspace: &Path,
+    observer: Box<dyn ToolEffectObserver>,
+) -> String {
     let workspace_tape = TapeWorkspace {
         root: workspace.to_path_buf(),
-        observer: Box::new(NoChanges),
+        observer,
     };
     let guard = start_recording(tapes, RecordingLevel::Full, Some(workspace_tape))
         .unwrap()
@@ -511,7 +553,105 @@ pipeline main(harness: Harness, task: unknown) {{
     assert!(!other_marker.exists(), "the branch ran an unrecorded exec");
     let divergence = report.divergence.expect("the unrecorded exec diverges");
     assert_eq!(divergence.what, "tool call", "{divergence:?}");
-    assert!(divergence.detail.contains("process:process.run"), "{divergence:?}");
+    assert!(divergence.detail.contains("process:process.exec"), "{divergence:?}");
+}
+
+/// A prefix process run, then a live turn, then `tail` against the workspace.
+fn process_then_tail_script(run: &str, tail: &str) -> String {
+    format!(
+        r#"
+import {{ agent_loop }} from "std/agent/loop"
+import {{ llm_text, with_llm_script }} from "std/testing"
+
+pipeline main(harness: Harness, task: unknown) {{
+  const id = harness.random.uuid()
+  const ran = {run}
+  const result = with_llm_script(
+    harness.llm,
+    [llm_text("<user_response>Done.</user_response><done>##DONE##</done>")],
+    {{ ->
+      return agent_loop(
+        harness,
+        "finish run " + id,
+        nil,
+        {{provider: "mock", max_iterations: 1, loop_until_done: true, session_id: "branch-" + id}},
+      )
+    }},
+  )
+  harness.stdio.log("ran=" + trim(ran.stdout) + " tail=" + {tail} + " " + result.status)
+}}
+"#
+    )
+}
+
+/// A served read-only run returns the recorded output and leaves the
+/// workspace as the branch found it.
+#[test]
+fn a_served_read_only_process_run_returns_the_recorded_output() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let file = dirs.workspace.join("f");
+    std::fs::write(&file, "recorded").unwrap();
+    let source = process_then_tail_script(
+        &format!(r#"harness.process.run({{program: "cat", args: [{}]}})"#, quote(&file)),
+        &format!("trim(harness.fs.read_text({}))", quote(&file)),
+    );
+
+    let recorded = record(&source, &dirs.tapes, &dirs.workspace);
+    assert!(
+        recorded.contains("ran=recorded tail=recorded"),
+        "recorded output: {recorded}\ntool calls: {}",
+        recorded_tool_calls(&dirs.tapes)
+    );
+    std::fs::write(&file, "changed").unwrap();
+
+    let Branched { output, report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+    let output = output.expect("the branched run succeeds");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(report.served_tool_calls, 1, "report: {report:?}");
+    assert!(
+        output.contains("ran=recorded tail=changed"),
+        "the served run answers from the tape and changes nothing: {output}"
+    );
+}
+
+/// A served writing run applies the files its recording wrote, so the live
+/// tail reads them.
+#[test]
+fn a_served_writing_process_run_leaves_its_files_for_the_live_tail() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let file = dirs.workspace.join("f");
+    let source = process_then_tail_script(
+        &format!(r#"harness.process.shell("echo x > " + {})"#, quote(&file)),
+        &format!("trim(harness.fs.read_text({}))", quote(&file)),
+    );
+
+    let recorded = record_with(
+        &source,
+        &dirs.tapes,
+        &dirs.workspace,
+        Box::<TreeDiff>::default(),
+    );
+    assert!(
+        recorded.contains("tail=x"),
+        "recorded output: {recorded}\ntool calls: {}",
+        recorded_tool_calls(&dirs.tapes)
+    );
+    std::fs::remove_file(&file).unwrap();
+
+    let Branched { output, report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+    let output = output.expect("the branched run succeeds");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(report.served_tool_calls, 1, "report: {report:?}");
+    assert!(
+        output.contains("tail=x"),
+        "the live tail reads the file the served run wrote: {output}"
+    );
 }
 
 /// One `mark` tool call, then done, with a post-turn session reset.
@@ -1113,9 +1253,9 @@ pipeline main(harness: Harness, task: unknown) {{
 }
 
 /// Record `source`, then branch it at K=1: the spawned task must belong to the
-/// branch, so its exec is refused rather than run and its store write never
+/// branch, so its exec is served rather than run and its store write never
 /// reaches the recording's store.
-fn assert_spawned_task_stays_in_the_branch(source: &str, marker: &Path) {
+fn assert_spawned_task_stays_in_the_branch(source: &str, marker: &Path) -> BranchReport {
     let dirs = dirs();
     let recorded = record(source, &dirs.tapes, &dirs.workspace);
     assert!(
@@ -1133,15 +1273,12 @@ fn assert_spawned_task_stays_in_the_branch(source: &str, marker: &Path) {
         !marker.exists(),
         "the branch re-ran a spawned task's exec: {output:?}"
     );
-    let divergence = report
-        .divergence
-        .expect("the refused exec is the divergence");
-    assert_eq!(divergence.what, "refused effect", "{divergence:?}");
     assert_eq!(
         std::fs::read_to_string(harn_vm::runtime_paths::store_path(&dirs.workspace)).unwrap(),
         recorded_store,
         "a spawned task wrote the recording's store"
     );
+    report
 }
 
 #[test]
@@ -1160,7 +1297,12 @@ fn a_parallel_race_task_in_the_prefix_belongs_to_the_branch() {
   }}"#,
         marker = quote(&marker),
     );
-    assert_spawned_task_stays_in_the_branch(&spawned_script(&setup), &marker);
+    let report = assert_spawned_task_stays_in_the_branch(&spawned_script(&setup), &marker);
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(
+        report.served_tool_calls, 1,
+        "the race task's exec was served from the branch's tape: {report:?}"
+    );
 }
 
 /// A supervisor child started in the branch's live tail writes the branch's
@@ -1357,7 +1499,9 @@ fn a_generator_body_in_the_prefix_belongs_to_the_branch() {
   }}"#,
         marker = quote(&marker),
     );
-    assert_spawned_task_stays_in_the_branch(&spawned_script(&setup), &marker);
+    let report = assert_spawned_task_stays_in_the_branch(&spawned_script(&setup), &marker);
+    let divergence = report.divergence.expect("starting a supervisor is refused");
+    assert_eq!(divergence.what, "refused effect", "{divergence:?}");
 }
 
 /// A pre-tool hook's reminder is a transcript injection inside the dispatch:

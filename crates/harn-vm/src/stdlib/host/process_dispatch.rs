@@ -53,6 +53,23 @@ async fn dispatch_process_exec_with_policy_origin(
     caller: JsonValue,
     origin: crate::orchestration::CommandDispatchOrigin,
 ) -> Result<VmValue, VmError> {
+    // Every script-level process run passes here: a branch prefix serves it
+    // from the tape, result and workspace changes, instead of running it.
+    let args = [VmValue::dict(params.clone())];
+    crate::llm::agent_host_primitives::taped_process_run(
+        "process.exec",
+        &args,
+        dispatch_untaped(ctx, params, caller, origin),
+    )
+    .await
+}
+
+async fn dispatch_untaped(
+    ctx: Option<&AsyncBuiltinCtx>,
+    params: &crate::value::DictMap,
+    caller: JsonValue,
+    origin: crate::orchestration::CommandDispatchOrigin,
+) -> Result<VmValue, VmError> {
     let preflight =
         crate::orchestration::run_command_policy_preflight_with_origin(ctx, params, caller, origin)
             .await?;

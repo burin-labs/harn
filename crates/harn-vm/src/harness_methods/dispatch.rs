@@ -62,14 +62,6 @@ async fn call_harness_method_taped(
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
     let owner = Some((capability, method));
-    if crate::run_tape::runs_a_process(owner) {
-        return crate::llm::agent_host_primitives::taped_process_run(
-            &format!("{}.{method}", capability.field_name()),
-            args,
-            call_harness_method_admitted(vm, handle, method, args),
-        )
-        .await;
-    }
     let effects = capability_method_effects(capability, method);
     if let Some(served) = crate::run_tape::serve_read(owner, method, effects, args) {
         return served;
