@@ -1519,8 +1519,11 @@ fn a_generator_body_in_the_prefix_belongs_to_the_branch() {
         marker = quote(&marker),
     );
     let report = assert_spawned_task_stays_in_the_branch(&spawned_script(&setup), &marker);
-    let divergence = report.divergence.expect("starting a supervisor is refused");
-    assert_eq!(divergence.what, "refused effect", "{divergence:?}");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(
+        report.served_tool_calls, 1,
+        "the generator's exec was served from the branch's tape: {report:?}"
+    );
 }
 
 /// A pre-tool hook's reminder is a transcript injection inside the dispatch:
