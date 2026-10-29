@@ -495,6 +495,8 @@ pub struct BranchReport {
     pub reexecuted_tool_calls: u64,
     pub applied_file_effects: u64,
     pub live_calls: u64,
+    /// Prefix cache reads of keys the recording never read, answered live.
+    pub live_cache_reads: u64,
     pub divergence: Option<BranchDivergence>,
 }
 
@@ -532,6 +534,8 @@ struct BranchState {
     /// recorded order.
     cache_lookups:
         BTreeMap<(u64, String, String), std::collections::VecDeque<Option<serde_json::Value>>>,
+    /// Every (namespace, key) the recording read anywhere in the run.
+    recorded_keys: BTreeSet<(String, String)>,
     /// Set by the first live model call; nothing is served after it.
     live: bool,
     workspace_root: PathBuf,
@@ -580,7 +584,11 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
     let mut calls = Vec::new();
     let mut tools: BTreeMap<u64, Vec<PrefixTool>> = BTreeMap::new();
     let mut cache_lookups: BTreeMap<_, std::collections::VecDeque<_>> = BTreeMap::new();
+    let mut recorded_keys = BTreeSet::new();
     for record in &tape.records {
+        if let TapeRecordKind::CacheLookup { namespace, key, .. } = &record.kind {
+            recorded_keys.insert((namespace.clone(), key.clone()));
+        }
         match &record.kind {
             TapeRecordKind::CacheLookup {
                 namespace,
@@ -672,6 +680,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
         calls,
         tools,
         cache_lookups,
+        recorded_keys,
         live: false,
         workspace_root: plan.workspace_root,
         report: BranchReport {
@@ -792,9 +801,10 @@ pub(crate) fn serve_llm_call(
 }
 
 /// One persistent cache lookup. In a branch prefix the recorded answer at
-/// the same point in the run is returned without reading the cache; a
-/// lookup the recording never made there diverges. Otherwise `live` answers.
-/// Either way a recording tape keeps the answer.
+/// the same point in the run is returned without reading the cache. A key
+/// the recording read only elsewhere diverges. A key it never read is
+/// run-scoped state, such as a key built from this run's session id, so it
+/// is read live. Either way a recording tape keeps the answer.
 pub(crate) fn cache_lookup(
     namespace: &str,
     key: &str,
@@ -818,19 +828,26 @@ pub(crate) fn cache_lookup(
                     .cache_lookups
                     .get_mut(&slot)
                     .and_then(|q| q.pop_front());
-                let Some(value) = recorded else {
-                    let divergence = BranchDivergence {
+                let known = state.recorded_keys.contains(&(slot.1, slot.2));
+                match recorded {
+                    Some(value) => Some(value),
+                    None if !known => {
+                        state.report.live_cache_reads += 1;
+                        None
+                    }
+                    None => {
+                        let divergence = BranchDivergence {
                         call: state.report.served_calls + 1,
                         what: "cache_lookup".to_string(),
                         detail: format!(
                             "the program read cache key `{key}` in `{namespace}` where the recording did not"
                         ),
                     };
-                    let error = divergence_error(&divergence);
-                    state.report.divergence = Some(divergence);
-                    return Err(error);
-                };
-                Some(value)
+                        let error = divergence_error(&divergence);
+                        state.report.divergence = Some(divergence);
+                        return Err(error);
+                    }
+                }
             }
             _ => None,
         }

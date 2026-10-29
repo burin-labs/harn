@@ -233,15 +233,20 @@ fn a_branch_replays_recorded_cache_misses_even_when_the_cache_now_hits() {
     let read = cache_lookup("intent", "k1", || Ok(Some(serde_json::json!("stale"))));
     assert_eq!(read.unwrap(), None);
     assert!(serve_llm_call(&request("classify")).unwrap().is_ok());
-    // A lookup the recording never made fails closed.
+    // A key the recording never read, such as one built from this run's
+    // session id, has nothing to replay and is read live.
     drop(branch);
-    let _branch = start_branch(BranchPlan {
+    let branch = start_branch(BranchPlan {
         tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: tmp.path().to_path_buf(),
     })
     .unwrap();
-    assert!(cache_lookup("intent", "other", || Ok(None)).is_err());
+    let fresh = cache_lookup("intent", "session-b", || {
+        Ok(Some(serde_json::json!("live")))
+    });
+    assert_eq!(fresh.unwrap(), Some(serde_json::json!("live")));
+    assert_eq!(branch.report().live_cache_reads, 1);
 }
 
 #[test]
