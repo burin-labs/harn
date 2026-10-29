@@ -8,3 +8,5 @@ both TypeScript and TSX.
 
 Install the pinned dependencies with `npm ci`, then run
 `../node_modules/.bin/tree-sitter generate` from each dialect directory.
+Remove this fork once upstream supports both import type arguments and the
+comparison controls in `tests/stdlib/typescript_import_query_test.harn`.

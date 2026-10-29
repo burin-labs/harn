@@ -29,7 +29,7 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:133141a1d96f267968365c64b07697dfc6545ee317f28bbebc2d3b705c9da887",
+        "artifact_digest": "sha256:dd8b2fb274308a2db16b4541c747ec67db40601090ddca0c14c545b0798f3f73",
         "checksum": null,
         "name": "harn-grammars",
         "source": "workspace-path",
@@ -45,7 +45,7 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:133141a1d96f267968365c64b07697dfc6545ee317f28bbebc2d3b705c9da887",
+        "artifact_digest": "sha256:dd8b2fb274308a2db16b4541c747ec67db40601090ddca0c14c545b0798f3f73",
         "checksum": null,
         "name": "harn-grammars",
         "source": "workspace-path",
