@@ -48,7 +48,7 @@ use super::store::{
     SweepReport, TruncateResult, UpdateSession, VerifyReport, MAX_READ_BATCH,
 };
 
-// v7 adds the ordered additional workspace directory projection.
+// v6 adds durable task admission, execution descriptors, and control events.
 // Adding a table or column has to move this number:
 // the shared initializer fast-paths out of schema setup entirely when the
 // recorded version already matches, so an unbumped column never reaches an
@@ -115,7 +115,7 @@ impl DerefMut for MutationConnection<'_> {
 
 impl SqliteSessionStore {
     /// Current schema version supported by the session store initializer.
-    pub const SCHEMA_VERSION: i64 = 7;
+    pub const SCHEMA_VERSION: i64 = 6;
 
     /// Inspect a session without reading its events or its potentially large metadata.
     pub fn journal_presence(
@@ -553,7 +553,6 @@ fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
                 title               TEXT,
                 title_pinned        INTEGER NOT NULL DEFAULT 0,
                 cwd                 TEXT,
-                additional_directories_json TEXT NOT NULL DEFAULT '[]',
                 model               TEXT,
                 session_type        TEXT,
                 project_scope       TEXT,
@@ -688,11 +687,6 @@ fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
     // correct reading of their history rather than a placeholder.
     ensure_session_column(transaction, "title_pinned", "INTEGER NOT NULL DEFAULT 0")?;
     ensure_session_column(transaction, "cwd", "TEXT")?;
-    ensure_session_column(
-        transaction,
-        "additional_directories_json",
-        "TEXT NOT NULL DEFAULT '[]'",
-    )?;
     ensure_session_column(transaction, "model", "TEXT")?;
     ensure_session_column(transaction, "session_type", "TEXT")?;
     ensure_session_column(transaction, "project_scope", "TEXT")?;
@@ -905,8 +899,6 @@ fn insert_session(
 ) -> StoreResult<()> {
     let tags_json = serde_json::to_string(&meta.tags).unwrap_or_else(|_| "[]".into());
     let attrs_json = serde_json::to_string(&meta.attributes).unwrap_or_else(|_| "{}".into());
-    let directories_json = serde_json::to_string(&meta.additional_directories)
-        .map_err(|error| StoreError::Backend(error.to_string()))?;
     conn.execute(
         "INSERT INTO sessions (
             id, tenant_id, persona, parent_session_id, title, cwd, model,
@@ -914,11 +906,11 @@ fn insert_session(
             usage_cost_usd_micros, created_at_ms, created_at, updated_at_ms,
             updated_at, status, event_count, last_event_id, chain_root_hash,
             closed_at_ms, closed_at, soft_deleted_at_ms, ttl_seconds, tags_json,
-            attributes_json, next_event_id, title_pinned, additional_directories_json
+            attributes_json, next_event_id, title_pinned
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
             ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-            ?28, ?29
+            ?28
          )",
         params![
             meta.id,
@@ -949,7 +941,6 @@ fn insert_session(
             attrs_json,
             next_event_id as i64,
             meta.title_pinned,
-            directories_json,
         ],
     )
     .map_err(|error| map_create_sql(error, &meta.id))?;
@@ -969,7 +960,7 @@ pub(crate) fn read_session_meta(
                     updated_at_ms, updated_at, status, event_count, last_event_id,
                     chain_root_hash, closed_at_ms, closed_at, soft_deleted_at_ms,
                     ttl_seconds, tags_json, attributes_json, next_event_id,
-                    title_pinned, additional_directories_json
+                    title_pinned
              FROM sessions WHERE id = ?1",
         )
         .map_err(map_sql)?
@@ -1002,7 +993,6 @@ pub(crate) fn read_session_meta(
                 row.get::<_, String>(24)?,
                 row.get::<_, i64>(25)?,
                 row.get::<_, bool>(26)?,
-                row.get::<_, String>(27)?,
             ))
         })
         .optional()
@@ -1036,15 +1026,9 @@ pub(crate) fn read_session_meta(
         attrs_json,
         next_event_id,
         title_pinned,
-        directories_json,
     ) = row;
     let tags = serde_json::from_str(&tags_json).unwrap_or_default();
     let attributes = serde_json::from_str(&attrs_json).unwrap_or_default();
-    let additional_directories = serde_json::from_str(&directories_json).map_err(|error| {
-        StoreError::Backend(format!(
-            "invalid additional directories for session '{session_id}': {error}"
-        ))
-    })?;
     let meta = SessionMeta {
         id: session_id.to_string(),
         tenant_id,
@@ -1053,7 +1037,6 @@ pub(crate) fn read_session_meta(
         title,
         title_pinned,
         cwd,
-        additional_directories,
         model,
         session_type: session_type
             .as_deref()

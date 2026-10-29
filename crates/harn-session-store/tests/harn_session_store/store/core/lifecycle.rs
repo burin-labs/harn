@@ -250,7 +250,7 @@ async fn sqlite_upgrade_cleans_pre_foreign_key_orphans_and_records_current_versi
         )
         .expect("legacy schema table state"),
     );
-    assert_eq!(schema_state, (SqliteSessionStore::SCHEMA_VERSION, false));
+    assert_eq!(schema_state, (6, false));
     let stale_children: i64 = conn
         .query_row(
             "SELECT
@@ -283,7 +283,7 @@ fn sqlite_rejects_a_newer_schema_version() {
         StoreError::SchemaIncompatible {
             schema: "session_store".to_string(),
             stored: 99,
-            supported: SqliteSessionStore::SCHEMA_VERSION,
+            supported: 6,
         }
     );
 }
@@ -309,7 +309,7 @@ fn sqlite_rejects_a_newer_shared_schema_marker_without_erasing_its_type() {
         StoreError::SchemaIncompatible {
             schema: "session_store".to_string(),
             stored: 99,
-            supported: SqliteSessionStore::SCHEMA_VERSION,
+            supported: 6,
         }
     );
 }

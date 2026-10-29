@@ -389,7 +389,8 @@ async fn open_journal(
         .describe(session_id)
         .await
         .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?
-        .additional_directories;
+        .additional_directories()
+        .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?;
     let JournalConfigIdentity {
         run_id,
         turn_id,
@@ -526,10 +527,7 @@ pub(crate) async fn flush(session_id: &str) -> Result<(), VmError> {
         store
             .update(
                 session_id,
-                UpdateSession {
-                    additional_directories: Some(directories.clone()),
-                    ..UpdateSession::default()
-                },
+                UpdateSession::default().with_additional_directories(directories.clone()),
             )
             .await
             .map_err(|error| VmError::Runtime(format!("workspace root metadata: {error}")))?;

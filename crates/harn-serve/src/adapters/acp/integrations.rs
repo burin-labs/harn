@@ -73,7 +73,17 @@ impl AcpServer {
                     if session.cwd.as_deref() != Some(root.workspace().to_string_lossy().as_ref()) {
                         continue;
                     }
-                    sessions.push(acp_persisted_session_item(session));
+                    match super::sessions::try_acp_persisted_session_item(session) {
+                        Ok(item) => sessions.push(item),
+                        Err(error) => {
+                            self.send_error(
+                                id,
+                                -32000,
+                                &format!("session/list canonical store: {error}"),
+                            );
+                            return;
+                        }
+                    }
                 }
             }
         }

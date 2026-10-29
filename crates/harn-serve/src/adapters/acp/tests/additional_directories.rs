@@ -45,7 +45,8 @@ async fn standard_directory_grants_replace_durably_and_refuse_partial_lists() {
             .describe(session)
             .await
             .unwrap()
-            .additional_directories,
+            .additional_directories()
+            .unwrap(),
         directories
     );
     let before = harn_vm::agent_sessions::workspace_anchor(session).unwrap();
@@ -96,7 +97,8 @@ async fn standard_directory_grants_replace_durably_and_refuse_partial_lists() {
                 .describe(session)
                 .await
                 .unwrap()
-                .additional_directories,
+                .additional_directories()
+                .unwrap(),
             directories
         );
     }
@@ -115,10 +117,53 @@ async fn standard_directory_grants_replace_durably_and_refuse_partial_lists() {
         .describe(session)
         .await
         .unwrap()
-        .additional_directories
+        .additional_directories()
+        .unwrap()
         .is_empty());
     assert!(harn_vm::agent_sessions::workspace_anchor(session)
         .unwrap()
         .additional_roots
         .is_empty());
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0", "id": 7, "method": "session/close",
+            "params": {"sessionId": session},
+        }))
+        .await;
+    let closed = recv_response_with_id(&mut rx, 7).await;
+    assert!(closed.get("result").is_some(), "{closed}");
+    store
+        .update(
+            session,
+            harn_session_store::UpdateSession {
+                attributes: [(
+                    "harn.workspace.additionalDirectories".into(),
+                    serde_json::json!([7]),
+                )]
+                .into(),
+                ..harn_session_store::UpdateSession::default()
+            },
+        )
+        .await
+        .unwrap();
+    let metadata = store.describe(session).await.unwrap();
+    let invalid = acp_persisted_session_item(metadata);
+    assert_eq!(invalid["error"]["code"], "invalid_session_metadata");
+    assert!(invalid.get("additionalDirectories").is_none());
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0", "id": 8, "method": "session/list",
+            "params": {"cwd": workspace},
+        }))
+        .await;
+    let refused = recv_response_with_id(&mut rx, 8).await;
+    assert_eq!(refused["error"]["code"], -32000, "{refused}");
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("invalid additional directories"),
+        "{refused}"
+    );
 }

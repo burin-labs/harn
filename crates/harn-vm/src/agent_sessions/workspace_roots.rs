@@ -133,14 +133,14 @@ impl PreparedWorkspaceRoots {
                 let metadata = store.describe(session_id).await.map_err(|error| {
                     VmError::Runtime(format!("workspace root metadata: {error}"))
                 })?;
-                if metadata.additional_directories != directories {
+                if metadata.additional_directories().map_err(|error| {
+                    VmError::Runtime(format!("workspace root metadata: {error}"))
+                })? != directories
+                {
                     store
                         .update(
                             session_id,
-                            UpdateSession {
-                                additional_directories: Some(directories),
-                                ..UpdateSession::default()
-                            },
+                            UpdateSession::default().with_additional_directories(directories),
                         )
                         .await
                         .map_err(|error| {

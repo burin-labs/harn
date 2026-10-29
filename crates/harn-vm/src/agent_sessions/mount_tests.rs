@@ -102,7 +102,8 @@ async fn workspace_root_replacement_persists_before_changing_authority() {
             .describe(&session)
             .await
             .unwrap()
-            .additional_directories,
+            .additional_directories()
+            .unwrap(),
         directories
     );
     let accepted = crate::agent_sessions::workspace_anchor(&session).unwrap();
@@ -123,7 +124,8 @@ async fn workspace_root_replacement_persists_before_changing_authority() {
             .describe(&session)
             .await
             .unwrap()
-            .additional_directories,
+            .additional_directories()
+            .unwrap(),
         directories
     );
     drop(lease);
@@ -151,7 +153,8 @@ async fn workspace_root_replacement_persists_before_changing_authority() {
         .describe(&session)
         .await
         .unwrap()
-        .additional_directories
+        .additional_directories()
+        .unwrap()
         .is_empty());
     assert!(crate::agent_sessions::workspace_anchor(&session)
         .unwrap()

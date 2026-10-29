@@ -8,83 +8,8 @@ static IMMEDIATE_BUSY_CALLBACKS: AtomicUsize = AtomicUsize::new(0);
 static DEFERRED_BUSY_CALLBACKS: AtomicUsize = AtomicUsize::new(0);
 
 #[tokio::test]
-async fn version_six_store_upgrades_directory_metadata_without_losing_history() {
-    use crate::{
-        AppendEvent, CreateSession, SessionEventKind, SessionStore, SqliteSessionStore,
-        UpdateSession,
-    };
-
-    let directory = tempfile::tempdir().unwrap();
-    let database = directory.path().join("version-six.sqlite");
-    let original = SqliteSessionStore::open(&database).unwrap();
-    original
-        .create(CreateSession {
-            id: Some("prior-session".into()),
-            title: Some("Retained title".into()),
-            ..CreateSession::default()
-        })
-        .await
-        .unwrap();
-    let event = original
-        .append(
-            "prior-session",
-            AppendEvent::new(
-                SessionEventKind::Message,
-                serde_json::json!({"content":"Retained history"}),
-            ),
-        )
-        .await
-        .unwrap();
-    drop(original);
-    let connection = Connection::open(&database).unwrap();
-    connection
-        .execute_batch(
-            "ALTER TABLE sessions DROP COLUMN additional_directories_json;
-         UPDATE main._harn_sqlite_schema_versions SET version = 6 WHERE name = 'session_store';",
-        )
-        .unwrap();
-    let marker: i64 = connection
-        .query_row(
-            "SELECT version FROM main._harn_sqlite_schema_versions WHERE name = 'session_store'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(marker, 6);
-    drop(connection);
-
-    let upgraded = SqliteSessionStore::open(&database).unwrap();
-    let metadata = upgraded.describe("prior-session").await.unwrap();
-    assert_eq!(metadata.title.as_deref(), Some("Retained title"));
-    assert!(metadata.additional_directories.is_empty());
-    assert_eq!(
-        upgraded.read_all("prior-session").await.unwrap(),
-        vec![event]
-    );
-    let directories = vec!["/work/second".to_string(), "/work/first".to_string()];
-    upgraded
-        .update(
-            "prior-session",
-            UpdateSession {
-                additional_directories: Some(directories.clone()),
-                ..UpdateSession::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        upgraded
-            .describe("prior-session")
-            .await
-            .unwrap()
-            .additional_directories,
-        directories
-    );
-}
-
-#[tokio::test]
-async fn additional_directories_survive_reopen_and_corrupt_lists_refuse() {
-    use crate::{CreateSession, ListFilter, SessionStore, SqliteSessionStore};
+async fn directory_metadata_survives_reopen_without_a_schema_upgrade() {
+    use crate::{CreateSession, SessionStore, SqliteSessionStore, UpdateSession};
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("roots.sqlite");
@@ -92,11 +17,13 @@ async fn additional_directories_survive_reopen_and_corrupt_lists_refuse() {
     {
         let store = SqliteSessionStore::open(&database).unwrap();
         store
-            .create(CreateSession {
-                id: Some("workspace-roots".into()),
-                additional_directories: roots.clone(),
-                ..CreateSession::default()
-            })
+            .create(
+                CreateSession {
+                    id: Some("workspace-roots".into()),
+                    ..CreateSession::default()
+                }
+                .with_additional_directories(roots.clone()),
+            )
             .await
             .unwrap();
     }
@@ -106,21 +33,38 @@ async fn additional_directories_survive_reopen_and_corrupt_lists_refuse() {
             .describe("workspace-roots")
             .await
             .unwrap()
-            .additional_directories,
+            .additional_directories()
+            .unwrap(),
         roots
     );
     let connection = Connection::open(&database).unwrap();
-    connection
-        .execute(
-            "UPDATE sessions SET additional_directories_json = '[7]' WHERE id = ?1",
-            params!["workspace-roots"],
+    let version: i64 = connection
+        .query_row(
+            "SELECT version FROM main._harn_sqlite_schema_versions WHERE name = 'session_store'",
+            [],
+            |row| row.get(0),
         )
         .unwrap();
-    let error = reopened.describe("workspace-roots").await.unwrap_err();
+    assert_eq!(version, 6);
+    reopened
+        .update(
+            "workspace-roots",
+            UpdateSession {
+                title: Some("Unrelated metadata".into()),
+                ..UpdateSession::default()
+            },
+        )
+        .await
+        .unwrap();
+    connection.execute(
+        "UPDATE sessions SET attributes_json = '{\"harn.workspace.additionalDirectories\":[7]}' WHERE id = ?1",
+        params!["workspace-roots"],
+    ).unwrap();
+    let metadata = reopened.describe("workspace-roots").await.unwrap();
     assert!(
-        matches!(error, StoreError::Backend(message) if message.contains("invalid additional directories"))
+        matches!(metadata.additional_directories(), Err(StoreError::Backend(message))
+        if message.contains("invalid additional directories"))
     );
-    reopened.list(ListFilter::default()).await.unwrap_err();
 }
 
 fn record_immediate_busy(_attempt: i32) -> bool {

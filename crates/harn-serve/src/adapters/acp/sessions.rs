@@ -668,9 +668,18 @@ pub(super) fn resolve_acp_session_cwd(
 
 /// Project one canonical store row into ACP's persisted-session shape.
 pub fn acp_persisted_session_item(session: harn_session_store::SessionMeta) -> serde_json::Value {
+    try_acp_persisted_session_item(session).unwrap_or_else(|error| {
+        serde_json::json!({"error": {"code": "invalid_session_metadata", "message": error.to_string()}})
+    })
+}
+
+pub(super) fn try_acp_persisted_session_item(
+    session: harn_session_store::SessionMeta,
+) -> harn_session_store::StoreResult<serde_json::Value> {
+    let directories = session.additional_directories()?;
     let mut item = serde_json::json!({
         "sessionId": session.id,
-        "additionalDirectories": session.additional_directories,
+        "additionalDirectories": directories,
         "liveState": "persisted",
         "activePrompt": false,
         "attachableRoles": [],
@@ -706,7 +715,7 @@ pub fn acp_persisted_session_item(session: harn_session_store::SessionMeta) -> s
             item[key] = value;
         }
     }
-    item
+    Ok(item)
 }
 
 /// Land a stop on a registered session.

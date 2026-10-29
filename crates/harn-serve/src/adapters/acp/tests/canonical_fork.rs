@@ -10,11 +10,13 @@ async fn metadata_only_parent_refuses_forking_unpersisted_live_messages() {
     let store = harn_vm::open_canonical_store(root.path()).unwrap();
     let parent = "unpersisted-root-parent";
     store
-        .create(CreateSession {
-            id: Some(parent.into()),
-            additional_directories: vec!["/work/extra".into()],
-            ..CreateSession::default()
-        })
+        .create(
+            CreateSession {
+                id: Some(parent.into()),
+                ..CreateSession::default()
+            }
+            .with_additional_directories(vec!["/work/extra".into()]),
+        )
         .await
         .unwrap();
     let empty = harn_vm::agent_sessions::canonical_history_boundaries(&store, root.path(), parent)

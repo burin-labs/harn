@@ -133,10 +133,10 @@ pub(crate) async fn open_canonical_agent_session_with_directories(
             parent_session_id,
             cwd: project_scope.clone(),
             session_type: Some(session_type),
-            additional_directories,
             project_scope,
             ..CreateSession::default()
-        },
+        }
+        .with_additional_directories(additional_directories),
     )
     .await?;
     Ok(store)

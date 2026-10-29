@@ -102,12 +102,6 @@ impl SessionStore for SqliteSessionStore {
         attributes.extend(request.attributes);
         let attributes_json =
             serde_json::to_string(&attributes).unwrap_or_else(|_| "{}".to_string());
-        let directories_json = request
-            .additional_directories
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
         let changed = tx
             .execute(
                 "UPDATE sessions SET
@@ -122,7 +116,6 @@ impl SessionStore for SqliteSessionStore {
                     usage_output = COALESCE(?8, usage_output),
                     usage_cost_usd_micros = COALESCE(?9, usage_cost_usd_micros),
                     attributes_json = ?14,
-                    additional_directories_json = COALESCE(?15, additional_directories_json),
                     updated_at_ms = ?10,
                     updated_at = ?11
                  WHERE id = ?12",
@@ -141,7 +134,6 @@ impl SessionStore for SqliteSessionStore {
                     session_id,
                     title_pinned,
                     attributes_json,
-                    directories_json,
                 ],
             )
             .map_err(map_sql)?;

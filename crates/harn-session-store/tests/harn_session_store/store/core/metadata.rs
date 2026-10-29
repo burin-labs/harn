@@ -6,11 +6,13 @@ use super::super::*;
 async fn directory_metadata_is_not_history_but_an_acknowledged_empty_fork_is() {
     run_with_hooks(StoreHooks::default(), |store| async move {
         let created = store
-            .create(CreateSession {
-                id: Some("root-metadata".into()),
-                additional_directories: vec!["/work/extra".into()],
-                ..CreateSession::default()
-            })
+            .create(
+                CreateSession {
+                    id: Some("root-metadata".into()),
+                    ..CreateSession::default()
+                }
+                .with_additional_directories(vec!["/work/extra".into()]),
+            )
             .await
             .unwrap();
         assert!(!created.has_canonical_journal());
@@ -50,15 +52,17 @@ async fn additional_directories_preserve_order_and_replace_as_a_complete_list() 
     run_with_hooks(StoreHooks::default(), |store| async move {
         let original = vec!["/work/second".to_string(), "/work/first".to_string()];
         store
-            .create(CreateSession {
-                id: Some("workspace-roots".into()),
-                additional_directories: original.clone(),
-                ..CreateSession::default()
-            })
+            .create(
+                CreateSession {
+                    id: Some("workspace-roots".into()),
+                    ..CreateSession::default()
+                }
+                .with_additional_directories(original.clone()),
+            )
             .await
             .expect("create with ordered roots");
         let read = store.describe("workspace-roots").await.unwrap();
-        assert_eq!(read.additional_directories, original);
+        assert_eq!(read.additional_directories().unwrap(), original);
         store
             .update(
                 "workspace-roots",
@@ -74,17 +78,15 @@ async fn additional_directories_preserve_order_and_replace_as_a_complete_list() 
                 .describe("workspace-roots")
                 .await
                 .unwrap()
-                .additional_directories,
+                .additional_directories()
+                .unwrap(),
             original
         );
         for replacement in [vec!["/work/third".to_string()], Vec::new()] {
             store
                 .update(
                     "workspace-roots",
-                    UpdateSession {
-                        additional_directories: Some(replacement.clone()),
-                        ..UpdateSession::default()
-                    },
+                    UpdateSession::default().with_additional_directories(replacement.clone()),
                 )
                 .await
                 .expect("replace the complete ordered root list");
@@ -93,13 +95,31 @@ async fn additional_directories_preserve_order_and_replace_as_a_complete_list() 
                     .describe("workspace-roots")
                     .await
                     .unwrap()
-                    .additional_directories,
+                    .additional_directories()
+                    .unwrap(),
                 replacement
             );
             let listed = store.list(ListFilter::default()).await.unwrap();
             assert_eq!(listed.len(), 1);
-            assert_eq!(listed[0].additional_directories, replacement);
+            assert_eq!(listed[0].additional_directories().unwrap(), replacement);
         }
+        store
+            .update(
+                "workspace-roots",
+                UpdateSession {
+                    attributes: [("harn.workspace.additionalDirectories".into(), json!([7]))]
+                        .into(),
+                    ..UpdateSession::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(store
+            .describe("workspace-roots")
+            .await
+            .unwrap()
+            .additional_directories()
+            .is_err());
     })
     .await;
 }

@@ -34,11 +34,13 @@ async fn workspace_timeline_uses_live_events_for_metadata_and_keeps_empty_journa
     let workspace = tempfile::tempdir().unwrap();
     let store = crate::open_canonical_store(workspace.path()).unwrap();
     store
-        .create(CreateSession {
-            id: Some("metadata-only".into()),
-            additional_directories: vec!["/work/extra".into()],
-            ..CreateSession::default()
-        })
+        .create(
+            CreateSession {
+                id: Some("metadata-only".into()),
+                ..CreateSession::default()
+            }
+            .with_additional_directories(vec!["/work/extra".into()]),
+        )
         .await
         .unwrap();
     store
@@ -81,7 +83,7 @@ async fn workspace_timeline_uses_live_events_for_metadata_and_keeps_empty_journa
     .await
     .unwrap();
     assert_eq!(empty.coverage.returned, 0);
-    assert_eq!(empty.coverage.available, 0);
+    assert_eq!(empty.coverage.available, Some(0));
 }
 
 #[tokio::test]
