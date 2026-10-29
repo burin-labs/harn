@@ -24,7 +24,7 @@ use crate::vm::Vm;
 
 struct CheckpointState {
     data: BTreeMap<String, serde_json::Value>,
-    path: PathBuf,
+    configured: PathBuf,
 }
 
 impl CheckpointState {
@@ -35,14 +35,22 @@ impl CheckpointState {
     fn at_state_root(state_root: &Path, pipeline_name: &str) -> Self {
         Self {
             data: BTreeMap::new(),
-            path: state_root
+            configured: state_root
                 .join(crate::runtime_paths::CHECKPOINTS_DIR)
                 .join(format!("{pipeline_name}.json")),
         }
     }
 
+    /// Resolved at use, so a store built before its branch was armed still
+    /// stays out of the recording's state.
+    fn path(&self) -> Result<PathBuf, String> {
+        crate::run_tape::durable_path(&self.configured, "checkpoint store")
+            .map_err(|error| error.to_string())
+    }
+
     fn load(&mut self) -> Result<(), String> {
-        self.data = match std::fs::read_to_string(&self.path) {
+        let path = self.path()?;
+        self.data = match std::fs::read_to_string(&path) {
             // serde's own message can quote stored values, so report only
             // the failure class and position.
             Ok(contents) => serde_json::from_str(&contents).map_err(|e| {
@@ -52,13 +60,13 @@ impl CheckpointState {
                 };
                 format!(
                     "checkpoint decode error in {}: {reason} at line {}, column {}",
-                    self.path.display(),
+                    path.display(),
                     e.line(),
                     e.column()
                 )
             })?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                self.confirm_absent()?;
+                confirm_absent(&path)?;
                 BTreeMap::new()
             }
             Err(e) => return Err(format!("checkpoint read error: {e}")),
@@ -66,33 +74,8 @@ impl CheckpointState {
         Ok(())
     }
 
-    /// Accept "not found" as an empty store only when the path is genuinely
-    /// absent beneath a directory.
-    ///
-    /// Unix reports a non-directory ancestor as `ENOTDIR`, but Windows reports
-    /// it as `ERROR_PATH_NOT_FOUND`, which std maps to `NotFound` — the same
-    /// kind a missing `checkpoints/` directory produces. Without this check a
-    /// store that cannot be reached reads as empty on Windows, and a resumed
-    /// pipeline would redo work its checkpoint had recorded as spent.
-    fn confirm_absent(&self) -> Result<(), String> {
-        for ancestor in self.path.ancestors().skip(1) {
-            match std::fs::metadata(ancestor) {
-                Ok(metadata) if metadata.is_dir() => return Ok(()),
-                Ok(_) => {
-                    return Err(format!(
-                        "checkpoint read error: {} is not a directory",
-                        ancestor.display()
-                    ))
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(format!("checkpoint read error: {e}")),
-            }
-        }
-        Ok(())
-    }
-
     fn lock(&self) -> Result<std::fs::File, String> {
-        let path = self.path.with_extension("lock");
+        let path = self.path()?.with_extension("lock");
         std::fs::create_dir_all(path.parent().expect("checkpoint path has a parent"))
             .map_err(|error| format!("checkpoint lock directory error: {error}"))?;
         let file = std::fs::OpenOptions::new()
@@ -115,7 +98,7 @@ impl CheckpointState {
     fn save(&self) -> Result<(), String> {
         let json = serde_json::to_string_pretty(&self.data)
             .map_err(|e| format!("checkpoint save error: {e}"))?;
-        crate::atomic_io::atomic_write(&self.path, json.as_bytes())
+        crate::atomic_io::atomic_write(&self.path()?, json.as_bytes())
             .map_err(|e| format!("checkpoint write error: {e}"))?;
         Ok(())
     }
@@ -151,7 +134,7 @@ impl CheckpointState {
 
     fn clear(&mut self) -> Result<(), String> {
         let _lock = self.lock()?;
-        match std::fs::remove_file(&self.path) {
+        match std::fs::remove_file(self.path()?) {
             Ok(()) => (),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
             Err(e) => return Err(format!("checkpoint clear error: {e}")),
@@ -186,6 +169,31 @@ impl CheckpointState {
         }
         result
     }
+}
+
+/// Accept "not found" as an empty store only when the path is genuinely
+/// absent beneath a directory.
+///
+/// Unix reports a non-directory ancestor as `ENOTDIR`, but Windows reports
+/// it as `ERROR_PATH_NOT_FOUND`, which std maps to `NotFound` — the same
+/// kind a missing `checkpoints/` directory produces. Without this check a
+/// store that cannot be reached reads as empty on Windows, and a resumed
+/// pipeline would redo work its checkpoint had recorded as spent.
+fn confirm_absent(path: &Path) -> Result<(), String> {
+    for ancestor in path.ancestors().skip(1) {
+        match std::fs::metadata(ancestor) {
+            Ok(metadata) if metadata.is_dir() => return Ok(()),
+            Ok(_) => {
+                return Err(format!(
+                    "checkpoint read error: {} is not a directory",
+                    ancestor.display()
+                ))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("checkpoint read error: {e}")),
+        }
+    }
+    Ok(())
 }
 
 thread_local! {

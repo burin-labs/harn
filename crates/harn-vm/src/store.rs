@@ -40,12 +40,9 @@ impl StoreState {
         if self.loaded {
             return Ok(());
         }
-        // Opened when the branch first uses it, so a VM built before the
-        // branch was armed still stays out of the recording's store.
-        if let Some(root) = crate::run_tape::branch_state_root() {
-            self.path = root.join(crate::runtime_paths::STORE_FILE);
-        }
-        let path = self.path.clone();
+        // Resolved at use, so a VM built before its branch was armed still
+        // stays out of the recording's store.
+        let path = crate::run_tape::durable_path(&self.path, "runtime store")?;
         let contents = crate::run_tape::store_seed(&path, || {
             std::fs::read_to_string(&path)
                 .ok()
@@ -66,12 +63,12 @@ impl StoreState {
             .collect();
         let json = serde_json::to_string_pretty(&serde_json::Value::Object(obj))
             .map_err(|e| VmError::Runtime(format!("store save error: {e}")))?;
-        if let Some(parent) = self.path.parent() {
+        let path = crate::run_tape::durable_path(&self.path, "runtime store")?;
+        if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| VmError::Runtime(format!("store mkdir error: {e}")))?;
         }
-        std::fs::write(&self.path, json)
-            .map_err(|e| VmError::Runtime(format!("store write error: {e}")))
+        std::fs::write(&path, json).map_err(|e| VmError::Runtime(format!("store write error: {e}")))
     }
 
     fn get(&mut self, key: &str) -> Result<Option<serde_json::Value>, VmError> {

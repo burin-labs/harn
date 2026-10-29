@@ -98,26 +98,19 @@ pub struct RunTapeHeader {
     /// True when a workspace effect observer recorded each tool call's file
     /// changes. Without it a served tool call cannot restore the workspace.
     pub effects_observed: bool,
+    /// Canonical durable state roots the recording ran against. A branch
+    /// remaps writes inside them under its own state root.
+    #[serde(default)]
+    pub state_roots: Vec<PathBuf>,
+    /// The recorded run's canonical workspace.
+    #[serde(default)]
+    pub workspace_root: Option<PathBuf>,
 }
 
 static PROCESS_TAPE: RwLock<Option<Arc<ProcessTape>>> = RwLock::new(None);
-static PROCESS_BRANCH: Mutex<Option<BranchState>> = Mutex::new(None);
-/// Mirrors "a branch is replaying its prefix" so dispatch hot paths check one
-/// atomic instead of taking the branch lock.
-static PREFIX_ACTIVE: AtomicBool = AtomicBool::new(false);
-/// Mirrors "a `recording: full` tape is active", for the same reason.
+/// Mirrors "a `recording: full` tape is active", so dispatch hot paths check
+/// one atomic instead of taking the tape lock.
 static RECORDING_FULL: AtomicBool = AtomicBool::new(false);
-/// The armed branch's state root, which every default state path resolves to
-/// while the branch runs.
-static BRANCH_STATE_ROOT: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
-
-/// Where the armed branch keeps its durable state, if a branch is armed.
-pub(crate) fn branch_state_root() -> Option<PathBuf> {
-    BRANCH_STATE_ROOT
-        .read()
-        .expect("branch state root poisoned")
-        .clone()
-}
 
 fn process_tape() -> Option<Arc<ProcessTape>> {
     PROCESS_TAPE
@@ -181,9 +174,22 @@ pub fn start_recording(
     let mut header =
         TapeHeader::current(Some(crate::stdlib::clock::now_wall_ms()), None, Vec::new());
     header.version = crate::testbench::tape::TAPE_FORMAT_VERSION;
+    let workspace_root = workspace.as_ref().map(|workspace| {
+        crate::workspace_path::canonicalize_existing_ancestor(&workspace.root)
+            .unwrap_or_else(|_| workspace.root.clone())
+    });
     header.run = Some(RunTapeHeader {
         recording: level,
         effects_observed: workspace.is_some(),
+        state_roots: workspace_root.as_deref().map_or_else(Vec::new, |root| {
+            host_state_roots(root)
+                .into_iter()
+                .map(|path| {
+                    crate::workspace_path::canonicalize_existing_ancestor(&path).unwrap_or(path)
+                })
+                .collect()
+        }),
+        workspace_root,
     });
     let mut slot = PROCESS_TAPE.write().expect("run tape lock poisoned");
     if slot.is_some() {
@@ -315,7 +321,8 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
         .map(|tape| tape.next_llm_call.fetch_add(1, Ordering::SeqCst) + 1);
     let surface = request_surface(request);
     let request_digest = surface_digest(&surface);
-    let full = tape.is_some() && level == RecordingLevel::Full;
+    // A testbench tape is always full, so a digest mismatch can name its field.
+    let full = level == RecordingLevel::Full;
     let attribution = match (&tape, call_index) {
         (Some(tape), Some(index)) if full => Some(
             tape.prompts
@@ -330,7 +337,16 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
         let messages = match whole.remove("messages") {
             Some(serde_json::Value::Array(messages)) => messages
                 .iter()
-                .map(|message| recorder.payload_cas(crate::canonical_json::to_vec(message)))
+                .map(|message| {
+                    // A run tape shares repeated prefixes through its store; a
+                    // testbench tape keeps small messages inline.
+                    let bytes = crate::canonical_json::to_vec(message);
+                    if tape.is_some() {
+                        recorder.payload_cas(bytes)
+                    } else {
+                        recorder.payload_from_bytes(bytes)
+                    }
+                })
                 .collect(),
             _ => Vec::new(),
         };
@@ -550,6 +566,9 @@ pub struct BranchReport {
     pub live_calls: u64,
     /// Prefix cache reads of keys the recording never read, answered live.
     pub live_cache_reads: u64,
+    /// Durable writes the live tail made outside the branch's state, by writer
+    /// and path. The prefix refuses them.
+    pub external_state_writes: Vec<String>,
     pub divergence: Option<BranchDivergence>,
 }
 
@@ -593,26 +612,30 @@ struct BranchState {
     report: BranchReport,
 }
 
-/// Ends the branch's replay when dropped.
+/// Ends the branch's replay when dropped. The branch applies only inside
+/// [`BranchGuard::scope`], which the host enters around the execution.
 pub struct BranchGuard {
-    _private: (),
+    handle: Arc<BranchHandle>,
 }
 
 impl BranchGuard {
+    pub fn scope(&self) -> BranchScope {
+        BranchScope {
+            handle: self.handle.clone(),
+        }
+    }
+
     pub fn report(&self) -> BranchReport {
-        branch_report().unwrap_or_default()
+        self.handle.state().report.clone()
     }
 
     /// The final report. A run that ended before consuming its whole prefix
     /// (model calls, tool calls or recorded reads) diverged: it did not
     /// replay the recording, however far it got.
     pub fn finish(&self) -> BranchReport {
-        let mut guard = PROCESS_BRANCH.lock().expect("branch lock poisoned");
-        let Some(state) = guard.as_mut() else {
-            return BranchReport::default();
-        };
+        let mut state = self.handle.state();
         if state.report.divergence.is_none() {
-            state.report.divergence = under_run(state);
+            state.report.divergence = under_run(&state);
         }
         state.report.clone()
     }
@@ -656,21 +679,13 @@ fn under_run(state: &BranchState) -> Option<BranchDivergence> {
 
 impl Drop for BranchGuard {
     fn drop(&mut self) {
-        *PROCESS_BRANCH.lock().expect("branch lock poisoned") = None;
-        PREFIX_ACTIVE.store(false, Ordering::Release);
-        *BRANCH_STATE_ROOT
-            .write()
-            .expect("branch state root poisoned") = None;
+        self.handle.end();
     }
 }
 
-/// The active branch's progress, if a branch is replaying in this process.
+/// The current execution's branch progress, if it branches.
 pub fn branch_report() -> Option<BranchReport> {
-    PROCESS_BRANCH
-        .lock()
-        .expect("branch lock poisoned")
-        .as_ref()
-        .map(|state| state.report.clone())
+    current_branch().map(|branch| branch.state().report.clone())
 }
 
 /// Load a tape and arm branch replay for this process.
@@ -680,14 +695,25 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
     }
     let tape = plan.tape;
     let k = plan.live_after_calls;
+    if tape.header.run.is_some()
+        && tape.header.version < crate::testbench::tape::TAPE_FORMAT_VERSION
+    {
+        return Err(format!(
+            "this tape is format {}, which does not record where the run kept its state; \
+             re-record it to branch",
+            tape.header.version
+        ));
+    }
     match &tape.header.run {
         Some(RunTapeHeader {
             recording: RecordingLevel::Full,
             effects_observed: true,
+            ..
         }) => {}
         Some(RunTapeHeader {
             recording: RecordingLevel::Full,
             effects_observed: false,
+            ..
         }) => {
             return Err(
                 "this tape was recorded without a workspace effect observer, so its tool calls \
@@ -807,15 +833,10 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
             plan.live_after_calls
         ));
     }
-    let mut slot = PROCESS_BRANCH.lock().expect("branch lock poisoned");
-    if slot.is_some() {
-        return Err("a branch is already replaying in this process".to_string());
-    }
-    let state_root = fresh_state_root(&plan.state_root)?;
-    *BRANCH_STATE_ROOT
-        .write()
-        .expect("branch state root poisoned") = Some(state_root);
-    *slot = Some(BranchState {
+    let protected = recording_trees(&tape, &plan.workspace_root);
+    let trees: Vec<PathBuf> = protected.iter().map(|(tree, _)| tree.clone()).collect();
+    let state_root = scope::fresh_state_root(&plan.state_root, &trees)?;
+    let state = BranchState {
         calls,
         tools,
         cache_lookups,
@@ -827,24 +848,47 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
             live_after_calls: plan.live_after_calls,
             ..BranchReport::default()
         },
-    });
-    PREFIX_ACTIVE.store(true, Ordering::Release);
-    Ok(BranchGuard { _private: () })
+    };
+    Ok(BranchGuard {
+        handle: BranchHandle::arm(state, state_root, protected),
+    })
 }
 
-/// Create the branch's state root, refusing one that already holds state: the
-/// recording's own root, or an earlier branch's.
-fn fresh_state_root(root: &Path) -> Result<PathBuf, String> {
-    let describe = |err: std::io::Error| format!("branch state root {}: {err}", root.display());
-    if root.exists() && std::fs::read_dir(root).map_err(describe)?.next().is_some() {
-        return Err(format!(
-            "branch state root {} is not empty; a branch keeps its state apart from the \
-             recording's, so give it a new directory",
-            root.display()
-        ));
+/// The trees a recording's durable state may live in, canonical, with where
+/// each remaps under a branch's state root: the state roots it recorded and
+/// the ones the host names now, then the recorded and branch workspaces.
+fn recording_trees(tape: &EventTape, workspace: &Path) -> Vec<(PathBuf, PathBuf)> {
+    let run = tape.header.run.as_ref();
+    let mut state_roots: Vec<PathBuf> = run.map(|run| run.state_roots.clone()).unwrap_or_default();
+    state_roots.extend(host_state_roots(workspace));
+    let workspaces = run
+        .and_then(|run| run.workspace_root.clone())
+        .into_iter()
+        .chain(std::iter::once(workspace.to_path_buf()));
+    let mut trees: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let roots = state_roots
+        .into_iter()
+        .map(|root| (root, PathBuf::new()))
+        .chain(workspaces.map(|root| (root, PathBuf::from("workspace"))));
+    for (root, mount) in roots {
+        let root = crate::workspace_path::canonicalize_existing_ancestor(&root).unwrap_or(root);
+        if !trees.iter().any(|(tree, _)| *tree == root) {
+            trees.push((root, mount));
+        }
     }
-    std::fs::create_dir_all(root).map_err(describe)?;
-    root.canonicalize().map_err(describe)
+    trees
+}
+
+/// Where the host keeps durable state for `workspace` right now: its
+/// default state root and a session store it names.
+fn host_state_roots(workspace: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![crate::runtime_paths::state_root(workspace)];
+    if let Some(root) = crate::stdlib::process::read_env_value("HARN_SESSION_STORE_ROOT")
+        .filter(|root| !root.trim().is_empty())
+    {
+        roots.push(PathBuf::from(root));
+    }
+    roots
 }
 
 fn recorded_surface(
@@ -867,6 +911,29 @@ fn recorded_surface(
         surface.insert("messages".to_string(), serde_json::Value::Array(messages));
     }
     Some(surface)
+}
+
+/// Name the first request field where two tapes' model calls differ.
+pub(crate) fn request_difference(
+    recorded_tape: &EventTape,
+    recorded: &TapeRecordKind,
+    replay_tape: &EventTape,
+    replayed: &TapeRecordKind,
+) -> String {
+    let surface = |tape: &EventTape, kind: &TapeRecordKind| match kind {
+        TapeRecordKind::LlmCall {
+            request, messages, ..
+        } => recorded_surface(tape, request.as_ref(), messages),
+        _ => None,
+    };
+    match (
+        surface(recorded_tape, recorded),
+        surface(replay_tape, replayed),
+    ) {
+        (Some(recorded), Some(replayed)) => first_difference(&recorded, &replayed),
+        (None, _) => "the recorded tape kept no request body to compare".to_string(),
+        (_, None) => "the replay kept no request body to compare".to_string(),
+    }
 }
 
 /// Name the first field where two request surfaces differ.
@@ -922,14 +989,17 @@ fn divergence_error(divergence: &BranchDivergence) -> crate::value::VmError {
 pub(crate) fn serve_llm_call(
     request: &LlmRequestPayload,
 ) -> Option<Result<LlmResult, crate::value::VmError>> {
-    let mut guard = PROCESS_BRANCH.lock().expect("branch lock poisoned");
+    let branch = current_branch();
+    let mut guard = branch.as_ref().map(|branch| branch.state());
     let state = guard.as_mut()?;
     if let Some(divergence) = &state.report.divergence {
         return Some(Err(divergence_error(divergence)));
     }
     if state.report.served_calls >= state.report.live_after_calls {
         state.live = true;
-        PREFIX_ACTIVE.store(false, Ordering::Release);
+        if let Some(branch) = &branch {
+            branch.go_live();
+        }
         state.report.live_calls += 1;
         return None;
     }
@@ -982,7 +1052,8 @@ fn recorded_lookup(
     live: impl FnOnce() -> Result<Option<serde_json::Value>, crate::value::VmError>,
 ) -> Result<Option<serde_json::Value>, crate::value::VmError> {
     let served = {
-        let mut guard = PROCESS_BRANCH.lock().expect("branch lock poisoned");
+        let branch = current_branch();
+        let mut guard = branch.as_ref().map(|branch| branch.state());
         match guard.as_mut() {
             Some(state) if state.report.divergence.is_some() => {
                 return Err(divergence_error(
@@ -1058,7 +1129,8 @@ pub(crate) enum ToolServe {
 }
 
 pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Value) -> ToolServe {
-    let mut guard = PROCESS_BRANCH.lock().expect("branch lock poisoned");
+    let branch = current_branch();
+    let mut guard = branch.as_ref().map(|branch| branch.state());
     let Some(state) = guard.as_mut() else {
         return ToolServe::Live;
     };
@@ -1156,6 +1228,13 @@ fn apply_effect(root: &Path, path: &str, content: Option<&[u8]>) -> Result<(), S
 
 #[path = "run_tape_prompts.rs"]
 mod prompts;
+
+#[path = "run_tape_scope.rs"]
+mod scope;
+pub use scope::BranchScope;
+pub(crate) use scope::{
+    branch_event_log, branch_path, current_branch, durable_path, scoped_state_root, BranchHandle,
+};
 
 #[path = "run_tape_prefix.rs"]
 mod prefix;

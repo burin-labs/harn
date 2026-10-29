@@ -53,8 +53,9 @@ use crate::clock_mock;
 /// Format version of the on-disk tape representation. Bump on any
 /// breaking change. Loaders refuse tapes with a higher version. Version 2
 /// widened the model-call `request_digest` to the whole request, so a
-/// version 1 digest never compares with a version 2 one.
-pub const TAPE_FORMAT_VERSION: u32 = 2;
+/// version 1 digest never compares with a version 2 one. Version 3 records
+/// where a run tape's recording kept its durable state.
+pub const TAPE_FORMAT_VERSION: u32 = 3;
 
 /// Records whose serialized payload exceeds this size are spilled into
 /// the content-addressed sidecar. Picked to be larger than typical

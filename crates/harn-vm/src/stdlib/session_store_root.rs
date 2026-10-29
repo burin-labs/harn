@@ -10,9 +10,14 @@ pub(crate) fn canonical_store_state_dir(
 ) -> Result<SessionStoreDir, VmError> {
     let explicit_root = option_string(options, "root")?
         .map(|root| crate::stdlib::process::resolve_source_relative_path(&root));
-    if let Some(root) = crate::run_tape::branch_state_root().filter(|_| explicit_root.is_none()) {
-        return Ok(SessionStoreDir(root));
-    }
+    let dir = store_state_dir(explicit_root)?;
+    Ok(SessionStoreDir(crate::run_tape::durable_path(
+        &dir.0,
+        "session store",
+    )?))
+}
+
+fn store_state_dir(explicit_root: Option<PathBuf>) -> Result<SessionStoreDir, VmError> {
     if explicit_root.is_none() && crate::persistent_state::current_session_workspace().is_some() {
         return Ok(SessionStoreDir(
             crate::persistent_state::current_persistent_state_root()

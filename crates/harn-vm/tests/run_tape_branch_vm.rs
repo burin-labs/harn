@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use harn_vm::run_tape::{
-    start_branch, start_recording, BranchPlan, BranchReport, EffectScan, RecordingLevel,
-    TapeWorkspace, ToolEffectObserver, TAPE_FILE_NAME,
+    start_branch, start_recording, BranchPlan, BranchReport, BranchScope, EffectScan,
+    RecordingLevel, TapeWorkspace, ToolEffectObserver, TAPE_FILE_NAME,
 };
 use harn_vm::testbench::tape::EventTape;
 use harn_vm::value::VmError;
@@ -39,9 +39,12 @@ fn quote(value: &Path) -> String {
 /// Every run is pointed at the recording's session store, as a host reusing
 /// its configuration would be; a branch must keep out of it on its own.
 fn run(source: &str, workspace: &Path) -> Result<String, String> {
-    let state_dir = recording_state(workspace);
-    // SAFETY: tests here hold SERIAL, so no other thread reads the env.
-    unsafe { std::env::set_var("HARN_SESSION_STORE_ROOT", &state_dir) };
+    run_in(source, workspace, None)
+}
+
+/// Run `source` inside `branch`, when there is one.
+fn run_in(source: &str, workspace: &Path, branch: Option<BranchScope>) -> Result<String, String> {
+    name_session_store(workspace);
     let source = source.to_string();
     let workspace = workspace.to_path_buf();
     harn_vm::on_vm_stack(move || {
@@ -51,7 +54,7 @@ fn run(source: &str, workspace: &Path) -> Result<String, String> {
             .enable_all()
             .build()
             .map_err(|error| error.to_string())?;
-        rt.block_on(harn_clock::test_support::with_local_tasks(async move {
+        let body = async move {
             // The run's write jail is the temp root holding the workspace and
             // the markers, not the test binary's cwd.
             let root = workspace.parent().expect("workspace has a parent");
@@ -72,6 +75,12 @@ fn run(source: &str, workspace: &Path) -> Result<String, String> {
             harn_vm::stdlib::process::set_thread_execution_context(None);
             result?;
             Ok(vm.output().to_string())
+        };
+        rt.block_on(harn_clock::test_support::with_local_tasks(async move {
+            match branch {
+                Some(branch) => branch.run(Box::pin(body)).await,
+                None => Box::pin(body).await,
+            }
         }))
     })
 }
@@ -88,6 +97,13 @@ fn record(source: &str, tapes: &Path, workspace: &Path) -> String {
     assert_eq!(guard.error(), None, "the tape wrote cleanly");
     drop(guard);
     output
+}
+
+/// Point the host at the recording's session store for `workspace`, as it is
+/// configured before a branch is armed.
+fn name_session_store(workspace: &Path) {
+    // SAFETY: tests here hold SERIAL, so no other thread reads the env.
+    unsafe { std::env::set_var("HARN_SESSION_STORE_ROOT", recording_state(workspace)) };
 }
 
 /// The session store the host names for every run.
@@ -109,6 +125,7 @@ fn branch(source: &str, tapes: &Path, workspace: &Path, k: u64) -> Branched {
         .parent()
         .unwrap()
         .join(format!("branch-state-{n}"));
+    name_session_store(workspace);
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: k,
@@ -116,7 +133,7 @@ fn branch(source: &str, tapes: &Path, workspace: &Path, k: u64) -> Branched {
         state_root: state.clone(),
     })
     .unwrap();
-    let output = run(source, workspace);
+    let output = run_in(source, workspace, Some(guard.scope()));
     let report = guard.finish();
     Branched {
         output,
@@ -489,10 +506,10 @@ fn a_session_reset_in_the_prefix_lands_once_in_the_branch_store_only() {
     }
 }
 
-/// A branch handed a state root that already holds state, here the
-/// recording's own session store, is refused before anything runs.
+/// A branch handed the recording's own session store as its state root is
+/// refused before anything runs.
 #[test]
-fn a_branch_refuses_a_state_root_that_already_holds_state() {
+fn a_branch_refuses_the_recordings_state_root() {
     let _serial = SERIAL
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -511,8 +528,24 @@ fn a_branch_refuses_a_state_root_that_already_holds_state() {
         state_root: recording_state(&dirs.workspace),
     })
     .err()
-    .expect("a non-empty state root is refused");
-    assert!(error.contains("is not empty"), "{error}");
+    .expect("the recording's state root is refused");
+    assert!(error.contains("overlaps the recording's"), "{error}");
+    // Inside a recording tree and holding one are refused the same way.
+    for state_root in [
+        recording_state(&dirs.workspace).join("nested"),
+        dirs.workspace.join("branch-state"),
+        dirs.workspace.parent().unwrap().to_path_buf(),
+    ] {
+        let error = start_branch(BranchPlan {
+            tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
+            live_after_calls: 1,
+            workspace_root: dirs.workspace.clone(),
+            state_root: state_root.clone(),
+        })
+        .err()
+        .unwrap_or_else(|| panic!("{} is refused", state_root.display()));
+        assert!(error.contains("overlaps the recording's"), "{error}");
+    }
 }
 
 /// Two agent loops, each with its own session; the first finishes inside the
@@ -620,4 +653,338 @@ fn prefix_store_writes_reach_the_branch_store() {
         recorded_store,
         "the branch changed the recording's store"
     );
+}
+
+/// `reset_script` with every session opened at an explicit store `root`.
+fn rooted_reset_script(hook_marker: &Path, exec_marker: &Path, root: &Path) -> String {
+    reset_script(hook_marker, exec_marker).replace(
+        "          session_id: \"branch-\" + id,",
+        &format!(
+            "          session_id: \"branch-\" + id,\n          root: {},",
+            quote(root)
+        ),
+    )
+}
+
+/// A session store named explicitly inside a tree the recording owns, at the
+/// recording's own root or nested under it, still lands in the branch's
+/// state: each branch holds the resets once and the recording keeps two.
+#[test]
+fn an_explicit_session_root_inside_the_recording_lands_in_the_branch() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    for nested in ["", "nested"] {
+        let dirs = dirs();
+        let hook_marker = dirs.markers.join("hook-marker");
+        let exec_marker = dirs.markers.join("exec-marker");
+        let root = recording_state(&dirs.workspace).join(nested);
+        let source = rooted_reset_script(&hook_marker, &exec_marker, &root);
+        record(&source, &dirs.tapes, &dirs.workspace);
+        let recording = recording_state(&dirs.workspace);
+        assert_eq!(
+            durable_resets(&recording),
+            2,
+            "{nested:?}: one reset per turn"
+        );
+        for k in [2, 1] {
+            let Branched {
+                output,
+                report,
+                state,
+            } = branch(&source, &dirs.tapes, &dirs.workspace, k);
+            output.expect("the branched run succeeds");
+            assert_eq!(report.divergence, None, "{nested:?} K={k}: {report:?}");
+            assert_eq!(
+                durable_resets(&state),
+                2,
+                "{nested:?} K={k}: branch history"
+            );
+            assert_eq!(
+                durable_resets(&recording),
+                2,
+                "{nested:?} K={k}: the branch wrote into the recording's tree"
+            );
+        }
+    }
+}
+
+/// A session store named outside every tree the recording owns is an effect
+/// outside the branch: the prefix refuses it with a named divergence and the
+/// store keeps what the recording left.
+#[test]
+fn an_explicit_session_root_outside_the_recording_is_refused_in_the_prefix() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let hook_marker = dirs.markers.join("hook-marker");
+    let exec_marker = dirs.markers.join("exec-marker");
+    let elsewhere = dirs.workspace.parent().unwrap().join("elsewhere");
+    let source = rooted_reset_script(&hook_marker, &exec_marker, &elsewhere);
+    record(&source, &dirs.tapes, &dirs.workspace);
+    assert_eq!(durable_resets(&elsewhere), 2, "one reset per turn");
+    let Branched { output, report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 2);
+    assert!(output.is_err(), "the refused write fails the run");
+    let divergence = report.divergence.expect("the prefix diverged");
+    assert_eq!(
+        divergence.what, "durable state outside the branch",
+        "{divergence:?}"
+    );
+    assert!(
+        divergence.detail.contains("session store"),
+        "{divergence:?}"
+    );
+    assert_eq!(
+        durable_resets(&elsewhere),
+        2,
+        "the branch wrote outside itself"
+    );
+}
+
+/// The newest event on every topic of `log`.
+async fn log_heads(log: &harn_vm::event_log::AnyEventLog) -> Vec<String> {
+    use harn_vm::event_log::EventLog;
+    let mut heads = Vec::new();
+    for topic in log.topics().await.unwrap() {
+        heads.push(format!("{topic:?} {:?}", log.latest(&topic).await.unwrap()));
+    }
+    heads
+}
+
+/// Bytes of every file under `root` but the event log, whose SQLite file
+/// changes on checkpoint without a write, by path.
+fn tree_bytes(root: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    let mut files = std::collections::BTreeMap::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if !path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("events.sqlite"))
+            {
+                files.insert(path.clone(), std::fs::read(&path).unwrap());
+            }
+        }
+    }
+    files
+}
+
+/// A host that builds its VM, state builtins and event log at the
+/// recording's root before arming the branch still keeps the branch out of
+/// it: every durable path resolves when it is used.
+#[test]
+fn state_built_before_the_branch_is_armed_stays_out_of_the_recording() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let hook_marker = dirs.markers.join("hook-marker");
+    let exec_marker = dirs.markers.join("exec-marker");
+    let source = mark_script(&hook_marker, &exec_marker);
+    record(&source, &dirs.tapes, &dirs.workspace);
+    let recording = recording_state(&dirs.workspace);
+    let state = dirs.workspace.parent().unwrap().join("branch-state");
+    let plan = BranchPlan {
+        tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 2,
+        workspace_root: dirs.workspace.clone(),
+        state_root: state.clone(),
+    };
+    let workspace = dirs.workspace;
+    let (output, report, before, after) = harn_vm::on_vm_stack(move || {
+        harn_vm::reset_thread_local_state();
+        let chunk = harn_vm::compile_source(&source).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(harn_clock::test_support::with_local_tasks(async move {
+            let root = workspace.parent().unwrap();
+            harn_vm::stdlib::process::set_thread_execution_context(Some(
+                harn_vm::orchestration::RunExecutionRecord {
+                    cwd: Some(root.display().to_string()),
+                    project_root: Some(root.display().to_string()),
+                    ..Default::default()
+                },
+            ));
+            let mut vm = harn_vm::new_vm();
+            harn_runtime::register_vm_stdlib(&mut vm);
+            harn_vm::register_persistent_state_builtins_at_root(
+                &mut vm,
+                &workspace,
+                harn_vm::PersistentStateRoot::new(&recording),
+                "branch",
+            );
+            let log = harn_vm::event_log::install_default_at_state_root(&recording).unwrap();
+            let heads = log_heads(&log).await;
+            let before = (tree_bytes(&recording), tree_bytes(&workspace));
+            let guard = start_branch(plan).unwrap();
+            let output = guard
+                .scope()
+                .run(Box::pin(vm.execute(&chunk)))
+                .await
+                .map(|_| vm.output().to_string())
+                .map_err(|error| format!("{error:?}"));
+            harn_vm::event_log::reset_active_event_log();
+            harn_vm::stdlib::process::set_thread_execution_context(None);
+            assert_eq!(
+                log_heads(&log).await,
+                heads,
+                "the branch wrote the recording's log"
+            );
+            let after = (tree_bytes(&recording), tree_bytes(&workspace));
+            (output, guard.finish(), before, after)
+        }))
+    });
+    output.expect("the branched run succeeds");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    // Neither the recording's state nor its workspace, which also holds run
+    // records, changes.
+    let changed: Vec<_> = [(&before.0, &after.0), (&before.1, &after.1)]
+        .into_iter()
+        .flat_map(|(before, after)| {
+            after
+                .iter()
+                .filter(|(path, bytes)| before.get(*path) != Some(*bytes))
+                .map(|(path, _)| path.display().to_string())
+        })
+        .collect();
+    assert!(
+        changed.is_empty(),
+        "the branch changed the recording's {changed:?}"
+    );
+    let state = state.canonicalize().unwrap();
+    assert_eq!(
+        store_at(&state)["after_key"],
+        "done",
+        "the branch's own store"
+    );
+    assert!(
+        harn_vm::runtime_paths::event_log_sqlite_path_at_state_root(&state).exists(),
+        "the branch opened its own event log"
+    );
+}
+
+/// Two sessions share one host thread and only one branches: the other
+/// keeps its own state root, its exec runs and its clock reads live, and
+/// the branch serves its prefix as if it ran alone.
+#[test]
+fn a_branch_leaves_another_session_in_the_same_host_untouched() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let hook_marker = dirs.markers.join("hook-marker");
+    let exec_marker = dirs.markers.join("exec-marker");
+    let other_marker = dirs.markers.join("other-marker");
+    let source = mark_script(&hook_marker, &exec_marker);
+    record(&source, &dirs.tapes, &dirs.workspace);
+    std::fs::remove_file(&hook_marker).unwrap();
+    std::fs::remove_file(&exec_marker).unwrap();
+    let other_workspace = dirs.workspace.parent().unwrap().join("other");
+    std::fs::create_dir_all(&other_workspace).unwrap();
+    let other_source = format!(
+        r#"
+pipeline main(harness: Harness, task: unknown) {{
+  const now = harness.clock.now_ms()
+  harness.process.run({{program: "touch", args: [{marker}]}})
+  harness.runtime.store_set("other_key", to_string(now))
+}}
+"#,
+        marker = quote(&other_marker)
+    );
+    let state = dirs.workspace.parent().unwrap().join("branch-state");
+    let guard = start_branch(BranchPlan {
+        tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 2,
+        workspace_root: dirs.workspace.clone(),
+        state_root: state.clone(),
+    })
+    .unwrap();
+    let scope = guard.scope();
+    let (workspace, other) = (dirs.workspace, other_workspace.clone());
+    let (branched, other_run) = harn_vm::on_vm_stack(move || {
+        harn_vm::reset_thread_local_state();
+        let chunk = harn_vm::compile_source(&source).unwrap();
+        let other_chunk = harn_vm::compile_source(&other_source).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(harn_clock::test_support::with_local_tasks(async move {
+            let root = workspace.parent().unwrap();
+            harn_vm::stdlib::process::set_thread_execution_context(Some(
+                harn_vm::orchestration::RunExecutionRecord {
+                    cwd: Some(root.display().to_string()),
+                    project_root: Some(root.display().to_string()),
+                    ..Default::default()
+                },
+            ));
+            let mut vm = harn_vm::new_vm();
+            harn_runtime::register_vm_stdlib(&mut vm);
+            harn_vm::register_store_builtins(&mut vm, &workspace);
+            let mut other_vm = harn_vm::new_vm();
+            harn_runtime::register_vm_stdlib(&mut other_vm);
+            harn_vm::register_store_builtins(&mut other_vm, &other);
+            let (branched, other_run) = tokio::join!(
+                Box::pin(scope.run(vm.execute(&chunk))),
+                Box::pin(other_vm.execute(&other_chunk))
+            );
+            harn_vm::stdlib::process::set_thread_execution_context(None);
+            (
+                branched.map(|_| ()).map_err(|error| format!("{error:?}")),
+                other_run.map(|_| ()).map_err(|error| format!("{error:?}")),
+            )
+        }))
+    });
+    let report = guard.finish();
+    branched.expect("the branched run succeeds");
+    other_run.expect("the other session runs live");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(report.served_calls, 2, "report: {report:?}");
+    assert!(!exec_marker.exists(), "the branch's prefix exec ran");
+    assert!(!hook_marker.exists(), "the branch's prefix hook ran");
+    assert!(
+        other_marker.exists(),
+        "the other session's exec was refused"
+    );
+    let other_store = harn_vm::runtime_paths::store_path(&other_workspace);
+    let other_store: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&other_store).unwrap()).unwrap();
+    assert!(other_store["other_key"].is_string(), "{other_store}");
+    let branch_store = store_at(&state.canonicalize().unwrap());
+    assert!(branch_store.get("other_key").is_none(), "{branch_store}");
+}
+
+/// A tape branches from another machine's layout: a different workspace
+/// path and home directory leave every request digest unchanged.
+#[test]
+fn a_tape_recorded_under_one_root_branches_under_another() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let recorded = dirs();
+    let hook_marker = recorded.markers.join("hook-marker");
+    let exec_marker = recorded.markers.join("exec-marker");
+    let source = mark_script(&hook_marker, &exec_marker);
+    record(&source, &recorded.tapes, &recorded.workspace);
+    let elsewhere = dirs();
+    let home = elsewhere.markers.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let previous_home = std::env::var_os("HOME");
+    // SAFETY: tests here hold SERIAL, so no other thread reads the env.
+    unsafe { std::env::set_var("HOME", &home) };
+    let Branched { output, report, .. } = branch(&source, &recorded.tapes, &elsewhere.workspace, 2);
+    match previous_home {
+        // SAFETY: as above.
+        Some(previous) => unsafe { std::env::set_var("HOME", previous) },
+        None => unsafe { std::env::remove_var("HOME") },
+    }
+    output.expect("the branched run succeeds");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(report.served_calls, 2, "report: {report:?}");
 }

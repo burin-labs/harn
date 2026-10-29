@@ -57,14 +57,36 @@ fn record_full(dir: &Path) -> RunTapeGuard {
         .unwrap()
 }
 
-fn branch(dir: &Path, k: u64, workspace: &Path) -> BranchGuard {
-    start_branch(BranchPlan {
+/// A branch entered on this thread for the life of the value.
+struct TestBranch {
+    guard: BranchGuard,
+    _scope: crate::persistent_state::ScopedPersistentStateRoot,
+    _state: tempfile::TempDir,
+}
+
+impl std::ops::Deref for TestBranch {
+    type Target = BranchGuard;
+
+    fn deref(&self) -> &BranchGuard {
+        &self.guard
+    }
+}
+
+fn branch(dir: &Path, k: u64, workspace: &Path) -> TestBranch {
+    let state = tempfile::tempdir().unwrap();
+    let guard = start_branch(BranchPlan {
         tape: EventTape::load(&dir.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: k,
         workspace_root: workspace.to_path_buf(),
-        state_root: fresh_branch_state(workspace),
+        state_root: state.path().join("branch"),
     })
-    .unwrap()
+    .unwrap();
+    let _scope = guard.scope().enter();
+    TestBranch {
+        guard,
+        _scope,
+        _state: state,
+    }
 }
 
 /// A new state root for each branch, as `start_branch` requires.
@@ -194,7 +216,9 @@ fn the_request_digest_covers_every_request_setting_but_the_credential_and_sessio
 /// must be named as covered or as deliberately left out.
 #[test]
 fn every_unserialized_request_field_is_covered_or_excluded_by_the_digest() {
-    let source = include_str!("../../harn-llm/src/request.rs");
+    // Read at run time: a packaged crate cannot include a sibling's source.
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../harn-llm/src/request.rs");
+    let source = std::fs::read_to_string(path).expect("read the request payload source");
     let struct_body = source
         .split("pub struct LlmRequestPayload {")
         .nth(1)
@@ -431,11 +455,18 @@ fn a_branch_store_starts_from_the_recording_and_never_writes_its_file() {
         std::fs::read_to_string(&path).unwrap(),
         r#"{"memo": "live"}"#
     );
-    let branch_root = crate::run_tape::branch_state_root().unwrap();
+    // This store lives at the workspace root, so it lands under the branch's
+    // copy of the workspace tree.
+    let branch_root = crate::run_tape::current_branch().unwrap();
     assert!(
-        std::fs::read_to_string(branch_root.join(crate::runtime_paths::STORE_FILE))
-            .unwrap()
-            .contains("branch"),
+        std::fs::read_to_string(
+            branch_root
+                .state_root()
+                .join("workspace")
+                .join(crate::runtime_paths::STORE_FILE)
+        )
+        .unwrap()
+        .contains("branch"),
         "the branch saved into its own root"
     );
 }

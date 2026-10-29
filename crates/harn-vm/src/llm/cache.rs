@@ -139,15 +139,12 @@ fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         VmError::Runtime("__cache_put(key, value, options?): value is required".to_string())
     })?;
     let options = parse_cache_options(args.get(2))?;
-    // A branch prefix replays a run that already made this write.
-    if !crate::run_tape::prefix_active() {
-        cache_put_at(
-            &options,
-            &key,
-            super::helpers::vm_value_to_json(value),
-            now_wall_ms(),
-        )?;
-    }
+    cache_put_at(
+        &options,
+        &key,
+        super::helpers::vm_value_to_json(value),
+        now_wall_ms(),
+    )?;
 
     let mut envelope = cache_envelope_base(&options);
     envelope.put_bool("stored", true);
@@ -163,9 +160,6 @@ fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 )]
 fn cache_clear_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let options = parse_cache_options(args.first())?;
-    if crate::run_tape::prefix_active() {
-        return Ok(VmValue::Nil);
-    }
     match options.backend {
         CacheBackend::Sqlite => sqlite_clear(&options)?,
         CacheBackend::Fs => fs_clear(&options)?,
@@ -434,6 +428,10 @@ fn parse_cache_options(value: Option<&VmValue>) -> Result<CacheOptions, VmError>
         .or_else(|| read_string_field(dict, "cache_dir"))
         .map(resolve_cache_path)
         .unwrap_or_else(|| default_cache_path(backend));
+    let path = match backend {
+        CacheBackend::Mem => path,
+        _ => crate::run_tape::durable_path(&path, "model cache")?,
+    };
 
     let ttl_seconds = read_duration_field(store_dict, "ttl")
         .transpose()?

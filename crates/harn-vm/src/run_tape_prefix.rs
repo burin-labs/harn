@@ -3,10 +3,10 @@
 //! While a branch replays its prefix, every builtin and capability call is
 //! checked against its registry effect contract. Clock, random and env reads
 //! are served from the recording. The runtime store opens with what the
-//! recorded run opened and does not save until the branch goes live, and
-//! persistent cache writes were already made by the recorded run. Reads of the restored workspace, state, host facts
-//! and secrets run. Anything else would act on the world a second time, so it
-//! is refused and the branch diverges.
+//! recorded run opened. Durable state writes land in the branch's own state
+//! root (see `scope`). Reads of the restored workspace, state, host facts and
+//! secrets run. Anything else would act on the world a second time, so it is
+//! refused and the branch diverges.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -14,8 +14,7 @@ use std::sync::atomic::Ordering;
 use harn_builtin_meta::{CapabilityId, EffectAccess, EffectKind, EffectSpec, ResourceSelector};
 
 use super::{
-    process_tape, recorded_lookup, BranchState, RecordingLevel, TapeRecordKind, PREFIX_ACTIVE,
-    PROCESS_BRANCH, RECORDING_FULL,
+    process_tape, recorded_lookup, BranchState, RecordingLevel, TapeRecordKind, RECORDING_FULL,
 };
 use crate::value::{VmError, VmValue};
 
@@ -62,9 +61,8 @@ fn verdict(owner: Owner<'_>, effects: &[EffectSpec]) -> Verdict {
     }
 }
 
-/// State writes the branch itself absorbs: the runtime store, which does not
-/// save during the prefix, and the persistent cache, whose prefix writes the
-/// recorded run already made.
+/// State writes that land in the branch's own state root: the runtime store
+/// and the persistent model cache.
 pub(super) fn branch_owns_state(owner: Owner<'_>) -> bool {
     match owner {
         Some((CapabilityId::Runtime, method)) => method.starts_with("store_"),
@@ -166,7 +164,7 @@ pub(super) fn process_local(effect: &EffectSpec) -> bool {
 
 /// True while a branch replays its prefix.
 pub(crate) fn prefix_active() -> bool {
-    PREFIX_ACTIVE.load(Ordering::Acquire)
+    super::current_branch().is_some_and(|branch| branch.in_prefix())
 }
 
 /// True while a full tape may need [`record_read`].
@@ -320,7 +318,8 @@ pub(crate) fn refuse_in_prefix(name: &str, reason: &str) -> Result<(), VmError> 
     if !prefix_active() {
         return Ok(());
     }
-    let mut guard = PROCESS_BRANCH.lock().expect("branch lock poisoned");
+    let branch = super::current_branch();
+    let mut guard = branch.as_ref().map(|branch| branch.state());
     let Some(state) = guard.as_mut() else {
         return Ok(());
     };
@@ -344,17 +343,12 @@ pub(crate) fn store_seed(
     read: impl FnOnce() -> Option<serde_json::Value>,
 ) -> Result<Option<serde_json::Value>, VmError> {
     let seeded = {
-        let mut guard = PROCESS_BRANCH.lock().expect("branch lock poisoned");
-        match guard.as_mut() {
-            None => None,
-            Some(state) => {
-                let id = store_identity(
-                    path,
-                    &[
-                        super::branch_state_root(),
-                        Some(state.workspace_root.clone()),
-                    ],
-                );
+        let branch = super::current_branch();
+        let mut guard = branch.as_ref().map(|branch| branch.state());
+        match (branch.as_ref(), guard.as_mut()) {
+            (Some(branch), Some(state)) => {
+                // `path` has already been remapped under the branch's root.
+                let id = store_identity(path, &[(branch.state_root().to_path_buf(), "")]);
                 match state.store_seeds.get(&id) {
                     Some(seed) => Some(Some(seed.clone())),
                     None if state.live => Some(None),
@@ -370,6 +364,7 @@ pub(crate) fn store_seed(
                     }
                 }
             }
+            _ => None,
         }
     };
     let contents = match seeded {
@@ -381,10 +376,15 @@ pub(crate) fn store_seed(
             namespace: STORE_SEED_NAMESPACE.to_string(),
             key: store_identity(
                 path,
-                &[
-                    tape.workspace_root().map(crate::runtime_paths::state_root),
-                    tape.workspace_root().map(Path::to_path_buf),
-                ],
+                &tape
+                    .workspace_root()
+                    .map(|root| {
+                        vec![
+                            (crate::runtime_paths::state_root(root), ""),
+                            (root.to_path_buf(), "workspace"),
+                        ]
+                    })
+                    .unwrap_or_default(),
             ),
             after_calls: tape.next_llm_call.load(Ordering::SeqCst),
             value: contents.as_ref().map(|value| {
@@ -396,14 +396,18 @@ pub(crate) fn store_seed(
     Ok(contents)
 }
 
-/// A store's identity across the recorded run and a branch: its path under
-/// the first of `roots` that holds it, the state root before the workspace.
-fn store_identity(path: &Path, roots: &[Option<PathBuf>]) -> String {
+/// A store's identity across the recorded run and a branch: where it lands
+/// under a branch's state root. `roots` pairs each root with its mount there,
+/// the state root before the workspace that may hold it.
+fn store_identity(path: &Path, roots: &[(PathBuf, &str)]) -> String {
     roots
         .iter()
-        .flatten()
-        .find_map(|root| path.strip_prefix(root).ok())
-        .unwrap_or(path)
+        .find_map(|(root, mount)| {
+            path.strip_prefix(root)
+                .ok()
+                .map(|rest| Path::new(mount).join(rest))
+        })
+        .unwrap_or_else(|| path.to_path_buf())
         .display()
         .to_string()
 }

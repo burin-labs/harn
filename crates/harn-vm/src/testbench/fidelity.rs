@@ -120,7 +120,11 @@ pub fn compare(recorded: &EventTape, replay: &EventTape, mode: FidelityMode) -> 
             ),
         }]
     } else {
-        compare_mode(recorded, replay, mode)
+        let mut divergences = compare_mode(recorded, replay, mode);
+        for divergence in &mut divergences {
+            name_request_difference(recorded, replay, divergence);
+        }
+        divergences
     };
     let baseline = recorded.records.len().max(replay.records.len()).max(1);
     let score = match mode {
@@ -142,6 +146,42 @@ pub fn compare(recorded: &EventTape, replay: &EventTape, mode: FidelityMode) -> 
         divergences,
         score,
     }
+}
+
+fn llm_calls(tape: &EventTape) -> Vec<(u64, &TapeRecordKind)> {
+    tape.records
+        .iter()
+        .filter(|record| matches!(record.kind, TapeRecordKind::LlmCall { .. }))
+        .map(|record| (record.seq, &record.kind))
+        .collect()
+}
+
+/// Append the first request field that differs to a request-digest
+/// divergence, matching the recorded call to the replay's call in the same
+/// position. Tapes that kept no request body say so instead.
+fn name_request_difference(recorded: &EventTape, replay: &EventTape, divergence: &mut Divergence) {
+    if divergence.category != "llm_request_digest" {
+        return;
+    }
+    let recorded_calls = llm_calls(recorded);
+    let Some(position) = recorded_calls
+        .iter()
+        .position(|(seq, _)| Some(*seq) == divergence.seq)
+    else {
+        return;
+    };
+    let detail = llm_calls(replay).get(position).map_or_else(
+        || "the replay made no call at this position".to_string(),
+        |(_, replayed)| {
+            crate::run_tape::request_difference(
+                recorded,
+                recorded_calls[position].1,
+                replay,
+                replayed,
+            )
+        },
+    );
+    divergence.message = format!("{}; {detail}", divergence.message);
 }
 
 fn compare_mode(recorded: &EventTape, replay: &EventTape, mode: FidelityMode) -> Vec<Divergence> {
