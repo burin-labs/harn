@@ -12,6 +12,28 @@ pub(super) struct RenameSites {
     pub shadows: Vec<ShadowSite>,
 }
 
+pub(super) fn is_constructor(tree: &Tree, source: &str, seed: &Node) -> bool {
+    let mut pending = vec![tree.root_node()];
+    while let Some(node) = pending.pop() {
+        if matches!(
+            node.kind(),
+            "constructor_declaration" | "compact_constructor_declaration"
+        ) {
+            if let Some(name) = node.child_by_field_name("name") {
+                let line = seed.line as usize;
+                if (node.start_position().row + 1 == line || name.start_position().row + 1 == line)
+                    && source.get(name.byte_range()) == Some(seed.name.as_str())
+                {
+                    return true;
+                }
+            }
+        }
+        let mut cursor = node.walk();
+        pending.extend(node.named_children(&mut cursor));
+    }
+    false
+}
+
 pub(super) fn check_new_name(name: &str) -> Result<(), String> {
     if crate::ast::java::is_object_method(name) {
         Err("the proposed Java name may change an Object dispatch contract".into())

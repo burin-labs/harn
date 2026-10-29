@@ -16,7 +16,8 @@
 //! - `no_match`    — `symbol_ref` did not resolve to a node in the graph.
 //! - `ambiguous_symbol` — multiple distinct symbols match `symbol_ref`,
 //!   or an occurrence cannot be proved to refer to the seed binding.
-//! - `unsupported_language` — at least one in-scope file uses a grammar
+//! - `unsupported_language` — the requested language-specific rename is unsupported,
+//!   or at least one in-scope file uses a grammar
 //!   that does not have an identifier table here yet.
 //! - `syntax_error` — a rewritten file failed re-parse with `validate=true`.
 //! - `invalid_identifier` — `new_name` is empty / shaped wrong for any
@@ -222,12 +223,44 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         ));
     }
 
-    // Java type references and public-type file moves are not yet represented
-    // by the rename planner; changing only the declaration breaks callers.
-    if seed_node.language == "java" && seed_node.kind == NodeKind::Type {
-        return Ok(ambiguous_response_with_details(
+    // Constructors are type-renaming seeds, not independent method renames.
+    let java_constructor = if seed_node.language == "java"
+        && seed_node.kind == NodeKind::Function
+        && state.symbols.nodes_named(&seed_node.name).iter().any(|id| {
+            state
+                .symbols
+                .node(*id)
+                .is_some_and(|node| node.kind == NodeKind::Type && node.path == seed_node.path)
+        }) {
+        let source = read_source(BUILTIN, &state.root, &seed_path, session_id.as_deref())?;
+        let tree = match ast_api::parse_tree(&source, Language::Java) {
+            Ok(tree) => tree,
+            Err(err) => {
+                return Ok(syntax_error_response(
+                    &env,
+                    format!("`{seed_path}` failed to parse: {err}"),
+                ))
+            }
+        };
+        if tree.root_node().has_error() {
+            return Ok(syntax_error_response(
+                &env,
+                format!("`{seed_path}` does not parse before the edit"),
+            ));
+        }
+        super::rename_java::is_constructor(&tree, &source, seed_node)
+    } else {
+        false
+    };
+    if seed_node.language == "java" && (seed_node.kind == NodeKind::Type || java_constructor) {
+        return Ok(emit_response(
             &env,
-            "rename aborted without writes: Java type references and public-type file moves cannot yet be proven by this rename path",
+            "unsupported_language",
+            ResponseExtras {
+                details: "Java type and constructor renames are not supported: references and public-type file moves cannot yet be proven; no files changed".into(),
+                fallback_suggestion: Some(TEXT_PATCH_FALLBACK.to_string()),
+                ..Default::default()
+            },
         ));
     }
 

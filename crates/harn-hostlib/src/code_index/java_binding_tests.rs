@@ -127,7 +127,7 @@ fn java_type_rename_refuses_unproven_references_before_writing() {
                     let result = super::rename::run(&ws.index, &[dict(&request)]).unwrap();
                     assert_eq!(
                         s(field(&result, "result")),
-                        "ambiguous_symbol",
+                        "unsupported_language",
                         "{result:?}"
                     );
                     assert_eq!(n(field(&result, "match_count")), 0, "{result:?}");
@@ -160,6 +160,63 @@ fn java_type_rename_refuses_unproven_references_before_writing() {
         "{result:?}"
     );
     ws.assert_unchanged();
+}
+
+#[test]
+fn java_constructor_seed_refuses_type_rename_before_writing() {
+    let source =
+        "package lab;\npublic final class DocumentStore {\n  public DocumentStore() {}\n}\n";
+    let caller =
+        "package lab; final class KnownPage { DocumentStore store = new DocumentStore(); }";
+    for backend in ["syntax_tree", "auto", "language_server"] {
+        for dry_run in [false, true] {
+            let ws = Workspace::new(&[
+                ("lab/DocumentStore.java", source),
+                ("lab/KnownPage.java", caller),
+            ]);
+            let result = super::rename::run(
+                &ws.index,
+                &[dict(&[
+                    (
+                        "symbol_ref",
+                        dict(&[
+                            ("name", vm_string("DocumentStore")),
+                            ("path", vm_string("lab/DocumentStore.java")),
+                            ("line", VmValue::Int(3)),
+                            ("kind", vm_string("Function")),
+                        ]),
+                    ),
+                    ("new_name", vm_string("DocumentLibrary")),
+                    ("scope", vm_string("workspace")),
+                    ("backend", vm_string(backend)),
+                    ("dry_run", VmValue::Bool(dry_run)),
+                ])],
+            )
+            .unwrap();
+            assert_eq!(
+                s(field(&result, "result")),
+                "unsupported_language",
+                "{result:?}"
+            );
+            assert_eq!(n(field(&result, "match_count")), 0, "{result:?}");
+            ws.assert_unchanged();
+        }
+    }
+}
+
+#[test]
+fn java_same_named_method_is_not_a_constructor() {
+    let source = "package lab;\nfinal class DocumentStore {\n  void DocumentStore() {}\n}\n";
+    let ws = Workspace::new(&[("lab/DocumentStore.java", source)]);
+    let index = ws.index.lock().unwrap();
+    let state = index.as_ref().unwrap();
+    let seed = state
+        .symbols
+        .iter_nodes()
+        .find(|node| node.kind == NodeKind::Function && node.name == "DocumentStore")
+        .expect("the method is indexed");
+    let tree = crate::ast::api::parse_tree(source, crate::ast::Language::Java).unwrap();
+    assert!(!super::rename_java::is_constructor(&tree, source, seed));
 }
 
 fn assert_known_call(graph: &SymbolGraph, path: &str) {
