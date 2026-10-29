@@ -26,11 +26,12 @@ pub(crate) async fn host_agent_dispatch_tool_call(
         )))
         }
     };
-    let recording = match begin(&call, tools) {
+    let mut recording = match begin(&call, tools) {
         Taped::Served(result) => return result,
         Taped::Live(recording) => recording,
     };
-    let result = Box::pin(super::dispatch_tool_call_live(ctx, call, tools, options)).await;
+    let live = Box::pin(super::dispatch_tool_call_live(ctx, call, tools, options));
+    let result = crate::run_tape::capture_tool_reminders(&mut recording, live).await;
     finish(recording, &result);
     result
 }
@@ -67,8 +68,9 @@ fn begin(call: &DictMap, tools: Option<&VmValue>) -> Taped {
     let recording = crate::run_tape::begin_tool_call(&id, &name, &args, read_only);
     match crate::run_tape::serve_tool_call(&id, &name, &args) {
         ToolServe::Live => Taped::Live(recording),
-        ToolServe::Served(recorded) => {
-            if let Some(recording) = recording {
+        ToolServe::Served(recorded, reminders) => {
+            if let Some(mut recording) = recording {
+                recording.reminders = reminders;
                 crate::run_tape::finish_tool_call(recording, Ok(recorded.clone()));
             }
             Taped::Served(result_from_recorded(recorded))

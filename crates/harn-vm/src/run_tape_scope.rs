@@ -168,11 +168,20 @@ pub(crate) fn durable_path(path: &Path, writer: &str) -> Result<PathBuf, VmError
     Ok(path.to_path_buf())
 }
 
-/// [`durable_path`] for a path resolver that cannot fail. A refused path is
-/// still returned, but the branch has diverged and fails closed at its next
-/// model call.
+/// [`durable_path`] for a path resolver that cannot fail. A refused path
+/// diverges the branch, and the write lands under the branch's state root
+/// instead of the recording's.
 pub(crate) fn branch_path(path: PathBuf, writer: &str) -> PathBuf {
-    durable_path(&path, writer).unwrap_or(path)
+    match durable_path(&path, writer) {
+        Ok(mapped) => mapped,
+        Err(_) => match current_branch() {
+            Some(branch) => branch
+                .state_root
+                .join("refused")
+                .join(writer.replace(' ', "-")),
+            None => path,
+        },
+    }
 }
 
 /// The state root a scope that names `root` resolves to: inside a branch the
@@ -185,13 +194,18 @@ pub(crate) fn scoped_state_root(branch: Option<&BranchHandle>, root: &Path) -> P
     }
 }
 
-/// The event log a branch writes instead of a durable `active` one. An
-/// in-memory log is process-local and stays shared.
-pub(crate) fn branch_event_log(active: Option<&Arc<AnyEventLog>>) -> Option<Arc<AnyEventLog>> {
+/// The event log a branch writes instead of a durable `active` one: `None`
+/// outside a branch or for an in-memory log, which is process-local and stays
+/// shared. `Some(None)` when the branch's own log cannot open: the branch then
+/// writes no log rather than the host's.
+#[allow(clippy::option_option)] // Outer: in a branch. Inner: its log opened.
+pub(crate) fn branch_event_log(
+    active: Option<&Arc<AnyEventLog>>,
+) -> Option<Option<Arc<AnyEventLog>>> {
     if matches!(active.map(AsRef::as_ref), Some(AnyEventLog::Memory(_))) {
         return None;
     }
-    current_branch()?.event_log()
+    Some(current_branch()?.event_log())
 }
 
 /// Refuse a state root that is, sits inside, or holds a tree the recording

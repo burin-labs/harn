@@ -72,84 +72,82 @@ where
     let worker_started_at = started_at.clone();
     let worker_operation = operation.clone();
     let worker_descriptor = descriptor.clone();
-    crate::runtime_stack::builder()
-        .name(format!("hso-worker-{worker_handle_id}"))
-        .spawn(move || {
-            let started = Instant::now();
-            let result = run(cancel.clone());
-            let entry = {
-                let mut store = HANDLE_STORE
-                    .lock()
-                    .expect("stdlib long-running handle store poisoned");
-                store.remove(&worker_handle_id)
-            };
-            if cancel.load(Ordering::Acquire) {
-                return;
+    crate::task_spawn::named_thread(format!("hso-worker-{worker_handle_id}"), move || {
+        let started = Instant::now();
+        let result = run(cancel.clone());
+        let entry = {
+            let mut store = HANDLE_STORE
+                .lock()
+                .expect("stdlib long-running handle store poisoned");
+            store.remove(&worker_handle_id)
+        };
+        if cancel.load(Ordering::Acquire) {
+            return;
+        }
+        let Some(entry) = entry else {
+            return;
+        };
+        let mut payload = serde_json::Map::new();
+        payload.insert(
+            "handle_id".to_string(),
+            serde_json::Value::String(worker_handle_id),
+        );
+        payload.insert(
+            "operation".to_string(),
+            serde_json::Value::String(worker_operation),
+        );
+        payload.insert(
+            "command_or_op_descriptor".to_string(),
+            serde_json::Value::String(worker_descriptor),
+        );
+        payload.insert(
+            "started_at".to_string(),
+            serde_json::Value::String(worker_started_at),
+        );
+        payload.insert(
+            "ended_at".to_string(),
+            serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+        );
+        payload.insert(
+            "duration_ms".to_string(),
+            serde_json::Value::Number((started.elapsed().as_millis() as u64).into()),
+        );
+        match result {
+            Ok(value) => {
+                payload.insert(
+                    "status".to_string(),
+                    serde_json::Value::String("completed".to_string()),
+                );
+                payload.insert("result".to_string(), value);
             }
-            let Some(entry) = entry else {
-                return;
-            };
-            let mut payload = serde_json::Map::new();
-            payload.insert(
-                "handle_id".to_string(),
-                serde_json::Value::String(worker_handle_id),
-            );
-            payload.insert(
-                "operation".to_string(),
-                serde_json::Value::String(worker_operation),
-            );
-            payload.insert(
-                "command_or_op_descriptor".to_string(),
-                serde_json::Value::String(worker_descriptor),
-            );
-            payload.insert(
-                "started_at".to_string(),
-                serde_json::Value::String(worker_started_at),
-            );
-            payload.insert(
-                "ended_at".to_string(),
-                serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
-            );
-            payload.insert(
-                "duration_ms".to_string(),
-                serde_json::Value::Number((started.elapsed().as_millis() as u64).into()),
-            );
-            match result {
-                Ok(value) => {
-                    payload.insert(
-                        "status".to_string(),
-                        serde_json::Value::String("completed".to_string()),
-                    );
-                    payload.insert("result".to_string(), value);
-                }
-                Err(error) => {
-                    payload.insert(
-                        "status".to_string(),
-                        serde_json::Value::String("failed".to_string()),
-                    );
-                    payload.insert("error".to_string(), serde_json::Value::String(error));
-                }
+            Err(error) => {
+                payload.insert(
+                    "status".to_string(),
+                    serde_json::Value::String("failed".to_string()),
+                );
+                payload.insert("error".to_string(), serde_json::Value::String(error));
             }
-            let content = serde_json::to_string(&payload).unwrap_or_default();
-            crate::orchestration::agent_inbox::push(
-                &entry.session_id,
-                "tool_result",
-                &content,
-                "stdlib.long_running",
-            );
-        })
-        .map_err(|error| {
-            let entry = {
-                let mut store = HANDLE_STORE
-                    .lock()
-                    .expect("stdlib long-running handle store poisoned");
-                store.remove(&handle_id)
-            };
-            if let Some(entry) = entry {
-                entry.cancel.store(true, Ordering::Release);
-            }
-            format!("failed to spawn stdlib long-running worker: {error}")
-        })?;
+        }
+        let content = serde_json::to_string(&payload).unwrap_or_default();
+        crate::orchestration::agent_inbox::push(
+            &entry.session_id,
+            "tool_result",
+            &content,
+            "stdlib.long_running",
+        );
+    })
+    .map_err(|error| {
+        let entry = {
+            let mut store = HANDLE_STORE
+                .lock()
+                .expect("stdlib long-running handle store poisoned");
+            store.remove(&handle_id)
+        };
+        if let Some(entry) = entry {
+            entry.cancel.store(true, Ordering::Release);
+        }
+        format!("failed to spawn stdlib long-running worker: {error}")
+    })?;
 
     Ok(OperationHandleInfo {
         handle_id,

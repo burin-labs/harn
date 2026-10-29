@@ -254,12 +254,10 @@ impl EventLogSink {
         let first_error = Arc::new(Mutex::new(None));
         let dispatch = if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-            handle.spawn(run_event_log_sink_worker(
-                log,
-                topic,
-                receiver,
-                first_error.clone(),
-            ));
+            crate::task_spawn::spawn_on(
+                &handle,
+                run_event_log_sink_worker(log, topic, receiver, first_error.clone()),
+            );
             EventLogSinkDispatch::Async(sender)
         } else {
             EventLogSinkDispatch::Blocking { log, topic }
@@ -366,7 +364,7 @@ async fn flush_event_log(log: Arc<AnyEventLog>) -> Result<(), AgentEventSinkErro
     let result = if event_log_flush_schedule(&log) == EventLogFlushSchedule::BlockingPool
         && tokio::runtime::Handle::try_current().is_ok()
     {
-        tokio::task::spawn_blocking(move || futures::executor::block_on(log.flush()))
+        crate::task_spawn::spawn_blocking(move || futures::executor::block_on(log.flush()))
             .await
             .map_err(|error| {
                 AgentEventSinkError::new("event_log", format!("flush task failed: {error}"))

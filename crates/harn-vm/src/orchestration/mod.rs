@@ -112,6 +112,7 @@ pub use policy::*;
 pub(crate) use policy::{is_policy_machinery_consent_call, swap_execution_policy_stack};
 
 mod ambient_scope;
+pub(crate) use ambient_scope::blocking::carry_ambient;
 pub use ambient_scope::blocking::run_blocking_with_ambient;
 pub(crate) use ambient_scope::scope_persistent_state_context;
 pub use ambient_scope::{

@@ -254,23 +254,21 @@ fn start_watcher(path: PathBuf, running: &mut Vec<(PathBuf, Arc<WatchState>)>) {
     let thread_path = path.clone();
     let (wake, events) = mpsc::channel();
     let thread_wake = wake.clone();
-    let thread = crate::runtime_stack::builder()
-        .name("harn-session-wal-watch".to_string())
-        .spawn(move || {
-            let _exit = WatchExit {
-                path: thread_path.clone(),
-                stop: cleanup_stop,
-            };
-            watch_loop(
-                thread_path,
-                reader,
-                initial_version,
-                thread_stop,
-                thread_wake,
-                events,
-            );
-        })
-        .expect("start session WAL watcher");
+    let thread = crate::task_spawn::named_thread("harn-session-wal-watch".to_string(), move || {
+        let _exit = WatchExit {
+            path: thread_path.clone(),
+            stop: cleanup_stop,
+        };
+        watch_loop(
+            thread_path,
+            reader,
+            initial_version,
+            thread_stop,
+            thread_wake,
+            events,
+        );
+    })
+    .expect("start session WAL watcher");
     let thread_id = thread.thread().id();
     running.push((
         path,

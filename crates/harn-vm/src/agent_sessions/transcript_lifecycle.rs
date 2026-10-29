@@ -583,6 +583,7 @@ pub(crate) fn inject_provider_reminder(
     id: &str,
     reminder: crate::llm::helpers::SystemReminder,
 ) -> Result<ReminderInjectionReport, String> {
+    crate::run_tape::note_injected_reminder(id, &reminder);
     inject_reminder_with_policy(id, reminder, true)
 }
 

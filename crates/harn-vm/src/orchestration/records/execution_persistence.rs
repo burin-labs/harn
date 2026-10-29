@@ -196,7 +196,10 @@ fn persist_flight_recording(
         ),
         // A caller-supplied directory may contain unrelated JSON. Rotation is
         // safe only in Harn's dedicated managed directory.
-        FlightRecordingStorage::Custom { output } => (output.to_path_buf(), usize::MAX),
+        FlightRecordingStorage::Custom { output } => (
+            crate::run_tape::branch_path(output.to_path_buf(), "flight recording"),
+            usize::MAX,
+        ),
     };
     crate::flight_recorder::persist_recording(&recording, &path, retain_files).map(Some)
 }

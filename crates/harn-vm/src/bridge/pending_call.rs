@@ -28,12 +28,12 @@ impl Drop for PendingCallRegistration {
         let pending = self.pending.clone();
         let id = self.id;
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(async move {
+            crate::task_spawn::spawn_on(&runtime, async move {
                 pending.lock().await.remove(&id);
             });
         } else {
             // A caller may drop a previously polled future outside its runtime.
-            crate::runtime_stack::spawn(move || {
+            crate::task_spawn::thread(move || {
                 pending.blocking_lock().remove(&id);
             });
         }

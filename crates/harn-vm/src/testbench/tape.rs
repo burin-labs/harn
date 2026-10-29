@@ -254,6 +254,11 @@ pub enum TapeRecordKind {
         /// re-executes such a call and counts any difference as divergence.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unservable: Option<String>,
+        /// Reminders the dispatch injected, each `{session_id, reminder}`. A
+        /// served dispatch runs no post-tool providers, so the branch injects
+        /// these instead.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        reminders: Vec<serde_json::Value>,
     },
     /// Completed typed evaluation, including its exact request and receipt.
     DecisionEvaluation {

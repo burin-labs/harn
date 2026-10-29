@@ -133,7 +133,7 @@ fn a_zero_edit_branch_serves_the_prefix_and_reapplies_tool_effects() {
     // The tool named by the served response returns its recorded result and
     // writes its recorded effect into the branch workspace without running.
     match serve_tool_call("t1", "write", &serde_json::json!({"path": "src/t1.txt"})) {
-        ToolServe::Served(outcome) => assert_eq!(outcome, ok(serde_json::json!("done"))),
+        ToolServe::Served(outcome, _) => assert_eq!(outcome, ok(serde_json::json!("done"))),
         _ => panic!("expected a served tool call"),
     }
     assert_eq!(
@@ -472,6 +472,39 @@ fn a_branch_store_starts_from_the_recording_and_never_writes_its_file() {
 }
 
 #[test]
+fn a_blocking_job_and_a_thread_resolve_writes_inside_the_branch() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    {
+        let _guard = record_full(tmp.path());
+        record_llm_call(&request("work"), &result("done", None));
+    }
+    let _branch = branch(tmp.path(), 1, tmp.path());
+    let path = tmp.path().join("written-off-thread.json");
+    let resolve = |path: PathBuf| move || crate::run_tape::durable_path(&path, "probe").unwrap();
+    let expected = resolve(path.clone())();
+    assert_ne!(expected, path, "the branch remaps the workspace");
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let blocking = runtime
+        .block_on(async { crate::task_spawn::spawn_blocking(resolve(path.clone())).await })
+        .unwrap();
+    assert_eq!(blocking, expected, "a blocking job keeps the branch");
+    let threaded = crate::task_spawn::thread(resolve(path.clone()))
+        .join()
+        .unwrap();
+    assert_eq!(threaded, expected, "a thread keeps the branch");
+
+    // The raw spawn drops the branch: the write would reach the recording's file.
+    let raw = crate::runtime_stack::spawn(resolve(path.clone()))
+        .join()
+        .unwrap();
+    assert_eq!(raw, path);
+}
+
+#[test]
 fn a_torn_final_tape_record_loads_the_complete_ones() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let tmp = tempfile::tempdir().unwrap();
@@ -578,7 +611,7 @@ fn a_prefix_tool_call_with_a_fresh_id_is_served_by_tool_and_arguments() {
     let args = serde_json::json!({"path": "src/t1.txt"});
     assert!(matches!(
         serve_tool_call("tc_7", "write", &args),
-        ToolServe::Served(_)
+        ToolServe::Served(..)
     ));
     // A second identical call has no recording left to serve and diverges.
     assert!(matches!(

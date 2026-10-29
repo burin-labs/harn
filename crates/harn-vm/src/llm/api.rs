@@ -567,7 +567,7 @@ async fn execute_provider_request(
     let observed = observed.clone();
     let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
     let reasoning_receipts = observed.reasoning_receipts();
-    tokio::task::spawn(crate::orchestration::scope_inline_subtask(async move {
+    crate::task_spawn::spawn(async move {
         super::reasoning_receipt::scope_request_receipts(
             reasoning_receipts,
             Box::pin(async {
@@ -591,7 +591,7 @@ async fn execute_provider_request(
             }),
         )
         .await
-    }))
+    })
     .await
     .map_err(|join_err| {
         VmError::Thrown(VmValue::string(format!(

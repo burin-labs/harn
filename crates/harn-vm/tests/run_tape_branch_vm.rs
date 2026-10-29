@@ -99,6 +99,27 @@ fn record(source: &str, tapes: &Path, workspace: &Path) -> String {
     output
 }
 
+/// The tape's tool-call records, for a failure message.
+fn recorded_tool_calls(tapes: &Path) -> String {
+    std::fs::read_to_string(tapes.join(TAPE_FILE_NAME))
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| line.contains("\"tool_call\""))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Remove a marker the recorded run must have made.
+fn remove_marker(marker: &Path, tapes: &Path) {
+    if let Err(error) = std::fs::remove_file(marker) {
+        panic!(
+            "the recorded run made no {}: {error}\ntool calls: {}",
+            marker.display(),
+            recorded_tool_calls(tapes)
+        );
+    }
+}
+
 /// Point the host at the recording's session store for `workspace`, as it is
 /// configured before a branch is armed.
 fn name_session_store(workspace: &Path) {
@@ -254,7 +275,8 @@ fn a_branch_prefix_serves_exec_store_write_and_hook_without_running_them() {
     let recorded = record(&source, &dirs.tapes, &dirs.workspace);
     assert!(
         recorded.contains("[harn] done"),
-        "recorded output: {recorded}"
+        "recorded output: {recorded}\ntool calls: {}",
+        recorded_tool_calls(&dirs.tapes)
     );
     let store_path = harn_vm::runtime_paths::store_path(&dirs.workspace);
     assert!(
@@ -267,8 +289,8 @@ fn a_branch_prefix_serves_exec_store_write_and_hook_without_running_them() {
     assert_eq!(store["tool_key"], "tool ran", "store: {store}");
     assert!(store["script_key"].is_string(), "store: {store}");
 
-    std::fs::remove_file(&hook_marker).unwrap();
-    std::fs::remove_file(&exec_marker).unwrap();
+    remove_marker(&hook_marker, &dirs.tapes);
+    remove_marker(&exec_marker, &dirs.tapes);
     let sentinel = "{\"sentinel\": true}";
     std::fs::write(&store_path, sentinel).unwrap();
 
@@ -305,6 +327,34 @@ fn a_branch_prefix_serves_exec_store_write_and_hook_without_running_them() {
 /// each served call consumed its scripted response, so live call 2 gets the
 /// done text rather than a second `mark` tool call.
 #[test]
+fn a_served_tool_call_injects_the_reminders_its_recording_injected() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dirs = dirs();
+    let hook_marker = dirs.markers.join("hook-marker");
+    let exec_marker = dirs.markers.join("exec-marker");
+    // A runtime signal in the tool's result fires a post-tool review reminder
+    // that the next model call's request carries.
+    let source = mark_script(&hook_marker, &exec_marker).replace(
+        r#"return "marked""#,
+        r#"return "thread 'main' panicked at src/lib.rs:3:5: boom""#,
+    );
+    record(&source, &dirs.tapes, &dirs.workspace);
+    let tape = std::fs::read_to_string(dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+    assert!(
+        tape.contains("Grounded adversarial review"),
+        "the recording injected the reminder"
+    );
+
+    let Branched { output, report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 2);
+    let output = output.expect("the branched run succeeds");
+    assert!(output.contains("[harn] done"), "branch output: {output}");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+    assert_eq!(report.served_calls, 2, "report: {report:?}");
+}
+
+#[test]
 fn a_branch_live_tail_continues_the_mock_script_after_the_served_prefix() {
     let _serial = SERIAL
         .lock()
@@ -315,8 +365,8 @@ fn a_branch_live_tail_continues_the_mock_script_after_the_served_prefix() {
     let source = mark_script(&hook_marker, &exec_marker);
 
     record(&source, &dirs.tapes, &dirs.workspace);
-    std::fs::remove_file(&hook_marker).unwrap();
-    std::fs::remove_file(&exec_marker).unwrap();
+    remove_marker(&hook_marker, &dirs.tapes);
+    remove_marker(&exec_marker, &dirs.tapes);
     let recorded_store =
         std::fs::read_to_string(harn_vm::runtime_paths::store_path(&dirs.workspace)).unwrap();
 
@@ -391,10 +441,11 @@ pipeline main(harness: Harness, task: unknown) {{
     let recorded = record(&source, &dirs.tapes, &dirs.workspace);
     assert!(
         recorded.contains("[harn] done"),
-        "recorded output: {recorded}"
+        "recorded output: {recorded}\ntool calls: {}",
+        recorded_tool_calls(&dirs.tapes)
     );
     assert!(exec_marker.exists(), "the recorded run ran the exec");
-    std::fs::remove_file(&exec_marker).unwrap();
+    remove_marker(&exec_marker, &dirs.tapes);
 
     let Branched { output, report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 1);
     assert!(output.is_err(), "a refused exec fails the run: {output:?}");
@@ -883,8 +934,8 @@ fn a_branch_leaves_another_session_in_the_same_host_untouched() {
     let other_marker = dirs.markers.join("other-marker");
     let source = mark_script(&hook_marker, &exec_marker);
     record(&source, &dirs.tapes, &dirs.workspace);
-    std::fs::remove_file(&hook_marker).unwrap();
-    std::fs::remove_file(&exec_marker).unwrap();
+    remove_marker(&hook_marker, &dirs.tapes);
+    remove_marker(&exec_marker, &dirs.tapes);
     let other_workspace = dirs.workspace.parent().unwrap().join("other");
     std::fs::create_dir_all(&other_workspace).unwrap();
     let other_source = format!(
@@ -987,4 +1038,118 @@ fn a_tape_recorded_under_one_root_branches_under_another() {
     output.expect("the branched run succeeds");
     assert_eq!(report.divergence, None, "report: {report:?}");
     assert_eq!(report.served_calls, 2, "report: {report:?}");
+}
+
+/// A pre-loop script whose `setup` statement runs inside a spawned task, then
+/// one model call.
+fn spawned_script(setup: &str) -> String {
+    format!(
+        r#"
+import {{ agent_loop }} from "std/agent/loop"
+import {{ llm_text, with_llm_script }} from "std/testing"
+
+pipeline main(harness: Harness, task: unknown) {{
+  const id = harness.random.uuid()
+  {setup}
+  const result = with_llm_script(
+    harness.llm,
+    [llm_text("<user_response>Done.</user_response><done>##DONE##</done>")],
+    {{ ->
+      return agent_loop(
+        harness,
+        "finish run " + id,
+        nil,
+        {{provider: "mock", max_iterations: 1, loop_until_done: true, session_id: "branch-" + id}},
+      )
+    }},
+  )
+  harness.stdio.log(result.status)
+}}
+"#
+    )
+}
+
+/// Record `source`, then branch it at K=1: the spawned task must belong to the
+/// branch, so its exec is refused rather than run and its store write never
+/// reaches the recording's store.
+fn assert_spawned_task_stays_in_the_branch(source: &str, marker: &Path) {
+    let dirs = dirs();
+    let recorded = record(source, &dirs.tapes, &dirs.workspace);
+    assert!(
+        recorded.contains("[harn] done"),
+        "recorded output: {recorded}\ntool calls: {}",
+        recorded_tool_calls(&dirs.tapes)
+    );
+    assert!(marker.exists(), "the recorded run ran the spawned exec");
+    std::fs::remove_file(marker).unwrap();
+    let recorded_store =
+        std::fs::read_to_string(harn_vm::runtime_paths::store_path(&dirs.workspace)).unwrap();
+
+    let Branched { output, report, .. } = branch(source, &dirs.tapes, &dirs.workspace, 1);
+    assert!(
+        !marker.exists(),
+        "the branch re-ran a spawned task's exec: {output:?}"
+    );
+    let divergence = report
+        .divergence
+        .expect("the refused exec is the divergence");
+    assert_eq!(divergence.what, "refused effect", "{divergence:?}");
+    assert_eq!(
+        std::fs::read_to_string(harn_vm::runtime_paths::store_path(&dirs.workspace)).unwrap(),
+        recorded_store,
+        "a spawned task wrote the recording's store"
+    );
+}
+
+#[test]
+fn a_parallel_race_task_in_the_prefix_belongs_to_the_branch() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let marker = tempfile::tempdir().unwrap().keep().join("race-marker");
+    let setup = format!(
+        r#"try {{
+    harness.runtime.parallel_race([1], {{ _x ->
+      harness.process.run({{program: "touch", args: [{marker}]}})
+      harness.runtime.store_set("race_key", "raced")
+      return "raced"
+    }})
+  }}"#,
+        marker = quote(&marker),
+    );
+    assert_spawned_task_stays_in_the_branch(&spawned_script(&setup), &marker);
+}
+
+#[test]
+fn a_supervisor_child_in_the_prefix_belongs_to_the_branch() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let marker = tempfile::tempdir()
+        .unwrap()
+        .keep()
+        .join("supervisor-marker");
+    let setup = format!(
+        r#"const done = harness.runtime.channel("child-done-" + id, 1)
+  const sup = harness.runtime.supervisor_start({{
+    name: "branch-sup",
+    strategy: "one_for_one",
+    children: [{{
+      name: "toucher",
+      restart: "never",
+      task: {{ _ctx ->
+        try {{
+          harness.process.run({{program: "touch", args: [{marker}]}})
+          harness.runtime.store_set("child_key", "ran")
+        }}
+        harness.runtime.send(done, "done")
+        "done"
+      }},
+    }}],
+  }})
+  deadline 5s {{ harness.runtime.receive(done) }}
+  harness.runtime.supervisor_stop(sup, 2s)"#,
+        marker = quote(&marker),
+    );
+    assert_spawned_task_stays_in_the_branch(&spawned_script(&setup), &marker);
 }

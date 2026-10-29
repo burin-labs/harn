@@ -1,5 +1,7 @@
 #![recursion_limit = "256"]
 #![allow(clippy::result_large_err, clippy::cloned_ref_to_slice_refs)]
+// Tests may spawn raw: they own their threads and run no branch.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 //! # harn-vm
 //!
 //! The Harn compiler, virtual machine, standard library, provider/LLM layer,
@@ -96,6 +98,7 @@ pub use native_vm::NativeBuiltinCtxExt;
 pub(crate) use native_vm::NativeCleanupTestExt;
 pub use native_vm::{new_vm, NativeVmExt};
 pub mod task_retry;
+pub(crate) mod task_spawn;
 pub(crate) mod tool_call_mutations;
 
 /// Placement policy for child-interpreter subtasks.

@@ -1,0 +1,22 @@
+too-many-arguments-threshold = 8
+
+# A raw spawn drops the spawner's ambient scope, branch replay included.
+disallowed-methods = [
+  { path = "tokio::task::spawn_local", reason = "use crate::task_spawn so the task keeps its ambient scope" },
+  { path = "tokio::task::JoinSet::spawn_local", reason = "use crate::task_spawn::spawn_local_into" },
+  { path = "tokio::task::LocalSet::spawn_local", reason = "use crate::task_spawn so the task keeps its ambient scope" },
+  { path = "tokio::task::spawn", reason = "use crate::task_spawn::spawn" },
+  { path = "tokio::spawn", reason = "use crate::task_spawn::spawn" },
+  { path = "tokio::task::JoinSet::spawn", reason = "use crate::task_spawn" },
+  { path = "tokio::runtime::Handle::spawn", reason = "use crate::task_spawn::spawn_on" },
+  { path = "tokio::runtime::Runtime::spawn", reason = "use crate::task_spawn::spawn_on" },
+  { path = "tokio::task::spawn_blocking", reason = "use crate::task_spawn::spawn_blocking" },
+  { path = "tokio::runtime::Handle::spawn_blocking", reason = "use crate::task_spawn::spawn_blocking" },
+  { path = "std::thread::spawn", reason = "use crate::task_spawn::thread so the thread keeps its ambient scope" },
+  { path = "std::thread::Builder::spawn", reason = "use crate::task_spawn::named_thread so the thread keeps its ambient scope" },
+  { path = "std::thread::Builder::spawn_scoped", reason = "use crate::task_spawn::scoped_thread" },
+  { path = "std::thread::Scope::spawn", reason = "use crate::task_spawn::scoped_thread" },
+  { path = "harn_parser::runtime_stack::spawn", reason = "use crate::task_spawn::thread so the thread keeps its ambient scope" },
+  { path = "harn_parser::runtime_stack::RuntimeScope::spawn", reason = "use crate::task_spawn::scoped_thread" },
+  { path = "harn_parser::runtime_stack::RuntimeScope::spawn_named", reason = "use crate::task_spawn::scoped_thread" },
+]

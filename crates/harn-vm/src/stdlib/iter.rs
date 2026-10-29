@@ -586,7 +586,7 @@ fn spawn_parallel_race_task(
     callable: VmValue,
     item: VmValue,
 ) {
-    join_set.spawn_local(async move {
+    crate::task_spawn::spawn_local_into(join_set, async move {
         match vm.call_callable_one(&callable, &item).await {
             Ok(VmValue::EnumVariant(enum_variant)) if enum_variant.is_variant("Result", "Ok") => {
                 Ok(enum_variant.fields.first().cloned().unwrap_or(VmValue::Nil))

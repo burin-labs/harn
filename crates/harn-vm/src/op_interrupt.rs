@@ -1142,7 +1142,7 @@ pub(crate) fn spawn_pipe_drain<R: std::io::Read + Send + 'static>(
     mut reader: R,
 ) -> std::sync::mpsc::Receiver<Vec<u8>> {
     let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
-    crate::runtime_stack::spawn(move || {
+    crate::task_spawn::thread(move || {
         let mut buf = Vec::new();
         let _ = reader.read_to_end(&mut buf);
         let _ = tx.send(buf);

@@ -869,7 +869,7 @@ pub(super) fn spawn_progress_forwarder(
     let mut detector = detector_ctx.map(|ctx| {
         crate::llm::tools::StreamingToolCallDetector::new(ctx.session_id, ctx.known_tools)
     });
-    tokio::task::spawn_local(async move {
+    crate::task_spawn::spawn_local(async move {
         let mut token_count: u64 = 0;
         while let Some(delta) = rx.recv().await {
             first_token.observe_delta();
@@ -901,6 +901,6 @@ pub(super) fn spawn_detector_only_forwarder(
     first_token: super::first_token::FirstTokenTimer,
 ) -> DeltaSender {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    tokio::task::spawn_local(run_detector_loop(detector_ctx, rx, first_token));
+    crate::task_spawn::spawn_local(run_detector_loop(detector_ctx, rx, first_token));
     tx
 }

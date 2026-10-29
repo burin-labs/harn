@@ -308,7 +308,7 @@ pub async fn build_run_report(request: RunReportRequest) -> Result<RunReport, Ru
         None => None,
     };
 
-    let tree = tokio::task::spawn_blocking(move || load_run_tree(&root_path, &allowed_roots))
+    let tree = crate::task_spawn::spawn_blocking(move || load_run_tree(&root_path, &allowed_roots))
         .await
         .map_err(|error| RunReportError::Read(format!("load run tree task: {error}")))??;
     let root_run_id = tree

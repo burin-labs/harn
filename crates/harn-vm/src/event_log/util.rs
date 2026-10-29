@@ -46,7 +46,7 @@ pub(super) fn stream_from_broadcast(
     // time. Spawning on tokio makes the forwarder participate in runtime
     // scheduling (including paused-time quiescence) and ties its lifetime to
     // the runtime's shutdown.
-    tokio::spawn(async move {
+    crate::task_spawn::spawn(async move {
         let mut last_seen = from.unwrap_or(0);
         for (event_id, event) in history {
             last_seen = event_id;

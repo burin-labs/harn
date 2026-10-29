@@ -6,7 +6,7 @@ pub(super) fn tee_delta_sender(mut senders: Vec<DeltaSender>) -> DeltaSender {
     }
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    tokio::task::spawn_local(async move {
+    crate::task_spawn::spawn_local(async move {
         while let Some(delta) = rx.recv().await {
             for sender in &senders {
                 let _ = sender.send(delta.clone());

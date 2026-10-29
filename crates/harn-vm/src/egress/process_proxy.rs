@@ -328,6 +328,8 @@ impl ProcessPolicySource {
     }
 }
 
+// Shared proxy infrastructure: it serves every run, so its threads carry no run's scope.
+#[allow(clippy::disallowed_methods)]
 fn spawn_listener(
     name: &str,
     listener: TcpListener,
@@ -755,6 +757,7 @@ fn record_audit(
 fn relay(left: TcpStream, right: TcpStream) -> io::Result<()> {
     let mut left_read = left.try_clone()?;
     let mut right_write = right.try_clone()?;
+    #[allow(clippy::disallowed_methods)] // A proxy relay, as above.
     let forward = crate::runtime_stack::spawn(move || io::copy(&mut left_read, &mut right_write));
     let mut right_read = right;
     let mut left_write = left;

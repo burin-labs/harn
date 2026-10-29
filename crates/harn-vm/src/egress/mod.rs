@@ -809,7 +809,7 @@ fn private_block_for_literal(target: &EgressTarget, allow_loopback: bool) -> Opt
 async fn resolve_host_addrs(host: &str) -> Option<Vec<IpAddr>> {
     use std::net::ToSocketAddrs;
     let host = host.to_string();
-    tokio::task::spawn_blocking(move || {
+    crate::task_spawn::spawn_blocking(move || {
         (host.as_str(), 0_u16)
             .to_socket_addrs()
             .ok()
@@ -1129,7 +1129,7 @@ fn audit_blocked_background(blocked: EgressBlocked) {
         return;
     };
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.spawn(async move {
+        crate::task_spawn::spawn_on(&handle, async move {
             let payload = json!({
                 "surface": blocked.surface,
                 "url": blocked.url,

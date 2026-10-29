@@ -504,7 +504,7 @@ pub fn active_event_log() -> Option<Arc<AnyEventLog>> {
     let active = ACTIVE_EVENT_LOG.with(|slot| slot.borrow().clone());
     // A branch writes its own log, wherever the host opened this one.
     if let Some(log) = crate::run_tape::branch_event_log(active.as_ref()) {
-        return Some(log);
+        return log;
     }
     if let Some(log) = active {
         return Some(log);

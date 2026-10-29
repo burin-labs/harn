@@ -421,6 +421,7 @@ pub(crate) struct ToolCallRecording {
     args_digest: String,
     after_calls: u64,
     watch: EffectWatch,
+    pub(crate) reminders: Vec<serde_json::Value>,
 }
 
 enum EffectWatch {
@@ -453,7 +454,71 @@ pub(crate) fn begin_tool_call(
         tool: tool.to_string(),
         args_digest: args_digest(args),
         watch,
+        reminders: Vec::new(),
     })
+}
+
+tokio::task_local! {
+    /// Reminders injected while the innermost recorded tool dispatch runs.
+    static DISPATCH_REMINDERS: Arc<Mutex<Vec<serde_json::Value>>>;
+}
+
+/// Run a live tool dispatch, keeping each reminder it injects on `recording`.
+/// An enclosing recorded dispatch keeps them too.
+pub(crate) async fn capture_tool_reminders<F: std::future::Future>(
+    recording: &mut Option<ToolCallRecording>,
+    live: F,
+) -> F::Output {
+    let Some(recording) = recording.as_mut() else {
+        return live.await;
+    };
+    let parent = DISPATCH_REMINDERS.try_with(Arc::clone).ok();
+    let frame = Arc::new(Mutex::new(Vec::new()));
+    let output = DISPATCH_REMINDERS.scope(frame.clone(), live).await;
+    let captured = std::mem::take(&mut *frame.lock().expect("reminder frame poisoned"));
+    if let Some(parent) = parent {
+        parent
+            .lock()
+            .expect("reminder frame poisoned")
+            .extend(captured.iter().cloned());
+    }
+    recording.reminders = captured;
+    output
+}
+
+/// Note a reminder injected into `session_id`, for the recorded dispatch
+/// running now, if any.
+pub(crate) fn note_injected_reminder(
+    session_id: &str,
+    reminder: &crate::llm::helpers::SystemReminder,
+) {
+    let _ = DISPATCH_REMINDERS.try_with(|frame| {
+        frame
+            .lock()
+            .expect("reminder frame poisoned")
+            .push(serde_json::json!({
+                "session_id": session_id,
+                "reminder": reminder,
+            }));
+    });
+}
+
+/// Inject the reminders a served dispatch's recording injected, into the
+/// sessions that still exist, and return them for the branch's own tape.
+fn reinject_reminders(reminders: Vec<serde_json::Value>) -> Result<Vec<serde_json::Value>, String> {
+    for entry in &reminders {
+        let session_id = entry
+            .get("session_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let reminder: crate::llm::helpers::SystemReminder =
+            serde_json::from_value(entry.get("reminder").cloned().unwrap_or_default())
+                .map_err(|error| format!("recorded reminder: {error}"))?;
+        if crate::agent_sessions::exists(session_id) {
+            crate::agent_sessions::inject_provider_reminder(session_id, reminder)?;
+        }
+    }
+    Ok(reminders)
 }
 
 pub(crate) fn args_digest(args: &serde_json::Value) -> String {
@@ -473,6 +538,7 @@ pub(crate) fn finish_tool_call(
         args_digest,
         after_calls,
         watch,
+        reminders,
     } = recording;
     let recorder = &tape.recorder;
     let full = tape.level == RecordingLevel::Full;
@@ -520,6 +586,7 @@ pub(crate) fn finish_tool_call(
         outcome,
         effects,
         unservable,
+        reminders: if full { reminders } else { Vec::new() },
     });
 }
 
@@ -584,6 +651,7 @@ struct RecordedTool {
     outcome: Option<RecordedToolResult>,
     effects: Vec<(String, Option<Vec<u8>>)>,
     unservable: Option<String>,
+    reminders: Vec<serde_json::Value>,
 }
 
 struct PrefixTool {
@@ -793,6 +861,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
                 outcome,
                 effects,
                 unservable,
+                reminders,
             } if *after_calls <= k => {
                 let bytes = tape.resolve_payload(outcome)?;
                 let outcome = if bytes.is_empty() {
@@ -819,6 +888,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
                         outcome,
                         effects: resolved,
                         unservable: unservable.clone(),
+                        reminders: reminders.clone(),
                     },
                     used: false,
                 });
@@ -1122,8 +1192,9 @@ fn recorded_lookup(
 pub(crate) enum ToolServe {
     /// Not part of a served prefix: run it.
     Live,
-    /// Served from the recording; effects already applied.
-    Served(RecordedToolResult),
+    /// Served from the recording; effects and reminders already applied.
+    /// Carries the reminders, for the branch's own tape.
+    Served(RecordedToolResult, Vec<serde_json::Value>),
     /// The prefix diverged; refuse the call.
     Diverged(crate::value::VmError),
 }
@@ -1189,6 +1260,7 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
         }
     };
     let effects = recorded.effects.clone();
+    let reminders = recorded.reminders.clone();
     let root = state.workspace_root.clone();
     for (path, content) in &effects {
         if let Err(error) = apply_effect(&root, path, content.as_deref()) {
@@ -1197,7 +1269,16 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
         state.report.applied_file_effects += 1;
     }
     state.report.served_tool_calls += 1;
-    ToolServe::Served(outcome)
+    // Injecting reaches the session table, which may read the branch.
+    drop(guard);
+    match reinject_reminders(reminders) {
+        Ok(reminders) => ToolServe::Served(outcome, reminders),
+        Err(error) => {
+            let branch = branch.expect("a served call has a branch");
+            let mut state = branch.state();
+            diverge(&mut state, "tool reminder", error)
+        }
+    }
 }
 
 fn apply_effect(root: &Path, path: &str, content: Option<&[u8]>) -> Result<(), String> {

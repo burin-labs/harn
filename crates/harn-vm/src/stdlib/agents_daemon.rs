@@ -1035,7 +1035,7 @@ fn spawn_daemon_task(state: Arc<parking_lot::Mutex<DaemonState>>, mut vm: crate:
 
 fn start_daemon_monitor(state: Arc<parking_lot::Mutex<DaemonState>>) {
     let monitor_state = state.clone();
-    let handle = tokio::spawn(async move {
+    let handle = crate::task_spawn::spawn(async move {
         loop {
             let should_exit = {
                 let mut daemon = monitor_state.lock();
