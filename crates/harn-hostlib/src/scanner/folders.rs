@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::scanner::extensions::folder_key;
 use crate::scanner::result::{
     FileRecord, FolderRecord, LanguageStat, ProjectMetadata, SymbolKind, SymbolRecord,
+    TestCommandDiscovery,
 };
 
 #[derive(Default)]
@@ -79,7 +80,7 @@ pub fn build_folder_records(files: &[FileRecord], symbols: &[SymbolRecord]) -> V
 pub fn build_project_metadata(
     root_path: &Path,
     files: &[FileRecord],
-    test_commands: BTreeMap<String, String>,
+    test_command_discovery: TestCommandDiscovery,
     code_patterns: Vec<String>,
     last_scanned_at: String,
 ) -> ProjectMetadata {
@@ -117,15 +118,11 @@ pub fn build_project_metadata(
             .then_with(|| a.name.cmp(&b.name))
     });
 
-    let detected_test_command =
-        crate::scanner::commands::select_preferred_test_command(&test_commands);
-
     ProjectMetadata {
         name,
         root_path: root_path_string,
         languages,
-        test_commands,
-        detected_test_command,
+        test_command_discovery,
         code_patterns,
         total_files,
         total_lines,
@@ -268,7 +265,10 @@ mod tests {
         let proj = build_project_metadata(
             Path::new("/repo/proj"),
             &files,
-            BTreeMap::new(),
+            TestCommandDiscovery::Complete {
+                commands: BTreeMap::new(),
+                preferred: None,
+            },
             Vec::new(),
             "2026-01-01T00:00:00Z".to_string(),
         );

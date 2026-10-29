@@ -12,12 +12,13 @@
 //! paginated-response helpers, prisma schema) without forcing a
 //! heavyweight checkout.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
 use harn_hostlib::scanner::{
     scan_incremental, scan_project, scan_project_with_git, FileRecord, GitCapabilities,
-    ScanProjectOptions, ScanResult, SymbolKind,
+    ProjectMetadata, ScanProjectOptions, ScanResult, SymbolKind, TestCommandDiscovery,
 };
 use tempfile::tempdir;
 
@@ -98,7 +99,7 @@ fn package_script_aliases_stay_within_physical_project() {
                 ..ScanProjectOptions::default()
             },
         );
-        let commands = result.project.test_commands;
+        let commands = test_commands(&result.project);
         assert!(commands.get("pnpm test").unwrap().contains("KNOWN_INSIDE"));
         assert!(commands
             .get("cd packages/aliased && npm test")
@@ -136,9 +137,7 @@ fn package_script_aliases_stay_within_physical_project() {
             ..ScanProjectOptions::default()
         },
     );
-    assert!(!result
-        .project
-        .test_commands
+    assert!(!test_commands(&result.project)
         .values()
         .any(|body| body.contains("KNOWN_OUTSIDE") || body.contains("KNOWN_INHERITED")));
 }
@@ -149,6 +148,15 @@ fn write(root: &Path, rel: &str, content: &str) {
         fs::create_dir_all(parent).unwrap();
     }
     fs::write(&path, content).unwrap();
+}
+
+fn test_commands(project: &ProjectMetadata) -> &BTreeMap<String, String> {
+    match &project.test_command_discovery {
+        TestCommandDiscovery::Complete { commands, .. } => commands,
+        TestCommandDiscovery::Unavailable { detail } => {
+            panic!("test discovery unavailable: {detail}")
+        }
+    }
 }
 
 fn scan_without_git_history(root: &Path) -> ScanResult {
@@ -174,10 +182,7 @@ fn bare_root_pytest_with_import_has_a_discovered_test_command() {
         .files
         .iter()
         .any(|file| file.relative_path == "test_app.py"));
-    assert!(result
-        .project
-        .test_commands
-        .contains_key("python -m pytest"));
+    assert!(test_commands(&result.project).contains_key("python -m pytest"));
 }
 
 #[test]
@@ -197,10 +202,7 @@ fn bare_root_pytest_without_import_has_a_discovered_test_command() {
         .symbols
         .iter()
         .any(|symbol| symbol.name == "test_value"));
-    assert!(result
-        .project
-        .test_commands
-        .contains_key("python -m pytest"));
+    assert!(test_commands(&result.project).contains_key("python -m pytest"));
 }
 
 #[test]
@@ -222,7 +224,7 @@ fn bare_source_without_tests_has_no_discovered_test_command() {
         .symbols
         .iter()
         .any(|symbol| symbol.name == "test_helper"));
-    assert!(result.project.test_commands.is_empty());
+    assert!(test_commands(&result.project).is_empty());
 }
 
 #[cfg(not(windows))]
@@ -239,7 +241,7 @@ fn non_collected_uppercase_python_filename_has_no_test_command() {
         .symbols
         .iter()
         .any(|symbol| symbol.name == "test_value"));
-    assert!(result.project.test_commands.is_empty());
+    assert!(test_commands(&result.project).is_empty());
 }
 
 #[cfg(windows)]
@@ -252,10 +254,7 @@ fn windows_pytest_filename_matching_is_case_insensitive() {
         "def test_value():\n    assert True\n",
     );
     let result = scan_without_git_history(tmp.path());
-    assert!(result
-        .project
-        .test_commands
-        .contains_key("python -m pytest"));
+    assert!(test_commands(&result.project).contains_key("python -m pytest"));
 }
 
 #[test]
@@ -271,10 +270,7 @@ fn nested_pytest_with_import_remains_a_discovered_test_command() {
         .files
         .iter()
         .any(|file| file.relative_path == "tests/test_app.py"));
-    assert!(result
-        .project
-        .test_commands
-        .contains_key("python -m pytest"));
+    assert!(test_commands(&result.project).contains_key("python -m pytest"));
 }
 
 #[test]
@@ -290,10 +286,7 @@ fn nested_pytest_without_import_has_a_discovered_test_command() {
         .files
         .iter()
         .any(|file| file.relative_path == "tests/test_app.py"));
-    assert!(result
-        .project
-        .test_commands
-        .contains_key("python -m pytest"));
+    assert!(test_commands(&result.project).contains_key("python -m pytest"));
 }
 
 #[test]
@@ -305,7 +298,7 @@ fn a_test_added_after_scanning_updates_discovered_commands() {
         ..ScanProjectOptions::default()
     };
     let initial = scan_project(tmp.path(), options.clone());
-    assert!(initial.project.test_commands.is_empty());
+    assert!(test_commands(&initial.project).is_empty());
     write(
         tmp.path(),
         "test_app.py",
@@ -318,11 +311,141 @@ fn a_test_added_after_scanning_updates_discovered_commands() {
         .files
         .iter()
         .any(|file| file.relative_path == "test_app.py"));
-    assert!(refreshed
-        .result
-        .project
-        .test_commands
-        .contains_key("python -m pytest"));
+    assert!(test_commands(&refreshed.result.project).contains_key("python -m pytest"));
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_test_directory_is_unavailable_and_recovers() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempdir().unwrap();
+    write(
+        tmp.path(),
+        "locked/test_app.py",
+        "def test_value():\n    assert 2 + 2 == 4\n",
+    );
+    let before = scan_without_git_history(tmp.path());
+    assert!(test_commands(&before.project).contains_key("python -m pytest"));
+    let directory = tmp.path().join("locked");
+    let original = fs::metadata(&directory).unwrap().permissions();
+    let mut denied = original.clone();
+    denied.set_mode(0);
+    fs::set_permissions(&directory, denied).unwrap();
+    let read_error = fs::read_dir(&directory).err();
+    let inaccessible = scan_without_git_history(tmp.path());
+    fs::set_permissions(&directory, original).unwrap();
+    assert_eq!(
+        read_error.map(|error| error.kind()),
+        Some(std::io::ErrorKind::PermissionDenied),
+        "the operating system must actually deny the directory read"
+    );
+    assert!(matches!(
+        &inaccessible.project.test_command_discovery,
+        TestCommandDiscovery::Unavailable { detail } if detail.contains("locked")
+    ));
+    let recovered = scan_without_git_history(tmp.path());
+    assert!(test_commands(&recovered.project).contains_key("python -m pytest"));
+}
+
+#[cfg(unix)]
+#[test]
+fn unchanged_files_do_not_hide_discovery_denial_or_recovery() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempdir().unwrap();
+    write(tmp.path(), "app.py", "def value():\n    return 4\n");
+    let directory = tmp.path().join("locked");
+    fs::create_dir(&directory).unwrap();
+    let options = ScanProjectOptions {
+        include_git_history: false,
+        ..ScanProjectOptions::default()
+    };
+    let initial = scan_project(tmp.path(), options.clone());
+    assert!(test_commands(&initial.project).is_empty());
+    let original = fs::metadata(&directory).unwrap().permissions();
+    let mut denied = original.clone();
+    denied.set_mode(0);
+    fs::set_permissions(&directory, denied).unwrap();
+    let read_error = fs::read_dir(&directory).err();
+    let inaccessible = scan_incremental(&initial.snapshot_token, None, options.clone());
+    fs::set_permissions(&directory, original).unwrap();
+    assert_eq!(
+        read_error.map(|error| error.kind()),
+        Some(std::io::ErrorKind::PermissionDenied)
+    );
+    assert!(inaccessible.delta.added.is_empty());
+    assert!(inaccessible.delta.modified.is_empty());
+    assert!(inaccessible.delta.removed.is_empty());
+    assert!(matches!(
+        inaccessible.result.project.test_command_discovery,
+        TestCommandDiscovery::Unavailable { .. }
+    ));
+    let recovered = scan_incremental(&initial.snapshot_token, None, options);
+    assert!(test_commands(&recovered.result.project).is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_test_file_cannot_expose_a_partial_command_set() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempdir().unwrap();
+    write(tmp.path(), "test_a.py", "def test_a():\n    assert True\n");
+    write(tmp.path(), "test_b.py", "def test_b():\n    assert True\n");
+    let file = tmp.path().join("test_b.py");
+    let original = fs::metadata(&file).unwrap().permissions();
+    let mut denied = original.clone();
+    denied.set_mode(0);
+    fs::set_permissions(&file, denied).unwrap();
+    let read_error = fs::read_to_string(&file).err();
+    let result = scan_without_git_history(tmp.path());
+    fs::set_permissions(&file, original).unwrap();
+    assert_eq!(
+        read_error.map(|error| error.kind()),
+        Some(std::io::ErrorKind::PermissionDenied)
+    );
+    assert!(matches!(
+        result.project.test_command_discovery,
+        TestCommandDiscovery::Unavailable { .. }
+    ));
+}
+
+#[test]
+fn invalid_package_manifest_is_not_a_complete_empty_discovery() {
+    let tmp = tempdir().unwrap();
+    write(tmp.path(), "package.json", "{not valid json}");
+    let result = scan_without_git_history(tmp.path());
+    assert!(matches!(
+        result.project.test_command_discovery,
+        TestCommandDiscovery::Unavailable { .. }
+    ));
+}
+
+#[test]
+fn discovery_status_is_required_in_the_serialized_project() {
+    let tmp = tempdir().unwrap();
+    let result = scan_without_git_history(tmp.path());
+    assert!(test_commands(&result.project).is_empty());
+    let mut project = serde_json::to_value(&result.project).unwrap();
+    assert_eq!(project["test_command_discovery"]["state"], "complete");
+    assert!(project.get("test_commands").is_none());
+    assert!(project.get("detected_test_command").is_none());
+    let mut missing_preferred = project.clone();
+    missing_preferred["test_command_discovery"]
+        .as_object_mut()
+        .unwrap()
+        .remove("preferred");
+    assert!(serde_json::from_value::<ProjectMetadata>(missing_preferred).is_err());
+    let mut empty_detail = project.clone();
+    empty_detail["test_command_discovery"] =
+        serde_json::json!({"state": "unavailable", "detail": "  "});
+    assert!(serde_json::from_value::<ProjectMetadata>(empty_detail).is_err());
+    project
+        .as_object_mut()
+        .unwrap()
+        .remove("test_command_discovery");
+    assert!(serde_json::from_value::<ProjectMetadata>(project).is_err());
 }
 
 fn build_fixture(root: &Path) {
@@ -458,6 +581,39 @@ impl GitCapabilities for MockGit {
 }
 
 #[test]
+fn git_tracked_ignored_test_still_contributes_a_command() {
+    let tmp = tempdir().unwrap();
+    fs::create_dir(tmp.path().join(".git")).unwrap();
+    write(tmp.path(), ".gitignore", "test_app.py\n");
+    write(
+        tmp.path(),
+        "test_app.py",
+        "def test_value():\n    assert True\n",
+    );
+    let mut walker = ignore::WalkBuilder::new(tmp.path());
+    harn_vm::ignore_policy::configure(
+        &mut walker,
+        tmp.path(),
+        harn_vm::ignore_policy::IgnorePolicy::Project,
+        false,
+    )
+    .unwrap();
+    assert!(!walker
+        .build()
+        .any(|entry| { entry.unwrap().path() == tmp.path().join("test_app.py") }));
+    let git = MockGit {
+        files: Some(vec!["test_app.py".into()]),
+        ..MockGit::default()
+    };
+    let result = scan_project_with_git(tmp.path(), ScanProjectOptions::default(), &git);
+    assert!(result
+        .files
+        .iter()
+        .any(|file| file.relative_path == "test_app.py"));
+    assert!(test_commands(&result.project).contains_key("python -m pytest"));
+}
+
+#[test]
 fn scan_project_emits_full_result_shape() {
     let tmp = tempdir().unwrap();
     build_fixture(tmp.path());
@@ -524,13 +680,15 @@ fn scan_project_emits_full_result_shape() {
         .languages
         .iter()
         .any(|l| l.name == "typescript"));
-    assert!(result.project.test_commands.contains_key("cargo test"));
-    assert!(result.project.test_commands.contains_key("npm test"));
-    let detected = result
-        .project
-        .detected_test_command
-        .as_deref()
-        .expect("a test command should be detected");
+    assert!(test_commands(&result.project).contains_key("cargo test"));
+    assert!(test_commands(&result.project).contains_key("npm test"));
+    let detected = match &result.project.test_command_discovery {
+        TestCommandDiscovery::Complete {
+            preferred: Some(command),
+            ..
+        } => command.as_str(),
+        _ => panic!("a test command should be detected"),
+    };
     assert!(!detected.is_empty());
     assert!(result
         .project

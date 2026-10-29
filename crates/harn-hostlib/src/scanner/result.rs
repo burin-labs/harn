@@ -166,6 +166,47 @@ pub struct LanguageStat {
     pub percentage: f64,
 }
 
+/// The scanner either observed a complete set of test candidates or could not
+/// read enough of the project to make that claim.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum TestCommandDiscovery {
+    /// The search completed. An empty map means no candidates were found.
+    Complete {
+        /// Candidate command to human-readable label.
+        commands: std::collections::BTreeMap<String, String>,
+        /// Preferred candidate, when there is one.
+        #[serde(deserialize_with = "required_nullable")]
+        preferred: Option<String>,
+    },
+    /// Discovery could not establish a complete result.
+    Unavailable {
+        /// A bounded explanation of the failed observation.
+        #[serde(deserialize_with = "nonempty_detail")]
+        detail: String,
+    },
+}
+
+fn required_nullable<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)
+}
+
+fn nonempty_detail<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let detail = String::deserialize(deserializer)?;
+    if detail.trim().is_empty() {
+        return Err(serde::de::Error::custom(
+            "discovery detail must not be empty",
+        ));
+    }
+    Ok(detail)
+}
+
 /// Project-level metadata.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProjectMetadata {
@@ -175,10 +216,8 @@ pub struct ProjectMetadata {
     pub root_path: String,
     /// Per-language line/file/percentage breakdown, sorted desc by lines.
     pub languages: Vec<LanguageStat>,
-    /// Map: command (e.g. `pnpm test`) → human-readable label.
-    pub test_commands: std::collections::BTreeMap<String, String>,
-    /// Best-guess preferred test command, if any.
-    pub detected_test_command: Option<String>,
+    /// Complete test-command candidates, or why discovery was unavailable.
+    pub test_command_discovery: TestCommandDiscovery,
     /// Heuristic project pattern hints (e.g. detected ORM, Zod, etc.).
     pub code_patterns: Vec<String>,
     /// Total file count.

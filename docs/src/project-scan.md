@@ -62,7 +62,7 @@ Normalization rules:
 literal target declarations without evaluating Make or expanding variables.
 Multi-target rules contribute each declared target; assignments and `define`
 bodies do not create targets. Test-shaped targets contribute their generated
-commands to the scanner's `test_commands` map. The config tier exposes all
+commands to the scanner's `test_command_discovery.commands` map. The config tier exposes all
 literal names in `makefile_targets` and build/test invocations in `build_commands`.
 
 `makefile_parse(text)` exposes the same parser to source-facing adapters. Each
@@ -71,6 +71,12 @@ record has `name`, a shell-quoted `command`, `recipe_preview`, and
 each; the count includes all recipe lines. These are declared source facts,
 not evidence that a command ran or passed. Variable-generated targets and
 pattern rules are not resolved by this static parser.
+
+The scanner's `test_command_discovery` is a tagged result. `complete` carries
+the discovered `commands` and nullable `preferred` command; an empty map means
+the search completed without candidates. `unavailable` carries a short `detail`
+instead of a command map when the search could not inspect a relevant path.
+Candidates describe possible commands, not proof that a command ran or passed.
 
 ```harn
 const targets = makefile_parse("unit test:\n\t@echo checked\n")

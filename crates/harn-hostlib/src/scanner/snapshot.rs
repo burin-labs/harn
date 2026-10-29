@@ -72,7 +72,7 @@ pub fn root_to_token(root: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scanner::result::{ProjectMetadata, ScanResult};
+    use crate::scanner::result::{ProjectMetadata, ScanResult, TestCommandDiscovery};
     use std::collections::BTreeMap;
     use tempfile::tempdir;
 
@@ -84,8 +84,10 @@ mod tests {
                 name: "x".to_string(),
                 root_path: root.to_string(),
                 languages: Vec::new(),
-                test_commands: BTreeMap::new(),
-                detected_test_command: None,
+                test_command_discovery: TestCommandDiscovery::Complete {
+                    commands: BTreeMap::new(),
+                    preferred: None,
+                },
                 code_patterns: Vec::new(),
                 total_files: 0,
                 total_lines: 0,

@@ -56,7 +56,7 @@ pub(crate) fn strip_ambient_git_env(cmd: &mut Command) {
 pub use git::GitCapabilities;
 pub use result::{
     DependencyEdge, FileRecord, FolderRecord, LanguageStat, ProjectMetadata, ScanDelta, ScanResult,
-    SubProject, SymbolKind, SymbolRecord,
+    SubProject, SymbolKind, SymbolRecord, TestCommandDiscovery,
 };
 
 const SCAN_PROJECT_BUILTIN: &str = "hostlib_scanner_scan_project";
@@ -137,6 +137,7 @@ pub fn scan_project_with_git(
         ignore_policy: opts.ignore_policy,
     };
     let mut discovered = discover::discover_files(&canonical, discover_opts, git);
+    let test_commands = commands::detect_test_commands(&canonical, discover_opts, &discovered);
     let truncated = if opts.max_files > 0 && discovered.len() > opts.max_files {
         discovered.truncate(opts.max_files);
         true
@@ -157,7 +158,6 @@ pub fn scan_project_with_git(
     test_mapping::map_test_files(&mut files);
 
     let folder_records = folders::build_folder_records(&files, &symbols);
-    let test_commands = commands::detect_test_commands(&canonical, &symbols);
     let code_patterns = commands::detect_code_patterns(&files, &canonical);
     let mut project = folders::build_project_metadata(
         &canonical,
@@ -222,7 +222,7 @@ pub fn scan_incremental_with_git(
     let canonical = canonicalize(&root);
 
     let cached = snapshot::load(&canonical);
-    let cached = match cached {
+    let mut cached = match cached {
         Some(c) => c,
         None => {
             let result = scan_project_with_git(&canonical, opts, git);
@@ -241,6 +241,7 @@ pub fn scan_incremental_with_git(
         ignore_policy: opts.ignore_policy,
     };
     let mut current = discover::discover_files(&canonical, discover_opts, git);
+    let test_commands = commands::detect_test_commands(&canonical, discover_opts, &current);
     if opts.max_files > 0 && current.len() > opts.max_files {
         current.truncate(opts.max_files);
     }
@@ -262,6 +263,18 @@ pub fn scan_incremental_with_git(
     }
 
     if delta.added.is_empty() && delta.modified.is_empty() && delta.removed.is_empty() {
+        if test_commands != cached.project.test_command_discovery {
+            cached.project.test_command_discovery = test_commands;
+            cached.project.last_scanned_at = now_iso8601();
+            cached.codebase_fingerprint = fingerprint::build(
+                &canonical,
+                &cached.project,
+                &cached.files,
+                &cached.symbols,
+                &cached.dependencies,
+            );
+            snapshot::save(&canonical, &cached);
+        }
         return IncrementalScan {
             result: cached,
             delta,
@@ -317,7 +330,6 @@ pub fn scan_incremental_with_git(
     test_mapping::map_test_files(&mut files);
 
     let folder_records = folders::build_folder_records(&files, &symbols);
-    let test_commands = commands::detect_test_commands(&canonical, &symbols);
     let code_patterns = commands::detect_code_patterns(&files, &canonical);
     let mut project = folders::build_project_metadata(
         &canonical,
@@ -738,18 +750,30 @@ fn list_of<T>(items: &[T], to_value: fn(&T) -> VmValue) -> VmValue {
 }
 
 fn project_to_value(project: &ProjectMetadata) -> VmValue {
-    let test_commands_entries: Vec<(String, VmValue)> = project
-        .test_commands
-        .iter()
-        .map(|(k, v)| (k.clone(), str_value(v)))
-        .collect();
-    let test_commands_dict = build_dict(test_commands_entries);
-
-    let detected: VmValue = project
-        .detected_test_command
-        .as_deref()
-        .map(str_value)
-        .unwrap_or(VmValue::Nil);
+    let test_discovery = match &project.test_command_discovery {
+        TestCommandDiscovery::Complete {
+            commands,
+            preferred,
+        } => build_dict([
+            ("state", str_value("complete")),
+            (
+                "commands",
+                build_dict(
+                    commands
+                        .iter()
+                        .map(|(key, value)| (key.clone(), str_value(value))),
+                ),
+            ),
+            (
+                "preferred",
+                preferred.as_deref().map(str_value).unwrap_or(VmValue::Nil),
+            ),
+        ]),
+        TestCommandDiscovery::Unavailable { detail } => build_dict([
+            ("state", str_value("unavailable")),
+            ("detail", str_value(detail)),
+        ]),
+    };
 
     let code_patterns: Vec<VmValue> = project.code_patterns.iter().map(str_value).collect();
     let available_dependencies: Vec<VmValue> = project
@@ -762,8 +786,7 @@ fn project_to_value(project: &ProjectMetadata) -> VmValue {
         ("name", str_value(&project.name)),
         ("root_path", str_value(&project.root_path)),
         ("languages", list_of(&project.languages, language_to_value)),
-        ("test_commands", test_commands_dict),
-        ("detected_test_command", detected),
+        ("test_command_discovery", test_discovery),
         ("code_patterns", VmValue::list(code_patterns)),
         ("total_files", VmValue::Int(project.total_files as i64)),
         ("total_lines", VmValue::Int(project.total_lines as i64)),

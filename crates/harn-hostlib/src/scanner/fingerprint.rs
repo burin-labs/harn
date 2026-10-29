@@ -8,7 +8,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
 
-use super::result::{DependencyEdge, FileRecord, ProjectMetadata, SymbolKind, SymbolRecord};
+use super::result::{
+    DependencyEdge, FileRecord, ProjectMetadata, SymbolKind, SymbolRecord, TestCommandDiscovery,
+};
 
 const MAX_AGENT_INSTRUCTIONS_CHARS: usize = 4_000;
 
@@ -386,19 +388,27 @@ fn import_hot_paths(dependencies: &[DependencyEdge]) -> Vec<String> {
 }
 
 fn append_test_commands(output: &mut String, project: &ProjectMetadata) {
-    if project.test_commands.is_empty() && project.detected_test_command.is_none() {
+    let TestCommandDiscovery::Complete {
+        commands,
+        preferred,
+    } = &project.test_command_discovery
+    else {
+        if let TestCommandDiscovery::Unavailable { detail } = &project.test_command_discovery {
+            output.push_str(&format!(
+                "## Test commands\n- Discovery unavailable: {detail}\n\n"
+            ));
+        }
+        return;
+    };
+    if commands.is_empty() && preferred.is_none() {
         return;
     }
     output.push_str("## Test commands\n");
-    if let Some(command) = project
-        .detected_test_command
-        .as_deref()
-        .filter(|command| !command.is_empty())
-    {
+    if let Some(command) = preferred.as_deref().filter(|command| !command.is_empty()) {
         output.push_str(&format!("- Preferred: `{command}`\n"));
     }
-    for (command, description) in project.test_commands.iter().take(5) {
-        if Some(command.as_str()) == project.detected_test_command.as_deref() {
+    for (command, description) in commands.iter().take(5) {
+        if Some(command.as_str()) == preferred.as_deref() {
             continue;
         }
         output.push_str(&format!("- `{command}` — {description}\n"));
@@ -592,8 +602,10 @@ mod tests {
                 line_count: 5,
                 percentage: 100.0,
             }],
-            test_commands: BTreeMap::from([("pnpm test".into(), "package script".into())]),
-            detected_test_command: Some("pnpm test".into()),
+            test_command_discovery: TestCommandDiscovery::Complete {
+                commands: BTreeMap::from([("pnpm test".into(), "package script".into())]),
+                preferred: Some("pnpm test".into()),
+            },
             code_patterns: vec!["Express routes".into()],
             total_files: 2,
             total_lines: 5,

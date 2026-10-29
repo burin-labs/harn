@@ -97,8 +97,13 @@ pipeline test(harness: Harness) {
     const executed = harness.process.exec("make", "--no-print-directory", "-C", dir, "test")
     assert_eq(executed.success, item.valid, "GNU make must confirm the fixture's target semantics")
     assert_eq(contains(executed.stdout, "QUALITY_MAKE_REACHED"), item.valid)
-    const commands = keys(scanned.project.test_commands)
-    assert_eq(commands, item.valid ? ["make test"] : [], "scanner must agree with actual Make")
+    if item.unreadable_directory != nil {
+      assert_eq(scanned.project.test_command_discovery.state, "unavailable")
+    } else {
+      assert_eq(scanned.project.test_command_discovery.state, "complete")
+      const commands = keys(scanned.project.test_command_discovery.commands)
+      assert_eq(commands, item.valid ? ["make test"] : [], "scanner must agree with actual Make")
+    }
     const configured = harness.project.scan(dir, {tiers: ["config"]})
     assert_eq(configured.makefile_targets.contains("test"), item.valid)
     assert_eq(configured.build_commands.contains("make test"), item.valid)
@@ -121,7 +126,11 @@ pipeline test(harness: Harness) {
     )
     const scanned = harness.scanner.scan_project({root: dir, include_git_history: false})
     assert(len(scanned.files) > 0)
-    assert_eq(keys(scanned.project.test_commands), literal ? ["make 'test%'"] : [])
+    assert_eq(scanned.project.test_command_discovery.state, "complete")
+    assert_eq(
+      keys(scanned.project.test_command_discovery.commands),
+      literal ? ["make 'test%'"] : [],
+    )
     const configured = harness.project.scan(dir, {tiers: ["config"]})
     assert_eq(configured.makefile_targets.contains("test%"), literal)
     assert(!configured.build_commands.contains("make 'test%'"))

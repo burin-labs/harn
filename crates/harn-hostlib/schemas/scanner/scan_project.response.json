@@ -42,12 +42,7 @@
         "name": { "type": "string" },
         "root_path": { "type": "string" },
         "languages": { "type": "array", "items": { "$ref": "#/$defs/LanguageStat" } },
-        "test_commands": {
-          "type": "object",
-          "additionalProperties": { "type": "string" },
-          "description": "Map keyed by command (e.g. `pnpm test`) to a human label."
-        },
-        "detected_test_command": { "type": ["string", "null"] },
+        "test_command_discovery": { "$ref": "#/$defs/TestCommandDiscovery" },
         "code_patterns": { "type": "array", "items": { "type": "string" } },
         "total_files": { "type": "integer", "minimum": 0 },
         "total_lines": { "type": "integer", "minimum": 0 },
@@ -65,13 +60,36 @@
         "name",
         "root_path",
         "languages",
-        "test_commands",
+        "test_command_discovery",
         "code_patterns",
         "total_files",
         "total_lines",
         "last_scanned_at"
       ],
       "additionalProperties": false
+    },
+    "TestCommandDiscovery": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": { "const": "complete" },
+            "commands": { "type": "object", "additionalProperties": { "type": "string" } },
+            "preferred": { "type": ["string", "null"] }
+          },
+          "required": ["state", "commands", "preferred"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "const": "unavailable" },
+            "detail": { "type": "string", "minLength": 1 }
+          },
+          "required": ["state", "detail"],
+          "additionalProperties": false
+        }
+      ]
     },
     "LanguageStat": {
       "type": "object",

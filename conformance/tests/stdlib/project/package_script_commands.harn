@@ -77,7 +77,8 @@ pipeline test(harness: Harness) {
     assert(ambient.build_commands == [], "ambient does not advertise manifest scripts")
     assert(
       contains(
-        host.project.test_commands[host.project.detected_test_command] ?? "",
+        host.project.test_command_discovery.commands[host.project.test_command_discovery.preferred]
+          ?? "",
         "KNOWN_PACKAGE_SCRIPT",
       ),
       "host script was reached",
@@ -92,10 +93,12 @@ pipeline test(harness: Harness) {
     assert(vm.package_scripts.commands.test == item.command)
     assert(vm.package_scripts.error == nil)
     harness.stdio.println(
-      "observed " + host.project.detected_test_command + " " + json_stringify(vm.build_commands),
+      "observed " + host.project.test_command_discovery.preferred + " "
+        + json_stringify(vm.build_commands),
     )
     assert(
-      host.project.detected_test_command == item.command,
+      host.project.test_command_discovery.state == "complete"
+        && host.project.test_command_discovery.preferred == item.command,
       "host runner must match its manifest",
     )
     assert(vm.build_commands == [item.command], "catalog and config must share the script owner")
@@ -110,7 +113,10 @@ pipeline test(harness: Harness) {
   )
   const unsupported_host = harness.scanner.scan_project({root: refused, include_git_history: false})
   const unsupported_vm = harness.project.scan(refused, {tiers: ["config"]})
-  assert(unsupported_host.project.test_commands == {}, "unsupported manager cannot become pnpm")
+  assert(
+    unsupported_host.project.test_command_discovery.state == "unavailable",
+    "unsupported manager cannot become pnpm",
+  )
   assert(unsupported_vm.build_commands == [], "unsupported manager cannot become npm")
   assert(unsupported_vm.package_scripts.state == "refused")
   assert(unsupported_vm.package_scripts.error == "unsupported_declaration")
@@ -127,7 +133,8 @@ pipeline test(harness: Harness) {
         && invalid.package_scripts.error == "invalid_declaration",
     )
     assert(
-      invalid.build_commands == [] && invalid_host.project.test_commands == {},
+      invalid.build_commands == []
+        && invalid_host.project.test_command_discovery.state == "unavailable",
       "malformed versions must not propose a runner",
     )
     assert(harness.project.fingerprint(refused).package_managers == [])
@@ -148,7 +155,10 @@ pipeline test(harness: Harness) {
   harness.fs.write_text(path_join(refused, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
   const conflict_host = harness.scanner.scan_project({root: refused, include_git_history: false})
   const conflict_vm = harness.project.scan(refused, {tiers: ["config"]})
-  assert(conflict_host.project.test_commands == {}, "conflicting manager cannot select a runner")
+  assert(
+    conflict_host.project.test_command_discovery.state == "unavailable",
+    "conflicting manager cannot select a runner",
+  )
   assert(conflict_vm.build_commands == [], "catalog cannot bypass conflicting manager evidence")
   assert(conflict_vm.package_scripts.state == "refused")
   assert(conflict_vm.package_scripts.error == "conflicting_managers")
@@ -176,13 +186,13 @@ pipeline test(harness: Harness) {
   const nested_vm = harness.project.scan_tree(nested, {tiers: ["config"]})
   assert(
     contains(
-      nested_host.project.test_commands["cd packages/inherited && pnpm test"],
+      nested_host.project.test_command_discovery.commands["cd packages/inherited && pnpm test"],
       "KNOWN_PACKAGE_SCRIPT",
     ),
   )
   assert(
     contains(
-      nested_host.project.test_commands["cd packages/independent && npm test"],
+      nested_host.project.test_command_discovery.commands["cd packages/independent && npm test"],
       "KNOWN_PACKAGE_SCRIPT",
     ),
   )
@@ -193,7 +203,8 @@ pipeline test(harness: Harness) {
   const scoped_host = harness.scanner.scan_project({root: child_root, include_git_history: false})
   const scoped_vm = harness.project.scan(child_root, {tiers: ["config"]})
   assert(
-    scoped_host.project.detected_test_command == "npm test",
+    scoped_host.project.test_command_discovery.state == "complete"
+      && scoped_host.project.test_command_discovery.preferred == "npm test",
     "standalone child scan cannot inherit outside its requested root",
   )
   assert(scoped_vm.build_commands == ["npm test"])
