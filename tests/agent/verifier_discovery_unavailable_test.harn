@@ -4,7 +4,7 @@ import { agent_loop } from "std/agent/loop"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { command_run } from "std/command"
 import { llm_text, with_llm_script, with_temp_dir } from "std/testing"
-import { repair_test_tools } from "../../fixtures/agents/repair_tools"
+import { repair_test_tools } from "../../conformance/fixtures/agents/repair_tools"
 
 fn run_with_discovery(harness: Harness, unavailable: bool) -> dict {
   const probe_key = "discovery-facts-${harness.random.uuid()}"
