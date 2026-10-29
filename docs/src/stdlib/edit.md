@@ -843,6 +843,7 @@ server and return `ambiguous_symbol` before any write. A definition selector
 chooses the method; it does not prove these unresolved caller bindings.
 Java rename also requires a final declaring type or a private method, and
 refuses new names that may change an Object method contract.
+Java type and constructor renames return `unsupported_language` without writing.
 Ambiguous results include declaration metadata in `warnings`: `symbol`,
 `qualified_name`, `path`, `line`, `col`, and `kind`. In every language
 `symbol` equals `qualified_name`, such as `First.load`, so it can be passed
