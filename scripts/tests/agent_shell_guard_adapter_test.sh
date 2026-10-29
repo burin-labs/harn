@@ -177,7 +177,7 @@ spaced_base="$repo_root/guard path test $$"
 spaced_caller="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$fixture_root" "$order_root" "$spaced_base" "$spaced_caller"' EXIT
 mkdir -p "$spaced_base"
-git -C "$spaced_base" init -q "main repo"
+git -C "$spaced_base" init -q -b main "main repo"
 git -C "$spaced_base/main repo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
 git -C "$spaced_base/main repo" worktree add -q --detach "$spaced_base/linked tree"
 printf 'gitdir: ../main repo/.git/worktrees/linked-tree\n' >"$spaced_base/linked tree/.git"
