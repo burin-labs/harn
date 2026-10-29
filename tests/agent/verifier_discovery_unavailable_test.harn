@@ -1,6 +1,12 @@
 import { agent_completion_gate } from "std/agent/completion_gate"
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
+import {
+  agent_session_finalize,
+  agent_session_init,
+  agent_session_pop_last_assistant,
+  agent_session_record_assistant,
+} from "std/agent/state"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { command_run } from "std/command"
 import { llm_text, with_llm_script, with_temp_dir } from "std/testing"
@@ -114,6 +120,89 @@ pipeline test_custom_completion_callback_preserves_discovery_fact(harness: Harne
   assert_eq(result.goal_outcome.reason, "verification_discovery_unavailable")
   assert(to_string(result?.visible_text ?? "").contains("The change is ready."))
   assert_eq(result.llm.iterations, 1)
+}
+
+pipeline test_invalid_terminal_output_is_not_relabelled_as_discovery_failure(harness: Harness) {
+  const called = "invalid-output-discovery-${harness.random.uuid()}"
+  const result = with_llm_script(
+    harness.llm,
+    [
+      llm_text("<user_response>Not JSON.</user_response><done>##DONE##</done>"),
+      llm_text("Still not JSON."),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Return the required structured answer.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 3,
+          done_sentinel: "##DONE##",
+          output: {type: "object", properties: {answer: {type: "int"}}, required: ["answer"]},
+          verify_completion: { _ ->
+            harness.runtime.store_set(called, true)
+            return {
+              confirm: true,
+              verification: {
+                oracle_expected: false,
+                command: "",
+                observed: "not_run",
+                discovery: {state: "unavailable", detail: "The test directory could not be read."},
+              },
+            }
+          },
+        },
+      )
+    },
+  )
+  assert(harness.runtime.store_get(called) == true, "completion must reach the callback")
+  assert_eq(result.output_valid, false, "the output contract must actually reject the answer")
+  assert_eq(result.publication_admitted, false, "invalid output must not be published")
+  assert(
+    result.terminal.kind != "completion_unverified",
+    "unavailable discovery must not relabel an unpublishable answer",
+  )
+  assert(result.goal_outcome.reason != "verification_discovery_unavailable")
+}
+
+pipeline test_withdrawn_answer_preserves_both_terminal_explanations(harness: Harness) {
+  const sid = "withdrawn-discovery-${harness.random.uuid()}"
+  agent_session_init(harness.agent, "Finish.", nil, {session_id: sid})
+  agent_session_record_assistant(harness.agent, sid, {text: "Rejected draft."})
+  const popped = agent_session_pop_last_assistant(
+    harness.agent,
+    sid,
+    "[withdrawn: this closing report was rejected; see the directive that follows]",
+    "The closing answer was rejected.",
+  )
+  assert(popped, "fixture must withdraw the actual assistant turn")
+  const result = agent_session_finalize(
+    harness.agent,
+    sid,
+    {
+      final_status: "completion_unverified",
+      stop_reason: "sentinel",
+      iterations: 1,
+      publication_admitted: true,
+      verification_discovery_unavailable: true,
+      completion_assessment: {
+        action: "accept",
+        evidence_id: "fixture-evidence",
+        requirements: nil,
+        goal_assessment: nil,
+        pending_tool_batch_effect_count: 0,
+        gap_count: 0,
+        verification: {discovery: {state: "unavailable", detail: "The test directory was denied."}},
+      },
+    },
+  )
+  assert_eq(result.stop_reason, "turn_withdrawn")
+  const message = to_string(result?.terminal?.message ?? "")
+  assert(message.contains("closing answer was rejected"), "the withdrawal cause must survive")
+  assert(message.contains("test directory was denied"), "the discovery cause must survive")
 }
 
 pipeline test_custom_callback_declared_verifier_overrules_unavailable_discovery(harness: Harness) {
@@ -320,8 +409,10 @@ pipeline test_permission_denied_directory_is_not_an_empty_project(harness: Harne
       const empty_read = harness.fs.list_dir(empty)
       const restored = command_run(harness.tools, {argv: ["chmod", "700", denied]})
       assert(restored.success, "the fixture must restore directory access")
-      assert_eq(denied_read, nil, "the operating system must actually deny the read")
       assert_eq(len(empty_read), 0, "a readable empty directory is the positive control")
+      if denied_read != nil {
+        skip("the current process can read a mode-000 directory")
+      }
       const empty_result = run_with_discovery(harness, false)
       assert_eq(empty_result.result.terminal.kind, "natural")
       const captured = run_with_discovery(harness, denied_read == nil)

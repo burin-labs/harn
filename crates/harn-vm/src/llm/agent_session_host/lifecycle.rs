@@ -566,7 +566,10 @@ pub(super) async fn host_agent_session_finalize(
         )
         && discovery_detail.is_some();
     if discovery_unavailable {
-        terminal_outcome.message = discovery_detail;
+        terminal_outcome.message = match (withdrawal_reason.as_ref(), discovery_detail) {
+            (Some(reason), Some(detail)) => Some(format!("{reason}\n{detail}")),
+            (_, detail) => detail,
+        };
     }
     if let Some(reason) = withdrawal_reason.as_ref() {
         if terminal_outcome.message.is_none() {
