@@ -112,8 +112,8 @@ impl PackageProof {
                 continue;
             }
             let exported = new_name.chars().next().is_some_and(char::is_uppercase);
-            if !source.contains(name)
-                && !(exported && source.contains("import") && source.contains('.'))
+            if !(source.contains(name)
+                || exported && source.contains("import") && source.contains('.'))
             {
                 continue;
             }
