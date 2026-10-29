@@ -68,8 +68,8 @@ const OUTPUT = "crates/harn-hostlib/data/grammar-fitness/receipt.v1.json"
 
 const LANGUAGE_PACKAGES = [
   {language: "harn", package: "tree-sitter-harn"},
-  {language: "typescript", package: "tree-sitter-typescript"},
-  {language: "tsx", package: "tree-sitter-typescript"},
+  {language: "typescript", package: "harn-grammars"},
+  {language: "tsx", package: "harn-grammars"},
   {language: "javascript", package: "tree-sitter-javascript"},
   {language: "jsx", package: "tree-sitter-javascript"},
   {language: "python", package: "tree-sitter-python"},
@@ -116,14 +116,29 @@ fn corpus_row_by_language(rows: list, language: string) {
 }
 
 fn path_artifact_digest(fs: HarnessFs, package_name: string) -> string {
-  if package_name != "tree-sitter-harn" {
+  const inputs = if package_name == "tree-sitter-harn" {
+    [
+      "tree-sitter-harn/src/parser.c",
+      "tree-sitter-harn/src/scanner.c",
+      "tree-sitter-harn/src/grammar.json",
+    ]
+  } else if package_name == "harn-grammars" {
+    [
+      "crates/harn-grammars/vendor/tree-sitter-typescript/typescript/src/parser.c",
+      "crates/harn-grammars/vendor/tree-sitter-typescript/typescript/src/scanner.c",
+      "crates/harn-grammars/vendor/tree-sitter-typescript/typescript/src/tree_sitter/alloc.h",
+      "crates/harn-grammars/vendor/tree-sitter-typescript/typescript/src/tree_sitter/array.h",
+      "crates/harn-grammars/vendor/tree-sitter-typescript/typescript/src/tree_sitter/parser.h",
+      "crates/harn-grammars/vendor/tree-sitter-typescript/tsx/src/parser.c",
+      "crates/harn-grammars/vendor/tree-sitter-typescript/tsx/src/scanner.c",
+      "crates/harn-grammars/vendor/tree-sitter-typescript/tsx/src/tree_sitter/alloc.h",
+      "crates/harn-grammars/vendor/tree-sitter-typescript/tsx/src/tree_sitter/array.h",
+      "crates/harn-grammars/vendor/tree-sitter-typescript/tsx/src/tree_sitter/parser.h",
+      "crates/harn-grammars/vendor/tree-sitter-typescript/common/scanner.h",
+    ]
+  } else {
     throw "path dependency `${package_name}` needs an explicit artifact digest rule"
   }
-  const inputs = [
-    "tree-sitter-harn/src/parser.c",
-    "tree-sitter-harn/src/scanner.c",
-    "tree-sitter-harn/src/grammar.json",
-  ]
   let joined = ""
   for path in inputs {
     joined = joined + path + "\n" + sha256(fs.read_bytes(path)) + "\n"
