@@ -49,40 +49,22 @@ deliberately so. Refusing raw worktree creation on an unknown answer prevents
 real harm wherever it fires; refusing `swift test` on an unknown answer would
 send the operator to a target that may not be there.
 
-## Admit Fleet worktrees before creating them
+## Create worktrees with plain Git
 
-Agent shell calls cannot run raw `git worktree add`. Use the owning
-`fleet-worktree-admit` command, which acquires the remote lease and records the
-joined ledger and recovery receipts before it creates the worktree. The guard
-does not expose an environment-variable bypass for this rule.
+The worktree rule refuses raw `git worktree add` only in a repository that owns
+a worktree admission command. Harn owns none, so create worktrees with plain Git
+from `origin/main`:
+
+```bash
+git worktree add -b <branch> <absolute-path> origin/main
+```
 
 The guard answers for the repository the command targets, not for the one it is
 installed in. A `git -C <path>` invocation names that repository, and so does an
 absolute `cd` earlier in the same command, which holds for everything after it.
 A relative `cd` is ignored: the hook payload carries no working directory to
-resolve it against.
-
-Configure the existing admission owner once for this repository. Use its
-absolute path; linked worktrees share the repository's local Git configuration:
-
-```bash
-git config --local harn.fleetAdmissionOwner /path/to/host-repo/scripts/fleet-worktree-admit.ts
-```
-
-With Node.js 22.6 or later available, run Harn's entry from the checkout
-you're admitting:
-
-```bash
-./scripts/fleet-worktree-admit.ts --help
-```
-
-The entry forwards arguments to the configured canonical admission owner and
-supplies this Harn checkout as `--repository-root`. Don't pass a separate root
-override. In a linked worktree, admission targets that linked checkout.
-
-A missing or unconfigured owner fails with its configuration remedy. A
-repository with no admission entry permits raw creation; an unmeasured target
-is refused.
+resolve it against. A target no measured repository covers is refused by name,
+because the adapter never looked there.
 
 This restriction does not affect people, continuous integration, repository
 scripts, `git worktree list`, or retirement through `git worktree remove`.

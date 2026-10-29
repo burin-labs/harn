@@ -176,6 +176,21 @@ if [[ -n "$worktree_allowed" ]]; then
   exit 1
 fi
 
+# This checkout owns no admission command, so plain creation is allowed here.
+if [[ -e "$repo_root/scripts/fleet-worktree-admit.ts" ]]; then
+  echo "this repository must NOT own an admission command" >&2
+  exit 1
+fi
+own_worktree_allowed="$(
+  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git -C $repo_root worktree add -b wt ../wt origin/main\"}}" \
+    | HARN_BIN="$HARN_BIN" "$repo_root/scripts/agent-shell-guard.sh"
+)"
+if [[ -n "$own_worktree_allowed" ]]; then
+  echo "adapter refused plain worktree creation in this repository" >&2
+  printf '%s\n' "$own_worktree_allowed" >&2
+  exit 1
+fi
+
 # The pinned consumer runtime must also reach that decision after a real cd.
 cd_worktree_allowed="$(
   printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cd $fixture_root && git worktree add ../unowned origin/main\"}}" \
