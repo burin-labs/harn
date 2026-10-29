@@ -243,3 +243,34 @@ fn a_branch_replays_recorded_cache_misses_even_when_the_cache_now_hits() {
     .unwrap();
     assert!(cache_lookup("intent", "other", || Ok(None)).is_err());
 }
+
+#[test]
+fn a_branch_reads_the_recorded_runtime_store_value_not_the_live_one() {
+    use crate::store::{store_get, StoreState};
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let store = parking_lot::Mutex::new(StoreState::at_path(tmp.path().join("store.json")));
+    store
+        .lock()
+        .set("memo".to_string(), serde_json::json!("recorded"))
+        .unwrap();
+    {
+        let _guard = start_recording(tmp.path(), RecordingLevel::Full, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(store_get(&store, "memo").unwrap().display(), "recorded");
+        record_llm_call(&request("work"), &result("done", None));
+    }
+    // Another run rewrote the memo after the recording.
+    store
+        .lock()
+        .set("memo".to_string(), serde_json::json!("live"))
+        .unwrap();
+    let _branch = start_branch(BranchPlan {
+        tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: tmp.path().to_path_buf(),
+    })
+    .unwrap();
+    assert_eq!(store_get(&store, "memo").unwrap().display(), "recorded");
+}

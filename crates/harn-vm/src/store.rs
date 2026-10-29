@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-struct StoreState {
+pub(crate) struct StoreState {
     data: BTreeMap<String, serde_json::Value>,
     path: PathBuf,
     loaded: bool,
@@ -26,7 +26,7 @@ impl StoreState {
         Self::at_path(state_root.join(crate::runtime_paths::STORE_FILE))
     }
 
-    fn at_path(path: PathBuf) -> Self {
+    pub(crate) fn at_path(path: PathBuf) -> Self {
         Self {
             data: BTreeMap::new(),
             path,
@@ -70,7 +70,7 @@ impl StoreState {
         self.data.get(key).cloned()
     }
 
-    fn set(&mut self, key: String, value: serde_json::Value) -> Result<(), String> {
+    pub(crate) fn set(&mut self, key: String, value: serde_json::Value) -> Result<(), String> {
         self.ensure_loaded();
         self.data.insert(key, value);
         self.save()
@@ -100,6 +100,17 @@ use crate::value::vm_to_storage_json as vm_to_json;
 /// Run-tape namespace for `harness.runtime.store` reads.
 const STORE_TAPE_NAMESPACE: &str = "harn.runtime.store";
 
+/// Read `key`. The store outlives the run, so a branch reads what its
+/// recording read, not what the store holds now.
+pub(crate) fn store_get(
+    state: &parking_lot::Mutex<StoreState>,
+    key: &str,
+) -> Result<VmValue, VmError> {
+    let value =
+        crate::run_tape::cache_lookup(STORE_TAPE_NAMESPACE, key, || Ok(state.lock().get(key)))?;
+    Ok(value.as_ref().map_or(VmValue::Nil, json_to_vm_value))
+}
+
 /// Register persistent key-value store builtins on a VM.
 ///
 /// The store is backed by `<state-root>/store.json`, created lazily
@@ -125,11 +136,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         "store_get",
         move |args, _out| {
             let key = args.first().map(|a| a.display()).unwrap_or_default();
-            // The store outlives the run, so a branch must read what the recording read.
-            let value = crate::run_tape::cache_lookup(STORE_TAPE_NAMESPACE, &key, || {
-                Ok(s.lock().get(&key))
-            })?;
-            Ok(value.as_ref().map_or(VmValue::Nil, json_to_vm_value))
+            store_get(&s, &key)
         },
     );
 
