@@ -1,31 +1,40 @@
 // Tests for the shared Codex and Claude shell guard.
-import "../agent_shell_guard.harn"
+import {
+  ADMISSION_CHECKED_ENV,
+  GIT_ALIASES_UNREADABLE,
+  ShellGuardDecision,
+  WorktreeAdmissionCensus,
+  cargo_violation,
+  discarded_output_violation,
+  disposable_trash_violation,
+  git_config_aliases,
+  is_disposable_path,
+  make_target_census,
+  program_of,
+  raw_worktree_add_violation,
+  segments_of,
+  worktree_admission_census,
+  worktree_admission_for,
+} from "../agent_shell_guard.harn"
 import { WORKTREE_ADMISSION_POLICY } from "../agent_shell_guard_policy"
+import {
+  ADMITTED,
+  NO_MAKE_TARGETS,
+  claude_payload,
+  decision,
+} from "./agent_shell_guard_test_fixtures"
 
 // A repository that owns the admission command, and one that does not. The
 // worktree rule must answer differently in the two, so every other case in
 // this file states which repository it is standing in rather than inheriting a
 // default.
-const ADMITTED: WorktreeAdmissionCensus = {
-  rows: [{root: "/repo/admitted", command: "scripts/fleet-worktree-admit.ts"}],
-  denial: "",
-}
-
 const UNADMITTED: WorktreeAdmissionCensus = {
   rows: [{root: "/repo/unadmitted", command: ""}],
   denial: "",
 }
 
-// Most cases here stand in a repository whose Make targets were never read,
-// which is the state every rule but the Make-owned one is indifferent to.
-const NO_MAKE_TARGETS: MakeTargetCensus = UNMEASURED_MAKE_TARGETS
-
 fn verdict(payload: string) -> ShellGuardDecision {
   return decision(payload, ADMITTED, NO_MAKE_TARGETS)
-}
-
-fn claude_payload(command: string) -> string {
-  return json_stringify({tool_name: "Bash", tool_input: {command: command}})
 }
 
 fn codex_payload(command: string) -> string {
@@ -1212,8 +1221,8 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
   assert_eq(listing["s"], "stash pop")
   assert_eq(listing["sh"], "!git stash drop")
   // Repo A (the hook's directory) defines nothing; repo B, reached through -C, defines the listing.
-  const lookup = { options ->
-    if options.contains("/repo/b") {
+  const lookup = { context ->
+    if context.options.contains("/repo/b") {
       listing
     } else {
       {}
@@ -1243,7 +1252,7 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
     )
   }
   // A configuration git could not read is refused rather than read as having no aliases.
-  const unreadable = { options -> {"<unreadable>": ""} }
+  const unreadable = { _options -> {"<unreadable>": ""} }
   assert(
     !decision(claude_payload("git -C /missing s"), ADMITTED, NO_MAKE_TARGETS, unreadable).allow,
   )
@@ -1251,7 +1260,13 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
   // refuse it if it were consulted.
   for command in ["git -C /missing status", "git -C /missing log -1", "git diff"] {
     assert(
-      decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, unreadable).allow,
+      decision(
+        claude_payload(command),
+        ADMITTED,
+        NO_MAKE_TARGETS,
+        unreadable,
+        { _program -> ["status", "log", "diff"] },
+      ).allow,
       command + " must not consult the alias lookup",
     )
   }
@@ -1259,7 +1274,7 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
   const nested = git_config_aliases("alias.foo !git -c alias.s=stash s pop\n")
   assert_eq(nested["foo"], "!git -c alias.s=stash s pop")
   assert(
-    !decision(claude_payload("git foo"), ADMITTED, NO_MAKE_TARGETS, { options -> nested }).allow,
+    !decision(claude_payload("git foo"), ADMITTED, NO_MAKE_TARGETS, { _options -> nested }).allow,
     "an alias that defines an inner alias still reaches the stash write",
   )
   // A command-local config source is invisible to the lookup, so a non-built-in subcommand under it
@@ -1290,6 +1305,7 @@ pipeline test_git_config_aliases_that_expand_to_stash_writes_are_denied(
       ADMITTED,
       NO_MAKE_TARGETS,
       lookup,
+      { _program -> ["status"] },
     ).allow,
   )
   assert(

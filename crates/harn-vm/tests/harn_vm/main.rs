@@ -18,6 +18,7 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+mod agent_batch_controls;
 mod agent_call_stage_attribution;
 mod agent_fanout;
 mod agent_loop_boundary_terminal;

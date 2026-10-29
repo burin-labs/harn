@@ -11,6 +11,7 @@
 //! engine, not to this crate.
 
 mod config;
+mod dispatch;
 mod error;
 mod event;
 mod inbox;
@@ -21,6 +22,9 @@ mod text;
 mod watcher;
 
 pub use config::{Config, Hold, Policy, QuietHours, CONFIG_FILE};
+pub use dispatch::{
+    DispatchBatch, DispatchClaim, DispatchPoll, DispatchState, DEFAULT_DISPATCH_INTERVAL_SECONDS,
+};
 pub use error::SignalsError;
 pub use event::{
     ManualEvent, TriageActionIntent, TriageActor, TriageEvent, TriagePrivacy, TriageRelatedRef,
@@ -31,9 +35,9 @@ pub use inbox::{
     SIGNALS_DIR_ENV,
 };
 pub use model::{
-    Activity, CheckIn, CheckInScope, Delivery, HarnessKind, Lease, Provenance, Reminder,
-    ReminderId, RoutingHints, Session, SessionAnnouncement, Severity, Signal, SignalInput,
-    SignalState, SignatureStatus,
+    Activity, CaptureIdentity, CheckIn, CheckInScope, Delivery, HarnessKind, Lease, Provenance,
+    Reminder, ReminderId, RoutingHints, Session, SessionAnnouncement, Severity, Signal,
+    SignalInput, SignalState, SignatureStatus,
 };
 pub use repo::{repo_slug, slug_from_url};
 pub use router::{Router, RuleRouter};

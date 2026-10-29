@@ -110,14 +110,17 @@ impl Hold {
 
 impl Policy {
     pub fn hold(&self, signal: &Signal, now: OffsetDateTime) -> Option<Hold> {
-        if self
-            .muted
-            .iter()
-            .any(|pattern| match pattern.strip_suffix('*') {
-                Some(prefix) => signal.key.starts_with(prefix),
-                None => &signal.key == pattern,
-            })
-        {
+        if self.muted.iter().any(|pattern| {
+            let matches = |key: &str| match pattern.strip_suffix('*') {
+                Some(prefix) => key.starts_with(prefix),
+                None => key == pattern,
+            };
+            matches(&signal.key)
+                || signal
+                    .capture
+                    .as_ref()
+                    .is_some_and(|capture| matches(&capture.monitor_key))
+        }) {
             return Some(Hold::Muted);
         }
         if signal.severity < self.min_severity {

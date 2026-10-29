@@ -919,6 +919,7 @@ impl AcpSandboxConfig {
             || !self.process.write_roots.is_empty()
             || self.process.allow_tcp_loopback
             || !self.process.unix_socket_roots.is_empty()
+            || self.process.ssh_agent_socket.is_some()
             || self.process.allow_child_workspace_write
     }
 

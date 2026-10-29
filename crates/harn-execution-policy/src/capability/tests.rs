@@ -568,6 +568,48 @@ fn unix_socket_roots_narrow_like_the_other_process_roots() {
         .expect_err("a flattened stage cannot move socket authority elsewhere");
 }
 
+#[test]
+fn ssh_agent_grant_inherits_the_host_endpoint_and_is_omitted_by_default() {
+    let policy = |socket: Option<&str>| CapabilityPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            ssh_agent_socket: socket.map(str::to_string),
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    };
+    let allowed = policy(Some("/run/agent.sock"));
+    let other = policy(Some("/run/other.sock"));
+    let absent = policy(None);
+    assert!(!serde_json::to_value(&absent.process_sandbox)
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .contains_key("ssh_agent_socket"));
+    let tools_only = CapabilityPolicy {
+        tools: vec!["run_command".into()],
+        ..CapabilityPolicy::default()
+    };
+    for requested in [&allowed, &other, &absent, &tools_only] {
+        assert_eq!(
+            allowed
+                .intersect(requested)
+                .unwrap()
+                .process_sandbox
+                .ssh_agent_socket,
+            Some("/run/agent.sock".into())
+        );
+        assert!(absent
+            .intersect(requested)
+            .unwrap()
+            .process_sandbox
+            .ssh_agent_socket
+            .is_none());
+    }
+    absent.assert_within_ceiling(&allowed).unwrap_err();
+    allowed.assert_within_ceiling(&other).unwrap_err();
+    allowed.assert_within_ceiling(&absent).unwrap();
+}
+
 /// A role whose tools run commands and edit nothing: the `workspace`
 /// capability only reads.
 fn read_only_role(grant: bool) -> CapabilityPolicy {

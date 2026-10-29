@@ -759,6 +759,11 @@ impl CapabilityPolicy {
         // case a `!ceiling_roots.is_empty()` guard would silently wave through).
         let ceiling_ps = &self.process_sandbox;
         let requested_ps = &requested.process_sandbox;
+        if requested_ps.ssh_agent_socket.is_some()
+            && requested_ps.ssh_agent_socket != ceiling_ps.ssh_agent_socket
+        {
+            return Err("flattened stage policy widened the SSH agent socket grant".to_string());
+        }
         for (label, ceiling_roots, requested_roots) in [
             (
                 "process_sandbox.read_roots",

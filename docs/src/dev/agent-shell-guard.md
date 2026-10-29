@@ -102,6 +102,16 @@ git reset --soft HEAD~1   # later, to continue editing
 
 `git stash list` and `git stash show` stay available, since they only read.
 
+The guard checks Git aliases too. Builtin and configuration queries use the
+selected executable only when it belongs to the hook's trusted PATH. Payload
+paths outside it are not executed during preflight. Source command facts retain
+assignment-only stages and outer shell prefixes, so a PATH or working-directory
+change cannot reuse facts from a different Git installation. Missing context
+remains unknown. When a payload changes Git configuration, run a custom alias in
+a separate shell call so the guard can read its effective configuration.
+Within one decision, repeated scans reuse measured builtin facts for the same
+executable. A new decision queries again; different executables keep separate facts.
+
 ## Keep complete command output
 
 Do not send a build or test directly into `grep`, `head`, or another filter.

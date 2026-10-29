@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { admitChild, admitObserver, archiveProducerBinding, githubArchiveProducer, githubDeclaration, githubRecord, observerContext, observerRefusal } from '../lib/consumer-observer.mjs';
+import { admitChild, admitObserver, archiveProducerBinding, githubArchiveProducer, githubDeclaration, githubRecord, observerContext, observerParentWorkflows, observerRefusal } from '../lib/consumer-observer.mjs';
 
 async function main() {
   const env = process.env;
@@ -18,9 +18,14 @@ async function main() {
   const parent = await githubRecord(env.GH_TOKEN, context.parent_repository, context.parent_run_id);
   admitObserver(context, parent);
   const declaration = await githubDeclaration(env.GH_TOKEN, context);
+  const sameLiveCandidate=parent.path===observerParentWorkflows.candidate
+    && String(parent.id)===env.RELEASE_PRODUCER_RUN_ID
+    && parent.run_attempt===Number(env.RELEASE_PRODUCER_RUN_ATTEMPT)
+    && parent.head_sha===context.source_revision;
   const binding=env.RELEASE_PRODUCER_RUN_ID || env.RELEASE_PRODUCER_RUN_ATTEMPT ? archiveProducerBinding(
     await githubArchiveProducer(env.GH_TOKEN,{sourceRevision:context.source_revision,
-      runId:env.RELEASE_PRODUCER_RUN_ID,attempt:Number(env.RELEASE_PRODUCER_RUN_ATTEMPT)})) : undefined;
+      runId:env.RELEASE_PRODUCER_RUN_ID,attempt:Number(env.RELEASE_PRODUCER_RUN_ATTEMPT),
+      allowPendingAudit:sameLiveCandidate})) : undefined;
   const [finalParent, child] = await Promise.all([
     githubRecord(env.GH_TOKEN, context.parent_repository, context.parent_run_id),
     githubRecord(env.GH_TOKEN, env.GITHUB_REPOSITORY, env.GITHUB_RUN_ID),

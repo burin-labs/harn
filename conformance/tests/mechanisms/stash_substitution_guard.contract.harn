@@ -2,6 +2,7 @@
 // mutation. Read-only substitutions remain available.
 import {
   NO_CONFIG_ALIASES,
+  NO_GIT_BUILTINS,
   UNMEASURED_MAKE_TARGETS,
   decision,
   worktree_admission_census,
@@ -35,6 +36,7 @@ pipeline default(harness: Harness) {
     census,
     UNMEASURED_MAKE_TARGETS,
     NO_CONFIG_ALIASES,
+    NO_GIT_BUILTINS,
     parse,
   )
   const expanding = decision(
@@ -42,6 +44,7 @@ pipeline default(harness: Harness) {
     census,
     UNMEASURED_MAKE_TARGETS,
     NO_CONFIG_ALIASES,
+    NO_GIT_BUILTINS,
     parse,
   )
   const incomplete = decision(
@@ -49,6 +52,7 @@ pipeline default(harness: Harness) {
     census,
     UNMEASURED_MAKE_TARGETS,
     NO_CONFIG_ALIASES,
+    NO_GIT_BUILTINS,
     { source, query ->
       {result: "ok", had_errors: false, truncated: false, match_count: 1, matches: []}
     },

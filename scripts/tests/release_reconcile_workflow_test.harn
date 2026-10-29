@@ -1,0 +1,27 @@
+import { read_yaml } from "std/fs"
+
+@test
+pipeline test_failed_producer_wakes_only_the_candidate_reconciler(harness: Harness) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/promote-release.yml")
+  const jobs = workflow.jobs
+  const reconcile = jobs.reconcile
+  assert(reconcile.needs.contains("resolve"))
+  assert(reconcile.needs.contains("plan"))
+  assert(reconcile.if.contains("always()"))
+  assert(reconcile.if.contains("github.event_name == 'workflow_run'"))
+  assert(reconcile.concurrency.group == "harn-release-candidate-reconcile")
+  assert(reconcile.concurrency["cancel-in-progress"] == false)
+  assert(jobs.resolve.if.contains("github.event.workflow_run.conclusion == 'success'"))
+  assert(jobs.plan.outputs.reconcile.contains("steps.plan.outputs.reconcile"))
+  const wake = reconcile.steps.filter({ step -> step?.id == "wake" }).to_list()[0]
+  assert(wake.run == "node scripts/ci/release-reconcile-wake.mjs")
+  const mint = reconcile.steps.filter({ step -> step?.id == "reconcile-token" }).to_list()[0]
+  assert(mint.if == "steps.wake.outputs.required == 'true'")
+  const request = reconcile.steps.filter(
+    { step -> step?.name == "Keep a candidate in flight while main owes a release" },
+  )
+    .to_list()[0]
+  assert(request.if == mint.if)
+  assert(request.run.contains("scripts/ci/release_candidate_reconcile.sh"))
+  assert(jobs.plan.steps.filter({ step -> step?.id == "reconcile-token" }).to_list() == [])
+}

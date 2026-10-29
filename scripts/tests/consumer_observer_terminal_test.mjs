@@ -385,12 +385,12 @@ test('the terminal entrypoint records only an authenticated reached product deci
     // manifest bound into custody, rather than borrowing a source-only pass.
     const admissionEntry=fileURLToPath(new URL('../ci/consumer-observer-admit.mjs',import.meta.url));
     const admissionEvent=path.join(scratch,'repair-event.json');
-    const admitBound=(inputs={})=>{
+    const admitBound=(inputs={},changes={})=>{
       const directory=path.join(scratch,`repair-admission-${sequence++}`);fs.mkdirSync(directory);
       const output=path.join(directory,'outputs');
       fs.writeFileSync(admissionEvent,JSON.stringify({inputs:{source_revision:context.source_revision,
         observer:JSON.stringify(context),release_producer_run_id:'900',release_producer_run_attempt:'1',...inputs}}));
-      fs.writeFileSync(fixture,JSON.stringify({...repairInputs,archives,child:{...pairedChild,status:'in_progress',conclusion:null}}));
+      fs.writeFileSync(fixture,JSON.stringify({...repairInputs,archives,child:{...pairedChild,status:'in_progress',conclusion:null},...changes}));
       const run=spawnSync(process.execPath,[admissionEntry],{encoding:'utf8',env:{PATH:process.env.PATH,
         NODE_OPTIONS:`--import=${observerPreload}`,GH_TOKEN:'fixture-read',OBSERVER_CONTEXT:JSON.stringify(context),
         GITHUB_REPOSITORY:'acme/widget-host',GITHUB_RUN_ID:'73',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:child.head_sha,
@@ -406,6 +406,13 @@ test('the terminal entrypoint records only an authenticated reached product deci
     assert.equal(boundReceipt.producer.manifest_id,producerArtifacts.find(item=>item.name.startsWith('candidate-manifest-')).id);
     const wrongInput=admitBound({release_producer_run_id:'901'});
     assert.equal(wrongInput.run.status,1);assert.equal(wrongInput.text,'');
+    for(const audit of [{status:'in_progress',conclusion:null},...['failure','cancelled','skipped','timed_out',null]
+      .map(conclusion=>({status:'completed',conclusion}))]) {
+      const refused=admitBound({},{producerData:{...producerData,jobs:producerJobs.map(job=>
+        job.name==='Release residual audit'?{...job,...audit}:job)}});
+      assert.equal(refused.run.status,1,'promotion admission cannot bind a pending or failed audit');
+      assert.equal(refused.text,'');
+    }
     const bindArchive=(file,slot)=>{
       const archive=path.join(scratch,`bound-${slot}.zip`);
       const zipped=spawnSync('zip',['-j',archive,file],{encoding:'utf8'});assert.equal(zipped.status,0,zipped.stderr);

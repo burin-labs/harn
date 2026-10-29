@@ -351,6 +351,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("shell_at", "harness.process.shell_at"),
     ("signal_ack", "harness.runtime.signal_ack"),
     ("signal_check_in", "harness.runtime.signal_check_in"),
+    ("signal_dispatch", "harness.runtime.signal_dispatch"),
     ("signal_end_session", "harness.runtime.signal_end_session"),
     ("signal_fire", "harness.runtime.signal_fire"),
     ("signal_register", "harness.runtime.signal_register"),
