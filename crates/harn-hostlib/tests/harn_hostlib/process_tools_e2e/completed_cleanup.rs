@@ -70,7 +70,7 @@ while True: signal.pause()
             revents: 0,
         };
         assert!(
-            unsafe { libc::poll(&mut signal, 1, 15_000) } > 0,
+            unsafe { libc::poll(&raw mut signal, 1, 15_000) } > 0,
             "detached child did not signal readiness"
         );
         let mut byte = [0_u8; 1];
@@ -98,9 +98,7 @@ while True: signal.pause()
             "cancelled"
         ));
     }
-    completed
-        .recv_timeout(std::time::Duration::from_secs(25))
-        .expect("cancelled handle did not settle");
+    harn_clock::test_support::recv_within("cancelled handle settled", &completed);
     let mut wait = dict_map();
     wait.insert("handle_id".into(), vm_string(&handle));
     let terminal = require_dict(call("hostlib_tools_wait_command", wait).unwrap());

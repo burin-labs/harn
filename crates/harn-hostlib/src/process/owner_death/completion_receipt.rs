@@ -123,8 +123,9 @@ mod tests {
             ..Default::default()
         };
         sender.send(Ok(expected.clone())).unwrap();
+        let shared = reader.clone();
         assert_eq!(reader.finish(), Some(expected.clone()));
-        assert_eq!(reader.clone().finish(), Some(expected));
+        assert_eq!(shared.finish(), Some(expected));
 
         let (sender, receiver) = mpsc::sync_channel(1);
         drop(sender);
