@@ -6,7 +6,6 @@ import {
 } from "../agent_shell_guard.harn"
 import { git_program_in_hook_path } from "../agent_shell_guard_policy"
 import {
-  ADMITTED,
   NO_MAKE_TARGETS,
   TEST_GIT_BUILTINS,
   claude_payload,
@@ -17,7 +16,6 @@ pipeline test_git_builtin_facts_are_queried_once_per_executable(harness: Harness
   const single = harness.runtime.atomic(0)
   const once = decision(
     claude_payload("bash -lc 'git status'"),
-    ADMITTED,
     NO_MAKE_TARGETS,
     NO_CONFIG_ALIASES,
     { _program ->
@@ -30,7 +28,6 @@ pipeline test_git_builtin_facts_are_queried_once_per_executable(harness: Harness
   assert(
     decision(
       claude_payload("git status"),
-      ADMITTED,
       NO_MAKE_TARGETS,
       NO_CONFIG_ALIASES,
       { _program ->
@@ -43,7 +40,6 @@ pipeline test_git_builtin_facts_are_queried_once_per_executable(harness: Harness
   const multiple = harness.runtime.atomic(0)
   const separate = decision(
     claude_payload("/old/git status && /new/git status"),
-    ADMITTED,
     NO_MAKE_TARGETS,
     NO_CONFIG_ALIASES,
     { _program ->
@@ -64,13 +60,12 @@ pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
     }
   }
   assert(
-    !decision(claude_payload("git rewrite"), ADMITTED, NO_MAKE_TARGETS, aliases, TEST_GIT_BUILTINS)
+    !decision(claude_payload("git rewrite"), NO_MAKE_TARGETS, aliases, TEST_GIT_BUILTINS)
       .allow,
   )
   assert(
     !decision(
       claude_payload("git history"),
-      ADMITTED,
       NO_MAKE_TARGETS,
       aliases,
       { program -> ["status"] },
@@ -79,7 +74,6 @@ pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
   assert(
     decision(
       claude_payload("git history"),
-      ADMITTED,
       NO_MAKE_TARGETS,
       aliases,
       { program -> ["history"] },
@@ -102,29 +96,28 @@ pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
     "sh -c 'if true; then PATH=/older/bin; fi; git history'",
   ] {
     assert(
-      !decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, aliases, versions).allow,
+      !decision(claude_payload(command), NO_MAKE_TARGETS, aliases, versions).allow,
       command,
     )
   }
   assert(
-    decision(claude_payload("FOO=1 git status"), ADMITTED, NO_MAKE_TARGETS, aliases, versions)
+    decision(claude_payload("FOO=1 git status"), NO_MAKE_TARGETS, aliases, versions)
       .allow,
   )
   assert(
     decision(
       claude_payload("git commit -m 'PATH=/older/bin'"),
-      ADMITTED,
       NO_MAKE_TARGETS,
       aliases,
       TEST_GIT_BUILTINS,
     ).allow,
   )
   assert(
-    !decision(claude_payload("/old/git history"), ADMITTED, NO_MAKE_TARGETS, aliases, versions)
+    !decision(claude_payload("/old/git history"), NO_MAKE_TARGETS, aliases, versions)
       .allow,
   )
   assert(
-    decision(claude_payload("/new/git history"), ADMITTED, NO_MAKE_TARGETS, aliases, versions)
+    decision(claude_payload("/new/git history"), NO_MAKE_TARGETS, aliases, versions)
       .allow,
   )
   for command in [
@@ -136,7 +129,6 @@ pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
     assert(
       !decision(
         claude_payload(command),
-        ADMITTED,
         NO_MAKE_TARGETS,
         NO_CONFIG_ALIASES,
         { program -> ["config", "status"] },
@@ -146,7 +138,6 @@ pipeline test_git_aliases_respect_installed_builtins_and_prior_config_writes() {
   assert(
     decision(
       claude_payload("git config user.name Agent; git status"),
-      ADMITTED,
       NO_MAKE_TARGETS,
       NO_CONFIG_ALIASES,
       { program -> ["config", "status"] },
@@ -162,7 +153,7 @@ pipeline test_git_global_options_without_a_subcommand_cannot_execute_aliases() {
     "git --help",
     "git -C /repo --list-cmds=builtins",
   ] {
-    assert(decision(claude_payload(command), ADMITTED, NO_MAKE_TARGETS, unreadable).allow)
+    assert(decision(claude_payload(command), NO_MAKE_TARGETS, unreadable).allow)
   }
 }
 
@@ -190,7 +181,6 @@ pipeline test_git_queries_use_the_selected_trusted_executable() {
   assert(
     !decision(
       claude_payload("/older/git -C /repo history"),
-      ADMITTED,
       NO_MAKE_TARGETS,
       selected,
       { program -> [] },
