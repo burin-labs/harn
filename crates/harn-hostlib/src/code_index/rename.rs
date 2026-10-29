@@ -222,7 +222,6 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             "must start with a letter or underscore and consist of identifier characters",
         ));
     }
-
     // Constructors are type-renaming seeds, not independent method renames.
     let java_constructor = if seed_node.language == "java"
         && seed_node.kind == NodeKind::Function
@@ -325,6 +324,13 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     }
     env.backend.syntax_tree = true;
 
+    if is_rename && seed_node.language == "go" && matches!(new_name.as_str(), "_" | "init") {
+        return Ok(invalid_identifier_response(
+            &env,
+            "Go's blank identifier and init cannot be used as rename targets",
+        ));
+    }
+
     let check_go_package = is_rename
         && seed_node.language == "go"
         && matches!(seed_node.kind, NodeKind::Function | NodeKind::Type);
@@ -340,13 +346,8 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
                 return Ok(conflict_response(&env, &package_shadows));
             }
             Ok((_, mut proof)) => {
-                if scope == Scope::Workspace {
-                    if let Err(detail) = proof.cover_workspace(
-                        &state.root,
-                        &symbol_name,
-                        session_id.as_deref(),
-                        &call,
-                    ) {
+                if scope != Scope::Workspace {
+                    if let Err(detail) = proof.cover_scope(&in_scope_files, &symbol_name, &call) {
                         if let Some(interrupt) = call.interrupted() {
                             return Ok(interrupted_response(&env, interrupt, false));
                         }
@@ -355,6 +356,21 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
                             &format!("rename aborted without writes: {detail}"),
                         ));
                     }
+                }
+                if let Err(detail) = proof.cover_workspace(
+                    &state.root,
+                    &symbol_name,
+                    &new_name,
+                    session_id.as_deref(),
+                    &call,
+                ) {
+                    if let Some(interrupt) = call.interrupted() {
+                        return Ok(interrupted_response(&env, interrupt, false));
+                    }
+                    return Ok(ambiguous_response_with_details(
+                        &env,
+                        &format!("rename aborted without writes: {detail}"),
+                    ));
                 }
                 Some(proof)
             }

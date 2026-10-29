@@ -334,25 +334,35 @@ fn stopping_one_tool_call_stops_a_waiting_rename_without_writes() {
 
 #[test]
 fn stopping_a_go_workspace_census_leaves_the_package_unchanged() {
-    stop_go_census("checking Go workspace sources", false, false);
+    stop_go_census("checking Go workspace sources", false, false, "workspace");
 }
 
 #[test]
 fn stopping_a_go_package_census_leaves_the_package_unchanged() {
-    stop_go_census("checking Go package sources", false, false);
+    stop_go_census("checking Go package sources", false, false, "workspace");
+}
+
+#[test]
+fn stopping_a_go_scope_census_leaves_the_package_unchanged() {
+    stop_go_census("checking Go scope bindings", false, false, "file");
 }
 
 #[test]
 fn stopping_at_go_rename_commit_reports_the_write_and_stops_follow_on_work() {
-    stop_go_census("hostlib_code_index_rename_symbol", true, false);
+    stop_go_census("hostlib_code_index_rename_symbol", true, false, "workspace");
 }
 
 #[test]
 fn stopping_a_later_wait_after_go_rename_prevents_follow_on_work() {
-    stop_go_census("never-match", true, true);
+    stop_go_census("never-match", true, true, "workspace");
 }
 
-fn stop_go_census(detail: &'static str, expect_applied: bool, stop_after_rename: bool) {
+fn stop_go_census(
+    detail: &'static str,
+    expect_applied: bool,
+    stop_after_rename: bool,
+    scope: &str,
+) {
     let workspace = tempfile::tempdir().unwrap();
     fs::create_dir_all(workspace.path().join("src")).unwrap();
     fs::write(
@@ -385,7 +395,7 @@ pipeline main(harness: Harness, _: unknown) {{
     parameters: {{}},
     handler: {{ _args ->
       try {{
-        const renamed = harness.code_index.rename_symbol({{symbol_ref: {{name: "Reading", path: "src/store.go", kind: "Type"}}, new_name: "Measurement", scope: "workspace", backend: "syntax_tree"}})
+        const renamed = harness.code_index.rename_symbol({{symbol_ref: {{name: "Reading", path: "src/store.go", kind: "Type"}}, new_name: "Measurement", scope: "{scope}", backend: "syntax_tree"}})
         {later_wait}
         {follow_on}
         return agent_tool_handler_result(json_stringify(renamed), renamed)

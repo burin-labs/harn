@@ -45,6 +45,50 @@ impl PackageProof {
             && !self.constrained.contains(path)
     }
 
+    /// A narrow scope must not leave another file of the same package using
+    /// the old package-level name. The ordinary index may omit that file.
+    pub(super) fn cover_scope(
+        &self,
+        in_scope: &[String],
+        name: &str,
+        call: &HostCallContext,
+    ) -> Result<(), String> {
+        call.report(Phase::Resolving, "checking Go scope bindings");
+        for (path, source) in &self.sources {
+            if call.interrupted().is_some() {
+                return Err("Go scope coverage was interrupted".into());
+            }
+            call.heartbeat(Phase::Resolving, "checking Go scope bindings");
+            if !self.members.contains(path) || in_scope.contains(path) || !source.contains(name) {
+                continue;
+            }
+            let tree = ast_api::parse_tree(source, Language::Go).map_err(|err| err.to_string())?;
+            let mut targets = Vec::new();
+            let mut ignored = Vec::new();
+            collect_identifier_spans(
+                tree.root_node(),
+                source.as_bytes(),
+                name,
+                "",
+                &[
+                    "identifier",
+                    "type_identifier",
+                    "field_identifier",
+                    "package_identifier",
+                ],
+                path,
+                &mut targets,
+                &mut ignored,
+            );
+            if !targets.is_empty() {
+                return Err(format!(
+                    "Go package source `{path}` outside the requested scope may refer to `{name}`"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// The ordinary index intentionally omits some workspace files. Do not
     /// trust it as a completeness proof for a cross-file Go rename: an
     /// unindexed consumer could otherwise be left referring to the old name.
@@ -52,6 +96,7 @@ impl PackageProof {
         &mut self,
         root: &Path,
         name: &str,
+        new_name: &str,
         session_id: Option<&str>,
         call: &HostCallContext,
     ) -> Result<(), String> {
@@ -63,7 +108,13 @@ impl PackageProof {
                 return Err("Go workspace coverage was interrupted".into());
             }
             call.heartbeat(Phase::Resolving, "checking Go workspace bindings");
-            if self.members.contains(path) || !source.contains(name) {
+            if self.members.contains(path) {
+                continue;
+            }
+            let exported = new_name.chars().next().is_some_and(char::is_uppercase);
+            if !source.contains(name)
+                && !(exported && source.contains("import") && source.contains('.'))
+            {
                 continue;
             }
             let tree = ast_api::parse_tree(source, Language::Go).map_err(|err| err.to_string())?;
@@ -71,6 +122,9 @@ impl PackageProof {
                 return Err(format!(
                     "Go source `{path}` cannot be parsed for binding proof"
                 ));
+            }
+            if exported && has_dot_import(tree.root_node(), source) {
+                return Err(format!("Go source `{path}` has a dot import whose bindings cannot be proven; use a binding-aware LSP rename"));
             }
             let mut targets = Vec::new();
             let mut ignored = Vec::new();
@@ -98,6 +152,21 @@ impl PackageProof {
         self.workspace = Some(sources);
         Ok(())
     }
+}
+
+fn has_dot_import(node: tree_sitter::Node<'_>, source: &str) -> bool {
+    if node.kind() == "import_spec"
+        && node
+            .child_by_field_name("name")
+            .is_some_and(|name| source.get(name.byte_range()) == Some("."))
+    {
+        return true;
+    }
+    let mut cursor = node.walk();
+    let found = node
+        .named_children(&mut cursor)
+        .any(|child| has_dot_import(child, source));
+    found
 }
 
 /// Check every sibling Go source, including staged additions and files that do
@@ -150,6 +219,13 @@ pub(super) fn inspect(
             continue;
         }
         members.insert(relative.clone());
+        if new_name.chars().next().is_some_and(char::is_uppercase)
+            && has_dot_import(tree.root_node(), source)
+        {
+            return Err(format!(
+                "Go package source `{relative}` has a dot import whose bindings cannot be proven"
+            ));
+        }
         let mut cursor = tree.root_node().walk();
         if tree.root_node().named_children(&mut cursor).any(|node| {
             node.kind() == "comment"
@@ -494,7 +570,13 @@ mod tests {
         .unwrap();
         let (_, mut proof) = inspect(root, "lab/store.go", "DocumentLibrary", None, None).unwrap();
         proof
-            .cover_workspace(root, "DocumentStore", None, &HostCallContext::new(None))
+            .cover_workspace(
+                root,
+                "DocumentStore",
+                "DocumentLibrary",
+                None,
+                &HostCallContext::new(None),
+            )
             .unwrap();
         assert!(proof.unchanged(root, None));
         fs::create_dir(root.join("build")).unwrap();
@@ -597,17 +679,35 @@ mod tests {
         symlink(root.join("guidance.md"), root.join("CLAUDE.md")).unwrap();
         let (_, mut proof) = inspect(root, "store.go", "DocumentLibrary", None, None).unwrap();
         proof
-            .cover_workspace(root, "DocumentStore", None, &HostCallContext::new(None))
+            .cover_workspace(
+                root,
+                "DocumentStore",
+                "DocumentLibrary",
+                None,
+                &HostCallContext::new(None),
+            )
             .unwrap();
         symlink(root.join("store.go"), root.join("linked.go")).unwrap();
         assert!(proof
-            .cover_workspace(root, "DocumentStore", None, &HostCallContext::new(None))
+            .cover_workspace(
+                root,
+                "DocumentStore",
+                "DocumentLibrary",
+                None,
+                &HostCallContext::new(None)
+            )
             .is_err());
         assert!(!proof.unchanged(root, None));
         fs::remove_file(root.join("linked.go")).unwrap();
         symlink(root.join("store.go"), root.join("secret.go")).unwrap();
         assert!(proof
-            .cover_workspace(root, "DocumentStore", None, &HostCallContext::new(None))
+            .cover_workspace(
+                root,
+                "DocumentStore",
+                "DocumentLibrary",
+                None,
+                &HostCallContext::new(None)
+            )
             .is_err());
     }
 
