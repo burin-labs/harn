@@ -48,7 +48,7 @@ use super::store::{
     SweepReport, TruncateResult, UpdateSession, VerifyReport, MAX_READ_BATCH,
 };
 
-// v6 adds durable task admission, execution descriptors, and control events.
+// v7 adds the ordered additional workspace directory projection.
 // Adding a table or column has to move this number:
 // the shared initializer fast-paths out of schema setup entirely when the
 // recorded version already matches, so an unbumped column never reaches an
@@ -115,7 +115,7 @@ impl DerefMut for MutationConnection<'_> {
 
 impl SqliteSessionStore {
     /// Current schema version supported by the session store initializer.
-    pub const SCHEMA_VERSION: i64 = 6;
+    pub const SCHEMA_VERSION: i64 = 7;
 
     /// Inspect a session without reading its events or its potentially large metadata.
     pub fn journal_presence(
