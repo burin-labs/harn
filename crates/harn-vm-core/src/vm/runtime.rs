@@ -120,6 +120,31 @@ pub trait VmRuntime: Any + Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<BuiltinGateDecision, VmError>> + Send + 'a>>;
     fn gate_bridge_builtin(&self, name: &str) -> Result<(), VmError>;
     fn builtin_effects(&self, name: &str) -> Option<&'static [harn_builtin_meta::EffectSpec]>;
+    /// Run-tape hook before a builtin runs. `Some` answers the call in its
+    /// place: a recorded read a branch replays, or the refusal of an effect
+    /// a branch prefix must not repeat. `effects: None` is a pure builtin.
+    fn serve_builtin_call(
+        &self,
+        _name: &str,
+        _effects: Option<&'static [harn_builtin_meta::EffectSpec]>,
+        _args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        None
+    }
+    /// True while builtin results may need recording, so callers keep the
+    /// arguments for [`Self::record_builtin_call`].
+    fn records_builtin_calls(&self) -> bool {
+        false
+    }
+    /// Run-tape hook after a builtin ran.
+    fn record_builtin_call(
+        &self,
+        _name: &str,
+        _effects: Option<&'static [harn_builtin_meta::EffectSpec]>,
+        _args: &[VmValue],
+        _result: &Result<VmValue, VmError>,
+    ) {
+    }
     fn capability_effects(
         &self,
         capability: harn_builtin_meta::CapabilityId,

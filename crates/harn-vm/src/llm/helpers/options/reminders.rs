@@ -44,8 +44,10 @@ pub fn directive_nonce_for_session(session_id: &str) -> String {
         let _ = crate::agent_sessions::record_directive_nonce(session_id, &recorded);
         return recorded;
     }
+    let fresh =
+        || crate::run_tape::taped_random("directive_nonce", || uuid::Uuid::now_v7().to_string());
     if crate::agent_sessions::exists(session_id) {
-        let generated = uuid::Uuid::now_v7().to_string();
+        let generated = fresh();
         return crate::agent_sessions::record_directive_nonce(session_id, &generated)
             .ok()
             .flatten()
@@ -60,7 +62,7 @@ pub fn directive_nonce_for_session(session_id: &str) -> String {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     nonces
         .entry(session_id.to_string())
-        .or_insert_with(|| uuid::Uuid::now_v7().to_string())
+        .or_insert_with(fresh)
         .clone()
 }
 

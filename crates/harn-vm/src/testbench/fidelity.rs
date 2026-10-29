@@ -107,11 +107,20 @@ pub struct Divergence {
 
 /// Compare two tapes under `mode`.
 pub fn compare(recorded: &EventTape, replay: &EventTape, mode: FidelityMode) -> FidelityReport {
-    let divergences = match mode {
-        FidelityMode::ByteIdentical => compare_record_by_record(recorded, replay, true),
-        FidelityMode::Semantic => compare_record_by_record(recorded, replay, false),
-        FidelityMode::Outcome => compare_outcome(recorded, replay),
-        FidelityMode::PhaseAware => compare_phase_aware(recorded, replay),
+    // Record shapes and digests change between formats, so a cross-format
+    // comparison would report every record as a confusing mismatch.
+    let (old, new) = (recorded.header.version, replay.header.version);
+    let divergences = if old != new {
+        vec![Divergence {
+            seq: None,
+            category: "tape_format_version".to_string(),
+            message: format!(
+                "the recorded tape was written in format version {old} and the replay in \
+                 version {new}; re-record the tape with this runtime"
+            ),
+        }]
+    } else {
+        compare_mode(recorded, replay, mode)
     };
     let baseline = recorded.records.len().max(replay.records.len()).max(1);
     let score = match mode {
@@ -132,6 +141,15 @@ pub fn compare(recorded: &EventTape, replay: &EventTape, mode: FidelityMode) -> 
         replay_records: replay.records.len(),
         divergences,
         score,
+    }
+}
+
+fn compare_mode(recorded: &EventTape, replay: &EventTape, mode: FidelityMode) -> Vec<Divergence> {
+    match mode {
+        FidelityMode::ByteIdentical => compare_record_by_record(recorded, replay, true),
+        FidelityMode::Semantic => compare_record_by_record(recorded, replay, false),
+        FidelityMode::Outcome => compare_outcome(recorded, replay),
+        FidelityMode::PhaseAware => compare_phase_aware(recorded, replay),
     }
 }
 

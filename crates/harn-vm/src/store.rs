@@ -15,6 +15,9 @@ pub(crate) struct StoreState {
     data: BTreeMap<String, serde_json::Value>,
     path: PathBuf,
     loaded: bool,
+    /// Set when a branch opened this store: it lives in memory and never
+    /// writes its file.
+    overlay: bool,
 }
 
 impl StoreState {
@@ -31,64 +34,71 @@ impl StoreState {
             data: BTreeMap::new(),
             path,
             loaded: false,
+            overlay: false,
         }
     }
 
-    fn ensure_loaded(&mut self) {
+    fn ensure_loaded(&mut self) -> Result<(), VmError> {
         if self.loaded {
-            return;
+            return Ok(());
         }
+        let path = self.path.clone();
+        let opened = crate::run_tape::store_seed(&path, || {
+            std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|contents| serde_json::from_str(&contents).ok())
+        })?;
         self.loaded = true;
-        if let Ok(contents) = std::fs::read_to_string(&self.path) {
-            if let Ok(serde_json::Value::Object(map)) =
-                serde_json::from_str::<serde_json::Value>(&contents)
-            {
-                for (k, v) in map {
-                    self.data.insert(k, v);
-                }
-            }
+        self.overlay = opened.overlay;
+        if let Some(serde_json::Value::Object(map)) = opened.contents {
+            self.data.extend(map);
         }
+        Ok(())
     }
 
-    fn save(&self) -> Result<(), String> {
+    fn save(&self) -> Result<(), VmError> {
+        if self.overlay {
+            return Ok(());
+        }
         let obj: serde_json::Map<String, serde_json::Value> = self
             .data
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         let json = serde_json::to_string_pretty(&serde_json::Value::Object(obj))
-            .map_err(|e| format!("store save error: {e}"))?;
+            .map_err(|e| VmError::Runtime(format!("store save error: {e}")))?;
         if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("store mkdir error: {e}"))?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| VmError::Runtime(format!("store mkdir error: {e}")))?;
         }
-        std::fs::write(&self.path, json).map_err(|e| format!("store write error: {e}"))?;
-        Ok(())
+        std::fs::write(&self.path, json)
+            .map_err(|e| VmError::Runtime(format!("store write error: {e}")))
     }
 
-    fn get(&mut self, key: &str) -> Option<serde_json::Value> {
-        self.ensure_loaded();
-        self.data.get(key).cloned()
+    fn get(&mut self, key: &str) -> Result<Option<serde_json::Value>, VmError> {
+        self.ensure_loaded()?;
+        Ok(self.data.get(key).cloned())
     }
 
-    pub(crate) fn set(&mut self, key: String, value: serde_json::Value) -> Result<(), String> {
-        self.ensure_loaded();
+    pub(crate) fn set(&mut self, key: String, value: serde_json::Value) -> Result<(), VmError> {
+        self.ensure_loaded()?;
         self.data.insert(key, value);
         self.save()
     }
 
-    fn delete(&mut self, key: &str) -> Result<(), String> {
-        self.ensure_loaded();
+    fn delete(&mut self, key: &str) -> Result<(), VmError> {
+        self.ensure_loaded()?;
         self.data.remove(key);
         self.save()
     }
 
-    fn list(&mut self) -> Vec<String> {
-        self.ensure_loaded();
-        self.data.keys().cloned().collect()
+    fn list(&mut self) -> Result<Vec<String>, VmError> {
+        self.ensure_loaded()?;
+        Ok(self.data.keys().cloned().collect())
     }
 
-    fn clear(&mut self) -> Result<(), String> {
-        self.ensure_loaded();
+    fn clear(&mut self) -> Result<(), VmError> {
+        self.ensure_loaded()?;
         self.data.clear();
         self.save()
     }
@@ -97,17 +107,13 @@ impl StoreState {
 use crate::json_to_vm_value;
 use crate::value::vm_to_storage_json as vm_to_json;
 
-/// Run-tape namespace for `harness.runtime.store` reads.
-const STORE_TAPE_NAMESPACE: &str = "harn.runtime.store";
-
-/// Read `key`. The store outlives the run, so a branch reads what its
-/// recording read, not what the store holds now.
+/// Read `key`. A branch's store starts from what its recording opened, so a
+/// replayed read never sees what the store gained since.
 pub(crate) fn store_get(
     state: &parking_lot::Mutex<StoreState>,
     key: &str,
 ) -> Result<VmValue, VmError> {
-    let value =
-        crate::run_tape::cache_lookup(STORE_TAPE_NAMESPACE, key, || Ok(state.lock().get(key)))?;
+    let value = state.lock().get(key)?;
     Ok(value.as_ref().map_or(VmValue::Nil, json_to_vm_value))
 }
 
@@ -148,7 +154,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
             let key = args.first().map(|a| a.display()).unwrap_or_default();
             let value = args.get(1).unwrap_or(&VmValue::Nil);
             let json_val = vm_to_json(value)?;
-            s.lock().set(key, json_val).map_err(VmError::Runtime)?;
+            s.lock().set(key, json_val)?;
             Ok(VmValue::Nil)
         },
     );
@@ -159,7 +165,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         "store_delete",
         move |args, _out| {
             let key = args.first().map(|a| a.display()).unwrap_or_default();
-            s.lock().delete(&key).map_err(VmError::Runtime)?;
+            s.lock().delete(&key)?;
             Ok(VmValue::Nil)
         },
     );
@@ -169,7 +175,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         harn_builtin_meta::CapabilityId::Runtime,
         "store_list",
         move |_args, _out| {
-            let keys = s.lock().list();
+            let keys = s.lock().list()?;
             Ok(VmValue::strings(keys))
         },
     );
@@ -179,7 +185,11 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         harn_builtin_meta::CapabilityId::Runtime,
         "store_save",
         move |_args, _out| {
-            s.lock().save().map_err(VmError::Runtime)?;
+            // Load first: saving an unopened store would overwrite its file
+            // with nothing, and a branch's open decides it is an overlay.
+            let mut store = s.lock();
+            store.ensure_loaded()?;
+            store.save()?;
             Ok(VmValue::Nil)
         },
     );
@@ -189,7 +199,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         harn_builtin_meta::CapabilityId::Runtime,
         "store_clear",
         move |_args, _out| {
-            s.lock().clear().map_err(VmError::Runtime)?;
+            s.lock().clear()?;
             Ok(VmValue::Nil)
         },
     );

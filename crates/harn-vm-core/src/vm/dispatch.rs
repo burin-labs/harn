@@ -854,9 +854,22 @@ impl Vm {
         }) {
             return Some(Err(error));
         }
+        if let Some(served) = args.with_slice(|slice| {
+            self.runtime
+                .serve_builtin_call(name, resolved.recorded_effects, slice)
+        }) {
+            return Some(served);
+        }
 
         let _interrupt = self.sync_builtin_interrupt_guard();
-        Some(args.with_slice(|slice| (resolved.handler)(slice, &mut self.output)))
+        let result = args.with_slice(|slice| (resolved.handler)(slice, &mut self.output));
+        if self.runtime.records_builtin_calls() {
+            args.with_slice(|slice| {
+                self.runtime
+                    .record_builtin_call(name, resolved.recorded_effects, slice, &result);
+            });
+        }
+        Some(result)
     }
 
     pub(crate) fn try_call_sync_builtin_id_or_name_from_stack_args(
@@ -893,11 +906,25 @@ impl Vm {
             return Some(Err(error));
         }
 
-        let _interrupt = self.sync_builtin_interrupt_guard();
-        Some((resolved.handler)(
+        if let Some(served) = self.runtime.serve_builtin_call(
+            name,
+            resolved.recorded_effects,
             &self.stack[args_start..],
-            &mut self.output,
-        ))
+        ) {
+            return Some(served);
+        }
+
+        let _interrupt = self.sync_builtin_interrupt_guard();
+        let result = (resolved.handler)(&self.stack[args_start..], &mut self.output);
+        if self.runtime.records_builtin_calls() {
+            self.runtime.record_builtin_call(
+                name,
+                resolved.recorded_effects,
+                &self.stack[args_start..],
+                &result,
+            );
+        }
+        Some(result)
     }
 
     async fn call_builtin_impl(
@@ -938,6 +965,34 @@ impl Vm {
         }
         crate::typecheck::validate_builtin_call(name, &args, None)?;
 
+        // Behind a Harness method the capability call already owns the tape.
+        if !enforce_contract {
+            return self
+                .dispatch_admitted_builtin(name, args, direct_id, enforce_contract)
+                .await;
+        }
+        let effects = self.runtime.builtin_effects(name);
+        if let Some(served) = self.runtime.serve_builtin_call(name, effects, &args) {
+            return served;
+        }
+        let kept = self.runtime.records_builtin_calls().then(|| args.clone());
+        let result = self
+            .dispatch_admitted_builtin(name, args, direct_id, enforce_contract)
+            .await;
+        if let Some(args) = kept {
+            self.runtime
+                .record_builtin_call(name, effects, &args, &result);
+        }
+        result
+    }
+
+    async fn dispatch_admitted_builtin(
+        &mut self,
+        name: &str,
+        args: Vec<VmValue>,
+        direct_id: Option<BuiltinId>,
+        enforce_contract: bool,
+    ) -> Result<VmValue, VmError> {
         if let Some(id) = direct_id {
             if let Some(entry) = self.builtins_by_id.get(&id).cloned() {
                 if entry.name.as_ref() == name {

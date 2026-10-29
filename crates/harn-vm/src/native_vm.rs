@@ -310,6 +310,44 @@ impl VmRuntime for NativeExecutionState {
             .map(|entry| entry.contract.effects)
     }
 
+    fn serve_builtin_call(
+        &self,
+        name: &str,
+        effects: Option<&'static [harn_builtin_meta::EffectSpec]>,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        if !crate::run_tape::prefix_active() {
+            return None;
+        }
+        // No manifest contract at all (a host bridge builtin, say) is not the
+        // same as a pure one: its effects are unknown, so the prefix refuses it.
+        let Some(contract) = crate::stdlib::builtin_policy_metadata(name).1 else {
+            return crate::run_tape::serve_read(None, name, None, args);
+        };
+        let owner = match contract.exposure {
+            harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, method } => {
+                Some((capability, method))
+            }
+            _ => None,
+        };
+        let effects = Some(effects.unwrap_or(contract.effects));
+        crate::run_tape::serve_read(owner, name, effects, args)
+    }
+
+    fn records_builtin_calls(&self) -> bool {
+        crate::run_tape::records_reads()
+    }
+
+    fn record_builtin_call(
+        &self,
+        name: &str,
+        effects: Option<&'static [harn_builtin_meta::EffectSpec]>,
+        args: &[VmValue],
+        result: &Result<VmValue, VmError>,
+    ) {
+        crate::run_tape::record_read(None, name, effects, args, result);
+    }
+
     fn capability_effects(
         &self,
         capability: harn_builtin_meta::CapabilityId,

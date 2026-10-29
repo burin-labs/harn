@@ -10,19 +10,20 @@
 //! A branch re-runs the program against a tape. The first `live_after_calls`
 //! model calls are served from the recording and verified: each request must
 //! digest to the recorded one, or the branch fails closed and never goes live.
-//! Tool calls named by a served response return their recorded outcome and
+//! Tool calls named by a served response return their recorded result and
 //! re-apply their recorded file effects, so the workspace evolves exactly as
-//! it did and nothing in the prefix re-executes. From call `live_after_calls +
-//! 1` everything is live.
+//! it did and nothing in the prefix re-executes. Any other effect in the
+//! prefix is served from the tape or refused (see `prefix`). From call
+//! `live_after_calls + 1` everything is live.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::llm::api::{LlmRequestPayload, LlmResult, ProviderTelemetry};
+use crate::llm::api::{LlmRequestPayload, LlmResult};
 use crate::testbench::tape::{
     content_hash, EventTape, FileEffect, TapeHeader, TapePayload, TapeRecordKind, TapeRecorder,
 };
@@ -68,14 +69,44 @@ impl RecordingLevel {
 struct ProcessTape {
     recorder: Arc<TapeRecorder>,
     level: RecordingLevel,
-    workspace_root: Option<PathBuf>,
+    workspace: Option<TapeWorkspace>,
     next_llm_call: AtomicU64,
     prompts: Mutex<prompts::PromptLedger>,
 }
 
+impl ProcessTape {
+    fn workspace_root(&self) -> Option<&Path> {
+        self.workspace
+            .as_ref()
+            .map(|workspace| workspace.root.as_path())
+    }
+}
+
+/// The workspace a run's tool calls change, and the observer that sees each
+/// call's file effects. One value, so a tape cannot claim a workspace whose
+/// effects nothing recorded.
+pub struct TapeWorkspace {
+    pub root: PathBuf,
+    pub observer: Box<dyn ToolEffectObserver>,
+}
+
+/// How a production run tape was recorded, in its header. A branch reads
+/// this, not the argv, to decide whether it may replay the tape.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunTapeHeader {
+    pub recording: RecordingLevel,
+    /// True when a workspace effect observer recorded each tool call's file
+    /// changes. Without it a served tool call cannot restore the workspace.
+    pub effects_observed: bool,
+}
+
 static PROCESS_TAPE: RwLock<Option<Arc<ProcessTape>>> = RwLock::new(None);
 static PROCESS_BRANCH: Mutex<Option<BranchState>> = Mutex::new(None);
-static EFFECT_OBSERVER: OnceLock<Box<dyn ToolEffectObserver>> = OnceLock::new();
+/// Mirrors "a branch is replaying its prefix" so dispatch hot paths check one
+/// atomic instead of taking the branch lock.
+static PREFIX_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Mirrors "a `recording: full` tape is active", for the same reason.
+static RECORDING_FULL: AtomicBool = AtomicBool::new(false);
 
 fn process_tape() -> Option<Arc<ProcessTape>> {
     PROCESS_TAPE
@@ -119,37 +150,40 @@ impl Drop for RunTapeGuard {
             .is_some_and(|tape| Arc::ptr_eq(&tape.recorder, &self.recorder))
         {
             *slot = None;
+            RECORDING_FULL.store(false, Ordering::Release);
         }
     }
 }
 
 /// Start recording this process's run into `dir/run.tape`. Returns `None` for
-/// [`RecordingLevel::Off`]. `workspace_root` scopes tool file effects; without
-/// it tool outcomes are recorded but effects are not, and the tape is marked
-/// unservable for tools that changed files.
+/// [`RecordingLevel::Off`]. Without a `workspace` tool results are recorded
+/// but their file effects are not, so the tape can be read but not branched.
 pub fn start_recording(
     dir: &Path,
     level: RecordingLevel,
-    workspace_root: Option<PathBuf>,
+    workspace: Option<TapeWorkspace>,
 ) -> Result<Option<RunTapeGuard>, String> {
     if level == RecordingLevel::Off {
         return Ok(None);
     }
     let path = dir.join(TAPE_FILE_NAME);
-    let header = TapeHeader::current(
-        Some(crate::stdlib::clock::now_wall_ms()),
-        None,
-        vec![format!("recording={}", level.as_str())],
-    );
-    let recorder = Arc::new(TapeRecorder::streaming(&path, header)?);
+    let mut header =
+        TapeHeader::current(Some(crate::stdlib::clock::now_wall_ms()), None, Vec::new());
+    header.version = crate::testbench::tape::TAPE_FORMAT_VERSION;
+    header.run = Some(RunTapeHeader {
+        recording: level,
+        effects_observed: workspace.is_some(),
+    });
     let mut slot = PROCESS_TAPE.write().expect("run tape lock poisoned");
     if slot.is_some() {
         return Err("a run tape is already recording in this process".to_string());
     }
+    let recorder = Arc::new(TapeRecorder::streaming(&path, header)?);
+    RECORDING_FULL.store(level == RecordingLevel::Full, Ordering::Release);
     *slot = Some(Arc::new(ProcessTape {
         recorder: recorder.clone(),
         level,
-        workspace_root,
+        workspace,
         next_llm_call: AtomicU64::new(0),
         prompts: Mutex::default(),
     }));
@@ -191,77 +225,33 @@ pub(crate) fn render_consumers(render_id: &str) -> Vec<u64> {
 // Request surface
 // ---------------------------------------------------------------------------
 
-/// The request fields that decide a model's answer, keyed by the model that
-/// served it. One owner for the digest that recording writes, the fidelity
-/// oracle compares, and branch verification checks. The field set and its
-/// presence rules are a tape compatibility contract: checked-in tapes carry
-/// digests of exactly this shape.
-fn request_surface(
-    request: &LlmRequestPayload,
-    model: &str,
-) -> serde_json::Map<String, serde_json::Value> {
-    use serde_json::json;
-    let call = crate::llm::mock::LlmMockCall::from_request(request);
-    let mut surface = serde_json::Map::new();
-    let mut put = |key: &str, value: serde_json::Value| {
-        surface.insert(key.to_string(), value);
+/// Request fields the digest leaves out, each because it legitimately
+/// differs between two runs that ask the model the same thing:
+/// - `api_key`: a credential, which must never reach a tape;
+/// - `session_id`: minted per run by the host.
+const REQUEST_DIGEST_DENYLIST: &[&str] = &["api_key", "session_id"];
+
+/// The request a model call's digest covers: every field the payload
+/// serializes minus [`REQUEST_DIGEST_DENYLIST`], plus the fields it does not
+/// serialize but that still shape the run. The one definition of "the same
+/// request" that recording writes, the fidelity oracle compares and branch
+/// verification checks. A new payload field is covered by default.
+fn request_surface(request: &LlmRequestPayload) -> serde_json::Map<String, serde_json::Value> {
+    let mut whole = match serde_json::to_value(request) {
+        Ok(serde_json::Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
     };
-    put("messages", json!(call.messages));
-    put("system", json!(call.system));
-    put("tools", json!(call.tools));
-    put("tool_choice", json!(call.tool_choice));
-    put("thinking", json!(call.thinking));
-    if call.mock_scope != crate::llm::mock::DEFAULT_MOCK_SCOPE {
-        put("mock_scope", json!(call.mock_scope));
-    }
-    put("model", json!(model));
-    if call.api_mode != "chat_completions" {
-        put("api_mode", json!(call.api_mode));
-    }
-    if call.logprobs.is_some() {
-        put("logprobs", json!(call.logprobs));
-    }
-    if !call.logit_bias.is_empty() {
-        put("logit_bias", json!(call.logit_bias));
+    for key in REQUEST_DIGEST_DENYLIST {
+        whole.remove(*key);
     }
     for (key, value) in [
-        ("min_p", json!(call.min_p)),
-        ("repetition_penalty", json!(call.repetition_penalty)),
-        ("prediction", json!(call.prediction)),
-        ("verbosity", json!(call.verbosity)),
-        ("mirostat", json!(call.mirostat)),
-        ("parallel_tool_calls", json!(call.parallel_tool_calls)),
+        ("done_sentinel", &request.done_sentinel),
+        ("done_sentinel_form", &request.done_sentinel_form),
+        ("mock_scope", &request.mock_scope),
     ] {
-        if !value.is_null() {
-            put(key, value);
-        }
+        whole.insert(key.to_string(), serde_json::json!(value));
     }
-    if call.provider_tools.is_some() {
-        put("provider_tools", json!(call.provider_tools));
-    }
-    if call
-        .output_format
-        .get("kind")
-        .and_then(|kind| kind.as_str())
-        != Some("text")
-    {
-        put("output_format", json!(call.output_format));
-    }
-    for (key, value) in [
-        ("previous_response_id", json!(call.previous_response_id)),
-        ("store", json!(call.store)),
-        ("background", json!(call.background)),
-        ("truncation", json!(call.truncation)),
-        ("compact", json!(call.compact)),
-        ("include", json!(call.include)),
-        ("max_tool_calls", json!(call.max_tool_calls)),
-        ("prefill", json!(call.prefill)),
-    ] {
-        if !value.is_null() {
-            put(key, value);
-        }
-    }
-    surface
+    whole
 }
 
 fn surface_digest(surface: &serde_json::Map<String, serde_json::Value>) -> String {
@@ -285,7 +275,7 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
     let call_index = tape
         .as_ref()
         .map(|tape| tape.next_llm_call.fetch_add(1, Ordering::SeqCst) + 1);
-    let mut surface = request_surface(request, &result.model);
+    let surface = request_surface(request);
     let request_digest = surface_digest(&surface);
     let full = tape.is_some() && level == RecordingLevel::Full;
     let attribution = match (&tape, call_index) {
@@ -298,7 +288,8 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
         _ => None,
     };
     let (request_payload, messages) = if full {
-        let messages = match surface.remove("messages") {
+        let mut whole = surface;
+        let messages = match whole.remove("messages") {
             Some(serde_json::Value::Array(messages)) => messages
                 .iter()
                 .map(|message| recorder.payload_cas(crate::canonical_json::to_vec(message)))
@@ -306,7 +297,7 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
             _ => Vec::new(),
         };
         let request = recorder.payload_from_bytes(crate::canonical_json::to_vec(
-            &serde_json::Value::Object(surface),
+            &serde_json::Value::Object(whole),
         ));
         (Some(request), messages)
     } else {
@@ -355,21 +346,9 @@ pub trait ToolEffectObserver: Send + Sync {
     fn end(&self, root: &Path, call_id: &str) -> EffectScan;
 }
 
-/// Install the process's effect observer. The first registration wins.
-pub fn register_tool_effect_observer(observer: Box<dyn ToolEffectObserver>) {
-    let _ = EFFECT_OBSERVER.set(observer);
-}
-
-/// A tool outcome in a shape a branch can hand back to the agent loop.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RecordedToolOutcome {
-    pub result: RecordedToolResult,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub executor: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub handler_outcome: Option<String>,
-}
-
+/// What one agent tool dispatch returned to the agent loop, after policy,
+/// approval, hooks and execution: the value a branch hands back in their
+/// place.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RecordedToolResult {
@@ -384,25 +363,42 @@ pub enum RecordedToolResult {
 pub(crate) struct ToolCallRecording {
     tape: Arc<ProcessTape>,
     call_id: String,
+    tool: String,
+    args_digest: String,
     after_calls: u64,
-    observed: bool,
+    watch: EffectWatch,
 }
 
-/// Begin recording a tool call. `None` when no run tape is recording.
-pub(crate) fn begin_tool_call(call_id: &str) -> Option<ToolCallRecording> {
+enum EffectWatch {
+    Scanned,
+    ReadOnly,
+    Unobserved,
+}
+
+/// Begin recording a tool call. `None` when no run tape is recording. A tool
+/// declared read-only skips the two workspace scans; its effect set is empty.
+pub(crate) fn begin_tool_call(
+    call_id: &str,
+    tool: &str,
+    args: &serde_json::Value,
+    read_only: bool,
+) -> Option<ToolCallRecording> {
     let tape = process_tape()?;
-    let observed = match (tape.level, &tape.workspace_root, EFFECT_OBSERVER.get()) {
-        (RecordingLevel::Full, Some(root), Some(observer)) => {
-            observer.begin(root, call_id);
-            true
+    let watch = match (tape.level, &tape.workspace) {
+        (RecordingLevel::Full, _) if read_only => EffectWatch::ReadOnly,
+        (RecordingLevel::Full, Some(workspace)) => {
+            workspace.observer.begin(&workspace.root, call_id);
+            EffectWatch::Scanned
         }
-        _ => false,
+        _ => EffectWatch::Unobserved,
     };
     Some(ToolCallRecording {
         after_calls: tape.next_llm_call.load(Ordering::SeqCst),
         tape,
         call_id: call_id.to_string(),
-        observed,
+        tool: tool.to_string(),
+        args_digest: args_digest(args),
+        watch,
     })
 }
 
@@ -410,59 +406,62 @@ pub(crate) fn args_digest(args: &serde_json::Value) -> String {
     content_hash(&crate::canonical_json::to_vec(args))
 }
 
-/// Finish recording a tool call. `outcome` is `None` when the dispatch result
-/// has no faithful recorded shape; the branch then re-executes the call.
+/// Finish recording a tool call. `Err` names why the dispatch result has no
+/// faithful recorded shape; a branch then refuses to serve the call.
 pub(crate) fn finish_tool_call(
     recording: ToolCallRecording,
-    tool: &str,
-    args: &serde_json::Value,
-    outcome: Result<RecordedToolOutcome, String>,
+    outcome: Result<RecordedToolResult, String>,
 ) {
     let ToolCallRecording {
         tape,
         call_id,
+        tool,
+        args_digest,
         after_calls,
-        observed,
+        watch,
     } = recording;
     let recorder = &tape.recorder;
+    let full = tape.level == RecordingLevel::Full;
     let mut unservable = None;
     let mut effects = Vec::new();
-    if observed {
-        let root = tape
-            .workspace_root
-            .as_deref()
-            .expect("observed implies root");
-        let scan = EFFECT_OBSERVER
-            .get()
-            .expect("observed implies observer")
-            .end(root, &call_id);
-        if scan.incomplete {
-            unservable = Some("the file-effect scan was incomplete".to_string());
+    match watch {
+        EffectWatch::Scanned => {
+            let workspace = tape.workspace.as_ref().expect("a scan implies a workspace");
+            let scan = workspace.observer.end(&workspace.root, &call_id);
+            if scan.incomplete {
+                unservable = Some("the file-effect scan was incomplete".to_string());
+            }
+            for (path, content) in scan.changes {
+                effects.push(FileEffect {
+                    path,
+                    content: content.map(|bytes| recorder.payload_cas(bytes)),
+                });
+            }
         }
-        for (path, content) in scan.changes {
-            effects.push(FileEffect {
-                path,
-                content: content.map(|bytes| recorder.payload_cas(bytes)),
-            });
+        EffectWatch::ReadOnly => {}
+        EffectWatch::Unobserved if full => {
+            unservable = Some("no workspace effect observer was installed".to_string());
         }
-    } else if tape.level == RecordingLevel::Full {
-        unservable = Some("no workspace effect observer was installed".to_string());
+        EffectWatch::Unobserved => {}
     }
     let outcome_bytes = match &outcome {
-        Ok(outcome) if tape.level == RecordingLevel::Full => {
-            serde_json::to_vec(outcome).unwrap_or_default()
-        }
+        Ok(outcome) if full => serde_json::to_vec(outcome).unwrap_or_default(),
         Ok(_) => Vec::new(),
-        Err(reason) => {
+        // A metadata tape keeps no tool text, error text included.
+        Err(reason) if full => {
             unservable.get_or_insert_with(|| reason.clone());
+            Vec::new()
+        }
+        Err(_) => {
+            unservable.get_or_insert_with(|| "unrecordable result".to_string());
             Vec::new()
         }
     };
     let outcome = recorder.payload_from_bytes(outcome_bytes);
     recorder.record(TapeRecordKind::ToolCall {
         call_id,
-        tool: tool.to_string(),
-        args_digest: args_digest(args),
+        tool,
+        args_digest,
         after_calls,
         outcome,
         effects,
@@ -502,8 +501,9 @@ pub struct BranchReport {
     pub live_after_calls: u64,
     pub served_calls: u64,
     pub served_tool_calls: u64,
-    pub reexecuted_tool_calls: u64,
     pub applied_file_effects: u64,
+    /// Clock, random and env reads answered from the recording.
+    pub served_reads: u64,
     pub live_calls: u64,
     /// Prefix cache reads of keys the recording never read, answered live.
     pub live_cache_reads: u64,
@@ -519,7 +519,7 @@ struct RecordedCall {
 struct RecordedTool {
     tool: String,
     args_digest: String,
-    outcome: Option<RecordedToolOutcome>,
+    outcome: Option<RecordedToolResult>,
     effects: Vec<(String, Option<Vec<u8>>)>,
     unservable: Option<String>,
 }
@@ -530,22 +530,20 @@ struct PrefixTool {
     used: bool,
 }
 
-/// Names the recorded prefix tool call a re-execution is compared with.
-pub(crate) struct ReexecutedTool {
-    after_calls: u64,
-    index: usize,
-}
+type RecordedLookups =
+    BTreeMap<(u64, String, String), std::collections::VecDeque<Option<serde_json::Value>>>;
 
 struct BranchState {
     calls: Vec<RecordedCall>,
     /// Prefix tool calls by how many model calls preceded them.
     tools: BTreeMap<u64, Vec<PrefixTool>>,
-    /// Prefix cache lookups per (model calls before, namespace, key), in
-    /// recorded order.
-    cache_lookups:
-        BTreeMap<(u64, String, String), std::collections::VecDeque<Option<serde_json::Value>>>,
+    /// Prefix cache lookups and recorded reads per (model calls before,
+    /// namespace, key), in recorded order.
+    cache_lookups: RecordedLookups,
     /// Every (namespace, key) the recording read anywhere in the run.
     recorded_keys: BTreeSet<(String, String)>,
+    /// Each runtime store's contents when the recorded run opened it.
+    store_seeds: BTreeMap<String, Option<serde_json::Value>>,
     /// Set by the first live model call; nothing is served after it.
     live: bool,
     workspace_root: PathBuf,
@@ -561,11 +559,62 @@ impl BranchGuard {
     pub fn report(&self) -> BranchReport {
         branch_report().unwrap_or_default()
     }
+
+    /// The final report. A run that ended before consuming its whole prefix
+    /// (model calls, tool calls or recorded reads) diverged: it did not
+    /// replay the recording, however far it got.
+    pub fn finish(&self) -> BranchReport {
+        let mut guard = PROCESS_BRANCH.lock().expect("branch lock poisoned");
+        let Some(state) = guard.as_mut() else {
+            return BranchReport::default();
+        };
+        if state.report.divergence.is_none() {
+            state.report.divergence = under_run(state);
+        }
+        state.report.clone()
+    }
+}
+
+fn under_run(state: &BranchState) -> Option<BranchDivergence> {
+    let served = state.report.served_calls;
+    let k = state.report.live_after_calls;
+    if served < k {
+        return Some(BranchDivergence {
+            call: served + 1,
+            what: "under-run prefix".to_string(),
+            detail: format!("the run ended after {served} of {k} recorded model calls"),
+        });
+    }
+    if let Some((after, tool)) = state.tools.iter().find_map(|(after, tools)| {
+        tools
+            .iter()
+            .find(|tool| !tool.used)
+            .map(|tool| (*after, tool))
+    }) {
+        return Some(BranchDivergence {
+            call: after,
+            what: "under-run prefix".to_string(),
+            detail: format!(
+                "recorded `{}` call {} was never made",
+                tool.recorded.tool, tool.call_id
+            ),
+        });
+    }
+    state
+        .cache_lookups
+        .iter()
+        .find(|(_, queue)| !queue.is_empty())
+        .map(|((after, namespace, key), _)| BranchDivergence {
+            call: *after,
+            what: "under-run prefix".to_string(),
+            detail: format!("recorded read of `{key}` in `{namespace}` was never made"),
+        })
 }
 
 impl Drop for BranchGuard {
     fn drop(&mut self) {
         *PROCESS_BRANCH.lock().expect("branch lock poisoned") = None;
+        PREFIX_ACTIVE.store(false, Ordering::Release);
     }
 }
 
@@ -584,39 +633,68 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
         return Err("a branch must serve at least one recorded call".to_string());
     }
     let tape = plan.tape;
-    let prefix = plan.live_after_calls;
-    if !tape.header.argv.iter().any(|arg| arg == "recording=full") {
-        return Err(
-            "this tape was not recorded with `recording: full`, so it can be read but not branched"
-                .to_string(),
-        );
+    let k = plan.live_after_calls;
+    match &tape.header.run {
+        Some(RunTapeHeader {
+            recording: RecordingLevel::Full,
+            effects_observed: true,
+        }) => {}
+        Some(RunTapeHeader {
+            recording: RecordingLevel::Full,
+            effects_observed: false,
+        }) => {
+            return Err(
+                "this tape was recorded without a workspace effect observer, so its tool calls \
+                 cannot restore the workspace"
+                    .to_string(),
+            )
+        }
+        _ => {
+            return Err(
+                "this tape was not recorded with `recording: full`, so it can be read but not \
+                 branched"
+                    .to_string(),
+            )
+        }
     }
     let mut calls = Vec::new();
     let mut tools: BTreeMap<u64, Vec<PrefixTool>> = BTreeMap::new();
-    let mut cache_lookups: BTreeMap<_, std::collections::VecDeque<_>> = BTreeMap::new();
+    let mut cache_lookups: RecordedLookups = BTreeMap::new();
     let mut recorded_keys = BTreeSet::new();
+    let mut store_seeds = BTreeMap::new();
+    let decode = |payload: &Option<TapePayload>| -> Result<Option<serde_json::Value>, String> {
+        payload
+            .as_ref()
+            .map(|payload| {
+                serde_json::from_slice(&tape.resolve_payload(payload)?)
+                    .map_err(|err| format!("tape recorded value: {err}"))
+            })
+            .transpose()
+    };
     for record in &tape.records {
-        if let TapeRecordKind::CacheLookup { namespace, key, .. } = &record.kind {
-            recorded_keys.insert((namespace.clone(), key.clone()));
-        }
         match &record.kind {
+            TapeRecordKind::CacheLookup {
+                namespace,
+                key,
+                value,
+                ..
+            } if namespace == prefix::STORE_SEED_NAMESPACE => {
+                let seed = decode(value)?;
+                store_seeds.entry(key.clone()).or_insert(seed);
+            }
             TapeRecordKind::CacheLookup {
                 namespace,
                 key,
                 after_calls,
                 value,
-            } if *after_calls <= prefix => {
-                let value = match value {
-                    Some(payload) => Some(
-                        serde_json::from_slice(&tape.resolve_payload(payload)?)
-                            .map_err(|err| format!("tape cache value: {err}"))?,
-                    ),
-                    None => None,
-                };
-                cache_lookups
-                    .entry((*after_calls, namespace.clone(), key.clone()))
-                    .or_default()
-                    .push_back(value);
+            } => {
+                recorded_keys.insert((namespace.clone(), key.clone()));
+                if *after_calls <= k {
+                    cache_lookups
+                        .entry((*after_calls, namespace.clone(), key.clone()))
+                        .or_default()
+                        .push_back(decode(value)?);
+                }
             }
             TapeRecordKind::LlmCall {
                 request_digest,
@@ -626,10 +704,11 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
                 messages,
                 ..
             } => {
+                let digest = request_digest.clone();
                 let result: LlmResult = serde_json::from_slice(&tape.resolve_payload(response)?)
                     .map_err(|err| format!("tape model response: {err}"))?;
                 calls.push(RecordedCall {
-                    digest: request_digest.clone(),
+                    digest,
                     surface: recorded_surface(&tape, request.as_ref(), messages),
                     result,
                 });
@@ -642,7 +721,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
                 outcome,
                 effects,
                 unservable,
-            } if *after_calls <= prefix => {
+            } if *after_calls <= k => {
                 let bytes = tape.resolve_payload(outcome)?;
                 let outcome = if bytes.is_empty() {
                     None
@@ -691,6 +770,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
         tools,
         cache_lookups,
         recorded_keys,
+        store_seeds,
         live: false,
         workspace_root: plan.workspace_root,
         report: BranchReport {
@@ -698,6 +778,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
             ..BranchReport::default()
         },
     });
+    PREFIX_ACTIVE.store(true, Ordering::Release);
     Ok(BranchGuard { _private: () })
 }
 
@@ -760,8 +841,8 @@ fn first_difference(
     "the digests differ but the surfaces match".to_string()
 }
 
-const DIVERGED_FIX: &str = "the program built a different request than the recording, so the \
-branch cannot prove its prefix; record a fresh tape with this build, or branch from an earlier call";
+const DIVERGED_FIX: &str = "the replayed prefix did something the recording did not, so the \
+branch cannot prove it; record a fresh tape with this build, or branch from an earlier call";
 
 fn divergence_error(divergence: &BranchDivergence) -> crate::value::VmError {
     crate::value::VmError::Runtime(format!(
@@ -783,13 +864,14 @@ pub(crate) fn serve_llm_call(
     }
     if state.report.served_calls >= state.report.live_after_calls {
         state.live = true;
+        PREFIX_ACTIVE.store(false, Ordering::Release);
         state.report.live_calls += 1;
         return None;
     }
     let index = usize::try_from(state.report.served_calls).expect("bounded by calls");
     let call_number = state.report.served_calls + 1;
     let recorded = &state.calls[index];
-    let surface = request_surface(request, &recorded.result.model);
+    let surface = request_surface(request);
     if surface_digest(&surface) != recorded.digest {
         let detail = recorded.surface.as_ref().map_or_else(
             || "the recorded request body was not kept".to_string(),
@@ -804,8 +886,10 @@ pub(crate) fn serve_llm_call(
         state.report.divergence = Some(divergence);
         return Some(Err(error));
     }
+    // Keep the recorded cost and usage, flagged as served, so a branch's
+    // accounting says what its prefix cost without counting it as new spend.
     let mut result = recorded.result.clone();
-    result.telemetry = Box::new(ProviderTelemetry::mock_replay(Some(0.0)));
+    result.telemetry.source = crate::llm::api::telemetry_source::BRANCH_SERVED.to_string();
     state.report.served_calls += 1;
     Some(Ok(result))
 }
@@ -818,6 +902,18 @@ pub(crate) fn serve_llm_call(
 pub(crate) fn cache_lookup(
     namespace: &str,
     key: &str,
+    live: impl FnOnce() -> Result<Option<serde_json::Value>, crate::value::VmError>,
+) -> Result<Option<serde_json::Value>, crate::value::VmError> {
+    recorded_lookup(namespace, key, true, live)
+}
+
+/// Serve `key` from the recording at this point of a branch prefix, or read
+/// it live and record it. `unknown_is_live` reads a key the recording never
+/// read live instead of diverging.
+fn recorded_lookup(
+    namespace: &str,
+    key: &str,
+    unknown_is_live: bool,
     live: impl FnOnce() -> Result<Option<serde_json::Value>, crate::value::VmError>,
 ) -> Result<Option<serde_json::Value>, crate::value::VmError> {
     let served = {
@@ -840,19 +936,24 @@ pub(crate) fn cache_lookup(
                     .and_then(|q| q.pop_front());
                 let known = state.recorded_keys.contains(&(slot.1, slot.2));
                 match recorded {
-                    Some(value) => Some(value),
-                    None if !known => {
+                    Some(value) => {
+                        if !unknown_is_live {
+                            state.report.served_reads += 1;
+                        }
+                        Some(value)
+                    }
+                    None if !known && unknown_is_live => {
                         state.report.live_cache_reads += 1;
                         None
                     }
                     None => {
                         let divergence = BranchDivergence {
-                        call: state.report.served_calls + 1,
-                        what: "cache_lookup".to_string(),
-                        detail: format!(
-                            "the program read cache key `{key}` in `{namespace}` where the recording did not"
+                            call: state.report.served_calls + 1,
+                            what: "cache_lookup".to_string(),
+                            detail: format!(
+                            "the program read `{key}` in `{namespace}` where the recording did not"
                         ),
-                    };
+                        };
                         let error = divergence_error(&divergence);
                         state.report.divergence = Some(divergence);
                         return Err(error);
@@ -886,9 +987,7 @@ pub(crate) enum ToolServe {
     /// Not part of a served prefix: run it.
     Live,
     /// Served from the recording; effects already applied.
-    Served(RecordedToolOutcome),
-    /// Prefix call the recording cannot serve: run it, then compare.
-    Reexecute(ReexecutedTool),
+    Served(RecordedToolResult),
     /// The prefix diverged; refuse the call.
     Diverged(crate::value::VmError),
 }
@@ -938,16 +1037,19 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
     let entry = &mut state.tools.get_mut(&call).expect("matched above")[index];
     entry.used = true;
     let recorded = &entry.recorded;
-    let Some(outcome) = recorded
-        .outcome
-        .clone()
-        .filter(|_| recorded.unservable.is_none())
-    else {
-        state.report.reexecuted_tool_calls += 1;
-        return ToolServe::Reexecute(ReexecutedTool {
-            after_calls: call,
-            index,
-        });
+    // Running it instead would repeat its effects; nothing in a prefix runs.
+    let outcome = match (&recorded.outcome, &recorded.unservable) {
+        (Some(outcome), None) => outcome.clone(),
+        (_, reason) => {
+            let reason = reason
+                .clone()
+                .unwrap_or_else(|| "no recorded result".to_string());
+            return diverge(
+                state,
+                "unservable tool call",
+                format!("the recording cannot serve `{tool}` call {call_id}: {reason}"),
+            );
+        }
     };
     let effects = recorded.effects.clone();
     let root = state.workspace_root.clone();
@@ -959,42 +1061,6 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
     }
     state.report.served_tool_calls += 1;
     ToolServe::Served(outcome)
-}
-
-/// Compare a re-executed prefix tool call with its recording. A different
-/// outcome is a divergence: the prefix is no longer the recorded one.
-pub(crate) fn check_reexecuted_tool_call(
-    reexecuted: &ReexecutedTool,
-    call_id: &str,
-    outcome: &Result<RecordedToolOutcome, String>,
-) {
-    let mut guard = PROCESS_BRANCH.lock().expect("branch lock poisoned");
-    let Some(state) = guard.as_mut() else {
-        return;
-    };
-    let Some(recorded) = state
-        .tools
-        .get(&reexecuted.after_calls)
-        .and_then(|entries| entries.get(reexecuted.index))
-        .map(|entry| &entry.recorded)
-    else {
-        return;
-    };
-    let same = matches!((&recorded.outcome, outcome), (Some(a), Ok(b)) if a == b);
-    if !same && state.report.divergence.is_none() {
-        state.report.divergence = Some(BranchDivergence {
-            call: state.report.served_calls,
-            what: "re-executed tool call".to_string(),
-            detail: format!(
-                "`{}` call {call_id} returned a different result than recorded ({})",
-                recorded.tool,
-                recorded
-                    .unservable
-                    .as_deref()
-                    .unwrap_or("re-executed because it could not be served")
-            ),
-        });
-    }
 }
 
 fn apply_effect(root: &Path, path: &str, content: Option<&[u8]>) -> Result<(), String> {
@@ -1025,6 +1091,13 @@ fn apply_effect(root: &Path, path: &str, content: Option<&[u8]>) -> Result<(), S
 
 #[path = "run_tape_prompts.rs"]
 mod prompts;
+
+#[path = "run_tape_prefix.rs"]
+mod prefix;
+pub(crate) use prefix::{
+    prefix_active, record_read, records_reads, refuse_in_prefix, serve_read, store_seed,
+    taped_random,
+};
 
 #[cfg(test)]
 #[path = "run_tape_tests.rs"]

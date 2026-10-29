@@ -49,6 +49,10 @@ pub mod source {
     /// so its authoritative provider spend is exactly zero even when the
     /// replay preserves the original provider/model identity.
     pub const MOCK_REPLAY: &str = "mock_replay";
+    /// A run-tape branch served this call from its recording. The other
+    /// telemetry fields are the recorded call's, so its usage and cost stay
+    /// visible, but no provider request occurred and new spend is zero.
+    pub const BRANCH_SERVED: &str = "branch_served";
     /// Provider responded but we did not capture anything beyond what
     /// already lives on `LlmResult` (e.g. mock / fake providers, or a
     /// stream that finished without a usage frame).
@@ -266,6 +270,9 @@ impl ProviderTelemetry {
     }
 
     pub(crate) fn mock_replay_cost_usd(&self) -> Option<f64> {
+        if self.source == source::BRANCH_SERVED {
+            return Some(0.0);
+        }
         (self.source == source::MOCK_REPLAY).then(|| {
             self.provider_metadata
                 .as_ref()

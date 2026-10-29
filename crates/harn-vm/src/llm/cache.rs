@@ -139,12 +139,15 @@ fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         VmError::Runtime("__cache_put(key, value, options?): value is required".to_string())
     })?;
     let options = parse_cache_options(args.get(2))?;
-    cache_put_at(
-        &options,
-        &key,
-        super::helpers::vm_value_to_json(value),
-        now_wall_ms(),
-    )?;
+    // A branch prefix replays a run that already made this write.
+    if !crate::run_tape::prefix_active() {
+        cache_put_at(
+            &options,
+            &key,
+            super::helpers::vm_value_to_json(value),
+            now_wall_ms(),
+        )?;
+    }
 
     let mut envelope = cache_envelope_base(&options);
     envelope.put_bool("stored", true);
@@ -160,6 +163,9 @@ fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 )]
 fn cache_clear_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let options = parse_cache_options(args.first())?;
+    if crate::run_tape::prefix_active() {
+        return Ok(VmValue::Nil);
+    }
     match options.backend {
         CacheBackend::Sqlite => sqlite_clear(&options)?,
         CacheBackend::Fs => fs_clear(&options)?,

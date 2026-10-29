@@ -106,35 +106,8 @@ pub(super) fn pin_scoped_tool_dispatch<'a>(
 ) -> std::pin::Pin<Box<impl std::future::Future<Output = agent_tools::ToolDispatchOutcome> + 'a>> {
     Box::pin(crate::orchestration::scope_agent_session(
         session_id,
-        crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async move {
-            // Recording starts before serving, so a branch's own tape keeps
-            // the calls it served and the effects it re-applied.
-            let recording = crate::run_tape::begin_tool_call(&tool_id);
-            let serve =
-                crate::run_tape::serve_tool_call(&tool_id, request.tool_name, request.tool_args);
-            let reexecuted = match serve {
-                crate::run_tape::ToolServe::Served(recorded) => {
-                    if let Some(recording) = recording {
-                        crate::run_tape::finish_tool_call(
-                            recording,
-                            request.tool_name,
-                            request.tool_args,
-                            Ok(recorded.clone()),
-                        );
-                    }
-                    return outcome_from_recorded(recorded);
-                }
-                crate::run_tape::ToolServe::Diverged(error) => {
-                    return agent_tools::ToolDispatchOutcome {
-                        result: Err(error),
-                        executor: None,
-                        handler_outcome: None,
-                    };
-                }
-                crate::run_tape::ToolServe::Reexecute(reexecuted) => Some(reexecuted),
-                crate::run_tape::ToolServe::Live => None,
-            };
-            let outcome = super::agent_tool_preparation::scope(
+        crate::agent_sessions::scope_current_tool_call(tool_id, async move {
+            super::agent_tool_preparation::scope(
                 request.prepared_invocation,
                 agent_tools::dispatch_tool_execution_with_mcp(
                     (Some(request.ctx), request.audience),
@@ -147,106 +120,7 @@ pub(super) fn pin_scoped_tool_dispatch<'a>(
                     request.tool_backoff_ms,
                 ),
             )
-            .await;
-            if recording.is_some() || reexecuted.is_some() {
-                let recorded = recorded_from_outcome(&outcome);
-                if let Some(reexecuted) = &reexecuted {
-                    crate::run_tape::check_reexecuted_tool_call(reexecuted, &tool_id, &recorded);
-                }
-                if let Some(recording) = recording {
-                    crate::run_tape::finish_tool_call(
-                        recording,
-                        request.tool_name,
-                        request.tool_args,
-                        recorded,
-                    );
-                }
-            }
-            outcome
+            .await
         }),
     ))
-}
-
-/// Project a dispatch outcome onto the run tape's recorded shape. Error
-/// variants without a faithful recorded form are refused, so a branch
-/// re-executes those calls instead of serving an approximation.
-fn recorded_from_outcome(
-    outcome: &agent_tools::ToolDispatchOutcome,
-) -> Result<crate::run_tape::RecordedToolOutcome, String> {
-    use crate::run_tape::RecordedToolResult;
-    let result = match &outcome.result {
-        Ok(value) => RecordedToolResult::Ok {
-            value: value.clone(),
-        },
-        Err(VmError::CategorizedError { message, category }) => RecordedToolResult::Categorized {
-            message: message.clone(),
-            category: category.as_str().to_string(),
-        },
-        Err(VmError::Thrown(VmValue::String(message))) => RecordedToolResult::Thrown {
-            message: message.to_string(),
-        },
-        Err(VmError::Thrown(value)) => RecordedToolResult::ThrownValue {
-            value: crate::llm::helpers::vm_value_to_json(value),
-        },
-        Err(VmError::Runtime(message)) => RecordedToolResult::Runtime {
-            message: message.clone(),
-        },
-        Err(other) => return Err(format!("tool error has no recorded shape: {other}")),
-    };
-    let executor = match &outcome.executor {
-        Some(executor) => Some(
-            serde_json::to_value(executor)
-                .map_err(|err| format!("tool executor does not serialize: {err}"))?,
-        ),
-        None => None,
-    };
-    let handler_outcome = outcome.handler_outcome.map(|outcome| {
-        match outcome {
-            crate::tool_registry::handler_result::HandlerOutcome::Ok => "ok",
-            crate::tool_registry::handler_result::HandlerOutcome::Error => "error",
-            crate::tool_registry::handler_result::HandlerOutcome::Rejected => "rejected",
-        }
-        .to_string()
-    });
-    Ok(crate::run_tape::RecordedToolOutcome {
-        result,
-        executor,
-        handler_outcome,
-    })
-}
-
-fn outcome_from_recorded(
-    recorded: crate::run_tape::RecordedToolOutcome,
-) -> agent_tools::ToolDispatchOutcome {
-    use crate::run_tape::RecordedToolResult;
-    use crate::tool_registry::handler_result::HandlerOutcome;
-    let result = match recorded.result {
-        RecordedToolResult::Ok { value } => Ok(value),
-        RecordedToolResult::Categorized { message, category } => Err(VmError::CategorizedError {
-            message,
-            category: crate::value::ErrorCategory::parse(&category),
-        }),
-        RecordedToolResult::Thrown { message } => {
-            Err(VmError::Thrown(VmValue::String(message.into())))
-        }
-        RecordedToolResult::ThrownValue { value } => {
-            Err(VmError::Thrown(crate::schema::json_to_vm_value(&value)))
-        }
-        RecordedToolResult::Runtime { message } => Err(VmError::Runtime(message)),
-    };
-    agent_tools::ToolDispatchOutcome {
-        result,
-        executor: recorded
-            .executor
-            .and_then(|value| serde_json::from_value(value).ok()),
-        handler_outcome: recorded
-            .handler_outcome
-            .as_deref()
-            .and_then(|outcome| match outcome {
-                "ok" => Some(HandlerOutcome::Ok),
-                "error" => Some(HandlerOutcome::Error),
-                "rejected" => Some(HandlerOutcome::Rejected),
-                _ => None,
-            }),
-    }
 }

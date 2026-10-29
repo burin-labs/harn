@@ -54,6 +54,7 @@ pub use receipts::{
 #[cfg(all(test, unix))]
 use scan::scan_tree_with_exclusions;
 use scan::{excluded_paths, is_excluded, scan_tree};
+pub use tape_effects::tape_effect_observer;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs as stdfs;
@@ -102,7 +103,6 @@ impl HostlibCapability for WorkspaceCheckpointCapability {
     }
 
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
-        tape_effects::register();
         registry.register_fn("fs", CAPTURE_BUILTIN, "checkpoint_capture", capture_builtin);
         registry.register_fn(
             "fs",

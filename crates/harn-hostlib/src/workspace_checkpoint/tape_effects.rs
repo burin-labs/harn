@@ -9,9 +9,10 @@ use harn_vm::run_tape::{EffectScan, ToolEffectObserver};
 
 use super::{scan::scan_tree, scan_blind_to, Scan, MAX_STORED_FILE_BYTES};
 
-/// Give the run tape's per-call file effects this module's scanner.
-pub(super) fn register() {
-    harn_vm::run_tape::register_tool_effect_observer(Box::<TapeEffectObserver>::default());
+/// The scanner a run tape uses for per-call file effects; pass it in
+/// `harn_vm::run_tape::TapeWorkspace`.
+pub fn tape_effect_observer() -> Box<dyn ToolEffectObserver> {
+    Box::<TapeEffectObserver>::default()
 }
 
 #[derive(Default)]
@@ -65,7 +66,14 @@ impl ToolEffectObserver for TapeEffectObserver {
             }
         }
         for path in before.index.keys() {
-            if !after.index.contains_key(path) {
+            if after.index.contains_key(path) {
+                continue;
+            }
+            // Gone from the scan but still on disk: the scan stopped seeing it
+            // (a .gitignore edit, say). Replaying that as a delete would lose it.
+            if root.join(path).symlink_metadata().is_ok() {
+                scan.incomplete = true;
+            } else {
                 scan.changes.push((path.clone(), None));
             }
         }

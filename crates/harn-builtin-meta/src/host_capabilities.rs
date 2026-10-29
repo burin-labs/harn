@@ -693,8 +693,17 @@ pub fn all_host_capability_groups() -> impl Iterator<Item = &'static HostCapabil
 }
 
 pub fn is_host_capability_method(capability: CapabilityId, method: &str) -> bool {
+    host_capability_method_effects(capability, method).is_some()
+}
+
+/// The effects of the host capability group that owns `method`.
+pub fn host_capability_method_effects(
+    capability: CapabilityId,
+    method: &str,
+) -> Option<&'static [EffectSpec]> {
     all_host_capability_groups()
-        .any(|group| group.capability == capability && group.methods.contains(&method))
+        .find(|group| group.capability == capability && group.methods.contains(&method))
+        .map(|group| group.effects)
 }
 
 #[cfg(test)]

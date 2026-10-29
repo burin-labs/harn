@@ -51,7 +51,9 @@ use serde::{Deserialize, Serialize};
 use crate::clock_mock;
 
 /// Format version of the on-disk tape representation. Bump on any
-/// breaking change. Loaders refuse tapes with a higher version.
+/// breaking change. Loaders refuse tapes with a higher version. Version 2
+/// widened the model-call `request_digest` to the whole request, so a
+/// version 1 digest never compares with a version 2 one.
 pub const TAPE_FORMAT_VERSION: u32 = 2;
 
 /// Records whose serialized payload exceeds this size are spilled into
@@ -82,6 +84,9 @@ pub struct TapeHeader {
     /// so two re-runs that differ only in argv are distinguishable.
     #[serde(default)]
     pub argv: Vec<String>,
+    /// How a production run tape was recorded. Absent on testbench tapes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<crate::run_tape::RunTapeHeader>,
 }
 
 impl TapeHeader {
@@ -96,6 +101,7 @@ impl TapeHeader {
             started_at_unix_ms,
             script_path,
             argv,
+            run: None,
         }
     }
 }
@@ -183,10 +189,10 @@ pub enum TapeRecordKind {
     /// Script slept (or otherwise advanced the unified mock clock) by
     /// `duration_ms`. The recorded virtual time is post-advance.
     ClockSleep { duration_ms: u64 },
-    /// LLM call. `request_digest` is a deterministic hash of the call's
-    /// matchable surface (messages + system + tools + tool_choice +
-    /// thinking). `response` is the recorded mock — inline JSON for
-    /// small payloads, a CAS reference for large ones.
+    /// LLM call. `request_digest` hashes the whole request minus the
+    /// credential and session id; the fidelity oracle and branch
+    /// verification both compare it. `response` is the recorded mock:
+    /// inline JSON for small payloads, a CAS reference for large ones.
     LlmCall {
         request_digest: String,
         response: TapePayload,
@@ -194,8 +200,8 @@ pub enum TapeRecordKind {
         /// testbench tapes, which order calls by `seq` alone.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_index: Option<u64>,
-        /// The digested request surface without its messages. Present only
-        /// at `recording: full`.
+        /// The request `request_digest` covers, without its messages. Present
+        /// only at `recording: full`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         request: Option<TapePayload>,
         /// The request's messages in order, each its own CAS entry, so a
@@ -582,18 +588,26 @@ impl EventTape {
             ));
         }
         let mut records = Vec::new();
-        for (idx, line) in lines.enumerate() {
+        // A streaming writer killed mid-record leaves a torn last line with no
+        // newline; the records before it are complete.
+        let torn_tail = !body.ends_with('\n');
+        let lines: Vec<&str> = lines.collect();
+        for (idx, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
             }
-            let parsed: TapeLine = serde_json::from_str(trimmed).map_err(|err| {
-                format!(
-                    "parse tape record at line {} in {}: {err}",
-                    idx + 2,
-                    path.display()
-                )
-            })?;
+            let parsed: TapeLine = match serde_json::from_str(trimmed) {
+                Ok(parsed) => parsed,
+                Err(_) if torn_tail && idx + 1 == lines.len() => break,
+                Err(err) => {
+                    return Err(format!(
+                        "parse tape record at line {} in {}: {err}",
+                        idx + 2,
+                        path.display()
+                    ))
+                }
+            };
             match parsed {
                 TapeLine::Record(record) => records.push(record),
                 TapeLine::Header(_) => {

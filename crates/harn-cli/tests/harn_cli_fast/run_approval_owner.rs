@@ -98,15 +98,13 @@ fn has_call(census: &Calls, caller: &str, required: &str) -> bool {
 }
 
 fn dispatch_reaches_typed_owner(dispatch: &Calls, approval: &Calls) -> bool {
-    has_call(
-        dispatch,
-        "host_agent_dispatch_tool_call",
-        "DispatchApproval::new",
-    ) && has_call(
-        approval,
-        "DispatchApproval::new",
-        "current_run_approval_policy",
-    ) && !has_call(approval, "DispatchApproval::new", "current_approval_policy")
+    has_call(dispatch, "dispatch_tool_call_live", "DispatchApproval::new")
+        && has_call(
+            approval,
+            "DispatchApproval::new",
+            "current_run_approval_policy",
+        )
+        && !has_call(approval, "DispatchApproval::new", "current_approval_policy")
 }
 
 #[test]
@@ -179,11 +177,11 @@ fn production_construction_and_dispatch_share_the_typed_owner() {
     assert!(!methods.callers.contains_key("TestMethod::new"));
     assert!(!methods.callers.contains_key("new"));
 
-    let connected = calls("fn host_agent_dispatch_tool_call() { DispatchApproval::new(); }");
+    let connected = calls("fn dispatch_tool_call_live() { DispatchApproval::new(); }");
     assert!(dispatch_reaches_typed_owner(&connected, &methods));
     for disconnected in [
-        "fn host_agent_dispatch_tool_call() {} fn unused() { DispatchApproval::new(); }",
-        "fn host_agent_dispatch_tool_call() { OtherDispatchApproval::new(); }",
+        "fn dispatch_tool_call_live() {} fn unused() { DispatchApproval::new(); }",
+        "fn dispatch_tool_call_live() { OtherDispatchApproval::new(); }",
     ] {
         assert!(!dispatch_reaches_typed_owner(
             &calls(disconnected),
