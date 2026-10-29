@@ -89,6 +89,14 @@ pub fn __agent_loop_finalize(harness: Harness, message: any, session: dict, stat
   )
   let final_status = resolved.final_status
   let stop_reason = resolved.stop_reason
+  // Discovery is an observation, not a directive: only label the run after
+  // the loop has independently reached its own accepted completion.
+  const discovery = state.terminal_assessment?.verification?.discovery
+  const discovery_unavailable = (final_status == "" || final_status == "done")
+    && state.terminal_error == nil
+    && state.suspend_result == nil
+    && state.terminal_assessment?.action == "accept"
+    && discovery != nil
   if resolved.converted != nil {
     agent_emit_event(
       harness.agent,
@@ -211,6 +219,9 @@ pub fn __agent_loop_finalize(harness: Harness, message: any, session: dict, stat
     && (wrapup_result?.publication_admitted ?? true)
     && len(agent_required_tools_missing_from_session(opts, state.successful_tools_seen)) == 0
     && (output_contract?.output_valid ?? true)
+  if discovery_unavailable {
+    final_status = "completion_unverified"
+  }
   const result = agent_session_finalize(
     harness.agent,
     session.session_id,
@@ -223,6 +234,7 @@ pub fn __agent_loop_finalize(harness: Harness, message: any, session: dict, stat
       adaptive_budget: adaptive_budget,
       completion_assessment: state.terminal_assessment,
       publication_admitted: publication_admitted,
+      verification_discovery_unavailable: discovery_unavailable,
     },
   )
   return {

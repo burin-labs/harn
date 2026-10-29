@@ -37,6 +37,7 @@ pub fn agent_session_init(
  */
 pub type AgentSessionFinalization = {
   publication_admitted?: bool,
+  verification_discovery_unavailable?: bool,
   final_status: string,
   stop_reason?: string,
   iterations?: int,

@@ -46,6 +46,24 @@ pub(super) struct Assessment {
     goal_assessment: Option<GoalAssessment>,
     pending_tool_batch_effect_count: usize,
     gap_count: usize,
+    verification: Option<Verification>,
+}
+
+#[derive(Deserialize)]
+struct Verification {
+    discovery: Option<DiscoveryUnavailable>,
+}
+
+#[derive(Deserialize)]
+struct DiscoveryUnavailable {
+    state: DiscoveryState,
+    detail: String,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum DiscoveryState {
+    Unavailable,
 }
 
 impl Assessment {
@@ -54,6 +72,16 @@ impl Assessment {
             .map(serde_json::from_value)
             .transpose()
             .map_err(|error| VmError::Runtime(format!("invalid completion assessment: {error}")))
+    }
+
+    pub(super) fn discovery_unavailable_detail(&self) -> Option<&str> {
+        let discovery = self.verification.as_ref()?.discovery.as_ref()?;
+        match discovery.state {
+            DiscoveryState::Unavailable => {
+                let detail = discovery.detail.trim();
+                (!detail.is_empty()).then_some(detail)
+            }
+        }
     }
 }
 
@@ -82,6 +110,7 @@ enum Reason {
     RequirementsUnassessed,
     GoalAssessed,
     PendingEffects,
+    VerificationDiscoveryUnavailable,
     CompletionNotAccepted,
 }
 
@@ -104,7 +133,11 @@ struct Outcome {
     requirements: Option<Summary>,
 }
 
-pub(super) fn project(assessment: Option<Assessment>, publication_admitted: bool) -> Value {
+pub(super) fn project(
+    assessment: Option<Assessment>,
+    publication_admitted: bool,
+    discovery_unavailable: bool,
+) -> Value {
     let mut outcome = Outcome {
         kind: Kind::Unknown,
         reason: Reason::Unassessed,
@@ -187,6 +220,9 @@ pub(super) fn project(assessment: Option<Assessment>, publication_admitted: bool
             }
             outcome.requirements = Some(summary);
         }
+        if discovery_unavailable && outcome.kind == Kind::Unknown {
+            outcome.reason = Reason::VerificationDiscoveryUnavailable;
+        }
     }
     serde_json::to_value(outcome).expect("goal outcome contains only JSON-safe fields")
 }
@@ -209,11 +245,11 @@ mod tests {
             }
         });
         let declared = Assessment::read(Some(receipt.clone())).unwrap();
-        assert_eq!(project(declared, true)["kind"], "not_achieved");
+        assert_eq!(project(declared, true, false)["kind"], "not_achieved");
         receipt["requirements"]["required_count"] = serde_json::json!(0);
         receipt["requirements"]["rows"] = serde_json::json!([]);
         let pending = Assessment::read(Some(receipt)).unwrap();
-        assert_eq!(project(pending, true)["kind"], "unknown");
+        assert_eq!(project(pending, true, false)["kind"], "unknown");
     }
 
     // Direct native finalization can receive a truncated report, unlike the
@@ -229,10 +265,10 @@ mod tests {
             }
         });
         let measured = Assessment::read(Some(receipt.clone())).unwrap();
-        assert_eq!(project(measured, true)["kind"], "achieved");
+        assert_eq!(project(measured, true, false)["kind"], "achieved");
         receipt["requirements"]["rows"] = serde_json::json!([]);
         let truncated = Assessment::read(Some(receipt)).unwrap();
-        let outcome = project(truncated, true);
+        let outcome = project(truncated, true, false);
         assert_eq!(outcome["kind"], "unknown");
         assert_eq!(outcome["requirements"]["required_count"], 1);
         assert_eq!(outcome["requirements"]["met_count"], 0);

@@ -477,6 +477,10 @@ pub(super) async fn host_agent_session_finalize(
             .finalization_status(&supplied_status),
         "completion_assessment",
     ))?;
+    let discovery_detail = completion_assessment
+        .as_ref()
+        .and_then(|assessment| assessment.discovery_unavailable_detail())
+        .map(str::to_owned);
     let (status_dict, mut finalization_stage) = finalization
         .session_mut()
         .begin_finalization(supplied_status);
@@ -554,6 +558,16 @@ pub(super) async fn host_agent_session_finalize(
         .with_suspension(suspension.as_ref()),
     );
     let mut terminal_outcome = terminal_outcome;
+    let discovery_unavailable = final_status == "completion_unverified"
+        && terminal_error.is_none()
+        && matches!(
+            status_dict.get("verification_discovery_unavailable"),
+            Some(VmValue::Bool(true))
+        )
+        && discovery_detail.is_some();
+    if discovery_unavailable {
+        terminal_outcome.message = discovery_detail;
+    }
     if let Some(reason) = withdrawal_reason.as_ref() {
         if terminal_outcome.message.is_none() {
             terminal_outcome.message = Some(reason.clone());
@@ -569,7 +583,7 @@ pub(super) async fn host_agent_session_finalize(
     } else {
         final_status.clone()
     };
-    let publication_admitted = canonical_status == "done"
+    let publication_admitted = (canonical_status == "done" || discovery_unavailable)
         && terminal_error.is_none()
         && !matches!(
             status_dict.get("publication_admitted"),
@@ -578,7 +592,11 @@ pub(super) async fn host_agent_session_finalize(
     let published =
         crate::agent_sessions::settle_assistant_publication(&session_id, publication_admitted)
             .map_err(VmError::Runtime)?;
-    let goal_outcome = super::goal_outcome::project(completion_assessment, publication_admitted);
+    let goal_outcome = super::goal_outcome::project(
+        completion_assessment,
+        publication_admitted && canonical_status == "done",
+        discovery_unavailable,
+    );
     if finalization_stage < super::AgentFinalizationStage::TranscriptMarkerWritten {
         if let Some(dir) = session.transcript_dir.as_deref() {
             crate::llm::agent_session_transcript::append_finalized_marker(

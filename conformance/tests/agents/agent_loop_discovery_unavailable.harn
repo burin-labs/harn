@@ -1,0 +1,332 @@
+import { agent_completion_gate } from "std/agent/completion_gate"
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { command_run } from "std/command"
+import { llm_text, with_llm_script, with_temp_dir } from "std/testing"
+import { repair_test_tools } from "../../fixtures/agents/repair_tools"
+
+fn run_with_discovery(harness: Harness, unavailable: bool) -> dict {
+  const probe_key = "discovery-facts-${harness.random.uuid()}"
+  return with_llm_script(
+    harness.llm,
+    [llm_text("<user_response>The change is ready.</user_response><done>##DONE##</done>")],
+    { ->
+      const session = "discovery-${harness.random.uuid()}"
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Finish the change.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "text",
+            loop_until_done: true,
+            max_iterations: 3,
+            done_sentinel: "##DONE##",
+            session_id: session,
+          }
+            + agent_completion_gate(
+              harness.runtime,
+              {
+                facts: { _ ->
+                  harness.runtime.store_set(probe_key, true)
+                  return {
+                    source_write_count: 1,
+                    verification_discovery: unavailable ? {
+                      state: "unavailable",
+                      detail: "The test directory could not be read.",
+                    } : nil,
+                  }
+                },
+              },
+            ),
+        ) },
+      )
+      assert(harness.runtime.store_get(probe_key) == true, "the completion gate must be reached")
+      return captured
+    },
+  )
+}
+
+pipeline test_unavailable_discovery_is_an_unverified_terminal(harness: Harness) {
+  const captured = run_with_discovery(harness, true)
+  const result = captured.result
+  assert_eq(result.terminal.kind, "completion_unverified")
+  assert_eq(result.llm.iterations, 1, "unavailable discovery must not prompt for another check")
+  assert_eq(result.goal_outcome.reason, "verification_discovery_unavailable")
+  assert_eq(result.stop_reason, "sentinel", "preserve the actual natural stop")
+  assert(
+    to_string(result?.terminal?.message ?? "").contains("test directory"),
+    "the terminal must explain what could not be read",
+  )
+  assert(
+    to_string(result?.visible_text ?? "").contains("The change is ready."),
+    "the final response must remain visible",
+  )
+  const checkpoints = captured.events.filter(
+    { event ->
+      event.type == "typed_checkpoint" && event?.checkpoint?.schema == "harn.agent_terminal.v1"
+    },
+  )
+    .to_list()
+  assert_eq(len(checkpoints), 1, "the runtime must publish a terminal checkpoint")
+  assert_eq(checkpoints[0].checkpoint.terminal.kind, "completion_unverified")
+  assert_eq(checkpoints[0].checkpoint.goal_outcome.reason, "verification_discovery_unavailable")
+}
+
+pipeline test_custom_completion_callback_preserves_discovery_fact(harness: Harness) {
+  const key = "custom-discovery-${harness.random.uuid()}"
+  const result = with_llm_script(
+    harness.llm,
+    [llm_text("<user_response>The change is ready.</user_response><done>##DONE##</done>")],
+    { ->
+      agent_loop(
+        harness,
+        "Finish the change.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 3,
+          done_sentinel: "##DONE##",
+          verify_completion: { _ ->
+            harness.runtime.store_set(key, true)
+            return {
+              confirm: true,
+              verification: {
+                oracle_expected: false,
+                command: "",
+                observed: "not_run",
+                discovery: {state: "unavailable", detail: "The test directory could not be read."},
+              },
+            }
+          },
+        },
+      )
+    },
+  )
+  assert(harness.runtime.store_get(key) == true, "the host completion callback must be reached")
+  assert_eq(result.terminal.kind, "completion_unverified")
+  assert_eq(result.goal_outcome.reason, "verification_discovery_unavailable")
+  assert(to_string(result?.visible_text ?? "").contains("The change is ready."))
+  assert_eq(result.llm.iterations, 1)
+}
+
+pipeline test_custom_callback_declared_verifier_overrules_unavailable_discovery(harness: Harness) {
+  const key = "custom-declared-verifier-${harness.random.uuid()}"
+  const windows = harness.system.platform().os == "windows"
+  const argv = windows ? ["cmd", "/c", "echo verifier-fired"] : [
+    "sh",
+    "-c",
+    "printf verifier-fired",
+  ]
+  const result = with_llm_script(
+    harness.llm,
+    [llm_text("<user_response>Verified.</user_response><done>##DONE##</done>")],
+    { ->
+      agent_loop(
+        harness,
+        "Run the declared check and finish.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 3,
+          done_sentinel: "##DONE##",
+          verify_completion: { _ ->
+            const child = command_run(harness.tools, {argv: argv})
+            assert(child.success && to_string(child.combined).contains("verifier-fired"))
+            harness.runtime.store_set(key, true)
+            return {
+              confirm: true,
+              verification: {
+                oracle_expected: true,
+                command: windows ? "cmd /c echo verifier-fired" : "sh -c printf",
+                observed: "passed",
+                discovery: {state: "unavailable", detail: "The test directory could not be read."},
+              },
+            }
+          },
+        },
+      )
+    },
+  )
+  assert(harness.runtime.store_get(key) == true, "the declared verifier must actually run")
+  assert_eq(result.terminal.kind, "natural", "a declared and observed verifier keeps authority")
+  assert_eq(result.llm.iterations, 1)
+}
+
+pipeline test_a_declared_verifier_runs_despite_unavailable_discovery(harness: Harness) {
+  const key = "declared-verifier-${harness.random.uuid()}"
+  const windows = harness.system.platform().os == "windows"
+  const argv = windows ? ["cmd", "/c", "echo verifier-fired"] : [
+    "sh",
+    "-c",
+    "printf verifier-fired",
+  ]
+  const command = windows ? "cmd /c echo verifier-fired" : "sh -c printf"
+  const tools = tool_define(
+    tool_registry(),
+    "verify",
+    "Run the declared verifier",
+    {
+      parameters: {},
+      handler: { _ ->
+        const child = command_run(harness.tools, {argv: argv})
+        assert(child.success, "the declared verifier must really execute")
+        assert(to_string(child.combined).contains("verifier-fired"))
+        harness.runtime.store_set(key, true)
+        return agent_tool_handler_result("verifier-fired", {command: command, exit_code: 0})
+      },
+      annotations: {kind: "read", completion_evidence_role: "verification"},
+    },
+  )
+  const result = with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "verify-1", name: "verify", arguments: {}}]},
+      llm_text("<user_response>Verified.</user_response><done>##DONE##</done>"),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Run the declared check and finish.",
+        nil,
+        {
+          provider: "mock",
+          tools: tools,
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          final_wrapup: false,
+          done_sentinel: "##DONE##",
+        }
+          + agent_completion_gate(
+            harness.runtime,
+            {
+              facts: { _ ->
+                {
+                  source_write_count: 1,
+                  verification_command: command,
+                  verify: {ok: harness.runtime.store_get(key) == true, command: command},
+                  verification_discovery: {
+                    state: "unavailable",
+                    detail: "The test directory could not be read.",
+                  },
+                }
+              },
+            },
+          ),
+      )
+    },
+  )
+  assert(harness.runtime.store_get(key) == true, "the verifier tool must run")
+  assert_eq(result.terminal.kind, "natural", "a declared verifier keeps authority")
+  assert_eq(result.llm.iterations, 2, "the declared verifier must not trigger extra turns")
+}
+
+pipeline test_unavailable_discovery_never_stops_active_work(harness: Harness) {
+  const key = "early-discovery-${harness.random.uuid()}"
+  const captured = with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "t1", name: "run_test", arguments: {}}]},
+      {text: "", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
+      {text: "", tool_calls: [{id: "e2", name: "apply_fix", arguments: {}}]},
+      llm_text("<user_response>Finished the edits.</user_response><done>##DONE##</done>"),
+    ],
+    { ->
+      const session = "early-discovery-${harness.random.uuid()}"
+      return agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Finish the edits.",
+          nil,
+          {
+            provider: "mock",
+            tools: repair_test_tools("test failed: assertion X", true, "read"),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 6,
+            final_wrapup: false,
+            done_sentinel: "##DONE##",
+            session_id: session,
+            stall_diagnostics: {enabled: true, post_edit_reverify: true},
+          }
+            + agent_completion_gate(
+              harness.runtime,
+              {
+                facts: { ctx ->
+                  if ctx.stop_reason == "post_edit_reverify" {
+                    harness.runtime.store_set(key, true)
+                  }
+                  return {
+                    source_write_count: 1,
+                    verification_discovery: {
+                      state: "unavailable",
+                      detail: "The test directory could not be read.",
+                    },
+                  }
+                },
+              },
+            ),
+        ) },
+      )
+    },
+  )
+  assert(harness.runtime.store_get(key) == true, "the early completion check must actually run")
+  const edits = captured.events.filter(
+    { event ->
+      event.type == "tool_call_update" && event.tool_name == "apply_fix"
+        && event.status == "completed"
+    },
+  )
+    .to_list()
+  assert_eq(len(edits), 2, "discovery must not stop the next edit")
+  assert_eq(captured.result.terminal.kind, "completion_unverified")
+}
+
+pipeline test_empty_discovery_keeps_the_existing_no_oracle_result(harness: Harness) {
+  const result = run_with_discovery(harness, false).result
+  assert_eq(result.terminal.kind, "natural")
+  assert_eq(result.stop_reason, "sentinel")
+}
+
+pipeline test_permission_denied_directory_is_not_an_empty_project(harness: Harness) {
+  if harness.system.platform().os == "windows" {
+    skip("the directory-permission control uses POSIX chmod")
+  }
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const denied = path_join(root, "denied")
+      const empty = path_join(root, "empty")
+      harness.fs.mkdir(denied)
+      harness.fs.mkdir(empty)
+      const blocked = command_run(harness.tools, {argv: ["chmod", "000", denied]})
+      assert(blocked.success, "the fixture must make the directory unreadable")
+      const denied_read = try {
+        harness.fs.list_dir(denied)
+      } catch {
+        nil
+      }
+      const empty_read = harness.fs.list_dir(empty)
+      const restored = command_run(harness.tools, {argv: ["chmod", "700", denied]})
+      assert(restored.success, "the fixture must restore directory access")
+      assert_eq(denied_read, nil, "the operating system must actually deny the read")
+      assert_eq(len(empty_read), 0, "a readable empty directory is the positive control")
+      const empty_result = run_with_discovery(harness, false)
+      assert_eq(empty_result.result.terminal.kind, "natural")
+      const captured = run_with_discovery(harness, denied_read == nil)
+      assert_eq(captured.result.terminal.kind, "completion_unverified")
+      assert_eq(captured.result.goal_outcome.reason, "verification_discovery_unavailable")
+    },
+  )
+}
