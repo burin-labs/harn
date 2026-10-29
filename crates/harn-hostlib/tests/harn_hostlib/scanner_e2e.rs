@@ -225,6 +225,39 @@ fn bare_source_without_tests_has_no_discovered_test_command() {
     assert!(result.project.test_commands.is_empty());
 }
 
+#[cfg(not(windows))]
+#[test]
+fn non_collected_uppercase_python_filename_has_no_test_command() {
+    let tmp = tempdir().unwrap();
+    write(
+        tmp.path(),
+        "TEST_app.py",
+        "def test_value():\n    assert True\n",
+    );
+    let result = scan_without_git_history(tmp.path());
+    assert!(result
+        .symbols
+        .iter()
+        .any(|symbol| symbol.name == "test_value"));
+    assert!(result.project.test_commands.is_empty());
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_pytest_filename_matching_is_case_insensitive() {
+    let tmp = tempdir().unwrap();
+    write(
+        tmp.path(),
+        "TEST_app.py",
+        "def test_value():\n    assert True\n",
+    );
+    let result = scan_without_git_history(tmp.path());
+    assert!(result
+        .project
+        .test_commands
+        .contains_key("python -m pytest"));
+}
+
 #[test]
 fn nested_pytest_with_import_remains_a_discovered_test_command() {
     let tmp = tempdir().unwrap();

@@ -130,7 +130,12 @@ fn detect_python_test_command(
             continue;
         }
         let lower = candidate.to_ascii_lowercase();
-        if !(lower.starts_with("test_")
+        let root_test = if cfg!(windows) {
+            lower.starts_with("test_")
+        } else {
+            candidate.starts_with("test_")
+        };
+        if !(root_test
             || lower.contains("/tests/")
             || lower.starts_with("tests/")
             || lower.contains("/test_")
@@ -143,7 +148,11 @@ fn detect_python_test_command(
             commands.insert(preferred_command.to_string(), preferred_label.to_string());
             return;
         }
-        let file_name = lower.rsplit('/').next().unwrap_or_default();
+        let file_name = if cfg!(windows) {
+            lower.rsplit('/').next().unwrap_or_default()
+        } else {
+            candidate.rsplit('/').next().unwrap_or_default()
+        };
         let pytest_collects_file =
             file_name.starts_with("test_") || file_name.ends_with("_test.py");
         if pytest_collects_file && pytest_function_paths.contains(candidate.as_str()) {
