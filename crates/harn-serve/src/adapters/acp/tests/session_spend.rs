@@ -125,19 +125,7 @@ async fn a_later_prompt_is_charged_what_earlier_prompts_spent() {
                     serde_json::json!(project),
                 )
                 .await;
-            // An interactive host records the session row when it opens the
-            // session; the prompt path only updates a row that exists.
-            {
-                use harn_session_store::{CreateSession, SessionStore};
-                harn_vm::open_canonical_store(&project)
-                    .expect("canonical store")
-                    .create(CreateSession {
-                        id: Some(session_id.clone()),
-                        ..CreateSession::default()
-                    })
-                    .await
-                    .expect("create the session row");
-            }
+            assert_eq!(stored_spend_micros(&project, &session_id).await, 0);
 
             // 2c of a 3c cap.
             let first = run_prompt(&request_tx, &mut response_rx, &session_id, 2).await;
@@ -311,8 +299,6 @@ async fn an_unreadable_spend_refuses_only_a_capped_turn() {
     harn_vm::reset_thread_local_state();
     let _mocks = install_priced_mocks(1);
     let (_dir, project, pipeline) = project_with_pipeline();
-    // A directory where the store file belongs: every open of it fails.
-    std::fs::create_dir_all(project.join(".harn/session-store.sqlite")).expect("block the store");
     for (config, capped) in [
         (
             AcpServerConfig::new(Some(pipeline.to_string_lossy().into_owned())),
@@ -325,6 +311,10 @@ async fn an_unreadable_spend_refuses_only_a_capped_turn() {
                 let (request_tx, mut response_rx, server, session_id) =
                     start_acp_channel_session_with_config(config, serde_json::json!(project))
                         .await;
+                let database = project.join(".harn/session-store.sqlite");
+                let saved = project.join(".harn/admitted-store.sqlite");
+                std::fs::rename(&database, &saved).expect("preserve the admitted store");
+                std::fs::create_dir(&database).expect("make the admitted store unreadable");
                 request_tx
                     .send(serde_json::json!({
                         "jsonrpc": "2.0", "id": 2, "method": "session/prompt",
@@ -348,6 +338,8 @@ async fn an_unreadable_spend_refuses_only_a_capped_turn() {
                 );
                 drop(request_tx);
                 server.await.expect("ACP channel server task");
+                std::fs::remove_dir(&database).unwrap();
+                std::fs::rename(&saved, &database).unwrap();
             })
             .await;
     }

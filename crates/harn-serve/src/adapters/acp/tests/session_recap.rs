@@ -2,9 +2,7 @@ use super::*;
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_recap_query_uses_the_canonical_store_contract() {
-    use harn_session_store::{
-        AppendEvent, CreateSession, SessionEventKind, SessionStore, SqliteSessionStore,
-    };
+    use harn_session_store::{AppendEvent, SessionEventKind, SessionStore, SqliteSessionStore};
 
     harn_clock::test_support::with_local_tasks(async {
         let project = tempfile::tempdir().expect("project root");
@@ -18,12 +16,9 @@ async fn acp_session_recap_query_uses_the_canonical_store_contract() {
         let store = SqliteSessionStore::open(project.path().join(".harn/session-store.sqlite"))
             .expect("canonical recap store");
         store
-            .create(CreateSession {
-                id: Some(session_id.clone()),
-                ..CreateSession::default()
-            })
+            .describe(&session_id)
             .await
-            .expect("create recap session");
+            .expect("admitted recap session");
         let mut event = AppendEvent::new(
             SessionEventKind::Message,
             serde_json::json!({

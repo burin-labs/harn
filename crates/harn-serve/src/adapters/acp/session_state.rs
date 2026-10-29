@@ -171,6 +171,14 @@ impl AcpServer {
             .workspace()
             .to_path_buf();
         self.insert_session(session_id.to_string(), cwd, SessionInfo::default())?;
+        // A cold admission replaces prior runtime authority, including a
+        // retired host's reanchored state still present on this VM thread.
+        harn_vm::agent_sessions::set_workspace_anchor(session_id, None).map_err(|reason| {
+            harn_vm::agent_sessions::SessionOpenError::LineageRejected {
+                session_id: session_id.to_string(),
+                reason,
+            }
+        })?;
         if let Some(session) = self.sessions.get_mut(session_id) {
             session.environment_policy = environment;
             session.admission_unavailable = true;
