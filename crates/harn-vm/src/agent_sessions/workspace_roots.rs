@@ -79,9 +79,7 @@ impl PreparedWorkspaceRoots {
         scope: &crate::SessionStoreScope,
         session_type: harn_session_store::SessionType,
     ) -> Result<bool, crate::value::VmError> {
-        use crate::stdlib::session_store;
         use crate::value::VmError;
-        use harn_session_store::{SessionStore, SessionWriteLease, UpdateSession};
 
         if !super::exists(session_id) {
             return Err(VmError::Runtime(format!("unknown session '{session_id}'")));
@@ -115,42 +113,56 @@ impl PreparedWorkspaceRoots {
             .anchor
             .additional_directories()
             .map_err(VmError::Runtime)?;
-        scope
-            .run(async {
-                let state_dir = session_store::canonical_store_state_dir(None)?;
-                let _lease = SessionWriteLease::try_acquire(state_dir.as_path(), session_id)
-                    .map_err(|error| {
-                        session_store::session_lease_error("workspace roots", error)
-                    })?;
-                let store = session_store::open_canonical_agent_session_with_directories(
-                    &state_dir,
-                    session_id,
-                    super::parent_id(session_id),
-                    session_type,
-                    directories.clone(),
-                )
-                .await?;
-                let metadata = store.describe(session_id).await.map_err(|error| {
-                    VmError::Runtime(format!("workspace root metadata: {error}"))
-                })?;
-                if metadata.additional_directories().map_err(|error| {
-                    VmError::Runtime(format!("workspace root metadata: {error}"))
-                })? != directories
-                {
-                    store
-                        .update(
-                            session_id,
-                            UpdateSession::default().with_additional_directories(directories),
-                        )
-                        .await
-                        .map_err(|error| {
-                            VmError::Runtime(format!("workspace root metadata: {error}"))
-                        })?;
-                }
-                super::set_workspace_anchor(session_id, Some(self.anchor)).map_err(VmError::Runtime)
-            })
-            .await
+        persist_directory_projection(session_id, scope, session_type, directories).await?;
+        super::set_workspace_anchor(session_id, Some(self.anchor)).map_err(VmError::Runtime)
     }
+}
+
+pub(super) async fn persist_directory_projection(
+    session_id: &str,
+    scope: &crate::SessionStoreScope,
+    session_type: harn_session_store::SessionType,
+    directories: Vec<String>,
+) -> Result<(), crate::value::VmError> {
+    use crate::stdlib::session_store;
+    use crate::value::VmError;
+    use harn_session_store::{SessionStore, SessionWriteLease, UpdateSession};
+
+    scope
+        .run(async {
+            let state_dir = session_store::canonical_store_state_dir(None)?;
+            let _lease = SessionWriteLease::try_acquire(state_dir.as_path(), session_id)
+                .map_err(|error| session_store::session_lease_error("workspace roots", error))?;
+            let store = session_store::open_canonical_agent_session_with_directories(
+                &state_dir,
+                session_id,
+                super::parent_id(session_id),
+                session_type,
+                directories.clone(),
+            )
+            .await?;
+            let metadata = store
+                .describe(session_id)
+                .await
+                .map_err(|error| VmError::Runtime(format!("workspace root metadata: {error}")))?;
+            if metadata
+                .additional_directories()
+                .map_err(|error| VmError::Runtime(format!("workspace root metadata: {error}")))?
+                != directories
+            {
+                store
+                    .update(
+                        session_id,
+                        UpdateSession::default().with_additional_directories(directories),
+                    )
+                    .await
+                    .map_err(|error| {
+                        VmError::Runtime(format!("workspace root metadata: {error}"))
+                    })?;
+            }
+            Ok(())
+        })
+        .await
 }
 
 fn validated_absolute_directory(path: &Path) -> Result<PathBuf, WorkspaceRootsError> {

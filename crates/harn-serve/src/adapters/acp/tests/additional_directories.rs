@@ -1,6 +1,122 @@
 use super::*;
 
 #[tokio::test(flavor = "current_thread")]
+async fn idle_mount_persists_before_acknowledgement_and_metadata_cwd_restores_the_same_workspace() {
+    use harn_session_store::{SessionStore, SessionWriteLease};
+    harn_vm::reset_thread_local_state();
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("workspace");
+    let extra = root.path().join("extra");
+    std::fs::create_dir(&workspace).unwrap();
+    std::fs::create_dir(&extra).unwrap();
+    let workspace = workspace.canonicalize().unwrap();
+    let extra = extra.canonicalize().unwrap();
+    assert_ne!(workspace, std::env::current_dir().unwrap());
+    let state = root.path().join("captured-state");
+    let launcher = harn_vm::security::LauncherEnvironment::from_snapshot(
+        [("HARN_STATE_DIR".into(), state.to_str().unwrap().into())].into(),
+    );
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(
+        AcpServerConfig::new(None).with_launcher_environment(launcher.clone()),
+        AcpOutput::Channel(tx),
+    );
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc":"2.0", "id":1, "method":"session/new",
+            "params":{"cwd":workspace, "environmentPolicy":{"kind":"isolated"}},
+        }))
+        .await;
+    let created = recv_response_with_id(&mut rx, 1).await;
+    let session = created["result"]["sessionId"].as_str().unwrap();
+    let scope = server.sessions[session].store_scope.clone();
+    let store = scope
+        .run(async { harn_vm::open_canonical_store(scope.workspace()) })
+        .await
+        .unwrap();
+    let before =
+        harn_vm::llm::vm_value_to_json(&harn_vm::agent_sessions::transcript(session).unwrap());
+    let lease = SessionWriteLease::try_acquire(scope.state_root(), session).unwrap();
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc":"2.0", "id":2, "method":"harn.session_add_root",
+            "params":{"sessionId":session, "path":extra, "mountMode":"extend"},
+        }))
+        .await;
+    let refused = recv_response_with_id(&mut rx, 2).await;
+    assert!(refused.get("error").is_some(), "{refused}");
+    assert_eq!(
+        harn_vm::llm::vm_value_to_json(&harn_vm::agent_sessions::transcript(session).unwrap()),
+        before
+    );
+    assert!(harn_vm::agent_sessions::workspace_anchor(session)
+        .unwrap()
+        .additional_roots
+        .is_empty());
+    assert!(store
+        .describe(session)
+        .await
+        .unwrap()
+        .additional_directories()
+        .unwrap()
+        .is_empty());
+    drop(lease);
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc":"2.0", "id":3, "method":"harn.session_add_root",
+            "params":{"sessionId":session, "path":extra, "mountMode":"extend"},
+        }))
+        .await;
+    let mounted = recv_response_with_id(&mut rx, 3).await;
+    assert!(mounted.get("result").is_some(), "{mounted}");
+    assert_eq!(
+        store
+            .describe(session)
+            .await
+            .unwrap()
+            .additional_directories()
+            .unwrap(),
+        vec![extra.to_str().unwrap().to_string()]
+    );
+    // No prompt, journal, close, or flush may supply the missing persistence.
+    drop(server);
+    harn_vm::reset_thread_local_state();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(
+        AcpServerConfig::new(None).with_launcher_environment(launcher),
+        AcpOutput::Channel(tx),
+    );
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc":"2.0", "id":4, "method":"session/list", "params":{"cwd":workspace},
+        }))
+        .await;
+    let listed = recv_response_with_id(&mut rx, 4).await;
+    assert_eq!(
+        listed["result"]["sessions"][0]["additionalDirectories"],
+        serde_json::json!([extra])
+    );
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc":"2.0", "id":5, "method":"session/load",
+            "params":{"sessionId":session, "_meta":{"harn":{"cwd":workspace}},
+                "environmentPolicy":{"kind":"isolated"}},
+        }))
+        .await;
+    let loaded = recv_response_with_id(&mut rx, 5).await;
+    assert!(loaded.get("result").is_some(), "{loaded}");
+    assert_eq!(
+        loaded["result"]["session"]["cwd"],
+        serde_json::json!(workspace)
+    );
+    assert_eq!(
+        loaded["result"]["session"]["additionalDirectories"],
+        serde_json::json!([])
+    );
+    assert_eq!(server.sessions[session].store_scope, scope);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn standard_directory_grants_replace_durably_and_refuse_partial_lists() {
     use harn_session_store::SessionStore;
     harn_vm::reset_thread_local_state();

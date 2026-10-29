@@ -160,11 +160,16 @@ impl AcpServer {
         params: &serde_json::Value,
         environment: harn_vm::security::SessionEnvironment,
     ) -> Result<(), harn_vm::agent_sessions::SessionOpenError> {
-        let cwd = params
-            .get("cwd")
-            .and_then(|value| value.as_str())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let cwd = self
+            .restore_store_scope(params)
+            .map_err(
+                |error| harn_vm::agent_sessions::SessionOpenError::LineageRejected {
+                    session_id: session_id.to_string(),
+                    reason: format!("session storage workspace: {error}"),
+                },
+            )?
+            .workspace()
+            .to_path_buf();
         self.insert_session(session_id.to_string(), cwd, SessionInfo::default())?;
         if let Some(session) = self.sessions.get_mut(session_id) {
             session.environment_policy = environment;

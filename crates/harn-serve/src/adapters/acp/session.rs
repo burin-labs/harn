@@ -220,7 +220,7 @@ impl AcpServer {
         );
     }
 
-    pub(super) fn handle_harn_session_add_root(
+    pub(super) async fn handle_harn_session_add_root(
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
@@ -229,6 +229,18 @@ impl AcpServer {
             self.send_error(id, -32602, "Missing session_id");
             return;
         };
+        if self
+            .sessions
+            .get(&session_id)
+            .is_some_and(|session| session.concurrent_control.prompt_is_active())
+        {
+            self.send_error(
+                id,
+                -32602,
+                "workspace roots cannot change during an active prompt",
+            );
+            return;
+        }
         if let Err(message) = self.ensure_workspace_anchor(&session_id) {
             self.send_error(id, -32602, &message);
             return;
@@ -252,13 +264,17 @@ impl AcpServer {
         let policy = self.sessions.get(&session_id).and_then(|session| {
             super::modes::policy_for_mode(&session.current_mode_id, &self.sandbox)
         });
-        let mounted_at = match harn_vm::stdlib::add_workspace_root(
+        let scope = self.sessions[&session_id].store_scope.clone();
+        let mounted_at = match harn_vm::stdlib::add_workspace_root_persisted(
             &session_id,
             &path,
             mount_mode,
             reason,
             policy.as_ref(),
-        ) {
+            &scope,
+        )
+        .await
+        {
             Ok(mounted_at) => mounted_at,
             Err(message) => {
                 self.send_error(id, -32602, &message);

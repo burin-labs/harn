@@ -348,6 +348,8 @@ mod transcript_lifecycle;
 mod types;
 mod workspace_roots;
 
+pub(crate) use metadata::add_workspace_root_verified_persisted;
+
 pub(crate) use text_tool_call_seq::next_text_tool_call_seq_for_parse;
 use text_tool_call_seq::{
     next_text_tool_call_seq_from_json_messages, next_text_tool_call_seq_from_transcript,

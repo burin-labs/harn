@@ -434,6 +434,74 @@ pub fn add_workspace_root_verified(
     Ok(applied.mounted_at)
 }
 
+pub(crate) async fn add_workspace_root_verified_persisted(
+    id: &str,
+    root: &str,
+    mount_mode: Option<MountMode>,
+    reason: Option<String>,
+    scope: &crate::SessionStoreScope,
+    verify: impl FnOnce(&std::path::Path) -> Result<(), String>,
+) -> Result<String, String> {
+    if super::workspace_anchor(id).is_none_or(|anchor| anchor.primary != scope.workspace()) {
+        return Err("workspace root mutation must use the session's captured workspace".into());
+    }
+    let mut pending = PendingWorkspaceMount {
+        id: id.to_string(),
+        generation: SESSIONS
+            .with(|sessions| {
+                sessions
+                    .borrow()
+                    .get(id)
+                    .map(super::SessionRetention::for_state)
+            })
+            .ok_or_else(|| format!("unknown session '{id}'"))?,
+        applied: Some(apply_workspace_mount(id, root, mount_mode)?),
+    };
+    verify(&pending.applied.as_ref().unwrap().root)?;
+    if super::has_journal(id) {
+        crate::agent_session_journal::flush(id)
+            .await
+            .map_err(|error| error.to_string())?;
+    } else {
+        let directories = super::workspace_anchor(id)
+            .ok_or_else(|| format!("unknown session '{id}'"))?
+            .additional_directories()?;
+        super::workspace_roots::persist_directory_projection(
+            id,
+            scope,
+            harn_session_store::SessionType::User,
+            directories,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+    if !pending.generation.is_current(id) {
+        return Err(format!(
+            "session '{id}' was closed while persisting workspace roots"
+        ));
+    }
+    record_workspace_mount(id, pending.applied.as_ref().unwrap(), reason)?;
+    Ok(pending.applied.take().unwrap().mounted_at)
+}
+
+struct PendingWorkspaceMount {
+    id: String,
+    generation: super::SessionRetention,
+    applied: Option<AppliedMount>,
+}
+
+impl Drop for PendingWorkspaceMount {
+    fn drop(&mut self) {
+        if let Some(applied) = self
+            .applied
+            .take()
+            .filter(|_| self.generation.is_current(&self.id))
+        {
+            rollback_workspace_mount(&self.id, applied);
+        }
+    }
+}
+
 /// A mount as the anchor now holds it, with what it replaced.
 struct AppliedMount {
     root: PathBuf,

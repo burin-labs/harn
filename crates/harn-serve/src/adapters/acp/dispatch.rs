@@ -353,7 +353,7 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_harn_session_add_root(&id, &params);
+                self.handle_harn_session_add_root(&id, &params).await;
             }
             "harn.session_reanchor" => {
                 if self.reject_unauthenticated(&id) {

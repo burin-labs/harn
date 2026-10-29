@@ -14,6 +14,15 @@ impl SessionRetention {
             _generation: state.retention.clone(),
         }
     }
+
+    pub(super) fn is_current(&self, id: &str) -> bool {
+        super::SESSIONS.with(|sessions| {
+            sessions
+                .borrow()
+                .get(id)
+                .is_some_and(|state| Arc::ptr_eq(&state.retention, &self._generation))
+        })
+    }
 }
 
 pub fn open_or_create_with_actor_chain(
