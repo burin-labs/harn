@@ -87,7 +87,8 @@ socket-root grant. Nothing in the socket-root grant opens IP networking.
 Pass `--allow-ssh-agent` to let a confined command sign Git commits through the
 launcher's `SSH_AUTH_SOCK`. The process policy records that one socket as
 `process_sandbox.ssh_agent_socket` and passes its path to children even with
-`--environment-policy isolated`. It grants connection to that endpoint without
+`--environment-policy isolated`. Nested tool policies inherit the host's exact
+endpoint and cannot invent or redirect it. It grants connection to that endpoint without
 granting private-key reads, directory reads under `~/.ssh`, socket creation, or
 IP networking. Other connections remain governed by their existing grants.
 macOS enforces the exact socket path. Linux requires an enforcing Landlock

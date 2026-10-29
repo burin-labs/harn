@@ -1,6 +1,13 @@
 import { command_run } from "std/command"
 
 fn main(harness: Harness) {
+  harness.runtime.with_execution_policy(
+    {tools: ["run_command"]},
+    { -> probe(harness) },
+  )
+}
+
+fn probe(harness: Harness) {
   const sign = command_run(
     harness.tools,
     ["git", "commit", "--allow-empty", "-S", "-m", "Socket grant proof"],

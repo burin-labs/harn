@@ -302,11 +302,9 @@ impl ProcessSandboxPolicy {
                 &self.unix_socket_roots,
                 &requested.unix_socket_roots,
             ),
-            ssh_agent_socket: self
-                .ssh_agent_socket
-                .as_ref()
-                .filter(|socket| requested.ssh_agent_socket.as_ref() == Some(*socket))
-                .cloned(),
+            // The host pins the endpoint. Nested tool restrictions may neither
+            // invent, redirect nor erase that transport grant.
+            ssh_agent_socket: self.ssh_agent_socket.clone(),
             // Narrows like every other additive term: a nested request may
             // keep the grant its ceiling already made and may never invent it.
             allow_process_self_introspection: self.allow_process_self_introspection

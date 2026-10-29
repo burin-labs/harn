@@ -569,7 +569,7 @@ fn unix_socket_roots_narrow_like_the_other_process_roots() {
 }
 
 #[test]
-fn ssh_agent_grant_narrows_to_the_exact_socket_and_is_omitted_by_default() {
+fn ssh_agent_grant_inherits_the_host_endpoint_and_is_omitted_by_default() {
     let policy = |socket: Option<&str>| CapabilityPolicy {
         process_sandbox: Box::new(ProcessSandboxPolicy {
             ssh_agent_socket: socket.map(str::to_string),
@@ -585,16 +585,20 @@ fn ssh_agent_grant_narrows_to_the_exact_socket_and_is_omitted_by_default() {
         .as_object()
         .unwrap()
         .contains_key("ssh_agent_socket"));
-    assert_eq!(
-        allowed
-            .intersect(&allowed)
-            .unwrap()
-            .process_sandbox
-            .ssh_agent_socket,
-        Some("/run/agent.sock".into())
-    );
-    for requested in [&other, &absent] {
-        assert!(allowed
+    let tools_only = CapabilityPolicy {
+        tools: vec!["run_command".into()],
+        ..CapabilityPolicy::default()
+    };
+    for requested in [&allowed, &other, &absent, &tools_only] {
+        assert_eq!(
+            allowed
+                .intersect(requested)
+                .unwrap()
+                .process_sandbox
+                .ssh_agent_socket,
+            Some("/run/agent.sock".into())
+        );
+        assert!(absent
             .intersect(requested)
             .unwrap()
             .process_sandbox
