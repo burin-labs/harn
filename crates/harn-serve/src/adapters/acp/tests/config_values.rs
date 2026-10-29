@@ -26,7 +26,7 @@ async fn config_discriminants_cannot_change_a_string_setting_through_boolean_val
     .into_iter()
     .enumerate()
     {
-        let id = index as i64 + 2;
+        let id = u64::try_from(index).unwrap() + 2;
         let mut params = input;
         params["sessionId"] = serde_json::json!(session_id);
         params["configId"] = serde_json::json!("mode");
