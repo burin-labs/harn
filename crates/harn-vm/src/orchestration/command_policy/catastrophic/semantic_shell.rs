@@ -782,21 +782,36 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
 }
 
 fn collect_redirect(redirect: Node<'_>, source: &[u8], analysis: &mut ShellAnalysis) {
-    let Some(destination_node) = redirect.child_by_field_name("destination") else {
-        analysis.unresolved = true;
-        return;
-    };
     let operator = redirect
         .child_by_field_name("operator")
         .and_then(|node| node_text(node, source))
         .map(ToString::to_string)
         .or_else(|| redirect_operator_from_children(redirect, source));
-    let Some(operator) = operator else {
+    let Some(mut operator) = operator else {
         analysis.unresolved = true;
+        return;
+    };
+    let Some(destination_node) = redirect.child_by_field_name("destination") else {
+        // `>&-` and `<&-` close a descriptor and take no destination.
+        analysis.unresolved |= !matches!(operator.as_str(), ">&-" | "<&-");
         return;
     };
     let (destination, dynamic) = shell_word(destination_node, source);
     analysis.unresolved |= dynamic;
+    if !dynamic && matches!(operator.as_str(), ">&" | "<&" | ">&-" | "<&-") {
+        match destination.as_deref() {
+            // Duplicating or closing a literal descriptor touches no file.
+            Some(fd) if fd == "-" || (!fd.is_empty() && fd.bytes().all(|b| b.is_ascii_digit())) => {
+                return;
+            }
+            // Bash reads `>&word` as `&>word`: both streams write the file.
+            Some(_) if operator == ">&" => operator = "&>".to_string(),
+            _ => {
+                analysis.unresolved = true;
+                return;
+            }
+        }
+    }
     if let Some(value) = destination.as_deref() {
         record_argument_word(analysis, value, false);
         record_argument_word(analysis, value, true);
@@ -814,7 +829,18 @@ fn redirect_operator_from_children(redirect: Node<'_>, source: &[u8]) -> Option<
         let text = node_text(child, source)?;
         matches!(
             text,
-            ">" | ">>" | ">|" | "&>" | "&>>" | "<>" | "<" | "<<" | "<<<"
+            ">" | ">>"
+                | ">|"
+                | "&>"
+                | "&>>"
+                | "<>"
+                | "<"
+                | "<<"
+                | "<<<"
+                | ">&"
+                | "<&"
+                | ">&-"
+                | "<&-"
         )
         .then(|| text.to_string())
     })

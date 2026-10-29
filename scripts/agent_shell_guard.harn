@@ -967,8 +967,14 @@ fn unprojected_path_assignment(command: string) -> bool {
   while index < len(command) {
     const char = command.substring(index, index + 1)
     if char == "\\" && !single {
-      // Escaping can construct a variable name outside the scanner's projection.
-      return true
+      // A line continuation can splice a variable name outside the scanner's projection. Any other
+      // escape quotes one character, and a quoted character makes its word no assignment.
+      const next = command.substring(index + 1, index + 2)
+      if next == "\n" || next == "\r" {
+        return true
+      }
+      index = index + 2
+      continue
     }
     if char == "'" && !double {
       single = !single

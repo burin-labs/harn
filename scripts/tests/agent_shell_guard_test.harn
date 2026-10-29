@@ -2,6 +2,7 @@
 import {
   ADMISSION_CHECKED_ENV,
   GIT_ALIASES_UNREADABLE,
+  GitAliasContext,
   ShellGuardDecision,
   WorktreeAdmissionCensus,
   cargo_violation,
@@ -1142,6 +1143,58 @@ pipeline test_git_stash_writes_are_denied_across_parser_shapes(harness: Harness,
       !decision(codex_payload(command), UNADMITTED, NO_MAKE_TARGETS).allow,
       command + " is refused for Codex in any repository",
     )
+  }
+}
+
+/** Hook-shaped git facts: `-C` names a directory whose configuration git cannot read. */
+const ALIASES_UNREADABLE_UNDER_C: fn(GitAliasContext) -> dict = { context ->
+  context.options.contains("-C") ? {"<unreadable>": ""} : {}
+}
+
+const COMMIT_LOG_GREP_BUILTINS: fn(string) -> list<string> = { _program ->
+  ["commit", "grep", "log", "stash"]
+}
+
+fn guard_with_git_facts(command: string) -> ShellGuardDecision {
+  return decision(
+    claude_payload(command),
+    ADMITTED,
+    NO_MAKE_TARGETS,
+    ALIASES_UNREADABLE_UNDER_C,
+    COMMIT_LOG_GREP_BUILTINS,
+  )
+}
+
+/** Runtimes before descriptor duplication resolved report `2>&1` as unresolved syntax. */
+fn scanner_resolves_descriptor_duplication() -> bool {
+  const scan = command_risk_scan({request: {mode: "shell", command: "git log 2>&1"}})
+  return scan.execution_semantics?.resolved == true
+}
+
+@test
+pipeline test_descriptor_duplication_and_escapes_keep_git_builtins_allowed(
+  harness: Harness,
+  task: unknown,
+) {
+  // A backslash that only quotes one character constructs no assignment, on every runtime.
+  const escaped = guard_with_git_facts("git -C /w grep -n \"a\\|b\" HEAD")
+  assert(escaped.allow, "an escaped pipe inside quotes is plain data: " + escaped.reason)
+  // NEGATIVE CONTROL: the injected facts are load-bearing. A verb that is not a builtin must
+  // consult the unreadable configuration and refuse, so the allows above are not vacuous.
+  assert(!guard_with_git_facts("git -C /w lg \"a\\|b\"").allow)
+  assert(!guard_with_git_facts("git -C /w lg 2>&1").allow)
+  assert(!guard_with_git_facts("git -C /w stash 2>&1").allow, "a stash write stays refused")
+  assert(!guard_with_git_facts("cd /w && git stash pop 2>&1").allow)
+  if !scanner_resolves_descriptor_duplication() {
+    return
+  }
+  for command in [
+    "git -C /w commit -m x > log 2>&1; echo c=$?",
+    "cd /w && git log 2>&1",
+    "git -C /w log >&2",
+  ] {
+    const allowed = guard_with_git_facts(command)
+    assert(allowed.allow, command + " duplicates a descriptor only: " + allowed.reason)
   }
 }
 
