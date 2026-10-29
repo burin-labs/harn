@@ -163,21 +163,47 @@ guard_git_directories_of() {
   [[ -f "$root/.git" ]] || return 0
   IFS= read -r gitdir <"$root/.git" || true
   gitdir="${gitdir#gitdir: }"
+  # A relative pointer is relative to the worktree, not to the caller.
+  [[ "$gitdir" == /* ]] || gitdir="$root/$gitdir"
   [[ -d "$gitdir" ]] || return 0
   gitdir="$(cd "$gitdir" && pwd -P)"
   printf '%s\n' "$gitdir"
   if [[ -f "$gitdir/commondir" ]]; then
     IFS= read -r common <"$gitdir/commondir" || true
-    [[ -n "$common" && -d "$gitdir/$common" ]] && (cd "$gitdir/$common" && pwd -P)
+    # A relative commondir is relative to the git directory that names it.
+    [[ "$common" == /* ]] || common="$gitdir/$common"
+    [[ -n "$common" && -d "$common" ]] && (cd "$common" && pwd -P)
   fi
   return 0
+}
+# Absolute paths a command names, spaces kept. The payload is cut at every
+# character that cannot occur in an unquoted path or that quotes one, which leaves
+# each quoted or bare run as one segment; a path with spaces is then the longest
+# run of words from a leading `/` that names an existing directory. Quoting is
+# thereby honoured without a second shell grammar, which only the policy owns.
+guard_absolute_paths_in() {
+  local segment candidate index count j
+  local -a words
+  while IFS= read -r segment; do
+    [[ "$segment" == *"/"* ]] || continue
+    read -r -a words <<<"$segment"
+    count=${#words[@]}
+    for ((index = 0; index < count; index++)); do
+      [[ "${words[index]}" == /* ]] || continue
+      candidate=""
+      for ((j = index; j < count && j < index + 12; j++)); do
+        candidate="${candidate:+$candidate }${words[j]}"
+        printf '%s\n' "$candidate"
+      done
+    done
+  done < <(sed 's/\\\\ / /g' "$1" | tr -c '[:alnum:]/._@+~ -' '\n')
 }
 if [[ "$harn_mode" == "standalone" || "$harn_runner" != "${HARN_BIN:-}" ]]; then
   guard_read_roots="$(guard_repository_root_of "$PWD" || pwd -P)"
   while IFS= read -r guard_token; do
     guard_candidate="$(guard_repository_root_of "$guard_token" || true)"
     [[ -n "$guard_candidate" ]] && guard_read_roots+=$'\n'"$guard_candidate"
-  done < <(tr -c '[:alnum:]/._@+~-' '\n' <"$payload_file" | grep '^/' | sort -u)
+  done < <(guard_absolute_paths_in "$payload_file" | sort -u)
   while IFS= read -r guard_root; do
     [[ -n "$guard_root" ]] && guard_read_roots+=$'\n'"$(guard_git_directories_of "$guard_root")"
   done < <(printf '%s\n' "$guard_read_roots" | sort -u)

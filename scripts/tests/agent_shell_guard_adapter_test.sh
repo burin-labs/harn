@@ -168,6 +168,33 @@ if [[ "$cwd_fault" != *'"permissionDecision":"deny"'* ]] \
   exit 1
 fi
 
+# A repository whose path holds spaces, reached from a directory outside it, and a
+# linked worktree whose `.git` pointer is relative, must both stay readable. Each
+# is built outside the caller's directory tree, so only a granted read root can
+# make the alias lookup succeed; a truncated path or a pointer resolved against
+# the caller's directory leaves it unreadable and the command is refused.
+spaced_base="$repo_root/guard path test $$"
+spaced_caller="$(cd "$(mktemp -d)" && pwd -P)"
+trap 'rm -rf "$fixture_root" "$order_root" "$spaced_base" "$spaced_caller"' EXIT
+mkdir -p "$spaced_base"
+git -C "$spaced_base" init -q "main repo"
+git -C "$spaced_base/main repo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
+git -C "$spaced_base/main repo" worktree add -q --detach "$spaced_base/linked tree"
+printf 'gitdir: ../main repo/.git/worktrees/linked-tree\n' >"$spaced_base/linked tree/.git"
+for spaced_target in "$spaced_base/main repo" "$spaced_base/linked tree"; do
+  for quoting in "'$spaced_target'" "\"$spaced_target\""; do
+    spaced_command="git -C $quoting s | grep -i \"a\\|b\""
+    spaced_payload="$(jq -cn --arg command "$spaced_command" '{tool_name:"Bash",tool_input:{command:$command}}')"
+    spaced_allowed="$(cd "$spaced_caller" && printf '%s' "$spaced_payload" | cwd_guard)"
+    if [[ -n "$spaced_allowed" ]]; then
+      echo "adapter refused a read of $spaced_target" >&2
+      printf '%s\n' "$spaced_allowed" >&2
+      exit 1
+    fi
+  done
+done
+rm -rf "$spaced_base" "$spaced_caller"
+
 discarded_blocked="$(
   printf '%s' \
     '{"tool_name":"Bash","tool_input":{"command":"make test | tail -20"}}' \
