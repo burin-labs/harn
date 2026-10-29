@@ -197,6 +197,40 @@ fn discovery_only_matches_full_scan_and_rechecks_without_a_snapshot() {
 }
 
 #[test]
+fn discovery_only_finds_a_git_tracked_test_matched_by_ignore() {
+    let tmp = tempdir().unwrap();
+    write(tmp.path(), ".gitignore", "test_app.py\n");
+    write(
+        tmp.path(),
+        "test_app.py",
+        "def test_value():\n    assert True\n",
+    );
+    assert!(std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(tmp.path())
+        .status()
+        .unwrap()
+        .success());
+    assert!(std::process::Command::new("git")
+        .args(["add", "-f", "test_app.py"])
+        .current_dir(tmp.path())
+        .status()
+        .unwrap()
+        .success());
+    assert!(std::process::Command::new("git")
+        .args(["check-ignore", "--no-index", "-q", "test_app.py"])
+        .current_dir(tmp.path())
+        .status()
+        .unwrap()
+        .success());
+    let discovery = discover_test_commands(tmp.path(), false, IgnorePolicy::Project);
+    assert!(matches!(
+        discovery,
+        TestCommandDiscovery::Complete { commands, .. } if commands.contains_key("python -m pytest")
+    ));
+}
+
+#[test]
 fn bare_root_pytest_with_import_has_a_discovered_test_command() {
     let tmp = tempdir().unwrap();
     write(

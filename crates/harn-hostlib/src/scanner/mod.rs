@@ -134,7 +134,9 @@ pub fn discover_test_commands(
         include_hidden,
         ignore_policy,
     };
-    let files = discover::discover_files(&canonical, options, &git::CliGitCapabilities);
+    // The command search walks the filesystem itself. Add only the tracked
+    // files Git can see through ignore rules, without doing a second walk.
+    let files = discover::git_ls_files(&canonical, &git::CliGitCapabilities).unwrap_or_default();
     commands::detect_test_commands(&canonical, options, &files)
 }
 

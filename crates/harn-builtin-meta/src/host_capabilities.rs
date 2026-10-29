@@ -349,7 +349,7 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
     },
     HostCapabilityGroup {
         capability: CapabilityId::Scanner,
-        methods: &["scan_incremental", "scan_project"],
+        methods: &["discover_test_commands", "scan_incremental", "scan_project"],
         effects: FS_READ,
     },
     HostCapabilityGroup {

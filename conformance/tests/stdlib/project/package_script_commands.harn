@@ -69,6 +69,10 @@ pipeline test(harness: Harness) {
       "test discovery must not create a full scanner snapshot",
     )
     const host = harness.scanner.scan_project({root: dir, include_git_history: false})
+    assert(
+      harness.fs.exists(path_join(dir, ".harn/hostlib/scanner-snapshot.json")),
+      "the full scanner must create the snapshot used as the positive control",
+    )
     assert_eq(discovery, host.project.test_command_discovery, "both entrypoints share one search")
     const vm = harness.project.scan(dir, {tiers: ["config"]})
     const ambient = harness.project.scan(dir, {tiers: ["ambient"]})

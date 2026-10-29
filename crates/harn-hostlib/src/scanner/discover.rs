@@ -52,7 +52,7 @@ pub struct DiscoverOptions {
     pub ignore_policy: IgnorePolicy,
 }
 
-fn git_ls_files(root: &Path, git: &dyn GitCapabilities) -> Option<Vec<DiscoveredFile>> {
+pub(super) fn git_ls_files(root: &Path, git: &dyn GitCapabilities) -> Option<Vec<DiscoveredFile>> {
     let paths = git.list_files(root)?;
     let mut entries = Vec::new();
     let mut saw_path = false;
