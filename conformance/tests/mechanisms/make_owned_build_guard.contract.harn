@@ -9,14 +9,9 @@
 //              the same command in a repository that declares no such target
 //              all stay available.
 //
-// The refusal is CONDITIONAL on measurement, and its direction is the opposite
-// of the worktree rule in this directory. Both rules are pure argv analysis
-// and both fire wherever the guard is wired, but they must resolve an unknown
-// answer differently:
+// The refusal is CONDITIONAL on measurement, and an unknown answer resolves to
+// ALLOW:
 //
-//   worktree add, census unreadable -> REFUSE. Creating an unowned worktree is
-//                                      harmful in every repository, so the
-//                                      conservative answer is to stop.
 //   swift build, targets unmeasured -> ALLOW. Refusing would send the operator
 //                                      to `make swift-build`, which a
 //                                      repository that never declared it does
@@ -30,7 +25,6 @@ import {
   UNMEASURED_MAKE_TARGETS,
   decision,
   make_target_census,
-  worktree_admission_census,
 } from "../../../scripts/agent_shell_guard"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
@@ -39,18 +33,12 @@ fn payload(command: string) -> string {
 }
 
 pipeline default(harness: Harness) {
-  // The worktree rule is measured and satisfied throughout, so nothing it
-  // owns can be mistaken for a result of the rule under test.
-  const ADMITTED_CENSUS = worktree_admission_census(
-    "1",
-    "/workspace\tscripts/fleet-worktree-admit.ts",
-  )
   // The wrapper read a root Makefile that declares the Swift targets.
   const owns = make_target_census("1", "build check swift-build swift-test test")
   // It read one that does not.
   const owns_none = make_target_census("1", "build check test")
-  const build = decision(payload("swift build"), ADMITTED_CENSUS, owns)
-  const test = decision(payload("swift test"), ADMITTED_CENSUS, owns)
+  const build = decision(payload("swift build"), owns)
+  const test = decision(payload("swift test"), owns)
   contract_effect(harness.stdio, "trigger_bare_swift_build", !build.allow && !test.allow)
   contract_effect(
     harness.stdio,
@@ -60,8 +48,8 @@ pipeline default(harness: Harness) {
   // Falsifier for the refusing arm: the same commands where the repository
   // declares no such target must be allowed, or the measurement does nothing
   // and the rule is unconditional.
-  const unowned_build = decision(payload("swift build"), ADMITTED_CENSUS, owns_none)
-  const unowned_test = decision(payload("swift test"), ADMITTED_CENSUS, owns_none)
+  const unowned_build = decision(payload("swift build"), owns_none)
+  const unowned_test = decision(payload("swift test"), owns_none)
   contract_negative(
     harness.stdio,
     "negative_repository_without_the_target_is_not_refused",
@@ -69,25 +57,24 @@ pipeline default(harness: Harness) {
   )
   // An unmeasured repository resolves the same way, which is the direction
   // this contract exists to pin.
-  const unmeasured = decision(payload("swift test"), ADMITTED_CENSUS, UNMEASURED_MAKE_TARGETS)
+  const unmeasured = decision(payload("swift test"), UNMEASURED_MAKE_TARGETS)
   contract_negative(
     harness.stdio,
     "negative_unmeasured_repository_is_inert_not_strict",
     !unmeasured.allow,
   )
   // The replacement command and an unclaimed verb of the same tool stay usable.
-  const target = decision(payload("make swift-test ARGS='--filter Foo'"), ADMITTED_CENSUS, owns)
-  const other_verb = decision(payload("swift package resolve"), ADMITTED_CENSUS, owns)
+  const target = decision(payload("make swift-test ARGS='--filter Foo'"), owns)
+  const other_verb = decision(payload("swift package resolve"), owns)
   contract_negative(
     harness.stdio,
     "negative_make_target_and_other_verbs_not_denied",
     !target.allow || !other_verb.allow,
   )
   // The escape is per tool. It releases the tool it names and nothing else.
-  const escaped = decision(payload("HARN_ALLOW_RAW_SWIFT=1 swift build"), ADMITTED_CENSUS, owns)
+  const escaped = decision(payload("HARN_ALLOW_RAW_SWIFT=1 swift build"), owns)
   const wrong_escape = decision(
     payload("HARN_ALLOW_RAW_CARGO=1 swift build"),
-    ADMITTED_CENSUS,
     owns,
   )
   contract_effect(
@@ -97,7 +84,7 @@ pipeline default(harness: Harness) {
   )
   // Live control: the unconditional Cargo rule still fires in the same
   // repository, so an allow above is a decision and not a dead guard.
-  const live_control = decision(payload("cargo build"), ADMITTED_CENSUS, owns)
+  const live_control = decision(payload("cargo build"), owns)
   contract_effect(
     harness.stdio,
     "live_control_raw_cargo_is_also_denied",

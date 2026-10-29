@@ -5,7 +5,6 @@ import {
   NO_GIT_BUILTINS,
   UNMEASURED_MAKE_TARGETS,
   decision,
-  worktree_admission_census,
 } from "../../../scripts/agent_shell_guard"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
@@ -14,15 +13,12 @@ fn payload(command: string) -> string {
 }
 
 pipeline default(harness: Harness) {
-  const census = worktree_admission_census("1", "/workspace\t")
   const write = decision(
     payload("echo \"$( # )\ngit stash drop\n)\""),
-    census,
     UNMEASURED_MAKE_TARGETS,
   )
   const read = decision(
     payload("echo \"$( # )\ngit stash list\n)\""),
-    census,
     UNMEASURED_MAKE_TARGETS,
   )
   contract_effect(harness.stdio, "trigger_stash_mutation_is_denied", !write.allow)
@@ -33,7 +29,6 @@ pipeline default(harness: Harness) {
   }
   const literal = decision(
     payload("printf '%s' '$(git stash drop)'\ncat <<EOF\nhello\nEOF"),
-    census,
     UNMEASURED_MAKE_TARGETS,
     NO_CONFIG_ALIASES,
     NO_GIT_BUILTINS,
@@ -41,7 +36,6 @@ pipeline default(harness: Harness) {
   )
   const expanding = decision(
     payload("cat <<EOF\n'`git stash drop`'\nEOF"),
-    census,
     UNMEASURED_MAKE_TARGETS,
     NO_CONFIG_ALIASES,
     NO_GIT_BUILTINS,
@@ -49,7 +43,6 @@ pipeline default(harness: Harness) {
   )
   const incomplete = decision(
     payload("printf '%s' '$(git stash drop)'\ncat <<EOF\nhello\nEOF"),
-    census,
     UNMEASURED_MAKE_TARGETS,
     NO_CONFIG_ALIASES,
     NO_GIT_BUILTINS,
