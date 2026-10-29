@@ -1,5 +1,38 @@
 use super::*;
 
+fn descriptor_identity(fd: i32) -> Option<(libc::dev_t, libc::ino_t)> {
+    let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+    // SAFETY: fstat initializes the output on success and does not take ownership.
+    if unsafe { libc::fstat(fd, stat.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    // SAFETY: fstat returned success, so the output is initialized.
+    let stat = unsafe { stat.assume_init() };
+    Some((stat.st_dev, stat.st_ino))
+}
+
+fn inherited_descriptor_identities() -> Vec<(libc::dev_t, libc::ino_t)> {
+    std::fs::read_dir("/dev/fd")
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().to_string_lossy().parse::<i32>().ok())
+        .filter_map(descriptor_identity)
+        .collect()
+}
+
+#[test]
+fn inherited_descriptor_snapshot_measures_live_pipe_by_fstat() {
+    use std::os::fd::AsRawFd;
+    let before = inherited_descriptor_identities();
+    let (reader, _writer) = std::io::pipe().unwrap();
+    let identity = descriptor_identity(reader.as_raw_fd()).unwrap();
+    assert!(
+        !before.contains(&identity),
+        "new pipe must be distinguishable"
+    );
+    assert!(inherited_descriptor_identities().contains(&identity));
+}
+
 #[test]
 fn real_completed_background_cancel_replays_guardian_cleanup_receipt() {
     let _session = harn_vm::agent_sessions::enter_current_session(format!(
@@ -7,13 +40,9 @@ fn real_completed_background_cancel_replays_guardian_cleanup_receipt() {
         std::process::id()
     ));
     let python = python3().expect("the process fixture requires Python 3");
-    use std::os::unix::fs::MetadataExt;
-    let inherited_descriptors = std::fs::read_dir("/dev/fd")
-        .unwrap()
-        .filter_map(Result::ok)
-        .filter_map(|entry| std::fs::metadata(entry.path()).ok())
-        .map(|metadata| (metadata.dev(), metadata.ino()))
-        .collect::<Vec<_>>();
+    // /dev/fd path metadata is not descriptor identity on macOS. Compare the
+    // same fstat values the payload reads, without taking ownership of any fd.
+    let inherited_descriptors = inherited_descriptor_identities();
     let script = r"
 import errno, os, signal
 inherited_descriptors = __INHERITED_DESCRIPTORS__
@@ -26,7 +55,7 @@ for name in os.listdir('/dev/fd'):
         assert error.errno == errno.EBADF
         continue
     if [stat.st_dev, stat.st_ino] in inherited_descriptors: continue
-    raise AssertionError('payload inherited descriptor ' + name + ': ' + os.readlink('/dev/fd/' + name))
+    raise AssertionError(f'payload inherited descriptor {name}: dev={stat.st_dev} ino={stat.st_ino} mode={stat.st_mode:o}')
 r, w = os.pipe()
 pid = os.fork()
 if pid == 0:
