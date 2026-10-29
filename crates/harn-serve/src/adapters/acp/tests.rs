@@ -155,6 +155,7 @@ async fn start_acp_channel_session_with_params(
         }))
         .expect("send session/new");
     let created = recv_json(&mut response_rx).await;
+    assert!(created["result"]["sessionId"].is_string(), "{created}");
     let session_id = created["result"]["sessionId"]
         .as_str()
         .expect("session id")

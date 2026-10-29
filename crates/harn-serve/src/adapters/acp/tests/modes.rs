@@ -951,6 +951,7 @@ async fn acp_session_fork_inherits_parent_current_mode() {
         }))
         .await;
     let created = recv_json(&mut rx).await;
+    assert!(created["result"]["sessionId"].is_string(), "{created}");
     let parent_id = created["result"]["sessionId"]
         .as_str()
         .expect("session id")
