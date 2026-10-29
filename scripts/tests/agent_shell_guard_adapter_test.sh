@@ -123,6 +123,78 @@ for heredoc_payload in \
   fi
 done
 
+# The verdict must not depend on the caller's directory. `git -C <repo>` with a
+# backslash in the command resolves `worktree` through the alias lookup, which
+# runs git inside the interpreter sandbox. That sandbox used to read only the
+# caller's directory tree, so from a subdirectory the lookup exited 128 and the
+# command was refused with the stash message.
+cwd_repo="$repo_root"
+cat >"$fixture_root/standalone-harn" <<'SH'
+#!/usr/bin/env bash
+exec "$STANDALONE_GUARD_RUNTIME" "$@"
+SH
+chmod +x "$fixture_root/standalone-harn"
+printf '%s\n' 'harn-run-standalone-v1' >"$fixture_root/standalone-harn.standalone-v1"
+cwd_guard() {
+  env -u HARN_BIN STANDALONE_GUARD_RUNTIME="$HARN_BIN" \
+    AGENT_SHELL_GUARD_HARN_BIN="$fixture_root/standalone-harn" \
+    "$fixture_root/scripts/agent-shell-guard.sh"
+}
+cwd_read='{"tool_name":"Bash","tool_input":{"command":"gh pr view 1; git -C '"$cwd_repo"' worktree list | grep -i \"a\\|b\""}}'
+cwd_stash='{"tool_name":"Bash","tool_input":{"command":"git stash push"}}'
+for cwd_caller in "$cwd_repo" "$cwd_repo/scripts/tests"; do
+  cwd_allowed="$(cd "$cwd_caller" && printf '%s' "$cwd_read" | cwd_guard)"
+  if [[ -n "$cwd_allowed" ]]; then
+    echo "adapter refused an ordinary read from $cwd_caller" >&2
+    printf '%s\n' "$cwd_allowed" >&2
+    exit 1
+  fi
+  # The other side: the real stash rule still fires from the same directory.
+  cwd_denied="$(cd "$cwd_caller" && printf '%s' "$cwd_stash" | cwd_guard)"
+  if [[ "$cwd_denied" != *'"permissionDecision":"deny"'* ]] \
+    || [[ "$cwd_denied" != *'is refused: the stash list'* ]]; then
+    echo "adapter did not refuse git stash from $cwd_caller" >&2
+    printf '%s\n' "$cwd_denied" >&2
+    exit 1
+  fi
+done
+# A lookup git cannot complete is a guard fault, never a stash refusal.
+cwd_fault="$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git -C /nonexistent-guard-target s"}}' | cwd_guard)"
+if [[ "$cwd_fault" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$cwd_fault" != *'guard fault'* ]] \
+  || [[ "$cwd_fault" == *'is refused: the stash list'* ]]; then
+  echo "adapter reported an alias lookup fault as a stash refusal" >&2
+  printf '%s\n' "$cwd_fault" >&2
+  exit 1
+fi
+
+# A repository whose path holds spaces, reached from a directory outside it, and a
+# linked worktree whose `.git` pointer is relative, must both stay readable. Each
+# is built outside the caller's directory tree, so only a granted read root can
+# make the alias lookup succeed; a truncated path or a pointer resolved against
+# the caller's directory leaves it unreadable and the command is refused.
+spaced_base="$repo_root/guard path test $$"
+spaced_caller="$(cd "$(mktemp -d)" && pwd -P)"
+trap 'rm -rf "$fixture_root" "$order_root" "$spaced_base" "$spaced_caller"' EXIT
+mkdir -p "$spaced_base"
+git -C "$spaced_base" init -q -b main "main repo"
+git -C "$spaced_base/main repo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
+git -C "$spaced_base/main repo" worktree add -q --detach "$spaced_base/linked tree"
+printf 'gitdir: ../main repo/.git/worktrees/linked-tree\n' >"$spaced_base/linked tree/.git"
+for spaced_target in "$spaced_base/main repo" "$spaced_base/linked tree"; do
+  for quoting in "'$spaced_target'" "\"$spaced_target\""; do
+    spaced_command="git -C $quoting s | grep -i \"a\\|b\""
+    spaced_payload="$(jq -cn --arg command "$spaced_command" '{tool_name:"Bash",tool_input:{command:$command}}')"
+    spaced_allowed="$(cd "$spaced_caller" && printf '%s' "$spaced_payload" | cwd_guard)"
+    if [[ -n "$spaced_allowed" ]]; then
+      echo "adapter refused a read of $spaced_target" >&2
+      printf '%s\n' "$spaced_allowed" >&2
+      exit 1
+    fi
+  done
+done
+rm -rf "$spaced_base" "$spaced_caller"
+
 discarded_blocked="$(
   printf '%s' \
     '{"tool_name":"Bash","tool_input":{"command":"make test | tail -20"}}' \

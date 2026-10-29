@@ -389,7 +389,7 @@ fn read_workspace_bounded(
         if bytes > max_source_bytes {
             return Err("Go workspace census exceeded its source-size limit".into());
         }
-        sources.push((relative.to_string(), source));
+        sources.push((relative.replace('\\', "/"), source));
     }
     Ok(sources)
 }
@@ -503,7 +503,8 @@ fn read_package_bounded(
         if bytes > max_source_bytes {
             return Err("Go package census exceeded its source-size limit".into());
         }
-        sources.push((relative.to_string(), source));
+        // Callers name the seed with `/`; Windows `strip_prefix` yields `\`.
+        sources.push((relative.replace('\\', "/"), source));
     }
     Ok(sources)
 }
@@ -556,6 +557,23 @@ mod tests {
         assert!(proof.unchanged(root, None));
         fs::remove_file(&sibling_path).unwrap();
         assert!(!proof.unchanged(root, None));
+    }
+
+    #[test]
+    fn package_and_workspace_censuses_use_portable_relative_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir(root.join("lab")).unwrap();
+        fs::write(
+            root.join("lab/store.go"),
+            "package lab\ntype Item struct{}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_package(root, "lab/store.go", None, None).unwrap()[0].0,
+            "lab/store.go"
+        );
+        assert_eq!(read_workspace(root, None).unwrap()[0].0, "lab/store.go");
     }
 
     #[test]
