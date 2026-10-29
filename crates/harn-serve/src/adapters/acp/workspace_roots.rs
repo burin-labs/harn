@@ -91,15 +91,15 @@ impl AcpServer {
         {
             return Ok(());
         }
-        prepared
-            .install(
-                session_id,
-                &session.store_scope,
-                harn_session_store::SessionType::User,
-            )
-            .await
-            .map(|_| ())
-            .map_err(|error| error.to_string())
+        harn_vm::install_session_workspace_roots(
+            session_id,
+            prepared,
+            &session.store_scope,
+            harn_session_store::SessionType::User,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string())
     }
 
     pub(super) fn rollback_session_admission(&mut self, session_id: &str) {

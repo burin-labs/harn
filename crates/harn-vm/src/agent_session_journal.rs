@@ -20,10 +20,15 @@ use crate::value::{DictMap, VmError};
 pub(crate) mod live;
 mod queue;
 mod run_preparation;
+mod workspace_roots;
+#[cfg(test)]
+mod workspace_roots_tests;
 pub(crate) use run_preparation::register as register_run_preparation;
 pub(crate) use run_preparation::{
     adopt_prepared_run, take_initialization_accounting, with_initialization_accounting,
 };
+pub(crate) use workspace_roots::add_workspace_root_verified_persisted;
+pub use workspace_roots::install_workspace_roots;
 #[cfg(test)]
 mod run_preparation_tests;
 pub(crate) use queue::JournalAuditWriter;

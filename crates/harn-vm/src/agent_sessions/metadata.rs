@@ -425,27 +425,16 @@ pub fn add_workspace_root_verified(
     reason: Option<String>,
     verify: impl FnOnce(&std::path::Path) -> Result<(), String>,
 ) -> Result<String, String> {
-    let applied = apply_workspace_mount(id, root, mount_mode)?;
-    if let Err(error) = verify(&applied.root) {
-        rollback_workspace_mount(id, applied);
-        return Err(error);
-    }
-    record_workspace_mount(id, &applied, reason)?;
-    Ok(applied.mounted_at)
+    prepare_workspace_mount_verified(id, root, mount_mode, verify)?.commit(reason)
 }
 
-pub(crate) async fn add_workspace_root_verified_persisted(
+pub(crate) fn prepare_workspace_mount_verified(
     id: &str,
     root: &str,
     mount_mode: Option<MountMode>,
-    reason: Option<String>,
-    scope: &crate::SessionStoreScope,
     verify: impl FnOnce(&std::path::Path) -> Result<(), String>,
-) -> Result<String, String> {
-    if super::workspace_anchor(id).is_none_or(|anchor| anchor.primary != scope.workspace()) {
-        return Err("workspace root mutation must use the session's captured workspace".into());
-    }
-    let mut pending = PendingWorkspaceMount {
+) -> Result<PendingWorkspaceMount, String> {
+    let pending = PendingWorkspaceMount {
         id: id.to_string(),
         generation: SESSIONS
             .with(|sessions| {
@@ -458,36 +447,32 @@ pub(crate) async fn add_workspace_root_verified_persisted(
         applied: Some(apply_workspace_mount(id, root, mount_mode)?),
     };
     verify(&pending.applied.as_ref().unwrap().root)?;
-    if super::has_journal(id) {
-        crate::agent_session_journal::flush(id)
-            .await
-            .map_err(|error| error.to_string())?;
-    } else {
-        let directories = super::workspace_anchor(id)
-            .ok_or_else(|| format!("unknown session '{id}'"))?
-            .additional_directories()?;
-        super::workspace_roots::persist_directory_projection(
-            id,
-            scope,
-            harn_session_store::SessionType::User,
-            directories,
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-    }
-    if !pending.generation.is_current(id) {
-        return Err(format!(
-            "session '{id}' was closed while persisting workspace roots"
-        ));
-    }
-    record_workspace_mount(id, pending.applied.as_ref().unwrap(), reason)?;
-    Ok(pending.applied.take().unwrap().mounted_at)
+    Ok(pending)
 }
 
-struct PendingWorkspaceMount {
+pub(crate) struct PendingWorkspaceMount {
     id: String,
     generation: super::SessionRetention,
     applied: Option<AppliedMount>,
+}
+
+impl PendingWorkspaceMount {
+    pub(crate) fn directories(&self) -> Result<Vec<String>, String> {
+        super::workspace_anchor(&self.id)
+            .ok_or_else(|| format!("unknown session '{}'", self.id))?
+            .additional_directories()
+    }
+
+    pub(crate) fn commit(mut self, reason: Option<String>) -> Result<String, String> {
+        if !self.generation.is_current(&self.id) {
+            return Err(format!(
+                "session '{}' was closed while preparing workspace roots",
+                self.id
+            ));
+        }
+        record_workspace_mount(&self.id, self.applied.as_ref().unwrap(), reason)?;
+        Ok(self.applied.take().unwrap().mounted_at)
+    }
 }
 
 impl Drop for PendingWorkspaceMount {
@@ -665,7 +650,7 @@ pub(super) fn validate_workspace_root_path_with<E: From<String>>(
     root: &str,
     validate_boundary: impl FnOnce(&Path) -> Result<(), E>,
 ) -> Result<PathBuf, E> {
-    let normalized = crate::stdlib::process::normalize_context_path(Path::new(root));
+    let normalized = crate::workspace_path::normalize_context_path(Path::new(root));
     let canonical = std::fs::canonicalize(&normalized).map_err(|error| {
         E::from(format!(
             "workspace root '{root}' must exist and be readable: {error}"
@@ -686,7 +671,7 @@ pub(super) fn validate_workspace_root_path_with<E: From<String>>(
 }
 
 pub(super) fn normalize_workspace_root_path(root: &str) -> PathBuf {
-    let absolute = crate::stdlib::process::normalize_context_path(Path::new(root));
+    let absolute = crate::workspace_path::normalize_context_path(Path::new(root));
     std::fs::canonicalize(&absolute).unwrap_or(absolute)
 }
 

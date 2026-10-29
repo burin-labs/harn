@@ -31,7 +31,7 @@ pub async fn add_workspace_root_persisted(
     policy: Option<&crate::orchestration::CapabilityPolicy>,
     scope: &crate::SessionStoreScope,
 ) -> Result<String, String> {
-    agent_sessions::add_workspace_root_verified_persisted(
+    crate::agent_session_journal::add_workspace_root_verified_persisted(
         id,
         root,
         mount_mode,
