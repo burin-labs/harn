@@ -65,6 +65,14 @@ pub(crate) fn additional_directories_grant_real_writes_and_omission_revokes_afte
     let session = created["result"]["sessionId"]
         .as_str()
         .expect("session admitted");
+    let mode = request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":20, "method":"session/set_mode",
+            "params":{"sessionId":session, "modeId":"code"}
+        }),
+    );
+    assert!(mode.get("error").is_none(), "{mode}");
     assert_eq!(
         created["result"]["session"]["additionalDirectories"], directories,
         "{created}"
@@ -119,6 +127,14 @@ pub(crate) fn additional_directories_grant_real_writes_and_omission_revokes_afte
         json!([]),
         "{loaded}"
     );
+    let mode = request(
+        &mut restored,
+        json!({
+            "jsonrpc":"2.0", "id":20, "method":"session/set_mode",
+            "params":{"sessionId":session, "modeId":"code"}
+        }),
+    );
+    assert!(mode.get("error").is_none(), "{mode}");
     let denied = first.join("revoked");
     let refused = request(
         &mut restored,
@@ -216,6 +232,14 @@ pub(crate) fn additional_directories_refuse_process_escape_without_replacing_the
     let session = created["result"]["sessionId"]
         .as_str()
         .expect("valid root admitted");
+    let mode = request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":20, "method":"session/set_mode",
+            "params":{"sessionId":session, "modeId":"code"}
+        }),
+    );
+    assert!(mode.get("error").is_none(), "{mode}");
     let escaped = request(
         &mut client,
         json!({

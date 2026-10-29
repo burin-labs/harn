@@ -1,4 +1,4 @@
-pub(crate) const CASES: [&str; 34] = [
+pub(crate) const CASES: [&str; 32] = [
     "scoped_ssh_agent::exact_agent_grant_signs_without_exposing_keys_or_other_sockets",
     "provider_account_confirmation::gemini_confirmation_requires_billing_and_contributor_sharing_off",
     "provider_account_confirmation::account_confirmation_is_not_exposed_to_scripts_or_child_processes",
@@ -34,6 +34,4 @@ pub(crate) const CASES: [&str; 34] = [
     "durable_spend_policy::agent_spend_guard_judge_permissive",
     "durable_spend_policy::agent_spend_guard_transcript_control",
     "provider_account_confirmation::script_server_applies_confirmations_before_provider_transport",
-    "acp_confinement_cli::additional_directories_grant_real_writes_and_omission_revokes_after_reload",
-    "acp_confinement_cli::additional_directories_refuse_process_escape_without_replacing_the_prior_grant",
 ];

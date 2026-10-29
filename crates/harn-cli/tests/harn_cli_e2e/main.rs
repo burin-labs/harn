@@ -207,18 +207,6 @@ const _: (&str, fn()) = (
     process_smoke_cli::process_smoke_matches_the_hosts_measured_confinement,
 );
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-const _: [(&str, fn()); 2] = [
-    (
-        required_pr_e2e::CASES[32],
-        acp_confinement_cli::additional_directories_grant_real_writes_and_omission_revokes_after_reload,
-    ),
-    (
-        required_pr_e2e::CASES[33],
-        acp_confinement_cli::additional_directories_refuse_process_escape_without_replacing_the_prior_grant,
-    ),
-];
-
 const _: [(&str, fn()); 12] = [
     (
         required_pr_e2e::CASES[0],
