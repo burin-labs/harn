@@ -1217,6 +1217,7 @@ export interface ToolCallReceipt {
 export interface ACPToolCall {
   sessionUpdate: "tool_call"
   toolCallId: string
+  name?: string | null
   title: string
   kind?: ACPToolKind
   status?: ACPToolCallStatus
@@ -1230,6 +1231,7 @@ export interface ACPToolCall {
 export interface ACPToolCallUpdate {
   sessionUpdate: "tool_call_update"
   toolCallId: string
+  name?: string | null
   title?: string | null
   kind?: ACPToolKind
   status?: ACPToolCallStatus | null
@@ -1739,6 +1741,7 @@ export interface HarnAgentEventNotification {
 export interface ACPPermissionToolCall {
   sessionUpdate?: "tool_call_update"
   toolCallId: string
+  name?: string | null
   title?: string
   kind?: ACPToolKind
   content?: ACPToolCallContent[]

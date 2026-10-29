@@ -1243,6 +1243,7 @@ class ACPToolCall(_HarnDataclass):
     sessionUpdate: str
     toolCallId: str
     title: str
+    name: Optional[str] = None
     kind: Optional[str] = None
     status: Optional[str] = None
     content: Optional[List[ACPContentBlock]] = None
@@ -1256,6 +1257,7 @@ class ACPToolCall(_HarnDataclass):
 class ACPToolCallUpdate(_HarnDataclass):
     sessionUpdate: str
     toolCallId: str
+    name: Optional[str] = None
     title: Optional[str] = None
     kind: Optional[str] = None
     status: Optional[str] = None
@@ -1278,6 +1280,7 @@ class ACPSessionUpdateEnvelope(_HarnDataclass):
     newTipTurnId: Optional[str] = None
     reason: Optional[str] = None
     toolCallId: Optional[str] = None
+    name: Optional[str] = None
     title: Optional[str] = None
     kind: Optional[str] = None
     status: Optional[str] = None

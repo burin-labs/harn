@@ -2819,6 +2819,7 @@ public struct HarnToolCallReceipt: Codable, Sendable, Equatable {
 public struct HarnACPToolCall: Codable, Sendable, Equatable {
     public var sessionUpdate: HarnACPSessionUpdate
     public var toolCallId: String
+    public var name: String?
     public var title: String
     public var kind: HarnACPToolKind?
     public var status: HarnACPToolCallStatus?
@@ -2831,6 +2832,7 @@ public struct HarnACPToolCall: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case sessionUpdate
         case toolCallId
+        case name
         case title
         case kind
         case status
@@ -2854,6 +2856,7 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
     public var newTipTurnId: String?
     public var reason: String?
     public var toolCallId: String?
+    public var name: String?
     public var title: String?
     public var kind: HarnACPToolKind?
     public var status: HarnACPToolCallStatus?
@@ -2873,6 +2876,7 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
         case newTipTurnId
         case reason
         case toolCallId
+        case name
         case title
         case kind
         case status
