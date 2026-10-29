@@ -165,16 +165,22 @@ type HarnAgentEventKind string
 
 // HarnAgentEventKinds enumerates every wire value Harn currently emits for HarnAgentEventKind.
 var HarnAgentEventKinds = []HarnAgentEventKind{
+	"agent_loop_stall_warning",
+	"agent_scratchpad_reorganization",
+	"anchor_changed",
 	"boundary_failure",
 	"budget_circuit_breaker",
 	"budget_exhausted",
+	"cache_hit",
+	"cache_miss",
+	"capability_gap",
 	"code_librarian_query_nl_fallback",
+	"compass_routing_decision",
 	"composition_child_call",
 	"composition_child_result",
 	"composition_error",
 	"composition_finish",
 	"composition_start",
-	"compass_routing_decision",
 	"control_outcome",
 	"daemon_watchdog_tripped",
 	"feedback_injected",
@@ -183,15 +189,20 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"host_tool_result",
 	"input_guardrail_verdict",
 	"iteration_end",
-	"session_health",
 	"iteration_start",
 	"judge_decision",
 	"judge_started",
+	"llm_call_log",
+	"llm_fallback_attempt",
+	"llm_routing_decision",
+	"llm_shadow_diff",
+	"loop_checkpoint",
 	"loop_control_decision",
 	"loop_stuck",
 	"mcp_auth_required",
 	"mcp_catalog_changed",
 	"mcp_notification",
+	"missing_tool_call_verdict",
 	"model_job",
 	"orchestration_decision",
 	"pack_thinking_stripped",
@@ -203,11 +214,14 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"reserved_terminal_verify",
 	"scope_classifier_verdict",
 	"self_consistency_tie",
+	"semantic_cache_hit",
+	"semantic_cache_miss",
 	"session_closed",
+	"session_health",
+	"step_judge_decision",
 	"structural_validator_decision",
 	"subagent_join",
 	"subagent_stop",
-	"step_judge_decision",
 	"tool_batch_disposition",
 	"tool_call_audit",
 	"tool_format_override",
@@ -2281,4 +2295,512 @@ type HarnAgentsEventProjection struct {
 	Payload   JSONObject `json:"payload"`
 	SessionID *string    `json:"session_id,omitempty"`
 	TaskID    *string    `json:"task_id,omitempty"`
+}
+
+type HarnAgentEventAgentScratchpadReorganization struct {
+	Iteration uint64          `json:"iteration"`
+	Status    string          `json:"status"`
+	Details   json.RawMessage `json:"details"`
+}
+
+type HarnAgentEventAnchorChanged struct {
+	Previous        json.RawMessage `json:"previous"`
+	Current         json.RawMessage `json:"current"`
+	CarryTranscript bool            `json:"carryTranscript"`
+	Compacted       bool            `json:"compacted"`
+	Reason          *string         `json:"reason"`
+}
+
+type HarnAgentEventBoundaryFailure struct {
+	Boundary     string  `json:"boundary"`
+	FailureKind  string  `json:"failureKind"`
+	Owner        string  `json:"owner"`
+	Detail       string  `json:"detail"`
+	DroppedCount uint64  `json:"droppedCount"`
+	DroppedBytes uint64  `json:"droppedBytes"`
+	Unreported   bool    `json:"unreported"`
+	Excerpt      *string `json:"excerpt,omitempty"`
+}
+
+type HarnAgentEventBudgetCircuitBreaker struct {
+	BreakerKind      string `json:"breakerKind"`
+	ConsecutiveCount uint64 `json:"consecutiveCount"`
+	PausedForMs      uint64 `json:"pausedForMs"`
+}
+
+type HarnAgentEventBudgetExhausted struct {
+	MaxIterations         uint64   `json:"maxIterations"`
+	BudgetKind            *string  `json:"budgetKind,omitempty"`
+	CostUsd               *float64 `json:"costUsd,omitempty"`
+	HeadroomUsd           *float64 `json:"headroomUsd,omitempty"`
+	Iteration             *uint64  `json:"iteration,omitempty"`
+	Limit                 *string  `json:"limit,omitempty"`
+	LimitValue            *float64 `json:"limitValue,omitempty"`
+	Model                 *string  `json:"model,omitempty"`
+	ProjectedCostUsd      *float64 `json:"projectedCostUsd,omitempty"`
+	ProjectedInputTokens  *uint64  `json:"projectedInputTokens,omitempty"`
+	ProjectedOutputTokens *uint64  `json:"projectedOutputTokens,omitempty"`
+	ProjectionBasis       *string  `json:"projectionBasis,omitempty"`
+	Provider              *string  `json:"provider,omitempty"`
+	SessionCostUsd        *float64 `json:"sessionCostUsd,omitempty"`
+	WallClockMs           *uint64  `json:"wallClockMs,omitempty"`
+}
+
+type HarnAgentEventCapabilityGap struct {
+	Level               string  `json:"level"`
+	Capability          string  `json:"capability"`
+	Provider            string  `json:"provider"`
+	Model               string  `json:"model"`
+	FallbackToolFormat  string  `json:"fallbackToolFormat"`
+	Message             string  `json:"message"`
+	RequestedToolFormat *string `json:"requestedToolFormat,omitempty"`
+}
+
+type HarnAgentEventCodeLibrarianQueryNlFallback struct {
+	AttemptedCypher *string `json:"attemptedCypher"`
+	MctsDepth       uint64  `json:"mctsDepth"`
+	MctsExpansions  uint64  `json:"mctsExpansions"`
+	ResultCount     uint64  `json:"resultCount"`
+	Text            string  `json:"text"`
+}
+
+type HarnAgentEventCompassRoutingDecision struct {
+	ToolCallID   string  `json:"toolCallId"`
+	Mode         string  `json:"mode"`
+	Action       string  `json:"action"`
+	Persona      string  `json:"persona"`
+	OriginalTool string  `json:"originalTool"`
+	RoutedTool   string  `json:"routedTool"`
+	TargetTool   string  `json:"targetTool"`
+	Path         *string `json:"path,omitempty"`
+}
+
+type HarnAgentEventCompositionChildCall struct {
+	RunID                    string          `json:"runId"`
+	ToolCallID               string          `json:"toolCallId"`
+	ToolName                 string          `json:"toolName"`
+	OperationIndex           uint64          `json:"operationIndex"`
+	Annotations              json.RawMessage `json:"annotations"`
+	RequestedSideEffectLevel string          `json:"requestedSideEffectLevel"`
+	PolicyContext            json.RawMessage `json:"policyContext"`
+	RawInput                 json.RawMessage `json:"rawInput"`
+}
+
+type HarnAgentEventCompositionChildResult struct {
+	RunID               string          `json:"runId"`
+	ToolCallID          string          `json:"toolCallId"`
+	ToolName            string          `json:"toolName"`
+	OperationIndex      uint64          `json:"operationIndex"`
+	Status              string          `json:"status"`
+	RawOutput           json.RawMessage `json:"rawOutput"`
+	Error               *string         `json:"error"`
+	ErrorCategory       *string         `json:"errorCategory"`
+	Executor            json.RawMessage `json:"executor"`
+	DurationMs          *uint64         `json:"durationMs"`
+	ExecutionDurationMs *uint64         `json:"executionDurationMs"`
+}
+
+type HarnAgentEventCompositionError struct {
+	RunID                      string            `json:"runId"`
+	Language                   string            `json:"language"`
+	SnippetHash                string            `json:"snippetHash"`
+	BindingManifestHash        string            `json:"bindingManifestHash"`
+	RequestedSideEffectCeiling string            `json:"requestedSideEffectCeiling"`
+	Stdout                     *string           `json:"stdout"`
+	Stderr                     *string           `json:"stderr"`
+	Artifacts                  []json.RawMessage `json:"artifacts"`
+	Result                     json.RawMessage   `json:"result"`
+	FailureCategory            *string           `json:"failureCategory"`
+	Error                      *string           `json:"error"`
+	DurationMs                 *uint64           `json:"durationMs"`
+	Metadata                   json.RawMessage   `json:"metadata"`
+}
+
+type HarnAgentEventCompositionFinish struct {
+	RunID                      string            `json:"runId"`
+	Language                   string            `json:"language"`
+	SnippetHash                string            `json:"snippetHash"`
+	BindingManifestHash        string            `json:"bindingManifestHash"`
+	RequestedSideEffectCeiling string            `json:"requestedSideEffectCeiling"`
+	Stdout                     *string           `json:"stdout"`
+	Stderr                     *string           `json:"stderr"`
+	Artifacts                  []json.RawMessage `json:"artifacts"`
+	Result                     json.RawMessage   `json:"result"`
+	FailureCategory            *string           `json:"failureCategory"`
+	Error                      *string           `json:"error"`
+	DurationMs                 *uint64           `json:"durationMs"`
+	Metadata                   json.RawMessage   `json:"metadata"`
+}
+
+type HarnAgentEventCompositionStart struct {
+	RunID                      string            `json:"runId"`
+	Language                   string            `json:"language"`
+	SnippetHash                string            `json:"snippetHash"`
+	BindingManifestHash        string            `json:"bindingManifestHash"`
+	RequestedSideEffectCeiling string            `json:"requestedSideEffectCeiling"`
+	Stdout                     *string           `json:"stdout"`
+	Stderr                     *string           `json:"stderr"`
+	Artifacts                  []json.RawMessage `json:"artifacts"`
+	Result                     json.RawMessage   `json:"result"`
+	FailureCategory            *string           `json:"failureCategory"`
+	Error                      *string           `json:"error"`
+	DurationMs                 *uint64           `json:"durationMs"`
+	Metadata                   json.RawMessage   `json:"metadata"`
+}
+
+type HarnAgentEventControlOutcome struct {
+	ControlID string          `json:"controlId"`
+	Method    string          `json:"method"`
+	Outcome   string          `json:"outcome"`
+	Status    string          `json:"status"`
+	Actor     json.RawMessage `json:"actor"`
+	Target    json.RawMessage `json:"target"`
+	Metadata  json.RawMessage `json:"metadata,omitempty"`
+	Reason    *string         `json:"reason,omitempty"`
+}
+
+type HarnAgentEventDaemonWatchdogTripped struct {
+	Attempts  uint64 `json:"attempts"`
+	ElapsedMs uint64 `json:"elapsedMs"`
+}
+
+type HarnAgentEventFeedbackInjected struct {
+	FeedbackKind         string  `json:"feedbackKind"`
+	Content              string  `json:"content"`
+	Delivered            *bool   `json:"delivered,omitempty"`
+	Iteration            *uint64 `json:"iteration,omitempty"`
+	Streak               *uint64 `json:"streak,omitempty"`
+	ToolName             *string `json:"toolName,omitempty"`
+	TurnClaimedForRepair *bool   `json:"turnClaimedForRepair,omitempty"`
+}
+
+type HarnAgentEventFinalWrapupUnconsumedToolCall struct {
+	ParseStatus     string   `json:"parseStatus"`
+	ParsedCallCount uint64   `json:"parsedCallCount"`
+	ToolNames       []string `json:"toolNames"`
+	Diagnostics     []string `json:"diagnostics"`
+	EvidenceLine    string   `json:"evidenceLine"`
+}
+
+type HarnAgentEventFinalWrapup struct {
+	FinalStatus        string                                       `json:"finalStatus"`
+	StopReason         string                                       `json:"stopReason"`
+	Iteration          uint64                                       `json:"iteration"`
+	HostDirective      bool                                         `json:"hostDirective"`
+	TerminalKind       string                                       `json:"terminalKind"`
+	UnconsumedToolCall *HarnAgentEventFinalWrapupUnconsumedToolCall `json:"unconsumedToolCall"`
+}
+
+type HarnAgentEventHostAttachment struct {
+	InjectionID      string          `json:"injectionId"`
+	MediaType        string          `json:"mediaType"`
+	Flavor           json.RawMessage `json:"flavor"`
+	ArtifactPointer  string          `json:"artifactPointer"`
+	Sha256           string          `json:"sha256"`
+	SizeBytes        uint64          `json:"sizeBytes"`
+	Rendered         json.RawMessage `json:"rendered"`
+	Description      *string         `json:"description"`
+	DescriptionModel *string         `json:"descriptionModel"`
+	Delivery         json.RawMessage `json:"delivery"`
+	DeliveredAtSeam  *string         `json:"deliveredAtSeam"`
+	Sequence         uint64          `json:"sequence"`
+	Provenance       json.RawMessage `json:"provenance"`
+	Sanitization     json.RawMessage `json:"sanitization"`
+}
+
+type HarnAgentEventHostToolResult struct {
+	InjectionID     string          `json:"injectionId"`
+	ToolCallID      string          `json:"toolCallId"`
+	ToolName        string          `json:"toolName"`
+	ToolKind        json.RawMessage `json:"toolKind"`
+	RawInput        json.RawMessage `json:"rawInput"`
+	Status          string          `json:"status"`
+	RawOutput       json.RawMessage `json:"rawOutput"`
+	ResultPointer   *string         `json:"resultPointer"`
+	Error           *string         `json:"error"`
+	DurationMs      *uint64         `json:"durationMs"`
+	Delivery        json.RawMessage `json:"delivery"`
+	DeliveredAtSeam *string         `json:"deliveredAtSeam"`
+	Sequence        uint64          `json:"sequence"`
+	Provenance      json.RawMessage `json:"provenance"`
+	Sanitization    json.RawMessage `json:"sanitization"`
+}
+
+type HarnAgentEventInputGuardrailVerdict struct {
+	Iteration           uint64  `json:"iteration"`
+	Tripwire            bool    `json:"tripwire"`
+	Reason              string  `json:"reason"`
+	Label               string  `json:"label"`
+	Confidence          float64 `json:"confidence"`
+	ConfidenceThreshold float64 `json:"confidenceThreshold"`
+	ClassifierKind      *string `json:"classifierKind"`
+	Model               *string `json:"model"`
+	Error               *string `json:"error"`
+}
+
+type HarnAgentEventIterationEnd struct {
+	Iteration     uint64          `json:"iteration"`
+	IterationInfo json.RawMessage `json:"iterationInfo"`
+}
+
+type HarnAgentEventIterationStart struct {
+	Iteration uint64  `json:"iteration"`
+	Model     *string `json:"model,omitempty"`
+	Provider  *string `json:"provider,omitempty"`
+}
+
+type HarnAgentEventJudgeDecision struct {
+	Iteration                 uint64          `json:"iteration"`
+	Verdict                   string          `json:"verdict"`
+	Reasoning                 string          `json:"reasoning"`
+	NextStep                  *string         `json:"nextStep"`
+	JudgeDurationMs           uint64          `json:"judgeDurationMs"`
+	Source                    *string         `json:"source"`
+	Trigger                   *string         `json:"trigger"`
+	Reason                    *string         `json:"reason"`
+	Confirm                   *bool           `json:"confirm"`
+	ConvertedFrom             *string         `json:"convertedFrom"`
+	EscalationRecommended     *bool           `json:"escalationRecommended"`
+	EscalationTarget          *string         `json:"escalationTarget"`
+	JudgeVerdict              *string         `json:"judgeVerdict"`
+	Override                  json.RawMessage `json:"override"`
+	GapClass                  *string         `json:"gapClass"`
+	JudgeOutcome              *string         `json:"judgeOutcome"`
+	TerminalEvidencePreserved *bool           `json:"terminalEvidencePreserved"`
+	RequirementReport         json.RawMessage `json:"requirementReport"`
+}
+
+type HarnAgentEventJudgeStarted struct {
+	Iteration uint64  `json:"iteration"`
+	Trigger   *string `json:"trigger"`
+}
+
+type HarnAgentEventLoopCheckpoint struct {
+	Iteration       uint64  `json:"iteration"`
+	CheckpointKind  string  `json:"checkpointKind"`
+	Delivered       uint64  `json:"delivered"`
+	DispatchSkipped *bool   `json:"dispatchSkipped,omitempty"`
+	InboxDelivered  *uint64 `json:"inboxDelivered,omitempty"`
+	TypedDelivered  *uint64 `json:"typedDelivered,omitempty"`
+}
+
+type HarnAgentEventLoopControlDecision struct {
+	Iteration uint64 `json:"iteration"`
+	Action    string `json:"action"`
+	OldLimit  uint64 `json:"oldLimit"`
+	NewLimit  uint64 `json:"newLimit"`
+	Reason    string `json:"reason"`
+	Status    string `json:"status"`
+}
+
+type HarnAgentEventLoopStuck struct {
+	LastIteration *uint64 `json:"lastIteration,omitempty"`
+	MaxNudges     *uint64 `json:"maxNudges,omitempty"`
+	TailExcerpt   *string `json:"tailExcerpt,omitempty"`
+}
+
+type HarnAgentEventMcpAuthRequired struct {
+	Server   string  `json:"server"`
+	Resource string  `json:"resource"`
+	Scope    *string `json:"scope"`
+}
+
+type HarnAgentEventMcpCatalogChanged struct {
+	Server *string `json:"server"`
+	Reason string  `json:"reason"`
+}
+
+type HarnAgentEventMcpNotification struct {
+	Server    string          `json:"server"`
+	Method    string          `json:"method"`
+	Direction string          `json:"direction"`
+	Params    json.RawMessage `json:"params"`
+}
+
+type HarnAgentEventMissingToolCallVerdict struct {
+	Iteration           uint64  `json:"iteration"`
+	Action              string  `json:"action"`
+	OriginalAction      string  `json:"originalAction"`
+	ToolName            string  `json:"toolName"`
+	Confidence          float64 `json:"confidence"`
+	ConfidenceThreshold float64 `json:"confidenceThreshold"`
+	Evidence            string  `json:"evidence"`
+	Language            *string `json:"language"`
+	ClassifierKind      *string `json:"classifierKind"`
+	Model               *string `json:"model"`
+	Error               *string `json:"error"`
+}
+
+type HarnAgentEventModelJob struct {
+	Event json.RawMessage `json:"event"`
+}
+
+type HarnAgentEventOrchestrationDecision struct {
+	Decision json.RawMessage `json:"decision"`
+}
+
+type HarnAgentEventPackThinkingStripped struct {
+	Model     string `json:"model"`
+	Requested string `json:"requested"`
+	Reason    string `json:"reason"`
+}
+
+type HarnAgentEventProgressReported struct {
+	Message  *string         `json:"message"`
+	Entries  json.RawMessage `json:"entries"`
+	Replace  bool            `json:"replace"`
+	Metadata json.RawMessage `json:"metadata"`
+}
+
+type HarnAgentEventProviderUsage struct {
+	CallID   string          `json:"call_id"`
+	Provider string          `json:"provider"`
+	Model    string          `json:"model"`
+	RunUsage json.RawMessage `json:"run_usage"`
+}
+
+type HarnAgentEventPurposeLabel struct {
+	Label         string   `json:"label"`
+	Source        string   `json:"source"`
+	Iteration     *uint64  `json:"iteration"`
+	ToolCallIDs   []string `json:"toolCallIds"`
+	ToolCallCount *uint64  `json:"toolCallCount"`
+}
+
+type HarnAgentEventRepairOutputContractApplied struct {
+	Iteration uint64 `json:"iteration"`
+	ToolCount uint64 `json:"toolCount"`
+}
+
+type HarnAgentEventRequireSuccessfulToolsViolation struct {
+	ViolationKind   string          `json:"violationKind"`
+	Source          string          `json:"source"`
+	Actor           *string         `json:"actor"`
+	RunID           *string         `json:"runId"`
+	RedactedSummary string          `json:"redactedSummary"`
+	RecurrenceHints []string        `json:"recurrenceHints"`
+	Metadata        json.RawMessage `json:"metadata"`
+}
+
+type HarnAgentEventScopeClassifierVerdict struct {
+	Iteration           uint64  `json:"iteration"`
+	Label               string  `json:"label"`
+	OriginalLabel       string  `json:"originalLabel"`
+	Confidence          float64 `json:"confidence"`
+	ConfidenceThreshold float64 `json:"confidenceThreshold"`
+	Evidence            string  `json:"evidence"`
+	SkipMainTurn        bool    `json:"skipMainTurn"`
+	ClassifierKind      *string `json:"classifierKind"`
+	Model               *string `json:"model"`
+	Error               *string `json:"error"`
+}
+
+type HarnAgentEventSelfConsistencyTie struct {
+	Answer       string          `json:"answer"`
+	Total        uint64          `json:"total"`
+	Distribution json.RawMessage `json:"distribution"`
+}
+
+type HarnAgentEventSessionClosed struct {
+	Reason   string          `json:"reason"`
+	Status   string          `json:"status"`
+	Metadata json.RawMessage `json:"metadata"`
+}
+
+type HarnAgentEventStepJudgeDecision struct {
+	Iteration         uint64  `json:"iteration"`
+	Verdict           string  `json:"verdict"`
+	Reasoning         string  `json:"reasoning"`
+	Critique          string  `json:"critique"`
+	Confidence        float64 `json:"confidence"`
+	JudgeDurationMs   uint64  `json:"judgeDurationMs"`
+	Vetoed            bool    `json:"vetoed"`
+	Skipped           bool    `json:"skipped"`
+	Reason            *string `json:"reason"`
+	JudgeError        bool    `json:"judgeError"`
+	UnavailableReason *string `json:"unavailableReason"`
+	UnavailableCount  uint64  `json:"unavailableCount"`
+	OnVeto            string  `json:"onVeto"`
+	InputTokens       uint64  `json:"inputTokens"`
+	OutputTokens      uint64  `json:"outputTokens"`
+	CostUsd           float64 `json:"costUsd"`
+	Provider          string  `json:"provider"`
+	Model             string  `json:"model"`
+}
+
+type HarnAgentEventStructuralValidatorDecision struct {
+	Iteration         uint64  `json:"iteration"`
+	Rule              string  `json:"rule"`
+	Diagnostic        string  `json:"diagnostic"`
+	RecommendedAction string  `json:"recommendedAction"`
+	Vetoed            bool    `json:"vetoed"`
+	Skipped           bool    `json:"skipped"`
+	Reason            *string `json:"reason"`
+	OnFailure         string  `json:"onFailure"`
+	Attempts          uint64  `json:"attempts"`
+	MaxAttempts       uint64  `json:"maxAttempts"`
+}
+
+type HarnAgentEventSubagentJoin struct {
+	ParentSessionID               string  `json:"parentSessionId"`
+	ParentRunID                   string  `json:"parentRunId"`
+	ChildSessionID                string  `json:"childSessionId"`
+	ChildRunID                    string  `json:"childRunId"`
+	WorkerID                      string  `json:"workerId"`
+	CompletedAtMs                 int64   `json:"completedAtMs"`
+	JoinedAtMs                    int64   `json:"joinedAtMs"`
+	CollectionLagMs               int64   `json:"collectionLagMs"`
+	WaitStartedAtMs               *int64  `json:"waitStartedAtMs"`
+	WaitMs                        *uint64 `json:"waitMs"`
+	ResultProcessingStartedAtMs   *int64  `json:"resultProcessingStartedAtMs"`
+	ResultProcessingCompletedAtMs *int64  `json:"resultProcessingCompletedAtMs"`
+	ResultProcessingMs            *uint64 `json:"resultProcessingMs"`
+}
+
+type HarnAgentEventSubagentStop struct {
+	ParentRunID     string          `json:"parentRunId"`
+	ChildRunID      string          `json:"childRunId"`
+	ParentSessionID *string         `json:"parentSessionId"`
+	ChildSessionID  *string         `json:"childSessionId"`
+	TerminalStatus  string          `json:"terminalStatus"`
+	TerminalClass   string          `json:"terminalClass"`
+	Reason          string          `json:"reason"`
+	ResultRef       *string         `json:"resultRef"`
+	ReceiptRef      *string         `json:"receiptRef"`
+	Cancellation    json.RawMessage `json:"cancellation"`
+	Timeout         json.RawMessage `json:"timeout"`
+	CompletedAtMs   int64           `json:"completedAtMs"`
+}
+
+type HarnAgentEventToolBatchDisposition struct {
+	Receipt json.RawMessage `json:"receipt"`
+}
+
+type HarnAgentEventToolCallAudit struct {
+	ToolCallID string          `json:"toolCallId"`
+	ToolName   string          `json:"toolName"`
+	Audit      json.RawMessage `json:"audit"`
+	Receipt    json.RawMessage `json:"receipt,omitempty"`
+}
+
+type HarnAgentEventToolFormatOverride struct {
+	Provider          string  `json:"provider"`
+	Model             string  `json:"model"`
+	RequestedFormat   string  `json:"requestedFormat"`
+	RecommendedFormat string  `json:"recommendedFormat"`
+	CatalogParity     string  `json:"catalogParity"`
+	AppliedFormat     *string `json:"appliedFormat,omitempty"`
+	OverrideReason    *string `json:"overrideReason,omitempty"`
+	Steered           *bool   `json:"steered,omitempty"`
+}
+
+type HarnAgentEventTurnPhaseChanged struct {
+	Phase          string          `json:"phase"`
+	CandidateReply *string         `json:"candidate_reply,omitempty"`
+	Outcome        json.RawMessage `json:"outcome,omitempty"`
+	Reply          *string         `json:"reply,omitempty"`
+}
+
+type HarnAgentEventTypedCheckpoint struct {
+	Checkpoint json.RawMessage `json:"checkpoint"`
 }

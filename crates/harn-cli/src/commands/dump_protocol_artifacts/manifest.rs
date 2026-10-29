@@ -347,6 +347,8 @@ pub(super) fn generate_readme() -> String {
            (`{MCP_PROTOCOL_VERSION}`).\n\
          - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving\n\
            `ToolCallReceipt` schema for audited tool calls.\n\
+         - `schemas/agent-event.schema.json`: the typed body of every\n\
+           `_harn/agentEvent` kind, derived from the types the ACP adapter emits.\n\
          - `schemas/session-health.schema.json`: versioned observational per-turn\n\
            and rolling agent health measurements.\n\
          - `schemas/session-recap-v1.schema.json`: closed write contract for Harn's\n\

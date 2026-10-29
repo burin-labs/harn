@@ -1,10 +1,9 @@
 //! ACP AgentEventSink — translates canonical `AgentEvent` variants into ACP
 //! `session/update` notifications. Registered per-session at prompt start.
 
-use super::event_projection::passthrough_projection;
+use super::agent_event_payloads::{self as payloads, AgentEventPayload};
 use super::AcpOutput;
 use harn_vm::agent_events::{AgentEvent, AgentEventSink, ToolExecutor};
-use harn_vm::composition::{CompositionChildCall, CompositionChildResult, CompositionRunEnvelope};
 use harn_vm::visible_text::sanitize_visible_assistant_text;
 
 /// Writes canonical ACP `session/update` notifications for each `AgentEvent`.
@@ -71,11 +70,11 @@ impl AcpAgentEventSink {
         }
     }
 
-    /// Emit a Harn agent event as `_harn/agentEvent`. The schema is the per-kind
-    /// payload defined in `HARN_AGENT_EVENT_KINDS`: top-level `sessionId` and
-    /// `kind`, plus kind-specific fields directly under `params`.
-    fn emit_agent_event_ext(&self, kind: &str, session_id: &str, payload: serde_json::Value) {
-        let params = agent_event_ext_params(kind, session_id, payload)
+    /// Emit a Harn agent event as `_harn/agentEvent`: top-level `sessionId`
+    /// and `kind`, plus the kind's typed body directly under `params`.
+    fn emit_agent_event<P: AgentEventPayload>(&self, session_id: &str, payload: &P) {
+        let body = serde_json::to_value(payload).expect("agent event payload serializes");
+        let params = agent_event_ext_params(P::KIND, session_id, body)
             .unwrap_or_else(|error| panic!("{error}"));
         self.write_jsonrpc_notification(super::schema::HARN_AGENT_EVENT_METHOD, params);
     }
@@ -114,53 +113,11 @@ impl AcpAgentEventSink {
     ) {
         merge_harn_meta(update, harn_meta);
     }
+}
 
-    fn composition_run_to_json(run: &CompositionRunEnvelope) -> serde_json::Value {
-        serde_json::json!({
-            "runId": &run.run_id,
-            "language": &run.language,
-            "snippetHash": &run.snippet_hash,
-            "bindingManifestHash": &run.binding_manifest_hash,
-            "requestedSideEffectCeiling": run.requested_side_effect_ceiling.as_str(),
-            "stdout": &run.stdout,
-            "stderr": &run.stderr,
-            "artifacts": &run.artifacts,
-            "result": &run.result,
-            "failureCategory": run.failure_category.map(|category| category.as_str()),
-            "error": &run.error,
-            "durationMs": run.duration_ms,
-            "metadata": &run.metadata,
-        })
-    }
-
-    fn composition_child_call_to_json(call: &CompositionChildCall) -> serde_json::Value {
-        serde_json::json!({
-            "runId": &call.run_id,
-            "toolCallId": &call.tool_call_id,
-            "toolName": &call.tool_name,
-            "operationIndex": call.operation_index,
-            "annotations": &call.annotations,
-            "requestedSideEffectLevel": call.requested_side_effect_level.as_str(),
-            "policyContext": &call.policy_context,
-            "rawInput": &call.raw_input,
-        })
-    }
-
-    fn composition_child_result_to_json(result: &CompositionChildResult) -> serde_json::Value {
-        serde_json::json!({
-            "runId": &result.run_id,
-            "toolCallId": &result.tool_call_id,
-            "toolName": &result.tool_name,
-            "operationIndex": result.operation_index,
-            "status": Self::status_str(result.status),
-            "rawOutput": &result.raw_output,
-            "error": &result.error,
-            "errorCategory": result.error_category.map(|category| category.as_str()),
-            "executor": result.executor.as_ref().map(Self::executor_to_json),
-            "durationMs": result.duration_ms,
-            "executionDurationMs": result.execution_duration_ms,
-        })
-    }
+/// A nested runtime record carried as an untyped field of an event body.
+fn to_wire<T: serde::Serialize>(value: &T) -> serde_json::Value {
+    serde_json::to_value(value).expect("agent event field serializes")
 }
 
 fn agent_event_ext_params(
@@ -211,22 +168,71 @@ fn mark_replayed_params(method: &str, params: &mut serde_json::Value) {
 impl AgentEventSink for AcpAgentEventSink {
     fn handle_event(&self, event: &AgentEvent) {
         match event {
-            // Diagnostics that differ only in wire name and carry their whole
-            // emitted record. `event_projection` owns that table; listing the
-            // family here keeps the match exhaustive, so a new variant must
-            // still make a deliberate choice rather than hit a catch-all.
-            event @ (AgentEvent::CacheHit { .. }
-            | AgentEvent::CacheMiss { .. }
-            | AgentEvent::LlmCallLog { .. }
-            | AgentEvent::LlmRoutingDecision { .. }
-            | AgentEvent::LlmFallbackAttempt { .. }
-            | AgentEvent::LlmShadowDiff { .. }
-            | AgentEvent::SemanticCacheHit { .. }
-            | AgentEvent::SemanticCacheMiss { .. }) => {
-                if let Some((kind, payload)) = passthrough_projection(event) {
-                    self.emit_agent_event_ext(kind, event.session_id(), payload.clone());
-                }
+            // Handler diagnostics that carry the whole record their stdlib
+            // emitter built.
+            AgentEvent::CacheHit {
+                session_id,
+                payload,
+                ..
+            } => {
+                self.emit_agent_event(session_id, &payloads::CacheHit::from_value(payload.clone()));
             }
+            AgentEvent::CacheMiss {
+                session_id,
+                payload,
+                ..
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::CacheMiss::from_value(payload.clone()),
+            ),
+            AgentEvent::LlmCallLog {
+                session_id,
+                payload,
+                ..
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::LlmCallLog::from_value(payload.clone()),
+            ),
+            AgentEvent::LlmRoutingDecision {
+                session_id,
+                payload,
+                ..
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::LlmRoutingDecision::from_value(payload.clone()),
+            ),
+            AgentEvent::LlmFallbackAttempt {
+                session_id,
+                payload,
+                ..
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::LlmFallbackAttempt::from_value(payload.clone()),
+            ),
+            AgentEvent::LlmShadowDiff {
+                session_id,
+                payload,
+                ..
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::LlmShadowDiff::from_value(payload.clone()),
+            ),
+            AgentEvent::SemanticCacheHit {
+                session_id,
+                payload,
+                ..
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::SemanticCacheHit::from_value(payload.clone()),
+            ),
+            AgentEvent::SemanticCacheMiss {
+                session_id,
+                payload,
+                ..
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::SemanticCacheMiss::from_value(payload.clone()),
+            ),
             AgentEvent::AgentMessageChunk {
                 session_id,
                 content,
@@ -751,21 +757,19 @@ impl AgentEventSink for AcpAgentEventSink {
                 reason,
                 metadata,
             } => {
-                let mut payload = serde_json::json!({
-                    "controlId": control_id,
-                    "method": method,
-                    "outcome": outcome,
-                    "status": status,
-                    "actor": actor,
-                    "target": target,
-                });
-                if let Some(reason) = reason {
-                    payload["reason"] = serde_json::Value::String(reason.clone());
-                }
-                if !metadata.is_null() {
-                    payload["metadata"] = metadata.clone();
-                }
-                self.emit_agent_event_ext("control_outcome", session_id, payload);
+                self.emit_agent_event(
+                    session_id,
+                    &payloads::ControlOutcome {
+                        control_id: control_id.clone(),
+                        method: method.clone(),
+                        outcome: outcome.clone(),
+                        status: status.clone(),
+                        actor: actor.clone(),
+                        target: target.clone(),
+                        reason: reason.clone(),
+                        metadata: (!metadata.is_null()).then(|| metadata.clone()),
+                    },
+                );
             }
             AgentEvent::WorkerUpdate {
                 session_id,
@@ -886,16 +890,14 @@ impl AgentEventSink for AcpAgentEventSink {
                 iteration,
                 provider,
                 model,
-            } => {
-                let mut payload = serde_json::json!({"iteration": iteration});
-                if !provider.is_empty() {
-                    payload["provider"] = serde_json::Value::String(provider.clone());
-                }
-                if !model.is_empty() {
-                    payload["model"] = serde_json::Value::String(model.clone());
-                }
-                self.emit_agent_event_ext("iteration_start", session_id, payload);
-            }
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::IterationStart {
+                    iteration: *iteration,
+                    provider: provider.clone(),
+                    model: model.clone(),
+                },
+            ),
             AgentEvent::InferenceSpeed { .. } => {
                 self.write_notification(meta::inference_speed_notification(event));
             }
@@ -905,43 +907,45 @@ impl AgentEventSink for AcpAgentEventSink {
                 provider,
                 model,
                 run_usage,
-            } => {
-                self.emit_agent_event_ext(
-                    "provider_usage",
-                    session_id,
-                    serde_json::json!({"call_id": call_id, "provider": provider, "model": model, "run_usage": run_usage}),
-                );
-            }
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::ProviderUsage {
+                    call_id: call_id.clone(),
+                    provider: provider.clone(),
+                    model: model.clone(),
+                    run_usage: serde_json::to_value(run_usage).expect("provider usage serializes"),
+                },
+            ),
             AgentEvent::IterationEnd {
                 session_id,
                 iteration,
                 iteration_info,
-            } => {
-                self.emit_agent_event_ext(
-                    "iteration_end",
-                    session_id,
-                    serde_json::json!({"iteration": iteration, "iterationInfo": iteration_info}),
-                );
-            }
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::IterationEnd {
+                    iteration: *iteration,
+                    iteration_info: iteration_info.clone(),
+                },
+            ),
             AgentEvent::SessionClosed {
                 session_id,
                 reason,
                 status,
                 metadata,
-            } => {
-                self.emit_agent_event_ext(
-                    "session_closed",
-                    session_id,
-                    serde_json::json!({
-                        "reason": reason,
-                        "status": status,
-                        "metadata": metadata,
-                    }),
-                );
-            }
-            AgentEvent::SessionHealth { session_id, fact } => {
-                self.emit_agent_event_ext("session_health", session_id, serde_json::json!(fact));
-            }
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::SessionClosed {
+                    reason: reason.clone(),
+                    status: status.clone(),
+                    metadata: metadata.clone(),
+                },
+            ),
+            AgentEvent::SessionHealth { session_id, fact } => self.emit_agent_event(
+                session_id,
+                &payloads::SessionHealth::from_value(
+                    serde_json::to_value(fact).expect("session health fact serializes"),
+                ),
+            ),
             AgentEvent::AnchorChanged {
                 session_id,
                 previous,
@@ -949,38 +953,30 @@ impl AgentEventSink for AcpAgentEventSink {
                 carry_transcript,
                 compacted,
                 reason,
-            } => {
-                self.emit_agent_event_ext(
-                    "anchor_changed",
-                    session_id,
-                    serde_json::json!({
-                        "previous": previous,
-                        "current": current,
-                        "carryTranscript": carry_transcript,
-                        "compacted": compacted,
-                        "reason": reason,
-                    }),
-                );
-            }
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::AnchorChanged {
+                    previous: previous.clone(),
+                    current: current.clone(),
+                    carry_transcript: *carry_transcript,
+                    compacted: *compacted,
+                    reason: reason.clone(),
+                },
+            ),
             AgentEvent::TurnPhaseChanged { session_id, phase } => {
-                let payload =
-                    serde_json::to_value(phase).expect("agent turn phase is serializable");
-                self.emit_agent_event_ext("turn_phase_changed", session_id, payload);
+                self.emit_agent_event(session_id, &payloads::TurnPhaseChanged::new(phase));
             }
             AgentEvent::JudgeStarted {
                 session_id,
                 iteration,
                 trigger,
-            } => {
-                self.emit_agent_event_ext(
-                    "judge_started",
-                    session_id,
-                    serde_json::json!({
-                        "iteration": iteration,
-                        "trigger": trigger,
-                    }),
-                );
-            }
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::JudgeStarted {
+                    iteration: *iteration,
+                    trigger: trigger.clone(),
+                },
+            ),
             AgentEvent::JudgeDecision {
                 session_id,
                 iteration,
@@ -1001,35 +997,29 @@ impl AgentEventSink for AcpAgentEventSink {
                 judge_outcome,
                 terminal_evidence_preserved,
                 requirement_report,
-            } => {
-                self.emit_agent_event_ext(
-                    "judge_decision",
-                    session_id,
-                    serde_json::json!({
-                        "iteration": iteration,
-                        "verdict": verdict,
-                        "reasoning": reasoning,
-                        "nextStep": next_step,
-                        "judgeDurationMs": judge_duration_ms,
-                        "source": source,
-                        "trigger": trigger,
-                        "reason": reason,
-                        "confirm": confirm,
-                        "convertedFrom": converted_from,
-                        "escalationRecommended": escalation_recommended,
-                        "escalationTarget": escalation_target,
-                        // `verdict` above is the answer of record. These two
-                        // are what let a reader tell an override from the
-                        // judge's own word instead of reading one as the other.
-                        "judgeVerdict": judge_verdict,
-                        "override": judge_override,
-                        "gapClass": gap_class,
-                        "judgeOutcome": judge_outcome,
-                        "terminalEvidencePreserved": terminal_evidence_preserved,
-                        "requirementReport": requirement_report,
-                    }),
-                );
-            }
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::JudgeDecision {
+                    iteration: *iteration,
+                    verdict: verdict.clone(),
+                    reasoning: reasoning.clone(),
+                    next_step: next_step.clone(),
+                    judge_duration_ms: *judge_duration_ms,
+                    source: source.clone(),
+                    trigger: trigger.clone(),
+                    reason: reason.clone(),
+                    confirm: *confirm,
+                    converted_from: converted_from.clone(),
+                    escalation_recommended: *escalation_recommended,
+                    escalation_target: escalation_target.clone(),
+                    judge_verdict: judge_verdict.clone(),
+                    judge_override: judge_override.clone(),
+                    gap_class: gap_class.clone(),
+                    judge_outcome: judge_outcome.clone(),
+                    terminal_evidence_preserved: *terminal_evidence_preserved,
+                    requirement_report: requirement_report.clone(),
+                },
+            ),
             AgentEvent::StepJudgeDecision {
                 session_id,
                 iteration,
@@ -1050,32 +1040,29 @@ impl AgentEventSink for AcpAgentEventSink {
                 cost_usd,
                 provider,
                 model,
-            } => {
-                self.emit_agent_event_ext(
-                    "step_judge_decision",
-                    session_id,
-                    serde_json::json!({
-                        "iteration": iteration,
-                        "verdict": verdict,
-                        "reasoning": reasoning,
-                        "critique": critique,
-                        "confidence": confidence,
-                        "judgeDurationMs": judge_duration_ms,
-                        "vetoed": vetoed,
-                        "skipped": skipped,
-                        "reason": reason,
-                        "judgeError": judge_error,
-                        "unavailableReason": unavailable_reason,
-                        "unavailableCount": unavailable_count,
-                        "onVeto": on_veto,
-                        "inputTokens": input_tokens,
-                        "outputTokens": output_tokens,
-                        "costUsd": cost_usd,
-                        "provider": provider,
-                        "model": model,
-                    }),
-                );
-            }
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::StepJudgeDecision {
+                    iteration: *iteration,
+                    verdict: verdict.clone(),
+                    reasoning: reasoning.clone(),
+                    critique: critique.clone(),
+                    confidence: *confidence,
+                    judge_duration_ms: *judge_duration_ms,
+                    vetoed: *vetoed,
+                    skipped: *skipped,
+                    reason: reason.clone(),
+                    judge_error: *judge_error,
+                    unavailable_reason: unavailable_reason.clone(),
+                    unavailable_count: *unavailable_count,
+                    on_veto: on_veto.clone(),
+                    input_tokens: *input_tokens,
+                    output_tokens: *output_tokens,
+                    cost_usd: *cost_usd,
+                    provider: provider.clone(),
+                    model: model.clone(),
+                },
+            ),
             AgentEvent::StructuralValidatorDecision {
                 session_id,
                 iteration,
@@ -1088,24 +1075,21 @@ impl AgentEventSink for AcpAgentEventSink {
                 on_failure,
                 attempts,
                 max_attempts,
-            } => {
-                self.emit_agent_event_ext(
-                    "structural_validator_decision",
-                    session_id,
-                    serde_json::json!({
-                        "iteration": iteration,
-                        "rule": rule,
-                        "diagnostic": diagnostic,
-                        "recommendedAction": recommended_action,
-                        "vetoed": vetoed,
-                        "skipped": skipped,
-                        "reason": reason,
-                        "onFailure": on_failure,
-                        "attempts": attempts,
-                        "maxAttempts": max_attempts,
-                    }),
-                );
-            }
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::StructuralValidatorDecision {
+                    iteration: *iteration,
+                    rule: rule.clone(),
+                    diagnostic: diagnostic.clone(),
+                    recommended_action: recommended_action.clone(),
+                    vetoed: *vetoed,
+                    skipped: *skipped,
+                    reason: reason.clone(),
+                    on_failure: on_failure.clone(),
+                    attempts: *attempts,
+                    max_attempts: *max_attempts,
+                },
+            ),
             AgentEvent::ScopeClassifierVerdict {
                 session_id,
                 iteration,
@@ -1118,24 +1102,21 @@ impl AgentEventSink for AcpAgentEventSink {
                 classifier_kind,
                 model,
                 error,
-            } => {
-                self.emit_agent_event_ext(
-                    "scope_classifier_verdict",
-                    session_id,
-                    serde_json::json!({
-                        "iteration": iteration,
-                        "label": label,
-                        "originalLabel": original_label,
-                        "confidence": confidence,
-                        "confidenceThreshold": confidence_threshold,
-                        "evidence": evidence,
-                        "skipMainTurn": skip_main_turn,
-                        "classifierKind": classifier_kind,
-                        "model": model,
-                        "error": error,
-                    }),
-                );
-            }
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::ScopeClassifierVerdict {
+                    iteration: *iteration,
+                    label: label.clone(),
+                    original_label: original_label.clone(),
+                    confidence: *confidence,
+                    confidence_threshold: *confidence_threshold,
+                    evidence: evidence.clone(),
+                    skip_main_turn: *skip_main_turn,
+                    classifier_kind: classifier_kind.clone(),
+                    model: model.clone(),
+                    error: error.clone(),
+                },
+            ),
             AgentEvent::InputGuardrailVerdict {
                 session_id,
                 iteration,
@@ -1147,39 +1128,35 @@ impl AgentEventSink for AcpAgentEventSink {
                 classifier_kind,
                 model,
                 error,
-            } => {
-                self.emit_agent_event_ext(
-                    "input_guardrail_verdict",
-                    session_id,
-                    serde_json::json!({
-                        "iteration": iteration,
-                        "tripwire": tripwire,
-                        "reason": reason,
-                        "label": label,
-                        "confidence": confidence,
-                        "confidenceThreshold": confidence_threshold,
-                        "classifierKind": classifier_kind,
-                        "model": model,
-                        "error": error,
-                    }),
-                );
-            }
-            AgentEvent::MissingToolCallVerdict { session_id, .. } => self.emit_agent_event_ext(
-                "missing_tool_call_verdict",
+            } => self.emit_agent_event(
                 session_id,
-                ext_payloads::missing_tool_call_verdict(event),
+                &payloads::InputGuardrailVerdict {
+                    iteration: *iteration,
+                    tripwire: *tripwire,
+                    reason: reason.clone(),
+                    label: label.clone(),
+                    confidence: *confidence,
+                    confidence_threshold: *confidence_threshold,
+                    classifier_kind: classifier_kind.clone(),
+                    model: model.clone(),
+                    error: error.clone(),
+                },
             ),
+            AgentEvent::MissingToolCallVerdict { session_id, .. } => {
+                if let Some(payload) = ext_payloads::missing_tool_call_verdict(event) {
+                    self.emit_agent_event(session_id, &payload);
+                }
+            }
             AgentEvent::RepairOutputContractApplied {
                 session_id,
                 iteration,
                 tool_count,
-            } => self.emit_agent_event_ext(
-                "repair_output_contract_applied",
+            } => self.emit_agent_event(
                 session_id,
-                serde_json::json!({
-                    "iteration": iteration,
-                    "toolCount": tool_count,
-                }),
+                &payloads::RepairOutputContractApplied {
+                    iteration: *iteration,
+                    tool_count: *tool_count,
+                },
             ),
             AgentEvent::SubagentJoin { .. }
             | AgentEvent::SubagentStop { .. }
@@ -1189,19 +1166,17 @@ impl AgentEventSink for AcpAgentEventSink {
             | AgentEvent::SelfConsistencyTie { .. }
             | AgentEvent::CodeLibrarianQueryNlFallback { .. }
             | AgentEvent::ModelJob { .. } => {
-                let (kind, session_id, payload) = ext_payloads::documented_stdlib_event(event);
-                self.emit_agent_event_ext(kind, session_id, payload);
+                ext_payloads::emit_documented_stdlib_event(self, event);
             }
             AgentEvent::TypedCheckpoint {
                 session_id,
                 checkpoint,
-            } => {
-                self.emit_agent_event_ext(
-                    "typed_checkpoint",
-                    session_id,
-                    serde_json::json!({"checkpoint": checkpoint}),
-                );
-            }
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::TypedCheckpoint {
+                    checkpoint: checkpoint.clone(),
+                },
+            ),
             AgentEvent::HostToolResult {
                 session_id,
                 injection_id,
@@ -1219,29 +1194,26 @@ impl AgentEventSink for AcpAgentEventSink {
                 sequence,
                 provenance,
                 sanitization,
-            } => {
-                self.emit_agent_event_ext(
-                    "host_tool_result",
-                    session_id,
-                    serde_json::json!({
-                        "injectionId": injection_id,
-                        "toolCallId": tool_call_id,
-                        "toolName": tool_name,
-                        "toolKind": kind,
-                        "rawInput": raw_input,
-                        "status": Self::status_str(*status),
-                        "rawOutput": raw_output,
-                        "resultPointer": result_pointer,
-                        "error": error,
-                        "durationMs": duration_ms,
-                        "delivery": delivery,
-                        "deliveredAtSeam": delivered_at_seam,
-                        "sequence": sequence,
-                        "provenance": provenance,
-                        "sanitization": sanitization,
-                    }),
-                );
-            }
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::HostToolResult {
+                    injection_id: injection_id.clone(),
+                    tool_call_id: tool_call_id.clone(),
+                    tool_name: tool_name.clone(),
+                    tool_kind: kind.as_ref().map(to_wire),
+                    raw_input: raw_input.clone(),
+                    status: Self::status_str(*status).to_string(),
+                    raw_output: raw_output.clone(),
+                    result_pointer: result_pointer.clone(),
+                    error: error.clone(),
+                    duration_ms: *duration_ms,
+                    delivery: to_wire(delivery),
+                    delivered_at_seam: delivered_at_seam.clone(),
+                    sequence: *sequence,
+                    provenance: to_wire(provenance),
+                    sanitization: to_wire(sanitization),
+                },
+            ),
             AgentEvent::HostAttachment {
                 session_id,
                 injection_id,
@@ -1258,28 +1230,25 @@ impl AgentEventSink for AcpAgentEventSink {
                 sequence,
                 provenance,
                 sanitization,
-            } => {
-                self.emit_agent_event_ext(
-                    "host_attachment",
-                    session_id,
-                    serde_json::json!({
-                        "injectionId": injection_id,
-                        "mediaType": media_type,
-                        "flavor": flavor,
-                        "artifactPointer": artifact_pointer,
-                        "sha256": sha256,
-                        "sizeBytes": size_bytes,
-                        "rendered": rendered,
-                        "description": description,
-                        "descriptionModel": description_model,
-                        "delivery": delivery,
-                        "deliveredAtSeam": delivered_at_seam,
-                        "sequence": sequence,
-                        "provenance": provenance,
-                        "sanitization": sanitization,
-                    }),
-                );
-            }
+            } => self.emit_agent_event(
+                session_id,
+                &payloads::HostAttachment {
+                    injection_id: injection_id.clone(),
+                    media_type: media_type.clone(),
+                    flavor: to_wire(flavor),
+                    artifact_pointer: artifact_pointer.clone(),
+                    sha256: sha256.clone(),
+                    size_bytes: *size_bytes,
+                    rendered: to_wire(rendered),
+                    description: description.clone(),
+                    description_model: description_model.clone(),
+                    delivery: to_wire(delivery),
+                    delivered_at_seam: delivered_at_seam.clone(),
+                    sequence: *sequence,
+                    provenance: to_wire(provenance),
+                    sanitization: to_wire(sanitization),
+                },
+            ),
             AgentEvent::Artifact {
                 session_id,
                 artifact_id,
