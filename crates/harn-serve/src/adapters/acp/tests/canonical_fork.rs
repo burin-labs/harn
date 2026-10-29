@@ -17,6 +17,10 @@ async fn metadata_only_parent_refuses_forking_unpersisted_live_messages() {
         })
         .await
         .unwrap();
+    let empty = harn_vm::agent_sessions::canonical_history_boundaries(&store, root.path(), parent)
+        .await
+        .unwrap();
+    assert!(empty.positions.is_empty());
     harn_vm::agent_sessions::seed_from_messages(
         Some(parent.into()),
         &[serde_json::json!({"role":"assistant", "content":"live message"})],

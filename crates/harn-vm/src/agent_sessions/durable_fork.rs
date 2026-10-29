@@ -119,7 +119,10 @@ pub(super) async fn ensure_canonical_parent(
 ) -> Result<(), VmError> {
     crate::agent_session_journal::flush(source).await?;
     let result = match store.describe(source).await {
-        Ok(meta) if !meta.has_canonical_journal() && super::length(source) != Some(0) => {
+        Ok(meta)
+            if !meta.has_canonical_journal()
+                && super::length(source).is_some_and(|length| length > 0) =>
+        {
             return Err(VmError::Runtime(
                 "canonical session history: live messages have not been persisted".into(),
             ));
