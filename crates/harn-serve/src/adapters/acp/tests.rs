@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 mod additional_directories;
 mod client_capabilities;
 mod provider_default_tests;
+mod root_projection;
 fn acp_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))

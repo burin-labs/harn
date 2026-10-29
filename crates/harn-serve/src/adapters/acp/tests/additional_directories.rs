@@ -69,6 +69,16 @@ async fn idle_mount_persists_before_acknowledgement_and_metadata_cwd_restores_th
         .await;
     let mounted = recv_response_with_id(&mut rx, 3).await;
     assert!(mounted.get("result").is_some(), "{mounted}");
+    let events = store.read_all(session).await.unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.payload.pointer("/transcript_event/kind")
+                == Some(&serde_json::json!("RootMounted")))
+            .count(),
+        1,
+        "the acknowledged idle mount must have one durable audit event before any later flush",
+    );
     assert_eq!(
         store
             .describe(session)
@@ -78,7 +88,7 @@ async fn idle_mount_persists_before_acknowledgement_and_metadata_cwd_restores_th
             .unwrap(),
         vec![extra.to_str().unwrap().to_string()]
     );
-    // No prompt, journal, close, or flush may supply the missing persistence.
+    // No prompt, close, or later flush may supply the missing persistence.
     drop(server);
     harn_vm::reset_thread_local_state();
     let (tx, mut rx) = mpsc::unbounded_channel();

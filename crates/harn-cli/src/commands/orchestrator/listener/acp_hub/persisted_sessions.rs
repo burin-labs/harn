@@ -196,11 +196,14 @@ pub(super) async fn list(
     let sessions = harn_vm::session_timeline::list_persisted_sessions(root, 500)
         .await
         .map_err(|error| DiscoveryError::Store(error.to_string()))?;
-    Ok(sessions
+    sessions
         .into_iter()
         .filter(|session| session.cwd.as_deref() == Some(cwd))
-        .map(harn_serve::acp_persisted_session_item)
-        .collect())
+        .map(|session| {
+            harn_serve::try_acp_persisted_session_item(session)
+                .map_err(|error| DiscoveryError::Store(error.to_string()))
+        })
+        .collect()
 }
 
 fn send_discovery_error(

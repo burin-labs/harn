@@ -51,8 +51,10 @@ macro_rules! required_pr_e2e_cases {
 pub(crate) use required_pr_e2e_cases;
 
 macro_rules! case_names {
-    ($($(#[$attribute:meta])* $case:path,)*) => {
-        pub(crate) const CASES: &[&str] = &[$(stringify!($case)),*];
+    ($($(#[$attribute:meta])* $module:ident $(::$member:ident)+,)*) => {
+        pub(crate) const CASES: &[&str] = &[
+            $(concat!(stringify!($module), $("::", stringify!($member)),+)),*
+        ];
     };
 }
 

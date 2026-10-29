@@ -1,6 +1,55 @@
 use super::*;
 
 #[tokio::test(flavor = "current_thread")]
+async fn acp_websocket_refuses_corrupt_directory_metadata_instead_of_hiding_a_session() {
+    use harn_serve::{CreateSession, SessionStore, SqliteSessionStore};
+    let _guard = lock_harn_state_async().await;
+    reset_active_event_log();
+    let project = tempdir().unwrap();
+    std::fs::create_dir(project.path().join(".harn")).unwrap();
+    let project_root = project.path().canonicalize().unwrap();
+    let store =
+        SqliteSessionStore::open(project.path().join(".harn/session-store.sqlite")).unwrap();
+    let metadata = store
+        .create(CreateSession {
+            cwd: Some(project_root.to_str().unwrap().into()),
+            project_scope: Some(project_root.to_str().unwrap().into()),
+            attributes: [("harn.workspace.additionalDirectories".into(), json!([7]))].into(),
+            ..CreateSession::default()
+        })
+        .await
+        .unwrap();
+    assert!(store
+        .describe(&metadata.id)
+        .await
+        .unwrap()
+        .additional_directories()
+        .is_err());
+    let (listener, _log, _listener_dir) = start_acp_test_listener_with_project_root(
+        ListenerRuntimeEnv::for_test().with_api_key("ws-test-key"),
+        Some(&project_root),
+    )
+    .await;
+    let (mut socket, _) =
+        tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+            .await
+            .unwrap();
+    let listed = acp_request(
+        &mut socket,
+        1,
+        "session/list",
+        json!({
+            "cwd":project_root, "liveState":"persisted",
+        }),
+    )
+    .await;
+    assert_eq!(listed["error"]["code"], -32000, "{listed}");
+    assert!(listed.get("result").is_none(), "{listed}");
+    listener.shutdown(Duration::from_secs(5)).await.unwrap();
+    reset_active_event_log();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn acp_websocket_lists_and_loads_a_store_only_session_from_its_project() {
     let _guard = lock_harn_state_async().await;
     reset_active_event_log();

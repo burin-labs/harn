@@ -463,14 +463,39 @@ impl PendingWorkspaceMount {
             .additional_directories()
     }
 
-    pub(crate) fn commit(mut self, reason: Option<String>) -> Result<String, String> {
+    pub(crate) fn audit_event(&self, reason: Option<String>) -> VmValue {
+        let applied = self.applied.as_ref().unwrap();
+        crate::llm::helpers::transcript_event(
+            "RootMounted",
+            "system",
+            "internal",
+            "",
+            Some(serde_json::json!({
+                "path": applied.root.to_string_lossy(),
+                "mount_mode": applied.mode.as_str(),
+                "mounted_at": applied.mounted_at.clone(),
+                "reason": reason,
+            })),
+        )
+    }
+
+    pub(crate) fn commit(self, reason: Option<String>) -> Result<String, String> {
+        let event = self.audit_event(reason);
+        self.commit_audit(MountAudit::Pending(event))
+    }
+
+    pub(crate) fn commit_persisted(self, event: VmValue) -> Result<String, String> {
+        self.commit_audit(MountAudit::Persisted(event))
+    }
+
+    fn commit_audit(mut self, audit: MountAudit) -> Result<String, String> {
         if !self.generation.is_current(&self.id) {
             return Err(format!(
                 "session '{}' was closed while preparing workspace roots",
                 self.id
             ));
         }
-        record_workspace_mount(&self.id, self.applied.as_ref().unwrap(), reason)?;
+        record_workspace_mount(&self.id, audit)?;
         Ok(self.applied.take().unwrap().mounted_at)
     }
 }
@@ -574,29 +599,29 @@ fn rollback_workspace_mount(id: &str, applied: AppliedMount) {
     });
 }
 
-fn record_workspace_mount(
-    id: &str,
-    applied: &AppliedMount,
-    reason: Option<String>,
-) -> Result<(), String> {
+enum MountAudit {
+    Pending(VmValue),
+    Persisted(VmValue),
+}
+
+fn record_workspace_mount(id: &str, audit: MountAudit) -> Result<(), String> {
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {
             return Err(format!("agent session '{id}' does not exist"));
         };
-        let event = crate::llm::helpers::transcript_event(
-            "RootMounted",
-            "system",
-            "internal",
-            "",
-            Some(serde_json::json!({
-                "path": applied.root.to_string_lossy(),
-                "mount_mode": applied.mode.as_str(),
-                "mounted_at": applied.mounted_at.clone(),
-                "reason": reason,
-            })),
-        );
-        append_event_to_state(state, event, "add_workspace_root")?;
+        match audit {
+            MountAudit::Pending(event) => {
+                append_event_to_state(state, event, "add_workspace_root")?
+            }
+            MountAudit::Persisted(event) => {
+                super::transcript_lifecycle::apply_transcript_event_to_state(
+                    state,
+                    event,
+                    "add_workspace_root",
+                )?
+            }
+        }
         crate::llm::permissions::clear_session_grants(id);
         state.touch();
         Ok(())

@@ -126,10 +126,18 @@ pub(crate) fn append_event_to_state(
     action: &str,
 ) -> Result<(), String> {
     let journal_event = crate::llm::helpers::vm_value_to_json(&event);
-    let candidate = transcript_with_appended_event(&state.transcript, event);
-    apply_transcript_with_budget(state, candidate, action)?;
+    apply_transcript_event_to_state(state, event, action)?;
     crate::agent_session_journal::enqueue_audit_event(&mut state.transcript_journal, journal_event);
     Ok(())
+}
+
+pub(crate) fn apply_transcript_event_to_state(
+    state: &mut SessionState,
+    event: VmValue,
+    action: &str,
+) -> Result<(), String> {
+    let candidate = transcript_with_appended_event(&state.transcript, event);
+    apply_transcript_with_budget(state, candidate, action)
 }
 
 fn transcript_with_appended_event(transcript: &VmValue, event: VmValue) -> VmValue {

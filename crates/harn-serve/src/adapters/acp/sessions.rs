@@ -673,7 +673,8 @@ pub fn acp_persisted_session_item(session: harn_session_store::SessionMeta) -> s
     })
 }
 
-pub(super) fn try_acp_persisted_session_item(
+/// Project a store row, refusing malformed typed metadata.
+pub fn try_acp_persisted_session_item(
     session: harn_session_store::SessionMeta,
 ) -> harn_session_store::StoreResult<serde_json::Value> {
     let directories = session.additional_directories()?;

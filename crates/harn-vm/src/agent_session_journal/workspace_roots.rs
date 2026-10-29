@@ -59,14 +59,76 @@ pub(crate) async fn add_workspace_root_verified_persisted(
         return Err("workspace root mutation must use the session's captured workspace".into());
     }
     let pending = agent_sessions::prepare_workspace_mount_verified(id, root, mount_mode, verify)?;
-    if agent_sessions::has_journal(id) {
+    let standalone = if agent_sessions::has_journal(id) {
         super::flush(id).await.map_err(|error| error.to_string())?;
+        None
     } else {
-        persist_directory_projection(id, scope, SessionType::User, pending.directories()?)
+        scope
+            .run(async {
+                let state_dir = session_store::canonical_store_state_dir(None)?;
+                super::prepare_standalone(id, Some(state_dir), None, "workspace_root_mount").await
+            })
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| error.to_string())?
+    };
+    let event = pending.audit_event(reason);
+    let payload = super::SessionEventPayload::Transcript(super::TranscriptRecord::new(
+        crate::llm::helpers::vm_value_to_json(&event),
+        None,
+    ));
+    let prepare = |journal: &super::JournalState| {
+        super::append_event_for_payload(&journal.config, payload.clone())
+            .map(|append| (journal.store(), append))
+    };
+    let (store, append) = match standalone.as_ref() {
+        Some(journal) => prepare(journal),
+        None => agent_sessions::with_live_journal(id, |journal| prepare(journal))
+            .ok_or_else(|| "workspace root journal disappeared before persistence".to_string())?,
     }
-    pending.commit(reason)
+    .map_err(|error| error.to_string())?;
+    let directories = pending.directories()?;
+    store
+        .update(
+            id,
+            UpdateSession::default().with_additional_directories(directories.clone()),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut events = Vec::new();
+    if standalone.is_some()
+        && !store
+            .describe(id)
+            .await
+            .map_err(|error| error.to_string())?
+            .has_canonical_journal()
+    {
+        // A first audit must not make an empty journal shadow existing live context.
+        let prompt = agent_sessions::prompt_state_json(id);
+        let transcript = agent_sessions::transcript(id)
+            .map(|value| crate::llm::helpers::vm_value_to_json(&value))
+            .ok_or_else(|| "workspace root session disappeared before persistence".to_string())?;
+        let source_event_ids = transcript
+            .get("events")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|event| super::TranscriptRecord::new(event.clone(), None))
+            .filter(|record| record.is_history_position())
+            .map(|record| record.transcript_event.id.clone())
+            .collect();
+        events.push(super::messages_replaced_event(
+            prompt.messages,
+            prompt.summary,
+            source_event_ids,
+        ));
+    }
+    events.push(append);
+    store
+        .append_batch(id, events)
+        .await
+        .map_err(|error| error.to_string())?;
+    agent_sessions::record_persisted_workspace_directories(id, directories);
+    pending.commit_persisted(event)
 }
 
 async fn persist_directory_projection(

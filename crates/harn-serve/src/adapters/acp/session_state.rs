@@ -1,10 +1,16 @@
 use super::*;
 
 impl AcpServer {
-    pub(super) fn session_restore_result(&self, session_id: &str) -> Option<serde_json::Value> {
-        let session = self.sessions.get(session_id)?;
+    pub(super) fn session_restore_result(
+        &self,
+        session_id: &str,
+    ) -> Result<serde_json::Value, String> {
+        let session = self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| format!("unknown session: {session_id}"))?;
         let session_value = self.session_item_json(session_id, "live", None)?;
-        Some(serde_json::json!({
+        Ok(serde_json::json!({
             "sessionId": session_id,
             "session": session_value,
             "workspaceCheckpointTracking": session.workspace_checkpoint,
@@ -18,8 +24,11 @@ impl AcpServer {
         session_id: &str,
         live_state: &str,
         last_event_id: Option<u64>,
-    ) -> Option<serde_json::Value> {
-        let session = self.sessions.get(session_id)?;
+    ) -> Result<serde_json::Value, String> {
+        let session = self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| format!("unknown session: {session_id}"))?;
         let workspace_anchor = harn_vm::agent_sessions::workspace_anchor(session_id);
         let snapshot = harn_vm::agent_sessions::snapshot(session_id)
             .map(|value| harn_vm::llm::vm_value_to_json(&value))
@@ -45,8 +54,7 @@ impl AcpServer {
         }
         if let Some(anchor) = workspace_anchor.as_ref() {
             item["workspaceAnchor"] = anchor.to_json();
-            item["additionalDirectories"] =
-                serde_json::json!(anchor.additional_directories().ok()?);
+            item["additionalDirectories"] = serde_json::json!(anchor.additional_directories()?);
         } else {
             item["additionalDirectories"] = serde_json::json!([]);
         }
@@ -74,7 +82,7 @@ impl AcpServer {
         }
         meta.insert("harn".to_string(), serde_json::Value::Object(harn_meta));
         item["_meta"] = serde_json::Value::Object(meta);
-        Some(item)
+        Ok(item)
     }
 
     pub(super) fn session_matches_list_filters(
@@ -421,13 +429,22 @@ impl AcpServer {
             })
             .collect();
 
-        let mut result = self
-            .session_restore_result(&session_id)
-            .expect("validated session should still exist");
+        let mut result = match self.session_restore_result(&session_id) {
+            Ok(result) => result,
+            Err(error) => {
+                self.send_error(id, -32000, &error);
+                return;
+            }
+        };
         if durable_checkpoint.is_some() {
-            result["session"] = self
-                .session_item_json(&session_id, "live", durable_checkpoint)
-                .expect("restored session should still exist");
+            result["session"] =
+                match self.session_item_json(&session_id, "live", durable_checkpoint) {
+                    Ok(item) => item,
+                    Err(error) => {
+                        self.send_error(id, -32000, &error);
+                        return;
+                    }
+                };
         }
         result["replayed"] = serde_json::json!(replayed);
         self.send_response(id, result);
@@ -455,9 +472,13 @@ impl AcpServer {
             self.send_error(id, -32000, &message);
             return;
         }
-        let result = self
-            .session_restore_result(session_id)
-            .expect("validated session should still exist");
+        let result = match self.session_restore_result(session_id) {
+            Ok(result) => result,
+            Err(error) => {
+                self.send_error(id, -32000, &error);
+                return;
+            }
+        };
         self.send_response(id, result);
     }
 

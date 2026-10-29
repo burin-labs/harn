@@ -53,9 +53,14 @@ impl AcpServer {
             self.send_error(id, -32000, &message);
             return;
         }
-        let session = self
-            .session_item_json(&session_id, "live", None)
-            .unwrap_or_else(|| serde_json::json!({"sessionId": session_id}));
+        let session = match self.session_item_json(&session_id, "live", None) {
+            Ok(session) => session,
+            Err(error) => {
+                self.rollback_session_admission(&session_id);
+                self.send_error(id, -32000, &error);
+                return;
+            }
+        };
 
         self.send_response(
             id,

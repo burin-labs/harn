@@ -73,7 +73,8 @@ pub use schema::{
     HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 pub use sessions::{
-    acp_persisted_session_item, resolve_acp_session_project_root, AcpSessionProjectRootError,
+    acp_persisted_session_item, resolve_acp_session_project_root, try_acp_persisted_session_item,
+    AcpSessionProjectRootError,
 };
 use sessions::{
     cancel_session_command_handles, lookup_session_cancellation, preempt_session_interruption,
