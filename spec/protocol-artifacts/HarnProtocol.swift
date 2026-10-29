@@ -5779,136 +5779,6 @@ public struct HarnAgentEventTypedCheckpoint: Codable, Sendable, Equatable {
     public var checkpoint: HarnACPValue
 }
 
-public enum HarnAgentEventKind: String, Codable, Sendable, CaseIterable {
-    case agentLoopStallWarning = "agent_loop_stall_warning"
-    case agentScratchpadReorganization = "agent_scratchpad_reorganization"
-    case anchorChanged = "anchor_changed"
-    case boundaryFailure = "boundary_failure"
-    case budgetCircuitBreaker = "budget_circuit_breaker"
-    case budgetExhausted = "budget_exhausted"
-    case cacheHit = "cache_hit"
-    case cacheMiss = "cache_miss"
-    case capabilityGap = "capability_gap"
-    case codeLibrarianQueryNlFallback = "code_librarian_query_nl_fallback"
-    case compassRoutingDecision = "compass_routing_decision"
-    case compositionChildCall = "composition_child_call"
-    case compositionChildResult = "composition_child_result"
-    case compositionError = "composition_error"
-    case compositionFinish = "composition_finish"
-    case compositionStart = "composition_start"
-    case controlOutcome = "control_outcome"
-    case daemonWatchdogTripped = "daemon_watchdog_tripped"
-    case feedbackInjected = "feedback_injected"
-    case finalWrapup = "final_wrapup"
-    case hostAttachment = "host_attachment"
-    case hostToolResult = "host_tool_result"
-    case inputGuardrailVerdict = "input_guardrail_verdict"
-    case iterationEnd = "iteration_end"
-    case iterationStart = "iteration_start"
-    case judgeDecision = "judge_decision"
-    case judgeStarted = "judge_started"
-    case llmCallLog = "llm_call_log"
-    case llmFallbackAttempt = "llm_fallback_attempt"
-    case llmRoutingDecision = "llm_routing_decision"
-    case llmShadowDiff = "llm_shadow_diff"
-    case loopCheckpoint = "loop_checkpoint"
-    case loopControlDecision = "loop_control_decision"
-    case loopStuck = "loop_stuck"
-    case mcpAuthRequired = "mcp_auth_required"
-    case mcpCatalogChanged = "mcp_catalog_changed"
-    case mcpNotification = "mcp_notification"
-    case missingToolCallVerdict = "missing_tool_call_verdict"
-    case modelJob = "model_job"
-    case orchestrationDecision = "orchestration_decision"
-    case packThinkingStripped = "pack_thinking_stripped"
-    case progressReported = "progress_reported"
-    case providerUsage = "provider_usage"
-    case purposeLabel = "purpose_label"
-    case repairOutputContractApplied = "repair_output_contract_applied"
-    case requireSuccessfulToolsViolation = "require_successful_tools_violation"
-    case reservedTerminalVerify = "reserved_terminal_verify"
-    case scopeClassifierVerdict = "scope_classifier_verdict"
-    case selfConsistencyTie = "self_consistency_tie"
-    case semanticCacheHit = "semantic_cache_hit"
-    case semanticCacheMiss = "semantic_cache_miss"
-    case sessionClosed = "session_closed"
-    case sessionHealth = "session_health"
-    case stepJudgeDecision = "step_judge_decision"
-    case structuralValidatorDecision = "structural_validator_decision"
-    case subagentJoin = "subagent_join"
-    case subagentStop = "subagent_stop"
-    case toolBatchDisposition = "tool_batch_disposition"
-    case toolCallAudit = "tool_call_audit"
-    case toolFormatOverride = "tool_format_override"
-    case turnPhaseChanged = "turn_phase_changed"
-    case typedCheckpoint = "typed_checkpoint"
-
-    public static let allCases: [Self] = [
-        "agent_loop_stall_warning",
-        "agent_scratchpad_reorganization",
-        "anchor_changed",
-        "boundary_failure",
-        "budget_circuit_breaker",
-        "budget_exhausted",
-        "cache_hit",
-        "cache_miss",
-        "capability_gap",
-        "code_librarian_query_nl_fallback",
-        "compass_routing_decision",
-        "composition_child_call",
-        "composition_child_result",
-        "composition_error",
-        "composition_finish",
-        "composition_start",
-        "control_outcome",
-        "daemon_watchdog_tripped",
-        "feedback_injected",
-        "final_wrapup",
-        "host_attachment",
-        "host_tool_result",
-        "input_guardrail_verdict",
-        "iteration_end",
-        "iteration_start",
-        "judge_decision",
-        "judge_started",
-        "llm_call_log",
-        "llm_fallback_attempt",
-        "llm_routing_decision",
-        "llm_shadow_diff",
-        "loop_checkpoint",
-        "loop_control_decision",
-        "loop_stuck",
-        "mcp_auth_required",
-        "mcp_catalog_changed",
-        "mcp_notification",
-        "missing_tool_call_verdict",
-        "model_job",
-        "orchestration_decision",
-        "pack_thinking_stripped",
-        "progress_reported",
-        "provider_usage",
-        "purpose_label",
-        "repair_output_contract_applied",
-        "require_successful_tools_violation",
-        "reserved_terminal_verify",
-        "scope_classifier_verdict",
-        "self_consistency_tie",
-        "semantic_cache_hit",
-        "semantic_cache_miss",
-        "session_closed",
-        "session_health",
-        "step_judge_decision",
-        "structural_validator_decision",
-        "subagent_join",
-        "subagent_stop",
-        "tool_batch_disposition",
-        "tool_call_audit",
-        "tool_format_override",
-        "turn_phase_changed",
-        "typed_checkpoint",
-    ].map { Self(rawValue: $0)! }
-}
-
 /// The typed body of one `_harn/agentEvent` notification.
 public enum HarnAgentEventPayload: Sendable, Equatable {
     case agentLoopStallWarning([String: HarnACPValue])
@@ -5978,9 +5848,139 @@ public enum HarnAgentEventPayload: Sendable, Equatable {
 /// The params of one `_harn/agentEvent` notification. `fields` keeps every
 /// params member, including those of a body Harn does not type. Decoding
 /// fails for a kind this binding does not name.
-public struct HarnAgentEvent: Codable, Sendable, Equatable {
+public struct HarnAgentEventParams: Codable, Sendable, Equatable {
+    public enum Kind: String, Codable, Sendable, CaseIterable {
+        case agentLoopStallWarning = "agent_loop_stall_warning"
+        case agentScratchpadReorganization = "agent_scratchpad_reorganization"
+        case anchorChanged = "anchor_changed"
+        case boundaryFailure = "boundary_failure"
+        case budgetCircuitBreaker = "budget_circuit_breaker"
+        case budgetExhausted = "budget_exhausted"
+        case cacheHit = "cache_hit"
+        case cacheMiss = "cache_miss"
+        case capabilityGap = "capability_gap"
+        case codeLibrarianQueryNlFallback = "code_librarian_query_nl_fallback"
+        case compassRoutingDecision = "compass_routing_decision"
+        case compositionChildCall = "composition_child_call"
+        case compositionChildResult = "composition_child_result"
+        case compositionError = "composition_error"
+        case compositionFinish = "composition_finish"
+        case compositionStart = "composition_start"
+        case controlOutcome = "control_outcome"
+        case daemonWatchdogTripped = "daemon_watchdog_tripped"
+        case feedbackInjected = "feedback_injected"
+        case finalWrapup = "final_wrapup"
+        case hostAttachment = "host_attachment"
+        case hostToolResult = "host_tool_result"
+        case inputGuardrailVerdict = "input_guardrail_verdict"
+        case iterationEnd = "iteration_end"
+        case iterationStart = "iteration_start"
+        case judgeDecision = "judge_decision"
+        case judgeStarted = "judge_started"
+        case llmCallLog = "llm_call_log"
+        case llmFallbackAttempt = "llm_fallback_attempt"
+        case llmRoutingDecision = "llm_routing_decision"
+        case llmShadowDiff = "llm_shadow_diff"
+        case loopCheckpoint = "loop_checkpoint"
+        case loopControlDecision = "loop_control_decision"
+        case loopStuck = "loop_stuck"
+        case mcpAuthRequired = "mcp_auth_required"
+        case mcpCatalogChanged = "mcp_catalog_changed"
+        case mcpNotification = "mcp_notification"
+        case missingToolCallVerdict = "missing_tool_call_verdict"
+        case modelJob = "model_job"
+        case orchestrationDecision = "orchestration_decision"
+        case packThinkingStripped = "pack_thinking_stripped"
+        case progressReported = "progress_reported"
+        case providerUsage = "provider_usage"
+        case purposeLabel = "purpose_label"
+        case repairOutputContractApplied = "repair_output_contract_applied"
+        case requireSuccessfulToolsViolation = "require_successful_tools_violation"
+        case reservedTerminalVerify = "reserved_terminal_verify"
+        case scopeClassifierVerdict = "scope_classifier_verdict"
+        case selfConsistencyTie = "self_consistency_tie"
+        case semanticCacheHit = "semantic_cache_hit"
+        case semanticCacheMiss = "semantic_cache_miss"
+        case sessionClosed = "session_closed"
+        case sessionHealth = "session_health"
+        case stepJudgeDecision = "step_judge_decision"
+        case structuralValidatorDecision = "structural_validator_decision"
+        case subagentJoin = "subagent_join"
+        case subagentStop = "subagent_stop"
+        case toolBatchDisposition = "tool_batch_disposition"
+        case toolCallAudit = "tool_call_audit"
+        case toolFormatOverride = "tool_format_override"
+        case turnPhaseChanged = "turn_phase_changed"
+        case typedCheckpoint = "typed_checkpoint"
+
+        public static let allCases: [Self] = [
+            "agent_loop_stall_warning",
+            "agent_scratchpad_reorganization",
+            "anchor_changed",
+            "boundary_failure",
+            "budget_circuit_breaker",
+            "budget_exhausted",
+            "cache_hit",
+            "cache_miss",
+            "capability_gap",
+            "code_librarian_query_nl_fallback",
+            "compass_routing_decision",
+            "composition_child_call",
+            "composition_child_result",
+            "composition_error",
+            "composition_finish",
+            "composition_start",
+            "control_outcome",
+            "daemon_watchdog_tripped",
+            "feedback_injected",
+            "final_wrapup",
+            "host_attachment",
+            "host_tool_result",
+            "input_guardrail_verdict",
+            "iteration_end",
+            "iteration_start",
+            "judge_decision",
+            "judge_started",
+            "llm_call_log",
+            "llm_fallback_attempt",
+            "llm_routing_decision",
+            "llm_shadow_diff",
+            "loop_checkpoint",
+            "loop_control_decision",
+            "loop_stuck",
+            "mcp_auth_required",
+            "mcp_catalog_changed",
+            "mcp_notification",
+            "missing_tool_call_verdict",
+            "model_job",
+            "orchestration_decision",
+            "pack_thinking_stripped",
+            "progress_reported",
+            "provider_usage",
+            "purpose_label",
+            "repair_output_contract_applied",
+            "require_successful_tools_violation",
+            "reserved_terminal_verify",
+            "scope_classifier_verdict",
+            "self_consistency_tie",
+            "semantic_cache_hit",
+            "semantic_cache_miss",
+            "session_closed",
+            "session_health",
+            "step_judge_decision",
+            "structural_validator_decision",
+            "subagent_join",
+            "subagent_stop",
+            "tool_batch_disposition",
+            "tool_call_audit",
+            "tool_format_override",
+            "turn_phase_changed",
+            "typed_checkpoint",
+        ].map { Self(rawValue: $0)! }
+    }
+
     public let sessionId: String
-    public let kind: HarnAgentEventKind
+    public let kind: Kind
     public let payload: HarnAgentEventPayload
     public let fields: [String: HarnACPValue]
 
@@ -5990,7 +5990,7 @@ public struct HarnAgentEvent: Codable, Sendable, Equatable {
         guard case .string(let sessionId)? = fields["sessionId"] else {
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "agent event without sessionId")
         }
-        guard case .string(let rawKind)? = fields["kind"], let kind = HarnAgentEventKind(rawValue: rawKind) else {
+        guard case .string(let rawKind)? = fields["kind"], let kind = Kind(rawValue: rawKind) else {
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "unknown agent event kind")
         }
         self.sessionId = sessionId

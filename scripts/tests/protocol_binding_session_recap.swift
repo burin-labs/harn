@@ -19,11 +19,11 @@ private func checkAgentEvents(_ path: String) throws {
         with: Data(contentsOf: URL(fileURLWithPath: path))
     ) as! [[String: Any]]
     for params in events {
-        try roundTrip(HarnAgentEvent.self, params, params)
+        try roundTrip(HarnAgentEventParams.self, params, params)
         let decoded = try JSONDecoder().decode(
-            HarnAgentEvent.self, from: JSONSerialization.data(withJSONObject: params))
+            HarnAgentEventParams.self, from: JSONSerialization.data(withJSONObject: params))
         let body = Mirror(reflecting: decoded.payload).children.first?.value
-        let openKinds: Set<HarnAgentEventKind> = [.sessionHealth, .reservedTerminalVerify, .agentLoopStallWarning]
+        let openKinds: Set<HarnAgentEventParams.Kind> = [.sessionHealth, .reservedTerminalVerify, .agentLoopStallWarning]
         if body is [String: HarnACPValue], !openKinds.contains(decoded.kind) {
             throw RecapBindingProbeError.agentEventDecodedAsUntyped(decoded.kind.rawValue)
         }
@@ -35,7 +35,7 @@ private func checkAgentEvents(_ path: String) throws {
     ] {
         do {
             _ = try JSONDecoder().decode(
-                HarnAgentEvent.self, from: JSONSerialization.data(withJSONObject: invalid))
+                HarnAgentEventParams.self, from: JSONSerialization.data(withJSONObject: invalid))
         } catch {
             continue
         }

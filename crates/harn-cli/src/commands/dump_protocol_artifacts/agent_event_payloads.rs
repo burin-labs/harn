@@ -133,8 +133,6 @@ impl AgentEventPayloads {
     }
 
     fn append_swift(&self, out: &mut String) {
-        let kinds: Vec<String> = self.variants.iter().map(|v| v.kind.clone()).collect();
-        out.push_str(&super::swift::swift_enum("HarnAgentEventKind", &kinds));
         out.push_str("/// The typed body of one `_harn/agentEvent` notification.\npublic enum HarnAgentEventPayload: Sendable, Equatable {\n");
         for variant in &self.variants {
             out.push_str(&format!(
@@ -144,13 +142,26 @@ impl AgentEventPayloads {
             ));
         }
         out.push_str("}\n\n");
+        // The kind enum nests so it cannot collide with a host's own top-level type.
+        let kinds: Vec<String> = self.variants.iter().map(|v| v.kind.clone()).collect();
+        let kind_enum = super::swift::swift_enum("Kind", &kinds);
         out.push_str(
             "/// The params of one `_harn/agentEvent` notification. `fields` keeps every\n\
              /// params member, including those of a body Harn does not type. Decoding\n\
              /// fails for a kind this binding does not name.\n\
-             public struct HarnAgentEvent: Codable, Sendable, Equatable {\n    \
+             public struct HarnAgentEventParams: Codable, Sendable, Equatable {\n",
+        );
+        for line in kind_enum.trim_end().lines() {
+            if !line.is_empty() {
+                out.push_str("    ");
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        out.push_str(
+            "\n    \
              public let sessionId: String\n    \
-             public let kind: HarnAgentEventKind\n    \
+             public let kind: Kind\n    \
              public let payload: HarnAgentEventPayload\n    \
              public let fields: [String: HarnACPValue]\n\n    \
              public init(from decoder: Decoder) throws {\n        \
@@ -159,7 +170,7 @@ impl AgentEventPayloads {
              guard case .string(let sessionId)? = fields[\"sessionId\"] else {\n            \
              throw DecodingError.dataCorruptedError(in: container, debugDescription: \"agent event without sessionId\")\n        \
              }\n        \
-             guard case .string(let rawKind)? = fields[\"kind\"], let kind = HarnAgentEventKind(rawValue: rawKind) else {\n            \
+             guard case .string(let rawKind)? = fields[\"kind\"], let kind = Kind(rawValue: rawKind) else {\n            \
              throw DecodingError.dataCorruptedError(in: container, debugDescription: \"unknown agent event kind\")\n        \
              }\n        \
              self.sessionId = sessionId\n        \
