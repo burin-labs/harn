@@ -1152,7 +1152,7 @@ const ALIASES_UNREADABLE_UNDER_C: fn(GitAliasContext) -> dict = { context ->
 }
 
 const COMMIT_LOG_GREP_BUILTINS: fn(string) -> list<string> = { _program ->
-  ["commit", "grep", "log", "stash"]
+  ["commit", "grep", "log", "stash", "status"]
 }
 
 fn guard_with_git_facts(command: string) -> ShellGuardDecision {
@@ -1177,8 +1177,14 @@ pipeline test_descriptor_duplication_and_escapes_keep_git_builtins_allowed(
   task: unknown,
 ) {
   // A backslash that only quotes one character constructs no assignment, on every runtime.
-  const escaped = guard_with_git_facts("git -C /w grep -n \"a\\|b\" HEAD")
-  assert(escaped.allow, "an escaped pipe inside quotes is plain data: " + escaped.reason)
+  for command in [
+    "git -C /w grep -n \"a\\|b\" HEAD",
+    "git -C /w status && git -C /w log -S \"a\\|b\" --oneline",
+    "git -C /w status; git -C /w log -S foo --oneline",
+  ] {
+    const escaped = guard_with_git_facts(command)
+    assert(escaped.allow, command + " carries only plain data: " + escaped.reason)
+  }
   // NEGATIVE CONTROL: the injected facts are load-bearing. A verb that is not a builtin must
   // consult the unreadable configuration and refuse, so the allows above are not vacuous.
   assert(!guard_with_git_facts("git -C /w lg \"a\\|b\"").allow)
@@ -1192,6 +1198,7 @@ pipeline test_descriptor_duplication_and_escapes_keep_git_builtins_allowed(
     "git -C /w commit -m x > log 2>&1; echo c=$?",
     "cd /w && git log 2>&1",
     "git -C /w log >&2",
+    "git -C /w status 2>&1; git -C /w log -S foo 2>&1",
   ] {
     const allowed = guard_with_git_facts(command)
     assert(allowed.allow, command + " duplicates a descriptor only: " + allowed.reason)
