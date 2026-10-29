@@ -2021,7 +2021,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-    "expression": "__agent_mcp_initialize_advisory_prompt(opts)",
+    "expression": "__agent_mcp_initialize_advisory_prompt(harness.fs, opts)",
     "owner": "__agent_mcp_initialize_advisory_prompt",
     "evidence": "Consumer __agent_mcp_initialize_advisory_prompt.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
