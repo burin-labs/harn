@@ -33,12 +33,23 @@ pub(super) async fn run_connect_status(args: &ConnectStatusArgs) -> Result<(), S
             ))
         );
     } else if report.connectors.is_empty() {
-        println!("No connector providers declared in the nearest harn.toml.");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "No connector providers declared in the nearest harn.toml."
+            )
+        );
     } else {
         for status in &report.connectors {
             println!(
-                "{}\t{}\tusable={}\t{}",
-                status.id, status.status, status.usable, status.reason
+                "{}",
+                crate::localization::formatted!(
+                    "{}\t{}\tusable={}\t{}",
+                    status.id,
+                    status.status,
+                    status.usable,
+                    status.reason
+                )
             );
         }
     }
@@ -57,10 +68,19 @@ pub(super) fn run_connect_setup_plan(args: &ConnectSetupPlanArgs) -> Result<(), 
             ))
         );
     } else {
-        println!("Connector: {}", plan.connector);
-        println!("Installed: {}", plan.installed);
+        println!(
+            "{}",
+            crate::localization::formatted!("Connector: {}", plan.connector)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("Installed: {}", plan.installed)
+        );
         if let Some(auth_type) = plan.auth_type.as_deref() {
-            println!("Auth: {auth_type}");
+            println!(
+                "{}",
+                crate::localization::formatted!("Auth: {auth_type}", auth_type = auth_type)
+            );
         }
         for step in &plan.steps {
             println!("- {}", step.title);

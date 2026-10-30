@@ -8,26 +8,53 @@ pub(super) async fn run(args: OrchestratorFireArgs) -> Result<(), OrchestratorEr
     let event = synthetic_event_for_binding(&ctx, &args.binding_id)?;
     let handle = trigger_fire(&mut ctx, &args.binding_id, event).await?;
 
-    println!("Synthetic event dispatched:");
-    println!("- binding_id={}", handle.binding_id);
-    println!("- binding_version={}", handle.binding_version);
-    println!("- event_id={}", handle.event_id);
-    println!("- status={}", handle.status);
     println!(
-        "- replay_of_event_id={}",
-        handle.replay_of_event_id.as_deref().unwrap_or("-")
+        "{}",
+        crate::localization::formatted!("Synthetic event dispatched:")
     );
     println!(
-        "- dlq_entry_id={}",
-        handle.dlq_entry_id.as_deref().unwrap_or("-")
+        "{}",
+        crate::localization::formatted!("- binding_id={}", handle.binding_id)
     );
-    println!("- error={}", handle.error.as_deref().unwrap_or("-"));
     println!(
-        "- result={}",
-        handle
-            .result
-            .map(|result| result.to_string())
-            .unwrap_or_else(|| "-".to_string())
+        "{}",
+        crate::localization::formatted!("- binding_version={}", handle.binding_version)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("- event_id={}", handle.event_id)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("- status={}", handle.status)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "- replay_of_event_id={}",
+            handle.replay_of_event_id.as_deref().unwrap_or("-")
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "- dlq_entry_id={}",
+            handle.dlq_entry_id.as_deref().unwrap_or("-")
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("- error={}", handle.error.as_deref().unwrap_or("-"))
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "- result={}",
+            handle
+                .result
+                .map(|result| result.to_string())
+                .unwrap_or_else(|| "-".to_string())
+        )
     );
     Ok(())
 }

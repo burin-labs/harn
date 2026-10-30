@@ -49,12 +49,21 @@ pub(crate) async fn run(args: LocalListArgs, base_dir: &Path) -> Result<(), Stri
 
 fn render_table(snapshots: &[LocalProviderSnapshot]) {
     if snapshots.is_empty() {
-        println!("(no local providers known)");
+        println!(
+            "{}",
+            crate::localization::formatted!("(no local providers known)")
+        );
         return;
     }
     println!(
-        "{:<10} {:<28} {:<8} {:<14} LOADED",
-        "PROVIDER", "URL", "PORT", "STATUS"
+        "{}",
+        crate::localization::formatted!(
+            "{:<10} {:<28} {:<8} {:<14} LOADED",
+            "PROVIDER",
+            "URL",
+            "PORT",
+            "STATUS"
+        )
     );
     for snapshot in snapshots {
         let port = snapshot

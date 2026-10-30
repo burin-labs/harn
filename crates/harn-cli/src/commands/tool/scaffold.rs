@@ -50,9 +50,12 @@ pub(crate) async fn run_new(args: &ToolNewArgs) -> Result<(), PackageError> {
     generate_package_docs_impl(Some(&dest), None, false)?;
 
     println!(
-        "Scaffolded tool package '{}' at {}",
-        args.name,
-        dest.display()
+        "{}",
+        crate::localization::formatted!(
+            "Scaffolded tool package '{}' at {}",
+            args.name,
+            dest.display()
+        )
     );
     println!("  harn package verify");
     Ok(())

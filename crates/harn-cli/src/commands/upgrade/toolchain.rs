@@ -35,11 +35,14 @@ fn run_blocking(args: SelfArgs) -> Result<i32, String> {
         SelfCommand::Install { version } => {
             let (binary, downloaded) = ensure_installed(&root, &version)?;
             println!(
-                "{} {} ({}) at {}",
-                if downloaded { "Installed" } else { "Cached" },
-                binary.version,
-                binary.revision,
-                binary.path.display()
+                "{}",
+                crate::localization::formatted!(
+                    "{} {} ({}) at {}",
+                    if downloaded { "Installed" } else { "Cached" },
+                    binary.version,
+                    binary.revision,
+                    binary.path.display()
+                )
             );
             Ok(0)
         }
@@ -57,7 +60,10 @@ fn run_blocking(args: SelfArgs) -> Result<i32, String> {
                 if valid_version_dir(&root, &version, &path)? {
                     fs::remove_dir_all(&path)
                         .map_err(|error| format!("failed to prune {}: {error}", path.display()))?;
-                    println!("Pruned {version}");
+                    println!(
+                        "{}",
+                        crate::localization::formatted!("Pruned {version}", version = version)
+                    );
                 }
             }
             Ok(0)

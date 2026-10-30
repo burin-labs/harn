@@ -651,7 +651,13 @@ async fn run_oauth_connect_inner(
                 "browser open failed because --no-open was requested",
             ));
         }
-        println!("Open this URL manually:\n{auth_url}");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Open this URL manually:\n{auth_url}",
+                auth_url = auth_url
+            )
+        );
     } else if webbrowser::open(auth_url.as_str()).is_err() {
         if request.json {
             return Err(setup_failure(
@@ -660,7 +666,13 @@ async fn run_oauth_connect_inner(
                 "browser open failed",
             ));
         }
-        println!("Open this URL manually:\n{auth_url}");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Open this URL manually:\n{auth_url}",
+                auth_url = auth_url
+            )
+        );
     }
 
     reporter.progress(
@@ -759,23 +771,21 @@ async fn run_oauth_connect_inner(
         ));
     }
     if stored.refresh_token.is_none() && !request.json {
-        eprintln!(
-            "note: {} did not issue a refresh token, so `harn connect --refresh {}` and \
-             std/oauth refresh will not work once the access token expires. If the provider \
-             needs a parameter for offline access, declare it under \
-             [providers.oauth] authorization_params.",
-            request.provider, request.provider
-        );
+        eprintln!("{}", crate::localization::formatted!("note: {} did not issue a refresh token, so `harn connect --refresh {}` and std/oauth refresh will not work once the access token expires. If the provider needs a parameter for offline access, declare it under [providers.oauth] authorization_params.",
+            request.provider, request.provider));
     }
 
     reporter.succeeded("The service is connected.");
     if !request.json {
         println!(
-            "Expires: {}",
-            stored
-                .expires_at_unix
-                .map(format_expiry)
-                .unwrap_or_else(|| "unknown".to_string())
+            "{}",
+            crate::localization::formatted!(
+                "Expires: {}",
+                stored
+                    .expires_at_unix
+                    .map(format_expiry)
+                    .unwrap_or_else(|| "unknown".to_string())
+            )
         );
     }
 
@@ -973,7 +983,13 @@ pub(super) async fn run_connect_refresh(
                 .map_err(|error| format!("failed to encode JSON output: {error}"))?
         );
     } else {
-        println!("Refreshed OAuth token for {provider_name}.");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Refreshed OAuth token for {provider_name}.",
+                provider_name = provider_name
+            )
+        );
     }
     Ok(())
 }

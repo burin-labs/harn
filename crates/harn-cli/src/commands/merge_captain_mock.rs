@@ -88,11 +88,17 @@ pub(crate) fn run_cleanup(args: &MergeCaptainMockCleanupArgs) -> i32 {
     let dir = Path::new(&args.dir);
     match playground::cleanup_playground_at(dir) {
         Ok(true) => {
-            println!("removed {}", dir.display());
+            println!(
+                "{}",
+                crate::localization::formatted!("removed {}", dir.display())
+            );
             0
         }
         Ok(false) => {
-            println!("nothing to remove at {}", dir.display());
+            println!(
+                "{}",
+                crate::localization::formatted!("nothing to remove at {}", dir.display())
+            );
             0
         }
         Err(error) => {
@@ -206,9 +212,12 @@ pub(crate) fn run_step(args: &MergeCaptainMockStepArgs) -> i32 {
             println!("{line}");
         }
         println!(
-            "applied {} action(s) ({} PR(s) touched)",
-            report.actions_applied,
-            report.prs_touched.len()
+            "{}",
+            crate::localization::formatted!(
+                "applied {} action(s) ({} PR(s) touched)",
+                report.actions_applied,
+                report.prs_touched.len()
+            )
         );
     }
     0
@@ -521,34 +530,49 @@ fn fake_into_response(response: playground::FakeResponse) -> (StatusCode, Json<V
 }
 
 fn print_status_text(state: &playground::PlaygroundState) {
-    println!("scenario: {}", state.scenario);
-    println!("owner:    {}", state.owner);
-    println!("step_count: {}", state.step_count);
-    println!("repos:");
+    println!(
+        "{}",
+        crate::localization::formatted!("scenario: {}", state.scenario)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("owner:    {}", state.owner)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("step_count: {}", state.step_count)
+    );
+    println!("{}", crate::localization::formatted!("repos:"));
     for repo in state.repos.values() {
         println!(
-            "  {} (default={}, branches={}, remote={})",
-            repo.name,
-            repo.default_branch,
-            repo.branches.len(),
-            repo.remote_url
+            "{}",
+            crate::localization::formatted!(
+                "  {} (default={}, branches={}, remote={})",
+                repo.name,
+                repo.default_branch,
+                repo.branches.len(),
+                repo.remote_url
+            )
         );
     }
-    println!("pull_requests:");
+    println!("{}", crate::localization::formatted!("pull_requests:"));
     for pr in state.pull_requests.values() {
         let head_sha = pr.head_sha.as_deref().unwrap_or("?");
         println!(
-            "  {} state={} head={}@{} mergeable={} state_v3={}",
-            pr.key(),
-            pr.state,
-            pr.head_branch,
-            short_sha(head_sha),
-            match pr.mergeable {
-                Some(true) => "yes",
-                Some(false) => "no",
-                None => "?",
-            },
-            pr.mergeable_state
+            "{}",
+            crate::localization::formatted!(
+                "  {} state={} head={}@{} mergeable={} state_v3={}",
+                pr.key(),
+                pr.state,
+                pr.head_branch,
+                short_sha(head_sha),
+                match pr.mergeable {
+                    Some(true) => "yes",
+                    Some(false) => "no",
+                    None => "?",
+                },
+                pr.mergeable_state
+            )
         );
     }
 }

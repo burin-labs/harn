@@ -114,23 +114,33 @@ fn emit_text(
     live: &[(String, rate_governor::GovernorSnapshot)],
 ) {
     println!(
-        "rate governor (flag llm.rate_governor: {})",
-        if flag_on { "ON" } else { "OFF" }
+        "{}",
+        crate::localization::formatted!(
+            "rate governor (flag llm.rate_governor: {})",
+            if flag_on { "ON" } else { "OFF" }
+        )
     );
-    println!("\nresolved limits (from catalog):");
+    println!(
+        "{}",
+        crate::localization::formatted!("\nresolved limits (from catalog):")
+    );
     for p in providers {
         let l = rate_governor::resolved_limits_for(p);
         println!(
-            "  {p}: concurrency {}..{}{}{}, adaptive={}, backoff {}ms..{}ms x{}{}",
-            l.min_concurrency,
-            l.max_concurrency,
-            l.rpm.map(|r| format!(", rpm={r}")).unwrap_or_default(),
-            l.tpm.map(|t| format!(", tpm={t}")).unwrap_or_default(),
-            l.adaptive,
-            l.backoff_base_ms,
-            l.backoff_max_ms,
-            l.backoff_multiplier,
-            if l.backoff_jitter { " jitter" } else { "" },
+            "{}",
+            crate::localization::formatted!(
+                "  {p}: concurrency {}..{}{}{}, adaptive={}, backoff {}ms..{}ms x{}{}",
+                l.min_concurrency,
+                l.max_concurrency,
+                l.rpm.map(|r| format!(", rpm={r}")).unwrap_or_default(),
+                l.tpm.map(|t| format!(", tpm={t}")).unwrap_or_default(),
+                l.adaptive,
+                l.backoff_base_ms,
+                l.backoff_max_ms,
+                l.backoff_multiplier,
+                if l.backoff_jitter { " jitter" } else { "" },
+                p = p
+            )
         );
     }
 
@@ -148,16 +158,28 @@ fn emit_text(
 
     if shown.is_empty() {
         if flag_on {
-            println!("\nlive governors: none yet (no calls have flowed)");
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "\nlive governors: none yet (no calls have flowed)"
+                )
+            );
         } else {
-            println!("\nlive governors: (flag off — no governor state is tracked)");
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "\nlive governors: (flag off — no governor state is tracked)"
+                )
+            );
         }
         return;
     }
-    println!("\nlive governors (provider::org_key):");
+    println!(
+        "{}",
+        crate::localization::formatted!("\nlive governors (provider::org_key):")
+    );
     for (route, snap) in shown {
-        println!(
-            "  {route}: circuit={}, concurrency={} ({}..{}), in_flight={}, throttles={}, open_cycles={}, last_signal={}",
+        println!("{}", crate::localization::formatted!("  {route}: circuit={}, concurrency={} ({}..{}), in_flight={}, throttles={}, open_cycles={}, last_signal={}",
             snap.circuit_state,
             snap.concurrency_limit,
             snap.min_concurrency,
@@ -165,7 +187,6 @@ fn emit_text(
             snap.in_flight,
             snap.consecutive_throttles,
             snap.open_cycles,
-            snap.last_signal.unwrap_or("none"),
-        );
+            snap.last_signal.unwrap_or("none"), route = route));
     }
 }

@@ -90,10 +90,13 @@ async fn dispatch(args: ProviderToolCalibrateArgs) -> i32 {
         }
     } else {
         println!(
-            "wrote {} records and {} route recommendations to {}",
-            store.records.len(),
-            store.recommendations.len(),
-            args.output.display()
+            "{}",
+            crate::localization::formatted!(
+                "wrote {} records and {} route recommendations to {}",
+                store.records.len(),
+                store.recommendations.len(),
+                args.output.display()
+            )
         );
     }
     0

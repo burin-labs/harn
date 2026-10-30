@@ -34,7 +34,10 @@ pub(super) fn run(args: &PrecompileArgs) {
             Ok(()) => {
                 prepared += 1;
                 if !args.quiet {
-                    println!("{} -> runtime cache", source.display());
+                    println!(
+                        "{}",
+                        crate::localization::formatted!("{} -> runtime cache", source.display())
+                    );
                 }
             }
             Err(error) => {

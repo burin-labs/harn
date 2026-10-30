@@ -404,17 +404,26 @@ fn json_type_name(value: &JsonValue) -> &'static str {
 
 /// Render the divergence for the human (non-`--json`) replay path.
 pub(crate) fn print_human(report: &CounterfactualReport) {
-    println!("Counterfactual: {} ({})", report.plan_path, report.result);
+    println!(
+        "{}",
+        crate::localization::formatted!("Counterfactual: {} ({})", report.plan_path, report.result)
+    );
     if report.diverged.is_empty() {
-        println!("  no files would diverge from the recorded outcome.");
+        println!(
+            "{}",
+            crate::localization::formatted!("  no files would diverge from the recorded outcome.")
+        );
     } else {
         println!(
-            "  would touch {} file(s) (+{} / -{} lines, {} op(s) applied, {} rejected):",
-            report.files_touched,
-            report.lines_added,
-            report.lines_removed,
-            report.ops_applied,
-            report.ops_rejected,
+            "{}",
+            crate::localization::formatted!(
+                "  would touch {} file(s) (+{} / -{} lines, {} op(s) applied, {} rejected):",
+                report.files_touched,
+                report.lines_added,
+                report.lines_removed,
+                report.ops_applied,
+                report.ops_rejected,
+            )
         );
         for file in &report.diverged {
             println!(

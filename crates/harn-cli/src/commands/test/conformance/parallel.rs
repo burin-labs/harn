@@ -358,7 +358,13 @@ fn print_text_report(
     }
     if show_timing {
         println!();
-        println!("Total time: {duration_ms} ms");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Total time: {duration_ms} ms",
+                duration_ms = duration_ms
+            )
+        );
         let test_report = test_report_from_conformance(suite_root, duration_ms, &report.results);
         print_per_test_timing(&test_report);
     }
@@ -372,7 +378,7 @@ fn print_text_report(
     for failure in failures {
         if !printed_header {
             println!();
-            println!("Failures:");
+            println!("{}", crate::localization::formatted!("Failures:"));
             printed_header = true;
         }
         println!(

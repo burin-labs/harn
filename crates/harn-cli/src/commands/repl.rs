@@ -433,8 +433,16 @@ async fn run_repl_interactive() {
         DefaultPrompt, DefaultPromptSegment, Emacs, FileBackedHistory, Reedline, Signal,
     };
 
-    println!("Harn REPL v{}", env!("CARGO_PKG_VERSION"));
-    println!("Type expressions or statements. Ctrl+C or Ctrl+D to exit.");
+    println!(
+        "{}",
+        crate::localization::formatted!("Harn REPL v{}", env!("CARGO_PKG_VERSION"))
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "Type expressions or statements. Ctrl+C or Ctrl+D to exit."
+        )
+    );
 
     let completion_entries = repl_completion_entries();
 
@@ -490,7 +498,7 @@ async fn run_repl_interactive() {
                 session.eval_line(&line).await;
             }
             Ok((_, Ok(Signal::CtrlC))) | Ok((_, Ok(Signal::CtrlD))) => {
-                println!("Goodbye!");
+                println!("{}", crate::localization::formatted!("Goodbye!"));
                 break;
             }
             Ok((_, Ok(_))) => {

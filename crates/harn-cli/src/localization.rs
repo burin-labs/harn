@@ -5,9 +5,16 @@ use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use clap::{Command, CommandFactory};
-use harn_hostlib::localization::{self as shared, process_locale, Locale};
+pub(crate) use harn_hostlib::localization::Locale;
+use harn_hostlib::localization::{self as shared, process_locale};
 
 use crate::cli::Cli;
+
+include!(concat!(env!("OUT_DIR"), "/localization_formats.rs"));
+
+pub(crate) fn selected_locale() -> Locale {
+    process_locale()
+}
 
 const CATALOGS: [(&str, &str); 8] = [
     ("es", include_str!("localization/es.json")),
@@ -114,6 +121,10 @@ fn command_for(locale: &str) -> Command {
 /// Canonical English source for translators and the existing CLI drift guard.
 pub(crate) fn source_catalog() -> Catalog {
     let mut catalog = shared::collect_help_messages(Cli::command());
+    catalog.extend(
+        serde_json::from_str::<Catalog>(include_str!("localization_formats.json"))
+            .expect("checked command-result templates"),
+    );
     for source in RUNTIME_MESSAGES {
         catalog.insert(source.to_owned(), source.to_owned());
     }
@@ -185,7 +196,7 @@ mod tests {
                     tokens
                 };
                 assert_eq!(
-                    tokens(key),
+                    tokens(&source[key]),
                     tokens(value),
                     "{locale} changed CLI syntax in {key}"
                 );

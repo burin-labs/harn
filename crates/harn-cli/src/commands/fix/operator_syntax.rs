@@ -91,16 +91,23 @@ pub(super) fn print_report(report: &OperatorSyntaxReport) {
         "changed"
     };
     println!(
-        "operator syntax migration: scanned={} {verb}={} failed={} excluded={}",
-        report.scanned_file_count,
-        report.changed_file_count,
-        report.failed_file_count,
-        report.excluded_file_count
+        "{}",
+        crate::localization::formatted!(
+            "operator syntax migration: scanned={} {verb}={} failed={} excluded={}",
+            report.scanned_file_count,
+            report.changed_file_count,
+            report.failed_file_count,
+            report.excluded_file_count,
+            verb = verb
+        )
     );
     for file in &report.changed_files {
         println!("  {verb} {file}");
     }
     for failure in &report.failed_files {
-        println!("  failed {}: {}", failure.file, failure.reason);
+        println!(
+            "{}",
+            crate::localization::formatted!("  failed {}: {}", failure.file, failure.reason)
+        );
     }
 }

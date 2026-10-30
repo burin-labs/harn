@@ -2,19 +2,23 @@ use super::*;
 
 pub(super) fn print_human_plan(plan: &RepairPlan) {
     if plan.repairs.is_empty() && plan.skipped_files.is_empty() {
-        println!("{}: no repairable diagnostics found", plan.path);
+        println!(
+            "{}",
+            crate::localization::formatted!("{}: no repairable diagnostics found", plan.path)
+        );
         print_frozen_callables(&plan.frozen_callables);
         return;
     }
     if !plan.repairs.is_empty() {
         println!(
-            "{}: {} repairable diagnostic(s)",
-            plan.path,
-            plan.repairs.len()
+            "{}",
+            crate::localization::formatted!(
+                "{}: {} repairable diagnostic(s)",
+                plan.path,
+                plan.repairs.len()
+            )
         );
-        println!(
-            "idx  code          safety               edits  clean  impact                    repair"
-        );
+        println!("{}", crate::localization::formatted!("idx  code          safety               edits  clean  impact                    repair"));
         for repair in &plan.repairs {
             let clean = if repair.applies_cleanly { "yes" } else { "no" };
             println!(
@@ -28,7 +32,10 @@ pub(super) fn print_human_plan(plan: &RepairPlan) {
                 repair.repair.id
             );
             for note in &repair.impact.notes {
-                println!("      note: {note}");
+                println!(
+                    "{}",
+                    crate::localization::formatted!("      note: {note}", note = note)
+                );
             }
         }
     }
@@ -48,11 +55,14 @@ pub(super) fn print_parameter_annotations(summary: Option<&ParameterAnnotationsW
         return;
     };
     println!(
-        "annotated {} parameter(s): {} inferred, {} left as `unknown` ({:.1}%)",
-        summary.total,
-        summary.inferred,
-        summary.unresolved,
-        summary.unresolved_share * 100.0
+        "{}",
+        crate::localization::formatted!(
+            "annotated {} parameter(s): {} inferred, {} left as `unknown` ({:.1}%)",
+            summary.total,
+            summary.inferred,
+            summary.unresolved,
+            summary.unresolved_share * 100.0
+        )
     );
     for (cause, count) in &summary.causes {
         println!("  {count:>6}  {cause}");
@@ -70,8 +80,11 @@ pub(super) fn print_frozen_callables(frozen: &[FrozenCallableWire]) {
         return;
     }
     println!(
-        "froze {} callable signature(s); capability migration cannot proceed for them:",
-        frozen.len()
+        "{}",
+        crate::localization::formatted!(
+            "froze {} callable signature(s); capability migration cannot proceed for them:",
+            frozen.len()
+        )
     );
     for callable in frozen {
         println!("  `{}`: {}", callable.name, callable.reason);
@@ -82,14 +95,23 @@ fn print_skipped_files(skipped_files: &[SkippedFileWire]) {
     if skipped_files.is_empty() {
         return;
     }
-    println!("skipped {} file(s):", skipped_files.len());
+    println!(
+        "{}",
+        crate::localization::formatted!("skipped {} file(s):", skipped_files.len())
+    );
     for skipped in skipped_files {
-        println!("skipped {}: {}", skipped.path, skipped.reason);
+        println!(
+            "{}",
+            crate::localization::formatted!("skipped {}: {}", skipped.path, skipped.reason)
+        );
         for diagnostic in &skipped.diagnostics {
             let code = diagnostic.code.as_deref().unwrap_or("no-code");
             println!("  {}[{}]: {}", diagnostic.source, code, diagnostic.message);
             if let Some(help) = &diagnostic.help {
-                println!("    help: {help}");
+                println!(
+                    "{}",
+                    crate::localization::formatted!("    help: {help}", help = help)
+                );
             }
         }
     }
@@ -106,8 +128,11 @@ fn print_declared_invalid_files(declared: &[SkippedFileWire]) {
         return;
     }
     println!(
-        "left {} declared-invalid fixture(s) untouched (sibling `.error` file):",
-        declared.len()
+        "{}",
+        crate::localization::formatted!(
+            "left {} declared-invalid fixture(s) untouched (sibling `.error` file):",
+            declared.len()
+        )
     );
     for file in declared {
         println!("  {}", file.path);
@@ -121,15 +146,25 @@ pub(super) fn print_apply_result(result: &ApplyResult) {
         "applied"
     };
     println!(
-        "{verb} {} repair(s), skipped {}; post-apply diagnostics: {}",
-        result.applied.len(),
-        result.skipped.len(),
-        result.post_apply_diagnostics_count
+        "{}",
+        crate::localization::formatted!(
+            "{verb} {} repair(s), skipped {}; post-apply diagnostics: {}",
+            result.applied.len(),
+            result.skipped.len(),
+            result.post_apply_diagnostics_count,
+            verb = verb
+        )
     );
     for skipped in &result.skipped {
         println!(
-            "skipped {} {} in {}: {}",
-            skipped.diagnostic_code, skipped.repair_id, skipped.path, skipped.reason
+            "{}",
+            crate::localization::formatted!(
+                "skipped {} {} in {}: {}",
+                skipped.diagnostic_code,
+                skipped.repair_id,
+                skipped.path,
+                skipped.reason
+            )
         );
     }
     print_skipped_files(&result.skipped_files);

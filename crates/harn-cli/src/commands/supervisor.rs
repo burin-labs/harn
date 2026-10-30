@@ -236,16 +236,22 @@ async fn run_start(args: SupervisorStartArgs) -> OrchestratorResult<()> {
     }
     if ready {
         println!(
-            "workflow supervisor running pid={} state_dir={}",
-            child.id(),
-            state_dir.display()
+            "{}",
+            crate::localization::formatted!(
+                "workflow supervisor running pid={} state_dir={}",
+                child.id(),
+                state_dir.display()
+            )
         );
     } else {
         println!(
-            "workflow supervisor starting pid={} state_dir={} log={}",
-            child.id(),
-            state_dir.display(),
-            log_path.display()
+            "{}",
+            crate::localization::formatted!(
+                "workflow supervisor starting pid={} state_dir={} log={}",
+                child.id(),
+                state_dir.display(),
+                log_path.display()
+            )
         );
     }
     Ok(())
@@ -279,8 +285,12 @@ async fn run_stop(args: SupervisorStopArgs) -> OrchestratorResult<()> {
         });
     }
     println!(
-        "workflow supervisor {} pid={pid}",
-        if stopped { "stopped" } else { "stopping" }
+        "{}",
+        crate::localization::formatted!(
+            "workflow supervisor {} pid={pid}",
+            if stopped { "stopped" } else { "stopping" },
+            pid = pid
+        )
     );
     Ok(())
 }
@@ -290,28 +300,48 @@ async fn run_list(args: SupervisorListArgs) -> OrchestratorResult<()> {
     if args.json {
         return print_json(&snapshot);
     }
-    println!("Workflow supervisor:");
+    println!(
+        "{}",
+        crate::localization::formatted!("Workflow supervisor:")
+    );
     if let Some(process) = snapshot.process.as_ref() {
         println!(
-            "- process pid={} status={} alive={}",
-            process.pid, process.status, process.alive
+            "{}",
+            crate::localization::formatted!(
+                "- process pid={} status={} alive={}",
+                process.pid,
+                process.status,
+                process.alive
+            )
         );
     } else {
-        println!("- process none");
+        println!("{}", crate::localization::formatted!("- process none"));
     }
-    println!("Workflows:");
+    println!("{}", crate::localization::formatted!("Workflows:"));
     if snapshot.workflows.is_empty() {
-        println!("- none");
+        println!("{}", crate::localization::formatted!("- none"));
     } else {
         for workflow in &snapshot.workflows {
             println!(
-                "- {} status={} provider={} kind={}",
-                workflow.workflow_id, workflow.status, workflow.provider, workflow.kind
+                "{}",
+                crate::localization::formatted!(
+                    "- {} status={} provider={} kind={}",
+                    workflow.workflow_id,
+                    workflow.status,
+                    workflow.provider,
+                    workflow.kind
+                )
             );
         }
     }
-    println!("- dlq_pending={}", snapshot.dlq.pending_entries);
-    println!("- catchup_needed={}", snapshot.catchup_needed.len());
+    println!(
+        "{}",
+        crate::localization::formatted!("- dlq_pending={}", snapshot.dlq.pending_entries)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("- catchup_needed={}", snapshot.catchup_needed.len())
+    );
     Ok(())
 }
 
@@ -341,13 +371,16 @@ async fn run_inspect(args: SupervisorInspectArgs) -> OrchestratorResult<()> {
     }
     for workflow in &snapshot.workflows {
         println!(
-            "{} status={} version={}",
-            workflow.workflow_id,
-            workflow.status,
-            workflow
-                .version
-                .map(|version| version.to_string())
-                .unwrap_or_else(|| "-".to_string())
+            "{}",
+            crate::localization::formatted!(
+                "{} status={} version={}",
+                workflow.workflow_id,
+                workflow.status,
+                workflow
+                    .version
+                    .map(|version| version.to_string())
+                    .unwrap_or_else(|| "-".to_string())
+            )
         );
     }
     Ok(())
@@ -464,11 +497,19 @@ async fn run_dlq_list(args: SupervisorDlqListArgs) -> OrchestratorResult<()> {
     if args.json {
         return print_json(&payload);
     }
-    println!("DLQ pending_entries={}", payload.pending_entries);
+    println!(
+        "{}",
+        crate::localization::formatted!("DLQ pending_entries={}", payload.pending_entries)
+    );
     for entry in &payload.entries {
         println!(
-            "- {} workflow={} event={}",
-            entry.id, entry.binding_id, entry.event_id
+            "{}",
+            crate::localization::formatted!(
+                "- {} workflow={} event={}",
+                entry.id,
+                entry.binding_id,
+                entry.event_id
+            )
         );
     }
     Ok(())
@@ -520,12 +561,15 @@ async fn run_recover(args: SupervisorRecoverArgs) -> OrchestratorResult<()> {
         return print_json(&payload);
     }
     println!(
-        "Recovery stranded_envelopes={} replayed={}",
-        payload["stranded_envelopes"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or(0),
-        payload["replayed"].as_array().map(Vec::len).unwrap_or(0)
+        "{}",
+        crate::localization::formatted!(
+            "Recovery stranded_envelopes={} replayed={}",
+            payload["stranded_envelopes"]
+                .as_array()
+                .map(Vec::len)
+                .unwrap_or(0),
+            payload["replayed"].as_array().map(Vec::len).unwrap_or(0)
+        )
     );
     Ok(())
 }
@@ -775,18 +819,39 @@ fn merge_json_object(target: &mut JsonValue, patch: JsonValue) {
 }
 
 fn print_dispatch_handle(handle: &DispatchHandleRecord) {
-    println!("workflow dispatch:");
-    println!("- workflow_id={}", handle.binding_id);
-    println!("- binding_version={}", handle.binding_version);
-    println!("- event_id={}", handle.event_id);
-    println!("- status={}", handle.status);
+    println!("{}", crate::localization::formatted!("workflow dispatch:"));
     println!(
-        "- replay_of_event_id={}",
-        handle.replay_of_event_id.as_deref().unwrap_or("-")
+        "{}",
+        crate::localization::formatted!("- workflow_id={}", handle.binding_id)
     );
     println!(
-        "- dlq_entry_id={}",
-        handle.dlq_entry_id.as_deref().unwrap_or("-")
+        "{}",
+        crate::localization::formatted!("- binding_version={}", handle.binding_version)
     );
-    println!("- error={}", handle.error.as_deref().unwrap_or("-"));
+    println!(
+        "{}",
+        crate::localization::formatted!("- event_id={}", handle.event_id)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("- status={}", handle.status)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "- replay_of_event_id={}",
+            handle.replay_of_event_id.as_deref().unwrap_or("-")
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "- dlq_entry_id={}",
+            handle.dlq_entry_id.as_deref().unwrap_or("-")
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("- error={}", handle.error.as_deref().unwrap_or("-"))
+    );
 }

@@ -36,7 +36,10 @@ pub(crate) fn run(args: &ProvidersSupportArgs) -> Result<(), String> {
             }
         }
         if !args.stdout && !args.json {
-            println!("provider support artifacts are up to date");
+            println!(
+                "{}",
+                crate::localization::formatted!("provider support artifacts are up to date")
+            );
         }
         return Ok(());
     }
@@ -52,8 +55,14 @@ pub(crate) fn run(args: &ProvidersSupportArgs) -> Result<(), String> {
 
     write_file(&args.output, &markdown)?;
     write_file(&args.json_output, &json)?;
-    println!("wrote {}", args.output.display());
-    println!("wrote {}", args.json_output.display());
+    println!(
+        "{}",
+        crate::localization::formatted!("wrote {}", args.output.display())
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("wrote {}", args.json_output.display())
+    );
     Ok(())
 }
 

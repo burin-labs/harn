@@ -95,8 +95,15 @@ pub(crate) async fn run(args: OrchestratorReloadArgs) -> Result<(), Orchestrator
         .map(Vec::len)
         .unwrap_or(0);
     println!(
-        "reload {} via {} (+{} ~{} -{})",
-        parsed.status, parsed.source, added, modified, removed
+        "{}",
+        crate::localization::formatted!(
+            "reload {} via {} (+{} ~{} -{})",
+            parsed.status,
+            parsed.source,
+            added,
+            modified,
+            removed
+        )
     );
     Ok(())
 }

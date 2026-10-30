@@ -92,8 +92,12 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                 crate::fatal_error(error);
             });
             println!(
-                "Removed stored OAuth token for {} ({})",
-                server.name, server.url
+                "{}",
+                crate::localization::formatted!(
+                    "Removed stored OAuth token for {} ({})",
+                    server.name,
+                    server.url
+                )
             );
         }
         McpCommand::Status(server_ref) => {
@@ -131,24 +135,54 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                             });
                         return;
                     }
-                    println!("Server: {}", server.name);
-                    println!("URL: {}", server.url);
-                    println!("Connected: yes");
-                    println!("Protocol: {MCP_PROTOCOL_VERSION}");
                     println!(
-                        "Expires: {}",
-                        token
-                            .expires_at_unix
-                            .map(format_expiry)
-                            .unwrap_or_else(|| "unknown".to_string())
+                        "{}",
+                        crate::localization::formatted!("Server: {}", server.name)
                     );
-                    println!("Client ID: {}", token.client_id);
-                    println!("Token auth method: {}", token.token_endpoint_auth_method);
-                    println!("Issuer: {}", token.issuer);
+                    println!("{}", crate::localization::formatted!("URL: {}", server.url));
+                    println!("{}", crate::localization::formatted!("Connected: yes"));
+                    println!(
+                        "{}",
+                        crate::localization::formatted!(
+                            "Protocol: {MCP_PROTOCOL_VERSION}",
+                            MCP_PROTOCOL_VERSION = MCP_PROTOCOL_VERSION
+                        )
+                    );
+                    println!(
+                        "{}",
+                        crate::localization::formatted!(
+                            "Expires: {}",
+                            token
+                                .expires_at_unix
+                                .map(format_expiry)
+                                .unwrap_or_else(|| "unknown".to_string())
+                        )
+                    );
+                    println!(
+                        "{}",
+                        crate::localization::formatted!("Client ID: {}", token.client_id)
+                    );
+                    println!(
+                        "{}",
+                        crate::localization::formatted!(
+                            "Token auth method: {}",
+                            token.token_endpoint_auth_method
+                        )
+                    );
+                    println!(
+                        "{}",
+                        crate::localization::formatted!("Issuer: {}", token.issuer)
+                    );
                     if let Some(identity) =
                         harn_vm::mcp_identity::display_identity(&server.url, &token)
                     {
-                        println!("Identity: {identity}");
+                        println!(
+                            "{}",
+                            crate::localization::formatted!(
+                                "Identity: {identity}",
+                                identity = identity
+                            )
+                        );
                     }
                 }
                 Ok(None) => {
@@ -159,9 +193,12 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                             });
                         return;
                     }
-                    println!("Server: {}", server.name);
-                    println!("URL: {}", server.url);
-                    println!("Connected: no");
+                    println!(
+                        "{}",
+                        crate::localization::formatted!("Server: {}", server.name)
+                    );
+                    println!("{}", crate::localization::formatted!("URL: {}", server.url));
+                    println!("{}", crate::localization::formatted!("Connected: no"));
                 }
                 Err(error) => {
                     if server_ref.json {
@@ -205,17 +242,41 @@ async fn discover_mcp_json(args: &McpDiscoverArgs) -> Result<(), String> {
 
     match report.descriptor {
         Some(descriptor) => {
-            println!("MCP discovery descriptor found");
-            println!("Source: {}", report.source);
-            println!("Name: {}", descriptor.name);
-            println!("Endpoint: {}", descriptor.endpoint);
-            println!("Description: {}", descriptor.description);
+            println!(
+                "{}",
+                crate::localization::formatted!("MCP discovery descriptor found")
+            );
+            println!(
+                "{}",
+                crate::localization::formatted!("Source: {}", report.source)
+            );
+            println!(
+                "{}",
+                crate::localization::formatted!("Name: {}", descriptor.name)
+            );
+            println!(
+                "{}",
+                crate::localization::formatted!("Endpoint: {}", descriptor.endpoint)
+            );
+            println!(
+                "{}",
+                crate::localization::formatted!("Description: {}", descriptor.description)
+            );
             if let Some(icon) = descriptor.icon {
-                println!("Icon: {icon}");
+                println!(
+                    "{}",
+                    crate::localization::formatted!("Icon: {icon}", icon = icon)
+                );
             }
         }
         None => {
-            println!("No MCP discovery descriptor found at {}", report.source);
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "No MCP discovery descriptor found at {}",
+                    report.source
+                )
+            );
         }
     }
     Ok(())
@@ -287,7 +348,12 @@ async fn run_mcp_status_report(json: bool) -> Result<(), String> {
                 .map_err(|error| format!("failed to encode JSON output: {error}"))?
         );
     } else if report.servers.is_empty() {
-        println!("No [[mcp]] servers declared in the nearest harn.toml.");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "No [[mcp]] servers declared in the nearest harn.toml."
+            )
+        );
     } else {
         for server in &report.servers {
             let counts = match (server.tools, server.resources, server.prompts) {
@@ -538,19 +604,43 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
     .await?;
     let (callback_listener, redirect_uri) = callback.take_listener()?;
 
-    println!("Server: {} ({})", server.name, server.url);
-    println!("Redirect URI: {redirect_uri}");
-    println!("Protocol Version: {MCP_PROTOCOL_VERSION}");
-    println!("Opening browser for OAuth authorization...");
+    println!(
+        "{}",
+        crate::localization::formatted!("Server: {} ({})", server.name, server.url)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "Redirect URI: {redirect_uri}",
+            redirect_uri = redirect_uri
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "Protocol Version: {MCP_PROTOCOL_VERSION}",
+            MCP_PROTOCOL_VERSION = MCP_PROTOCOL_VERSION
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("Opening browser for OAuth authorization...")
+    );
 
     if webbrowser::open(&pending.authorize_url).is_err() {
-        println!("Open this URL manually:\n{}", pending.authorize_url);
+        println!(
+            "{}",
+            crate::localization::formatted!("Open this URL manually:\n{}", pending.authorize_url)
+        );
     }
 
     let callback = wait_for_oauth_response(callback_listener, &redirect_uri, &pending.state)?;
     mcp_oauth::complete_authorization(&pending.state, &callback.code, callback.issuer.as_deref())
         .await?;
-    println!("OAuth token stored for {}.", server.name);
+    println!(
+        "{}",
+        crate::localization::formatted!("OAuth token stored for {}.", server.name)
+    );
     Ok(())
 }
 
@@ -574,7 +664,12 @@ async fn login_bulk(options: &McpLoginArgs) -> Result<(), String> {
     let servers = enumerate_oauth_servers(&options.only).await?;
     if servers.is_empty() {
         if !options.json {
-            println!("No OAuth-backed [[mcp]] servers found in the nearest harn.toml.");
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "No OAuth-backed [[mcp]] servers found in the nearest harn.toml."
+                )
+            );
         }
         return Ok(());
     }
@@ -585,9 +680,13 @@ async fn login_bulk(options: &McpLoginArgs) -> Result<(), String> {
             "Authenticating"
         };
         println!(
-            "{verb} {} OAuth-backed MCP server(s) via {}…",
-            servers.len(),
-            options.redirect_uri
+            "{}",
+            crate::localization::formatted!(
+                "{verb} {} OAuth-backed MCP server(s) via {}…",
+                servers.len(),
+                options.redirect_uri,
+                verb = crate::localization::translate(verb)
+            )
         );
     }
 
@@ -628,9 +727,7 @@ async fn login_bulk(options: &McpLoginArgs) -> Result<(), String> {
         drop(driver);
         let _ = printer.await;
         if !json {
-            println!(
-                "\nNothing to authorize: {skipped} already satisfied, {failed} failed to prepare."
-            );
+            println!("{}", crate::localization::formatted!("\nNothing to authorize: {skipped} already satisfied, {failed} failed to prepare.", failed = failed, skipped = skipped));
         }
         return Ok(());
     }
@@ -645,8 +742,12 @@ async fn login_bulk(options: &McpLoginArgs) -> Result<(), String> {
     for flow in &pending {
         if webbrowser::open(&flow.authorize_url).is_err() && !json {
             println!(
-                "Open this URL to authorize {}:\n  {}",
-                flow.name, flow.authorize_url
+                "{}",
+                crate::localization::formatted!(
+                    "Open this URL to authorize {}:\n  {}",
+                    flow.name,
+                    flow.authorize_url
+                )
             );
         }
         tokio::time::sleep(Duration::from_millis(BROWSER_OPEN_STAGGER_MS)).await;
@@ -682,13 +783,9 @@ async fn login_bulk(options: &McpLoginArgs) -> Result<(), String> {
     drop(driver);
     let _ = printer.await;
     if !json {
-        println!(
-            "\nBulk login complete: {connected} connected, {skipped} skipped, {failed} failed, {remaining} pending."
-        );
+        println!("{}", crate::localization::formatted!("\nBulk login complete: {connected} connected, {skipped} skipped, {failed} failed, {remaining} pending.", connected = connected, failed = failed, remaining = remaining, skipped = skipped));
         if remaining > 0 {
-            println!(
-                "Timed out after {BULK_CALLBACK_TIMEOUT_SECS}s waiting for {remaining} consent(s). Re-run with --reauth to retry."
-            );
+            println!("{}", crate::localization::formatted!("Timed out after {BULK_CALLBACK_TIMEOUT_SECS}s waiting for {remaining} consent(s). Re-run with --reauth to retry.", BULK_CALLBACK_TIMEOUT_SECS = BULK_CALLBACK_TIMEOUT_SECS, remaining = remaining));
         }
     }
     Ok(())
@@ -1167,245 +1264,5 @@ p {{ margin: 0; color: #c6cfdb; font-size: 15px; line-height: 1.55; }}
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use harn_vm::mcp_auth::{
-        authorization_server_metadata_candidates, build_oauth_authorization_url,
-        canonical_resource_indicator, protected_resource_metadata_candidates,
-        OAuthAuthorizationUrlOptions,
-    };
-
-    #[test]
-    fn protected_resource_candidate_prefers_path_specific_url() {
-        let url = Url::parse("https://example.com/mcp/wiki").unwrap();
-        let candidates = protected_resource_metadata_candidates(&url);
-        assert_eq!(
-            candidates[0].as_str(),
-            "https://example.com/.well-known/oauth-protected-resource/mcp/wiki"
-        );
-        assert_eq!(
-            candidates[1].as_str(),
-            "https://example.com/.well-known/oauth-protected-resource"
-        );
-    }
-
-    #[test]
-    fn authorization_server_candidate_prefers_path_specific_metadata() {
-        let url = Url::parse("https://auth.example.com/oauth").unwrap();
-        let candidates = authorization_server_metadata_candidates(&url);
-        assert_eq!(
-            candidates[0].url.as_str(),
-            "https://auth.example.com/.well-known/oauth-authorization-server/oauth"
-        );
-        assert_eq!(
-            candidates[1].url.as_str(),
-            "https://auth.example.com/.well-known/openid-configuration/oauth"
-        );
-        assert_eq!(
-            candidates[2].url.as_str(),
-            "https://auth.example.com/oauth/.well-known/openid-configuration"
-        );
-    }
-
-    #[test]
-    fn callback_html_response_escapes_message() {
-        let response = html_response(400, "<script>alert('x')</script>&");
-        assert!(response.contains("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;&amp;"));
-        assert!(!response.contains("<script>"));
-    }
-
-    #[test]
-    fn callback_page_localizes_owned_chrome_and_preserves_external_diagnostics() {
-        use harn_hostlib::localization::Locale;
-        for locale in Locale::ALL {
-            let body = crate::localization::translate_for(
-                locale,
-                crate::localization::OAUTH_SUCCESS_MESSAGE,
-            );
-            let response = html_response_in(200, &body, locale);
-            assert!(response.starts_with("HTTP/1.1 200 OK"));
-            assert!(response.contains(&format!("Content-Language: {}", locale.id())));
-            assert!(response.contains(&format!("<html lang=\"{}\">", locale.id())));
-            assert!(response.contains(&crate::format::escape_html(&body)));
-            if locale != Locale::English {
-                assert!(!response.contains("<title>Authorization Complete</title>"));
-            }
-        }
-        let japanese = html_response_in(200, "provider-message", Locale::Japanese);
-        assert!(japanese.contains("<title>認可が完了しました</title>"));
-        let external = html_response_in(400, "Authorization Complete <script>", Locale::French);
-        assert!(external.contains("<p>Authorization Complete &lt;script&gt;</p>"));
-    }
-
-    #[test]
-    fn authorization_url_includes_canonical_resource_indicator() {
-        let resource = canonical_resource_indicator("https://MCP.Example.com:443/mcp/").unwrap();
-        let url = build_oauth_authorization_url(OAuthAuthorizationUrlOptions {
-            authorization_endpoint: "https://auth.example.com/authorize",
-            client_id: "client-123",
-            redirect_uri: "http://127.0.0.1:9783/oauth/callback",
-            state: "state-abc",
-            code_challenge: "challenge-xyz",
-            resource: &resource,
-            scopes: Some("mcp.read"),
-        })
-        .unwrap();
-        let resource_param = url
-            .query_pairs()
-            .find(|(key, _)| key == "resource")
-            .map(|(_, value)| value.into_owned());
-        assert_eq!(
-            resource_param.as_deref(),
-            Some("https://mcp.example.com/mcp")
-        );
-    }
-
-    fn parse_server(toml_table: &str) -> McpServerConfig {
-        toml::from_str::<McpServerConfig>(toml_table).expect("mcp server config")
-    }
-
-    #[test]
-    fn mcp_server_config_parses_token_exchange_row() {
-        let server = parse_server(
-            r#"
-name = "api"
-transport = "http"
-url = "https://mcp.example/mcp"
-
-[token_exchange]
-token_url = "https://auth.example/token"
-actor_token = "agent.jwt"
-actor_token_type = "jwt"
-subject_token_type = "access_token"
-client_id = "agent-client"
-client_secret = "agent-secret"
-token_endpoint_auth_method = "client_secret_basic"
-scope = "repo"
-
-[token_exchange.extra_params]
-deployment = "enterprise"
-"#,
-        );
-        let exchange = server
-            .token_exchange
-            .as_ref()
-            .expect("token exchange row parsed");
-        assert_eq!(
-            exchange.token_url.as_deref(),
-            Some("https://auth.example/token")
-        );
-        assert_eq!(exchange.actor_token.as_deref(), Some("agent.jwt"));
-        assert_eq!(
-            exchange.token_endpoint_auth_method.as_deref(),
-            Some("client_secret_basic")
-        );
-        assert_eq!(
-            exchange.extra_params.get("deployment"),
-            Some(&serde_json::json!("enterprise"))
-        );
-    }
-
-    #[test]
-    fn oauth_server_classification() {
-        let oauth = parse_server(
-            "name = \"wiki\"\ntransport = \"http\"\nurl = \"https://mcp.wiki.example/mcp\"\n",
-        );
-        assert!(is_oauth_server(&oauth), "http server with a url is OAuth");
-
-        let stdio = parse_server("name = \"fs\"\ntransport = \"stdio\"\ncommand = \"npx\"\n");
-        assert!(!is_oauth_server(&stdio), "stdio is not OAuth");
-
-        let static_bearer = parse_server(
-            "name = \"api\"\ntransport = \"http\"\nurl = \"https://mcp.example/mcp\"\nauth_token = \"static\"\n",
-        );
-        assert!(
-            !is_oauth_server(&static_bearer),
-            "a static bearer token is not interactive OAuth"
-        );
-
-        let static_secret = parse_server(
-            "name = \"api\"\ntransport = \"http\"\nurl = \"https://mcp.example/mcp\"\n[auth]\nsecret_id = \"my-secret\"\n",
-        );
-        assert!(
-            !is_oauth_server(&static_secret),
-            "an [auth].secret_id static token is not interactive OAuth"
-        );
-
-        let no_url = parse_server("name = \"x\"\ntransport = \"http\"\n");
-        assert!(!is_oauth_server(&no_url), "http without a url is not OAuth");
-    }
-
-    #[test]
-    fn callback_query_parsing_extracts_code_state_issuer() {
-        let url = Url::parse(
-            "http://127.0.0.1:9783/oauth/callback?code=abc&state=xyz&iss=https%3A%2F%2Fauth.example",
-        )
-        .unwrap();
-        let query = parse_callback_query(&url);
-        assert_eq!(query_get(&query, "code").as_deref(), Some("abc"));
-        assert_eq!(query_get(&query, "state").as_deref(), Some("xyz"));
-        assert_eq!(
-            query_get(&query, "iss").as_deref(),
-            Some("https://auth.example")
-        );
-        assert!(query_get(&query, "error").is_none());
-    }
-
-    #[tokio::test]
-    async fn stdio_server_without_live_handle_is_disconnected() {
-        let server =
-            parse_server("name = \"fs\"\ntransport = \"stdio\"\ncommand = \"/bin/true\"\n");
-        let status = derive_server_status(&server).await;
-        assert_eq!(status.name, "fs");
-        assert_eq!(status.transport, "stdio");
-        assert_eq!(status.state, "disconnected");
-        assert_eq!(status.url, "");
-        assert!(status.tools.is_none());
-        assert!(status.last_error.is_none());
-    }
-
-    #[tokio::test]
-    async fn http_server_with_static_token_is_connected() {
-        let server = parse_server(
-            "name = \"api\"\ntransport = \"http\"\nurl = \"https://mcp.example.com/mcp\"\nauth_token = \"static-bearer\"\n",
-        );
-        let status = derive_server_status(&server).await;
-        assert_eq!(status.transport, "http");
-        assert_eq!(status.state, "connected");
-        assert_eq!(status.url, "https://mcp.example.com/mcp");
-    }
-
-    #[test]
-    fn status_report_serializes_with_stable_keys() {
-        let report = McpStatusReport {
-            schema_version: MCP_STATUS_SCHEMA_VERSION,
-            manifest: Some("/repo/harn.toml".to_string()),
-            servers: vec![McpServerStatus {
-                name: "fs".to_string(),
-                transport: "stdio".to_string(),
-                state: "disconnected".to_string(),
-                url: String::new(),
-                lazy: true,
-                tools: None,
-                resources: None,
-                prompts: None,
-                last_error: None,
-                token_expires_at_unix: None,
-                token_client_id: None,
-                token_issuer: None,
-                display_identity: None,
-            }],
-        };
-        let value: serde_json::Value = serde_json::to_value(&report).expect("serialize");
-        assert_eq!(value["schema_version"], 3);
-        assert_eq!(value["manifest"], "/repo/harn.toml");
-        assert_eq!(value["servers"][0]["name"], "fs");
-        assert_eq!(value["servers"][0]["transport"], "stdio");
-        assert_eq!(value["servers"][0]["state"], "disconnected");
-        assert_eq!(value["servers"][0]["lazy"], true);
-        assert!(value["servers"][0]["tools"].is_null());
-        assert!(value["servers"][0]["last_error"].is_null());
-        assert!(value["servers"][0]["token_expires_at_unix"].is_null());
-        assert!(value["servers"][0]["display_identity"].is_null());
-    }
-}
+#[path = "command_tests.rs"]
+mod tests;

@@ -109,3 +109,59 @@ fn localizing_help_keeps_structured_arguments_and_diagnostics_canonical() {
         );
     }
 }
+
+#[test]
+fn command_results_use_selected_language_while_json_and_csv_stay_canonical() {
+    let directory = tempfile::tempdir().expect("isolated usage project");
+    let project = directory.path().to_str().unwrap();
+    let source = "No LLM usage recorded (0 provider_call_response events matched).";
+    for (locale, id) in [
+        ("C", "en"),
+        ("es", "es"),
+        ("fr", "fr"),
+        ("de", "de"),
+        ("pt_BR", "pt-BR"),
+        ("it", "it"),
+        ("ja", "ja"),
+        ("ko", "ko"),
+        ("zh_CN", "zh-Hans"),
+    ] {
+        let output = run(locale, &["usage", "--project", project]);
+        assert!(output.status.success(), "{locale}: {output:?}");
+        let text = String::from_utf8(output.stdout).unwrap();
+        let expected = if id == "en" {
+            source.to_owned()
+        } else {
+            let catalog: std::collections::BTreeMap<String, String> =
+                serde_json::from_str(match id {
+                    "es" => include_str!("../../src/localization/es.json"),
+                    "fr" => include_str!("../../src/localization/fr.json"),
+                    "de" => include_str!("../../src/localization/de.json"),
+                    "pt-BR" => include_str!("../../src/localization/pt-BR.json"),
+                    "it" => include_str!("../../src/localization/it.json"),
+                    "ja" => include_str!("../../src/localization/ja.json"),
+                    "ko" => include_str!("../../src/localization/ko.json"),
+                    "zh-Hans" => include_str!("../../src/localization/zh-Hans.json"),
+                    _ => unreachable!(),
+                })
+                .unwrap();
+            catalog[source].clone()
+        };
+        assert!(text.contains(&expected), "{locale}: {text}");
+        assert!(
+            text.contains("provider_call_response"),
+            "event ID must stay canonical"
+        );
+        let listing = run(locale, &["demo", "--list"]);
+        assert!(listing.status.success(), "{locale}: {listing:?}");
+        assert!(String::from_utf8_lossy(&listing.stdout).contains("merge-captain"));
+    }
+    for format in ["--json", "--csv"] {
+        let english = run("C", &["usage", "--project", project, format]);
+        let japanese = run("ja", &["usage", "--project", project, format]);
+        assert!(english.status.success(), "{format}: {english:?}");
+        assert!(japanese.status.success(), "{format}: {japanese:?}");
+        assert!(!english.stdout.is_empty(), "must measure populated output");
+        assert_eq!(english.stdout, japanese.stdout, "{format} output changed");
+    }
+}

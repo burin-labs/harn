@@ -46,10 +46,8 @@ pub(crate) fn handle_package_test_inventory(args: PackageTestInventoryArgs) -> R
     if args.json {
         println!("{rendered}");
     } else if passed {
-        println!(
-            "Package test discovery passed: {} selected file(s), {} discovered test pipeline(s).",
-            inventory.selected_file_count, inventory.discovered_test_count
-        );
+        println!("{}", crate::localization::formatted!("Package test discovery passed: {} selected file(s), {} discovered test pipeline(s).",
+            inventory.selected_file_count, inventory.discovered_test_count));
     } else {
         cli_diagnostic!("Package test discovery failed:");
         for problem in &problems {
@@ -1338,17 +1336,23 @@ fn package_dir_from_anchor(path: &Path) -> PathBuf {
 
 pub(crate) fn print_connector_report(report: &ConnectorCheckReport) {
     println!(
-        "Connector contract check passed for {} connector(s), {} fixture(s).",
-        report.checked_connectors.len(),
-        report.fixture_count
+        "{}",
+        crate::localization::formatted!(
+            "Connector contract check passed for {} connector(s), {} fixture(s).",
+            report.checked_connectors.len(),
+            report.fixture_count
+        )
     );
     for connector in &report.checked_connectors {
         println!(
-            "- {}: kinds=[{}], schema={}, fixtures={}",
-            connector.provider,
-            connector.kinds.join(", "),
-            connector.payload_schema,
-            connector.fixtures.len()
+            "{}",
+            crate::localization::formatted!(
+                "- {}: kinds=[{}], schema={}, fixtures={}",
+                connector.provider,
+                connector.kinds.join(", "),
+                connector.payload_schema,
+                connector.fixtures.len()
+            )
         );
     }
     for warning in &report.warnings {
@@ -1360,8 +1364,14 @@ fn print_gate_report(report: &PackageVerifyReport) {
     println!("{}", gate_report_header(report));
     for check in &report.checks {
         println!(
-            "- {}: {} (applicable={}, reached={})",
-            check.name, check.status, check.applicable, check.reached
+            "{}",
+            crate::localization::formatted!(
+                "- {}: {} (applicable={}, reached={})",
+                check.name,
+                check.status,
+                check.applicable,
+                check.reached
+            )
         );
         for detail in &check.details {
             println!("  {detail}");

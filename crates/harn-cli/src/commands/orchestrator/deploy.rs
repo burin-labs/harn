@@ -53,12 +53,18 @@ pub(crate) async fn run(args: OrchestratorDeployArgs) -> Result<(), Orchestrator
     let bundle = write_bundle(&args, &validated, &env.public)?;
 
     println!(
-        "validated {} trigger(s) from {} ({} HTTP-managed)",
-        validated.trigger_count,
-        validated.manifest_path.display(),
-        validated.http_trigger_count
+        "{}",
+        crate::localization::formatted!(
+            "validated {} trigger(s) from {} ({} HTTP-managed)",
+            validated.trigger_count,
+            validated.manifest_path.display(),
+            validated.http_trigger_count
+        )
     );
-    println!("wrote deploy bundle: {}", bundle.provider_dir.display());
+    println!(
+        "{}",
+        crate::localization::formatted!("wrote deploy bundle: {}", bundle.provider_dir.display())
+    );
 
     if !env.missing_secret_env.is_empty() {
         cli_diagnostic!(
@@ -86,7 +92,10 @@ pub(crate) async fn run(args: OrchestratorDeployArgs) -> Result<(), Orchestrator
     let deploy_command = provider_deploy_command(&args, &bundle);
 
     if args.dry_run {
-        println!("dry run; commands not executed:");
+        println!(
+            "{}",
+            crate::localization::formatted!("dry run; commands not executed:")
+        );
         for command in &pre_deploy_plan {
             println!("  {}", command.display());
         }
@@ -551,7 +560,10 @@ fn optional_api_token(
 }
 
 fn run_secret_sync(plan: SecretSyncPlan) -> Result<(), OrchestratorError> {
-    println!("running: {}", plan.display());
+    println!(
+        "{}",
+        crate::localization::formatted!("running: {}", plan.display())
+    );
     let client =
         net::blocking_http_client("cli.orchestrator.deploy.secrets", Duration::from_secs(30))
             .map_err(|error| format!("failed to create provider API client: {error}"))?;
@@ -785,7 +797,10 @@ impl PlannedCommand {
 }
 
 fn run_checked(command: PlannedCommand) -> Result<(), OrchestratorError> {
-    println!("running: {}", command.display());
+    println!(
+        "{}",
+        crate::localization::formatted!("running: {}", command.display())
+    );
     let mut process = Command::new(&command.program);
     process.args(&command.args);
     if let Some(cwd) = &command.cwd {
@@ -840,7 +855,10 @@ fn probe_health(url: &str) -> Result<(), OrchestratorError> {
         )
     })?;
     if response.status().is_success() {
-        println!("health check passed: {url}");
+        println!(
+            "{}",
+            crate::localization::formatted!("health check passed: {url}", url = url)
+        );
         Ok(())
     } else {
         Err(format!("health probe failed for {url}: HTTP {}", response.status()).into())

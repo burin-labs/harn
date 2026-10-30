@@ -191,7 +191,10 @@ pub(crate) fn run_matrix(args: &ProvidersMatrixArgs) -> Result<(), String> {
             ));
         }
         if !args.stdout {
-            println!("provider capability matrix is up to date");
+            println!(
+                "{}",
+                crate::localization::formatted!("provider capability matrix is up to date")
+            );
             return Ok(());
         }
     }
@@ -200,7 +203,10 @@ pub(crate) fn run_matrix(args: &ProvidersMatrixArgs) -> Result<(), String> {
         return Ok(());
     }
     write_file(&args.output, &generated)?;
-    println!("wrote {}", args.output.display());
+    println!(
+        "{}",
+        crate::localization::formatted!("wrote {}", args.output.display())
+    );
     Ok(())
 }
 

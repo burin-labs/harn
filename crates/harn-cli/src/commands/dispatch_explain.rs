@@ -262,19 +262,15 @@ pub(crate) fn run_audit(args: &ProviderDispatchAuditArgs) {
     if args.json {
         print_json_or_exit(&report, "dispatch audit report");
     } else {
-        println!(
-            "provider dispatch audit: {}/{} dispatch rows passed across {} catalog routes and {} variants",
-            report.pass_count, report.row_count, report.route_count, report.variant_count
-        );
+        println!("{}", crate::localization::formatted!("provider dispatch audit: {}/{} dispatch rows passed across {} catalog routes and {} variants",
+            report.pass_count, report.row_count, report.route_count, report.variant_count));
         if let Some(plan) = &report.tool_probe_plan {
-            println!(
-                "tool-probe plan: {} live commands and {} request-audit commands across {} routes, {} cases, {} modes",
+            println!("{}", crate::localization::formatted!("tool-probe plan: {} live commands and {} request-audit commands across {} routes, {} cases, {} modes",
                 plan.command_count,
                 plan.request_audit_command_count,
                 plan.route_count,
                 plan.cases.len(),
-                plan.modes.len()
-            );
+                plan.modes.len()));
         }
         for failure in report.failures.iter().take(10) {
             let target = failure
@@ -1190,49 +1186,85 @@ fn dispatch_audit_variants(
 }
 
 fn print_human_explanation(report: &DispatchExplanation) {
-    println!("dispatch-explain {}:{}", report.provider, report.model);
-    println!("  wire_format:      {}", report.wire_format);
-    println!("  message_wire:     {}", report.message_wire_format);
+    println!(
+        "{}",
+        crate::localization::formatted!("dispatch-explain {}:{}", report.provider, report.model)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("  wire_format:      {}", report.wire_format)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("  message_wire:     {}", report.message_wire_format)
+    );
     if let Some(family) = &report.live_endpoint_family {
-        println!("  live_endpoint:    {family}");
+        println!(
+            "{}",
+            crate::localization::formatted!("  live_endpoint:    {family}", family = family)
+        );
     }
-    println!("  tool_wire:        {}", report.native_tool_wire_format);
-    println!("  base_url_host:    {}", report.base_url_host);
+    println!(
+        "{}",
+        crate::localization::formatted!("  tool_wire:        {}", report.native_tool_wire_format)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("  base_url_host:    {}", report.base_url_host)
+    );
     if let Some(contract) = &report.chat_wire_contract {
         println!(
-            "  chat_endpoint:    {} (source: {})",
-            contract.chat_endpoint,
-            contract
-                .sources
-                .chat_endpoint
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_else(|| "unset".into())
+            "{}",
+            crate::localization::formatted!(
+                "  chat_endpoint:    {} (source: {})",
+                contract.chat_endpoint,
+                contract
+                    .sources
+                    .chat_endpoint
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "unset".into())
+            )
         );
         println!(
-            "  chat_api_adapter: {} (source: {})",
-            serde_json::to_value(contract.chat_api_adapter).expect("adapter serializes"),
-            contract
-                .sources
-                .chat_api_adapter
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_else(|| "model default".into())
+            "{}",
+            crate::localization::formatted!(
+                "  chat_api_adapter: {} (source: {})",
+                serde_json::to_value(contract.chat_api_adapter).expect("adapter serializes"),
+                contract
+                    .sources
+                    .chat_api_adapter
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "model default".into())
+            )
         );
     }
-    println!("  tool_format:      {}", report.tool_format);
-    println!("  native_tools:     {}", report.native_tools);
     println!(
-        "  thinking:         advertised={advertises_thinking}{}",
-        if report.requested_thinking {
-            " (requested)"
-        } else {
-            ""
-        },
-        advertises_thinking = report.advertises_thinking
+        "{}",
+        crate::localization::formatted!("  tool_format:      {}", report.tool_format)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("  native_tools:     {}", report.native_tools)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "  thinking:         advertised={advertises_thinking}{}",
+            if report.requested_thinking {
+                " (requested)"
+            } else {
+                ""
+            },
+            advertises_thinking = report.advertises_thinking
+        )
     );
     if let Some(note) = &report.thinking_note {
-        println!("  NOTE: {note}");
+        println!(
+            "{}",
+            crate::localization::formatted!("  NOTE: {note}", note = note)
+        );
     }
 }
 

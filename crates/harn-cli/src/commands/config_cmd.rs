@@ -55,7 +55,10 @@ fn run_validate(args: ConfigValidateArgs) -> Result<(), String> {
         args.files
     };
     if files.is_empty() {
-        println!("No Harn config files found.");
+        println!(
+            "{}",
+            crate::localization::formatted!("No Harn config files found.")
+        );
         return Ok(());
     }
     for path in files {
@@ -74,7 +77,10 @@ fn run_validate(args: ConfigValidateArgs) -> Result<(), String> {
         } else {
             "config"
         };
-        println!("ok: {kind} {}", path.display());
+        println!(
+            "{}",
+            crate::localization::formatted!("ok: {kind} {}", path.display(), kind = kind)
+        );
     }
     Ok(())
 }

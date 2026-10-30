@@ -40,83 +40,120 @@ async fn run_ls(
         return Ok(());
     }
 
-    println!("Queue:");
+    println!("{}", crate::localization::formatted!("Queue:"));
     println!(
-        "- dispatcher_in_flight={}",
-        overview.dispatcher.dispatcher_in_flight
+        "{}",
+        crate::localization::formatted!(
+            "- dispatcher_in_flight={}",
+            overview.dispatcher.dispatcher_in_flight
+        )
     );
     println!(
-        "- dispatcher_retry_queue_depth={}",
-        overview.dispatcher.dispatcher_retry_queue_depth
+        "{}",
+        crate::localization::formatted!(
+            "- dispatcher_retry_queue_depth={}",
+            overview.dispatcher.dispatcher_retry_queue_depth
+        )
     );
     println!(
-        "- inferred_in_flight={}",
-        overview.dispatcher.inferred_in_flight
+        "{}",
+        crate::localization::formatted!(
+            "- inferred_in_flight={}",
+            overview.dispatcher.inferred_in_flight
+        )
     );
     println!(
-        "- inferred_pending_retries={}",
-        overview.dispatcher.inferred_pending_retries
+        "{}",
+        crate::localization::formatted!(
+            "- inferred_pending_retries={}",
+            overview.dispatcher.inferred_pending_retries
+        )
     );
     println!(
-        "- stranded_envelopes={}",
-        overview.dispatcher.stranded_envelopes.len()
+        "{}",
+        crate::localization::formatted!(
+            "- stranded_envelopes={}",
+            overview.dispatcher.stranded_envelopes.len()
+        )
     );
     println!(
-        "- inbox_claims_written={}",
-        overview.dispatcher.inbox_claims_written
+        "{}",
+        crate::localization::formatted!(
+            "- inbox_claims_written={}",
+            overview.dispatcher.inbox_claims_written
+        )
     );
     println!(
-        "- inbox_envelopes_written={}",
-        overview.dispatcher.inbox_envelopes_written
+        "{}",
+        crate::localization::formatted!(
+            "- inbox_envelopes_written={}",
+            overview.dispatcher.inbox_envelopes_written
+        )
     );
     println!(
-        "- inbox_duplicates_rejected={}",
-        overview.dispatcher.inbox_duplicates_rejected
+        "{}",
+        crate::localization::formatted!(
+            "- inbox_duplicates_rejected={}",
+            overview.dispatcher.inbox_duplicates_rejected
+        )
     );
     println!(
-        "- inbox_fast_path_hits={}",
-        overview.dispatcher.inbox_fast_path_hits
+        "{}",
+        crate::localization::formatted!(
+            "- inbox_fast_path_hits={}",
+            overview.dispatcher.inbox_fast_path_hits
+        )
     );
     println!(
-        "- inbox_durable_hits={}",
-        overview.dispatcher.inbox_durable_hits
+        "{}",
+        crate::localization::formatted!(
+            "- inbox_durable_hits={}",
+            overview.dispatcher.inbox_durable_hits
+        )
     );
     println!(
-        "- inbox_expired_entries={}",
-        overview.dispatcher.inbox_expired_entries
+        "{}",
+        crate::localization::formatted!(
+            "- inbox_expired_entries={}",
+            overview.dispatcher.inbox_expired_entries
+        )
     );
     println!(
-        "- inbox_active_entries={}",
-        overview.dispatcher.inbox_active_entries
+        "{}",
+        crate::localization::formatted!(
+            "- inbox_active_entries={}",
+            overview.dispatcher.inbox_active_entries
+        )
     );
 
     println!();
-    println!("Worker queues:");
+    println!("{}", crate::localization::formatted!("Worker queues:"));
     if overview.worker_queues.is_empty() {
-        println!("- none");
+        println!("{}", crate::localization::formatted!("- none"));
     } else {
         for queue in &overview.worker_queues {
             let oldest = queue
                 .oldest_unclaimed_age_ms
                 .map(|age_ms| format_duration(StdDuration::from_millis(age_ms)))
                 .unwrap_or_else(|| "-".to_string());
-            println!(
-                "- {} ready={} in_flight={} acked={} purged={} responses={} oldest_unclaimed_age={}",
+            println!("{}", crate::localization::formatted!("- {} ready={} in_flight={} acked={} purged={} responses={} oldest_unclaimed_age={}",
                 queue.queue,
                 queue.ready,
                 queue.in_flight,
                 queue.acked,
                 queue.purged,
                 queue.responses,
-                oldest,
-            );
+                oldest,));
         }
     }
 
     println!();
-    println!("In-flight dispatches:");
+    println!(
+        "{}",
+        crate::localization::formatted!("In-flight dispatches:")
+    );
     if overview.dispatcher.in_flight_dispatches.is_empty() {
-        println!("- none");
+        println!("{}", crate::localization::formatted!("- none"));
     } else {
         for key in &overview.dispatcher.in_flight_dispatches {
             println!("- {key}");
@@ -124,9 +161,9 @@ async fn run_ls(
     }
 
     println!();
-    println!("Pending retries:");
+    println!("{}", crate::localization::formatted!("Pending retries:"));
     if overview.dispatcher.pending_retries.is_empty() {
-        println!("- none");
+        println!("{}", crate::localization::formatted!("- none"));
     } else {
         for key in &overview.dispatcher.pending_retries {
             println!("- {key}");
@@ -134,25 +171,39 @@ async fn run_ls(
     }
 
     println!();
-    println!("Stranded envelopes:");
+    println!("{}", crate::localization::formatted!("Stranded envelopes:"));
     render_stranded(&overview.dispatcher.stranded_envelopes);
 
     println!();
     println!(
-        "Scheduler policy: strategy={} fairness_key={}",
-        overview.scheduler.policy.strategy_name(),
-        overview.scheduler.policy.fairness_key.as_str(),
+        "{}",
+        crate::localization::formatted!(
+            "Scheduler policy: strategy={} fairness_key={}",
+            overview.scheduler.policy.strategy_name(),
+            overview.scheduler.policy.fairness_key.as_str(),
+        )
     );
     if overview.scheduler.per_queue.is_empty() {
-        println!("- no queues observed yet");
+        println!(
+            "{}",
+            crate::localization::formatted!("- no queues observed yet")
+        );
     } else {
         for queue in &overview.scheduler.per_queue {
             println!(
-                "- queue={} rounds_completed={} starvation_promotions={}",
-                queue.queue, queue.rounds_completed, queue.starvation_promotions_total,
+                "{}",
+                crate::localization::formatted!(
+                    "- queue={} rounds_completed={} starvation_promotions={}",
+                    queue.queue,
+                    queue.rounds_completed,
+                    queue.starvation_promotions_total,
+                )
             );
             if queue.keys.is_empty() {
-                println!("    (no fairness keys observed)");
+                println!(
+                    "{}",
+                    crate::localization::formatted!("    (no fairness keys observed)")
+                );
             } else {
                 for stat in &queue.keys {
                     let oldest = if stat.oldest_ready_age_ms > 0 {
@@ -160,8 +211,7 @@ async fn run_ls(
                     } else {
                         "-".to_string()
                     };
-                    println!(
-                        "    key={} weight={} ready={} in_flight={} deficit={} selected={} deferred={} oldest_eligible={}",
+                    println!("{}", crate::localization::formatted!("    key={} weight={} ready={} in_flight={} deficit={} selected={} deferred={} oldest_eligible={}",
                         stat.fairness_key,
                         stat.weight,
                         stat.ready_jobs,
@@ -169,8 +219,7 @@ async fn run_ls(
                         stat.deficit,
                         stat.selected_total,
                         stat.deferred_total,
-                        oldest,
-                    );
+                        oldest,));
                 }
             }
         }
@@ -319,8 +368,7 @@ async fn run_drain(
             serde_json::to_string_pretty(&result).map_err(|error| error.to_string())?
         );
     } else {
-        println!(
-            "Drained queue '{}' as {}: jobs={} acked={} deferred={} ready={} in_flight={} responses={}",
+        println!("{}", crate::localization::formatted!("Drained queue '{}' as {}: jobs={} acked={} deferred={} ready={} in_flight={} responses={}",
             result.queue,
             result.consumer_id,
             result.drained,
@@ -328,8 +376,7 @@ async fn run_drain(
             result.deferred,
             result.summary.ready,
             result.summary.in_flight,
-            result.summary.responses,
-        );
+            result.summary.responses,));
         for response in &result.responses {
             let status = response
                 .outcome
@@ -337,15 +384,18 @@ async fn run_drain(
                 .map(|outcome| outcome.status.as_str())
                 .unwrap_or("error");
             println!(
-                "- job_event_id={} status={} trigger_id={} error={}",
-                response.job_event_id,
-                status,
-                response
-                    .outcome
-                    .as_ref()
-                    .map(|outcome| outcome.trigger_id.as_str())
-                    .unwrap_or("-"),
-                response.error.as_deref().unwrap_or("-"),
+                "{}",
+                crate::localization::formatted!(
+                    "- job_event_id={} status={} trigger_id={} error={}",
+                    response.job_event_id,
+                    status,
+                    response
+                        .outcome
+                        .as_ref()
+                        .map(|outcome| outcome.trigger_id.as_str())
+                        .unwrap_or("-"),
+                    response.error.as_deref().unwrap_or("-"),
+                )
             );
         }
     }
@@ -387,12 +437,15 @@ async fn run_purge(
         );
     } else {
         println!(
-            "Purged queue '{}': purged={} ready={} in_flight={} purged_total={}",
-            result.queue,
-            result.purged,
-            result.summary.ready,
-            result.summary.in_flight,
-            result.summary.purged,
+            "{}",
+            crate::localization::formatted!(
+                "Purged queue '{}': purged={} ready={} in_flight={} purged_total={}",
+                result.queue,
+                result.purged,
+                result.summary.ready,
+                result.summary.in_flight,
+                result.summary.purged,
+            )
         );
     }
     Ok(())
@@ -502,12 +555,11 @@ async fn build_overview(
 
 fn render_stranded(stranded: &[StrandedEnvelopeRecord]) {
     if stranded.is_empty() {
-        println!("- none");
+        println!("{}", crate::localization::formatted!("- none"));
         return;
     }
     for envelope in stranded {
-        println!(
-            "- event_id={} trigger_id={} binding_version={} provider={} kind={} age={} received_at={} inbox_offset={}",
+        println!("{}", crate::localization::formatted!("- event_id={} trigger_id={} binding_version={} provider={} kind={} age={} received_at={} inbox_offset={}",
             envelope.event_id,
             envelope.trigger_id.as_deref().unwrap_or("-"),
             envelope
@@ -518,8 +570,7 @@ fn render_stranded(stranded: &[StrandedEnvelopeRecord]) {
             envelope.kind,
             format_duration(envelope.age),
             format_timestamp(envelope.received_at),
-            envelope.inbox_offset,
-        );
+            envelope.inbox_offset,));
     }
 }
 

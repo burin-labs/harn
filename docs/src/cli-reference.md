@@ -14,7 +14,7 @@ error event retains its detailed diagnostic.
 
 ## Interface language
 
-Command help, interactive credential prompts, and OAuth browser result pages follow the first nonempty
+Command help, command status and result headings, setup prompts, and OAuth browser result pages follow the first nonempty
 `LC_ALL`, `LC_MESSAGES`, or `LANG` value, in that order. Supported languages are
 English (`en`), Spanish (`es`), French (`fr`), German (`de`), Brazilian Portuguese
 (`pt-BR`), Italian (`it`), Japanese (`ja`), Korean (`ko`), and Simplified Chinese
@@ -30,6 +30,11 @@ diagnostics, and authored or scaffolded source files retain their canonical
 spelling. The English help catalog is generated from the live command parser by
 `make gen-cli-surface`; the existing surface check and catalog coverage tests
 detect missing translations when the parser changes.
+
+Complete command-result templates share the same catalogs. The build projects
+their translations into Rust formatting branches so argument types and formatting
+specifications are checked for every supported language. JSON and CSV output keep
+their existing keys, columns, and values.
 
 ## Durable provider allowance
 

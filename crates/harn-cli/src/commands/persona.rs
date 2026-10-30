@@ -35,11 +35,11 @@ pub(crate) fn run_list(manifest: Option<&Path>, args: &PersonaListArgs) {
     let personas =
         package::load_discoverable_personas(manifest).unwrap_or_else(|error| fatal(&error));
     if personas.is_empty() {
-        println!("No personas found.");
+        println!("{}", crate::localization::formatted!("No personas found."));
         return;
     }
 
-    println!("Personas:");
+    println!("{}", crate::localization::formatted!("Personas:"));
     let name_width = personas
         .iter()
         .map(|persona| persona.id.len())
@@ -57,8 +57,15 @@ pub(crate) fn run_list(manifest: Option<&Path>, args: &PersonaListArgs) {
             .unwrap_or("<missing>");
         let entry = persona.entry_workflow.as_deref().unwrap_or("<missing>");
         println!(
-            "  {:<name_width$}  tier={tier:<17} receipts={receipts:<8} entry={entry}",
-            discovered.id
+            "{}",
+            crate::localization::formatted!(
+                "  {:<name_width$}  tier={tier:<17} receipts={receipts:<8} entry={entry}",
+                discovered.id,
+                entry = entry,
+                name_width = name_width,
+                receipts = receipts,
+                tier = tier
+            )
         );
     }
 }
@@ -113,9 +120,12 @@ pub(crate) fn run_check(manifest: Option<&Path>, args: &PersonaCheckArgs) {
         ),
     };
     println!(
-        "ok: {} persona manifest validates ({} personas)",
-        catalog.manifest_path.display(),
-        catalog.personas.len()
+        "{}",
+        crate::localization::formatted!(
+            "ok: {} persona manifest validates ({} personas)",
+            catalog.manifest_path.display(),
+            catalog.personas.len()
+        )
     );
 }
 
@@ -141,43 +151,85 @@ pub(crate) fn run_inspect(manifest: Option<&Path>, args: &PersonaInspectArgs) {
     let persona = &discovered.persona;
 
     println!(
-        "name:           {}",
-        persona.name.as_deref().unwrap_or_default()
+        "{}",
+        crate::localization::formatted!(
+            "name:           {}",
+            persona.name.as_deref().unwrap_or_default()
+        )
     );
     if let Some(version) = &persona.version {
-        println!("version:        {version}");
+        println!(
+            "{}",
+            crate::localization::formatted!("version:        {version}", version = version)
+        );
     }
     println!(
-        "description:    {}",
-        persona.description.as_deref().unwrap_or_default()
+        "{}",
+        crate::localization::formatted!(
+            "description:    {}",
+            persona.description.as_deref().unwrap_or_default()
+        )
     );
     println!(
-        "entry_workflow: {}",
-        persona.entry_workflow.as_deref().unwrap_or_default()
-    );
-    println!("tools:          {}", comma_or_dash(&persona.tools));
-    println!("capabilities:   {}", comma_or_dash(&persona.capabilities));
-    println!(
-        "autonomy_tier:  {}",
-        persona
-            .autonomy_tier
-            .map(|tier| tier.as_str())
-            .unwrap_or_default()
+        "{}",
+        crate::localization::formatted!(
+            "entry_workflow: {}",
+            persona.entry_workflow.as_deref().unwrap_or_default()
+        )
     );
     println!(
-        "receipt_policy: {}",
-        persona
-            .receipt_policy
-            .map(|policy| policy.as_str())
-            .unwrap_or_default()
+        "{}",
+        crate::localization::formatted!("tools:          {}", comma_or_dash(&persona.tools))
     );
-    println!("triggers:       {}", comma_or_dash(&persona.triggers));
-    println!("schedules:      {}", comma_or_dash(&persona.schedules));
-    println!("handoffs:       {}", comma_or_dash(&persona.handoffs));
-    println!("context_packs:  {}", comma_or_dash(&persona.context_packs));
-    println!("evals:          {}", comma_or_dash(&persona.evals));
+    println!(
+        "{}",
+        crate::localization::formatted!("capabilities:   {}", comma_or_dash(&persona.capabilities))
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "autonomy_tier:  {}",
+            persona
+                .autonomy_tier
+                .map(|tier| tier.as_str())
+                .unwrap_or_default()
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "receipt_policy: {}",
+            persona
+                .receipt_policy
+                .map(|policy| policy.as_str())
+                .unwrap_or_default()
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("triggers:       {}", comma_or_dash(&persona.triggers))
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("schedules:      {}", comma_or_dash(&persona.schedules))
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("handoffs:       {}", comma_or_dash(&persona.handoffs))
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "context_packs:  {}",
+            comma_or_dash(&persona.context_packs)
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("evals:          {}", comma_or_dash(&persona.evals))
+    );
     if !persona.steps.is_empty() {
-        println!("steps:");
+        println!("{}", crate::localization::formatted!("steps:"));
         for step in &persona.steps {
             let mut detail = format!("  - {} ({})", step.name, step.function);
             if let Some(model) = step.model.as_deref() {
@@ -198,7 +250,7 @@ pub(crate) fn run_inspect(manifest: Option<&Path>, args: &PersonaInspectArgs) {
         }
     }
     if !persona.stages.is_empty() {
-        println!("stages:");
+        println!("{}", crate::localization::formatted!("stages:"));
         for stage in &persona.stages {
             let tools = stage
                 .allowed_tools
@@ -216,12 +268,21 @@ pub(crate) fn run_inspect(manifest: Option<&Path>, args: &PersonaInspectArgs) {
         }
     }
     if let Some(owner) = &persona.owner {
-        println!("owner:          {owner}");
+        println!(
+            "{}",
+            crate::localization::formatted!("owner:          {owner}", owner = owner)
+        );
     }
     if let Some(provenance) = discovered.installed_provenance() {
-        println!("package:        {}", provenance.package_alias);
+        println!(
+            "{}",
+            crate::localization::formatted!("package:        {}", provenance.package_alias)
+        );
     }
-    println!("manifest:       {}", discovered.manifest_path.display());
+    println!(
+        "{}",
+        crate::localization::formatted!("manifest:       {}", discovered.manifest_path.display())
+    );
 }
 
 /// In-process variant of `harn persona status`.
@@ -468,8 +529,13 @@ pub(crate) async fn run_spend(
         );
     } else {
         println!(
-            "budget: spent_today=${:.4} tokens_today={} exhausted={}",
-            budget.spent_today_usd, budget.tokens_today, budget.exhausted
+            "{}",
+            crate::localization::formatted!(
+                "budget: spent_today=${:.4} tokens_today={} exhausted={}",
+                budget.spent_today_usd,
+                budget.tokens_today,
+                budget.exhausted
+            )
         );
     }
     Ok(())
@@ -595,73 +661,115 @@ fn print_status(status: &harn_vm::PersonaStatus, json: bool) {
         );
         return;
     }
-    println!("persona:        {}", status.name);
     println!(
-        "template_ref:   {}",
-        status.template_ref.as_deref().unwrap_or("-")
-    );
-    println!("state:          {}", status.state.as_str());
-    println!("entry_workflow: {}", status.entry_workflow);
-    println!("role:           {}", status.role);
-    println!(
-        "assignment:     {}",
-        status
-            .current_assignment
-            .as_ref()
-            .map(|assignment| assignment.work_key.as_str())
-            .unwrap_or("-")
+        "{}",
+        crate::localization::formatted!("persona:        {}", status.name)
     );
     println!(
-        "last_run:       {}",
-        status.last_run.as_deref().unwrap_or("-")
+        "{}",
+        crate::localization::formatted!(
+            "template_ref:   {}",
+            status.template_ref.as_deref().unwrap_or("-")
+        )
     );
     println!(
-        "next_run:       {}",
-        status.next_scheduled_run.as_deref().unwrap_or("-")
+        "{}",
+        crate::localization::formatted!("state:          {}", status.state.as_str())
     );
-    println!("queued_events:  {}", status.queued_events);
+    println!(
+        "{}",
+        crate::localization::formatted!("entry_workflow: {}", status.entry_workflow)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("role:           {}", status.role)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "assignment:     {}",
+            status
+                .current_assignment
+                .as_ref()
+                .map(|assignment| assignment.work_key.as_str())
+                .unwrap_or("-")
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "last_run:       {}",
+            status.last_run.as_deref().unwrap_or("-")
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "next_run:       {}",
+            status.next_scheduled_run.as_deref().unwrap_or("-")
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("queued_events:  {}", status.queued_events)
+    );
     if !status.handoff_inbox.is_empty() {
-        println!("handoffs:");
+        println!("{}", crate::localization::formatted!("handoffs:"));
         for handoff in &status.handoff_inbox {
             println!(
-                "  - {} kind={} from={} task={}",
-                handoff
-                    .handoff_id
-                    .as_deref()
-                    .unwrap_or(handoff.work_key.as_str()),
-                handoff.handoff_kind.as_deref().unwrap_or("-"),
-                handoff.source_persona.as_deref().unwrap_or("-"),
-                handoff.task.as_deref().unwrap_or("-")
+                "{}",
+                crate::localization::formatted!(
+                    "  - {} kind={} from={} task={}",
+                    handoff
+                        .handoff_id
+                        .as_deref()
+                        .unwrap_or(handoff.work_key.as_str()),
+                    handoff.handoff_kind.as_deref().unwrap_or("-"),
+                    handoff.source_persona.as_deref().unwrap_or("-"),
+                    handoff.task.as_deref().unwrap_or("-")
+                )
             );
         }
     }
     println!(
-        "active_lease:   {}",
-        status
-            .active_lease
-            .as_ref()
-            .map(|lease| lease.id.as_str())
-            .unwrap_or("-")
+        "{}",
+        crate::localization::formatted!(
+            "active_lease:   {}",
+            status
+                .active_lease
+                .as_ref()
+                .map(|lease| lease.id.as_str())
+                .unwrap_or("-")
+        )
     );
     println!(
-        "budget:         spent_today=${:.4} remaining_today={}",
-        status.budget.spent_today_usd,
-        status
-            .budget
-            .remaining_today_usd
-            .map(|value| format!("${value:.4}"))
-            .unwrap_or_else(|| "-".to_string())
+        "{}",
+        crate::localization::formatted!(
+            "budget:         spent_today=${:.4} remaining_today={}",
+            status.budget.spent_today_usd,
+            status
+                .budget
+                .remaining_today_usd
+                .map(|value| format!("${value:.4}"))
+                .unwrap_or_else(|| "-".to_string())
+        )
     );
     if let Some(receipt) = status.value_receipts.last() {
         println!(
-            "last_receipt:   {} paid=${:.4} avoided=${:.4}",
-            receipt.kind.as_str(),
-            receipt.paid_cost_usd,
-            receipt.avoided_cost_usd
+            "{}",
+            crate::localization::formatted!(
+                "last_receipt:   {} paid=${:.4} avoided=${:.4}",
+                receipt.kind.as_str(),
+                receipt.paid_cost_usd,
+                receipt.avoided_cost_usd
+            )
         );
     }
     if let Some(error) = &status.last_error {
-        println!("last_error:     {error}");
+        println!(
+            "{}",
+            crate::localization::formatted!("last_error:     {error}", error = error)
+        );
     }
 }
 
@@ -674,11 +782,20 @@ fn print_receipt(receipt: &harn_vm::PersonaRunReceipt, json: bool) {
         );
     } else {
         println!(
-            "persona={} status={} work_key={} queued={}",
-            receipt.persona, receipt.status, receipt.work_key, receipt.queued
+            "{}",
+            crate::localization::formatted!(
+                "persona={} status={} work_key={} queued={}",
+                receipt.persona,
+                receipt.status,
+                receipt.work_key,
+                receipt.queued
+            )
         );
         if let Some(error) = &receipt.error {
-            println!("error={error}");
+            println!(
+                "{}",
+                crate::localization::formatted!("error={error}", error = error)
+            );
         }
     }
 }

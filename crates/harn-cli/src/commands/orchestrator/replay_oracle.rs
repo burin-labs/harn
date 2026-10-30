@@ -109,7 +109,12 @@ pub(super) async fn run(args: OrchestratorReplayOracleArgs) -> Result<(), Orches
                     if let Some(divergence) = &trace_report.divergence {
                         print_divergence(divergence);
                     } else {
-                        println!("    expected drift, but canonical replay runs matched");
+                        println!(
+                            "{}",
+                            crate::localization::formatted!(
+                                "    expected drift, but canonical replay runs matched"
+                            )
+                        );
                     }
                 }
                 report.fixtures.push(ReplayOracleFixtureOutcome {
@@ -158,8 +163,12 @@ pub(super) async fn run(args: OrchestratorReplayOracleArgs) -> Result<(), Orches
 
     if !args.json {
         println!(
-            "Replay oracle passed: {} passed, {} skipped",
-            report.passed, report.skipped
+            "{}",
+            crate::localization::formatted!(
+                "Replay oracle passed: {} passed, {} skipped",
+                report.passed,
+                report.skipped
+            )
         );
     }
     Ok(())
@@ -200,9 +209,18 @@ fn matches_filter(
 }
 
 fn print_divergence(divergence: &harn_vm::ReplayDivergence) {
-    println!("    first divergence at {}", divergence.path);
-    println!("    left: {}", compact_json(&divergence.left));
-    println!("    right: {}", compact_json(&divergence.right));
+    println!(
+        "{}",
+        crate::localization::formatted!("    first divergence at {}", divergence.path)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("    left: {}", compact_json(&divergence.left))
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("    right: {}", compact_json(&divergence.right))
+    );
 }
 
 fn compact_json(value: &serde_json::Value) -> String {

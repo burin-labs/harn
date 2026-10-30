@@ -47,16 +47,25 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
 
     if args.model != resolved.id {
         println!(
-            "Resolved {} -> {} via provider {}",
-            args.model, resolved.id, resolved.provider
+            "{}",
+            crate::localization::formatted!(
+                "Resolved {} -> {} via provider {}",
+                args.model,
+                resolved.id,
+                resolved.provider
+            )
         );
     }
 
     if let Some(size_gb) = estimate_size_gb(&resolved.id).await {
         if size_gb > 10 && !args.yes {
             eprint!(
-                "Model {} is approximately {size_gb} GB. Continue? [y/N] ",
-                resolved.id
+                "{}",
+                crate::localization::formatted!(
+                    "Model {} is approximately {size_gb} GB. Continue? [y/N] ",
+                    resolved.id,
+                    size_gb = size_gb
+                )
             );
             io::stderr().flush().ok();
             let mut buf = String::new();
@@ -100,7 +109,10 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
         cli_diagnostic!("ollama pull exited {status}");
         std::process::exit(status.code().unwrap_or(1));
     }
-    println!("\nPulled {}", resolved.id);
+    println!(
+        "{}",
+        crate::localization::formatted!("\nPulled {}", resolved.id)
+    );
 
     // Best-effort warm probe through provider readiness. Skip silently if it
     // fails; the pull itself succeeded.
@@ -115,17 +127,20 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
     )
     .await;
     if readiness.ok {
-        println!("Warm probe: ok");
+        println!("{}", crate::localization::formatted!("Warm probe: ok"));
     } else {
-        println!("Warm probe: skipped ({})", readiness.message);
+        println!(
+            "{}",
+            crate::localization::formatted!("Warm probe: skipped ({})", readiness.message)
+        );
     }
     println!();
-    println!("Use with:");
+    println!("{}", crate::localization::formatted!("Use with:"));
     println!(
         "  HARN_LLM_PROVIDER=ollama HARN_LLM_MODEL={} harn run <file.harn>",
         args.model
     );
-    println!("Verify:");
+    println!("{}", crate::localization::formatted!("Verify:"));
     println!("  harn provider ready ollama --model {}", args.model);
 }
 

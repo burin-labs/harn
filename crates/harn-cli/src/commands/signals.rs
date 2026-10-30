@@ -196,7 +196,7 @@ fn run_command(args: SignalsArgs) -> Result<(), String> {
                         .unwrap_or_default()
                 ));
             }
-            println!("acked {id}");
+            println!("{}", crate::localization::formatted!("acked {id}", id = id));
             Ok(())
         }
         SignalsCommand::Hook(hook) => run_hook(&inbox, hook, now),
@@ -288,12 +288,23 @@ fn report(transition: &harn_signals::Transition, json: bool) -> Result<(), Strin
     }
     match transition {
         harn_signals::Transition::Changed { state, generation } => {
-            println!("{} (generation {generation})", state.as_str());
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "{} (generation {generation})",
+                    state.as_str(),
+                    generation = generation
+                )
+            );
         }
         harn_signals::Transition::Unchanged { state, generation } => {
             println!(
-                "unchanged: already {} (generation {generation})",
-                state.as_str()
+                "{}",
+                crate::localization::formatted!(
+                    "unchanged: already {} (generation {generation})",
+                    state.as_str(),
+                    generation = generation
+                )
             );
         }
         harn_signals::Transition::Unknown => return Err("no signal has that key".into()),

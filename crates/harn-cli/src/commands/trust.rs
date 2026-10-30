@@ -51,13 +51,16 @@ async fn run_query(args: TrustQueryArgs) -> Result<(), String> {
                     .map(|value| format!("{value:.4}"))
                     .unwrap_or_else(|| "n/a".to_string());
                 println!(
-                    "{} total={} success_rate={:.2}% mean_cost_usd={} tiers={} outcomes={}",
-                    item.agent,
-                    item.total,
-                    item.success_rate * 100.0,
-                    mean_cost,
-                    compact_counts(&item.tier_distribution),
-                    compact_counts(&item.outcome_distribution),
+                    "{}",
+                    crate::localization::formatted!(
+                        "{} total={} success_rate={:.2}% mean_cost_usd={} tiers={} outcomes={}",
+                        item.agent,
+                        item.total,
+                        item.success_rate * 100.0,
+                        mean_cost,
+                        compact_counts(&item.tier_distribution),
+                        compact_counts(&item.outcome_distribution),
+                    )
                 );
             }
         }
@@ -82,16 +85,26 @@ async fn run_query(args: TrustQueryArgs) -> Result<(), String> {
 
     if args.grouped_by_trace {
         for group in harn_vm::group_trust_records_by_trace(&records) {
-            println!("trace_id={} count={}", group.trace_id, group.records.len());
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "trace_id={} count={}",
+                    group.trace_id,
+                    group.records.len()
+                )
+            );
             for record in group.records {
                 println!(
-                    "  {} agent={} action={} outcome={} tier={} approver={}",
-                    format_timestamp(record.timestamp),
-                    record.agent,
-                    record.action,
-                    record.outcome.as_str(),
-                    record.autonomy_tier.as_str(),
-                    record.approver.unwrap_or_else(|| "-".to_string()),
+                    "{}",
+                    crate::localization::formatted!(
+                        "  {} agent={} action={} outcome={} tier={} approver={}",
+                        format_timestamp(record.timestamp),
+                        record.agent,
+                        record.action,
+                        record.outcome.as_str(),
+                        record.autonomy_tier.as_str(),
+                        record.approver.unwrap_or_else(|| "-".to_string()),
+                    )
                 );
             }
         }
@@ -100,14 +113,17 @@ async fn run_query(args: TrustQueryArgs) -> Result<(), String> {
 
     for record in records {
         println!(
-            "{} agent={} action={} outcome={} tier={} trace_id={} approver={}",
-            format_timestamp(record.timestamp),
-            record.agent,
-            record.action,
-            record.outcome.as_str(),
-            record.autonomy_tier.as_str(),
-            record.trace_id,
-            record.approver.unwrap_or_else(|| "-".to_string()),
+            "{}",
+            crate::localization::formatted!(
+                "{} agent={} action={} outcome={} tier={} trace_id={} approver={}",
+                format_timestamp(record.timestamp),
+                record.agent,
+                record.action,
+                record.outcome.as_str(),
+                record.autonomy_tier.as_str(),
+                record.trace_id,
+                record.approver.unwrap_or_else(|| "-".to_string()),
+            )
         );
     }
     Ok(())
@@ -125,20 +141,26 @@ async fn run_verify_chain(args: TrustVerifyChainArgs) -> Result<(), String> {
         );
     } else if report.verified {
         println!(
-            "verified topic={} records={} root_hash={}",
-            report.topic,
-            report.total,
-            report.root_hash.unwrap_or_else(|| "-".to_string())
+            "{}",
+            crate::localization::formatted!(
+                "verified topic={} records={} root_hash={}",
+                report.topic,
+                report.total,
+                report.root_hash.unwrap_or_else(|| "-".to_string())
+            )
         );
     } else {
         println!(
-            "failed topic={} records={} broken_at_event_id={}",
-            report.topic,
-            report.total,
-            report
-                .broken_at_event_id
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "-".to_string())
+            "{}",
+            crate::localization::formatted!(
+                "failed topic={} records={} broken_at_event_id={}",
+                report.topic,
+                report.total,
+                report
+                    .broken_at_event_id
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_string())
+            )
         );
         for error in &report.errors {
             println!("  {error}");

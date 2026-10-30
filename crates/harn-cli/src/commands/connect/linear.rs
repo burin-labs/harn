@@ -131,31 +131,43 @@ pub(super) async fn run_connect_linear(args: &ConnectLinearArgs) -> Result<(), S
     } else {
         let webhook = rendered.get("webhook").unwrap_or(&JsonValue::Null);
         println!(
-            "Registered Linear webhook {} for {}",
-            webhook
-                .get("id")
-                .and_then(JsonValue::as_str)
-                .unwrap_or("<unknown>"),
-            url
+            "{}",
+            crate::localization::formatted!(
+                "Registered Linear webhook {} for {}",
+                webhook
+                    .get("id")
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or("<unknown>"),
+                url
+            )
         );
         println!(
-            "Enabled: {}",
-            webhook
-                .get("enabled")
-                .and_then(JsonValue::as_bool)
-                .unwrap_or(false)
+            "{}",
+            crate::localization::formatted!(
+                "Enabled: {}",
+                webhook
+                    .get("enabled")
+                    .and_then(JsonValue::as_bool)
+                    .unwrap_or(false)
+            )
         );
         println!(
-            "Resource types: {}",
-            rendered["resource_types"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(JsonValue::as_str)
-                .collect::<Vec<_>>()
-                .join(", ")
+            "{}",
+            crate::localization::formatted!(
+                "Resource types: {}",
+                rendered["resource_types"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(JsonValue::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
         );
-        println!("Manifest: {}", manifest_path.display());
+        println!(
+            "{}",
+            crate::localization::formatted!("Manifest: {}", manifest_path.display())
+        );
     }
 
     Ok(())

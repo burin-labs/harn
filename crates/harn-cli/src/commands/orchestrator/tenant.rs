@@ -59,14 +59,29 @@ fn create_tenant(
     if args.json {
         return print_json(&TenantCreateOutput { tenant, api_key });
     }
-    println!("created tenant {}", tenant.scope.id.0);
-    println!("state: {}", tenant.scope.state_root.display());
-    println!("secret namespace: {}", tenant.scope.secret_namespace);
     println!(
-        "event topic prefix: {}",
-        tenant.scope.event_log_topic_prefix
+        "{}",
+        crate::localization::formatted!("created tenant {}", tenant.scope.id.0)
     );
-    println!("api key: {api_key}");
+    println!(
+        "{}",
+        crate::localization::formatted!("state: {}", tenant.scope.state_root.display())
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("secret namespace: {}", tenant.scope.secret_namespace)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "event topic prefix: {}",
+            tenant.scope.event_log_topic_prefix
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("api key: {api_key}", api_key = api_key)
+    );
     Ok(())
 }
 
@@ -79,16 +94,19 @@ fn list_tenants(
         return print_json(&tenants);
     }
     if tenants.is_empty() {
-        println!("no tenants");
+        println!("{}", crate::localization::formatted!("no tenants"));
         return Ok(());
     }
     for tenant in tenants {
         println!(
-            "{}\t{:?}\t{}\tkeys={}",
-            tenant.scope.id.0,
-            tenant.status,
-            tenant.scope.state_root.display(),
-            tenant.api_keys.len()
+            "{}",
+            crate::localization::formatted!(
+                "{}\t{:?}\t{}\tkeys={}",
+                tenant.scope.id.0,
+                tenant.status,
+                tenant.scope.state_root.display(),
+                tenant.api_keys.len()
+            )
         );
     }
     Ok(())
@@ -102,7 +120,10 @@ fn suspend_tenant(
     if args.json {
         return print_json(&tenant);
     }
-    println!("suspended tenant {}", tenant.scope.id.0);
+    println!(
+        "{}",
+        crate::localization::formatted!("suspended tenant {}", tenant.scope.id.0)
+    );
     Ok(())
 }
 
@@ -119,6 +140,9 @@ fn delete_tenant(
     if args.json {
         return print_json(&tenant);
     }
-    println!("deleted tenant {}", tenant.scope.id.0);
+    println!(
+        "{}",
+        crate::localization::formatted!("deleted tenant {}", tenant.scope.id.0)
+    );
     Ok(())
 }

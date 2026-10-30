@@ -324,7 +324,10 @@ fn first_differing_byte(before: Option<&Value>, after: Option<&Value>) -> usize 
 }
 
 fn print_human_report(report: &PrefixStabilityReport) {
-    println!("pair\tleading messages\tsystem\ttools\tappend-only");
+    println!(
+        "{}",
+        crate::localization::formatted!("pair\tleading messages\tsystem\ttools\tappend-only")
+    );
     for pair in &report.pairs {
         println!(
             "{} -> {}\t{}\t{}\t{}\t{}",
@@ -338,16 +341,24 @@ fn print_human_report(report: &PrefixStabilityReport) {
         if let Some(change) = &pair.modified_message {
             let role = change.role.as_deref().unwrap_or("unknown role");
             println!(
-                "  message {} ({role}) changed at byte {}:",
-                change.index, change.first_differing_byte
+                "{}",
+                crate::localization::formatted!(
+                    "  message {} ({role}) changed at byte {}:",
+                    change.index,
+                    change.first_differing_byte,
+                    role = role
+                )
             );
             print_value('-', change.before.as_ref());
             print_value('+', change.after.as_ref());
         }
         if let Some(change) = &pair.system_change {
             println!(
-                "  system block changed at byte {}:",
-                change.first_differing_byte
+                "{}",
+                crate::localization::formatted!(
+                    "  system block changed at byte {}:",
+                    change.first_differing_byte
+                )
             );
             print_value('-', change.before.as_ref());
             print_value('+', change.after.as_ref());
@@ -355,12 +366,19 @@ fn print_human_report(report: &PrefixStabilityReport) {
         if let Some(change) = &pair.tool_change {
             match change.index {
                 Some(index) => println!(
-                    "  tool {index} changed at byte {}:",
-                    change.first_differing_byte
+                    "{}",
+                    crate::localization::formatted!(
+                        "  tool {index} changed at byte {}:",
+                        change.first_differing_byte,
+                        index = index
+                    )
                 ),
                 None => println!(
-                    "  tool list changed at byte {}:",
-                    change.first_differing_byte
+                    "{}",
+                    crate::localization::formatted!(
+                        "  tool list changed at byte {}:",
+                        change.first_differing_byte
+                    )
                 ),
             }
             print_value('-', change.before.as_ref());
@@ -369,9 +387,13 @@ fn print_human_report(report: &PrefixStabilityReport) {
     }
     let status = if report.stable { "stable" } else { "unstable" };
     println!(
-        "prefix {status}: {} requests, {} consecutive pairs",
-        report.request_count,
-        report.pairs.len()
+        "{}",
+        crate::localization::formatted!(
+            "prefix {status}: {} requests, {} consecutive pairs",
+            report.request_count,
+            report.pairs.len(),
+            status = status
+        )
     );
 }
 

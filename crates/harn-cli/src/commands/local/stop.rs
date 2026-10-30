@@ -62,11 +62,17 @@ pub(crate) async fn run(args: LocalStopArgs, base_dir: &Path) -> Result<(), Stri
                 .map_err(|error| format!("failed to render stop JSON: {error}"))?
         );
     } else if payload.providers.is_empty() {
-        println!("(no local providers to stop)");
+        println!(
+            "{}",
+            crate::localization::formatted!("(no local providers to stop)")
+        );
     } else {
         for outcome in &payload.providers {
             if outcome.actions.is_empty() {
-                println!("{}: nothing to stop", outcome.provider);
+                println!(
+                    "{}",
+                    crate::localization::formatted!("{}: nothing to stop", outcome.provider)
+                );
             } else {
                 println!("{}:", outcome.provider);
                 for action in &outcome.actions {

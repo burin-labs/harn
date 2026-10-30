@@ -179,14 +179,23 @@ pub(crate) fn run_list(args: &SkillsListArgs) {
     }
 
     if corpus.is_empty() {
-        println!("No canonical skills available for this `harn` build.");
+        println!(
+            "{}",
+            crate::localization::formatted!("No canonical skills available for this `harn` build.")
+        );
         return;
     }
 
     if corpus.is_disk() {
-        println!("Disk canonical skills ({}):", corpus.len());
+        println!(
+            "{}",
+            crate::localization::formatted!("Disk canonical skills ({}):", corpus.len())
+        );
     } else {
-        println!("Embedded canonical skills ({}):", corpus.len());
+        println!(
+            "{}",
+            crate::localization::formatted!("Embedded canonical skills ({}):", corpus.len())
+        );
     }
     let entries = list_payload_entries(&corpus);
     let name_width = entries.iter().map(|s| s.name.len()).max().unwrap_or(4);
@@ -204,8 +213,14 @@ pub(crate) fn run_list(args: &SkillsListArgs) {
         );
     }
     println!();
-    println!("Run `harn skill get <name>` for one entry's frontmatter.");
-    println!("Run `harn skill get <name> --full` to include the body.");
+    println!(
+        "{}",
+        crate::localization::formatted!("Run `harn skill get <name>` for one entry's frontmatter.")
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("Run `harn skill get <name> --full` to include the body.")
+    );
 }
 
 /// `harn skill get <name>` — canonical skill frontmatter, or full
@@ -313,7 +328,14 @@ pub(crate) fn run_dump(args: &SkillsDumpArgs) {
         written.push(dest);
     }
 
-    println!("Wrote {} skill(s) to {}", written.len(), out_dir.display());
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "Wrote {} skill(s) to {}",
+            written.len(),
+            out_dir.display()
+        )
+    );
     for path in &written {
         println!("  {}", path.display());
     }
@@ -330,28 +352,52 @@ fn resolve_skill_corpus_or_exit() -> SkillCorpus {
 }
 
 fn print_skill_frontmatter(frontmatter: &SkillFrontmatter) {
-    println!("name:        {}", frontmatter.name);
+    println!(
+        "{}",
+        crate::localization::formatted!("name:        {}", frontmatter.name)
+    );
     if !frontmatter.short.is_empty() {
-        println!("short:       {}", frontmatter.short);
+        println!(
+            "{}",
+            crate::localization::formatted!("short:       {}", frontmatter.short)
+        );
     }
     if !frontmatter.description.is_empty() {
-        println!("description: {}", frontmatter.description);
+        println!(
+            "{}",
+            crate::localization::formatted!("description: {}", frontmatter.description)
+        );
     }
     if let Some(when) = frontmatter.when_to_use {
-        println!("when_to_use: {when}");
+        println!(
+            "{}",
+            crate::localization::formatted!("when_to_use: {when}", when = when)
+        );
     }
 }
 
 fn print_disk_skill_frontmatter(frontmatter: &DiskSkillFrontmatter) {
-    println!("name:        {}", frontmatter.name);
+    println!(
+        "{}",
+        crate::localization::formatted!("name:        {}", frontmatter.name)
+    );
     if !frontmatter.short.is_empty() {
-        println!("short:       {}", frontmatter.short);
+        println!(
+            "{}",
+            crate::localization::formatted!("short:       {}", frontmatter.short)
+        );
     }
     if !frontmatter.description.is_empty() {
-        println!("description: {}", frontmatter.description);
+        println!(
+            "{}",
+            crate::localization::formatted!("description: {}", frontmatter.description)
+        );
     }
     if let Some(when) = &frontmatter.when_to_use {
-        println!("when_to_use: {when}");
+        println!(
+            "{}",
+            crate::localization::formatted!("when_to_use: {when}", when = when)
+        );
     }
 }
 
@@ -451,12 +497,18 @@ pub(crate) fn run_resolved(args: &SkillsResolvedArgs) {
     }
 
     if report.winners.is_empty() {
-        println!("No skills resolved.");
+        println!("{}", crate::localization::formatted!("No skills resolved."));
         println!(
-            "Hint: add skills via --skill-dir, HARN_SKILLS_PATH, .harn/skills/, or harn.toml."
+            "{}",
+            crate::localization::formatted!(
+                "Hint: add skills via --skill-dir, HARN_SKILLS_PATH, .harn/skills/, or harn.toml."
+            )
         );
     } else {
-        println!("Resolved skills ({}):", report.winners.len());
+        println!(
+            "{}",
+            crate::localization::formatted!("Resolved skills ({}):", report.winners.len())
+        );
         let id_width = report.winners.iter().map(|w| w.id.len()).max().unwrap_or(4);
         for winner in &report.winners {
             let desc = if winner.manifest.short.is_empty() {
@@ -481,28 +533,37 @@ pub(crate) fn run_resolved(args: &SkillsResolvedArgs) {
 
     if !report.shadowed.is_empty() {
         println!();
-        println!("Shadowed skills ({}):", report.shadowed.len());
+        println!(
+            "{}",
+            crate::localization::formatted!("Shadowed skills ({}):", report.shadowed.len())
+        );
         for entry in &report.shadowed {
             println!(
-                "  {:<12} winner=[{}] hidden=[{}] origin={}",
-                entry.id,
-                entry.winner.label(),
-                entry.loser.label(),
-                entry.loser_origin
+                "{}",
+                crate::localization::formatted!(
+                    "  {:<12} winner=[{}] hidden=[{}] origin={}",
+                    entry.id,
+                    entry.winner.label(),
+                    entry.loser.label(),
+                    entry.loser_origin
+                )
             );
         }
     }
 
     if !report.disabled_layers.is_empty() {
         println!();
-        print!("Disabled layers: ");
+        print!("{}", crate::localization::formatted!("Disabled layers: "));
         let labels: Vec<&str> = report.disabled_layers.iter().map(|l| l.label()).collect();
         println!("{}", labels.join(", "));
     }
 
     if !report.unknown_fields.is_empty() {
         println!();
-        println!("Unknown frontmatter fields:");
+        println!(
+            "{}",
+            crate::localization::formatted!("Unknown frontmatter fields:")
+        );
         for (id, fields) in &report.unknown_fields {
             println!("  {id}: {}", fields.join(", "));
         }
@@ -531,45 +592,87 @@ pub(crate) fn run_inspect(args: &SkillsInspectArgs) {
         return;
     }
 
-    println!("id:          {}", skill.id());
-    println!("name:        {}", skill.manifest.name);
-    println!("layer:       {}", skill.layer.label());
+    println!(
+        "{}",
+        crate::localization::formatted!("id:          {}", skill.id())
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("name:        {}", skill.manifest.name)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("layer:       {}", skill.layer.label())
+    );
     if let Some(ns) = &skill.namespace {
-        println!("namespace:   {ns}");
+        println!(
+            "{}",
+            crate::localization::formatted!("namespace:   {ns}", ns = ns)
+        );
     }
     if !skill.manifest.short.is_empty() {
-        println!("short:       {}", skill.manifest.short);
+        println!(
+            "{}",
+            crate::localization::formatted!("short:       {}", skill.manifest.short)
+        );
     }
     if !skill.manifest.description.is_empty() {
-        println!("description: {}", skill.manifest.description);
+        println!(
+            "{}",
+            crate::localization::formatted!("description: {}", skill.manifest.description)
+        );
     }
     if let Some(when) = &skill.manifest.when_to_use {
-        println!("when_to_use: {when}");
+        println!(
+            "{}",
+            crate::localization::formatted!("when_to_use: {when}", when = when)
+        );
     }
     if let Some(dir) = &skill.skill_dir {
-        println!("skill_dir:   {}", dir.display());
+        println!(
+            "{}",
+            crate::localization::formatted!("skill_dir:   {}", dir.display())
+        );
     }
     if !skill.manifest.allowed_tools.is_empty() {
-        println!("allowed:     {}", skill.manifest.allowed_tools.join(", "));
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "allowed:     {}",
+                skill.manifest.allowed_tools.join(", ")
+            )
+        );
     }
     if !skill.manifest.paths.is_empty() {
-        println!("paths:       {}", skill.manifest.paths.join(", "));
+        println!(
+            "{}",
+            crate::localization::formatted!("paths:       {}", skill.manifest.paths.join(", "))
+        );
     }
     if let Some(model) = &skill.manifest.model {
-        println!("model:       {model}");
+        println!(
+            "{}",
+            crate::localization::formatted!("model:       {model}", model = model)
+        );
     }
     if let Some(effort) = &skill.manifest.effort {
-        println!("effort:      {effort}");
+        println!(
+            "{}",
+            crate::localization::formatted!("effort:      {effort}", effort = effort)
+        );
     }
     if !skill.unknown_fields.is_empty() {
-        println!("unknown:     {}", skill.unknown_fields.join(", "));
+        println!(
+            "{}",
+            crate::localization::formatted!("unknown:     {}", skill.unknown_fields.join(", "))
+        );
     }
 
     if let Some(dir) = &skill.skill_dir {
         let bundled = collect_bundled_files(dir);
         if !bundled.is_empty() {
             println!();
-            println!("Bundled files:");
+            println!("{}", crate::localization::formatted!("Bundled files:"));
             for file in &bundled {
                 println!("  {}", file.display());
             }
@@ -620,19 +723,28 @@ pub(crate) fn run_match(args: &SkillsMatchArgs) {
     }
 
     if top.is_empty() {
-        println!("No skills matched '{}'.", args.query);
+        println!(
+            "{}",
+            crate::localization::formatted!("No skills matched '{}'.", args.query)
+        );
         return;
     }
 
-    println!("Match results for: {}", args.query);
+    println!(
+        "{}",
+        crate::localization::formatted!("Match results for: {}", args.query)
+    );
     for (idx, cand) in top.iter().enumerate() {
         println!(
-            "  {:>2}. {:<20}  score={:.3}  [{}]  {}",
-            idx + 1,
-            cand.id,
-            cand.score,
-            cand.layer.label(),
-            cand.reason
+            "{}",
+            crate::localization::formatted!(
+                "  {:>2}. {:<20}  score={:.3}  [{}]  {}",
+                idx + 1,
+                cand.id,
+                cand.score,
+                cand.layer.label(),
+                cand.reason
+            )
         );
     }
 }
@@ -668,21 +780,27 @@ pub(crate) fn run_install(args: &SkillsInstallArgs) {
 
     if install_dir.exists() {
         println!(
-            "refreshing {}",
-            install_dir
-                .strip_prefix(".")
-                .unwrap_or(&install_dir)
-                .display()
+            "{}",
+            crate::localization::formatted!(
+                "refreshing {}",
+                install_dir
+                    .strip_prefix(".")
+                    .unwrap_or(&install_dir)
+                    .display()
+            )
         );
         let _ = fs::remove_dir_all(&install_dir);
     } else {
         println!(
-            "installing {} to {}",
-            spec,
-            install_dir
-                .strip_prefix(".")
-                .unwrap_or(&install_dir)
-                .display()
+            "{}",
+            crate::localization::formatted!(
+                "installing {} to {}",
+                spec,
+                install_dir
+                    .strip_prefix(".")
+                    .unwrap_or(&install_dir)
+                    .display()
+            )
         );
     }
 
@@ -733,9 +851,12 @@ pub(crate) fn run_install(args: &SkillsInstallArgs) {
         String::new()
     };
     println!(
-        "installed{} — layer=package, path={}",
-        namespace_note,
-        install_dir.display()
+        "{}",
+        crate::localization::formatted!(
+            "installed{} — layer=package, path={}",
+            namespace_note,
+            install_dir.display()
+        )
     );
 }
 
@@ -815,13 +936,19 @@ They are accessible to the skill body via `${{HARN_SKILL_DIR}}/files/<name>`.\n"
         ),
     );
 
-    println!("Scaffolded skill '{}' at {}", args.name, dest.display());
+    println!(
+        "{}",
+        crate::localization::formatted!("Scaffolded skill '{}' at {}", args.name, dest.display())
+    );
     println!("  SKILL.md");
     println!("  files/README.md");
     println!();
     println!(
-        "Edit the SKILL.md, run `harn skill validate {}` and then `harn skill resolved`.",
-        dest.display(),
+        "{}",
+        crate::localization::formatted!(
+            "Edit the SKILL.md, run `harn skill validate {}` and then `harn skill resolved`.",
+            dest.display(),
+        )
     );
 }
 
@@ -892,10 +1019,22 @@ pub(crate) fn run_validate(args: &SkillsValidateArgs) {
         return;
     }
 
-    println!("valid: {}", skill_dir.display());
-    println!("id:    {}", payload.id);
-    println!("short: {}", payload.short);
-    println!("files: {} bundled file(s)", payload.bundled_files.len());
+    println!(
+        "{}",
+        crate::localization::formatted!("valid: {}", skill_dir.display())
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("id:    {}", payload.id)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("short: {}", payload.short)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("files: {} bundled file(s)", payload.bundled_files.len())
+    );
     if !skill.unknown_fields.is_empty() {
         cli_diagnostic!(
             "warning: unknown frontmatter field(s): {}",
@@ -1295,85 +1434,5 @@ use harn_glob::match_path as glob_match;
 fn _types(_: SkillManifestRef) {}
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::env_guard::ScopedEnvVar;
-    use crate::tests::common::harn_state_lock::lock_harn_state;
-
-    #[test]
-    fn derive_name_extracts_repo_segment() {
-        assert_eq!(
-            derive_name_from_spec("https://github.com/acme/harn-skills.git"),
-            Some("harn-skills".to_string())
-        );
-        assert_eq!(
-            derive_name_from_spec("./local/path/deploy"),
-            Some("deploy".to_string())
-        );
-        assert_eq!(derive_name_from_spec("acme/ops"), Some("ops".to_string()));
-    }
-
-    #[test]
-    fn resolve_git_url_expands_shorthand() {
-        assert_eq!(
-            resolve_git_url("acme/ops"),
-            "https://github.com/acme/ops.git"
-        );
-        assert_eq!(
-            resolve_git_url("https://example.com/x.git"),
-            "https://example.com/x.git"
-        );
-    }
-
-    #[test]
-    fn glob_matches_expected() {
-        assert!(glob_match("src/*.rs", "src/main.rs"));
-        assert!(!glob_match("src/*.rs", "src/sub/main.rs"));
-        assert!(glob_match("infra/**", "infra/terraform/main.tf"));
-    }
-
-    #[test]
-    fn command_discovery_owns_the_package_generation_it_reads() {
-        let _env = lock_harn_state();
-        let temp = tempfile::tempdir().unwrap();
-        let home = tempfile::tempdir().unwrap();
-        let _home = ScopedEnvVar::set("HOME", home.path().to_str().unwrap());
-        let _skills_path = ScopedEnvVar::unset("HARN_SKILLS_PATH");
-        fs::write(temp.path().join("harn.toml"), "[package]\nname = \"app\"\n").unwrap();
-        let anchor = temp.path().join("main.harn");
-        fs::write(&anchor, "fn main() {}\n").unwrap();
-        let packages_root =
-            crate::package::test_support::create_test_package_generation(temp.path());
-        crate::package::test_support::write_test_generation_lock(
-            temp.path(),
-            "version = 4\n\n[[package]]\nname = \"pack\"\nsource = \"path+fixture\"\n",
-        );
-        let skill_dir = packages_root.join("pack/skills/review");
-        fs::create_dir_all(&skill_dir).unwrap();
-        fs::write(
-            skill_dir.join("SKILL.md"),
-            "---\nname: review\nshort: review code\n---\nReview the project",
-        )
-        .unwrap();
-
-        let discovery = build_discovery(&[], anchor.to_str());
-        let lease = fs::File::open(
-            packages_root
-                .parent()
-                .unwrap()
-                .join(harn_modules::package_snapshot::GENERATION_LEASE_FILE),
-        )
-        .unwrap();
-        assert!(
-            lease.try_lock().is_err(),
-            "command discovery must retain the generation backing its paths"
-        );
-        assert_eq!(
-            discovery.fetch("review").unwrap().body,
-            "Review the project"
-        );
-
-        drop(discovery);
-        harn_flock::assert_released(&lease);
-    }
-}
+#[path = "skills_tests.rs"]
+mod tests;

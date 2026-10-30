@@ -53,13 +53,16 @@ pub async fn run(args: EvalSkillGateArgs) -> i32 {
         }
     } else {
         println!(
-            "skill gate: {} selected={} variants={} included={} excluded={} tamper={}",
-            if report.pass { "PASS" } else { "FAIL" },
-            report.selected_variant_id.as_deref().unwrap_or("none"),
-            report.variants.len(),
-            report.included_task_count,
-            report.excluded_task_count,
-            if report.tamper.pass { "pass" } else { "fail" }
+            "{}",
+            crate::localization::formatted!(
+                "skill gate: {} selected={} variants={} included={} excluded={} tamper={}",
+                if report.pass { "PASS" } else { "FAIL" },
+                report.selected_variant_id.as_deref().unwrap_or("none"),
+                report.variants.len(),
+                report.included_task_count,
+                report.excluded_task_count,
+                if report.tamper.pass { "pass" } else { "fail" }
+            )
         );
     }
     i32::from(!report.pass)
