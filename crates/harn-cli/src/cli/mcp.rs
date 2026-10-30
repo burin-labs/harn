@@ -153,6 +153,7 @@ pub(crate) struct McpServeArgs {
     pub transport: McpServeTransport,
     /// Socket address to bind when serving over HTTP.
     #[arg(
+        hide_env_values = true,
         long,
         env = "HARN_MCP_SERVE_BIND",
         default_value = "127.0.0.1:8765",
