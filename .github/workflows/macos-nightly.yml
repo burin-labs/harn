@@ -93,7 +93,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        frontend_threads: [1, 8]
+        frontend_threads: [1]
     env:
       HARN_RUSTC_FRONTEND_THREADS: ${{ matrix.frontend_threads }}
     # Only trusted main workflow dispatches may execute on the restricted group.
