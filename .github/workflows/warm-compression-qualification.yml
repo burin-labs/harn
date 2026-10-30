@@ -44,6 +44,7 @@ jobs:
           metrics="$RUNNER_TEMP/warm-compression-metrics.txt"
           cp scripts/ci/workspace_warm_artifact.sh "$candidate"
           git show a09d0c76612bc0d4d9bf6920bcb831b7e83c0e66:scripts/ci/workspace_warm_artifact.sh > scripts/ci/workspace_warm_artifact.sh
+          cp scripts/ci/workspace_warm_artifact.sh "$RUNNER_TEMP/baseline-warm.sh"
           started=$(date +%s)
           scripts/ci/workspace_warm_artifact.sh windows pack "$RUNNER_TEMP/warm-baseline" > "$RUNNER_TEMP/baseline-pack.log"
           baseline_seconds=$(( $(date +%s) - started ))
@@ -51,14 +52,22 @@ jobs:
           started=$(date +%s)
           scripts/ci/workspace_warm_artifact.sh windows pack "$RUNNER_TEMP/warm-candidate" > "$RUNNER_TEMP/candidate-pack.log"
           candidate_seconds=$(( $(date +%s) - started ))
+          cp "$RUNNER_TEMP/baseline-warm.sh" scripts/ci/workspace_warm_artifact.sh
+          started=$(date +%s)
+          scripts/ci/workspace_warm_artifact.sh windows pack "$RUNNER_TEMP/warm-baseline-after" > "$RUNNER_TEMP/baseline-after-pack.log"
+          baseline_after_seconds=$(( $(date +%s) - started ))
+          cp "$candidate" scripts/ci/workspace_warm_artifact.sh
           gzip -dc "$RUNNER_TEMP/warm-baseline/target.tar.gz" | sha256sum > "$RUNNER_TEMP/baseline-payload.sha256"
           gzip -dc "$RUNNER_TEMP/warm-candidate/target.tar.gz" | sha256sum > "$RUNNER_TEMP/candidate-payload.sha256"
+          gzip -dc "$RUNNER_TEMP/warm-baseline-after/target.tar.gz" | sha256sum > "$RUNNER_TEMP/baseline-after-payload.sha256"
           cmp "$RUNNER_TEMP/baseline-payload.sha256" "$RUNNER_TEMP/candidate-payload.sha256"
+          cmp "$RUNNER_TEMP/baseline-payload.sha256" "$RUNNER_TEMP/baseline-after-payload.sha256"
           {
             echo "source=$(git rev-parse HEAD)"
             echo "baseline_seconds=$baseline_seconds"
             echo "candidate_seconds=$candidate_seconds"
-            cat "$RUNNER_TEMP/baseline-pack.log" "$RUNNER_TEMP/candidate-pack.log"
+            echo "baseline_after_seconds=$baseline_after_seconds"
+            cat "$RUNNER_TEMP/baseline-pack.log" "$RUNNER_TEMP/candidate-pack.log" "$RUNNER_TEMP/baseline-after-pack.log"
             cat "$RUNNER_TEMP/baseline-payload.sha256"
             gzip --version
           } > "$metrics"
