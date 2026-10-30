@@ -350,7 +350,7 @@ fn read_key(owner: Owner<'_>, name: &str, args: &[VmValue]) -> String {
     );
     let key = format!("{name}:{}", super::args_digest(&args));
     // TEMPORARY diagnostic, reverted before review.
-    if let Ok(log) = std::env::var("HARN_DEBUG_READ_KEYS") {
+    if let Ok(log) = std::env::var("HARN_EXT_DEBUG_READ_KEYS") {
         use std::io::Write;
         if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(log) {
             let _ = writeln!(file, "{}", serde_json::json!({"key": key, "args": args}));
