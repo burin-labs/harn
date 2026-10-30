@@ -358,6 +358,36 @@ export function observerDeclarationName(context) {
   return `consumer-observer-${observer.parent_run_attempt}-${observer.dispatch_nonce}`;
 }
 
+export function observerPublicationWitness(context) {
+  return `Confirm consumer observer declaration ${observerContext(context).dispatch_nonce}`;
+}
+
+/** A nonce-bound successful step pairs the authenticated declaration to one job. */
+export function qualifyObserverPublisher(context, jobs) {
+  const observer = observerContext(context);
+  const name = observerPublicationWitness(observer);
+  let matches = jobs.flatMap(job => job.steps.filter(step => step.name === name).map(step => ({job, step})));
+  // The immutable 182 producer is already in flight without the witness step.
+  const frozen182 = observer.parent_run_id === '41016965350'
+    && observer.parent_run_attempt === 3
+    && observer.parent_head_sha === 'e1ef4c6ae5bcf6445a3b864712f2589f3d8aabcc'
+    && observer.source_revision === observer.parent_head_sha;
+  if (matches.length === 0 && frozen182) {
+    matches = jobs.flatMap(job => job.steps.filter(step => step.name === observerDeclarationStep).map(step => ({job, step})));
+  }
+  if (matches.length !== 1) refuse('observer_job_identity_unproven');
+  const {job, step} = matches[0];
+  const publication = job.steps.filter(item => item.name === observerDeclarationStep);
+  if (!Number.isSafeInteger(job.id) || job.id < 1
+    || String(job.run_id) !== observer.parent_run_id || job.run_attempt !== observer.parent_run_attempt
+    || job.head_sha !== observer.parent_head_sha || publication.length !== 1
+    || publication[0].status !== 'completed' || publication[0].conclusion !== 'success'
+    || !Number.isSafeInteger(publication[0].number)
+    || step.status !== 'completed' || step.conclusion !== 'success' || !Number.isSafeInteger(step.number)
+    || (step !== publication[0] && step.number <= publication[0].number)) refuse('observer_job_identity_unproven');
+  return {job, publication:publication[0], witness:step};
+}
+
 function artifactJsonFromZip(bytes, filename) {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-observer-declaration-'));
   try {
@@ -551,9 +581,9 @@ export async function githubParentDeclarations(token, runId, attempt, fetchRecor
   const prefix = `consumer-observer-${attempt}-`;
   const declarations = artifacts.filter(artifact => artifact.name?.startsWith(prefix));
   const publication = jobs.flatMap(job => job.steps).filter(step => step.name === observerDeclarationStep);
-  // One context can own multiple dispatched children. Multiple publishers
-  // cannot be paired to artifacts by count alone, so their custody is unknown.
-  if (publication.length > 1) refuse('declaration_publication_ambiguous');
+  if (jobs.some(job => job.steps.filter(step => step.name === observerDeclarationStep).length > 1)) {
+    refuse('declaration_publication_ambiguous');
+  }
   if (publication.some(step => step.status !== 'completed' || !completedConclusions.has(step.conclusion))) {
     refuse('declaration_step_census_unmeasured');
   }
@@ -565,12 +595,16 @@ export async function githubParentDeclarations(token, runId, attempt, fetchRecor
   // caller reached the successful publication boundary or dispatched it.
   if (declarations.length !== published) refuse('declaration_publication_unmeasured');
   const contexts = [];
+  const publishers = new Set();
   for (const artifact of declarations) {
     const context = observerContext(await githubArtifactJson(token, parentRepository, artifact, {
       runId, headSha: parent.head_sha, name: artifact.name, filename: 'consumer-observer.json',
     }, fetchRecord, extract));
     qualifyObserverParent(context, parent);
     if (artifact.name !== observerDeclarationName(context)) refuse('dispatch_declaration_mismatch');
+    const {job} = qualifyObserverPublisher(context, jobs);
+    if (publishers.has(job.id)) refuse('declaration_publication_ambiguous');
+    publishers.add(job.id);
     contexts.push(context);
   }
   if (new Set(contexts.map(context => context.dispatch_nonce)).size !== contexts.length) {
@@ -1136,17 +1170,10 @@ async function reconcileChildren(token, context, expected, fetchRecord, extract,
   let observerEnded = parent.status === 'completed';
   if (!observerEnded && retireFailedObservation) {
     const jobs = await githubParentJobs(token, observer.parent_run_id, observer.parent_run_attempt, fetchRecord);
-    const publishers = jobs.filter(job => job.steps.some(step => step.name === observerDeclarationStep));
-    if (publishers.length !== 1) refuse('observer_job_identity_unproven');
-    const job = publishers[0];
-    const declarations = job.steps.filter(step => step.name === observerDeclarationStep);
-    if (String(job.run_id) !== observer.parent_run_id || job.run_attempt !== observer.parent_run_attempt
-      || job.head_sha !== observer.parent_head_sha || declarations.length !== 1
-      || declarations[0].status !== 'completed' || declarations[0].conclusion !== 'success'
-      || !Number.isSafeInteger(declarations[0].number)) refuse('observer_job_identity_unproven');
+    const {job, witness} = qualifyObserverPublisher(observer, jobs);
     observerEnded = job.steps.some(step => observerStopSteps.has(step.name)
       && step.status === 'completed' && ['failure', 'cancelled'].includes(step.conclusion)
-      && Number.isSafeInteger(step.number) && step.number > declarations[0].number);
+      && Number.isSafeInteger(step.number) && step.number > witness.number);
   }
   const runs = await githubChildCensus(token, expected.repository, expected.workflow,
     parent.created_at, fetchRecord);

@@ -2611,6 +2611,7 @@ pub fn consumer_canary_errors(
       ]
   }
   const steps = job?.steps ?? []
+  let custody_declared = false
   let custody_before_dispatch = false
   for step in steps {
     const uses = step_uses(step)
@@ -2622,13 +2623,34 @@ pub fn consumer_canary_errors(
         && step?.with
           == {"source-revision": CONSUMER_CANARY_SOURCE, token: "$" + "{{ github.token }}"}
         && !keys(step).any({ key -> !["name", "id", "if", "uses", "with"].contains(key) })
-      custody_before_dispatch = safe
+      custody_declared = safe
       if !safe {
         errors = errors + ["consumer declaration must publish only canonical public custody"]
       }
       continue
     }
     const command = to_string(step?.run ?? "")
+    if command.contains("consumer-observer-declare.mjs --witness") {
+      const dollar = "$"
+      const safe = custody_declared
+        && step
+          == {
+            name:
+              "Confirm consumer observer declaration ${dollar}{{ fromJSON(steps.observer.outputs.context || '{}').dispatch_nonce }}",
+            if: "inputs.rehearsal_promotion_run_id == ''",
+            env: {
+              GH_TOKEN: "${dollar}{{ github.token }}",
+              OBSERVER_CONTEXT: "${dollar}{{ steps.observer.outputs.context }}",
+              SOURCE_REVISION: CONSUMER_CANARY_SOURCE,
+            },
+            run: "node scripts/ci/consumer-observer-declare.mjs --witness",
+          }
+      custody_before_dispatch = safe
+      if !safe {
+        errors = errors
+          + ["consumer publication witness must authenticate its nonce and resolved source"]
+      }
+    }
     if command.contains("consumer_canary.sh")
       && !command.contains("--observe")
       && !command.contains("--decide")

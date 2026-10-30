@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import {consumerProductVerdict,observerContext,observerDeclarationStep,observerWindowSteps,qualifyObserverParent,
+import {consumerProductVerdict,observerContext,observerDeclarationStep,observerWindowSteps,qualifyObserverParent,qualifyObserverPublisher,
   githubDeclaration,githubRecord,githubParentJobs,githubArtifactCensus,githubArtifactJson,
   readConsumerContextDecision} from './consumer-observer.mjs';
 export {observerWindowSteps} from './consumer-observer.mjs';
@@ -73,9 +73,10 @@ export async function readConsumerDeadline(token,context,fetchRecord=fetch,extra
   }
   await githubDeclaration(token,observer,fetchRecord,extract);
   const jobs=await githubParentJobs(token,observer.parent_run_id,observer.parent_run_attempt,fetchRecord);
-  const publishers=jobs.flatMap(job=>job.steps.filter(step=>step.name===observerDeadlineStep).map(step=>({job,step})));
-  if(publishers.length!==1) throw new Error('CONSUMER_OBSERVER reason=deadline_publication_unmeasured');
-  const {job,step:publication}=publishers[0];
+  const {job,witness}=qualifyObserverPublisher(observer,jobs);
+  const publications=job.steps.filter(step=>step.name===observerDeadlineStep);
+  if(publications.length!==1||publications[0].number<=witness.number) throw new Error('CONSUMER_OBSERVER reason=deadline_publication_unmeasured');
+  const publication=publications[0];
   if(!Number.isSafeInteger(job.id)||job.id<1||String(job.run_id)!==observer.parent_run_id
     || job.run_attempt!==observer.parent_run_attempt||job.head_sha!==observer.parent_head_sha
     || job.status!=='completed'||job.conclusion!=='failure'){
@@ -83,8 +84,7 @@ export async function readConsumerDeadline(token,context,fetchRecord=fetch,extra
   }
   const declarations=job.steps.filter(step=>step.name===observerDeclarationStep);
   const observations=job.steps.filter(step=>observerWindowSteps.includes(step.name)&&step.conclusion==='failure');
-  if(declarations.length!==1||observations.length!==1
-    || jobs.flatMap(candidate=>candidate.steps).filter(step=>step.name===observerDeclarationStep).length!==1){
+  if(declarations.length!==1||observations.length!==1){
     throw new Error('CONSUMER_OBSERVER reason=deadline_producer_unmeasured');
   }
   const name=observerDeadlineName(observer);
