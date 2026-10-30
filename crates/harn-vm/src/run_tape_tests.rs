@@ -166,9 +166,9 @@ fn a_zero_edit_branch_serves_the_prefix_and_reapplies_tool_effects() {
 fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let tmp = tempfile::tempdir().unwrap();
-    let tape_dir = tmp.path().join("tape");
-    std::fs::create_dir_all(&tape_dir).unwrap();
     let secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD";
+    let tape_dir = tmp.path().join(secret);
+    std::fs::create_dir_all(&tape_dir).unwrap();
     let text = format!("Bearer {secret}");
     struct SecretEffectObserver;
     impl ToolEffectObserver for SecretEffectObserver {
@@ -209,7 +209,7 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
         parent_span: Some(Box::new(parent.clone())),
         ..parent
     };
-    record_prompt_render("prompt://fixture", &text, &[span]);
+    record_prompt_render(&format!("prompt://{secret}"), &text, &[span]);
     record_llm_call(&request(&text), &result(&text, None));
     let mut recording = begin_tool_call("secret-tool", "write", &serde_json::json!({}), false)
         .expect("active tape recording");
@@ -221,10 +221,13 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
         )]),
     });
     finish_tool_call(recording, Ok(ok(serde_json::json!({"output": text}))));
-    cache_lookup("prompt-cache", "request-1", || {
+    cache_lookup(secret, secret, || {
         Ok(Some(serde_json::json!({"result": text.clone()})))
     })
     .unwrap();
+    let mut opaque = vec![0xff];
+    opaque.extend_from_slice(format!("Bearer {secret}\n{}", "x".repeat(8192)).as_bytes());
+    process_recorder().unwrap().payload_cas(opaque);
     assert_eq!(guard.error(), None);
     drop(guard);
 
@@ -247,6 +250,10 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
         );
     }
     let tape = EventTape::load(&tape_dir.join(TAPE_FILE_NAME)).unwrap();
+    assert!(tape
+        .records
+        .iter()
+        .any(|record| matches!(record.kind, TapeRecordKind::CacheLookup { .. })));
     assert!(tape
         .records
         .iter()
@@ -609,6 +616,58 @@ fn a_prefix_refuses_effects_no_recording_serves_and_serves_recorded_reads() {
     let report = branch.finish();
     assert_eq!(report.served_reads, 1);
     assert_eq!(report.divergence.unwrap().what, "refused effect");
+}
+
+#[test]
+fn a_prefix_refuses_direct_host_tools_before_the_bridge_runs() {
+    use crate::stdlib::host::{host_call_ready, HostCallBridge, HostCallDispatchFuture};
+    use crate::value::VmError;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingBridge(Arc<AtomicUsize>);
+    impl HostCallBridge for CountingBridge {
+        fn dispatch<'a>(
+            &'a self,
+            _: &'a str,
+            _: &'a str,
+            _: &'a crate::value::DictMap,
+        ) -> HostCallDispatchFuture<'a> {
+            host_call_ready(Ok(None))
+        }
+        fn call_tool(&self, _: &str, _: &VmValue) -> Result<Option<VmValue>, VmError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(VmValue::Nil))
+        }
+    }
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let _bridge =
+        crate::stdlib::host::install_host_call_bridge(Arc::new(CountingBridge(calls.clone())));
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let invoke = || crate::stdlib::host::dispatch_host_tool_call("Write", &VmValue::Nil);
+    {
+        let _guard = record_full(tmp.path());
+        rt.block_on(invoke()).unwrap();
+        record_llm_call(&request("first"), &result("ok", None));
+    }
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "live host tool must actually fire"
+    );
+    let branch = branch(tmp.path(), 1, tmp.path());
+    let outcome = rt.block_on(invoke());
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "replayed prefix must never repeat the host mutation"
+    );
+    assert!(outcome.unwrap_err().to_string().contains("host_tool_call"));
+    assert_eq!(branch.finish().divergence.unwrap().what, "refused effect");
 }
 
 #[test]

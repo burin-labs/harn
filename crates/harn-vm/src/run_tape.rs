@@ -323,40 +323,12 @@ fn record_payload_redaction() {
     }
 }
 
-pub(super) fn redacted_tape_json_bytes(value: &impl Serialize) -> Vec<u8> {
-    let mut redacted = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
-    if redact_tape_json(&mut redacted) {
-        crate::canonical_json::to_vec(&redacted)
-    } else {
-        // Preserve existing payload identities when no sanitization was needed.
-        serde_json::to_vec(value).unwrap_or_default()
-    }
-}
-
 pub(super) fn redacted_tape_text(value: &str) -> String {
     let redacted = crate::redact::current_policy().redact_string(value);
     if redacted != value {
         record_payload_redaction();
     }
     redacted.into_owned()
-}
-
-fn redact_transcript_changes(changes: &mut [TranscriptChange]) {
-    for change in changes {
-        for value in change.fields.values_mut() {
-            match value {
-                crate::testbench::tape::FieldChange::Set(value) => {
-                    redact_tape_json(value);
-                }
-                crate::testbench::tape::FieldChange::Append(values) => {
-                    for value in values {
-                        redact_tape_json(value);
-                    }
-                }
-                crate::testbench::tape::FieldChange::Remove => {}
-            }
-        }
-    }
 }
 
 /// Record one completed model call on the active tape, if any.
@@ -405,7 +377,7 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
                 .map(|message| {
                     // A run tape shares repeated prefixes through its store; a
                     // testbench tape keeps small messages inline.
-                    let bytes = redacted_tape_json_bytes(message);
+                    let bytes = serde_json::to_vec(message).unwrap_or_default();
                     if tape.is_some() {
                         recorder.payload_cas(bytes)
                     } else {
@@ -415,8 +387,9 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
                 .collect(),
             _ => Vec::new(),
         };
-        let request = recorder
-            .payload_from_bytes(redacted_tape_json_bytes(&serde_json::Value::Object(whole)));
+        let request = recorder.payload_from_bytes(
+            serde_json::to_vec(&serde_json::Value::Object(whole)).unwrap_or_default(),
+        );
         (Some(request), messages)
     } else {
         (None, Vec::new())
@@ -430,7 +403,7 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
         }))
         .unwrap_or_default()
     } else {
-        redacted_tape_json_bytes(result)
+        serde_json::to_vec(result).unwrap_or_default()
     };
     let response = recorder.payload_from_bytes(response_bytes);
     recorder.record(TapeRecordKind::LlmCall {
@@ -609,7 +582,7 @@ pub(crate) fn finish_tool_call(
         });
     }
     let outcome_bytes = match &outcome {
-        Ok(outcome) if full => redacted_tape_json_bytes(outcome),
+        Ok(outcome) if full => serde_json::to_vec(outcome).unwrap_or_default(),
         Ok(_) => Vec::new(),
         // A metadata tape keeps no tool text, error text included.
         Err(reason) if full => {
@@ -622,15 +595,6 @@ pub(crate) fn finish_tool_call(
         }
     };
     let outcome = recorder.payload_from_bytes(outcome_bytes);
-    let mut transcript_changes = transcript_changes;
-    if full {
-        redact_transcript_changes(&mut transcript_changes);
-    }
-    let unservable = unservable.map(|reason| {
-        crate::redact::current_policy()
-            .redact_string(&reason)
-            .into_owned()
-    });
     recorder.record(TapeRecordKind::ToolCall {
         call_id,
         tool,
@@ -1250,7 +1214,7 @@ fn recorded_lookup(
     if let Some(tape) = process_tape().filter(|tape| tape.level == RecordingLevel::Full) {
         let payload = value.as_ref().map(|value| {
             tape.recorder
-                .payload_from_bytes(redacted_tape_json_bytes(value))
+                .payload_from_bytes(serde_json::to_vec(value).unwrap_or_default())
         });
         tape.recorder.record(TapeRecordKind::CacheLookup {
             namespace: namespace.to_string(),

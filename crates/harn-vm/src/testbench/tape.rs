@@ -50,6 +50,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::clock_mock;
 
+#[path = "tape_privacy.rs"]
+mod privacy;
+
 /// Format version of the on-disk tape representation. Bump on any
 /// breaking change. Loaders refuse tapes with a higher version. Version 2
 /// widened the model-call `request_digest` to the whole request, so a
@@ -654,13 +657,13 @@ impl EventTape {
         let mut cas = BTreeMap::new();
         let cas_dir = cas_dir_for(path);
         if cas_dir.is_dir() {
-            for record in &records {
-                visit_payloads(&record.kind, |payload| {
+            for record in &mut records {
+                visit_payloads(&mut record.kind, |payload| {
                     if let TapePayload::Cas { content_hash, .. } = payload {
-                        if cas.contains_key(content_hash) {
+                        if cas.contains_key(content_hash.as_str()) {
                             return;
                         }
-                        let entry = cas_dir.join(content_hash);
+                        let entry = cas_dir.join(content_hash.as_str());
                         if let Ok(bytes) = std::fs::read(&entry) {
                             cas.insert(content_hash.clone(), bytes);
                         }
@@ -682,7 +685,7 @@ fn cas_dir_for(tape_path: &Path) -> PathBuf {
     PathBuf::from(buf)
 }
 
-fn visit_payloads(kind: &TapeRecordKind, mut visit: impl FnMut(&TapePayload)) {
+fn visit_payloads(kind: &mut TapeRecordKind, mut visit: impl FnMut(&mut TapePayload)) {
     match kind {
         TapeRecordKind::LlmCall {
             response,
@@ -694,9 +697,9 @@ fn visit_payloads(kind: &TapeRecordKind, mut visit: impl FnMut(&TapePayload)) {
             if let Some(request) = request {
                 visit(request);
             }
-            messages.iter().for_each(&mut visit);
+            messages.iter_mut().for_each(&mut visit);
         }
-        TapeRecordKind::CacheLookup { value, .. } => value.iter().for_each(&mut visit),
+        TapeRecordKind::CacheLookup { value, .. } => value.iter_mut().for_each(&mut visit),
         TapeRecordKind::PromptRender {
             rendered, spans, ..
         } => {
@@ -709,8 +712,8 @@ fn visit_payloads(kind: &TapeRecordKind, mut visit: impl FnMut(&TapePayload)) {
         } => {
             visit(outcome);
             effects
-                .iter()
-                .filter_map(|effect| effect.content.as_ref())
+                .iter_mut()
+                .filter_map(|effect| effect.content.as_mut())
                 .for_each(&mut visit);
         }
         TapeRecordKind::ProcessSpawn {
@@ -819,8 +822,8 @@ impl TapeRecorder {
         }
     }
 
-    /// Append a record built from `kind`. The recorder stamps the seq
-    /// number and timing metadata; callers only worry about the payload.
+    /// Append a record built from `kind`. The recorder owns metadata privacy,
+    /// sequence numbers and timing. Sanitized evidence refuses exact replay.
     pub fn record(&self, kind: TapeRecordKind) {
         let virtual_time_ms = clock_mock::now_ms();
         let monotonic_ms = clock_mock::instant_now()
@@ -831,6 +834,29 @@ impl TapeRecorder {
     }
 
     fn record_at(&self, kind: TapeRecordKind, virtual_time_ms: i64, monotonic_ms: i64) {
+        let (mut kind, sanitized) = if matches!(kind, TapeRecordKind::PayloadRedaction) {
+            (kind, false)
+        } else {
+            privacy::metadata(kind).unwrap_or((TapeRecordKind::PayloadRedaction, true))
+        };
+        if sanitized {
+            if !matches!(kind, TapeRecordKind::PayloadRedaction) {
+                self.record_at(
+                    TapeRecordKind::PayloadRedaction,
+                    virtual_time_ms,
+                    monotonic_ms,
+                );
+            }
+            visit_payloads(&mut kind, |payload| {
+                if let TapePayload::Inline {
+                    content_hash: hash,
+                    text,
+                } = payload
+                {
+                    *hash = content_hash(text.as_bytes());
+                }
+            });
+        }
         let seq = self.next_seq.fetch_add(1, Ordering::SeqCst);
         let record = TapeRecord {
             seq,
@@ -854,6 +880,7 @@ impl TapeRecorder {
     /// records. CAS bodies go straight to disk and are not retained in
     /// memory, so [`Self::snapshot`] of a streaming recorder has records only.
     pub fn streaming(path: &Path, header: TapeHeader) -> Result<Self, String> {
+        let (header, sanitized) = privacy::metadata(header)?;
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent)
                 .map_err(|err| format!("mkdir {}: {err}", parent.display()))?;
@@ -878,6 +905,9 @@ impl TapeRecorder {
             .lock()
             .expect("tape recorder mutex poisoned")
             .sink = Some(sink);
+        if sanitized {
+            recorder.record(TapeRecordKind::PayloadRedaction);
+        }
         Ok(recorder)
     }
 
@@ -903,6 +933,10 @@ impl TapeRecorder {
     }
 
     fn payload(&self, bytes: Vec<u8>, force_cas: bool) -> TapePayload {
+        let (bytes, sanitized) = privacy::payload(bytes);
+        if sanitized {
+            self.record(TapeRecordKind::PayloadRedaction);
+        }
         let mut guard = self.inner.lock().expect("tape recorder mutex poisoned");
         let inner = &mut *guard;
         let Some(sink) = inner.sink.as_mut() else {
@@ -929,6 +963,11 @@ impl TapeRecorder {
     /// mid-run for diagnostics — production callers usually move into
     /// `into_tape` instead.
     pub fn snapshot(&self, header: TapeHeader) -> EventTape {
+        let (header, sanitized) = privacy::metadata(header)
+            .unwrap_or_else(|_| (TapeHeader::current(None, None, Vec::new()), true));
+        if sanitized {
+            self.record(TapeRecordKind::PayloadRedaction);
+        }
         let inner = self.inner.lock().expect("tape recorder mutex poisoned");
         EventTape {
             header,
