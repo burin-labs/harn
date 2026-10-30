@@ -8,14 +8,16 @@ use cap_std::fs::{Dir, Permissions};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+mod links;
+
 /// Resource ceilings checked while reading, including ignored files.
 #[derive(Clone, Copy, Debug)]
 pub struct SeedLimits {
     /// Files and directories, excluding the root itself.
     pub max_entries: usize,
-    /// Total regular-file content in each copy.
+    /// Total regular-file and symbolic-link content in each copy.
     pub max_bytes: u64,
-    /// Content limit for any single regular file.
+    /// Content limit for any single regular file or symbolic link.
     pub max_file_bytes: u64,
     /// Maximum number of relative path components.
     pub max_depth: usize,
@@ -43,7 +45,7 @@ pub struct SeedReceipt {
     pub files: usize,
     /// Files and directories actually observed.
     pub entries: usize,
-    /// Regular-file bytes actually read.
+    /// Regular-file and symbolic-link bytes actually read.
     pub bytes: u64,
 }
 
@@ -97,8 +99,8 @@ pub struct ReplayWorkspace {
 }
 
 impl ReplayWorkspace {
-    /// Capture all regular files, including ignored and untracked files.
-    /// Symlinks and special files refuse; none are silently omitted. Directory
+    /// Capture all regular files and internal relative links, including ignored
+    /// and untracked files. External links and special files refuse. Directory
     /// structure and file permissions are retained, not directory timestamps.
     pub fn capture(source: &Path, limits: SeedLimits) -> Result<Self, SeedError> {
         Self::capture_in(source, &std::env::temp_dir(), limits)
@@ -218,6 +220,10 @@ impl ReplayWorkspace {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Entry {
     Directory,
+    Link {
+        target: String,
+        directory: bool,
+    },
     File {
         sha256: String,
         bytes: u64,
@@ -348,10 +354,19 @@ fn copy_and_measure(
                         mode,
                     },
                 );
+            } else if metadata.file_type().is_symlink() {
+                let link = links::copy(source, destination, &path)?;
+                let Entry::Link { target, .. } = &link else {
+                    unreachable!("link capture returns a link")
+                };
+                limit("file bytes", target.len() as u64, limits.max_file_bytes)?;
+                bytes = bytes.saturating_add(target.len() as u64);
+                limit("total bytes", bytes, limits.max_bytes)?;
+                manifest.insert(name, link);
             } else {
                 return Err(SeedError::Unsupported {
                     path,
-                    reason: "symlinks and special files cannot be replayed",
+                    reason: "special files cannot be replayed",
                 });
             }
         }

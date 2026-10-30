@@ -125,6 +125,34 @@ fn symlinks_refuse_instead_of_following_an_external_source() {
 
 #[cfg(unix)]
 #[test]
+fn internal_links_survive_restore_and_relative_escapes_refuse() {
+    let source = tempfile::tempdir().unwrap();
+    fs::create_dir(source.path().join("docs")).unwrap();
+    fs::write(source.path().join("AGENTS.md"), "instructions").unwrap();
+    std::os::unix::fs::symlink("AGENTS.md", source.path().join("CLAUDE.md")).unwrap();
+    std::os::unix::fs::symlink("../AGENTS.md", source.path().join("docs/guide")).unwrap();
+    let mut replay = ReplayWorkspace::capture(source.path(), SeedLimits::default()).unwrap();
+    assert_eq!(replay.receipt().files, 1);
+    assert_eq!(replay.receipt().entries, 4);
+    fs::remove_file(replay.path().join("CLAUDE.md")).unwrap();
+    replay.restore().unwrap();
+    assert_eq!(
+        fs::read_link(replay.path().join("CLAUDE.md")).unwrap(),
+        Path::new("AGENTS.md")
+    );
+    assert_eq!(
+        fs::read_to_string(replay.path().join("docs/guide")).unwrap(),
+        "instructions"
+    );
+    std::os::unix::fs::symlink("../../", source.path().join("docs/outside")).unwrap();
+    assert!(matches!(
+        ReplayWorkspace::capture(source.path(), SeedLimits::default()),
+        Err(SeedError::Unsupported { .. })
+    ));
+}
+
+#[cfg(unix)]
+#[test]
 fn executable_permissions_and_backslash_names_survive_restore() {
     use std::os::unix::fs::PermissionsExt;
     let source = tempfile::tempdir().unwrap();

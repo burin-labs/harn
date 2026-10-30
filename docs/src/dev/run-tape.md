@@ -67,5 +67,31 @@ does not rewrite prompt text, host arguments, or command strings.
 - Dropping a branch scope does not cancel a session. Hosts must use their
   session cancellation path and wait for its terminal result.
 
+## Private trial workspaces
+
+`harn_hostlib::workspace_checkpoint::ReplayWorkspace` captures a private seed
+and a disposable working copy. `path()` names the same working directory
+after every `restore()`. Stop the previous session and its children before
+restoring; the workspace owner does not cancel execution.
+
+Capture includes ignored and untracked regular files, empty directories, file
+permission bits, and relative symbolic links that resolve inside the source.
+External or broken links, special files, and non-UTF-8 paths refuse. Source
+content is measured twice before publishing the copy. `SeedLimits` bounds
+entry count, depth, per-file content, and total bytes; its defaults allow
+100,000 entries, depth 128, 128 MiB per file, and 1 GiB overall.
+
+`receipt()` reports the observed entries, regular files, bytes, and a SHA-256
+identity covering sorted paths, contents, link targets, and file permissions.
+Restore verifies that identity before replacing the working copy. A changed
+seed leaves the previous working copy available. Dropping the owner deletes
+its private storage without changing the source.
+
+Offline coding replay uses this owner for its file-only fixtures and includes
+the seed receipt in trial evidence. Its effect oracle still rejects symbolic
+links. The seed API supplies filesystem isolation between trial copies, not
+process confinement; hosts must also grant each execution only its working
+copy and required read-only assets.
+
 Outstanding replay cases are tracked in
 [remaining prefix cases](https://github.com/burin-labs/harn/issues/10805).
