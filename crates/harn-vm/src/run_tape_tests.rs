@@ -88,6 +88,7 @@ fn branch(dir: &Path, k: u64, workspace: &Path) -> TestBranch {
         workspace_root: workspace.to_path_buf(),
         state_root: state.path().join("branch"),
         host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
     })
     .unwrap();
     let _scope = guard.scope().enter();
@@ -267,6 +268,7 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
         workspace_root: tmp.path().join("branch"),
         state_root: tmp.path().join("branch-state"),
         host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
     });
     assert!(result
         .err()
@@ -320,6 +322,7 @@ fn a_branch_requires_an_existing_workspace_copy() {
         workspace_root: missing.clone(),
         state_root: tmp.path().join("branch-state"),
         host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
     });
     assert!(result
         .err()
@@ -467,6 +470,7 @@ fn a_metadata_tape_refuses_to_branch() {
         workspace_root: tmp.path().to_path_buf(),
         state_root: fresh_branch_state(tmp.path()),
         host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
     })
     .err()
     .unwrap();
@@ -489,6 +493,7 @@ fn a_tape_recorded_without_a_workspace_observer_refuses_to_branch() {
         workspace_root: tmp.path().to_path_buf(),
         state_root: fresh_branch_state(tmp.path()),
         host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
     })
     .err()
     .unwrap();
@@ -793,6 +798,7 @@ fn a_write_after_the_branch_ends_stays_out_of_the_recording() {
         workspace_root: tmp.path().to_path_buf(),
         state_root: state.path().join("branch"),
         host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
     })
     .unwrap();
     let scope = guard.scope();

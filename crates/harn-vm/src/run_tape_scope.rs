@@ -90,6 +90,18 @@ impl BranchHandle {
         &self.state_root
     }
 
+    /// Resolve a physical branch asset back to the recorded source identity.
+    pub(super) fn prompt_uri(&self, uri: &str) -> String {
+        let path = Path::new(uri);
+        match (
+            &self.recorded_workspace,
+            workspace_relative(path, &self.workspace),
+        ) {
+            (Some(recorded), Some(relative)) => recorded.join(relative).display().to_string(),
+            _ => uri.to_string(),
+        }
+    }
+
     /// Where `path` lands for this branch, or `None` when it is outside every
     /// tree the branch owns or remaps.
     fn remap(&self, path: &Path) -> Option<PathBuf> {
@@ -168,20 +180,8 @@ pub(crate) fn workspace_path(path: PathBuf) -> Result<PathBuf, VmError> {
     if recorded == &branch.workspace {
         return Ok(path);
     }
-    let relative = if let Ok(relative) = path.strip_prefix(recorded) {
-        relative
-    } else {
-        // Resolve aliases of the workspace root, not descendants in the
-        // original tree. On macOS a host can name /var while the tape stores
-        // /private/var. Descendant symlinks must resolve in the branch instead.
-        let Some(alias) = path.ancestors().find(|ancestor| {
-            ancestor
-                .canonicalize()
-                .is_ok_and(|canonical| canonical == *recorded)
-        }) else {
-            return Ok(path);
-        };
-        path.strip_prefix(alias).expect("ancestor is a path prefix")
+    let Some(relative) = workspace_relative(&path, recorded) else {
+        return Ok(path);
     };
     let mapped = branch.workspace.join(relative);
     let resolved = crate::workspace_path::canonicalize_existing_ancestor(&mapped)
@@ -193,6 +193,19 @@ pub(crate) fn workspace_path(path: PathBuf) -> Result<PathBuf, VmError> {
         )));
     }
     Ok(mapped)
+}
+
+pub(super) fn workspace_relative<'a>(path: &'a Path, root: &Path) -> Option<&'a Path> {
+    if let Ok(relative) = path.strip_prefix(root) {
+        return Some(relative);
+    }
+    // Resolve only root aliases. Descendant links belong to the isolated copy.
+    let alias = path.ancestors().find(|ancestor| {
+        ancestor
+            .canonicalize()
+            .is_ok_and(|canonical| canonical == root)
+    })?;
+    path.strip_prefix(alias).ok()
 }
 
 /// A shell's path literals do not pass through the VM filesystem resolver.

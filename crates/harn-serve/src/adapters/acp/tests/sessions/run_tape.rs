@@ -90,6 +90,7 @@ fn a_branch_reuses_the_recorded_acp_session_identity() {
             workspace_root: branch_workspace.clone(),
             state_root: tmp.path().join("branch-state"),
             host_state_roots: Vec::new(),
+            prompt_edits: Vec::new(),
         })
         .unwrap();
         let replayed_id = branch.scope().run(open_session(&branch_workspace)).await;

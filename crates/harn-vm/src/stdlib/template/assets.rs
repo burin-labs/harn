@@ -53,6 +53,19 @@ thread_local! {
 }
 
 impl TemplateAsset {
+    pub(crate) fn for_render(&self) -> Result<std::borrow::Cow<'_, Self>, TemplateError> {
+        match crate::run_tape::prepare_prompt_source(&self.uri, &self.source)
+            .map_err(|message| TemplateError::new(1, 1, message))?
+        {
+            Some(source) => {
+                let mut asset = self.clone();
+                asset.source = Rc::from(source);
+                Ok(std::borrow::Cow::Owned(asset))
+            }
+            None => Ok(std::borrow::Cow::Borrowed(self)),
+        }
+    }
+
     pub(crate) fn inline(source: &str, base: Option<&Path>, source_path: Option<&Path>) -> Self {
         let source_path = source_path.map(Path::to_path_buf);
         let base = base.map(Path::to_path_buf);

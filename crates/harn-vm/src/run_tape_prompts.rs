@@ -44,9 +44,6 @@ impl PromptLedger {
         rendered: &str,
         spans: &[PromptSourceSpan],
     ) {
-        if rendered.len() < MIN_ATTRIBUTABLE_BYTES {
-            return;
-        }
         if !self.texts.contains_key(render_id) {
             let spans = serde_json::to_vec(spans).unwrap_or_default();
             let rendered = super::redacted_tape_text(rendered);
@@ -77,7 +74,10 @@ impl PromptLedger {
             .fresh
             .iter()
             .chain(self.carried.iter())
-            .filter_map(|id| Some((id.clone(), self.texts.get(id)?.clone())))
+            .filter_map(|id| {
+                let text = self.texts.get(id)?;
+                (text.len() >= MIN_ATTRIBUTABLE_BYTES).then(|| (id.clone(), text.clone()))
+            })
             .collect();
         candidates.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(&b.0)));
         candidates.dedup_by(|a, b| a.0 == b.0);
