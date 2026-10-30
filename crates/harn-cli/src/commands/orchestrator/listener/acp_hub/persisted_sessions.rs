@@ -198,7 +198,12 @@ pub(super) async fn list(
         .map_err(|error| DiscoveryError::Store(error.to_string()))?;
     sessions
         .into_iter()
-        .filter(|session| session.cwd.as_deref() == Some(cwd))
+        .filter(|session| {
+            session
+                .cwd
+                .as_deref()
+                .is_some_and(|session_cwd| super::canonical_paths_match(session_cwd, cwd))
+        })
         .map(|session| {
             harn_serve::try_acp_persisted_session_item(session)
                 .map_err(|error| DiscoveryError::Store(error.to_string()))

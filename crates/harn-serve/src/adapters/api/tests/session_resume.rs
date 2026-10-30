@@ -360,7 +360,25 @@ async fn restored_session_mutations_preserve_policy_metadata_and_actual_transcri
     assert!(serde_json::to_string(&transcript)
         .unwrap()
         .contains("restored-transcript-canary"));
-    let message_count = completed_prompt_message_count(root.path());
+    let replay_before = harn_vm::agent_session_restore::load_canonical_session_replay_from_store(
+        restarted_state
+            .canonical_sessions
+            .as_ref()
+            .unwrap()
+            .as_ref(),
+        &session,
+    )
+    .await
+    .unwrap()
+    .expect("canonical transcript replay");
+    assert!(
+        !replay_before.events.is_empty(),
+        "the replay path must be reached"
+    );
+    assert!(
+        replay_before.transcript_message_count > 1,
+        "canonical transcript rows must contain messages beyond the retained prefix"
+    );
     let response = request(
         &app,
         "POST",
@@ -371,10 +389,22 @@ async fn restored_session_mutations_preserve_policy_metadata_and_actual_transcri
     assert_eq!(response.status(), StatusCode::OK);
     let truncated = read_json(response).await;
     assert_eq!(truncated["kept_turn_count"], 1);
+    let replay_after = harn_vm::agent_session_restore::load_canonical_session_replay_from_store(
+        restarted_state
+            .canonical_sessions
+            .as_ref()
+            .unwrap()
+            .as_ref(),
+        &session,
+    )
+    .await
+    .unwrap()
+    .expect("canonical transcript replay after truncate");
+    assert_eq!(replay_after.transcript_message_count, 1);
     assert_eq!(
         truncated["removed_turn_count"],
-        message_count - 1,
-        "truncate removes the measured provider context and reply after the retained prefix"
+        replay_before.transcript_message_count - replay_after.transcript_message_count,
+        "truncate's reported count matches the canonical transcript rows it removed"
     );
     let app = api_router(ApiServer::new(config.clone()).state);
     let response = request(

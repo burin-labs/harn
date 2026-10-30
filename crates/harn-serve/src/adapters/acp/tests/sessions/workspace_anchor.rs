@@ -8,6 +8,7 @@ async fn acp_session_list_filters_by_workspace_anchor_and_cwd() {
             let sibling = dir.path().join("project-tools");
             std::fs::create_dir_all(&primary).expect("primary dir");
             std::fs::create_dir_all(&sibling).expect("sibling dir");
+            let canonical_primary = primary.canonicalize().expect("canonical primary");
 
             let (request_tx, request_rx) = mpsc::unbounded_channel();
             let (response_tx, mut response_rx) = mpsc::unbounded_channel();
@@ -87,7 +88,7 @@ async fn acp_session_list_filters_by_workspace_anchor_and_cwd() {
             );
             assert_eq!(
                 anchored["result"]["sessions"][0]["workspaceAnchor"]["primary"],
-                serde_json::json!(primary.display().to_string())
+                serde_json::json!(canonical_primary.display().to_string())
             );
             assert_eq!(
                 anchored["result"]["sessions"][0]["_meta"]["harn"]["liveState"],
@@ -119,7 +120,7 @@ async fn acp_session_list_filters_by_workspace_anchor_and_cwd() {
             let loaded = recv_json(&mut response_rx).await;
             assert_eq!(
                 loaded["result"]["session"]["_meta"]["harn"]["workspaceAnchor"]["primary"],
-                serde_json::json!(primary.display().to_string())
+                serde_json::json!(canonical_primary.display().to_string())
             );
 
             drop(request_tx);
@@ -138,6 +139,8 @@ async fn acp_harn_workspace_anchor_methods_mutate_live_session() {
         std::fs::create_dir_all(&primary).expect("primary dir");
         std::fs::create_dir_all(&sibling).expect("sibling dir");
         std::fs::create_dir_all(&target).expect("target dir");
+        let canonical_primary = primary.canonicalize().expect("canonical primary");
+        let canonical_target = target.canonicalize().expect("canonical target");
         let canonical_sibling = sibling.canonicalize().expect("canonical sibling");
 
         let (request_tx, mut response_rx, server, session_id) =
@@ -158,13 +161,13 @@ async fn acp_harn_workspace_anchor_methods_mutate_live_session() {
         let roots = recv_response_with_id(&mut response_rx, 2).await;
         assert_eq!(
             roots["result"]["workspaceAnchor"]["primary"],
-            serde_json::json!(primary.display().to_string())
+            serde_json::json!(canonical_primary.display().to_string())
         );
         assert_eq!(
             harn_vm::agent_sessions::workspace_anchor(&session_id)
                 .expect("live anchor")
                 .primary,
-            primary
+            canonical_primary
         );
 
         request_tx
@@ -206,11 +209,11 @@ async fn acp_harn_workspace_anchor_methods_mutate_live_session() {
         assert_eq!(reanchored["result"]["changed"], serde_json::json!(true));
         assert_eq!(
             reanchored["result"]["previousWorkspaceAnchor"]["primary"],
-            serde_json::json!(primary.display().to_string())
+            serde_json::json!(canonical_primary.display().to_string())
         );
         assert_eq!(
             reanchored["result"]["workspaceAnchor"]["primary"],
-            serde_json::json!(target.display().to_string())
+            serde_json::json!(canonical_target.display().to_string())
         );
 
         request_tx
@@ -230,7 +233,7 @@ async fn acp_harn_workspace_anchor_methods_mutate_live_session() {
         );
         assert_eq!(
             listed["result"]["sessions"][0]["workspaceAnchor"]["primary"],
-            serde_json::json!(target.display().to_string())
+            serde_json::json!(canonical_target.display().to_string())
         );
 
         drop(request_tx);
@@ -248,6 +251,8 @@ async fn acp_harn_session_reanchor_seeds_missing_anchor_from_live_cwd() {
         let target = dir.path().join("target");
         std::fs::create_dir_all(&primary).expect("primary dir");
         std::fs::create_dir_all(&target).expect("target dir");
+        let canonical_primary = primary.canonicalize().expect("canonical primary");
+        let canonical_target = target.canonicalize().expect("canonical target");
 
         let (request_tx, mut response_rx, server, session_id) =
             start_acp_channel_session_with_config(
@@ -270,11 +275,11 @@ async fn acp_harn_session_reanchor_seeds_missing_anchor_from_live_cwd() {
         let reanchored = recv_response_with_id(&mut response_rx, 2).await;
         assert_eq!(
             reanchored["result"]["previousWorkspaceAnchor"]["primary"],
-            serde_json::json!(primary.display().to_string())
+            serde_json::json!(canonical_primary.display().to_string())
         );
         assert_eq!(
             reanchored["result"]["workspaceAnchor"]["primary"],
-            serde_json::json!(target.display().to_string())
+            serde_json::json!(canonical_target.display().to_string())
         );
 
         drop(request_tx);

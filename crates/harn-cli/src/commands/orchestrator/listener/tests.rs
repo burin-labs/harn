@@ -561,6 +561,7 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
 
     let dir = tempdir().expect("tempdir");
     let cwd = dir.path().display().to_string();
+    let canonical_cwd = dir.path().canonicalize().expect("canonical cwd");
     let (listener, _log, _dir) = start_acp_test_listener_with_project_root(
         ListenerRuntimeEnv::for_test().with_api_key("ws-test-key"),
         Some(dir.path()),
@@ -584,7 +585,7 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
     .await;
     assert_eq!(
         roots["result"]["workspaceAnchor"]["primary"],
-        json!(cwd),
+        json!(canonical_cwd.display().to_string()),
         "the session must advertise the anchor used by the list filter: {roots}"
     );
 

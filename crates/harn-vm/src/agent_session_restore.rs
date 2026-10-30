@@ -35,6 +35,8 @@ const RESTORE_PAGE: usize = 512;
 /// The checkpoint includes bookkeeping rows that have no visible projection.
 pub struct CanonicalSessionReplay {
     pub events: Vec<AgentSessionReplayEvent>,
+    /// Number of prompt messages after applying transcript lifecycle rows.
+    pub transcript_message_count: usize,
     pub last_event_id: Option<EventId>,
 }
 
@@ -100,6 +102,7 @@ async fn read_canonical_session_prefix(
         }
         return Ok(CanonicalSessionReplay {
             events: Vec::new(),
+            transcript_message_count: 0,
             last_event_id: None,
         });
     }
@@ -171,12 +174,14 @@ async fn read_canonical_session_prefix(
     }
     let (transcript, publications) = hydration.finish();
     transcript.validate_goal().map_err(VmError::Runtime)?;
+    let transcript_message_count = transcript.messages.len();
     let events = events
         .into_iter()
         .filter_map(|event| event.finish(&publications))
         .collect();
     Ok(CanonicalSessionReplay {
         events: close_unanswered_tool_calls(session_id, events),
+        transcript_message_count,
         last_event_id: checkpoint.last_event_id,
     })
 }

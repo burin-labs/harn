@@ -1817,13 +1817,27 @@ fn is_session_list_request(value: &JsonValue) -> bool {
     value.get("method").and_then(JsonValue::as_str) == Some("session/list")
 }
 
+pub(super) fn canonical_paths_match(left: &str, right: &str) -> bool {
+    let canonical = |path: &str| {
+        harn_vm::workspace_anchor::WorkspaceAnchor::canonicalize_path(std::path::Path::new(path))
+    };
+    match (canonical(left), canonical(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
 fn acp_session_summary_matches(
     summary: &AcpSessionSummary,
     live_state: &str,
     params: &JsonValue,
 ) -> bool {
     if let Some(cwd) = acp_session_filter_value(params, "cwd", "cwd").and_then(JsonValue::as_str) {
-        if summary.cwd.as_deref() != Some(cwd) {
+        if !summary
+            .cwd
+            .as_deref()
+            .is_some_and(|session_cwd| canonical_paths_match(session_cwd, cwd))
+        {
             return false;
         }
     }
@@ -1840,13 +1854,13 @@ fn acp_session_summary_matches(
             return anchor
                 .get("primary")
                 .and_then(JsonValue::as_str)
-                .is_some_and(|value| value == primary);
+                .is_some_and(|value| canonical_paths_match(value, primary));
         }
         if let Some(primary) = filter.get("primary").and_then(JsonValue::as_str) {
             return anchor
                 .get("primary")
                 .and_then(JsonValue::as_str)
-                .is_some_and(|value| value == primary);
+                .is_some_and(|value| canonical_paths_match(value, primary));
         }
         return anchor == filter;
     }

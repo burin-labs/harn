@@ -267,6 +267,12 @@ pub fn pinned_reasoning_policy(id: &str) -> Option<String> {
 /// Returns `Ok(true)` when the value actually changed so callers can
 /// decide whether to broadcast `AnchorChanged` notifications.
 pub fn set_workspace_anchor(id: &str, anchor: Option<WorkspaceAnchor>) -> Result<bool, String> {
+    let anchor = anchor
+        .map(|mut anchor| {
+            anchor.canonicalize_roots()?;
+            Ok::<_, String>(anchor)
+        })
+        .transpose()?;
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {
@@ -320,11 +326,12 @@ pub struct ReanchorOutcome {
 /// stale anchor-based decisions don't leak into the next turn.
 pub fn reanchor_session(
     id: &str,
-    new_anchor: WorkspaceAnchor,
+    mut new_anchor: WorkspaceAnchor,
     carry_transcript: bool,
     compacted: bool,
     reason: Option<String>,
 ) -> Result<ReanchorOutcome, String> {
+    new_anchor.canonicalize_roots()?;
     let outcome = SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {

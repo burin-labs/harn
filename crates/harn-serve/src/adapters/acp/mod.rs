@@ -402,10 +402,16 @@ fn workspace_anchor_filter_matches(
         return false;
     };
     if let Some(raw) = filter.as_str() {
-        return anchor.primary.to_string_lossy() == raw;
+        return harn_vm::workspace_anchor::WorkspaceAnchor::canonicalize_path(
+            std::path::Path::new(raw),
+        )
+        .is_ok_and(|expected| expected == anchor.primary);
     }
     if let Some(primary) = filter.get("primary").and_then(serde_json::Value::as_str) {
-        return anchor.primary.to_string_lossy() == primary;
+        return harn_vm::workspace_anchor::WorkspaceAnchor::canonicalize_path(
+            std::path::Path::new(primary),
+        )
+        .is_ok_and(|expected| expected == anchor.primary);
     }
     harn_vm::workspace_anchor::WorkspaceAnchor::from_json(filter).is_ok_and(|expected| {
         expected.primary == anchor.primary && expected.additional_roots == anchor.additional_roots
