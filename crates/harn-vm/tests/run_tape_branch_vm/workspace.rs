@@ -1,5 +1,76 @@
 use super::*;
 
+#[cfg(unix)]
+#[test]
+fn result_readers_report_branch_path_refusals_as_structured_errors() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    for read in [
+        "harness.fs.read_text_result(path)",
+        "harness.fs.read_lines_page_result(path, {})",
+        "harness.fs.read_lines_append_page_result(path, {})",
+    ] {
+        let recorded = dirs();
+        let isolated = dirs();
+        let source = format!(
+            r#"
+import {{ with_llm_script }} from "std/testing"
+pipeline main(harness: Harness, task: unknown) {{
+  with_llm_script(harness.llm, [{{text: "prefix", model: "mock"}}, {{text: "live", model: "mock"}}], {{ ->
+    harness.llm.call("prefix", nil, {{provider: "mock", model: "mock"}})
+    harness.llm.call("live", nil, {{provider: "mock", model: "mock"}})
+    const path = {path}
+    const read = {read}
+    if is_err(read) {{
+      const failure = unwrap_err(read)
+      harness.stdio.println("handled:${{failure.error}}:${{failure.kind}}")
+    }} else {{
+      harness.stdio.println("read:${{unwrap(read)}}")
+    }}
+  }})
+}}
+"#,
+            path = quote(&recorded.workspace.join("input.txt"))
+        );
+        std::fs::write(recorded.workspace.join("input.txt"), "recorded-canary\n").unwrap();
+        std::fs::write(isolated.workspace.join("input.txt"), "isolated-canary\n").unwrap();
+        let baseline = record(&source, &recorded.tapes, &recorded.workspace);
+        assert!(baseline.contains("recorded-canary"), "{baseline}");
+        let positive = branch(&source, &recorded.tapes, &isolated.workspace, 1);
+        let output = positive.output.unwrap();
+        assert!(output.contains("isolated-canary"), "{output}");
+        assert_eq!(
+            (positive.report.served_calls, positive.report.live_calls),
+            (1, 1)
+        );
+        std::fs::remove_file(isolated.workspace.join("input.txt")).unwrap();
+        std::os::unix::fs::symlink(
+            recorded.workspace.join("input.txt"),
+            isolated.workspace.join("input.txt"),
+        )
+        .unwrap();
+        let refused = branch(&source, &recorded.tapes, &isolated.workspace, 1);
+        let output = refused
+            .output
+            .expect("result-returning readers must not throw");
+        assert!(
+            output.contains("handled:io_error:invalid_input"),
+            "{output}"
+        );
+        assert!(
+            !output.contains("canary"),
+            "refused read leaked file content: {output}"
+        );
+        assert_eq!(
+            (refused.report.served_calls, refused.report.live_calls),
+            (1, 1)
+        );
+        assert_eq!(
+            std::fs::read_to_string(recorded.workspace.join("input.txt")).unwrap(),
+            "recorded-canary\n"
+        );
+    }
+}
+
 #[test]
 fn relocated_live_commands_cannot_touch_recorded_absolute_paths() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());

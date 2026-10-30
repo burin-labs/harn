@@ -467,6 +467,7 @@ pub(crate) struct ToolCallRecording {
     after_calls: u64,
     watch: EffectWatch,
     pub(crate) transcript_changes: Vec<TranscriptChange>,
+    unservable: Option<String>,
 }
 
 enum EffectWatch {
@@ -508,6 +509,7 @@ pub(crate) fn begin_tool_call(
         args_digest: args_digest(args),
         watch,
         transcript_changes: Vec::new(),
+        unservable: None,
     })
 }
 
@@ -520,8 +522,9 @@ pub(crate) async fn capture_transcript_changes<F: std::future::Future>(
     let Some(recording) = recording.as_mut() else {
         return live.await;
     };
-    let (output, changes) = transcript::capture(live).await;
+    let (output, changes, unservable) = transcript::capture(live).await;
     recording.transcript_changes = changes;
+    recording.unservable = unservable;
     output
 }
 
@@ -544,11 +547,12 @@ pub(crate) fn finish_tool_call(
         after_calls,
         watch,
         transcript_changes,
+        unservable,
     } = recording;
     let recorder = &tape.recorder;
     let full = tape.level == RecordingLevel::Full;
     let mut unservable = if full {
-        transcript::validate_lifetimes(&transcript_changes).err()
+        unservable.or_else(|| transcript::validate_lifetimes(&transcript_changes).err())
     } else {
         None
     };
@@ -1386,7 +1390,7 @@ mod prompts;
 mod transcript;
 pub(crate) use transcript::{
     apply as apply_transcript_change, note_session_closed, note_session_opened,
-    note_transcript_change,
+    note_session_store_reset, note_transcript_change,
 };
 
 #[path = "run_tape_scope.rs"]

@@ -4,8 +4,8 @@ use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmDictExt, VmError, VmValue};
 
 use super::{
-    io_error_value, io_error_value_with_kind, queue_file_edited_for, resolve_fs_path, result_err,
-    result_ok, FILE_TEXT_CACHE,
+    io_error_value, io_error_value_with_kind, queue_file_edited_for, resolve_fs_path_result,
+    result_err, result_ok, FILE_TEXT_CACHE,
 };
 
 fn option_error(message: impl AsRef<str>) -> VmValue {
@@ -107,7 +107,7 @@ fn receipt_value(
 
 fn replace_value(builtin: &str, args: &[VmValue], bytes: &[u8]) -> Result<VmValue, VmValue> {
     let path = args.first().map(VmValue::display).unwrap_or_default();
-    let resolved = resolve_fs_path(&path).map_err(|error| option_error(error.to_string()))?;
+    let resolved = resolve_fs_path_result(&path)?;
     crate::stdlib::sandbox::enforce_fs_path(
         builtin,
         &resolved,
