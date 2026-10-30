@@ -4,30 +4,30 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Richtlinie zum Speichern von Embeddings: " + values[0]
+    return "  Richtlinie zum Speichern von Embeddings: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  política de guardado de embeddings: " + values[0]
+    return "  política de guardado de embeddings: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  politique d'enregistrement des embeddings : " + values[0]
+    return "  politique d'enregistrement des embeddings : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  politica di salvataggio dell'embedding: " + values[0]
+    return "  politica di salvataggio dell'embedding: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  埋め込み保存ポリシー: " + values[0]
+    return "  埋め込み保存ポリシー: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  embedding 저장 정책: " + values[0]
+    return "  embedding 저장 정책: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  política de salvamento de embeddings: " + values[0]
+    return "  política de salvamento de embeddings: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  嵌入保存策略：" + values[0]
+    return "  嵌入保存策略：" + (values[0] ?? "")
   }
-  return "  embedding save policy: " + values[0]
+  return "  embedding save policy: " + (values[0] ?? "")
 }
 
 pub fn message_1(locale: string, values: list<string>) -> string {
@@ -35,30 +35,30 @@ pub fn message_1(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  erwartete Trainer-Identität: " + values[0]
+    return "  erwartete Trainer-Identität: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  identidad del entrenador esperada: " + values[0]
+    return "  identidad del entrenador esperada: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  identité de l'entraîneur attendue : " + values[0]
+    return "  identité de l'entraîneur attendue : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  identità del trainer prevista: " + values[0]
+    return "  identità del trainer prevista: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  期待されるトレーナーの識別子: " + values[0]
+    return "  期待されるトレーナーの識別子: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  예상 trainer 신원: " + values[0]
+    return "  예상 trainer 신원: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  identidade esperada do treinador: " + values[0]
+    return "  identidade esperada do treinador: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  预期训练器标识：" + values[0]
+    return "  预期训练器标识：" + (values[0] ?? "")
   }
-  return "  expected trainer identity: " + values[0]
+  return "  expected trainer identity: " + (values[0] ?? "")
 }
 
 pub fn message_2(locale: string, values: list<string>) -> string {
@@ -66,30 +66,30 @@ pub fn message_2(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Inferenzkatalog: " + values[0]
+    return "  Inferenzkatalog: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  catálogo de inferencia: " + values[0]
+    return "  catálogo de inferencia: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  catalogue d'inférence : " + values[0]
+    return "  catalogue d'inférence : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  catalogo di inferenza: " + values[0]
+    return "  catalogo di inferenza: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  推論カタログ: " + values[0]
+    return "  推論カタログ: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  inference catalog: " + values[0]
+    return "  inference catalog: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  catálogo de inferência: " + values[0]
+    return "  catálogo de inferência: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  推理目录：" + values[0]
+    return "  推理目录：" + (values[0] ?? "")
   }
-  return "  inference catalog: " + values[0]
+  return "  inference catalog: " + (values[0] ?? "")
 }
 
 pub fn message_3(locale: string, values: list<string>) -> string {
@@ -128,28 +128,28 @@ pub fn message_4(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Zu speichernde Module: " + values[0]
+    return "  Zu speichernde Module: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  módulos a guardar: " + values[0]
+    return "  módulos a guardar: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  modules à enregistrer : " + values[0]
+    return "  modules à enregistrer : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  moduli da salvare: " + values[0]
+    return "  moduli da salvare: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  保存するモジュール: " + values[0]
+    return "  保存するモジュール: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  저장할 모듈: " + values[0]
+    return "  저장할 모듈: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  modules to save: " + values[0]
+    return "  modules to save: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  要保存的模块: " + values[0]
+    return "  要保存的模块: " + (values[0] ?? "")
   }
-  return "  modules to save: " + values[0]
+  return "  modules to save: " + (values[0] ?? "")
 }

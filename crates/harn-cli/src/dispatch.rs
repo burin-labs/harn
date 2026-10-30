@@ -62,6 +62,10 @@ use crate::env_guard::ScopedEnvVar;
 /// user-provided value in the environment still wins.
 pub const JSON_MODE_ENV: &str = "HARN_OUTPUT_JSON";
 
+pub(crate) fn effective_json_mode(explicit: bool) -> bool {
+    explicit || std::env::var(JSON_MODE_ENV).as_deref() == Ok("1")
+}
+
 /// Opt-out for the AOT bytecode fast path added in G7 (harn#2300).
 /// When set to any truthy value (anything but unset, `0`, `false`,
 /// `no`, or `off`), dispatch never drops the embedded bytecode
@@ -242,11 +246,9 @@ async fn run_embedded_script_inner(
     // the loader transparently falls back to source compilation.
     let _adjacent = maybe_drop_adjacent_bytecode(script_name, temp.path());
 
-    // Set HARN_OUTPUT_JSON only when the host explicitly asked for JSON
-    // mode. If json_mode=false we leave the env alone — a user shell
-    // export still wins, matching the NO_COLOR convention. ScopedEnvVar
-    // restores the prior value on drop so tests stay isolated.
-    let _scope = json_mode.then(|| ScopedEnvVar::set(JSON_MODE_ENV, "1"));
+    // An explicit JSON request and the shell's exact "1" opt-in share one
+    // mode. The scoped value restores the caller's environment on drop.
+    let _scope = effective_json_mode(json_mode).then(|| ScopedEnvVar::set(JSON_MODE_ENV, "1"));
     let _locale_scope = ScopedEnvVar::set(
         crate::localization::script_locale_env(),
         crate::localization::selected_locale().id(),

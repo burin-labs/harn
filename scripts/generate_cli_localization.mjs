@@ -43,7 +43,8 @@ function expression(template, arity) {
       const slot = Number(match[1]);
       assert(slot < arity, `out-of-range slot: ${template}`);
       slots.push(slot);
-      pieces.push(`values[${slot}]`);
+      // Arity excludes missing values; indexing remains nullable to the checker.
+      pieces.push(`(values[${slot}] ?? "")`);
     }
     cursor = match.index + match[0].length;
   }
@@ -61,7 +62,7 @@ function run(arguments_) {
   return result.stdout;
 }
 
-assert(expression("literal {{0}} %@ {0}", 1) === '"literal {0} %@ " + values[0]', "literal template control failed");
+assert(expression("literal {{0}} %@ {0}", 1) === '"literal {0} %@ " + (values[0] ?? "")', "literal template control failed");
 for (const [template, arity] of [["missing {0}", 2], ["duplicate {0} {0}", 1], ["unknown {1}", 1], ["implicit {}", 1]]) {
   let rejected = false;
   try { expression(template, arity); } catch { rejected = true; }

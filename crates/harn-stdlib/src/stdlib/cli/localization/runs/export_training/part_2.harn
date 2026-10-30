@@ -4,28 +4,28 @@ pub fn message_10(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "Trainingsbeispiel-Export aus " + values[0]
+    return "Trainingsbeispiel-Export aus " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "Exportación de ejemplo de entrenamiento desde " + values[0]
+    return "Exportación de ejemplo de entrenamiento desde " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "Export d’exemple d’entraînement depuis " + values[0]
+    return "Export d’exemple d’entraînement depuis " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "Esportazione dell'esempio di addestramento da " + values[0]
+    return "Esportazione dell'esempio di addestramento da " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return values[0] + " からのトレーニング例エクスポート"
+    return (values[0] ?? "") + " からのトレーニング例エクスポート"
   }
   if locale == "ko" {
-    return values[0] + "에서 내보낸 학습 예시"
+    return (values[0] ?? "") + "에서 내보낸 학습 예시"
   }
   if locale == "pt-BR" {
-    return "Exportação de exemplo de treinamento de " + values[0]
+    return "Exportação de exemplo de treinamento de " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "来自 " + values[0] + " 的训练示例导出"
+    return "来自 " + (values[0] ?? "") + " 的训练示例导出"
   }
-  return "Training example export from " + values[0]
+  return "Training example export from " + (values[0] ?? "")
 }

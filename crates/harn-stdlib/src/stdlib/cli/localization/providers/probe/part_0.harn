@@ -35,64 +35,82 @@ pub fn message_1(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return values[0] + "  - " + values[1] + " (size=" + values[2] + " vram=" + values[3] + " ctx="
-      + values[4]
+    return (values[0] ?? "") + "  - " + (values[1] ?? "") + " (size=" + (values[2] ?? "") + " vram="
+      + (values[3] ?? "")
+      + " ctx="
+      + (values[4] ?? "")
       + " expires="
-      + values[5]
+      + (values[5] ?? "")
       + ")\n"
   }
   if locale == "es" {
-    return values[0] + "  - " + values[1] + " (size=" + values[2] + " vram=" + values[3] + " ctx="
-      + values[4]
+    return (values[0] ?? "") + "  - " + (values[1] ?? "") + " (size=" + (values[2] ?? "") + " vram="
+      + (values[3] ?? "")
+      + " ctx="
+      + (values[4] ?? "")
       + " expires="
-      + values[5]
+      + (values[5] ?? "")
       + ")\n"
   }
   if locale == "fr" {
-    return values[0] + "  - " + values[1] + " (size=" + values[2] + " vram=" + values[3] + " ctx="
-      + values[4]
+    return (values[0] ?? "") + "  - " + (values[1] ?? "") + " (size=" + (values[2] ?? "") + " vram="
+      + (values[3] ?? "")
+      + " ctx="
+      + (values[4] ?? "")
       + " expires="
-      + values[5]
+      + (values[5] ?? "")
       + ")\n"
   }
   if locale == "it" {
-    return values[0] + "  - " + values[1] + " (size=" + values[2] + " vram=" + values[3] + " ctx="
-      + values[4]
+    return (values[0] ?? "") + "  - " + (values[1] ?? "") + " (size=" + (values[2] ?? "") + " vram="
+      + (values[3] ?? "")
+      + " ctx="
+      + (values[4] ?? "")
       + " expires="
-      + values[5]
+      + (values[5] ?? "")
       + ")\n"
   }
   if locale == "ja" {
-    return values[0] + "  - " + values[1] + " (size=" + values[2] + " vram=" + values[3] + " ctx="
-      + values[4]
+    return (values[0] ?? "") + "  - " + (values[1] ?? "") + " (size=" + (values[2] ?? "") + " vram="
+      + (values[3] ?? "")
+      + " ctx="
+      + (values[4] ?? "")
       + " expires="
-      + values[5]
+      + (values[5] ?? "")
       + ")\n"
   }
   if locale == "ko" {
-    return values[0] + "  - " + values[1] + " (size=" + values[2] + " vram=" + values[3] + " ctx="
-      + values[4]
+    return (values[0] ?? "") + "  - " + (values[1] ?? "") + " (size=" + (values[2] ?? "") + " vram="
+      + (values[3] ?? "")
+      + " ctx="
+      + (values[4] ?? "")
       + " expires="
-      + values[5]
+      + (values[5] ?? "")
       + ")\n"
   }
   if locale == "pt-BR" {
-    return values[0] + "  - " + values[1] + " (size=" + values[2] + " vram=" + values[3] + " ctx="
-      + values[4]
+    return (values[0] ?? "") + "  - " + (values[1] ?? "") + " (size=" + (values[2] ?? "") + " vram="
+      + (values[3] ?? "")
+      + " ctx="
+      + (values[4] ?? "")
       + " expires="
-      + values[5]
+      + (values[5] ?? "")
       + ")\n"
   }
   if locale == "zh-Hans" {
-    return values[0] + "  - " + values[1] + " (size=" + values[2] + " vram=" + values[3] + " ctx="
-      + values[4]
+    return (values[0] ?? "") + "  - " + (values[1] ?? "") + " (size=" + (values[2] ?? "") + " vram="
+      + (values[3] ?? "")
+      + " ctx="
+      + (values[4] ?? "")
       + " expires="
-      + values[5]
+      + (values[5] ?? "")
       + ")\n"
   }
-  return values[0] + "  - " + values[1] + " (size=" + values[2] + " vram=" + values[3] + " ctx="
-    + values[4]
+  return (values[0] ?? "") + "  - " + (values[1] ?? "") + " (size=" + (values[2] ?? "") + " vram="
+    + (values[3] ?? "")
+    + " ctx="
+    + (values[4] ?? "")
     + " expires="
-    + values[5]
+    + (values[5] ?? "")
     + ")\n"
 }

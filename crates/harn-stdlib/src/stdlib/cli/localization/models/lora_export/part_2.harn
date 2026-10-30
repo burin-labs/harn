@@ -4,30 +4,30 @@ pub fn message_10(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Datensatzformat: " + values[0]
+    return "  Datensatzformat: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  formato del conjunto de datos: " + values[0]
+    return "  formato del conjunto de datos: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  format du jeu de données : " + values[0]
+    return "  format du jeu de données : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  formato del dataset: " + values[0]
+    return "  formato del dataset: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  データセット形式: " + values[0]
+    return "  データセット形式: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  데이터셋 형식: " + values[0]
+    return "  데이터셋 형식: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  formato do conjunto de dados: " + values[0]
+    return "  formato do conjunto de dados: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  数据集格式：" + values[0]
+    return "  数据集格式：" + (values[0] ?? "")
   }
-  return "  dataset format: " + values[0]
+  return "  dataset format: " + (values[0] ?? "")
 }
 
 pub fn message_11(locale: string, values: list<string>) -> string {
@@ -35,30 +35,30 @@ pub fn message_11(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Manifest: " + values[0]
+    return "  Manifest: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  manifiesto: " + values[0]
+    return "  manifiesto: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  manifeste : " + values[0]
+    return "  manifeste : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  manifest: " + values[0]
+    return "  manifest: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  manifest: " + values[0]
+    return "  manifest: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  manifest: " + values[0]
+    return "  manifest: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  manifest: " + values[0]
+    return "  manifest: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  manifest: " + values[0]
+    return "  manifest: " + (values[0] ?? "")
   }
-  return "  manifest: " + values[0]
+  return "  manifest: " + (values[0] ?? "")
 }
 
 pub fn message_12(locale: string, values: list<string>) -> string {
@@ -97,30 +97,30 @@ pub fn message_13(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Ausgabe: " + values[0]
+    return "  Ausgabe: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  salida: " + values[0]
+    return "  salida: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  sortie : " + values[0]
+    return "  sortie : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  output: " + values[0]
+    return "  output: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  出力: " + values[0]
+    return "  出力: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  출력: " + values[0]
+    return "  출력: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  output: " + values[0]
+    return "  output: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  输出: " + values[0]
+    return "  输出: " + (values[0] ?? "")
   }
-  return "  output: " + values[0]
+  return "  output: " + (values[0] ?? "")
 }
 
 pub fn message_14(locale: string, values: list<string>) -> string {
@@ -128,28 +128,28 @@ pub fn message_14(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Promotions-Baseline: " + values[0]
+    return "  Promotions-Baseline: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  línea base de promoción: " + values[0]
+    return "  línea base de promoción: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  référence de promotion : " + values[0]
+    return "  référence de promotion : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  baseline di promozione: " + values[0]
+    return "  baseline di promozione: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  昇格ベースライン: " + values[0]
+    return "  昇格ベースライン: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  promotion baseline: " + values[0]
+    return "  promotion baseline: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  promotion baseline: " + values[0]
+    return "  promotion baseline: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  提升基线: " + values[0]
+    return "  提升基线: " + (values[0] ?? "")
   }
-  return "  promotion baseline: " + values[0]
+  return "  promotion baseline: " + (values[0] ?? "")
 }

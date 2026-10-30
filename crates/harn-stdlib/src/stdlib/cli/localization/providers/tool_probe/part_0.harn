@@ -4,47 +4,65 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return values[0] + "  " + values[1] + ": " + values[2] + " ok=" + values[3] + " reason="
-      + values[4]
+    return (values[0] ?? "") + "  " + (values[1] ?? "") + ": " + (values[2] ?? "") + " ok="
+      + (values[3] ?? "")
+      + " reason="
+      + (values[4] ?? "")
       + "\n"
   }
   if locale == "es" {
-    return values[0] + "  " + values[1] + ": " + values[2] + " ok=" + values[3] + " reason="
-      + values[4]
+    return (values[0] ?? "") + "  " + (values[1] ?? "") + ": " + (values[2] ?? "") + " ok="
+      + (values[3] ?? "")
+      + " reason="
+      + (values[4] ?? "")
       + "\n"
   }
   if locale == "fr" {
-    return values[0] + "  " + values[1] + ": " + values[2] + " ok=" + values[3] + " reason="
-      + values[4]
+    return (values[0] ?? "") + "  " + (values[1] ?? "") + ": " + (values[2] ?? "") + " ok="
+      + (values[3] ?? "")
+      + " reason="
+      + (values[4] ?? "")
       + "\n"
   }
   if locale == "it" {
-    return values[0] + "  " + values[1] + ": " + values[2] + " ok=" + values[3] + " reason="
-      + values[4]
+    return (values[0] ?? "") + "  " + (values[1] ?? "") + ": " + (values[2] ?? "") + " ok="
+      + (values[3] ?? "")
+      + " reason="
+      + (values[4] ?? "")
       + "\n"
   }
   if locale == "ja" {
-    return values[0] + "  " + values[1] + ": " + values[2] + " ok=" + values[3] + " reason="
-      + values[4]
+    return (values[0] ?? "") + "  " + (values[1] ?? "") + ": " + (values[2] ?? "") + " ok="
+      + (values[3] ?? "")
+      + " reason="
+      + (values[4] ?? "")
       + "\n"
   }
   if locale == "ko" {
-    return values[0] + "  " + values[1] + ": " + values[2] + " ok=" + values[3] + " reason="
-      + values[4]
+    return (values[0] ?? "") + "  " + (values[1] ?? "") + ": " + (values[2] ?? "") + " ok="
+      + (values[3] ?? "")
+      + " reason="
+      + (values[4] ?? "")
       + "\n"
   }
   if locale == "pt-BR" {
-    return values[0] + "  " + values[1] + ": " + values[2] + " ok=" + values[3] + " reason="
-      + values[4]
+    return (values[0] ?? "") + "  " + (values[1] ?? "") + ": " + (values[2] ?? "") + " ok="
+      + (values[3] ?? "")
+      + " reason="
+      + (values[4] ?? "")
       + "\n"
   }
   if locale == "zh-Hans" {
-    return values[0] + "  " + values[1] + ": " + values[2] + " ok=" + values[3] + " reason="
-      + values[4]
+    return (values[0] ?? "") + "  " + (values[1] ?? "") + ": " + (values[2] ?? "") + " ok="
+      + (values[3] ?? "")
+      + " reason="
+      + (values[4] ?? "")
       + "\n"
   }
-  return values[0] + "  " + values[1] + ": " + values[2] + " ok=" + values[3] + " reason="
-    + values[4]
+  return (values[0] ?? "") + "  " + (values[1] ?? "") + ": " + (values[2] ?? "") + " ok="
+    + (values[3] ?? "")
+    + " reason="
+    + (values[4] ?? "")
     + "\n"
 }
 
@@ -53,91 +71,108 @@ pub fn message_1(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return values[0] + " " + values[1] + " format=" + values[2] + " fallback=" + values[3]
+    return (values[0] ?? "") + " " + (values[1] ?? "") + " format=" + (values[2] ?? "")
+      + " fallback="
+      + (values[3] ?? "")
       + " native="
-      + values[4]
+      + (values[4] ?? "")
       + " text="
-      + values[5]
+      + (values[5] ?? "")
       + " streaming_native="
-      + values[6]
+      + (values[6] ?? "")
       + "\n"
   }
   if locale == "es" {
-    return values[0] + " " + values[1] + " format=" + values[2] + " fallback=" + values[3]
+    return (values[0] ?? "") + " " + (values[1] ?? "") + " format=" + (values[2] ?? "")
+      + " fallback="
+      + (values[3] ?? "")
       + " native="
-      + values[4]
+      + (values[4] ?? "")
       + " text="
-      + values[5]
+      + (values[5] ?? "")
       + " streaming_native="
-      + values[6]
+      + (values[6] ?? "")
       + "\n"
   }
   if locale == "fr" {
-    return values[0] + " " + values[1] + " format=" + values[2] + " fallback=" + values[3]
+    return (values[0] ?? "") + " " + (values[1] ?? "") + " format=" + (values[2] ?? "")
+      + " fallback="
+      + (values[3] ?? "")
       + " native="
-      + values[4]
+      + (values[4] ?? "")
       + " text="
-      + values[5]
+      + (values[5] ?? "")
       + " streaming_native="
-      + values[6]
+      + (values[6] ?? "")
       + "\n"
   }
   if locale == "it" {
-    return values[0] + " " + values[1] + " format=" + values[2] + " fallback=" + values[3]
+    return (values[0] ?? "") + " " + (values[1] ?? "") + " format=" + (values[2] ?? "")
+      + " fallback="
+      + (values[3] ?? "")
       + " native="
-      + values[4]
+      + (values[4] ?? "")
       + " text="
-      + values[5]
+      + (values[5] ?? "")
       + " streaming_native="
-      + values[6]
+      + (values[6] ?? "")
       + "\n"
   }
   if locale == "ja" {
-    return values[0] + " " + values[1] + " format=" + values[2] + " fallback=" + values[3]
+    return (values[0] ?? "") + " " + (values[1] ?? "") + " format=" + (values[2] ?? "")
+      + " fallback="
+      + (values[3] ?? "")
       + " native="
-      + values[4]
+      + (values[4] ?? "")
       + " text="
-      + values[5]
+      + (values[5] ?? "")
       + " streaming_native="
-      + values[6]
+      + (values[6] ?? "")
       + "\n"
   }
   if locale == "ko" {
-    return values[0] + " " + values[1] + " format=" + values[2] + " fallback=" + values[3]
+    return (values[0] ?? "") + " " + (values[1] ?? "") + " format=" + (values[2] ?? "")
+      + " fallback="
+      + (values[3] ?? "")
       + " native="
-      + values[4]
+      + (values[4] ?? "")
       + " text="
-      + values[5]
+      + (values[5] ?? "")
       + " streaming_native="
-      + values[6]
+      + (values[6] ?? "")
       + "\n"
   }
   if locale == "pt-BR" {
-    return values[0] + " " + values[1] + " format=" + values[2] + " fallback=" + values[3]
+    return (values[0] ?? "") + " " + (values[1] ?? "") + " format=" + (values[2] ?? "")
+      + " fallback="
+      + (values[3] ?? "")
       + " native="
-      + values[4]
+      + (values[4] ?? "")
       + " text="
-      + values[5]
+      + (values[5] ?? "")
       + " streaming_native="
-      + values[6]
+      + (values[6] ?? "")
       + "\n"
   }
   if locale == "zh-Hans" {
-    return values[0] + " " + values[1] + " format=" + values[2] + " fallback=" + values[3]
+    return (values[0] ?? "") + " " + (values[1] ?? "") + " format=" + (values[2] ?? "")
+      + " fallback="
+      + (values[3] ?? "")
       + " native="
-      + values[4]
+      + (values[4] ?? "")
       + " text="
-      + values[5]
+      + (values[5] ?? "")
       + " streaming_native="
-      + values[6]
+      + (values[6] ?? "")
       + "\n"
   }
-  return values[0] + " " + values[1] + " format=" + values[2] + " fallback=" + values[3]
+  return (values[0] ?? "") + " " + (values[1] ?? "") + " format=" + (values[2] ?? "") + " fallback="
+    + (values[3] ?? "")
     + " native="
-    + values[4]
+    + (values[4] ?? "")
     + " text="
-    + values[5]
+    + (values[5] ?? "")
     + " streaming_native="
-    + values[6]
+    + (values[6] ?? "")
     + "\n"
 }

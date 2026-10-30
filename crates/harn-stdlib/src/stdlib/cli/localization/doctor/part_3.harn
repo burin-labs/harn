@@ -97,30 +97,30 @@ pub fn message_18(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "erreichbar (" + values[0] + "ms)"
+    return "erreichbar (" + (values[0] ?? "") + "ms)"
   }
   if locale == "es" {
-    return "alcanzable (" + values[0] + "ms)"
+    return "alcanzable (" + (values[0] ?? "") + "ms)"
   }
   if locale == "fr" {
-    return "accessible (" + values[0] + "ms)"
+    return "accessible (" + (values[0] ?? "") + "ms)"
   }
   if locale == "it" {
-    return "raggiungibile (" + values[0] + "ms)"
+    return "raggiungibile (" + (values[0] ?? "") + "ms)"
   }
   if locale == "ja" {
-    return "到達可能 (" + values[0] + "ms)"
+    return "到達可能 (" + (values[0] ?? "") + "ms)"
   }
   if locale == "ko" {
-    return "도달 가능 (" + values[0] + "ms)"
+    return "도달 가능 (" + (values[0] ?? "") + "ms)"
   }
   if locale == "pt-BR" {
-    return "acessível (" + values[0] + "ms)"
+    return "acessível (" + (values[0] ?? "") + "ms)"
   }
   if locale == "zh-Hans" {
-    return "可达（" + values[0] + "ms）"
+    return "可达（" + (values[0] ?? "") + "ms）"
   }
-  return "reachable (" + values[0] + "ms)"
+  return "reachable (" + (values[0] ?? "") + "ms)"
 }
 
 pub fn message_19(locale: string, values: list<string>) -> string {

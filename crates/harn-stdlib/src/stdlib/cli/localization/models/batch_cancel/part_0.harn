@@ -4,30 +4,30 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  abbrechbar: " + values[0]
+    return "  abbrechbar: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  cancelable: " + values[0]
+    return "  cancelable: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  annulable : " + values[0]
+    return "  annulable : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  annullabile: " + values[0]
+    return "  annullabile: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  キャンセル可能: " + values[0]
+    return "  キャンセル可能: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  취소 가능: " + values[0]
+    return "  취소 가능: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  cancelável: " + values[0]
+    return "  cancelável: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  可取消：" + values[0]
+    return "  可取消：" + (values[0] ?? "")
   }
-  return "  cancelable: " + values[0]
+  return "  cancelable: " + (values[0] ?? "")
 }
 
 pub fn message_1(locale: string, values: list<string>) -> string {
@@ -35,30 +35,30 @@ pub fn message_1(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  abgebrochen: " + values[0]
+    return "  abgebrochen: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  cancelado: " + values[0]
+    return "  cancelado: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  annulé : " + values[0]
+    return "  annulé : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  annullato: " + values[0]
+    return "  annullato: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  キャンセル済み: " + values[0]
+    return "  キャンセル済み: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  취소됨: " + values[0]
+    return "  취소됨: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  cancelado: " + values[0]
+    return "  cancelado: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  已取消：" + values[0]
+    return "  已取消：" + (values[0] ?? "")
   }
-  return "  canceled: " + values[0]
+  return "  canceled: " + (values[0] ?? "")
 }
 
 pub fn message_2(locale: string, values: list<string>) -> string {
@@ -66,30 +66,30 @@ pub fn message_2(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  wird abgebrochen: " + values[0]
+    return "  wird abgebrochen: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  cancelando: " + values[0]
+    return "  cancelando: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  annulation en cours : " + values[0]
+    return "  annulation en cours : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  annullamento in corso: " + values[0]
+    return "  annullamento in corso: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  キャンセル中: " + values[0]
+    return "  キャンセル中: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  취소 중: " + values[0]
+    return "  취소 중: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  cancelando: " + values[0]
+    return "  cancelando: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  正在取消：" + values[0]
+    return "  正在取消：" + (values[0] ?? "")
   }
-  return "  canceling: " + values[0]
+  return "  canceling: " + (values[0] ?? "")
 }
 
 pub fn message_3(locale: string, values: list<string>) -> string {
@@ -97,30 +97,30 @@ pub fn message_3(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  fehlgeschlagen: " + values[0]
+    return "  fehlgeschlagen: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  falló: " + values[0]
+    return "  falló: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  échec : " + values[0]
+    return "  échec : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  non riuscito: " + values[0]
+    return "  non riuscito: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  失敗: " + values[0]
+    return "  失敗: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  실패: " + values[0]
+    return "  실패: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  falhou: " + values[0]
+    return "  falhou: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  失败：" + values[0]
+    return "  失败：" + (values[0] ?? "")
   }
-  return "  failed: " + values[0]
+  return "  failed: " + (values[0] ?? "")
 }
 
 pub fn message_4(locale: string, values: list<string>) -> string {
@@ -128,28 +128,28 @@ pub fn message_4(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Jobs: " + values[0]
+    return "  Jobs: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  trabajos: " + values[0]
+    return "  trabajos: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  travaux : " + values[0]
+    return "  travaux : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  job: " + values[0]
+    return "  job: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  ジョブ: " + values[0]
+    return "  ジョブ: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  작업: " + values[0]
+    return "  작업: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  jobs: " + values[0]
+    return "  jobs: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  作业: " + values[0]
+    return "  作业: " + (values[0] ?? "")
   }
-  return "  jobs: " + values[0]
+  return "  jobs: " + (values[0] ?? "")
 }

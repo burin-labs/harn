@@ -4,30 +4,30 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  LoRA-Modulformat: " + values[0]
+    return "  LoRA-Modulformat: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  formato del módulo LoRA: " + values[0]
+    return "  formato del módulo LoRA: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  format du module LoRA : " + values[0]
+    return "  format du module LoRA : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  Formato modulo LoRA: " + values[0]
+    return "  Formato modulo LoRA: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  LoRA モジュール形式: " + values[0]
+    return "  LoRA モジュール形式: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  LoRA 모듈 형식: " + values[0]
+    return "  LoRA 모듈 형식: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  formato do módulo LoRA: " + values[0]
+    return "  formato do módulo LoRA: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  LoRA 模块格式：" + values[0]
+    return "  LoRA 模块格式：" + (values[0] ?? "")
   }
-  return "  LoRA module format: " + values[0]
+  return "  LoRA module format: " + (values[0] ?? "")
 }
 
 pub fn message_1(locale: string, values: list<string>) -> string {
@@ -35,30 +35,30 @@ pub fn message_1(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Adapter-Vertrags-ID: " + values[0]
+    return "  Adapter-Vertrags-ID: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  id del contrato del adaptador: " + values[0]
+    return "  id del contrato del adaptador: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  identifiant du contrat de l’adaptateur : " + values[0]
+    return "  identifiant du contrat de l’adaptateur : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  ID contratto adapter: " + values[0]
+    return "  ID contratto adapter: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  アダプタ契約 ID: " + values[0]
+    return "  アダプタ契約 ID: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  어댑터 계약 ID: " + values[0]
+    return "  어댑터 계약 ID: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  ID do contrato do adapter: " + values[0]
+    return "  ID do contrato do adapter: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  适配器合约 ID：" + values[0]
+    return "  适配器合约 ID：" + (values[0] ?? "")
   }
-  return "  adapter contract id: " + values[0]
+  return "  adapter contract id: " + (values[0] ?? "")
 }
 
 pub fn message_2(locale: string, values: list<string>) -> string {
@@ -66,30 +66,30 @@ pub fn message_2(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Adapter: " + values[0]
+    return "  Adapter: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  adaptador: " + values[0]
+    return "  adaptador: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  adaptateur : " + values[0]
+    return "  adaptateur : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  adapter: " + values[0]
+    return "  adapter: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  アダプタ: " + values[0]
+    return "  アダプタ: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  어댑터: " + values[0]
+    return "  어댑터: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  adapter: " + values[0]
+    return "  adapter: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  适配器：" + values[0]
+    return "  适配器：" + (values[0] ?? "")
   }
-  return "  adapter: " + values[0]
+  return "  adapter: " + (values[0] ?? "")
 }
 
 pub fn message_3(locale: string, values: list<string>) -> string {
@@ -97,30 +97,30 @@ pub fn message_3(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Basisübereinstimmung: " + values[0]
+    return "  Basisübereinstimmung: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  coincidencia con la base: " + values[0]
+    return "  coincidencia con la base: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  correspondance de base : " + values[0]
+    return "  correspondance de base : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  corrispondenza base: " + values[0]
+    return "  corrispondenza base: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  base 一致: " + values[0]
+    return "  base 一致: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  기본 일치: " + values[0]
+    return "  기본 일치: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  correspondência da base: " + values[0]
+    return "  correspondência da base: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  基座匹配：" + values[0]
+    return "  基座匹配：" + (values[0] ?? "")
   }
-  return "  base match: " + values[0]
+  return "  base match: " + (values[0] ?? "")
 }
 
 pub fn message_4(locale: string, values: list<string>) -> string {
@@ -128,28 +128,28 @@ pub fn message_4(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Katalog-Startflags für LoRA: " + values[0]
+    return "  Katalog-Startflags für LoRA: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  flags de lanzamiento LoRA del catálogo: " + values[0]
+    return "  flags de lanzamiento LoRA del catálogo: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  indicateurs de lancement LoRA du catalogue : " + values[0]
+    return "  indicateurs de lancement LoRA du catalogue : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  flag di avvio LoRA del catalogo: " + values[0]
+    return "  flag di avvio LoRA del catalogo: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  カタログ LoRA 起動フラグ: " + values[0]
+    return "  カタログ LoRA 起動フラグ: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  카탈로그 LoRA 실행 플래그: " + values[0]
+    return "  카탈로그 LoRA 실행 플래그: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  flags de lançamento de LoRA do catálogo: " + values[0]
+    return "  flags de lançamento de LoRA do catálogo: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  目录 LoRA 启动标志：" + values[0]
+    return "  目录 LoRA 启动标志：" + (values[0] ?? "")
   }
-  return "  catalog LoRA launch flags: " + values[0]
+  return "  catalog LoRA launch flags: " + (values[0] ?? "")
 }

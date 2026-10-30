@@ -128,28 +128,28 @@ pub fn message_24(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return values[0] + " -> " + values[1] + " via " + values[2]
+    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
   }
   if locale == "es" {
-    return values[0] + " -> " + values[1] + " mediante " + values[2]
+    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " mediante " + (values[2] ?? "")
   }
   if locale == "fr" {
-    return values[0] + " -> " + values[1] + " via " + values[2]
+    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
   }
   if locale == "it" {
-    return values[0] + " -> " + values[1] + " tramite " + values[2]
+    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " tramite " + (values[2] ?? "")
   }
   if locale == "ja" {
-    return values[0] + " -> " + values[1] + " via " + values[2]
+    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
   }
   if locale == "ko" {
-    return values[0] + " -> " + values[1] + " via " + values[2]
+    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
   }
   if locale == "pt-BR" {
-    return values[0] + " -> " + values[1] + " via " + values[2]
+    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
   }
   if locale == "zh-Hans" {
-    return values[0] + " -> " + values[1] + " via " + values[2]
+    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
   }
-  return values[0] + " -> " + values[1] + " via " + values[2]
+  return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
 }

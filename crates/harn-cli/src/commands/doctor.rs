@@ -120,6 +120,10 @@ pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
 /// owns the human-readable section layout and the JSON envelope
 /// pass-through.
 async fn run_dispatch(opts: DoctorOptions) -> i32 {
+    let opts = DoctorOptions {
+        json: dispatch::effective_json_mode(opts.json),
+        ..opts
+    };
     let report = build_report(&opts).await;
     let report_json = match serde_json::to_string(&report) {
         Ok(json) => json,

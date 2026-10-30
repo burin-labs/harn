@@ -4,30 +4,33 @@ pub fn message_30(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Tool-Format: " + values[0] + " (angefordert " + values[1] + ")"
+    return "  Tool-Format: " + (values[0] ?? "") + " (angefordert " + (values[1] ?? "") + ")"
   }
   if locale == "es" {
-    return "  formato de herramienta: " + values[0] + " (solicitado " + values[1] + ")"
+    return "  formato de herramienta: " + (values[0] ?? "") + " (solicitado " + (values[1] ?? "")
+      + ")"
   }
   if locale == "fr" {
-    return "  format de l’outil : " + values[0] + " (demandé " + values[1] + ")"
+    return "  format de l’outil : " + (values[0] ?? "") + " (demandé " + (values[1] ?? "") + ")"
   }
   if locale == "it" {
-    return "  formato dello strumento: " + values[0] + " (richiesto " + values[1] + ")"
+    return "  formato dello strumento: " + (values[0] ?? "") + " (richiesto " + (values[1] ?? "")
+      + ")"
   }
   if locale == "ja" {
-    return "  ツール形式: " + values[0] + " (要求 " + values[1] + ")"
+    return "  ツール形式: " + (values[0] ?? "") + " (要求 " + (values[1] ?? "") + ")"
   }
   if locale == "ko" {
-    return "  tool format: " + values[0] + " (requested " + values[1] + ")"
+    return "  tool format: " + (values[0] ?? "") + " (requested " + (values[1] ?? "") + ")"
   }
   if locale == "pt-BR" {
-    return "  formato da ferramenta: " + values[0] + " (solicitado " + values[1] + ")"
+    return "  formato da ferramenta: " + (values[0] ?? "") + " (solicitado " + (values[1] ?? "")
+      + ")"
   }
   if locale == "zh-Hans" {
-    return "  工具格式：" + values[0] + "（请求 " + values[1] + "）"
+    return "  工具格式：" + (values[0] ?? "") + "（请求 " + (values[1] ?? "") + "）"
   }
-  return "  tool format: " + values[0] + " (requested " + values[1] + ")"
+  return "  tool format: " + (values[0] ?? "") + " (requested " + (values[1] ?? "") + ")"
 }
 
 pub fn message_31(locale: string, values: list<string>) -> string {
@@ -35,30 +38,30 @@ pub fn message_31(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Trainer: " + values[0]
+    return "  Trainer: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  entrenador: " + values[0]
+    return "  entrenador: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  formateur : " + values[0]
+    return "  formateur : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  trainer: " + values[0]
+    return "  trainer: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  トレーナー: " + values[0]
+    return "  トレーナー: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  트레이너: " + values[0]
+    return "  트레이너: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  treinador: " + values[0]
+    return "  treinador: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  训练器：" + values[0]
+    return "  训练器：" + (values[0] ?? "")
   }
-  return "  trainer: " + values[0]
+  return "  trainer: " + (values[0] ?? "")
 }
 
 pub fn message_32(locale: string, values: list<string>) -> string {
@@ -66,30 +69,30 @@ pub fn message_32(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Trainings-Basispräzision: " + values[0]
+    return "  Trainings-Basispräzision: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  precisión base de entrenamiento: " + values[0]
+    return "  precisión base de entrenamiento: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  précision de base de l’entraînement : " + values[0]
+    return "  précision de base de l’entraînement : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  precisione della base di training: " + values[0]
+    return "  precisione della base di training: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  学習時のベース精度: " + values[0]
+    return "  学習時のベース精度: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  훈련 기본 정밀도: " + values[0]
+    return "  훈련 기본 정밀도: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  precisão da base de treinamento: " + values[0]
+    return "  precisão da base de treinamento: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  训练基础精度：" + values[0]
+    return "  训练基础精度：" + (values[0] ?? "")
   }
-  return "  training base precision: " + values[0]
+  return "  training base precision: " + (values[0] ?? "")
 }
 
 pub fn message_33(locale: string, values: list<string>) -> string {
@@ -97,30 +100,30 @@ pub fn message_33(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Trainings-Compute-Präzision: " + values[0]
+    return "  Trainings-Compute-Präzision: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  precisión de cómputo de entrenamiento: " + values[0]
+    return "  precisión de cómputo de entrenamiento: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  précision de calcul de l’entraînement : " + values[0]
+    return "  précision de calcul de l’entraînement : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  precisione di calcolo del training: " + values[0]
+    return "  precisione di calcolo del training: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  学習時の計算精度: " + values[0]
+    return "  学習時の計算精度: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  훈련 계산 정밀도: " + values[0]
+    return "  훈련 계산 정밀도: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  precisão de computação do treinamento: " + values[0]
+    return "  precisão de computação do treinamento: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  训练计算精度：" + values[0]
+    return "  训练计算精度：" + (values[0] ?? "")
   }
-  return "  training compute precision: " + values[0]
+  return "  training compute precision: " + (values[0] ?? "")
 }
 
 pub fn message_34(locale: string, values: list<string>) -> string {
@@ -128,28 +131,28 @@ pub fn message_34(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Training: " + values[0] + " + " + values[1]
+    return "  Training: " + (values[0] ?? "") + " + " + (values[1] ?? "")
   }
   if locale == "es" {
-    return "  entrenamiento: " + values[0] + " + " + values[1]
+    return "  entrenamiento: " + (values[0] ?? "") + " + " + (values[1] ?? "")
   }
   if locale == "fr" {
-    return "  entraînement : " + values[0] + " + " + values[1]
+    return "  entraînement : " + (values[0] ?? "") + " + " + (values[1] ?? "")
   }
   if locale == "it" {
-    return "  training: " + values[0] + " + " + values[1]
+    return "  training: " + (values[0] ?? "") + " + " + (values[1] ?? "")
   }
   if locale == "ja" {
-    return "  学習: " + values[0] + " + " + values[1]
+    return "  学習: " + (values[0] ?? "") + " + " + (values[1] ?? "")
   }
   if locale == "ko" {
-    return "  훈련: " + values[0] + " + " + values[1]
+    return "  훈련: " + (values[0] ?? "") + " + " + (values[1] ?? "")
   }
   if locale == "pt-BR" {
-    return "  treinamento: " + values[0] + " + " + values[1]
+    return "  treinamento: " + (values[0] ?? "") + " + " + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  训练：" + values[0] + " + " + values[1]
+    return "  训练：" + (values[0] ?? "") + " + " + (values[1] ?? "")
   }
-  return "  training: " + values[0] + " + " + values[1]
+  return "  training: " + (values[0] ?? "") + " + " + (values[1] ?? "")
 }

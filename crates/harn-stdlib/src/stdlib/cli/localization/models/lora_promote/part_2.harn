@@ -128,28 +128,28 @@ pub fn message_14(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "Fehler bei Prüfung " + values[0]
+    return "Fehler bei Prüfung " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "fallos del sondeo " + values[0]
+    return "fallos del sondeo " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "échecs de la sonde " + values[0]
+    return "échecs de la sonde " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "fallimenti della sonda " + values[0]
+    return "fallimenti della sonda " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "プローブ " + values[0] + " の失敗"
+    return "プローブ " + (values[0] ?? "") + " の失敗"
   }
   if locale == "ko" {
-    return "프로브 " + values[0] + " 실패"
+    return "프로브 " + (values[0] ?? "") + " 실패"
   }
   if locale == "pt-BR" {
-    return "falhas da sonda " + values[0]
+    return "falhas da sonda " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "探测 " + values[0] + " 失败"
+    return "探测 " + (values[0] ?? "") + " 失败"
   }
-  return "probe " + values[0] + " failures"
+  return "probe " + (values[0] ?? "") + " failures"
 }

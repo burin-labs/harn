@@ -4,30 +4,30 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Nachrichten (" + values[0] + "):"
+    return "  Nachrichten (" + (values[0] ?? "") + "):"
   }
   if locale == "es" {
-    return "  mensajes (" + values[0] + "):"
+    return "  mensajes (" + (values[0] ?? "") + "):"
   }
   if locale == "fr" {
-    return "  messages (" + values[0] + ") :"
+    return "  messages (" + (values[0] ?? "") + ") :"
   }
   if locale == "it" {
-    return "  messaggi (" + values[0] + "):"
+    return "  messaggi (" + (values[0] ?? "") + "):"
   }
   if locale == "ja" {
-    return "  メッセージ (" + values[0] + "):"
+    return "  メッセージ (" + (values[0] ?? "") + "):"
   }
   if locale == "ko" {
-    return "  메시지 (" + values[0] + "):"
+    return "  메시지 (" + (values[0] ?? "") + "):"
   }
   if locale == "pt-BR" {
-    return "  messages (" + values[0] + "):"
+    return "  messages (" + (values[0] ?? "") + "):"
   }
   if locale == "zh-Hans" {
-    return "  消息（" + values[0] + "）:"
+    return "  消息（" + (values[0] ?? "") + "）:"
   }
-  return "  messages (" + values[0] + "):"
+  return "  messages (" + (values[0] ?? "") + "):"
 }
 
 pub fn message_1(locale: string, values: list<string>) -> string {
@@ -35,30 +35,30 @@ pub fn message_1(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  abgelehnt: " + values[0]
+    return "  abgelehnt: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  rechazado: " + values[0]
+    return "  rechazado: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  refusé : " + values[0]
+    return "  refusé : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  rifiutato: " + values[0]
+    return "  rifiutato: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  拒否: " + values[0]
+    return "  拒否: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  거부됨: " + values[0]
+    return "  거부됨: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  recusado: " + values[0]
+    return "  recusado: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  拒绝: " + values[0]
+    return "  拒绝: " + (values[0] ?? "")
   }
-  return "  refused: " + values[0]
+  return "  refused: " + (values[0] ?? "")
 }
 
 pub fn message_2(locale: string, values: list<string>) -> string {
@@ -66,30 +66,39 @@ pub fn message_2(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Route: " + values[0] + "/" + values[1] + " tool_format=" + values[2]
+    return "  Route: " + (values[0] ?? "") + "/" + (values[1] ?? "") + " tool_format="
+      + (values[2] ?? "")
   }
   if locale == "es" {
-    return "  ruta: " + values[0] + "/" + values[1] + " tool_format=" + values[2]
+    return "  ruta: " + (values[0] ?? "") + "/" + (values[1] ?? "") + " tool_format="
+      + (values[2] ?? "")
   }
   if locale == "fr" {
-    return "  route : " + values[0] + "/" + values[1] + " tool_format=" + values[2]
+    return "  route : " + (values[0] ?? "") + "/" + (values[1] ?? "") + " tool_format="
+      + (values[2] ?? "")
   }
   if locale == "it" {
-    return "  rotta: " + values[0] + "/" + values[1] + " tool_format=" + values[2]
+    return "  rotta: " + (values[0] ?? "") + "/" + (values[1] ?? "") + " tool_format="
+      + (values[2] ?? "")
   }
   if locale == "ja" {
-    return "  ルート: " + values[0] + "/" + values[1] + " tool_format=" + values[2]
+    return "  ルート: " + (values[0] ?? "") + "/" + (values[1] ?? "") + " tool_format="
+      + (values[2] ?? "")
   }
   if locale == "ko" {
-    return "  경로: " + values[0] + "/" + values[1] + " tool_format=" + values[2]
+    return "  경로: " + (values[0] ?? "") + "/" + (values[1] ?? "") + " tool_format="
+      + (values[2] ?? "")
   }
   if locale == "pt-BR" {
-    return "  rota: " + values[0] + "/" + values[1] + " tool_format=" + values[2]
+    return "  rota: " + (values[0] ?? "") + "/" + (values[1] ?? "") + " tool_format="
+      + (values[2] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  路由: " + values[0] + "/" + values[1] + " tool_format=" + values[2]
+    return "  路由: " + (values[0] ?? "") + "/" + (values[1] ?? "") + " tool_format="
+      + (values[2] ?? "")
   }
-  return "  route: " + values[0] + "/" + values[1] + " tool_format=" + values[2]
+  return "  route: " + (values[0] ?? "") + "/" + (values[1] ?? "") + " tool_format="
+    + (values[2] ?? "")
 }
 
 pub fn message_3(locale: string, values: list<string>) -> string {
@@ -97,30 +106,30 @@ pub fn message_3(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Ausführen: " + values[0]
+    return "  Ausführen: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  ejecución: " + values[0]
+    return "  ejecución: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  exécution : " + values[0]
+    return "  exécution : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  esegui: " + values[0]
+    return "  esegui: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  実行: " + values[0]
+    return "  実行: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  실행: " + values[0]
+    return "  실행: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  execução: " + values[0]
+    return "  execução: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  运行: " + values[0]
+    return "  运行: " + (values[0] ?? "")
   }
-  return "  run: " + values[0]
+  return "  run: " + (values[0] ?? "")
 }
 
 pub fn message_4(locale: string, values: list<string>) -> string {
@@ -128,28 +137,28 @@ pub fn message_4(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Schema: " + values[0]
+    return "  Schema: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  esquema: " + values[0]
+    return "  esquema: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  schéma : " + values[0]
+    return "  schéma : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  schema: " + values[0]
+    return "  schema: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  スキーマ: " + values[0]
+    return "  スキーマ: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  스키마: " + values[0]
+    return "  스키마: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  esquema: " + values[0]
+    return "  esquema: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  模式: " + values[0]
+    return "  模式: " + (values[0] ?? "")
   }
-  return "  schema: " + values[0]
+  return "  schema: " + (values[0] ?? "")
 }

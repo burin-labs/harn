@@ -4,30 +4,30 @@ pub fn message_25(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Korrektur des Tool-Formats: " + values[0]
+    return "  Korrektur des Tool-Formats: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  corrección del formato de herramienta: " + values[0]
+    return "  corrección del formato de herramienta: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  correction du format d’outil : " + values[0]
+    return "  correction du format d’outil : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  correzione del formato dello strumento: " + values[0]
+    return "  correzione del formato dello strumento: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  ツール形式の修正: " + values[0]
+    return "  ツール形式の修正: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  tool format correction: " + values[0]
+    return "  tool format correction: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  correção de formato da ferramenta: " + values[0]
+    return "  correção de formato da ferramenta: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  工具格式修正：" + values[0]
+    return "  工具格式修正：" + (values[0] ?? "")
   }
-  return "  tool format correction: " + values[0]
+  return "  tool format correction: " + (values[0] ?? "")
 }
 
 pub fn message_26(locale: string, values: list<string>) -> string {
@@ -66,30 +66,31 @@ pub fn message_27(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "LoRA-Preflight für " + values[0] + " via " + values[1]
+    return "LoRA-Preflight für " + (values[0] ?? "") + " via " + (values[1] ?? "")
   }
   if locale == "es" {
-    return "Comprobación previa de LoRA para " + values[0] + " mediante " + values[1]
+    return "Comprobación previa de LoRA para " + (values[0] ?? "") + " mediante "
+      + (values[1] ?? "")
   }
   if locale == "fr" {
-    return "Prévol LoRA pour " + values[0] + " via " + values[1]
+    return "Prévol LoRA pour " + (values[0] ?? "") + " via " + (values[1] ?? "")
   }
   if locale == "it" {
-    return "Preflight LoRA per " + values[0] + " tramite " + values[1]
+    return "Preflight LoRA per " + (values[0] ?? "") + " tramite " + (values[1] ?? "")
   }
   if locale == "ja" {
-    return values[1] + " を介した " + values[0] + " の LoRA 事前確認"
+    return (values[1] ?? "") + " を介した " + (values[0] ?? "") + " の LoRA 事前確認"
   }
   if locale == "ko" {
-    return values[1] + "를 통한 " + values[0] + "용 LoRA 사전 점검"
+    return (values[1] ?? "") + "를 통한 " + (values[0] ?? "") + "용 LoRA 사전 점검"
   }
   if locale == "pt-BR" {
-    return "Pré-checagem de LoRA para " + values[0] + " via " + values[1]
+    return "Pré-checagem de LoRA para " + (values[0] ?? "") + " via " + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
-    return "通过 " + values[1] + " 为 " + values[0] + " 进行 LoRA 预检"
+    return "通过 " + (values[1] ?? "") + " 为 " + (values[0] ?? "") + " 进行 LoRA 预检"
   }
-  return "LoRA preflight for " + values[0] + " via " + values[1]
+  return "LoRA preflight for " + (values[0] ?? "") + " via " + (values[1] ?? "")
 }
 
 pub fn message_28(locale: string, values: list<string>) -> string {

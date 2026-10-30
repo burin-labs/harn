@@ -4,30 +4,30 @@ pub fn message_20(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Zielbasis: " + values[0]
+    return "  Zielbasis: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  base de destino: " + values[0]
+    return "  base de destino: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  base cible : " + values[0]
+    return "  base cible : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  base target: " + values[0]
+    return "  base target: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  ターゲットのベース: " + values[0]
+    return "  ターゲットのベース: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  대상 기반: " + values[0]
+    return "  대상 기반: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  base de destino: " + values[0]
+    return "  base de destino: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  目标基座: " + values[0]
+    return "  目标基座: " + (values[0] ?? "")
   }
-  return "  target base: " + values[0]
+  return "  target base: " + (values[0] ?? "")
 }
 
 pub fn message_21(locale: string, values: list<string>) -> string {
@@ -35,30 +35,33 @@ pub fn message_21(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Tool-Format: " + values[0] + " (angefordert " + values[1] + ")"
+    return "  Tool-Format: " + (values[0] ?? "") + " (angefordert " + (values[1] ?? "") + ")"
   }
   if locale == "es" {
-    return "  formato de herramienta: " + values[0] + " (solicitado " + values[1] + ")"
+    return "  formato de herramienta: " + (values[0] ?? "") + " (solicitado " + (values[1] ?? "")
+      + ")"
   }
   if locale == "fr" {
-    return "  format de l’outil : " + values[0] + " (demandé " + values[1] + ")"
+    return "  format de l’outil : " + (values[0] ?? "") + " (demandé " + (values[1] ?? "") + ")"
   }
   if locale == "it" {
-    return "  formato dello strumento: " + values[0] + " (richiesto " + values[1] + ")"
+    return "  formato dello strumento: " + (values[0] ?? "") + " (richiesto " + (values[1] ?? "")
+      + ")"
   }
   if locale == "ja" {
-    return "  ツール形式: " + values[0] + " (要求 " + values[1] + ")"
+    return "  ツール形式: " + (values[0] ?? "") + " (要求 " + (values[1] ?? "") + ")"
   }
   if locale == "ko" {
-    return "  tool format: " + values[0] + " (requested " + values[1] + ")"
+    return "  tool format: " + (values[0] ?? "") + " (requested " + (values[1] ?? "") + ")"
   }
   if locale == "pt-BR" {
-    return "  formato da ferramenta: " + values[0] + " (solicitado " + values[1] + ")"
+    return "  formato da ferramenta: " + (values[0] ?? "") + " (solicitado " + (values[1] ?? "")
+      + ")"
   }
   if locale == "zh-Hans" {
-    return "  工具格式：" + values[0] + "（请求 " + values[1] + "）"
+    return "  工具格式：" + (values[0] ?? "") + "（请求 " + (values[1] ?? "") + "）"
   }
-  return "  tool format: " + values[0] + " (requested " + values[1] + ")"
+  return "  tool format: " + (values[0] ?? "") + " (requested " + (values[1] ?? "") + ")"
 }
 
 pub fn message_22(locale: string, values: list<string>) -> string {
@@ -66,30 +69,30 @@ pub fn message_22(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "LoRA-Export für " + values[0] + " via " + values[1]
+    return "LoRA-Export für " + (values[0] ?? "") + " via " + (values[1] ?? "")
   }
   if locale == "es" {
-    return "Exportación de LoRA para " + values[0] + " mediante " + values[1]
+    return "Exportación de LoRA para " + (values[0] ?? "") + " mediante " + (values[1] ?? "")
   }
   if locale == "fr" {
-    return "Export LoRA pour " + values[0] + " via " + values[1]
+    return "Export LoRA pour " + (values[0] ?? "") + " via " + (values[1] ?? "")
   }
   if locale == "it" {
-    return "Esportazione LoRA per " + values[0] + " tramite " + values[1]
+    return "Esportazione LoRA per " + (values[0] ?? "") + " tramite " + (values[1] ?? "")
   }
   if locale == "ja" {
-    return values[1] + " を介した " + values[0] + " の LoRA エクスポート"
+    return (values[1] ?? "") + " を介した " + (values[0] ?? "") + " の LoRA エクスポート"
   }
   if locale == "ko" {
-    return values[1] + "를 통한 " + values[0] + "용 LoRA 내보내기"
+    return (values[1] ?? "") + "를 통한 " + (values[0] ?? "") + "용 LoRA 내보내기"
   }
   if locale == "pt-BR" {
-    return "Exportação de LoRA para " + values[0] + " via " + values[1]
+    return "Exportação de LoRA para " + (values[0] ?? "") + " via " + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
-    return "通过 " + values[1] + " 为 " + values[0] + " 导出 LoRA"
+    return "通过 " + (values[1] ?? "") + " 为 " + (values[0] ?? "") + " 导出 LoRA"
   }
-  return "LoRA export for " + values[0] + " via " + values[1]
+  return "LoRA export for " + (values[0] ?? "") + " via " + (values[1] ?? "")
 }
 
 pub fn message_23(locale: string, values: list<string>) -> string {

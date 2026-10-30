@@ -4,30 +4,30 @@ pub fn message_10(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  harte Token-Schätzgrenze: " + values[0]
+    return "  harte Token-Schätzgrenze: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  límite duro de estimación de tokens: " + values[0]
+    return "  límite duro de estimación de tokens: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  limite dure d'estimation des jetons : " + values[0]
+    return "  limite dure d'estimation des jetons : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  limite duro di stima dei token: " + values[0]
+    return "  limite duro di stima dei token: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  ハードなトークン推定上限: " + values[0]
+    return "  ハードなトークン推定上限: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  하드 토큰 추정 한도: " + values[0]
+    return "  하드 토큰 추정 한도: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  limite rígido de estimativa de tokens: " + values[0]
+    return "  limite rígido de estimativa de tokens: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  硬性 token 估计上限：" + values[0]
+    return "  硬性 token 估计上限：" + (values[0] ?? "")
   }
-  return "  hard token estimate limit: " + values[0]
+  return "  hard token estimate limit: " + (values[0] ?? "")
 }
 
 pub fn message_11(locale: string, values: list<string>) -> string {
@@ -35,30 +35,30 @@ pub fn message_11(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Sprachen: " + values[0]
+    return "  Sprachen: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  idiomas: " + values[0]
+    return "  idiomas: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  langues : " + values[0]
+    return "  langues : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  lingue: " + values[0]
+    return "  lingue: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  言語: " + values[0]
+    return "  言語: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  언어: " + values[0]
+    return "  언어: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  languages: " + values[0]
+    return "  languages: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  语言: " + values[0]
+    return "  语言: " + (values[0] ?? "")
   }
-  return "  languages: " + values[0]
+  return "  languages: " + (values[0] ?? "")
 }
 
 pub fn message_12(locale: string, values: list<string>) -> string {
@@ -97,30 +97,30 @@ pub fn message_13(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  max_seq_length: " + values[0]
+    return "  max_seq_length: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  max_seq_length: " + values[0]
+    return "  max_seq_length: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  max_seq_length : " + values[0]
+    return "  max_seq_length : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  max_seq_length: " + values[0]
+    return "  max_seq_length: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  max_seq_length: " + values[0]
+    return "  max_seq_length: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  max_seq_length: " + values[0]
+    return "  max_seq_length: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  max_seq_length: " + values[0]
+    return "  max_seq_length: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  max_seq_length: " + values[0]
+    return "  max_seq_length: " + (values[0] ?? "")
   }
-  return "  max_seq_length: " + values[0]
+  return "  max_seq_length: " + (values[0] ?? "")
 }
 
 pub fn message_14(locale: string, values: list<string>) -> string {
@@ -128,28 +128,28 @@ pub fn message_14(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Mindestanzahl an Datensätzen: " + values[0]
+    return "  Mindestanzahl an Datensätzen: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  registros mínimos: " + values[0]
+    return "  registros mínimos: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  nombre minimal d’enregistrements : " + values[0]
+    return "  nombre minimal d’enregistrements : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  record minimi: " + values[0]
+    return "  record minimi: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  最小レコード数: " + values[0]
+    return "  最小レコード数: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  최소 기록 수: " + values[0]
+    return "  최소 기록 수: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  minimum records: " + values[0]
+    return "  minimum records: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  最小记录数: " + values[0]
+    return "  最小记录数: " + (values[0] ?? "")
   }
-  return "  minimum records: " + values[0]
+  return "  minimum records: " + (values[0] ?? "")
 }

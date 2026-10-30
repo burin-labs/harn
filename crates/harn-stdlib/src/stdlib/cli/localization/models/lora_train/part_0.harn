@@ -4,35 +4,45 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  LoRA-Hyperparameter: rank=" + values[0] + " alpha=" + values[1] + " dropout="
-      + values[2]
+    return "  LoRA-Hyperparameter: rank=" + (values[0] ?? "") + " alpha=" + (values[1] ?? "")
+      + " dropout="
+      + (values[2] ?? "")
   }
   if locale == "es" {
-    return "  parámetros h LoRA: rank=" + values[0] + " alpha=" + values[1] + " dropout="
-      + values[2]
+    return "  parámetros h LoRA: rank=" + (values[0] ?? "") + " alpha=" + (values[1] ?? "")
+      + " dropout="
+      + (values[2] ?? "")
   }
   if locale == "fr" {
-    return "  paramètres LoRA : rank=" + values[0] + " alpha=" + values[1] + " dropout=" + values[2]
+    return "  paramètres LoRA : rank=" + (values[0] ?? "") + " alpha=" + (values[1] ?? "")
+      + " dropout="
+      + (values[2] ?? "")
   }
   if locale == "it" {
-    return "  Parametri iper LoRA: rank=" + values[0] + " alpha=" + values[1] + " dropout="
-      + values[2]
+    return "  Parametri iper LoRA: rank=" + (values[0] ?? "") + " alpha=" + (values[1] ?? "")
+      + " dropout="
+      + (values[2] ?? "")
   }
   if locale == "ja" {
-    return "  LoRA ハイパーパラメータ: rank=" + values[0] + " alpha=" + values[1] + " dropout="
-      + values[2]
+    return "  LoRA ハイパーパラメータ: rank=" + (values[0] ?? "") + " alpha=" + (values[1] ?? "")
+      + " dropout="
+      + (values[2] ?? "")
   }
   if locale == "ko" {
-    return "  LoRA 하이퍼파라미터: rank=" + values[0] + " alpha=" + values[1] + " dropout="
-      + values[2]
+    return "  LoRA 하이퍼파라미터: rank=" + (values[0] ?? "") + " alpha=" + (values[1] ?? "")
+      + " dropout="
+      + (values[2] ?? "")
   }
   if locale == "pt-BR" {
-    return "  hparams LoRA: rank=" + values[0] + " alpha=" + values[1] + " dropout=" + values[2]
+    return "  hparams LoRA: rank=" + (values[0] ?? "") + " alpha=" + (values[1] ?? "") + " dropout="
+      + (values[2] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  LoRA 超参数：rank=" + values[0] + " alpha=" + values[1] + " dropout=" + values[2]
+    return "  LoRA 超参数：rank=" + (values[0] ?? "") + " alpha=" + (values[1] ?? "") + " dropout="
+      + (values[2] ?? "")
   }
-  return "  LoRA hparams: rank=" + values[0] + " alpha=" + values[1] + " dropout=" + values[2]
+  return "  LoRA hparams: rank=" + (values[0] ?? "") + " alpha=" + (values[1] ?? "") + " dropout="
+    + (values[2] ?? "")
 }
 
 pub fn message_1(locale: string, values: list<string>) -> string {
@@ -40,30 +50,30 @@ pub fn message_1(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Adapter-Bindung: " + values[0]
+    return "  Adapter-Bindung: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  enlace del adaptador: " + values[0]
+    return "  enlace del adaptador: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  liaison de l’adaptateur : " + values[0]
+    return "  liaison de l’adaptateur : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  binding dell'adapter: " + values[0]
+    return "  binding dell'adapter: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  アダプタのバインディング: " + values[0]
+    return "  アダプタのバインディング: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  어댑터 바인딩: " + values[0]
+    return "  어댑터 바인딩: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  vinculação do adapter: " + values[0]
+    return "  vinculação do adapter: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  适配器绑定：" + values[0]
+    return "  适配器绑定：" + (values[0] ?? "")
   }
-  return "  adapter binding: " + values[0]
+  return "  adapter binding: " + (values[0] ?? "")
 }
 
 pub fn message_2(locale: string, values: list<string>) -> string {
@@ -71,30 +81,30 @@ pub fn message_2(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Adapter-Präzision: " + values[0]
+    return "  Adapter-Präzision: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  precisión del adaptador: " + values[0]
+    return "  precisión del adaptador: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  précision de l’adaptateur : " + values[0]
+    return "  précision de l’adaptateur : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  precisione dell'adapter: " + values[0]
+    return "  precisione dell'adapter: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  アダプタの精度: " + values[0]
+    return "  アダプタの精度: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  어댑터 정밀도: " + values[0]
+    return "  어댑터 정밀도: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  precisão do adapter: " + values[0]
+    return "  precisão do adapter: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  适配器精度：" + values[0]
+    return "  适配器精度：" + (values[0] ?? "")
   }
-  return "  adapter precision: " + values[0]
+  return "  adapter precision: " + (values[0] ?? "")
 }
 
 pub fn message_3(locale: string, values: list<string>) -> string {
@@ -133,28 +143,28 @@ pub fn message_4(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Backend-Exitcode: " + values[0]
+    return "  Backend-Exitcode: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  código de salida del backend: " + values[0]
+    return "  código de salida del backend: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  code de sortie du backend : " + values[0]
+    return "  code de sortie du backend : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  codice di uscita backend: " + values[0]
+    return "  codice di uscita backend: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  backend 終了コード: " + values[0]
+    return "  backend 終了コード: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  백엔드 종료 코드: " + values[0]
+    return "  백엔드 종료 코드: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  código de saída do backend: " + values[0]
+    return "  código de saída do backend: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  后端退出码：" + values[0]
+    return "  后端退出码：" + (values[0] ?? "")
   }
-  return "  backend exit code: " + values[0]
+  return "  backend exit code: " + (values[0] ?? "")
 }

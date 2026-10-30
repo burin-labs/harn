@@ -4,100 +4,109 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "model_id=" + values[0] + " provider=" + values[1] + " latency_ms=" + values[2]
+    return "model_id=" + (values[0] ?? "") + " provider=" + (values[1] ?? "") + " latency_ms="
+      + (values[2] ?? "")
       + " first_token_ms="
-      + values[3]
+      + (values[3] ?? "")
       + " input_tokens="
-      + values[4]
+      + (values[4] ?? "")
       + " output_tokens="
-      + values[5]
+      + (values[5] ?? "")
       + " estimated_cost_usd="
-      + values[6]
+      + (values[6] ?? "")
   }
   if locale == "es" {
-    return "model_id=" + values[0] + " provider=" + values[1] + " latency_ms=" + values[2]
+    return "model_id=" + (values[0] ?? "") + " provider=" + (values[1] ?? "") + " latency_ms="
+      + (values[2] ?? "")
       + " first_token_ms="
-      + values[3]
+      + (values[3] ?? "")
       + " input_tokens="
-      + values[4]
+      + (values[4] ?? "")
       + " output_tokens="
-      + values[5]
+      + (values[5] ?? "")
       + " estimated_cost_usd="
-      + values[6]
+      + (values[6] ?? "")
   }
   if locale == "fr" {
-    return "model_id=" + values[0] + " provider=" + values[1] + " latency_ms=" + values[2]
+    return "model_id=" + (values[0] ?? "") + " provider=" + (values[1] ?? "") + " latency_ms="
+      + (values[2] ?? "")
       + " first_token_ms="
-      + values[3]
+      + (values[3] ?? "")
       + " input_tokens="
-      + values[4]
+      + (values[4] ?? "")
       + " output_tokens="
-      + values[5]
+      + (values[5] ?? "")
       + " estimated_cost_usd="
-      + values[6]
+      + (values[6] ?? "")
   }
   if locale == "it" {
-    return "model_id=" + values[0] + " provider=" + values[1] + " latency_ms=" + values[2]
+    return "model_id=" + (values[0] ?? "") + " provider=" + (values[1] ?? "") + " latency_ms="
+      + (values[2] ?? "")
       + " first_token_ms="
-      + values[3]
+      + (values[3] ?? "")
       + " input_tokens="
-      + values[4]
+      + (values[4] ?? "")
       + " output_tokens="
-      + values[5]
+      + (values[5] ?? "")
       + " estimated_cost_usd="
-      + values[6]
+      + (values[6] ?? "")
   }
   if locale == "ja" {
-    return "model_id=" + values[0] + " provider=" + values[1] + " latency_ms=" + values[2]
+    return "model_id=" + (values[0] ?? "") + " provider=" + (values[1] ?? "") + " latency_ms="
+      + (values[2] ?? "")
       + " first_token_ms="
-      + values[3]
+      + (values[3] ?? "")
       + " input_tokens="
-      + values[4]
+      + (values[4] ?? "")
       + " output_tokens="
-      + values[5]
+      + (values[5] ?? "")
       + " estimated_cost_usd="
-      + values[6]
+      + (values[6] ?? "")
   }
   if locale == "ko" {
-    return "model_id=" + values[0] + " provider=" + values[1] + " latency_ms=" + values[2]
+    return "model_id=" + (values[0] ?? "") + " provider=" + (values[1] ?? "") + " latency_ms="
+      + (values[2] ?? "")
       + " first_token_ms="
-      + values[3]
+      + (values[3] ?? "")
       + " input_tokens="
-      + values[4]
+      + (values[4] ?? "")
       + " output_tokens="
-      + values[5]
+      + (values[5] ?? "")
       + " estimated_cost_usd="
-      + values[6]
+      + (values[6] ?? "")
   }
   if locale == "pt-BR" {
-    return "model_id=" + values[0] + " provider=" + values[1] + " latency_ms=" + values[2]
+    return "model_id=" + (values[0] ?? "") + " provider=" + (values[1] ?? "") + " latency_ms="
+      + (values[2] ?? "")
       + " first_token_ms="
-      + values[3]
+      + (values[3] ?? "")
       + " input_tokens="
-      + values[4]
+      + (values[4] ?? "")
       + " output_tokens="
-      + values[5]
+      + (values[5] ?? "")
       + " estimated_cost_usd="
-      + values[6]
+      + (values[6] ?? "")
   }
   if locale == "zh-Hans" {
-    return "model_id=" + values[0] + " provider=" + values[1] + " latency_ms=" + values[2]
+    return "model_id=" + (values[0] ?? "") + " provider=" + (values[1] ?? "") + " latency_ms="
+      + (values[2] ?? "")
       + " first_token_ms="
-      + values[3]
+      + (values[3] ?? "")
       + " input_tokens="
-      + values[4]
+      + (values[4] ?? "")
       + " output_tokens="
-      + values[5]
+      + (values[5] ?? "")
       + " estimated_cost_usd="
-      + values[6]
+      + (values[6] ?? "")
   }
-  return "model_id=" + values[0] + " provider=" + values[1] + " latency_ms=" + values[2]
+  return "model_id=" + (values[0] ?? "") + " provider=" + (values[1] ?? "") + " latency_ms="
+    + (values[2] ?? "")
     + " first_token_ms="
-    + values[3]
+    + (values[3] ?? "")
     + " input_tokens="
-    + values[4]
+    + (values[4] ?? "")
     + " output_tokens="
-    + values[5]
+    + (values[5] ?? "")
     + " estimated_cost_usd="
-    + values[6]
+    + (values[6] ?? "")
 }

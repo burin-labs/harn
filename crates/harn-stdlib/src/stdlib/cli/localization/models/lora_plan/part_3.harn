@@ -4,30 +4,30 @@ pub fn message_15(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Packen: " + values[0]
+    return "  Packen: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  empaquetado: " + values[0]
+    return "  empaquetado: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  empaquetage : " + values[0]
+    return "  empaquetage : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  packing: " + values[0]
+    return "  packing: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  packing: " + values[0]
+    return "  packing: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  packing: " + values[0]
+    return "  packing: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  packing: " + values[0]
+    return "  packing: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  打包: " + values[0]
+    return "  打包: " + (values[0] ?? "")
   }
-  return "  packing: " + values[0]
+  return "  packing: " + (values[0] ?? "")
 }
 
 pub fn message_16(locale: string, values: list<string>) -> string {
@@ -35,30 +35,30 @@ pub fn message_16(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Parser-Eigentümer: " + values[0]
+    return "  Parser-Eigentümer: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  propietario del analizador: " + values[0]
+    return "  propietario del analizador: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  propriétaire du parseur : " + values[0]
+    return "  propriétaire du parseur : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  proprietario del parser: " + values[0]
+    return "  proprietario del parser: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  parser所有者: " + values[0]
+    return "  parser所有者: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  parser owner: " + values[0]
+    return "  parser owner: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  parser owner: " + values[0]
+    return "  parser owner: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  解析器所有者: " + values[0]
+    return "  解析器所有者: " + (values[0] ?? "")
   }
-  return "  parser owner: " + values[0]
+  return "  parser owner: " + (values[0] ?? "")
 }
 
 pub fn message_17(locale: string, values: list<string>) -> string {
@@ -66,30 +66,30 @@ pub fn message_17(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Präzisionsrichtlinie: " + values[0]
+    return "  Präzisionsrichtlinie: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  política de precisión: " + values[0]
+    return "  política de precisión: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  politique de précision : " + values[0]
+    return "  politique de précision : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  policy di precisione: " + values[0]
+    return "  policy di precisione: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  precision policy: " + values[0]
+    return "  precision policy: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  precision policy: " + values[0]
+    return "  precision policy: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  precision policy: " + values[0]
+    return "  precision policy: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  精度策略: " + values[0]
+    return "  精度策略: " + (values[0] ?? "")
   }
-  return "  precision policy: " + values[0]
+  return "  precision policy: " + (values[0] ?? "")
 }
 
 pub fn message_18(locale: string, values: list<string>) -> string {
@@ -97,30 +97,30 @@ pub fn message_18(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Promotions-ID: " + values[0]
+    return "  Promotions-ID: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  id de promoción: " + values[0]
+    return "  id de promoción: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  identifiant de promotion : " + values[0]
+    return "  identifiant de promotion : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  id di promozione: " + values[0]
+    return "  id di promozione: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  昇格ID: " + values[0]
+    return "  昇格ID: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  promotion id: " + values[0]
+    return "  promotion id: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  promotion id: " + values[0]
+    return "  promotion id: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  提升 ID: " + values[0]
+    return "  提升 ID: " + (values[0] ?? "")
   }
-  return "  promotion id: " + values[0]
+  return "  promotion id: " + (values[0] ?? "")
 }
 
 pub fn message_19(locale: string, values: list<string>) -> string {
@@ -128,28 +128,28 @@ pub fn message_19(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Quantisierung: " + values[0]
+    return "  Quantisierung: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  cuantización: " + values[0]
+    return "  cuantización: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  quantification : " + values[0]
+    return "  quantification : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  quantizzazione: " + values[0]
+    return "  quantizzazione: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  量子化: " + values[0]
+    return "  量子化: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  양자화: " + values[0]
+    return "  양자화: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  quantização: " + values[0]
+    return "  quantização: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  量化: " + values[0]
+    return "  量化: " + (values[0] ?? "")
   }
-  return "  quantization: " + values[0]
+  return "  quantization: " + (values[0] ?? "")
 }

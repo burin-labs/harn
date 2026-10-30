@@ -4,46 +4,54 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "keine Modellempfehlung für ram_bucket=" + values[0] + " gpu=" + values[1]
+    return "keine Modellempfehlung für ram_bucket=" + (values[0] ?? "") + " gpu="
+      + (values[1] ?? "")
       + " has_provider_key="
-      + values[2]
+      + (values[2] ?? "")
   }
   if locale == "es" {
-    return "no hay recomendación de modelo para ram_bucket=" + values[0] + " gpu=" + values[1]
+    return "no hay recomendación de modelo para ram_bucket=" + (values[0] ?? "") + " gpu="
+      + (values[1] ?? "")
       + " has_provider_key="
-      + values[2]
+      + (values[2] ?? "")
   }
   if locale == "fr" {
-    return "aucune recommandation de modèle pour ram_bucket=" + values[0] + " gpu=" + values[1]
+    return "aucune recommandation de modèle pour ram_bucket=" + (values[0] ?? "") + " gpu="
+      + (values[1] ?? "")
       + " has_provider_key="
-      + values[2]
+      + (values[2] ?? "")
   }
   if locale == "it" {
-    return "nessuna raccomandazione di modello per ram_bucket=" + values[0] + " gpu=" + values[1]
+    return "nessuna raccomandazione di modello per ram_bucket=" + (values[0] ?? "") + " gpu="
+      + (values[1] ?? "")
       + " has_provider_key="
-      + values[2]
+      + (values[2] ?? "")
   }
   if locale == "ja" {
-    return "ram_bucket=" + values[0] + " gpu=" + values[1] + " has_provider_key=" + values[2]
+    return "ram_bucket=" + (values[0] ?? "") + " gpu=" + (values[1] ?? "") + " has_provider_key="
+      + (values[2] ?? "")
       + " に対するモデル推奨がありません"
   }
   if locale == "ko" {
-    return "ram_bucket=" + values[0] + " gpu=" + values[1] + " has_provider_key=" + values[2]
+    return "ram_bucket=" + (values[0] ?? "") + " gpu=" + (values[1] ?? "") + " has_provider_key="
+      + (values[2] ?? "")
       + "에 대한 모델 권장 사항이 없음"
   }
   if locale == "pt-BR" {
-    return "sem recomendação de modelo para ram_bucket=" + values[0] + " gpu=" + values[1]
+    return "sem recomendação de modelo para ram_bucket=" + (values[0] ?? "") + " gpu="
+      + (values[1] ?? "")
       + " has_provider_key="
-      + values[2]
+      + (values[2] ?? "")
   }
   if locale == "zh-Hans" {
-    return "没有适用于 ram_bucket=" + values[0] + " gpu=" + values[1] + " has_provider_key="
-      + values[2]
+    return "没有适用于 ram_bucket=" + (values[0] ?? "") + " gpu=" + (values[1] ?? "")
+      + " has_provider_key="
+      + (values[2] ?? "")
       + " 的模型建议"
   }
-  return "no model recommendation for ram_bucket=" + values[0] + " gpu=" + values[1]
+  return "no model recommendation for ram_bucket=" + (values[0] ?? "") + " gpu=" + (values[1] ?? "")
     + " has_provider_key="
-    + values[2]
+    + (values[2] ?? "")
 }
 
 pub fn message_1(locale: string, values: list<string>) -> string {
@@ -82,30 +90,30 @@ pub fn message_2(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return values[0] + "  protocol=" + values[1]
+    return (values[0] ?? "") + "  protocol=" + (values[1] ?? "")
   }
   if locale == "es" {
-    return values[0] + "  protocol=" + values[1]
+    return (values[0] ?? "") + "  protocol=" + (values[1] ?? "")
   }
   if locale == "fr" {
-    return values[0] + "  protocol=" + values[1]
+    return (values[0] ?? "") + "  protocol=" + (values[1] ?? "")
   }
   if locale == "it" {
-    return values[0] + "  protocol=" + values[1]
+    return (values[0] ?? "") + "  protocol=" + (values[1] ?? "")
   }
   if locale == "ja" {
-    return values[0] + "  protocol=" + values[1]
+    return (values[0] ?? "") + "  protocol=" + (values[1] ?? "")
   }
   if locale == "ko" {
-    return values[0] + "  protocol=" + values[1]
+    return (values[0] ?? "") + "  protocol=" + (values[1] ?? "")
   }
   if locale == "pt-BR" {
-    return values[0] + "  protocol=" + values[1]
+    return (values[0] ?? "") + "  protocol=" + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
-    return values[0] + "  protocol=" + values[1]
+    return (values[0] ?? "") + "  protocol=" + (values[1] ?? "")
   }
-  return values[0] + "  protocol=" + values[1]
+  return (values[0] ?? "") + "  protocol=" + (values[1] ?? "")
 }
 
 pub fn message_3(locale: string, values: list<string>) -> string {
@@ -113,28 +121,29 @@ pub fn message_3(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return values[0] + " Route(n) deklarieren die " + values[1] + "-Operation"
+    return (values[0] ?? "") + " Route(n) deklarieren die " + (values[1] ?? "") + "-Operation"
   }
   if locale == "es" {
-    return values[0] + " ruta(s) declaran la operación " + values[1]
+    return (values[0] ?? "") + " ruta(s) declaran la operación " + (values[1] ?? "")
   }
   if locale == "fr" {
-    return values[0] + " route(s) déclarent l'opération " + values[1]
+    return (values[0] ?? "") + " route(s) déclarent l'opération " + (values[1] ?? "")
   }
   if locale == "it" {
-    return values[0] + " route dichiarano l'operazione " + values[1]
+    return (values[0] ?? "") + " route dichiarano l'operazione " + (values[1] ?? "")
   }
   if locale == "ja" {
-    return values[0] + " 個のルートが " + values[1] + " オペレーションを宣言しています"
+    return (values[0] ?? "") + " 個のルートが " + (values[1] ?? "")
+      + " オペレーションを宣言しています"
   }
   if locale == "ko" {
-    return values[0] + " 경로가 " + values[1] + " 작업을 선언합니다"
+    return (values[0] ?? "") + " 경로가 " + (values[1] ?? "") + " 작업을 선언합니다"
   }
   if locale == "pt-BR" {
-    return values[0] + " rota(s) declaram a operação " + values[1]
+    return (values[0] ?? "") + " rota(s) declaram a operação " + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
-    return values[0] + " 路由声明了 " + values[1] + " 操作"
+    return (values[0] ?? "") + " 路由声明了 " + (values[1] ?? "") + " 操作"
   }
-  return values[0] + " route(s) declare the " + values[1] + " operation"
+  return (values[0] ?? "") + " route(s) declare the " + (values[1] ?? "") + " operation"
 }

@@ -35,28 +35,28 @@ pub fn message_1(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "Fehler: " + values[0]
+    return "Fehler: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "error: " + values[0]
+    return "error: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "erreur : " + values[0]
+    return "erreur : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "errore: " + values[0]
+    return "errore: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "エラー: " + values[0]
+    return "エラー: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "error: " + values[0]
+    return "error: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "erro: " + values[0]
+    return "erro: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "错误：" + values[0]
+    return "错误：" + (values[0] ?? "")
   }
-  return "error: " + values[0]
+  return "error: " + (values[0] ?? "")
 }

@@ -4,30 +4,30 @@ pub fn message_15(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  angefordertes Modell: " + values[0]
+    return "  angefordertes Modell: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  modelo solicitado: " + values[0]
+    return "  modelo solicitado: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  modèle demandé : " + values[0]
+    return "  modèle demandé : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  modello richiesto: " + values[0]
+    return "  modello richiesto: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  要求モデル: " + values[0]
+    return "  要求モデル: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  요청 모델: " + values[0]
+    return "  요청 모델: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  modelo solicitado: " + values[0]
+    return "  modelo solicitado: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  请求模型: " + values[0]
+    return "  请求模型: " + (values[0] ?? "")
   }
-  return "  request model: " + values[0]
+  return "  request model: " + (values[0] ?? "")
 }
 
 pub fn message_16(locale: string, values: list<string>) -> string {
@@ -35,30 +35,30 @@ pub fn message_16(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Tool-Format: " + values[0]
+    return "  Tool-Format: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  formato de herramienta: " + values[0]
+    return "  formato de herramienta: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  format de l’outil : " + values[0]
+    return "  format de l’outil : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  formato dello strumento: " + values[0]
+    return "  formato dello strumento: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  ツール形式: " + values[0]
+    return "  ツール形式: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  tool format: " + values[0]
+    return "  tool format: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  formato da ferramenta: " + values[0]
+    return "  formato da ferramenta: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  工具格式：" + values[0]
+    return "  工具格式：" + (values[0] ?? "")
   }
-  return "  tool format: " + values[0]
+  return "  tool format: " + (values[0] ?? "")
 }
 
 pub fn message_17(locale: string, values: list<string>) -> string {
@@ -66,30 +66,30 @@ pub fn message_17(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Warnung: " + values[0]
+    return "  Warnung: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  advertencia: " + values[0]
+    return "  advertencia: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  avertissement : " + values[0]
+    return "  avertissement : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  avviso: " + values[0]
+    return "  avviso: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  警告: " + values[0]
+    return "  警告: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  경고: " + values[0]
+    return "  경고: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  aviso: " + values[0]
+    return "  aviso: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  警告：" + values[0]
+    return "  警告：" + (values[0] ?? "")
   }
-  return "  warning: " + values[0]
+  return "  warning: " + (values[0] ?? "")
 }
 
 pub fn message_18(locale: string, values: list<string>) -> string {

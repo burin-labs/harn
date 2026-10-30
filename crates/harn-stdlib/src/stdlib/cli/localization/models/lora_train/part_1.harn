@@ -4,47 +4,56 @@ pub fn message_5(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  backend realisierte Zeilen: rendered=" + values[0] + " trainable=" + values[1]
+    return "  backend realisierte Zeilen: rendered=" + (values[0] ?? "") + " trainable="
+      + (values[1] ?? "")
       + " retention="
-      + values[2]
+      + (values[2] ?? "")
   }
   if locale == "es" {
-    return "  filas realizadas por el backend: rendered=" + values[0] + " trainable=" + values[1]
+    return "  filas realizadas por el backend: rendered=" + (values[0] ?? "") + " trainable="
+      + (values[1] ?? "")
       + " retention="
-      + values[2]
+      + (values[2] ?? "")
   }
   if locale == "fr" {
-    return "  lignes réalisées du backend : rendered=" + values[0] + " trainable=" + values[1]
+    return "  lignes réalisées du backend : rendered=" + (values[0] ?? "") + " trainable="
+      + (values[1] ?? "")
       + " retention="
-      + values[2]
+      + (values[2] ?? "")
   }
   if locale == "it" {
-    return "  righe realizzate dal backend: rendered=" + values[0] + " trainable=" + values[1]
+    return "  righe realizzate dal backend: rendered=" + (values[0] ?? "") + " trainable="
+      + (values[1] ?? "")
       + " retention="
-      + values[2]
+      + (values[2] ?? "")
   }
   if locale == "ja" {
-    return "  backend realized rows: rendered=" + values[0] + " trainable=" + values[1]
+    return "  backend realized rows: rendered=" + (values[0] ?? "") + " trainable="
+      + (values[1] ?? "")
       + " retention="
-      + values[2]
+      + (values[2] ?? "")
   }
   if locale == "ko" {
-    return "  backend realized rows: rendered=" + values[0] + " trainable=" + values[1]
+    return "  backend realized rows: rendered=" + (values[0] ?? "") + " trainable="
+      + (values[1] ?? "")
       + " retention="
-      + values[2]
+      + (values[2] ?? "")
   }
   if locale == "pt-BR" {
-    return "  linhas realizadas do backend: rendered=" + values[0] + " trainable=" + values[1]
+    return "  linhas realizadas do backend: rendered=" + (values[0] ?? "") + " trainable="
+      + (values[1] ?? "")
       + " retention="
-      + values[2]
+      + (values[2] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  后端实现行：rendered=" + values[0] + " trainable=" + values[1] + " retention="
-      + values[2]
+    return "  后端实现行：rendered=" + (values[0] ?? "") + " trainable=" + (values[1] ?? "")
+      + " retention="
+      + (values[2] ?? "")
   }
-  return "  backend realized rows: rendered=" + values[0] + " trainable=" + values[1]
+  return "  backend realized rows: rendered=" + (values[0] ?? "") + " trainable="
+    + (values[1] ?? "")
     + " retention="
-    + values[2]
+    + (values[2] ?? "")
 }
 
 pub fn message_6(locale: string, values: list<string>) -> string {
@@ -52,30 +61,30 @@ pub fn message_6(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Backend-Ergebnis: " + values[0]
+    return "  Backend-Ergebnis: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  resultado del backend: " + values[0]
+    return "  resultado del backend: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  résultat du backend : " + values[0]
+    return "  résultat du backend : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  risultato backend: " + values[0]
+    return "  risultato backend: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  backend 結果: " + values[0]
+    return "  backend 結果: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  백엔드 결과: " + values[0]
+    return "  백엔드 결과: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  resultado do backend: " + values[0]
+    return "  resultado do backend: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  后端结果：" + values[0]
+    return "  后端结果：" + (values[0] ?? "")
   }
-  return "  backend result: " + values[0]
+  return "  backend result: " + (values[0] ?? "")
 }
 
 pub fn message_7(locale: string, values: list<string>) -> string {
@@ -83,30 +92,30 @@ pub fn message_7(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Backend-Status: " + values[0]
+    return "  Backend-Status: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  estado del backend: " + values[0]
+    return "  estado del backend: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  état du backend : " + values[0]
+    return "  état du backend : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  stato backend: " + values[0]
+    return "  stato backend: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  backend 状態: " + values[0]
+    return "  backend 状態: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  백엔드 상태: " + values[0]
+    return "  백엔드 상태: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  status do backend: " + values[0]
+    return "  status do backend: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  后端状态：" + values[0]
+    return "  后端状态：" + (values[0] ?? "")
   }
-  return "  backend status: " + values[0]
+  return "  backend status: " + (values[0] ?? "")
 }
 
 pub fn message_8(locale: string, values: list<string>) -> string {
@@ -114,30 +123,30 @@ pub fn message_8(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Vertrag: " + values[0]
+    return "  Vertrag: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  contrato: " + values[0]
+    return "  contrato: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  contrat : " + values[0]
+    return "  contrat : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  contratto: " + values[0]
+    return "  contratto: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  契約: " + values[0]
+    return "  契約: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  contract: " + values[0]
+    return "  contract: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  contrato: " + values[0]
+    return "  contrato: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  合同：" + values[0]
+    return "  合同：" + (values[0] ?? "")
   }
-  return "  contract: " + values[0]
+  return "  contract: " + (values[0] ?? "")
 }
 
 pub fn message_9(locale: string, values: list<string>) -> string {
@@ -145,61 +154,66 @@ pub fn message_9(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Datensatzprüfung: status=" + values[0] + " rows=" + values[1]
+    return "  Datensatzprüfung: status=" + (values[0] ?? "") + " rows=" + (values[1] ?? "")
       + " invalid_tool_blocks="
-      + values[2]
+      + (values[2] ?? "")
       + " parse_errors="
-      + values[3]
+      + (values[3] ?? "")
   }
   if locale == "es" {
-    return "  auditoría del conjunto de datos: status=" + values[0] + " rows=" + values[1]
+    return "  auditoría del conjunto de datos: status=" + (values[0] ?? "") + " rows="
+      + (values[1] ?? "")
       + " invalid_tool_blocks="
-      + values[2]
+      + (values[2] ?? "")
       + " parse_errors="
-      + values[3]
+      + (values[3] ?? "")
   }
   if locale == "fr" {
-    return "  audit du jeu de données : status=" + values[0] + " rows=" + values[1]
+    return "  audit du jeu de données : status=" + (values[0] ?? "") + " rows=" + (values[1] ?? "")
       + " invalid_tool_blocks="
-      + values[2]
+      + (values[2] ?? "")
       + " parse_errors="
-      + values[3]
+      + (values[3] ?? "")
   }
   if locale == "it" {
-    return "  controllo del dataset: status=" + values[0] + " rows=" + values[1]
+    return "  controllo del dataset: status=" + (values[0] ?? "") + " rows=" + (values[1] ?? "")
       + " invalid_tool_blocks="
-      + values[2]
+      + (values[2] ?? "")
       + " parse_errors="
-      + values[3]
+      + (values[3] ?? "")
   }
   if locale == "ja" {
-    return "  データセット監査: status=" + values[0] + " rows=" + values[1]
+    return "  データセット監査: status=" + (values[0] ?? "") + " rows=" + (values[1] ?? "")
       + " invalid_tool_blocks="
-      + values[2]
+      + (values[2] ?? "")
       + " parse_errors="
-      + values[3]
+      + (values[3] ?? "")
   }
   if locale == "ko" {
-    return "  데이터셋 감사: status=" + values[0] + " rows=" + values[1] + " invalid_tool_blocks="
-      + values[2]
+    return "  데이터셋 감사: status=" + (values[0] ?? "") + " rows=" + (values[1] ?? "")
+      + " invalid_tool_blocks="
+      + (values[2] ?? "")
       + " parse_errors="
-      + values[3]
+      + (values[3] ?? "")
   }
   if locale == "pt-BR" {
-    return "  auditoria do conjunto de dados: status=" + values[0] + " rows=" + values[1]
+    return "  auditoria do conjunto de dados: status=" + (values[0] ?? "") + " rows="
+      + (values[1] ?? "")
       + " invalid_tool_blocks="
-      + values[2]
+      + (values[2] ?? "")
       + " parse_errors="
-      + values[3]
+      + (values[3] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  数据集审核：status=" + values[0] + " rows=" + values[1] + " invalid_tool_blocks="
-      + values[2]
+    return "  数据集审核：status=" + (values[0] ?? "") + " rows=" + (values[1] ?? "")
+      + " invalid_tool_blocks="
+      + (values[2] ?? "")
       + " parse_errors="
-      + values[3]
+      + (values[3] ?? "")
   }
-  return "  dataset audit: status=" + values[0] + " rows=" + values[1] + " invalid_tool_blocks="
-    + values[2]
+  return "  dataset audit: status=" + (values[0] ?? "") + " rows=" + (values[1] ?? "")
+    + " invalid_tool_blocks="
+    + (values[2] ?? "")
     + " parse_errors="
-    + values[3]
+    + (values[3] ?? "")
 }

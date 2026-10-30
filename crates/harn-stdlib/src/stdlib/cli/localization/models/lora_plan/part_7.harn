@@ -4,30 +4,30 @@ pub fn message_35(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Warnung: " + values[0]
+    return "  Warnung: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  advertencia: " + values[0]
+    return "  advertencia: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  avertissement : " + values[0]
+    return "  avertissement : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  avviso: " + values[0]
+    return "  avviso: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  警告: " + values[0]
+    return "  警告: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  경고: " + values[0]
+    return "  경고: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  aviso: " + values[0]
+    return "  aviso: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  警告：" + values[0]
+    return "  警告：" + (values[0] ?? "")
   }
-  return "  warning: " + values[0]
+  return "  warning: " + (values[0] ?? "")
 }
 
 pub fn message_36(locale: string, values: list<string>) -> string {
@@ -35,30 +35,30 @@ pub fn message_36(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "LoRA-Plan für " + values[0] + " via " + values[1]
+    return "LoRA-Plan für " + (values[0] ?? "") + " via " + (values[1] ?? "")
   }
   if locale == "es" {
-    return "Plan de LoRA para " + values[0] + " mediante " + values[1]
+    return "Plan de LoRA para " + (values[0] ?? "") + " mediante " + (values[1] ?? "")
   }
   if locale == "fr" {
-    return "Plan LoRA pour " + values[0] + " via " + values[1]
+    return "Plan LoRA pour " + (values[0] ?? "") + " via " + (values[1] ?? "")
   }
   if locale == "it" {
-    return "Piano LoRA per " + values[0] + " tramite " + values[1]
+    return "Piano LoRA per " + (values[0] ?? "") + " tramite " + (values[1] ?? "")
   }
   if locale == "ja" {
-    return values[1] + " を介した " + values[0] + " の LoRA 計画"
+    return (values[1] ?? "") + " を介した " + (values[0] ?? "") + " の LoRA 計画"
   }
   if locale == "ko" {
-    return values[1] + "를 통한 " + values[0] + "용 LoRA 계획"
+    return (values[1] ?? "") + "를 통한 " + (values[0] ?? "") + "용 LoRA 계획"
   }
   if locale == "pt-BR" {
-    return "Plano de LoRA para " + values[0] + " via " + values[1]
+    return "Plano de LoRA para " + (values[0] ?? "") + " via " + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
-    return "通过 " + values[1] + " 为 " + values[0] + " 制定 LoRA 计划"
+    return "通过 " + (values[1] ?? "") + " 为 " + (values[0] ?? "") + " 制定 LoRA 计划"
   }
-  return "LoRA plan for " + values[0] + " via " + values[1]
+  return "LoRA plan for " + (values[0] ?? "") + " via " + (values[1] ?? "")
 }
 
 pub fn message_37(locale: string, values: list<string>) -> string {

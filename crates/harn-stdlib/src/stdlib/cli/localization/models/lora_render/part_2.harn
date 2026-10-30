@@ -4,30 +4,30 @@ pub fn message_10(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Tool-Katalog-ID: " + values[0]
+    return "  Tool-Katalog-ID: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  id del catálogo de herramientas: " + values[0]
+    return "  id del catálogo de herramientas: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  identifiant du catalogue d’outils : " + values[0]
+    return "  identifiant du catalogue d’outils : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  ID del catalogo degli strumenti: " + values[0]
+    return "  ID del catalogo degli strumenti: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  ツールカタログID: " + values[0]
+    return "  ツールカタログID: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  tool catalog id: " + values[0]
+    return "  tool catalog id: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  ID do catálogo de ferramentas: " + values[0]
+    return "  ID do catálogo de ferramentas: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  工具目录 ID：" + values[0]
+    return "  工具目录 ID：" + (values[0] ?? "")
   }
-  return "  tool catalog id: " + values[0]
+  return "  tool catalog id: " + (values[0] ?? "")
 }
 
 pub fn message_11(locale: string, values: list<string>) -> string {
@@ -35,30 +35,30 @@ pub fn message_11(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Tool-Katalog-Richtlinie: " + values[0]
+    return "  Tool-Katalog-Richtlinie: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  política del catálogo de herramientas: " + values[0]
+    return "  política del catálogo de herramientas: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  politique du catalogue d’outils : " + values[0]
+    return "  politique du catalogue d’outils : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  policy del catalogo degli strumenti: " + values[0]
+    return "  policy del catalogo degli strumenti: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  ツールカタログのポリシー: " + values[0]
+    return "  ツールカタログのポリシー: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  tool catalog policy: " + values[0]
+    return "  tool catalog policy: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  política do catálogo de ferramentas: " + values[0]
+    return "  política do catálogo de ferramentas: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  工具目录策略：" + values[0]
+    return "  工具目录策略：" + (values[0] ?? "")
   }
-  return "  tool catalog policy: " + values[0]
+  return "  tool catalog policy: " + (values[0] ?? "")
 }
 
 pub fn message_12(locale: string, values: list<string>) -> string {
@@ -66,30 +66,30 @@ pub fn message_12(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Bestätigung der Trainerumgebung: " + values[0]
+    return "  Bestätigung der Trainerumgebung: " + (values[0] ?? "")
   }
   if locale == "es" {
-    return "  atestación del entorno del entrenador: " + values[0]
+    return "  atestación del entorno del entrenador: " + (values[0] ?? "")
   }
   if locale == "fr" {
-    return "  attestation de l’environnement du formateur : " + values[0]
+    return "  attestation de l’environnement du formateur : " + (values[0] ?? "")
   }
   if locale == "it" {
-    return "  attestazione dell'ambiente del trainer: " + values[0]
+    return "  attestazione dell'ambiente del trainer: " + (values[0] ?? "")
   }
   if locale == "ja" {
-    return "  トレーナー環境の証明: " + values[0]
+    return "  トレーナー環境の証明: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "  트레이너 환경 증명: " + values[0]
+    return "  트레이너 환경 증명: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
-    return "  atestado do ambiente de treinamento: " + values[0]
+    return "  atestado do ambiente de treinamento: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  训练器环境证明：" + values[0]
+    return "  训练器环境证明：" + (values[0] ?? "")
   }
-  return "  trainer environment attestation: " + values[0]
+  return "  trainer environment attestation: " + (values[0] ?? "")
 }
 
 pub fn message_13(locale: string, values: list<string>) -> string {
@@ -97,30 +97,31 @@ pub fn message_13(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Trainerumgebung: " + values[0] + " promotable=" + values[1]
+    return "  Trainerumgebung: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "es" {
-    return "  entorno del entrenador: " + values[0] + " promotable=" + values[1]
+    return "  entorno del entrenador: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "fr" {
-    return "  environnement du formateur : " + values[0] + " promotable=" + values[1]
+    return "  environnement du formateur : " + (values[0] ?? "") + " promotable="
+      + (values[1] ?? "")
   }
   if locale == "it" {
-    return "  ambiente del trainer: " + values[0] + " promotable=" + values[1]
+    return "  ambiente del trainer: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "ja" {
-    return "  トレーナー環境: " + values[0] + " promotable=" + values[1]
+    return "  トレーナー環境: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "ko" {
-    return "  트레이너 환경: " + values[0] + " promotable=" + values[1]
+    return "  트레이너 환경: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "pt-BR" {
-    return "  ambiente de treinamento: " + values[0] + " promotable=" + values[1]
+    return "  ambiente de treinamento: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  训练器环境：" + values[0] + " promotable=" + values[1]
+    return "  训练器环境：" + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
-  return "  trainer environment: " + values[0] + " promotable=" + values[1]
+  return "  trainer environment: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
 }
 
 pub fn message_14(locale: string, values: list<string>) -> string {
@@ -128,28 +129,28 @@ pub fn message_14(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Traineridentität: " + values[0] + " promotable=" + values[1]
+    return "  Traineridentität: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "es" {
-    return "  identidad del entrenador: " + values[0] + " promotable=" + values[1]
+    return "  identidad del entrenador: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "fr" {
-    return "  identité du formateur : " + values[0] + " promotable=" + values[1]
+    return "  identité du formateur : " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "it" {
-    return "  identità del trainer: " + values[0] + " promotable=" + values[1]
+    return "  identità del trainer: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "ja" {
-    return "  トレーナーの識別情報: " + values[0] + " promotable=" + values[1]
+    return "  トレーナーの識別情報: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "ko" {
-    return "  트레이너 정체성: " + values[0] + " promotable=" + values[1]
+    return "  트레이너 정체성: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "pt-BR" {
-    return "  identidade do treinador: " + values[0] + " promotable=" + values[1]
+    return "  identidade do treinador: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
-    return "  训练器身份：" + values[0] + " promotable=" + values[1]
+    return "  训练器身份：" + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
-  return "  trainer identity: " + values[0] + " promotable=" + values[1]
+  return "  trainer identity: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
 }

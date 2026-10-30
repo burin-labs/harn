@@ -83,6 +83,22 @@ fn doctor_scripts_localize_human_sections_and_preserve_nonempty_json() {
             actual_report["data"]["next_step"], parsed["data"]["next_step"],
             "human language must not change the report contract"
         );
+        let env_json = harn_e2e_command()
+            .env("LC_ALL", locale)
+            .env("HARN_OUTPUT_JSON", "1")
+            .args(["doctor", "--no-network"])
+            .output()
+            .unwrap();
+        let env_report: serde_json::Value =
+            serde_json::from_slice(&env_json.stdout).expect("shell-selected doctor JSON");
+        assert!(!env_report["data"]["checks"]
+            .as_array()
+            .expect("populated env report")
+            .is_empty());
+        assert_eq!(
+            env_report["data"]["next_step"], parsed["data"]["next_step"],
+            "shell-selected JSON remains canonical in {locale}"
+        );
         let output = harn_e2e_command()
             .env("LC_ALL", locale)
             .env(
@@ -104,6 +120,16 @@ fn doctor_scripts_localize_human_sections_and_preserve_nonempty_json() {
         );
     }
     let temporary = tempfile::tempdir().unwrap();
+    let non_json = harn_e2e_command()
+        .env("LC_ALL", "fr")
+        .env("HARN_OUTPUT_JSON", "true")
+        .args(["doctor", "--no-network"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&non_json.stdout).contains("--- Cibles ---"),
+        "only the exact shell value 1 selects JSON: {non_json:?}"
+    );
     let source = temporary.path().join("literal-values.harn");
     std::fs::write(&source, r#"import { cli_message } from "std/cli/localization/scaffold/init"
 fn main(harness: Harness) {
