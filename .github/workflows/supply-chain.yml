@@ -48,4 +48,4 @@ jobs:
     permissions:
       contents: read
       issues: write # the shared workflow's default-branch tracking issue
-    uses: burin-labs/.github/.github/workflows/cargo-deny.yml@bd2f36fff6b659ef6042eeea733fdf9a3050daec
+    uses: burin-labs/.github/.github/workflows/cargo-deny.yml@3fd396a4769e3e6e53cbd883ff46fa6985734afd

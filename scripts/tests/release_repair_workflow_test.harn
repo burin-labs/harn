@@ -6,8 +6,10 @@ fn expression(value: string) -> string {
 
 pipeline test_candidate_security_owns_exact_source_admission_before_builds(harness: Harness) {
   const flow = read_yaml(harness.fs, "../../.github/workflows/build-release-binaries.yml", nil)
+  const supply = read_yaml(harness.fs, "../../.github/workflows/supply-chain.yml", nil)
   const security = flow.jobs["source-security"]
   assert(security.uses.contains("/.github/workflows/cargo-deny.yml@"))
+  assert_eq(security.uses, supply.jobs["cargo-deny"].uses)
   assert_eq(security.needs, "setup")
   assert_eq(security["if"], "needs.setup.outputs.build_mode == 'candidate'")
   assert_eq(
@@ -29,8 +31,10 @@ pipeline test_candidate_security_owns_exact_source_admission_before_builds(harne
 
 pipeline test_publication_refreshes_security_after_all_other_authority(harness: Harness) {
   const flow = read_yaml(harness.fs, "../../.github/workflows/promote-release.yml", nil)
+  const supply = read_yaml(harness.fs, "../../.github/workflows/supply-chain.yml", nil)
   const security = flow.jobs["publication-security"]
   assert(security.uses.contains("/.github/workflows/cargo-deny.yml@"))
+  assert_eq(security.uses, supply.jobs["cargo-deny"].uses)
   assert_eq(security.needs, ["plan", "authorize"])
   assert_eq(security.with["source-revision"], expression("needs.plan.outputs.source_sha"))
   assert_eq(security.with.policy, false)
