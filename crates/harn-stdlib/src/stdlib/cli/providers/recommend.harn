@@ -1,3 +1,5 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/providers/recommend"
 import { safe_int, safe_list, safe_string } from "std/cli/render"
 
 /**
@@ -26,12 +28,16 @@ fn __recommended_tool(value: string) -> string {
   return "unproven"
 }
 
-fn __render_human(report: dict) -> string {
-  let out = "local provider recommendations\n"
-  out = out + "source: " + safe_string(report["source"], "") + "\n"
+fn __render_human(__cli_locale: string, report: dict) -> string {
+  let out = cli_message(__cli_locale, "local provider recommendations\n", [])
+  out = cli_message(
+    __cli_locale,
+    "{0}source: {1}\n",
+    [to_string(out), to_string(safe_string(report["source"], ""))],
+  )
   const recommendations = safe_list(report["recommendations"])
   if len(recommendations) == 0 {
-    return out + "(no local model outcomes found)\n"
+    return cli_message(__cli_locale, "{0}(no local model outcomes found)\n", [to_string(out)])
   }
   for rec in recommendations {
     if type_of(rec) != "dict" {
@@ -43,18 +49,23 @@ fn __render_human(report: dict) -> string {
     const status = safe_string(rec["status"], "")
     const selector = safe_string(rec["selector"], "")
     const tool_format = __recommended_tool(rec["recommended_tool_format"])
-    out = out + to_string(rank) + ". " + provider + " " + model
-      + " ("
-      + status
-      + ", selector "
-      + selector
-      + ", tools "
-      + tool_format
-      + ")\n"
+    out = cli_message(
+      __cli_locale,
+      "{0}{1}. {2} {3} ({4}, selector {5}, tools {6})\n",
+      [
+        to_string(out),
+        to_string(to_string(rank)),
+        to_string(provider),
+        to_string(model),
+        to_string(status),
+        to_string(selector),
+        to_string(tool_format),
+      ],
+    )
     const caveats = safe_list(rec["caveats"])
     for caveat in caveats {
       if type_of(caveat) == "string" {
-        out = out + "   caveat: " + caveat + "\n"
+        out = cli_message(__cli_locale, "{0}   caveat: {1}\n", [to_string(out), to_string(caveat)])
       }
     }
   }
@@ -62,6 +73,7 @@ fn __render_human(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
+  const __cli_locale = cli_locale(harness.env)
   const raw = harness.env.get_or("HARN_PROVIDERS_RECOMMEND_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio.eprintln(
@@ -90,7 +102,7 @@ fn main(harness: Harness) -> int {
     }
     return 0
   }
-  const text = __render_human(report)
+  const text = __render_human(__cli_locale, report)
   // The host renderer always ended each line with `println!`; the
   // last println leaves a single trailing newline. Strip the trailing
   // newline so `harness.stdio.println` can re-add exactly one and the

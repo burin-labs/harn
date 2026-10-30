@@ -161,7 +161,7 @@ pub use introspection::{host_confinement, SANDBOX_CONFINEMENT_SCHEMA};
 pub(crate) use locked_append::AppendLockOptions;
 pub(crate) use policy::allows_network as policy_allows_network;
 pub(crate) use replace::{
-    atomic_replace_scoped_at_open_unlocked, atomic_write_scoped_at_open,
+    apply_effect, atomic_replace_scoped_at_open_unlocked, atomic_write_scoped_at_open,
     read_for_replace_scoped_at_open,
 };
 pub use workspace_env::{

@@ -1,8 +1,85 @@
 use std::fs;
 
-use super::support::{parse_json, prepare_batch, run, success_data};
+use super::support::{batch_manifest, parse_json, prepare_batch, run, success_data};
 
 // - models batch ----------------------------------------------------------
+
+#[test]
+fn models_batch_prepare_keeps_receipt_states_canonical_across_locales() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = batch_manifest(
+        "anthropic",
+        "claude-haiku-4-5-20251001",
+        "judge",
+        "native",
+        "anthropic_messages",
+        "inline_requests",
+        serde_json::json!({"max_tokens": 32, "messages": [{"role": "user", "content": "label this"}]}),
+    );
+    fs::write(&manifest_path, manifest.to_string()).expect("write manifest");
+    for locale in [
+        "en_US.UTF-8",
+        "es_ES.UTF-8",
+        "fr_FR.UTF-8",
+        "de_DE.UTF-8",
+        "pt_BR.UTF-8",
+        "it_IT.UTF-8",
+        "ja_JP.UTF-8",
+        "ko_KR.UTF-8",
+        "zh_CN.UTF-8",
+    ] {
+        for valid in [true, false] {
+            let input = if valid {
+                manifest_path.clone()
+            } else {
+                tmp.path().join("missing-manifest.json")
+            };
+            let out_dir = tmp.path().join(format!("{locale}-{valid}"));
+            let output = run(
+                &[
+                    "models",
+                    "batch",
+                    "prepare",
+                    "--manifest",
+                    input.to_str().expect("manifest path"),
+                    "--out-dir",
+                    out_dir.to_str().expect("output path"),
+                    "--json",
+                ],
+                &[("LC_ALL", locale)],
+            );
+            assert_eq!(
+                output.exit_code,
+                i32::from(!valid),
+                "{locale}: {}",
+                output.stderr
+            );
+            let value = parse_json(&output.stdout, "localized prepare result");
+            if valid {
+                let report = success_data(&value);
+                let receipt = parse_json(
+                    &fs::read_to_string(out_dir.join("receipt.json")).expect("persisted receipt"),
+                    "persisted prepare receipt",
+                );
+                assert_eq!(receipt["status"], "prepared", "{locale}");
+                assert_eq!(receipt["lifecycle"]["state"], "prepared", "{locale}");
+                assert_eq!(report["lifecycle"], receipt["lifecycle"], "{locale}");
+                assert_eq!(receipt["jobs"][0]["status"], "prepared", "{locale}");
+            } else {
+                assert_eq!(value["ok"], false, "{locale}");
+                assert_eq!(
+                    value["error"]["details"]["lifecycle"]["state"], "failed",
+                    "{locale}"
+                );
+                assert!(
+                    !out_dir.join("receipt.json").exists(),
+                    "invalid input cannot publish a receipt"
+                );
+            }
+        }
+    }
+}
 
 #[test]
 fn models_batch_plan_reports_harn_live_adapter_support() {

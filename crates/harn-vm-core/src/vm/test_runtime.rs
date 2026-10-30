@@ -234,6 +234,8 @@ impl VmTaskCleanup for TestRuntime {
     ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
         Box::pin(async { Ok(()) })
     }
+    // The fixture carries no ambient scope to lose.
+    #[allow(clippy::disallowed_methods)]
     fn schedule(&self, _task_id: String, before_cleanup: Pin<Box<dyn Future<Output = ()> + Send>>) {
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn(before_cleanup);

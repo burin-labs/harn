@@ -120,6 +120,10 @@ pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
 /// owns the human-readable section layout and the JSON envelope
 /// pass-through.
 async fn run_dispatch(opts: DoctorOptions) -> i32 {
+    let opts = DoctorOptions {
+        json: dispatch::effective_json_mode(opts.json),
+        ..opts
+    };
     let report = build_report(&opts).await;
     let report_json = match serde_json::to_string(&report) {
         Ok(json) => json,
@@ -190,7 +194,12 @@ async fn build_report(opts: &DoctorOptions) -> DoctorReport {
         check.ensure_id();
     }
 
-    let next_step = next_step_suggestion(&checks);
+    let locale = if opts.json {
+        crate::localization::Locale::English
+    } else {
+        crate::localization::selected_locale()
+    };
+    let next_step = next_step_suggestion(&checks, locale);
     let summary = build_summary(&checks);
     let host = build_host_info(&toolchain);
     let capabilities = stdlib_capability_matrix();

@@ -65,6 +65,7 @@ fidelity checkers still produce a structured report.
 | `clock_read` | `source` (`"wall"` or `"monotonic"`), `value_ms` | `harness.clock.now_ms()` / `harness.clock.monotonic_ms()` methods |
 | `clock_sleep` | `duration_ms` | `harness.clock.sleep_ms(...)` / `harness.testing.clock_advance(...)` |
 | `llm_call` | `request_digest`, `response` (inline or CAS) | LLM provider interception |
+| `payload_redaction` | none | A full run payload required credential redaction |
 | `file_read` | `path`, `content_hash`, `len_bytes` | `harness.fs.read_text(...)` builtins |
 | `file_write` | `path`, `content_hash`, `len_bytes` | `harness.fs.write_text(...)`, `harness.fs.append(...)`, `harness.fs.append_locked(...)` |
 | `file_delete` | `path` | `remove_file(...)` |
@@ -104,7 +105,13 @@ Smaller payloads stay inline:
 { "content_hash": "<blake3-hex>", "text": "...stdout..." }
 ```
 
-`content_hash` is a hex BLAKE3 digest of the raw bytes. The fidelity
+Run tapes apply the runtime's credential redaction policy before persisting
+payloads. A tape with a `payload_redaction` record remains readable but cannot
+serve an exact branch prefix. Secret-bearing file effects are omitted rather
+than replayed with altered contents. Branch workspaces must be existing copies;
+replayed writes and deletions use the sandbox's root-relative mutation path.
+
+`content_hash` is a hex BLAKE3 digest of the persisted bytes. The fidelity
 oracle compares hashes only; it never re-hashes payloads at compare
 time.
 

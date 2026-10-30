@@ -215,10 +215,10 @@ async fn failed_save_invalidates_memory_and_reloads_persisted_value() {
 fn a_store_beneath_a_file_is_unreachable_but_a_missing_one_is_absent() {
     let root = tempfile::tempdir().unwrap();
     let missing = CheckpointState::at_state_root(&root.path().join("never/created"), "recovery");
-    assert_eq!(missing.confirm_absent(), Ok(()));
+    assert_eq!(confirm_absent(&missing.path().unwrap()), Ok(()));
 
     std::fs::write(root.path().join("checkpoints"), "blocks persistence").unwrap();
     let blocked = CheckpointState::at_state_root(root.path(), "recovery");
-    let error = blocked.confirm_absent().unwrap_err();
+    let error = confirm_absent(&blocked.path().unwrap()).unwrap_err();
     assert!(error.contains("is not a directory"), "{error}");
 }

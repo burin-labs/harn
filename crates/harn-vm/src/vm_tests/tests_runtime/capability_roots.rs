@@ -454,14 +454,9 @@ fn test_policy_workspace_roots_catch_template_render_escapes() {
     };
 
     let escaped_path = outside_template.display();
-    let escapes = [
-        format!(
-            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.render_prompt("{escaped_path}") }}"#
-        ),
-        format!(
-            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.render_prompt_with_provenance("{escaped_path}") }}"#
-        ),
-    ];
+    let escapes = [format!(
+        r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.render_prompt("{escaped_path}") }}"#
+    )];
 
     for source in escapes {
         let err = run_harn_with_policy(&source, policy.clone()).unwrap_err();

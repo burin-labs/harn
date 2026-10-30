@@ -385,6 +385,16 @@ pub(super) async fn request_host_permission(
     if let Some(refused) = command_floor_refusal(&request) {
         return refused;
     }
+    // A replayed prefix never asks anyone; the refusal is the branch's
+    // divergence, so it fails closed at its next model call.
+    if let Err(error) =
+        crate::run_tape::refuse_in_prefix("host permission prompt", "no approval is recorded")
+    {
+        return HostPermissionOutcome::Refused {
+            source: "branch prefix".to_string(),
+            reason: error.to_string(),
+        };
+    }
     let Some(bridge) = bridge else {
         return HostPermissionOutcome::Unavailable;
     };

@@ -1,6 +1,72 @@
-//! Symlink-safe atomic and conditional replacement inside sandbox scopes.
+//! Symlink-safe file effects and conditional replacement inside sandbox scopes.
 
 use super::*;
+
+/// Apply one recorded file effect beneath the branch-owned workspace root.
+#[cfg(any(unix, windows))]
+pub(crate) fn apply_effect(
+    root: &Path,
+    relative: &Path,
+    contents: Option<&[u8]>,
+) -> io::Result<()> {
+    let target = ScopedMutationTarget {
+        root: root.to_path_buf(),
+        relative: relative.to_path_buf(),
+    };
+    match contents {
+        Some(contents) => atomic_replace_scoped_target(
+            &target,
+            contents,
+            crate::atomic_io::AtomicWriteDurability::Flush,
+            true,
+        )
+        .map(|_| ()),
+        None => remove_workspace_effect(&target),
+    }
+}
+
+#[cfg(unix)]
+fn remove_workspace_effect(target: &ScopedMutationTarget) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let (parent, file_name) = match open_parent_dir_scoped(target) {
+        Ok(parent) => parent,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    match unlinkat_name(parent.as_raw_fd(), &file_name, 0) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(windows)]
+fn remove_workspace_effect(target: &ScopedMutationTarget) -> io::Result<()> {
+    let (parent, file_name) = match win_scoped_parent(target, false) {
+        Ok(parent) => parent,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let full = parent.join(file_name);
+    win_reject_reparse_leaf(&full)?;
+    match std::fs::remove_file(full) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(all(not(unix), not(windows)))]
+pub(crate) fn apply_effect(
+    _root: &Path,
+    _relative: &Path,
+    _contents: Option<&[u8]>,
+) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "safe replay effects are unsupported on this platform",
+    ))
+}
 
 pub(crate) fn atomic_write_scoped_at_open(
     builtin: &str,

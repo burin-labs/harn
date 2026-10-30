@@ -108,12 +108,7 @@ pub(super) fn collect_static_tool_surface_from_node(
                 });
             }
         }
-        Node::MethodCall { method, args, .. }
-            if matches!(
-                method.as_str(),
-                "render_prompt" | "render_prompt_with_provenance"
-            ) =>
-        {
+        Node::MethodCall { method, args, .. } if matches!(method.as_str(), "render_prompt") => {
             if let Some(target) = args.first().and_then(literal_template_path) {
                 prompt_targets.push(target);
             }

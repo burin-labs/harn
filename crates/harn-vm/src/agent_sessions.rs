@@ -365,6 +365,7 @@ use metadata::{
     branch_event_index, clone_transcript_with_id, clone_transcript_with_parent, empty_transcript,
     prepare_lineage_update, session_snapshot, transcript_with_session_metadata, update_lineage,
 };
+use retention::minted_session_id;
 pub use retention::{
     fork, open_or_create_with_actor_chain, open_retained_with_actor_chain, SessionRetention,
 };
@@ -692,6 +693,22 @@ pub fn exists(id: &str) -> bool {
     SESSIONS.with(|s| s.borrow().contains_key(id))
 }
 
+/// Apply a transcript change a served tool dispatch recorded, through the
+/// one transcript writer. A session that no longer exists is skipped.
+pub(crate) fn replay_transcript_change(
+    id: &str,
+    fields: &std::collections::BTreeMap<String, crate::testbench::tape::FieldChange>,
+) -> Result<(), String> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Ok(());
+        };
+        let next = crate::run_tape::apply_transcript_change(&state.transcript, fields)?;
+        state.replace_transcript(next)
+    })
+}
+
 pub fn length(id: &str) -> Option<usize> {
     SESSIONS.with(|s| {
         s.borrow().get(id).map(|state| {
@@ -773,7 +790,7 @@ fn open_with_retention(
     requested_actor_chain: Option<ActorChain>,
     retain: bool,
 ) -> Result<(String, Option<SessionRetention>), SessionOpenError> {
-    let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    let resolved = id.unwrap_or_else(minted_session_id);
     let parent_session = current_session_id();
     let inherited_actor_chain = requested_actor_chain
         .clone()
@@ -853,7 +870,7 @@ pub fn open_child_session_with_actor(
     actor: Option<&str>,
 ) -> Result<String, SessionOpenError> {
     let actor_chain = ActorChain::delegated(actor_chain(parent_id), actor);
-    let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    let resolved = id.unwrap_or_else(minted_session_id);
     admit_linked_sessions(parent_id, &resolved, actor_chain, None)?;
     Ok(resolved)
 }
@@ -1119,7 +1136,7 @@ fn fork_with_retention(
     dst_id: Option<String>,
     retain: bool,
 ) -> Result<Option<(String, Option<SessionRetention>)>, SessionOpenError> {
-    let dst = dst_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    let dst = dst_id.unwrap_or_else(minted_session_id);
     if dst == src_id {
         return Ok(None);
     }
@@ -1366,7 +1383,7 @@ pub fn seed_from_messages(
     system_prompt: Option<String>,
     tool_format: Option<String>,
 ) -> Result<String, String> {
-    let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    let resolved = id.unwrap_or_else(minted_session_id);
     if exists(&resolved) {
         return Err(format!("agent session '{resolved}' already exists"));
     }

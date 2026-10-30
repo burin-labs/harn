@@ -301,7 +301,7 @@ pub(crate) fn schedule(task_id: String, runtimes: CleanupRuntimes) {
     }
 
     let runtime_key = runtimes.key();
-    crate::vm::subtask::spawn_lifecycle_cleanup(ScopedCleanup {
+    crate::task_spawn::spawn_lifecycle_cleanup(ScopedCleanup {
         runtimes,
         inner: async move {
             let cleanup_execution_id = runtime_key.execution_id.clone();

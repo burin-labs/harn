@@ -400,12 +400,6 @@ const BUILTIN_CAPABILITIES: &[(&str, &str, &str, &str)] = &[
     ),
     ("render", "workspace", "read_text", "read_only"),
     ("render_prompt", "workspace", "read_text", "read_only"),
-    (
-        "render_with_provenance",
-        "workspace",
-        "read_text",
-        "read_only",
-    ),
     ("list_dir", "workspace", "list", "read_only"),
     ("file_exists", "workspace", "exists", "read_only"),
     ("path_status", "workspace", "exists", "read_only"),

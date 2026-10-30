@@ -54,7 +54,7 @@ pub type NativeQualificationObservation = {
 /** The workflow and nextest configuration are checked projections of one purpose policy. */
 pub fn native_qualification_command(policy: NativeQualificationPolicy) -> string {
   return LANE_WRAPPER
-    + " cargo-nextest nextest run --locked --workspace --exclude harn-wasm --profile $"
+    + " cargo-nextest nextest run --locked --workspace --exclude harn-wasm --timings --profile $"
     + "{{ github.event_name == 'workflow_dispatch' && '"
     + policy.profile
     + "' || '"

@@ -197,7 +197,7 @@ impl InferenceMeter {
     ) -> (DeltaSender, tokio::task::JoinHandle<()>) {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let meter = self.clone();
-        let handle = tokio::spawn(async move {
+        let handle = crate::task_spawn::spawn(async move {
             while let Some(delta) = rx.recv().await {
                 meter.observe(OutputKind::Text, &delta);
                 let _ = downstream.send(delta);

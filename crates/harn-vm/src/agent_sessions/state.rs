@@ -57,6 +57,7 @@ impl SessionState {
         self.ensure_run_accepts_mutation("replace_transcript")?;
         if !crate::values_equal(&self.transcript, &transcript) {
             self.redo_stack.clear();
+            crate::run_tape::note_transcript_change(&self.id, &self.transcript, &transcript);
         }
         self.transcript = transcript;
         self.touch();

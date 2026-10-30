@@ -1,4 +1,6 @@
 #![recursion_limit = "256"]
+// Tests own their tasks and run no branch, so they spawn raw.
+#![allow(clippy::disallowed_methods)]
 //! End-to-end coverage for the unified agent inbox.
 //!
 //! These tests exercise the public host-builtin surface

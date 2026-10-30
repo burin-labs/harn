@@ -296,18 +296,10 @@ pub(crate) struct LlmMockCall {
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
     pub top_k: Option<i64>,
-    pub logprobs: Option<crate::llm::api::LogprobsConfig>,
-    pub logit_bias: Vec<crate::llm::api::TokenBias>,
-    pub min_p: Option<f64>,
-    pub repetition_penalty: Option<f64>,
-    pub prediction: Option<String>,
-    pub verbosity: Option<crate::llm::api::Verbosity>,
-    pub mirostat: Option<crate::llm::api::MirostatConfig>,
     pub stop: Option<Vec<String>>,
     pub seed: Option<i64>,
     pub frequency_penalty: Option<f64>,
     pub presence_penalty: Option<f64>,
-    pub parallel_tool_calls: Option<bool>,
     pub previous_response_id: Option<String>,
     pub store: Option<bool>,
     pub background: Option<bool>,
@@ -695,8 +687,13 @@ fn mock_prefix_miss(cli_scope: Option<u64>) -> Option<(u64, u64)> {
 }
 
 fn record_llm_mock_call(request: &super::api::LlmRequestPayload) {
-    with_mock_state_mut(|state| {
-        state.calls.push(LlmMockCall {
+    let call = LlmMockCall::from_request(request);
+    with_mock_state_mut(|state| state.calls.push(call));
+}
+
+impl LlmMockCall {
+    pub(crate) fn from_request(request: &super::api::LlmRequestPayload) -> Self {
+        LlmMockCall {
             mock_scope: request
                 .mock_scope
                 .as_deref()
@@ -726,18 +723,10 @@ fn record_llm_mock_call(request: &super::api::LlmRequestPayload) {
             temperature: request.temperature,
             top_p: request.top_p,
             top_k: request.top_k,
-            logprobs: request.logprobs,
-            logit_bias: request.logit_bias.clone(),
-            min_p: request.min_p,
-            repetition_penalty: request.repetition_penalty,
-            prediction: request.prediction.clone(),
-            verbosity: request.verbosity,
-            mirostat: request.mirostat,
             stop: request.stop.clone(),
             seed: request.seed,
             frequency_penalty: request.frequency_penalty,
             presence_penalty: request.presence_penalty,
-            parallel_tool_calls: request.parallel_tool_calls,
             previous_response_id: request.previous_response_id.clone(),
             store: request.store,
             background: request.background,
@@ -746,8 +735,8 @@ fn record_llm_mock_call(request: &super::api::LlmRequestPayload) {
             include: request.include.clone(),
             max_tool_calls: request.max_tool_calls,
             prefill: request.prefill.clone(),
-        });
-    });
+        }
+    }
 }
 
 /// Build an LlmResult from a matched mock.
@@ -1048,7 +1037,7 @@ fn try_match_cli_mock(
 }
 
 pub(crate) fn record_cli_llm_result(request: &super::api::LlmRequestPayload, result: &LlmResult) {
-    record_unified_tape_llm_call(result);
+    crate::run_tape::record_llm_call(request, result);
     let Some(scope) = request.cli_llm_mock_scope else {
         return;
     };
@@ -1089,123 +1078,6 @@ pub(crate) fn record_cli_llm_result(request: &super::api::LlmRequestPayload, res
         logprobs: result.logprobs.clone(),
         error: None,
         stream_chunks: Vec::new(),
-    });
-}
-
-/// Append an `LlmCall` record to the unified-tape recorder when one is
-/// active. The request digest is built from the most recently recorded
-/// `LlmMockCall` so the same hashing surface used for fixture matching
-/// drives the fidelity oracle's request comparison; falls back to a
-/// hash of the response text alone when no matching call is on record
-/// (e.g. when `record_llm_mock_call` was bypassed).
-fn record_unified_tape_llm_call(result: &LlmResult) {
-    if crate::testbench::tape::active_recorder().is_none() {
-        return;
-    }
-    let response_json = serde_json::to_vec(result).unwrap_or_else(|_| Vec::new());
-    let request_digest = with_mock_state(|state| state.calls.last().cloned())
-        .map(|call| {
-            let mut request = serde_json::Map::new();
-            request.insert("messages".to_string(), serde_json::json!(call.messages));
-            request.insert("system".to_string(), serde_json::json!(call.system));
-            request.insert("tools".to_string(), serde_json::json!(call.tools));
-            request.insert(
-                "tool_choice".to_string(),
-                serde_json::json!(call.tool_choice),
-            );
-            request.insert("thinking".to_string(), serde_json::json!(call.thinking));
-            if call.mock_scope != DEFAULT_MOCK_SCOPE {
-                request.insert("mock_scope".to_string(), serde_json::json!(call.mock_scope));
-            }
-            request.insert("model".to_string(), serde_json::json!(result.model));
-            if call.api_mode != "chat_completions" {
-                request.insert("api_mode".to_string(), serde_json::json!(call.api_mode));
-            }
-            if call.logprobs.is_some() {
-                request.insert("logprobs".to_string(), serde_json::json!(call.logprobs));
-            }
-            if !call.logit_bias.is_empty() {
-                request.insert("logit_bias".to_string(), serde_json::json!(call.logit_bias));
-            }
-            for (key, value) in [
-                ("min_p", serde_json::json!(call.min_p)),
-                (
-                    "repetition_penalty",
-                    serde_json::json!(call.repetition_penalty),
-                ),
-                ("prediction", serde_json::json!(call.prediction)),
-                ("verbosity", serde_json::json!(call.verbosity)),
-                ("mirostat", serde_json::json!(call.mirostat)),
-                (
-                    "parallel_tool_calls",
-                    serde_json::json!(call.parallel_tool_calls),
-                ),
-            ] {
-                if !value.is_null() {
-                    request.insert(key.to_string(), value);
-                }
-            }
-            if call.provider_tools.is_some() {
-                request.insert(
-                    "provider_tools".to_string(),
-                    serde_json::json!(call.provider_tools),
-                );
-            }
-            if call
-                .output_format
-                .get("kind")
-                .and_then(|value| value.as_str())
-                != Some("text")
-            {
-                request.insert(
-                    "output_format".to_string(),
-                    serde_json::json!(call.output_format),
-                );
-            }
-            if call.previous_response_id.is_some() {
-                request.insert(
-                    "previous_response_id".to_string(),
-                    serde_json::json!(call.previous_response_id),
-                );
-            }
-            if call.store.is_some() {
-                request.insert("store".to_string(), serde_json::json!(call.store));
-            }
-            if call.background.is_some() {
-                request.insert("background".to_string(), serde_json::json!(call.background));
-            }
-            if call.truncation.is_some() {
-                request.insert("truncation".to_string(), serde_json::json!(call.truncation));
-            }
-            if call.compact.is_some() {
-                request.insert("compact".to_string(), serde_json::json!(call.compact));
-            }
-            if call.include.is_some() {
-                request.insert("include".to_string(), serde_json::json!(call.include));
-            }
-            if call.max_tool_calls.is_some() {
-                request.insert(
-                    "max_tool_calls".to_string(),
-                    serde_json::json!(call.max_tool_calls),
-                );
-            }
-            if call.prefill.is_some() {
-                request.insert("prefill".to_string(), serde_json::json!(call.prefill));
-            }
-            let serialized = crate::canonical_json::to_vec(&serde_json::Value::Object(request));
-            crate::testbench::tape::content_hash(&serialized)
-        })
-        .unwrap_or_else(|| {
-            // Fall back to hashing the response — keeps fidelity comparable
-            // across runs even when the request surface wasn't captured.
-            crate::testbench::tape::content_hash(result.text.as_bytes())
-        });
-    crate::testbench::tape::with_active_recorder(|recorder| {
-        let response = recorder.payload_from_bytes(response_json);
-        Some(crate::testbench::tape::TapeRecordKind::LlmCall {
-            request_digest,
-            response,
-        })
     });
 }
 

@@ -1,3 +1,4 @@
+import { cli_message } from "std/cli/localization/models/batch_rejoin"
 /**
  * Provider-neutral terminal rejoin for durable model-batch executions.
  *
@@ -683,14 +684,54 @@ pub fn batch_rejoin(fs: HarnessFs, input: BatchRejoinInput) -> BatchRejoinRun {
   return {receipt: receipt, normalized_rows: normalized_rows, errors: errors}
 }
 
-fn __render_rejoin_human(stdio: HarnessStdio, receipt: dict) {
-  stdio.println("Batch result rejoin: " + safe_string(receipt["status"], ""))
-  stdio.println("  consumable: " + to_string(safe_bool(receipt["consumable"], false)))
-  stdio.println("  matched: " + safe_int_string(receipt["matchedCount"], "0"))
-  stdio.println("  missing: " + safe_int_string(receipt["missingCount"], "0"))
-  stdio.println("  duplicate: " + safe_int_string(receipt["duplicateCount"], "0"))
-  stdio.println("  unexpected: " + safe_int_string(receipt["unexpectedCount"], "0"))
-  print_list(stdio, "quarantine", safe_list(safe_dict(receipt["quarantine"])["reasons"]))
+fn __render_rejoin_human(__cli_locale: string, stdio: HarnessStdio, receipt: dict) {
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "Batch result rejoin: {0}",
+      [to_string(safe_string(receipt["status"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  consumable: {0}",
+      [to_string(to_string(safe_bool(receipt["consumable"], false)))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  matched: {0}",
+      [to_string(safe_int_string(receipt["matchedCount"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  missing: {0}",
+      [to_string(safe_int_string(receipt["missingCount"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  duplicate: {0}",
+      [to_string(safe_int_string(receipt["duplicateCount"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  unexpected: {0}",
+      [to_string(safe_int_string(receipt["unexpectedCount"], "0"))],
+    ),
+  )
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "quarantine", []),
+    safe_list(safe_dict(receipt["quarantine"])["reasons"]),
+  )
 }
 
 /**
@@ -700,7 +741,7 @@ fn __render_rejoin_human(stdio: HarnessStdio, receipt: dict) {
  * @effects: [env.read, fs.read, fs.write, stdio.write]
  * @errors: [runtime]
  */
-pub fn __run_rejoin(harness: Harness) -> int {
+pub fn __run_rejoin(__cli_locale: string, harness: Harness) -> int {
   const execution_path = trim(harness.env.get_or("HARN_MODELS_BATCH_EXECUTION", ""))
   const manifest_path = trim(harness.env.get_or("HARN_MODELS_BATCH_MANIFEST", ""))
   const download_path = trim(harness.env.get_or("HARN_MODELS_BATCH_DOWNLOAD_RECEIPT", ""))
@@ -768,7 +809,7 @@ pub fn __run_rejoin(harness: Harness) -> int {
       ),
     )
   } else {
-    __render_rejoin_human(harness.stdio, receipt)
+    __render_rejoin_human(__cli_locale, harness.stdio, receipt)
   }
   return 0
 }

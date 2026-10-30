@@ -43,6 +43,10 @@ pub(crate) async fn call_mcp_tool_with_hint(
     tool_name: &str,
     arguments: serde_json::Value,
 ) -> Result<(serde_json::Value, Option<McpCacheHint>), VmError> {
+    crate::run_tape::refuse_in_prefix(
+        &format!("mcp tool {tool_name}"),
+        "MCP calls are not on the tape",
+    )?;
     // Attach a unique progress token so the server can emit
     // `notifications/progress` updates that we route back into the
     // active session's `agent_inbox`. Tokens are scoped to the active

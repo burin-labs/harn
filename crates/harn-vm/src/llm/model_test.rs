@@ -77,7 +77,8 @@ pub async fn run_model_smoke_test(
 
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let started = Instant::now();
-    let first_delta = tokio::spawn(async move { delta_rx.recv().await.map(|_| started.elapsed()) });
+    let first_delta =
+        crate::task_spawn::spawn(async move { delta_rx.recv().await.map(|_| started.elapsed()) });
     let result = vm_call_llm_full_streaming(&opts, delta_tx)
         .await
         .map_err(vm_error_message);

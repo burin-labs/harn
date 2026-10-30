@@ -1350,7 +1350,7 @@ async fn acquire_oauth_refresh_lock_with_timeout(
         })?;
     let lock_path = oauth_refresh_lock_path(key, lock_dir_override);
     let open_path = lock_path.clone();
-    let file = tokio::task::spawn_blocking(move || {
+    let file = crate::task_spawn::spawn_blocking(move || {
         if let Some(parent) = open_path.parent() {
             fs::create_dir_all(parent).map_err(|error| {
                 format!(

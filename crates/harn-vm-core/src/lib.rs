@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 #![allow(clippy::result_large_err, clippy::cloned_ref_to_slice_refs)]
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 //! Bytecode execution with required host services supplied by an execution backend.
 
 #[path = "../build_support/compiler_sources.rs"]

@@ -435,7 +435,7 @@ fn source_uses_prompt_asset(path: &Path) -> bool {
                 Node::MethodCall { method, .. }
                     if matches!(
                         method.as_str(),
-                        "render_prompt" | "render_prompt_with_provenance"
+                        "render_prompt"
                     )
             ) {
                 found = true;

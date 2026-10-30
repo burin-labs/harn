@@ -45,6 +45,51 @@ async fn call_harness_method_in_scope(
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
+    match handle.kind().capability_id() {
+        // Boxed so the untaped path keeps the frame it had before tapes.
+        Some(capability) if crate::run_tape::taping() => {
+            Box::pin(call_harness_method_taped(vm, handle, capability, method, args)).await
+        }
+        _ => call_harness_method_admitted(vm, handle, method, args).await,
+    }
+}
+
+async fn call_harness_method_taped(
+    vm: &mut Vm,
+    handle: &VmHarness<'_>,
+    capability: harn_builtin_meta::CapabilityId,
+    method: &str,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
+    let owner = Some((capability, method));
+    let effects = capability_method_effects(capability, method);
+    if let Some(served) = crate::run_tape::serve_read(owner, method, effects, args) {
+        return served;
+    }
+    let result = call_harness_method_admitted(vm, handle, method, args).await;
+    crate::run_tape::record_read(owner, method, effects, args, &result);
+    result
+}
+
+/// Effects a capability method declares: its manifest contract, or its host
+/// capability group's.
+fn capability_method_effects(
+    capability: harn_builtin_meta::CapabilityId,
+    method: &str,
+) -> Option<&'static [harn_builtin_meta::EffectSpec]> {
+    crate::stdlib::capability_method_manifest_entry(capability, method)
+        .map(|entry| entry.contract.effects)
+        .or_else(|| {
+            harn_builtin_meta::host_capabilities::host_capability_method_effects(capability, method)
+        })
+}
+
+async fn call_harness_method_admitted(
+    vm: &mut Vm,
+    handle: &VmHarness<'_>,
+    method: &str,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
     if let Some(capability) = handle.kind().capability_id() {
         let declared = crate::stdlib::capability_method_manifest_entry(capability, method);
         crate::tool_registry::preparation_scope::enforce_contract(
@@ -369,6 +414,17 @@ fn call_harness_method_sync_fast(
     };
     let started = crate::builtin_profile::is_enabled().then(std::time::Instant::now);
     let result = call_harness_method_sync_fast_inner(output, runtime_effects, &handle, method, args);
+    if let (Some(result), Some(capability)) = (&result, handle.kind().capability_id()) {
+        if crate::run_tape::records_reads() {
+            crate::run_tape::record_read(
+                Some((capability, method)),
+                method,
+                capability_method_effects(capability, method),
+                args,
+                result,
+            );
+        }
+    }
     if result.is_some() {
         if let Some(started) = started {
             crate::builtin_profile::record(
@@ -406,6 +462,11 @@ fn call_harness_method_sync_fast_inner(
             return Some(Err(method_unsupported(handle, method)));
         }
     };
+    if let Some(served) =
+        crate::run_tape::serve_read(Some((capability, method)), method, Some(entry.contract.effects), args)
+    {
+        return Some(served);
+    }
     runtime_effects.record_specs(entry.contract.effects, args);
     if let HarnessMode::Null(state) = handle.inner().mode() {
         state.record_deny(handle.kind(), method, args);

@@ -19,6 +19,8 @@
 //! here. If this count regresses (e.g. a reintroduced env clone or a
 //! clone-then-grow reallocation), this test fails. Improvements are allowed:
 //! the assertion is an upper bound.
+// Tests own their tasks and run no branch, so they spawn raw.
+#![allow(clippy::disallowed_methods)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;

@@ -152,7 +152,6 @@ fn builtin_effect_group(builtin: &str) -> Option<BuiltinEffectGroup> {
         | "package_snapshot_open"
         | "render"
         | "render_prompt"
-        | "render_with_provenance"
         | "write_file"
         | "write_file_bytes"
         | "replace_file"

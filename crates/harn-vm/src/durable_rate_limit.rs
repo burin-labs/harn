@@ -204,8 +204,9 @@ async fn durable_rate_limit_acquire_impl(
 
 fn parse_state_path(options: &crate::value::DictMap) -> Result<PathBuf, VmError> {
     match options.get("state_path") {
-        Some(VmValue::String(path)) if !path.trim().is_empty() => Ok(
-            crate::stdlib::process::resolve_source_relative_path(path.trim()),
+        Some(VmValue::String(path)) if !path.trim().is_empty() => crate::run_tape::durable_path(
+            &crate::stdlib::process::resolve_source_relative_path(path.trim()),
+            "rate limit state",
         ),
         Some(VmValue::Nil) | None => {
             let base = crate::stdlib::process::runtime_root_base();
@@ -825,7 +826,7 @@ where
         let now_ms = now_wall_ms();
         let attempt_path = state_path.clone();
         let attempt_buckets = buckets.clone();
-        let attempt = tokio::task::spawn_blocking(move || {
+        let attempt = crate::task_spawn::spawn_blocking(move || {
             try_reserve_once(&attempt_path, &attempt_buckets, now_ms)
         })
         .await
@@ -918,7 +919,7 @@ where
         let attempt_buckets = buckets.clone();
         let attempt_queue_key = queue_key.clone();
         let attempt_consumer_id = consumer_id.clone();
-        let attempt = tokio::task::spawn_blocking(move || {
+        let attempt = crate::task_spawn::spawn_blocking(move || {
             try_reserve_fair_once(
                 &attempt_path,
                 &attempt_buckets,
@@ -1008,7 +1009,7 @@ async fn remove_fair_waiter(
     ticket_id: i64,
     mark_rerouted: bool,
 ) -> Result<FairRateLimitCounters, VmError> {
-    tokio::task::spawn_blocking(move || {
+    crate::task_spawn::spawn_blocking(move || {
         remove_fair_waiter_sync(
             &state_path,
             &queue_key,

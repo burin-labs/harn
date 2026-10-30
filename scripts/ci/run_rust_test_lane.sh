@@ -10,9 +10,20 @@ report_duration_budget() {
     return
   fi
   local limit_seconds=$((limit_minutes * 60))
-  local message="Rust workspace test step: ${duration}s of ${limit_seconds}s job limit; warning threshold ${warning_percent}%; runner memory ${memory_mb} MiB."
+  local warning_seconds=$((limit_seconds * warning_percent / 100))
+  local warning_label="warning threshold ${warning_percent}%"
+  local feedback_seconds=${4:-}
+  if [[ -n "$feedback_seconds" ]]; then
+    if [[ ! "$feedback_seconds" =~ ^[1-9][0-9]*$ ]] || ((feedback_seconds > limit_seconds)); then
+      echo "::warning::RUST_TEST_DURATION_UNMEASURED duration_seconds=$duration job_limit_minutes=$limit_minutes feedback_budget_seconds=$feedback_seconds"
+      return
+    fi
+    warning_seconds=$feedback_seconds
+    warning_label="feedback budget ${feedback_seconds}s"
+  fi
+  local message="Rust build and test lane: ${duration}s of ${limit_seconds}s job limit; ${warning_label}; runner memory ${memory_mb} MiB."
   echo "$message"
-  if ((duration * 100 > limit_seconds * warning_percent)); then
+  if ((duration > warning_seconds)); then
     echo "::warning::$message"
   fi
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
@@ -101,13 +112,13 @@ else
 fi
 duration=$((SECONDS - started))
 if [[ -n "${RUST_TEST_JOB_LIMIT_MINUTES:-}" ]]; then
-  report_duration_budget "$duration" "$RUST_TEST_JOB_LIMIT_MINUTES" "$memory_mb"
+  report_duration_budget "$duration" "$RUST_TEST_JOB_LIMIT_MINUTES" "$memory_mb" "${RUST_TEST_FEEDBACK_BUDGET_SECONDS:-}"
 fi
 report_resources "Rust test resources after"
-echo "rust_test_execution_seconds=${duration}"
+echo "rust_test_lane_seconds=${duration}"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   {
-    echo "### Rust test execution"
+    echo "### Rust build and test lane"
     echo
     echo "- Duration: ${duration}s"
     echo "- Exit status: ${status}"

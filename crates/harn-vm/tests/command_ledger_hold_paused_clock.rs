@@ -1,4 +1,6 @@
 #![recursion_limit = "256"]
+// Tests own their tasks and run no branch, so they spawn raw.
+#![allow(clippy::disallowed_methods)]
 //! PausedClock integration proof for `command_ledger_hold` — the orchestration
 //! that PARKS the whole agent loop while a long-running command is awaited.
 //!

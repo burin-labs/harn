@@ -383,8 +383,10 @@ fn start_supervisor(base_vm: Vm, spec_value: &VmValue) -> Result<SupervisorHandl
             .insert(state.lock().id.clone(), handle.clone());
     });
 
-    let supervisor_join =
-        tokio::task::spawn_local(supervisor_loop(state.clone(), tx, rx, Arc::new(base_vm)));
+    let supervisor_join = crate::task_spawn::spawn_local_in(
+        crate::orchestration::AmbientExecutionScope::capture_inherited(),
+        supervisor_loop(state.clone(), tx, rx, Arc::new(base_vm)),
+    );
     state.lock().supervisor_join = Some(supervisor_join);
     Ok(handle)
 }
@@ -749,7 +751,9 @@ fn spawn_child(
     );
     child_vm.install_cancel_token(cancel_token);
     let child_ctx = child_context_value(&supervisor_id, &spec, generation);
-    let join = tokio::task::spawn_local(async move {
+    // A child is a worker: it keeps the supervisor's branch and policy, not its session.
+    let child_scope = crate::orchestration::AmbientExecutionScope::capture_inherited();
+    let join = crate::task_spawn::spawn_local_in(child_scope, async move {
         let result = child_vm
             .call_closure_pub(&task, &[child_ctx])
             .await
@@ -774,7 +778,7 @@ fn schedule_restart(
     generation: u64,
     delay_ms: u64,
 ) {
-    tokio::task::spawn_local(async move {
+    crate::task_spawn::spawn_local(async move {
         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
         let _ = tx.send(SupervisorMsg::RestartDue { index, generation });
     });
@@ -1163,7 +1167,7 @@ fn emit_event_log(event: &SupervisorEvent) {
         "message": event.message,
     });
     let log_event = LogEvent::new(event.kind.clone(), payload);
-    tokio::task::spawn_local(async move {
+    crate::task_spawn::spawn_local(async move {
         let _ = log.append(&topic, log_event).await;
     });
 }

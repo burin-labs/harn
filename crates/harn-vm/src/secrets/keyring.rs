@@ -296,15 +296,11 @@ impl NativeKeyring {
             store: self.store.clone(),
         };
         let (sender, receiver) = std::sync::mpsc::channel();
-        crate::runtime_stack::builder()
-            .name("harn-keyring-round-trip".to_string())
-            .spawn(move || {
-                let user = format!("__harn_probe__:{}", uuid::Uuid::now_v7().simple());
-                let _ = sender.send(probe.round_trip_with_user(&user));
-            })
-            .map_err(|_| {
-                NativeKeyringError::Verification("could not start the round-trip probe")
-            })?;
+        crate::task_spawn::named_thread("harn-keyring-round-trip".to_string(), move || {
+            let user = format!("__harn_probe__:{}", uuid::Uuid::now_v7().simple());
+            let _ = sender.send(probe.round_trip_with_user(&user));
+        })
+        .map_err(|_| NativeKeyringError::Verification("could not start the round-trip probe"))?;
 
         match receiver.recv_timeout(timeout) {
             Ok(result) => result,

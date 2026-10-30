@@ -818,9 +818,8 @@ pub fn emit_reminder_lifecycle_event(kind: &str, mut payload: JsonValue) {
     ensure_reminder_correlation(&mut payload);
     let event = LogEvent::new(kind, payload);
     if tokio::runtime::Handle::try_current().is_ok() {
-        if let Ok(join) = crate::runtime_stack::builder()
-            .name("harn-reminder-event-log".to_string())
-            .spawn(move || {
+        if let Ok(join) =
+            crate::task_spawn::named_thread("harn-reminder-event-log".to_string(), move || {
                 let _ = futures::executor::block_on(log.append(&topic, event));
             })
         {

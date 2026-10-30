@@ -57,7 +57,7 @@ impl VmTaskCleanup for CleanupRuntimes {
 
     fn schedule(&self, task_id: String, before_cleanup: Pin<Box<dyn Future<Output = ()> + Send>>) {
         let runtimes = self.clone();
-        crate::vm::subtask::spawn_lifecycle_cleanup(async move {
+        crate::task_spawn::spawn_lifecycle_cleanup(async move {
             before_cleanup.await;
             crate::agent_lifecycle_cleanup::schedule(task_id, runtimes);
         });

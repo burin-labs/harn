@@ -23,6 +23,8 @@ mod side_effect_ceiling;
 mod structured_tool_result;
 pub(crate) mod tool_catalog;
 mod tool_parse_diagnostics;
+mod tool_tape;
+pub(crate) use tool_tape::host_agent_dispatch_tool_call;
 pub(crate) mod tool_result_budget;
 mod undispatched_tool;
 use crate::orchestration::ToolDispatchPolicy;
@@ -504,21 +506,12 @@ use super::agent_host_tool_dispatch::{
     ToolDispatchRequest,
 };
 
-pub(crate) async fn host_agent_dispatch_tool_call(
+async fn dispatch_tool_call_live(
     ctx: crate::vm::AsyncBuiltinCtx,
-    call: VmValue,
+    call: std::sync::Arc<crate::value::DictMap>,
     tools: Option<&VmValue>,
     options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
-    let call = match call {
-        VmValue::Dict(call) => call,
-        other => {
-            return Err(VmError::Runtime(format!(
-            "__host_agent_dispatch_tool_call(call, tools?, options?): call must be a dict; got {}",
-            other.type_name()
-        )))
-        }
-    };
     let tool_id = ["id", "tool_call_id", "call_id"]
         .iter()
         .find_map(|key| match call.get(*key) {

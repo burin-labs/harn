@@ -78,8 +78,11 @@ impl MetadataState {
         }
     }
 
-    fn metadata_dir(&self) -> PathBuf {
-        self.metadata_dir.clone()
+    /// Resolved at use, so state built before its branch was armed still
+    /// stays out of the recording's.
+    fn metadata_dir(&self) -> Result<PathBuf, String> {
+        crate::run_tape::durable_path(&self.metadata_dir, "metadata store")
+            .map_err(|error| error.to_string())
     }
 
     fn ensure_loaded(&mut self) {
@@ -87,7 +90,11 @@ impl MetadataState {
             return;
         }
         self.loaded = true;
-        if let Ok(loaded) = self.backend.load(&self.metadata_dir()) {
+        // A refused path has already failed the branch closed.
+        let Ok(dir) = self.metadata_dir() else {
+            return;
+        };
+        if let Ok(loaded) = self.backend.load(&dir) {
             self.entries = loaded.dirs;
             self.files = loaded.files;
         }
@@ -265,7 +272,7 @@ impl MetadataState {
         if !self.dirty {
             return Ok(());
         }
-        let meta_dir = self.metadata_dir();
+        let meta_dir = self.metadata_dir()?;
         self.backend.save(&meta_dir, &self.entries, &self.files)?;
         self.dirty = false;
         Ok(())

@@ -89,7 +89,7 @@ fn forward_event_to_log(event: &RedactionEvent) {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         let metrics = handle.metrics();
         if metrics.num_workers() > 1 {
-            handle.spawn(task);
+            crate::task_spawn::spawn_on(&handle, task);
         }
     }
 }
