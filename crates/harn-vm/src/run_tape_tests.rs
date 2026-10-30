@@ -222,7 +222,7 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
     });
     finish_tool_call(recording, Ok(ok(serde_json::json!({"output": text}))));
     cache_lookup(secret, secret, || {
-        Ok(Some(serde_json::json!({"result": text.clone()})))
+        Ok(Some(serde_json::json!({"result": text})))
     })
     .unwrap();
     let mut opaque = vec![0xff];
