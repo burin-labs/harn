@@ -1,6 +1,6 @@
 use super::*;
 use harn_vm::testbench::tape::{
-    FieldChange, TapeRecordKind, TranscriptChange, TranscriptLifecycle,
+    FieldChange, FileEffect, TapePayload, TapeRecordKind, TranscriptChange, TranscriptLifecycle,
 };
 
 fn git(root: &Path, args: &[&str]) {
@@ -91,9 +91,27 @@ fn assert_closed_child_replays(create: &str) {
         harness.agent.close(child)
     "#
     );
-    let source = transcript_change_script(&hook_marker, &exec_marker, &change);
+    let source = transcript_change_script(&hook_marker, &exec_marker, &change).replace(
+        "const id = harness.random.uuid()",
+        "const id = \"lifecycle-review\"",
+    );
     record(&source, &dirs.tapes, &dirs.workspace);
-    let tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+    let mut tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+    let canary = dirs.workspace.join("replay-canary");
+    let mut effect_count = 0;
+    for record in &mut tape.records {
+        if let TapeRecordKind::ToolCall { effects, .. } = &mut record.kind {
+            effects.push(FileEffect {
+                path: "replay-canary".into(),
+                content: Some(TapePayload::Inline {
+                    content_hash: harn_vm::testbench::tape::content_hash(b"replayed"),
+                    text: "replayed".into(),
+                }),
+            });
+            effect_count += 1;
+        }
+    }
+    assert_eq!(effect_count, 1);
     assert!(
         tape.records.iter().any(|record| {
             matches!(&record.kind, TapeRecordKind::ToolCall { transcript_changes, .. }
@@ -105,12 +123,23 @@ fn assert_closed_child_replays(create: &str) {
     );
     remove_marker(&hook_marker, &dirs.tapes);
     remove_marker(&exec_marker, &dirs.tapes);
-    let replay = branch(&source, &dirs.tapes, &dirs.workspace, 2);
-    replay
-        .output
+    name_session_store(&dirs.workspace);
+    let guard = start_branch(BranchPlan {
+        tape: tape.clone(),
+        live_after_calls: 2,
+        workspace_root: dirs.workspace.clone(),
+        state_root: dirs.workspace.parent().unwrap().join("valid-child"),
+        host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
+    })
+    .unwrap();
+    run_in(&source, &dirs.workspace, Some(guard.scope()))
         .expect("the closed child does not prevent replay");
-    assert_eq!(replay.report.divergence, None);
-    assert_eq!(replay.report.served_tool_calls, 1);
+    let report = guard.finish();
+    assert_eq!(report.divergence, None);
+    assert_eq!(report.served_tool_calls, 1);
+    assert_eq!(report.applied_file_effects, 1);
+    assert_eq!(std::fs::read_to_string(&canary).unwrap(), "replayed");
     assert!(
         !exec_marker.exists(),
         "the live dispatch must not run again"
@@ -118,6 +147,7 @@ fn assert_closed_child_replays(create: &str) {
     assert!(!hook_marker.exists(), "the live hook must not run again");
 
     for (case, expected) in [
+        ("live-collision", "already exists"),
         ("null-open", "invalid initial transcript"),
         ("wrong-id", "invalid initial transcript"),
         ("missing-kind", "invalid initial transcript"),
@@ -127,6 +157,7 @@ fn assert_closed_child_replays(create: &str) {
         ("invalid-field", "is not a list to extend"),
         ("missing-close", "1 recorded new session(s) remain open"),
     ] {
+        std::fs::write(&canary, "unchanged").unwrap();
         let mut changed = tape.clone();
         let mut edited = 0;
         for record in &mut changed.records {
@@ -137,6 +168,24 @@ fn assert_closed_child_replays(create: &str) {
                 continue;
             };
             transcript_changes.retain_mut(|change| match change {
+                TranscriptChange::Lifecycle {
+                    session_id,
+                    lifecycle,
+                } if session_id == "ephemeral-review-child" && case == "live-collision" => {
+                    *session_id = "branch-lifecycle-review".into();
+                    if let TranscriptLifecycle::Opened { transcript } = lifecycle {
+                        transcript["id"] = serde_json::json!(session_id);
+                    }
+                    edited += 1;
+                    true
+                }
+                TranscriptChange::Fields { session_id, .. }
+                    if session_id == "ephemeral-review-child" && case == "live-collision" =>
+                {
+                    *session_id = "branch-lifecycle-review".into();
+                    edited += 1;
+                    true
+                }
                 TranscriptChange::Lifecycle {
                     session_id,
                     lifecycle: TranscriptLifecycle::Opened { transcript },
@@ -221,6 +270,12 @@ fn assert_closed_child_replays(create: &str) {
         .unwrap();
         assert!(run_in(&source, &dirs.workspace, Some(guard.scope())).is_err());
         let report = guard.finish();
+        assert_eq!(report.applied_file_effects, 0, "{case}");
+        assert_eq!(
+            std::fs::read_to_string(&canary).unwrap(),
+            "unchanged",
+            "{case}"
+        );
         assert_eq!(
             report.served_tool_calls, 0,
             "{case}: a refused tool was not served"

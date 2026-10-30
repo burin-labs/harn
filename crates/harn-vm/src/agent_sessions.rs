@@ -383,6 +383,7 @@ pub(crate) use transcript_lifecycle::settle_assistant_publication;
 pub use transcript_lifecycle::*;
 pub(crate) use transcript_lifecycle::{
     append_event_to_state, canonical_prompt_snapshot, replay_transcript_change,
+    replay_transcript_snapshot,
 };
 pub use types::*;
 pub use workspace_roots::{PreparedWorkspaceRoots, WorkspaceRootsError};
