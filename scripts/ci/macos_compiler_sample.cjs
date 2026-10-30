@@ -90,8 +90,8 @@ async function observe(root, output, run, attempt, sourceCommit, sourceTree) {
   let owner;
   let ready = false;
   process.on('SIGTERM', () => { stopped = true; child?.kill('SIGTERM'); });
-  const command = async (program, args, maxBuffer, stage) => {
-    const pending = hostCommand(program, args, maxBuffer, stage);
+  const command = async (program, args, maxBuffer, stage, timeoutMs) => {
+    const pending = hostCommand(program, args, maxBuffer, stage, timeoutMs);
     child = pending.child;
     try { return await pending.result; }
     finally { child = undefined; }
@@ -126,7 +126,9 @@ async function observe(root, output, run, attempt, sourceCommit, sourceTree) {
         sampled.add(identity);
         const before = performance.now() - started;
         const beganAt = new Date().toISOString();
-        const raw = await command('/usr/bin/sample', [String(target.pid), '2', '10'], 262144, 'sample_command');
+        // Symbolication follows the two-second capture and can exceed the
+        // process-census budget even while the compiler remains responsive.
+        const raw = await command('/usr/bin/sample', [String(target.pid), '2', '10'], 262144, 'sample_command', 30000);
         const stacks = symbolStacks(raw, target);
         if (stopped || !sameProcess(target, (await read()).find(row => row.pid === target.pid))) {
           receipt.refusal = { stage: 'sample_identity', cause: 'changed_or_interrupted' };
