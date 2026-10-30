@@ -77,6 +77,19 @@ pub(super) const TRANSCRIPT_TYPE: &str = "transcript";
 pub(super) const TRANSCRIPT_ASSET_TYPE: &str = "transcript_asset";
 pub(super) const TRANSCRIPT_VERSION: i64 = 2;
 
+/// A persisted initial session state must carry the same envelope produced by
+/// `new_transcript_with_events`, including its session identity.
+pub(crate) fn is_session_transcript_snapshot(value: &serde_json::Value, id: &str) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.get("id").and_then(serde_json::Value::as_str) == Some(id)
+            && object.get("_type").and_then(serde_json::Value::as_str) == Some(TRANSCRIPT_TYPE)
+            && object.get("version").and_then(serde_json::Value::as_i64) == Some(TRANSCRIPT_VERSION)
+            && ["messages", "events", "assets"]
+                .iter()
+                .all(|field| object.get(*field).is_some_and(serde_json::Value::is_array))
+    })
+}
+
 /// Structural JSON representation for values crossing a served-export
 /// boundary. Unlike display-oriented JSON conversion, enum variants retain
 /// their nominal identity and positional payload so an advertised output

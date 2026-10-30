@@ -118,7 +118,12 @@ fn assert_closed_child_replays(create: &str) {
     assert!(!hook_marker.exists(), "the live hook must not run again");
 
     for (case, expected) in [
-        ("missing-open", "is not open"),
+        ("null-open", "invalid initial transcript"),
+        ("wrong-id", "invalid initial transcript"),
+        ("missing-kind", "invalid initial transcript"),
+        ("wrong-version", "invalid initial transcript"),
+        ("missing-messages", "invalid initial transcript"),
+        ("missing-open", "no dispatch-local opening"),
         ("invalid-field", "is not a list to extend"),
         ("missing-close", "1 recorded new session(s) remain open"),
     ] {
@@ -132,6 +137,47 @@ fn assert_closed_child_replays(create: &str) {
                 continue;
             };
             transcript_changes.retain_mut(|change| match change {
+                TranscriptChange::Lifecycle {
+                    session_id,
+                    lifecycle: TranscriptLifecycle::Opened { transcript },
+                } if session_id == "ephemeral-review-child"
+                    && matches!(
+                        case,
+                        "null-open"
+                            | "wrong-id"
+                            | "missing-kind"
+                            | "wrong-version"
+                            | "missing-messages"
+                    ) =>
+                {
+                    match case {
+                        "null-open" => *transcript = serde_json::Value::Null,
+                        "wrong-id" => transcript["id"] = serde_json::json!("another-session"),
+                        "missing-kind" => {
+                            transcript.as_object_mut().unwrap().remove("_type");
+                        }
+                        "wrong-version" => transcript["version"] = serde_json::json!(-1),
+                        "missing-messages" => {
+                            transcript.as_object_mut().unwrap().remove("messages");
+                        }
+                        _ => unreachable!(),
+                    }
+                    edited += 1;
+                    true
+                }
+                TranscriptChange::Fields { session_id, .. }
+                    if session_id == "ephemeral-review-child"
+                        && matches!(
+                            case,
+                            "null-open"
+                                | "wrong-id"
+                                | "missing-kind"
+                                | "wrong-version"
+                                | "missing-messages"
+                        ) =>
+                {
+                    false
+                }
                 TranscriptChange::Lifecycle {
                     session_id,
                     lifecycle: TranscriptLifecycle::Opened { .. },
@@ -174,11 +220,92 @@ fn assert_closed_child_replays(create: &str) {
         .unwrap();
         assert!(run_in(&source, &dirs.workspace, Some(guard.scope())).is_err());
         let report = guard.finish();
+        assert_eq!(
+            report.served_tool_calls, 0,
+            "{case}: a refused tool was not served"
+        );
         let divergence = report.divergence.expect("invalid lifecycle must refuse");
         assert!(
             divergence.detail.contains(expected),
             "{case}: {divergence:?}"
         );
         assert!(!exec_marker.exists());
+    }
+}
+
+#[test]
+fn unsupported_session_lifetimes_are_marked_when_recorded() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    for (case, setup, change, expected) in [
+        (
+            "close-existing",
+            "harness.agent.open(\"existing-child\")",
+            "harness.agent.close(\"existing-child\")",
+            "no dispatch-local opening",
+        ),
+        (
+            "leave-open",
+            "",
+            "harness.agent.open(\"surviving-child\")",
+            "1 recorded new session(s) remain open",
+        ),
+    ] {
+        let dirs = dirs();
+        let hook_marker = dirs.markers.join("hook-marker");
+        let exec_marker = dirs.markers.join("exec-marker");
+        let source = transcript_change_script(&hook_marker, &exec_marker, change).replace(
+            "  let tools = tool_define(",
+            &format!("  {setup}\n  let tools = tool_define("),
+        );
+        if !setup.is_empty() {
+            assert!(source.contains(setup));
+        }
+        record(&source, &dirs.tapes, &dirs.workspace);
+        assert!(
+            exec_marker.exists(),
+            "{case}: recording must run the real tool"
+        );
+        let tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+        let calls: Vec<_> = tape
+            .records
+            .iter()
+            .filter_map(|record| match &record.kind {
+                TapeRecordKind::ToolCall {
+                    unservable,
+                    transcript_changes,
+                    ..
+                } => Some((unservable, transcript_changes)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(calls.len(), 1, "{case}: one dispatch must be recorded");
+        assert!(
+            !calls[0].1.is_empty(),
+            "{case}: lifecycle evidence must exist"
+        );
+        assert!(
+            calls[0]
+                .0
+                .as_deref()
+                .is_some_and(|reason| reason.contains(expected)),
+            "{case}: {calls:?}"
+        );
+        remove_marker(&hook_marker, &dirs.tapes);
+        remove_marker(&exec_marker, &dirs.tapes);
+        let replay = branch(&source, &dirs.tapes, &dirs.workspace, 2);
+        assert!(replay.output.is_err());
+        assert_eq!(replay.report.served_tool_calls, 0);
+        let divergence = replay
+            .report
+            .divergence
+            .expect("unsupported lifecycle refuses");
+        assert!(
+            divergence.detail.contains(expected),
+            "{case}: {divergence:?}"
+        );
+        assert!(
+            !exec_marker.exists(),
+            "{case}: replay must not execute the tool"
+        );
     }
 }
