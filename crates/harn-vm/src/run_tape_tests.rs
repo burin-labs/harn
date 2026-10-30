@@ -8,6 +8,9 @@ mod prompt_locations;
 #[path = "run_tape_overlap_tests.rs"]
 mod overlap;
 
+#[path = "run_tape_session_reset_tests.rs"]
+mod session_reset;
+
 /// Every test that touches the process tape or branch holds this lock: both
 /// are process-global by design.
 static PROCESS_LOCK: Mutex<()> = Mutex::new(());

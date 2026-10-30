@@ -597,7 +597,10 @@ fn read_lines_page_result_builtin(args: &[VmValue], _out: &mut String) -> Result
         Ok(options) => options,
         Err(error) => return Ok(super::result_err(error)),
     };
-    let resolved = super::resolve_fs_path(&path)?;
+    let resolved = match super::resolve_fs_path_result(&path) {
+        Ok(path) => path,
+        Err(error) => return Ok(super::result_err(error)),
+    };
     if let Err(violation) = crate::stdlib::sandbox::check_fs_path_scope(
         &resolved,
         crate::stdlib::sandbox::FsAccess::Read,
@@ -633,7 +636,10 @@ fn read_lines_append_page_result_builtin(
         Ok(options) => options,
         Err(error) => return Ok(super::result_err(error)),
     };
-    let resolved = super::resolve_fs_path(&path)?;
+    let resolved = match super::resolve_fs_path_result(&path) {
+        Ok(path) => path,
+        Err(error) => return Ok(super::result_err(error)),
+    };
     if let Err(violation) = crate::stdlib::sandbox::check_fs_path_scope(
         &resolved,
         crate::stdlib::sandbox::FsAccess::Read,

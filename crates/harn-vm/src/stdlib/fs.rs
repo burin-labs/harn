@@ -96,6 +96,11 @@ fn resolve_fs_path(path: &str) -> Result<PathBuf, VmError> {
     crate::run_tape::workspace_path(crate::stdlib::process::resolve_source_relative_path(path))
 }
 
+fn resolve_fs_path_result(path: &str) -> Result<PathBuf, VmValue> {
+    resolve_fs_path(path)
+        .map_err(|error| io_error_value_with_kind("invalid_input", error.to_string()))
+}
+
 fn result_ok(value: VmValue) -> VmValue {
     VmValue::enum_variant("Result", "Ok", vec![value])
 }
@@ -505,7 +510,10 @@ fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
     if crate::stdlib::asset_paths::stdlib_prompt_asset_path(&path).is_some() {
         return Ok(result_err(unknown_prompt_asset_error_value(&path)));
     }
-    let resolved = resolve_fs_path(&path)?;
+    let resolved = match resolve_fs_path_result(&path) {
+        Ok(path) => path,
+        Err(error) => return Ok(result_err(error)),
+    };
     if let Err(violation) = crate::stdlib::sandbox::check_fs_path_scope(
         &resolved,
         crate::stdlib::sandbox::FsAccess::Read,
