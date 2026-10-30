@@ -272,8 +272,9 @@ paths, and multiple languages. A layout is not evidence that tests ran.
 The Rust scanner API routes Git-backed file discovery and churn scoring through
 `GitCapabilities`. The default hostlib builtin uses the Git CLI only when the
 scan root is inside a worktree; embedders and tests can supply a mock capability
-with `scan_project_with_git` when they need deterministic scanner behavior
-without depending on ambient checkout state.
+with `scan_project_with_git` without depending on ambient checkout state. Its
+file-listing result distinguishes no repository (`Ok(None)`) from a failed
+listing (`Err`).
 
 Producing a `ScanResult` is a read-only operation and the snapshot file lives
 under `.harn/`, which the hostlib treats as a managed directory. Script

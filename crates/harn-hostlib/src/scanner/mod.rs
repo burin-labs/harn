@@ -142,8 +142,27 @@ pub fn discover_test_commands(
     };
     // The command search walks the filesystem itself. Add only the tracked
     // files Git can see through ignore rules, without doing a second walk.
-    let files = discover::git_ls_files(&canonical, &git::CliGitCapabilities).unwrap_or_default();
-    commands::detect_test_commands(&canonical, options, &files, layout_profiles)
+    let (files, git_error) = match discover::git_ls_files(&canonical, &git::CliGitCapabilities) {
+        Ok(files) => (files.unwrap_or_default(), None),
+        Err(detail) => (Vec::new(), Some(detail)),
+    };
+    test_commands_with_git_status(&canonical, options, &files, layout_profiles, git_error)
+}
+
+fn test_commands_with_git_status(
+    root: &Path,
+    options: discover::DiscoverOptions,
+    files: &[discover::DiscoveredFile],
+    profiles: &[TestLayoutProfile],
+    git_error: Option<String>,
+) -> TestCommandDiscovery {
+    let discovery = commands::detect_test_commands(root, options, files, profiles);
+    match (discovery, git_error) {
+        (TestCommandDiscovery::Complete { .. }, Some(detail)) => {
+            TestCommandDiscovery::Unavailable { detail }
+        }
+        (discovery, _) => discovery,
+    }
 }
 
 /// Run a full scan of `root`, persist a snapshot, and return the result.
@@ -166,12 +185,13 @@ pub fn scan_project_with_git(
         include_hidden: opts.include_hidden,
         ignore_policy: opts.ignore_policy,
     };
-    let mut discovered = discover::discover_files(&canonical, discover_opts, git);
-    let test_commands = commands::detect_test_commands(
+    let (mut discovered, git_error) = discover::discover_files(&canonical, discover_opts, git);
+    let test_commands = test_commands_with_git_status(
         &canonical,
         discover_opts,
         &discovered,
         &opts.layout_profiles,
+        git_error,
     );
     let truncated = if opts.max_files > 0 && discovered.len() > opts.max_files {
         discovered.truncate(opts.max_files);
@@ -275,9 +295,14 @@ pub fn scan_incremental_with_git(
         include_hidden: opts.include_hidden,
         ignore_policy: opts.ignore_policy,
     };
-    let mut current = discover::discover_files(&canonical, discover_opts, git);
-    let test_commands =
-        commands::detect_test_commands(&canonical, discover_opts, &current, &opts.layout_profiles);
+    let (mut current, git_error) = discover::discover_files(&canonical, discover_opts, git);
+    let test_commands = test_commands_with_git_status(
+        &canonical,
+        discover_opts,
+        &current,
+        &opts.layout_profiles,
+        git_error,
+    );
     if opts.max_files > 0 && current.len() > opts.max_files {
         current.truncate(opts.max_files);
     }

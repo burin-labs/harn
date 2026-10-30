@@ -307,6 +307,65 @@ fn discovery_only_matches_full_scan_and_rechecks_without_a_snapshot() {
 }
 
 #[test]
+fn discovery_reports_an_unreadable_git_index_instead_of_a_false_empty_search() {
+    let tmp = tempdir().unwrap();
+    assert!(std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(tmp.path())
+        .status()
+        .unwrap()
+        .success());
+    let empty = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &[]);
+    assert!(
+        matches!(empty, TestCommandDiscovery::Complete { commands, .. } if commands.is_empty())
+    );
+    write(tmp.path(), ".gitignore", "test_value.py\n");
+    write(tmp.path(), "test_value.py", "def test_value(): pass\n");
+    assert!(std::process::Command::new("git")
+        .args(["add", "-f", "test_value.py"])
+        .current_dir(tmp.path())
+        .status()
+        .unwrap()
+        .success());
+    let before = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &[]);
+    assert!(
+        matches!(before, TestCommandDiscovery::Complete { commands, .. }
+        if commands.contains_key("python -m pytest"))
+    );
+    let opts = ScanProjectOptions {
+        include_git_history: false,
+        ..ScanProjectOptions::default()
+    };
+    let full_before = scan_project(tmp.path(), opts.clone());
+    assert!(matches!(
+        full_before.project.test_command_discovery,
+        TestCommandDiscovery::Complete { .. }
+    ));
+    let index = fs::read(tmp.path().join(".git/index")).unwrap();
+    fs::write(tmp.path().join(".git/index"), b"corrupt index").unwrap();
+    let failed = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &[]);
+    assert!(
+        matches!(failed, TestCommandDiscovery::Unavailable { .. }),
+        "{failed:?}"
+    );
+    let incremental = scan_incremental(&full_before.snapshot_token, None, opts.clone());
+    assert!(matches!(
+        incremental.result.project.test_command_discovery,
+        TestCommandDiscovery::Unavailable { .. }
+    ));
+    let full_failed = scan_project(tmp.path(), opts.clone());
+    assert!(matches!(
+        full_failed.project.test_command_discovery,
+        TestCommandDiscovery::Unavailable { .. }
+    ));
+    fs::write(tmp.path().join(".git/index"), index).unwrap();
+    let recovered = scan_incremental(&full_failed.snapshot_token, None, opts);
+    assert!(
+        matches!(recovered.result.project.test_command_discovery, TestCommandDiscovery::Complete { commands, .. } if commands.contains_key("python -m pytest"))
+    );
+}
+
+#[test]
 fn discovery_only_finds_a_git_tracked_test_matched_by_ignore() {
     let tmp = tempdir().unwrap();
     write(tmp.path(), ".gitignore", "test_app.py\n");
@@ -761,8 +820,8 @@ struct MockGit {
 }
 
 impl GitCapabilities for MockGit {
-    fn list_files(&self, _root: &Path) -> Option<Vec<String>> {
-        self.files.clone()
+    fn list_files(&self, _root: &Path) -> Result<Option<Vec<String>>, String> {
+        Ok(self.files.clone())
     }
 
     fn churn_scores(&self, _root: &Path) -> std::collections::BTreeMap<String, f64> {

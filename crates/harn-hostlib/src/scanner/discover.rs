@@ -35,12 +35,16 @@ pub fn discover_files(
     root: &Path,
     opts: DiscoverOptions,
     git: &dyn GitCapabilities,
-) -> Vec<DiscoveredFile> {
-    let mut files = git_ls_files(root, git).unwrap_or_else(|| walk_files(root, opts));
+) -> (Vec<DiscoveredFile>, Option<String>) {
+    let (mut files, git_error) = match git_ls_files(root, git) {
+        Ok(Some(files)) => (files, None),
+        Ok(None) => (walk_files(root, opts), None),
+        Err(error) => (walk_files(root, opts), Some(error)),
+    };
     files.retain(|entry| should_include(&entry.relative_path));
     files.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
     files.dedup_by(|a, b| a.relative_path == b.relative_path);
-    files
+    (files, git_error)
 }
 
 /// Tunable knobs for [`discover_files`].
@@ -52,15 +56,18 @@ pub struct DiscoverOptions {
     pub ignore_policy: IgnorePolicy,
 }
 
-pub(super) fn git_ls_files(root: &Path, git: &dyn GitCapabilities) -> Option<Vec<DiscoveredFile>> {
-    let paths = git.list_files(root)?;
+pub(super) fn git_ls_files(
+    root: &Path,
+    git: &dyn GitCapabilities,
+) -> Result<Option<Vec<DiscoveredFile>>, String> {
+    let Some(paths) = git.list_files(root)? else {
+        return Ok(None);
+    };
     let mut entries = Vec::new();
-    let mut saw_path = false;
     for path in paths {
         if path.is_empty() {
             continue;
         }
-        saw_path = true;
         if !should_traverse(&path) {
             continue;
         }
@@ -69,11 +76,7 @@ pub(super) fn git_ls_files(root: &Path, git: &dyn GitCapabilities) -> Option<Vec
             relative_path: path,
         });
     }
-    if saw_path {
-        Some(entries)
-    } else {
-        None
-    }
+    Ok(Some(entries))
 }
 
 fn walk_files(root: &Path, opts: DiscoverOptions) -> Vec<DiscoveredFile> {
@@ -143,7 +146,8 @@ mod tests {
         fs::write(root.join("README.md"), "# hi").unwrap();
         fs::write(root.join("node_modules/foo/bar.js"), "x").unwrap();
 
-        let files = discover_files(root, DiscoverOptions::default(), &NoGit);
+        let (files, error) = discover_files(root, DiscoverOptions::default(), &NoGit);
+        assert!(error.is_none());
         let names: Vec<_> = files.iter().map(|f| f.relative_path.as_str()).collect();
         assert!(names.contains(&"src/main.rs"));
         assert!(names.contains(&"README.md"));
@@ -161,7 +165,8 @@ mod tests {
         let git = MockGit {
             files: vec!["src/tracked.rs".to_string()],
         };
-        let files = discover_files(root, DiscoverOptions::default(), &git);
+        let (files, error) = discover_files(root, DiscoverOptions::default(), &git);
+        assert!(error.is_none());
         let names: Vec<_> = files.iter().map(|f| f.relative_path.as_str()).collect();
         assert_eq!(names, vec!["src/tracked.rs"]);
     }
@@ -169,8 +174,8 @@ mod tests {
     struct NoGit;
 
     impl GitCapabilities for NoGit {
-        fn list_files(&self, _root: &Path) -> Option<Vec<String>> {
-            None
+        fn list_files(&self, _root: &Path) -> Result<Option<Vec<String>>, String> {
+            Ok(None)
         }
 
         fn churn_scores(&self, _root: &Path) -> std::collections::BTreeMap<String, f64> {
@@ -183,8 +188,8 @@ mod tests {
     }
 
     impl GitCapabilities for MockGit {
-        fn list_files(&self, _root: &Path) -> Option<Vec<String>> {
-            Some(self.files.clone())
+        fn list_files(&self, _root: &Path) -> Result<Option<Vec<String>>, String> {
+            Ok(Some(self.files.clone()))
         }
 
         fn churn_scores(&self, _root: &Path) -> std::collections::BTreeMap<String, f64> {

@@ -9,8 +9,8 @@ use std::path::Path;
 
 /// Git data needed by the scanner.
 pub trait GitCapabilities {
-    /// Return tracked and untracked file paths relative to `root`.
-    fn list_files(&self, root: &Path) -> Option<Vec<String>>;
+    /// Return paths, no repository, or an error when the listing is unavailable.
+    fn list_files(&self, root: &Path) -> Result<Option<Vec<String>>, String>;
 
     /// Return normalized 0..1 churn scores keyed by paths relative to `root`.
     fn churn_scores(&self, root: &Path) -> BTreeMap<String, f64>;
@@ -21,12 +21,14 @@ pub trait GitCapabilities {
 pub struct CliGitCapabilities;
 
 impl GitCapabilities for CliGitCapabilities {
-    fn list_files(&self, root: &Path) -> Option<Vec<String>> {
+    fn list_files(&self, root: &Path) -> Result<Option<Vec<String>>, String> {
         if !has_git_repository_marker(root) {
-            return None;
+            return Ok(None);
         }
 
-        let mut cmd = harn_vm::process_sandbox::session_std_command("git").ok()?;
+        let unavailable = || "Could not inspect Git-tracked files.".to_string();
+        let mut cmd =
+            harn_vm::process_sandbox::session_std_command("git").map_err(|_| unavailable())?;
         super::strip_ambient_git_env(&mut cmd);
         // `-c core.quotepath=false` keeps non-ASCII paths as literal UTF-8
         // instead of C-quoted (`"src/caf\303\251.rs"`); `-z` NUL-delimits the
@@ -36,7 +38,7 @@ impl GitCapabilities for CliGitCapabilities {
                 "-c",
                 "core.quotepath=false",
                 "-C",
-                root.to_str()?,
+                root.to_str().ok_or_else(unavailable)?,
                 "ls-files",
                 "--cached",
                 "--others",
@@ -44,21 +46,17 @@ impl GitCapabilities for CliGitCapabilities {
                 "-z",
             ])
             .output()
-            .ok()?;
+            .map_err(|_| unavailable())?;
         if !output.status.success() {
-            return None;
+            return Err(unavailable());
         }
-        let stdout = String::from_utf8(output.stdout).ok()?;
+        let stdout = String::from_utf8(output.stdout).map_err(|_| unavailable())?;
         let entries: Vec<String> = stdout
             .split('\0')
             .filter(|entry| !entry.is_empty())
             .map(str::to_string)
             .collect();
-        if entries.is_empty() {
-            None
-        } else {
-            Some(entries)
-        }
+        Ok(Some(entries))
     }
 
     fn churn_scores(&self, root: &Path) -> BTreeMap<String, f64> {
@@ -199,7 +197,10 @@ mod tests {
         fs::write(root.join("src/café.rs"), b"fn main() {}\n").unwrap();
         git_in(root, &["add", "."]);
 
-        let files = CliGitCapabilities.list_files(root).expect("some files");
+        let files = CliGitCapabilities
+            .list_files(root)
+            .expect("git listing")
+            .expect("some files");
         assert!(
             files.iter().any(|f| f == "src/café.rs"),
             "expected literal UTF-8 path, got {files:?}"
