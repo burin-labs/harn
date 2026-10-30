@@ -519,6 +519,7 @@ pub fn set_transcript_budget_policy(
 
 /// Clear the calling thread's session store and its process-global sidecars.
 pub fn reset_session_store() {
+    crate::run_tape::note_session_store_reset();
     let retired = SESSIONS.with(|s| retire_all_session_states(&mut s.borrow_mut()));
     let mut owned_session_ids: HashSet<String> = retired
         .into_iter()

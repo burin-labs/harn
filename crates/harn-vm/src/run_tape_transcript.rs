@@ -15,22 +15,47 @@ tokio::task_local! {
     /// The transcript changes made while the innermost recorded tool
     /// dispatch runs.
     static DISPATCH_CHANGES: Arc<Mutex<Vec<TranscriptChange>>>;
+    static DISPATCH_REFUSAL: Arc<Mutex<Option<String>>>;
 }
 
 /// Run a live tool dispatch and return it with every transcript change it
 /// made. An enclosing recorded dispatch keeps them too.
-pub(super) async fn capture<F: std::future::Future>(live: F) -> (F::Output, Vec<TranscriptChange>) {
+pub(super) async fn capture<F: std::future::Future>(
+    live: F,
+) -> (F::Output, Vec<TranscriptChange>, Option<String>) {
     let parent = DISPATCH_CHANGES.try_with(Arc::clone).ok();
+    let parent_refusal = DISPATCH_REFUSAL.try_with(Arc::clone).ok();
     let frame = Arc::new(Mutex::new(Vec::new()));
-    let output = DISPATCH_CHANGES.scope(frame.clone(), live).await;
+    let refusal = Arc::new(Mutex::new(None));
+    let output = DISPATCH_REFUSAL
+        .scope(refusal.clone(), DISPATCH_CHANGES.scope(frame.clone(), live))
+        .await;
     let captured = std::mem::take(&mut *frame.lock().expect("transcript frame poisoned"));
+    let refusal = refusal.lock().expect("dispatch refusal poisoned").take();
     if let Some(parent) = parent {
         parent
             .lock()
             .expect("transcript frame poisoned")
             .extend(captured.iter().cloned());
     }
-    (output, captured)
+    if let (Some(parent), Some(reason)) = (parent_refusal, &refusal) {
+        parent
+            .lock()
+            .expect("dispatch refusal poisoned")
+            .get_or_insert_with(|| reason.clone());
+    }
+    (output, captured, refusal)
+}
+
+pub(crate) fn note_session_store_reset() {
+    let _ = DISPATCH_REFUSAL.try_with(|refusal| {
+        refusal
+            .lock()
+            .expect("dispatch refusal poisoned")
+            .get_or_insert_with(|| {
+                "the dispatch resets session runtime state beyond recorded transcripts".to_string()
+            });
+    });
 }
 
 /// Note that session `session_id`'s transcript went from `before` to `after`,

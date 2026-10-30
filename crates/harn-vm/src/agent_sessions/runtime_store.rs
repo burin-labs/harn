@@ -151,11 +151,16 @@ pub(super) fn retire_all_session_states(
     let mut inputs = std::mem::take(&mut *runtime.inputs.write());
     let mut retired = sessions
         .drain()
-        .map(|(id, _)| RetiredSession {
-            inputs: inputs.remove(&id),
-            spill_dir:
-                crate::llm::agent_host_primitives::tool_result_budget::take_session_spill_dir(&id),
-            id,
+        .map(|(id, _)| {
+            crate::run_tape::note_session_closed(&id);
+            RetiredSession {
+                inputs: inputs.remove(&id),
+                spill_dir:
+                    crate::llm::agent_host_primitives::tool_result_budget::take_session_spill_dir(
+                        &id,
+                    ),
+                id,
+            }
         })
         .collect::<Vec<_>>();
     retired.extend(inputs.into_iter().map(|(id, inputs)| RetiredSession {
