@@ -161,7 +161,7 @@ pub use introspection::{host_confinement, SANDBOX_CONFINEMENT_SCHEMA};
 pub(crate) use locked_append::AppendLockOptions;
 pub(crate) use policy::allows_network as policy_allows_network;
 pub(crate) use replace::{
-    atomic_replace_scoped_at_open_unlocked, atomic_write_scoped_at_open,
+    apply_effect, atomic_replace_scoped_at_open_unlocked, atomic_write_scoped_at_open,
     read_for_replace_scoped_at_open,
 };
 pub use workspace_env::{
@@ -284,76 +284,6 @@ pub(crate) fn append_locked_scoped_at_open(
         return locked_append::append_locked_unscoped(path, contents, options);
     };
     locked_append::append_locked_scoped_target(&target, contents, options)
-}
-
-/// Apply one recorded run-tape file effect beneath its workspace root.
-///
-/// The branch owns the root rather than the execution policy. Reuse scoped
-/// mutations so a planted symlink cannot redirect an effect outside it.
-#[cfg(any(unix, windows))]
-pub(crate) fn apply_workspace_effect(
-    root: &Path,
-    relative: &Path,
-    contents: Option<&[u8]>,
-) -> io::Result<()> {
-    let target = ScopedMutationTarget {
-        root: root.to_path_buf(),
-        relative: relative.to_path_buf(),
-    };
-    match contents {
-        Some(contents) => replace::atomic_replace_scoped_target(
-            &target,
-            contents,
-            crate::atomic_io::AtomicWriteDurability::Flush,
-            true,
-        )
-        .map(|_| ()),
-        None => remove_workspace_effect(&target),
-    }
-}
-
-#[cfg(unix)]
-fn remove_workspace_effect(target: &ScopedMutationTarget) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
-
-    let (parent, file_name) = match open_parent_dir_scoped(target) {
-        Ok(parent) => parent,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    match unlinkat_name(parent.as_raw_fd(), &file_name, 0) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-#[cfg(windows)]
-fn remove_workspace_effect(target: &ScopedMutationTarget) -> io::Result<()> {
-    let (parent, file_name) = match win_scoped_parent(target, false) {
-        Ok(parent) => parent,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    let full = parent.join(file_name);
-    win_reject_reparse_leaf(&full)?;
-    match std::fs::remove_file(full) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-#[cfg(all(not(unix), not(windows)))]
-pub(crate) fn apply_workspace_effect(
-    _root: &Path,
-    _relative: &Path,
-    _contents: Option<&[u8]>,
-) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "safe replay effects are unsupported on this platform",
-    ))
 }
 
 pub(crate) fn copy_scoped_at_open(builtin: &str, src: &Path, dst: &Path) -> io::Result<u64> {

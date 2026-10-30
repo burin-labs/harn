@@ -305,12 +305,14 @@ fn surface_digest(surface: &serde_json::Map<String, serde_json::Value>) -> Strin
     )))
 }
 
-fn redact_tape_json(value: &mut serde_json::Value) {
+fn redact_tape_json(value: &mut serde_json::Value) -> bool {
     let original = value.clone();
     crate::redact::current_policy().redact_json_in_place(value);
-    if *value != original {
+    let changed = *value != original;
+    if changed {
         record_payload_redaction();
     }
+    changed
 }
 
 fn record_payload_redaction() {
@@ -320,9 +322,13 @@ fn record_payload_redaction() {
 }
 
 pub(super) fn redacted_tape_json_bytes(value: &impl Serialize) -> Vec<u8> {
-    let mut value = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
-    redact_tape_json(&mut value);
-    crate::canonical_json::to_vec(&value)
+    let mut redacted = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
+    if redact_tape_json(&mut redacted) {
+        crate::canonical_json::to_vec(&redacted)
+    } else {
+        // Preserve existing payload identities when no sanitization was needed.
+        serde_json::to_vec(value).unwrap_or_default()
+    }
 }
 
 pub(super) fn redacted_tape_text(value: &str) -> String {
@@ -337,7 +343,9 @@ fn redact_transcript_changes(changes: &mut [TranscriptChange]) {
     for change in changes {
         for value in change.fields.values_mut() {
             match value {
-                crate::testbench::tape::FieldChange::Set(value) => redact_tape_json(value),
+                crate::testbench::tape::FieldChange::Set(value) => {
+                    redact_tape_json(value);
+                }
                 crate::testbench::tape::FieldChange::Append(values) => {
                     for value in values {
                         redact_tape_json(value);
@@ -369,14 +377,14 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
     // A testbench tape is always full, so a digest mismatch can name its field.
     let full = level == RecordingLevel::Full;
     let recording_surface = if full {
-        let mut value = serde_json::Value::Object(surface.clone());
+        let mut value = serde_json::Value::Object(surface);
         redact_tape_json(&mut value);
         match value {
             serde_json::Value::Object(surface) => surface,
             _ => unreachable!("redacting an object preserves its outer shape"),
         }
     } else {
-        surface.clone()
+        surface
     };
     let attribution = match (&tape, call_index) {
         (Some(tape), Some(index)) if full => Some(
@@ -1339,7 +1347,7 @@ fn apply_effect(root: &Path, path: &str, content: Option<&[u8]>) -> Result<(), S
         return Err(format!("refusing effect outside the workspace: {path}"));
     }
     let target = root.join(relative);
-    crate::stdlib::sandbox::apply_workspace_effect(root, relative, content)
+    crate::stdlib::sandbox::apply_effect(root, relative, content)
         .map_err(|err| format!("apply {}: {err}", target.display()))
 }
 
