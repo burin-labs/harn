@@ -118,10 +118,16 @@ pub(crate) fn compile_one(module: &str, source: &str) -> Result<CompiledStdlibAr
     );
     let context = module_compilation_context_for_source(&synthetic, source)
         .map_err(|error| error.to_string())?;
-    let artifact = compile_embedded_stdlib_module_artifact_from_source_with_context(
+    let mut artifact = compile_embedded_stdlib_module_artifact_from_source_with_context(
         &synthetic, source, &context,
     )
     .map_err(|error| error.to_string())?;
+    // The loader rebinds this diagnostic location to the requested alias.
+    // Store its content identity so equal keys have identical immutable bytes.
+    artifact.bind_source_file(&PathBuf::from(format!(
+        "<stdlib>/{}",
+        key.module_filename()
+    )));
     let bytes = bytecode_cache::serialize_module_artifact(&key, &artifact)
         .map_err(|error| error.to_string())?;
     Ok(CompiledStdlibArtifact {
@@ -142,8 +148,8 @@ mod tests {
         let second = compile_one("alias/second", "pub fn answer() -> int { return 42 }")
             .expect("compile second logical module");
         assert_eq!(first.file_name, second.file_name);
-        assert_eq!(
-            first.bytes, second.bytes,
+        assert!(
+            first.bytes == second.bytes,
             "content artifacts must be relocatable"
         );
         let unique =
