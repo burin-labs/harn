@@ -9,6 +9,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 mod links;
+mod storage;
 
 /// Resource ceilings checked while reading, including ignored files.
 #[derive(Clone, Copy, Debug)]
@@ -39,7 +40,7 @@ impl Default for SeedLimits {
 pub struct SeedReceipt {
     /// Versioned receipt contract.
     pub schema: &'static str,
-    /// Digest of sorted paths, file contents and file permission bits.
+    /// Digest of sorted paths, contents, links and file/directory permissions.
     pub sha256: String,
     /// Regular files actually read.
     pub files: usize,
@@ -92,7 +93,7 @@ pub enum SeedError {
 /// execution and its child processes have stopped; cancellation belongs to
 /// the session owner. Dropping this value retires both directories.
 pub struct ReplayWorkspace {
-    storage: tempfile::TempDir,
+    storage: storage::PrivateStorage,
     workspace: PathBuf,
     receipt: SeedReceipt,
     limits: SeedLimits,
@@ -101,12 +102,15 @@ pub struct ReplayWorkspace {
 impl ReplayWorkspace {
     /// Capture all regular files and internal relative links, including ignored
     /// and untracked files. External links and special files refuse. Directory
-    /// structure and file permissions are retained, not directory timestamps.
+    /// structure and permissions are retained, not directory timestamps or ACLs.
     pub fn capture(source: &Path, limits: SeedLimits) -> Result<Self, SeedError> {
         Self::capture_in(source, &std::env::temp_dir(), limits)
     }
 
     /// Place private storage under an existing directory outside the source.
+    /// On Windows the caller must supply a parent whose ACL restricts access
+    /// to the current user; child directories inherit that ACL. Unix storage
+    /// is created with mode 0700 even when the parent is shared.
     pub fn capture_in(
         source: &Path,
         storage_parent: &Path,
@@ -125,10 +129,17 @@ impl ReplayWorkspace {
             });
         }
         let original = open_dir(source)?;
-        let storage = tempfile::Builder::new()
-            .prefix("harn-replay-")
-            .tempdir_in(storage_parent)
-            .map_err(|error| io("create private storage", storage_parent, error))?;
+        let mut builder = tempfile::Builder::new();
+        builder.prefix("harn-replay-");
+        #[cfg(unix)]
+        builder.permissions(
+            <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o700),
+        );
+        let storage = storage::PrivateStorage(
+            builder
+                .tempdir_in(storage_parent)
+                .map_err(|error| io("create private storage", storage_parent, error))?,
+        );
         let parent = open_dir(storage.path())?;
         parent
             .create_dir("seed")
@@ -174,10 +185,12 @@ impl ReplayWorkspace {
         let seed = parent
             .open_dir("seed")
             .map_err(|error| io("open", Path::new("seed"), error))?;
-        let staging = tempfile::Builder::new()
-            .prefix("restore-")
-            .tempdir_in(self.storage.path())
-            .map_err(|error| io("create staging", self.storage.path(), error))?;
+        let staging = storage::PrivateStorage(
+            tempfile::Builder::new()
+                .prefix("restore-")
+                .tempdir_in(self.storage.path())
+                .map_err(|error| io("create staging", self.storage.path(), error))?,
+        );
         let next = open_dir(staging.path())?;
         if copy_and_measure(&seed, Some(&next), self.limits)? != self.receipt {
             return Err(SeedError::SeedChanged);
@@ -205,6 +218,13 @@ impl ReplayWorkspace {
                 })?;
             return Err(io("publish restored copy", &self.workspace, error));
         }
+        storage::make_child_removable(&parent, Path::new("previous")).map_err(|error| {
+            io(
+                "prepare retired copy for removal",
+                Path::new("previous"),
+                error,
+            )
+        })?;
         parent.remove_dir_all("previous").map_err(|error| {
             io(
                 "remove retired copy after successful restore",
@@ -219,7 +239,9 @@ impl ReplayWorkspace {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Entry {
-    Directory,
+    Directory {
+        mode: u32,
+    },
     Link {
         target: String,
         directory: bool,
@@ -265,6 +287,12 @@ fn copy_and_measure(
     let mut pending = vec![PathBuf::new()];
     let mut files = 0;
     let mut bytes = 0u64;
+    let root_permissions = source
+        .dir_metadata()
+        .map_err(|error| io("inspect root", Path::new("."), error))?
+        .permissions();
+    let root_mode = directory_permission_mode(&root_permissions);
+    let mut directories = Vec::new();
     while let Some(directory) = pending.pop() {
         let entries = source
             .read_dir(if directory.as_os_str().is_empty() {
@@ -304,8 +332,10 @@ fn copy_and_measure(
                         .create_dir(&path)
                         .map_err(|error| io("create directory", &path, error))?;
                 }
+                let mode = directory_permission_mode(&metadata.permissions());
+                directories.push((path.clone(), metadata.permissions()));
                 pending.push(path);
-                manifest.insert(name, Entry::Directory);
+                manifest.insert(name, Entry::Directory { mode });
             } else if metadata.is_file() {
                 limit("file bytes", metadata.len(), limits.max_file_bytes)?;
                 let mut file = source
@@ -371,7 +401,20 @@ fn copy_and_measure(
             }
         }
     }
-    let identity = serde_json::to_vec(&manifest).expect("seed manifest is serializable");
+    if let Some(target) = destination {
+        // Populate children before reinstating read-only parent directories.
+        directories.sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
+        for (path, permissions) in directories {
+            target
+                .set_permissions(&path, permissions)
+                .map_err(|error| io("set directory permissions", &path, error))?;
+        }
+        target
+            .set_permissions(".", root_permissions)
+            .map_err(|error| io("set root permissions", Path::new("."), error))?;
+    }
+    let identity =
+        serde_json::to_vec(&(root_mode, &manifest)).expect("seed manifest is serializable");
     Ok(SeedReceipt {
         schema: "harn.workspace-seed.v1",
         sha256: hex::encode(Sha256::digest(&identity)),
@@ -384,6 +427,17 @@ fn copy_and_measure(
 #[cfg(unix)]
 fn permission_mode(permissions: &Permissions) -> u32 {
     cap_std::fs::PermissionsExt::mode(permissions) & 0o777
+}
+
+fn directory_permission_mode(permissions: &Permissions) -> u32 {
+    #[cfg(unix)]
+    {
+        cap_std::fs::PermissionsExt::mode(permissions) & 0o7777
+    }
+    #[cfg(not(unix))]
+    {
+        permission_mode(permissions)
+    }
 }
 
 #[cfg(not(unix))]

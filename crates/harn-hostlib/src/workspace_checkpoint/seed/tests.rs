@@ -1,6 +1,70 @@
 use super::*;
 use std::fs;
 
+#[cfg(unix)]
+#[test]
+fn private_storage_stays_private_under_an_ordinary_umask() {
+    use std::os::unix::fs::PermissionsExt;
+    const CHILD: &str = "HARN_SEED_UMASK_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let evidence = tempfile::tempdir().unwrap();
+        let marker = evidence.path().join("completed");
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "workspace_checkpoint::seed::tests::private_storage_stays_private_under_an_ordinary_umask", "--nocapture"])
+            .env(CHILD, &marker)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_eq!(
+            fs::read_to_string(marker).unwrap(),
+            "capture and restore verified"
+        );
+        return;
+    }
+    // Only this isolated test process changes its process-wide creation mask.
+    unsafe {
+        libc::umask(0o022);
+    }
+    let parent = tempfile::tempdir().unwrap();
+    fs::set_permissions(parent.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    let source = tempfile::tempdir().unwrap();
+    fs::set_permissions(source.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(source.path().join("canary"), "harmless private seed canary").unwrap();
+    fs::set_permissions(
+        source.path().join("canary"),
+        fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+    let mut replay =
+        ReplayWorkspace::capture_in(source.path(), parent.path(), SeedLimits::default()).unwrap();
+    assert_eq!(
+        fs::metadata(replay.storage.path())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert_eq!(
+        fs::read_to_string(replay.path().join("canary")).unwrap(),
+        "harmless private seed canary"
+    );
+    replay.restore().unwrap();
+    assert_eq!(
+        fs::metadata(replay.storage.path())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    fs::write(
+        std::env::var_os(CHILD).unwrap(),
+        "capture and restore verified",
+    )
+    .unwrap();
+}
+
 #[test]
 fn restores_the_complete_private_copy_at_the_same_path() {
     let source = tempfile::tempdir().unwrap();
@@ -176,4 +240,81 @@ fn executable_permissions_and_backslash_names_survive_restore() {
             & 0o777,
         0o755
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn directory_permissions_survive_restore_and_private_cleanup() {
+    use std::os::unix::fs::PermissionsExt;
+    let source = tempfile::tempdir().unwrap();
+    fs::create_dir_all(source.path().join("readonly/child")).unwrap();
+    fs::write(source.path().join("readonly/child/file"), "unchanged").unwrap();
+    fs::set_permissions(
+        source.path().join("readonly"),
+        fs::Permissions::from_mode(0o555),
+    )
+    .unwrap();
+    fs::set_permissions(source.path(), fs::Permissions::from_mode(0o750)).unwrap();
+    let mut replay = ReplayWorkspace::capture(source.path(), SeedLimits::default()).unwrap();
+    let storage = replay.storage.path().to_path_buf();
+    for restored in [false, true] {
+        if restored {
+            replay.restore().unwrap();
+        }
+        assert_eq!(
+            fs::metadata(replay.path()).unwrap().permissions().mode() & 0o777,
+            0o750
+        );
+        assert_eq!(
+            fs::metadata(replay.path().join("readonly"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o555
+        );
+        assert!(fs::write(replay.path().join("readonly/new"), "must refuse").is_err());
+        assert_eq!(
+            fs::read_to_string(replay.path().join("readonly/child/file")).unwrap(),
+            "unchanged"
+        );
+    }
+    let outside = tempfile::tempdir().unwrap();
+    fs::write(outside.path().join("canary"), "outside the trial").unwrap();
+    fs::set_permissions(outside.path(), fs::Permissions::from_mode(0o555)).unwrap();
+    std::os::unix::fs::symlink(outside.path(), replay.path().join("outside")).unwrap();
+    fs::set_permissions(
+        replay.path().join("readonly/child"),
+        fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
+    fs::set_permissions(replay.path(), fs::Permissions::from_mode(0o000)).unwrap();
+    replay.restore().unwrap();
+    assert_eq!(
+        fs::metadata(outside.path()).unwrap().permissions().mode() & 0o777,
+        0o555
+    );
+    assert_eq!(
+        fs::read_to_string(outside.path().join("canary")).unwrap(),
+        "outside the trial"
+    );
+    fs::set_permissions(outside.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(
+        fs::read_to_string(replay.path().join("readonly/child/file")).unwrap(),
+        "unchanged"
+    );
+    // Directory-only tampering must change seed identity before replacement.
+    fs::set_permissions(
+        replay.storage.path().join("seed/readonly"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    assert!(matches!(replay.restore(), Err(SeedError::SeedChanged)));
+    drop(replay);
+    assert!(!storage.exists());
+    fs::set_permissions(
+        source.path().join("readonly"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
 }

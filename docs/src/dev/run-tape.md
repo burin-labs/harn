@@ -74,7 +74,7 @@ and a disposable working copy. `path()` names the same working directory
 after every `restore()`. Stop the previous session and its children before
 restoring; the workspace owner does not cancel execution.
 
-Capture includes ignored and untracked regular files, empty directories, file
+Capture includes ignored and untracked regular files, empty directories, file and directory
 permission bits, and relative symbolic links that resolve inside the source.
 External or broken links, special files, and non-UTF-8 paths refuse. Source
 content is measured twice before publishing the copy. `SeedLimits` bounds
@@ -82,10 +82,15 @@ entry count, depth, per-file content, and total bytes; its defaults allow
 100,000 entries, depth 128, 128 MiB per file, and 1 GiB overall.
 
 `receipt()` reports the observed entries, regular files, bytes, and a SHA-256
-identity covering sorted paths, contents, link targets, and file permissions.
+identity covering sorted paths, contents, link targets, and file and directory permissions.
 Restore verifies that identity before replacing the working copy. A changed
 seed leaves the previous working copy available. Dropping the owner deletes
 its private storage without changing the source.
+
+Unix storage is created with owner-only access, including under shared temporary
+directories. On Windows, the storage parent must have a user-private ACL; child
+directories inherit it. `capture_in` callers must supply that protected parent.
+Source ACLs, ownership, and timestamps are not copied.
 
 Offline coding replay uses this owner for its file-only fixtures and includes
 the seed receipt in trial evidence. Its effect oracle still rejects symbolic
