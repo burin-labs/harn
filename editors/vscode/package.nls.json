@@ -1,0 +1,17 @@
+{
+  "displayName": "Harn Language",
+  "description": "Language support for Harn — the pipeline-oriented language for AI agents",
+  "harn.runPipeline": "Harn: Run Pipeline",
+  "harn.formatFile": "Harn: Format File",
+  "harn.applyAllAutofixes": "Harn: Apply All Autofixes",
+  "debug.program": "Path to the .harn file to debug",
+  "debug.cwd": "Working directory for the debug session",
+  "debug.name": "Debug Current Harn File",
+  "harn.path": "Path to the harn binary",
+  "harn.lspPath": "Path to the harn-lsp language server binary",
+  "harn.dapPath": "Path to the harn-dap debug adapter binary",
+  "task.command": "The harn subcommand to invoke.",
+  "task.file": "Path to a .harn script. Defaults to the current file when omitted.",
+  "task.args": "Extra arguments appended after the file path.",
+  "task.cwd": "Working directory for the spawned process."
+}

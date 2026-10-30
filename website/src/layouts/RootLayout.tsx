@@ -6,6 +6,7 @@ import { Footer } from "../components/Footer"
 import { SearchModal } from "../components/SearchModal"
 import { KeywordTooltip } from "../components/KeywordTooltip"
 import { useMessages } from "../i18n"
+import { initializeLocale } from "../../../ui/localization"
 
 export function RootLayout() {
   const t = useMessages()
@@ -13,6 +14,8 @@ export function RootLayout() {
   const location = useLocation()
   const openSearch = useCallback(() => setSearchOpen(true), [])
   const closeSearch = useCallback(() => setSearchOpen(false), [])
+
+  useEffect(initializeLocale, [])
 
   // ⌘K / Ctrl-K opens search anywhere.
   useEffect(() => {

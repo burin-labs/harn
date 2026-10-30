@@ -1,0 +1,232 @@
+{
+  "common": {
+    "siteName": "Harn",
+    "github": "GitHub",
+    "language": "语言"
+  },
+  "keywords": {
+    "pipeline": "声明一个命名流水线：一个顶层、可重放的智能体工作单元。",
+    "fn": "定义一个函数。",
+    "let": "绑定一个局部值。",
+    "parallel": "并发运行各次迭代并合并它们的结果。",
+    "for": "按顺序遍历一个集合。",
+    "in": "命名循环所遍历的集合。",
+    "retry": "在失败时重跑该块，最多按给定次数重试。",
+    "spawn": "启动一个并发任务，稍后可对其进行 await。",
+    "llm_call": "调用一个模型。第一个参数是提示，第二个是系统提示。",
+    "log": "将一个值写入运行日志。",
+    "read_file": "通过 harness 读取文件，这是在运行前检查的能力。",
+    "tool_select": "选择模型下一步应调用哪个工具。",
+    "if": "当条件成立时运行该块。",
+    "else": "当匹配的 if 条件为 false 时运行。",
+    "while": "在条件成立时重复运行该块。",
+    "return": "从函数或流水线返回一个值。",
+    "break": "退出最近的循环。",
+    "continue": "跳到下一次循环迭代。"
+  },
+  "banner": {
+    "label": "预发布",
+    "prerelease": "Harn 处于 1.0 之前——语言、标准库和 CLI 可能会在各版本之间发生变化。",
+    "changelogLink": "查看发行说明"
+  },
+  "nav": {
+    "mainNavAria": "主导航",
+    "brandHomeAria": "Harn 主页",
+    "docs": "文档",
+    "reference": "参考",
+    "search": "搜索",
+    "searchAria": "搜索文档",
+    "cmdK": "⌘K",
+    "githubAria": "GitHub 上的 Harn"
+  },
+  "theme": {
+    "toLight": "切换到浅色模式",
+    "toDark": "切换到深色模式"
+  },
+  "search": {
+    "placeholder": "搜索文档…",
+    "esc": "esc",
+    "loading": "加载中…",
+    "noResults": "没有结果。"
+  },
+  "footer": {
+    "tagline": "用于构建和运行 AI 代理的面向流水线的语言。",
+    "docsTitle": "文档",
+    "projectTitle": "项目",
+    "communityTitle": "社区",
+    "introduction": "简介",
+    "gettingStarted": "入门",
+    "languageReference": "语言参考",
+    "cookbook": "食谱",
+    "llmsTxt": "llms.txt",
+    "github": "GitHub",
+    "releases": "发行版",
+    "playground": "试验场",
+    "issues": "问题",
+    "discussions": "讨论",
+    "contributing": "贡献",
+    "copyright": "© {year} Burin Labs。Harn 是开源的。"
+  },
+  "notFound": {
+    "code": "404",
+    "title": "页面未找到",
+    "body": "该页面不存在。它可能已被移动，请尝试搜索或返回文档。",
+    "toDocs": "前往文档",
+    "toHome": "主页"
+  },
+  "docs": {
+    "previous": "上一页",
+    "next": "下一页",
+    "pagerAria": "上一页和下一页",
+    "onThisPage": "本页内容",
+    "editOnGitHub": "在 GitHub 上编辑此页面",
+    "sectionsAria": "文档章节",
+    "sidebarAria": "文档页面",
+    "breadcrumbAria": "面包屑导航",
+    "onThisPageAria": "本页内容",
+    "skipToContent": "跳到内容"
+  },
+  "diagram": {
+    "expand": "展开图表",
+    "overlayAria": "图表查看器",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "resetZoom": "将图表适配到屏幕",
+    "resetZoomLabel": "适配",
+    "close": "关闭图表查看器"
+  },
+  "mockup": {
+    "aria": "作为实时代理运行的 Harn 管道定义",
+    "fileLabel": "review.harn",
+    "runLabel": "harn run",
+    "thought": "正在读取 crates/harn-vm 的 diff…",
+    "toolCall": "llm_call · claude-opus-4-8 · 2 个工具",
+    "findingPrefix": "已标记 3 个问题：在 ",
+    "findingSymbol": "call_closure",
+    "findingSuffix": " 中存在未受保护的 unwrap、缺少边界检查，以及一处过时的文档片段。",
+    "spawn": "spawn agent · deadline 30s",
+    "replay": "确定性回放：已开启",
+    "findings": "3 个发现"
+  },
+  "landing": {
+    "hero": {
+      "headline": "用一种语言构建并运维 AI 代理。",
+      "subhead": "Harn 是一种面向管道的 AI 代理语言。LLM 调用、工具、能力检查、持久化步骤和确定性回放，都是语言和标准库特性，而不是你自己拼接的 SDK。",
+      "getStarted": "开始使用",
+      "forAgents": "面向代理",
+      "readDocs": "阅读文档",
+      "github": "GitHub",
+      "facts": [
+        "开源，使用 Rust 编写",
+        "确定性回放",
+        "默认具备能力安全",
+        "支持 MCP、ACP 和 A2A"
+      ]
+    },
+    "examples": {
+      "sectionTitle": "完整程序，而非片段",
+      "sectionBody": "请阅读这些示例的结构，而不是主题。在每个示例中，确定性工作都是普通代码，程序会决定某一步是否值得调用模型。它们包含在 CLI 演示包中，并可在离线状态下使用已记录的固定数据运行。",
+      "tablistAria": "可运行的 Harn 示例",
+      "filesAria": "场景文件",
+      "multiFileNote": "此场景包含多个文件。提示词位于相邻的 .harn.prompt 模板中，并通过 render_prompt 加载，就像真实的 Harn 项目布局一样。",
+      "copy": "复制",
+      "copied": "已复制",
+      "copyAria": "复制文件源代码",
+      "viewSource": "查看源代码",
+      "readDocs": "阅读文档",
+      "extendLabel": "打造专属于你的版本",
+      "scenarios": {
+        "review-captain": {
+          "tab": "代码审查代理",
+          "title": "把模型只用在需要判断的地方。",
+          "outcome": "收集差异、统计变更行数并整理收据都是普通代码。只有两个步骤需要做出判断，所以只有这两个步骤会变成模型调用。提示词存放在独立的模板文件中。",
+          "extend": "把硬编码的 diff 换成对你的 forge 的调用，它就能审查真实的拉取请求。无需改动程序就能编辑提示词，或者再加一个第三阶段，在结论为负时阻止合并。"
+        },
+        "merge-captain": {
+          "tab": "PR 分流",
+          "title": "把队列变成你可以采取行动的决策。",
+          "outcome": "每个拉取请求都会被分类为合并、移交或阻止，并以结构化数据而不是散文形式返回，因此下一步是代码，而不是另一个提示。",
+          "extend": "把它指向你的真实队列，并扩展结论集合。由于每个决策都有类型，你可以据此路由：自动合并安全的请求，并将其余请求升级处理。"
+        },
+        "mcp-host": {
+          "tab": "MCP 服务器",
+          "title": "将工具服务器作为程序的一部分来监督。",
+          "outcome": "注册、状态快照和关闭都只是普通语句。工具服务器的生命周期由程序负责，而不是由部署来负责。",
+          "extend": "注册你自己的服务器，并用能力策略对其加以限制，这样自主循环就无法访问你没有交给它的工具。"
+        },
+        "stdlib-toolkit": {
+          "tab": "提示词工具包",
+          "title": "先以确定性方式构建上下文，再询问一次。",
+          "outcome": "克隆、合并、去重、XML 往返转换、换行和缩进都是库调用。提示词最昂贵的部分通常是组装它，而这些组装过程都不需要模型。",
+          "extend": "接入你自己的来源，并把组装留在代码里。你要求模型重建的上下文越少，运行就越便宜，也越可重复。"
+        }
+      }
+    },
+    "features": {
+      "sectionTitle": "内置于语言中的代理运行时",
+      "sectionBody": "编排、安全性和可观测性是 Harn 及其标准库中的基础原语，因此它们是相互协作，而不是彼此冲突。",
+      "pipelines": {
+        "title": "流水线是一等公民",
+        "description": "使用 |> 运算符组合工作。数据流和控制流自上而下可读，编译器会跟踪每个阶段的形状。"
+      },
+      "llms": {
+        "title": "LLM 和工具，内置支持",
+        "description": "llm_call、agent_loop、tool vaults、MCP、reranking 和 ensembles 都是语言原语，而不是需要你手工拼装的外挂式 SDK。"
+      },
+      "capabilities": {
+        "title": "编译期能力安全",
+        "description": "文件系统、网络和进程访问都属于在单行代码运行之前就已检查的能力。自主循环中不会出现意外副作用。"
+      },
+      "replay": {
+        "title": "确定性重放",
+        "description": "每次运行都会被记录并可重放。你可以逐步回溯代理的决策，比较两次运行的差异，并将非确定性问题从系统中排查出去。"
+      },
+      "durable": {
+        "title": "持久化步骤和触发器",
+        "description": "为长时间运行的工作设置检查点，并在崩溃后继续执行。可从 cron、webhook、GitHub、Slack 等触发流水线。"
+      },
+      "protocols": {
+        "title": "原生协议支持",
+        "description": "开箱即用地支持 MCP、ACP 和 A2A。可将 Harn 嵌入 Rust，或使用 harn serve 以服务器方式运行。"
+      }
+    },
+    "paths": {
+      "sectionTitle": "找到你的路径",
+      "sectionBody": "文档是围绕你想要完成的事情来组织的。",
+      "explore": "探索",
+      "tutorials": {
+        "kicker": "教程",
+        "title": "边构建边学习",
+        "description": "从零开始，一步一步构建一个可工作的代理、MCP 服务器或评估流水线。"
+      },
+      "guides": {
+        "kicker": "操作指南",
+        "title": "完成一项任务",
+        "description": "针对你真正需要的内容提供配方：hooks、channels、pools、重构等。"
+      },
+      "reference": {
+        "kicker": "参考",
+        "title": "查找细节",
+        "description": "完整的语言、运行时、标准库、协议和 CLI 参考。"
+      },
+      "explanation": {
+        "kicker": "内部原理",
+        "title": "理解设计",
+        "description": "关于宿主边界、沙箱以及 Harn 架构决策背后的思考。"
+      }
+    },
+    "cta": {
+      "title": "编写你的第一个管道",
+      "body": "安装 CLI，编写几行 Harn，然后在几分钟内运行一个真实代理。",
+      "getStarted": "开始使用",
+      "browseCookbook": "浏览食谱"
+    }
+  },
+  "meta": {
+    "landingTitle": "Harn：面向管道的 AI 代理编排语言",
+    "landingDescription": "Harn 是一种面向管道的语言，用于构建、编排和运行 AI 代理。包含教程、指南，以及完整的语言和运行时参考。",
+    "notFoundTitle": "页面未找到 | {siteName}",
+    "notFoundDescription": "找不到所请求的 Harn 文档页面。",
+    "docTitle": "{title} | {siteName}"
+  }
+}

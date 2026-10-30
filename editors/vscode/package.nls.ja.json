@@ -1,0 +1,17 @@
+{
+  "displayName": "Harn 言語",
+  "description": "AI エージェント向けのパイプライン指向言語である Harn の言語サポート",
+  "harn.runPipeline": "Harn: パイプラインを実行",
+  "harn.formatFile": "Harn: ファイルを整形",
+  "harn.applyAllAutofixes": "Harn: すべての自動修正を適用",
+  "debug.program": "デバッグする .harn ファイルへのパス",
+  "debug.cwd": "デバッグ セッションの作業ディレクトリ",
+  "debug.name": "現在の Harn ファイルをデバッグ",
+  "harn.path": "harn バイナリへのパス",
+  "harn.lspPath": "harn-lsp 言語サーバー バイナリへのパス",
+  "harn.dapPath": "harn-dap デバッグ アダプター バイナリへのパス",
+  "task.command": "呼び出す harn のサブコマンド。",
+  "task.file": ".harn スクリプトへのパス。省略した場合は現在のファイルが既定値になります。",
+  "task.args": "ファイル パスの後ろに追加される追加引数。",
+  "task.cwd": "起動されたプロセスの作業ディレクトリ。"
+}

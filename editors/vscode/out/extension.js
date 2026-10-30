@@ -51,14 +51,14 @@ class HarnDebugConfigurationProvider {
         if (!config.type && !config.request && !config.name) {
             config.type = "harn";
             config.request = "launch";
-            config.name = "Debug Current Harn File";
+            config.name = vscode.l10n.t("Debug Current Harn File");
             config.program = "${file}";
             config.cwd = "${workspaceFolder}";
         }
         if (!config.program) {
             const editor = vscode.window.activeTextEditor;
             if (!editor || editor.document.languageId !== "harn") {
-                vscode.window.showErrorMessage("Open a .harn file to debug");
+                vscode.window.showErrorMessage(vscode.l10n.t("Open a .harn file to debug"));
                 return null;
             }
             config.program = editor.document.fileName;
@@ -156,7 +156,7 @@ function activate(context) {
             { scheme: "file", language: "harn-prompt" },
         ],
     };
-    client = new node_1.LanguageClient("harn-lsp", "Harn Language Server", serverOptions, clientOptions);
+    client = new node_1.LanguageClient("harn-lsp", vscode.l10n.t("Harn Language Server"), serverOptions, clientOptions);
     client.start().catch((err) => {
         // LSP is optional — extension works for syntax highlighting without it
         console.warn("Harn LSP failed to start:", err);
@@ -165,7 +165,7 @@ function activate(context) {
     const runCommand = vscode.commands.registerCommand("harn.runPipeline", async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor || editor.document.languageId !== "harn") {
-            vscode.window.showWarningMessage("Open a .harn file first");
+            vscode.window.showWarningMessage(vscode.l10n.t("Open a .harn file first"));
             return;
         }
         await editor.document.save();
@@ -187,7 +187,7 @@ function activate(context) {
     const applyAllFixesCommand = vscode.commands.registerCommand("harn.applyAllAutofixes", async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor || editor.document.languageId !== "harn") {
-            vscode.window.showWarningMessage("Open a .harn file first");
+            vscode.window.showWarningMessage(vscode.l10n.t("Open a .harn file first"));
             return;
         }
         await vscode.commands.executeCommand("editor.action.sourceAction", {

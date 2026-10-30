@@ -1,0 +1,17 @@
+{
+  "displayName": "Harn-Sprache",
+  "description": "Sprachunterstützung für Harn — die pipeline-orientierte Sprache für KI-Agenten",
+  "harn.runPipeline": "Harn: Pipeline ausführen",
+  "harn.formatFile": "Harn: Datei formatieren",
+  "harn.applyAllAutofixes": "Harn: Alle automatischen Korrekturen anwenden",
+  "debug.program": "Pfad zur .harn-Datei zum Debuggen",
+  "debug.cwd": "Arbeitsverzeichnis für die Debug-Sitzung",
+  "debug.name": "Aktuelle Harn-Datei debuggen",
+  "harn.path": "Pfad zur harn-Binärdatei",
+  "harn.lspPath": "Pfad zur harn-lsp-Sprachserver-Binärdatei",
+  "harn.dapPath": "Pfad zur harn-dap-Debug-Adapter-Binärdatei",
+  "task.command": "Der aufzurufende harn-Unterbefehl.",
+  "task.file": "Pfad zu einem .harn-Skript. Standardmäßig die aktuelle Datei, wenn weggelassen.",
+  "task.args": "Zusätzliche Argumente, die nach dem Dateipfad angehängt werden.",
+  "task.cwd": "Arbeitsverzeichnis für den gestarteten Prozess."
+}

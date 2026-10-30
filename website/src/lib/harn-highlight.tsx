@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import type { Mode } from "highlight.js"
 import { createLowlight, type LanguageFn } from "lowlight"
 import vocabulary from "../../../spec/language-vocabulary.json"
-import { KEYWORD_DOCS } from "./keyword-docs"
+import { keywordDoc } from "./keyword-docs"
 
 const harnLanguage: LanguageFn = (hljs) => {
   const keywords = {
@@ -82,7 +82,7 @@ function renderHighlightNode(node: HighlightNode, index: number): ReactNode {
   const classes = classList(node)
   // Offer a hover doc when this token is a keyword/built-in we have a note for.
   // The shared KeywordTooltip listener reads `data-harn-tip`, so there is no per-token JS.
-  const tip = classes.some((c) => TIPPABLE.has(c)) ? KEYWORD_DOCS[nodeText(node).trim()] : undefined
+  const tip = classes.some((c) => TIPPABLE.has(c)) ? keywordDoc(nodeText(node).trim()) : undefined
 
   return (
     <span

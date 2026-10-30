@@ -1,3 +1,4 @@
+import { portalText } from "../i18n/portalText"
 import { defineMessages, useIntl } from "react-intl"
 import { Link, useNavigate, useSearchParams } from "react-router"
 
@@ -6,9 +7,18 @@ import { useRunDetailData } from "../hooks/useRunDetailData"
 
 const messages = defineMessages({
   back: { id: "portal.runDetailPage.back", defaultMessage: "Back to runs" },
-  eyebrow: { id: "portal.runDetailPage.eyebrow", defaultMessage: "Run inspector" },
-  title: { id: "portal.runDetailPage.title", defaultMessage: "Inspect persisted run" },
-  missing: { id: "portal.runDetailPage.missing", defaultMessage: "Choose a run from the runs page." },
+  eyebrow: {
+    id: "portal.runDetailPage.eyebrow",
+    defaultMessage: "Run inspector",
+  },
+  title: {
+    id: "portal.runDetailPage.title",
+    defaultMessage: "Inspect persisted run",
+  },
+  missing: {
+    id: "portal.runDetailPage.missing",
+    defaultMessage: "Choose a run from the runs page.",
+  },
 })
 
 export function RunDetailPage() {
@@ -43,7 +53,11 @@ export function RunDetailPage() {
         />
       ) : (
         <section className="empty-state empty-state-inline">
-          <p>{loading ? "Loading run…" : lastError ?? intl.formatMessage(messages.missing)}</p>
+          <p>
+            {loading
+              ? portalText("Loading run…")
+              : (lastError ?? intl.formatMessage(messages.missing))}
+          </p>
         </section>
       )}
     </section>

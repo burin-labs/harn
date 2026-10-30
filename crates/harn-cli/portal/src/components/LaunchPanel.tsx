@@ -1,7 +1,13 @@
+import { portalText } from "../i18n/portalText"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { defineMessages, useIntl } from "react-intl"
 
-import type { PortalLaunchJob, PortalLaunchTarget, PortalLlmOptions, PortalMeta } from "../types"
+import type {
+  PortalLaunchJob,
+  PortalLaunchTarget,
+  PortalLlmOptions,
+  PortalMeta,
+} from "../types"
 
 const CodeEditor = lazy(async () => {
   const module = await import("./CodeEditor")
@@ -46,16 +52,31 @@ const messages = defineMessages({
   },
   mode: { id: "portal.launch.mode", defaultMessage: "Mode" },
   fileMode: { id: "portal.launch.fileMode", defaultMessage: "Existing file" },
-  sourceMode: { id: "portal.launch.sourceMode", defaultMessage: "Script editor" },
-  playgroundMode: { id: "portal.launch.playgroundMode", defaultMessage: "Playground" },
-  chooseModel: { id: "portal.launch.chooseModel", defaultMessage: "Choose a model for this provider" },
+  sourceMode: {
+    id: "portal.launch.sourceMode",
+    defaultMessage: "Script editor",
+  },
+  playgroundMode: {
+    id: "portal.launch.playgroundMode",
+    defaultMessage: "Playground",
+  },
+  chooseModel: {
+    id: "portal.launch.chooseModel",
+    defaultMessage: "Choose a model for this provider",
+  },
   target: { id: "portal.launch.target", defaultMessage: "Target file" },
   source: { id: "portal.launch.source", defaultMessage: "Harn source" },
   task: { id: "portal.launch.task", defaultMessage: "Task" },
   provider: { id: "portal.launch.provider", defaultMessage: "Provider" },
   model: { id: "portal.launch.model", defaultMessage: "Model" },
-  customProvider: { id: "portal.launch.customProvider", defaultMessage: "Custom provider" },
-  customModel: { id: "portal.launch.customModel", defaultMessage: "Custom model" },
+  customProvider: {
+    id: "portal.launch.customProvider",
+    defaultMessage: "Custom provider",
+  },
+  customModel: {
+    id: "portal.launch.customModel",
+    defaultMessage: "Custom model",
+  },
   env: { id: "portal.launch.env", defaultMessage: "Env JSON overrides" },
   run: { id: "portal.launch.run", defaultMessage: "Run now" },
   running: { id: "portal.launch.running", defaultMessage: "Launching…" },
@@ -66,42 +87,80 @@ const messages = defineMessages({
   jobs: { id: "portal.launch.jobs", defaultMessage: "Recent launches" },
   noJobs: { id: "portal.launch.noJobs", defaultMessage: "No launch jobs yet." },
   openRun: { id: "portal.launch.openRun", defaultMessage: "Open run" },
-  workspaceDir: { id: "portal.launch.workspaceDir", defaultMessage: "Workspace" },
-  transcriptPath: { id: "portal.launch.transcriptPath", defaultMessage: "Transcript" },
+  workspaceDir: {
+    id: "portal.launch.workspaceDir",
+    defaultMessage: "Workspace",
+  },
+  transcriptPath: {
+    id: "portal.launch.transcriptPath",
+    defaultMessage: "Transcript",
+  },
   logs: { id: "portal.launch.logs", defaultMessage: "Logs" },
-  workspaceRoot: { id: "portal.launch.workspaceRoot", defaultMessage: "Workspace root" },
+  workspaceRoot: {
+    id: "portal.launch.workspaceRoot",
+    defaultMessage: "Workspace root",
+  },
   runDir: { id: "portal.launch.runDir", defaultMessage: "Run artifacts" },
-  launchContext: { id: "portal.launch.launchContext", defaultMessage: "Launch context" },
+  launchContext: {
+    id: "portal.launch.launchContext",
+    defaultMessage: "Launch context",
+  },
   launchContextCopy: {
     id: "portal.launch.launchContextCopy",
-    defaultMessage: "Existing-file launches run from this workspace. Playground launches also persist generated source and metadata under the run directory.",
+    defaultMessage:
+      "Existing-file launches run from this workspace. Playground launches also persist generated source and metadata under the run directory.",
   },
   sourceHelp: {
     id: "portal.launch.sourceHelp",
-    defaultMessage: "Write and execute a Harn script directly in the portal. The script runs with the workspace root shown above as its current directory.",
+    defaultMessage:
+      "Write and execute a Harn script directly in the portal. The script runs with the workspace root shown above as its current directory.",
   },
   playgroundHelp: {
     id: "portal.launch.playgroundHelp",
-    defaultMessage: "Create a quick persisted workflow run from a task and optional provider/model overrides.",
+    defaultMessage:
+      "Create a quick persisted workflow run from a task and optional provider/model overrides.",
   },
   fileHelp: {
     id: "portal.launch.fileHelp",
     defaultMessage: "Run an existing .harn file from the current workspace.",
   },
-  presetHello: { id: "portal.launch.presetHello", defaultMessage: "Hello world" },
-  presetWorkflow: { id: "portal.launch.presetWorkflow", defaultMessage: "Workflow graph" },
-  editorPresets: { id: "portal.launch.editorPresets", defaultMessage: "Templates" },
-  sectionEditor: { id: "portal.launch.sectionEditor", defaultMessage: "Editor" },
-  sectionRuns: { id: "portal.launch.sectionRuns", defaultMessage: "Launch history" },
-  selectMode: { id: "portal.launch.selectMode", defaultMessage: "Choose a launch flow" },
+  presetHello: {
+    id: "portal.launch.presetHello",
+    defaultMessage: "Hello world",
+  },
+  presetWorkflow: {
+    id: "portal.launch.presetWorkflow",
+    defaultMessage: "Workflow graph",
+  },
+  editorPresets: {
+    id: "portal.launch.editorPresets",
+    defaultMessage: "Templates",
+  },
+  sectionEditor: {
+    id: "portal.launch.sectionEditor",
+    defaultMessage: "Editor",
+  },
+  sectionRuns: {
+    id: "portal.launch.sectionRuns",
+    defaultMessage: "Launch history",
+  },
+  selectMode: {
+    id: "portal.launch.selectMode",
+    defaultMessage: "Choose a launch flow",
+  },
   providerHelp: {
     id: "portal.launch.providerHelp",
-    defaultMessage: "Configured providers are read from Harn's runtime config. Local providers attempt live model discovery from their configured endpoints.",
+    defaultMessage:
+      "Configured providers are read from Harn's runtime config. Local providers attempt live model discovery from their configured endpoints.",
   },
-  endpointUrl: { id: "portal.launch.endpointUrl", defaultMessage: "Endpoint URL" },
+  endpointUrl: {
+    id: "portal.launch.endpointUrl",
+    defaultMessage: "Endpoint URL",
+  },
   endpointHelp: {
     id: "portal.launch.endpointHelp",
-    defaultMessage: "Use this to point the selected provider at a localhost or LAN-hosted model server without editing config files first.",
+    defaultMessage:
+      "Use this to point the selected provider at a localhost or LAN-hosted model server without editing config files first.",
   },
   providerUnavailable: {
     id: "portal.launch.providerUnavailable",
@@ -110,7 +169,8 @@ const messages = defineMessages({
   customOption: { id: "portal.launch.customOption", defaultMessage: "Custom…" },
   envHelp: {
     id: "portal.launch.envHelp",
-    defaultMessage: "JSON object merged into the child process env only for this launch.",
+    defaultMessage:
+      "JSON object merged into the child process env only for this launch.",
   },
 })
 
@@ -151,19 +211,31 @@ function parseEnvOverrides(envJson: string): Record<string, string> {
   return env
 }
 
-export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenRun }: LaunchPanelProps) {
+export function LaunchPanel({
+  meta,
+  llmOptions,
+  targets,
+  jobs,
+  onLaunch,
+  onOpenRun,
+}: LaunchPanelProps) {
   const intl = useIntl()
-  const [mode, setMode] = useState<"file" | "source" | "playground">("playground")
+  const [mode, setMode] = useState<"file" | "source" | "playground">(
+    "playground",
+  )
   const [filePath, setFilePath] = useState("examples/portal-demo.harn")
   const [source, setSource] = useState(HELLO_WORLD_SOURCE)
   const [task, setTask] = useState("Summarize the repository in a few bullets.")
   const preferredProvider = llmOptions?.providers.find(
     (item) => item.name === llmOptions.preferred_provider && item.viable,
   )
-  const initialProvider = preferredProvider ??
+  const initialProvider =
+    preferredProvider ??
     llmOptions?.providers.find((item) => item.local && item.viable) ??
     llmOptions?.providers.find((item) => item.viable)
-  const initialModel = preferredProvider ? llmOptions?.preferred_model || initialProvider?.default_model : initialProvider?.default_model
+  const initialModel = preferredProvider
+    ? llmOptions?.preferred_model || initialProvider?.default_model
+    : initialProvider?.default_model
   const [provider, setProvider] = useState(initialProvider?.name ?? "")
   const [model, setModel] = useState(initialModel ?? "")
   const [endpointUrl, setEndpointUrl] = useState("")
@@ -173,21 +245,32 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const selectedProvider = customProviderMode ? null : (
-    llmOptions?.providers.find((item) => item.name === provider && item.viable) ??
-    preferredProvider ??
-    llmOptions?.providers.find((item) => item.local && item.viable) ??
-    llmOptions?.providers.find((item) => item.viable) ??
-    null
-  )
-  const providerValue = customProviderMode ? provider : (selectedProvider?.name ?? provider)
+  const selectedProvider = customProviderMode
+    ? null
+    : (llmOptions?.providers.find(
+        (item) => item.name === provider && item.viable,
+      ) ??
+      preferredProvider ??
+      llmOptions?.providers.find((item) => item.local && item.viable) ??
+      llmOptions?.providers.find((item) => item.viable) ??
+      null)
+  const providerValue = customProviderMode
+    ? provider
+    : (selectedProvider?.name ?? provider)
   const selectedModels = selectedProvider?.models ?? []
-  const modelValue = customModelMode ? model : (model || selectedProvider?.default_model || "")
+  const modelValue = customModelMode
+    ? model
+    : model || selectedProvider?.default_model || ""
   const needsCustomModel =
-    customModelMode || (modelValue !== "" && selectedModels.length > 0 && !selectedModels.includes(modelValue))
+    customModelMode ||
+    (modelValue !== "" &&
+      selectedModels.length > 0 &&
+      !selectedModels.includes(modelValue))
 
   useEffect(() => {
-    if (!llmOptions) {return}
+    if (!llmOptions) {
+      return
+    }
     queueMicrotask(() => {
       if (!provider && !customProviderMode && initialProvider) {
         setProvider(initialProvider.name)
@@ -197,7 +280,9 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
   }, [llmOptions, provider, customProviderMode, initialProvider, initialModel])
 
   useEffect(() => {
-    if (!selectedProvider) {return}
+    if (!selectedProvider) {
+      return
+    }
     queueMicrotask(() => {
       if (!endpointUrl) {
         setEndpointUrl(selectedProvider.base_url)
@@ -243,7 +328,9 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
       <section className="panel launch-panel">
         <div className="panel-header panel-header-spacious">
           <div>
-            <div className="eyebrow">{intl.formatMessage(messages.selectMode)}</div>
+            <div className="eyebrow">
+              {intl.formatMessage(messages.selectMode)}
+            </div>
             <h2>{intl.formatMessage(messages.title)}</h2>
             <p>{intl.formatMessage(messages.copy)}</p>
           </div>
@@ -258,17 +345,25 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
           </div>
           <div className="context-grid">
             <div className="context-card">
-              <div className="eyebrow">{intl.formatMessage(messages.workspaceRoot)}</div>
-              <code>{meta?.workspace_root ?? "Loading…"}</code>
+              <div className="eyebrow">
+                {intl.formatMessage(messages.workspaceRoot)}
+              </div>
+              <code>{meta?.workspace_root ?? portalText("Loading…")}</code>
             </div>
             <div className="context-card">
-              <div className="eyebrow">{intl.formatMessage(messages.runDir)}</div>
-              <code>{meta?.run_dir ?? "Loading…"}</code>
+              <div className="eyebrow">
+                {intl.formatMessage(messages.runDir)}
+              </div>
+              <code>{meta?.run_dir ?? portalText("Loading…")}</code>
             </div>
           </div>
         </section>
 
-        <div className="mode-switch" role="tablist" aria-label={intl.formatMessage(messages.mode)}>
+        <div
+          className="mode-switch"
+          role="tablist"
+          aria-label={intl.formatMessage(messages.mode)}
+        >
           {[
             ["playground", intl.formatMessage(messages.playgroundMode)],
             ["source", intl.formatMessage(messages.sourceMode)],
@@ -290,7 +385,9 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
         <div className="launch-workbench">
           <div className="panel-subheader">
             <div>
-              <div className="eyebrow">{intl.formatMessage(messages.sectionEditor)}</div>
+              <div className="eyebrow">
+                {intl.formatMessage(messages.sectionEditor)}
+              </div>
               <h3>
                 {mode === "source"
                   ? intl.formatMessage(messages.sourceMode)
@@ -305,7 +402,11 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
           {mode === "file" ? (
             <label className="search">
               <span>{intl.formatMessage(messages.target)}</span>
-              <select className="compare-select" value={filePath} onChange={(event) => setFilePath(event.target.value)}>
+              <select
+                className="compare-select"
+                value={filePath}
+                onChange={(event) => setFilePath(event.target.value)}
+              >
                 {targets.map((target) => (
                   <option key={target.path} value={target.path}>
                     {target.group} • {target.path}
@@ -318,12 +419,22 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
           {mode === "source" ? (
             <div className="editor-block">
               <div className="editor-toolbar">
-                <span className="eyebrow">{intl.formatMessage(messages.editorPresets)}</span>
+                <span className="eyebrow">
+                  {intl.formatMessage(messages.editorPresets)}
+                </span>
                 <div className="preset-row">
-                  <button className="ghost-button" onClick={() => setSource(HELLO_WORLD_SOURCE)} type="button">
+                  <button
+                    className="ghost-button"
+                    onClick={() => setSource(HELLO_WORLD_SOURCE)}
+                    type="button"
+                  >
                     {intl.formatMessage(messages.presetHello)}
                   </button>
-                  <button className="ghost-button" onClick={() => setSource(WORKFLOW_SOURCE)} type="button">
+                  <button
+                    className="ghost-button"
+                    onClick={() => setSource(WORKFLOW_SOURCE)}
+                    type="button"
+                  >
                     {intl.formatMessage(messages.presetWorkflow)}
                   </button>
                 </div>
@@ -337,7 +448,11 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
                   />
                 }
               >
-                <CodeEditor value={source} onChange={setSource} minHeight="320px" />
+                <CodeEditor
+                  value={source}
+                  onChange={setSource}
+                  minHeight="320px"
+                />
               </Suspense>
             </div>
           ) : null}
@@ -359,7 +474,16 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
               <span>{intl.formatMessage(messages.provider)}</span>
               <select
                 className="compare-select"
-                value={customProviderMode ? "__custom__" : providerValue && llmOptions?.providers.some((item) => item.name === providerValue) ? providerValue : "__custom__"}
+                value={
+                  customProviderMode
+                    ? "__custom__"
+                    : providerValue &&
+                        llmOptions?.providers.some(
+                          (item) => item.name === providerValue,
+                        )
+                      ? providerValue
+                      : "__custom__"
+                }
                 onChange={(event) => {
                   if (event.target.value === "__custom__") {
                     setCustomProviderMode(true)
@@ -370,32 +494,53 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
                   }
                   setCustomProviderMode(false)
                   setProvider(event.target.value)
-                  const nextProvider = llmOptions?.providers.find((item) => item.name === event.target.value)
+                  const nextProvider = llmOptions?.providers.find(
+                    (item) => item.name === event.target.value,
+                  )
                   setEndpointUrl(nextProvider?.base_url ?? "")
                   setModel(nextProvider?.default_model ?? "")
                   setCustomModelMode(false)
                 }}
               >
                 {llmOptions?.providers.map((item) => (
-                  <option key={item.name} value={item.name} disabled={!item.viable}>
+                  <option
+                    key={item.name}
+                    value={item.name}
+                    disabled={!item.viable}
+                  >
                     {item.viable
                       ? item.name
-                      : intl.formatMessage(messages.providerUnavailable, { name: item.name })}
+                      : intl.formatMessage(messages.providerUnavailable, {
+                          name: item.name,
+                        })}
                   </option>
                 ))}
-                <option value="__custom__">{intl.formatMessage(messages.customOption)}</option>
+                <option value="__custom__">
+                  {intl.formatMessage(messages.customOption)}
+                </option>
               </select>
             </label>
-            {customProviderMode || !providerValue || !llmOptions?.providers.some((item) => item.name === providerValue) ? (
+            {customProviderMode ||
+            !providerValue ||
+            !llmOptions?.providers.some(
+              (item) => item.name === providerValue,
+            ) ? (
               <label className="search">
                 <span>{intl.formatMessage(messages.customProvider)}</span>
-                <input value={provider} onChange={(event) => setProvider(event.target.value)} placeholder="local" />
+                <input
+                  value={provider}
+                  onChange={(event) => setProvider(event.target.value)}
+                  placeholder="local"
+                />
               </label>
             ) : null}
             {selectedProvider?.base_url_env ? (
               <label className="search">
                 <span>
-                  {intl.formatMessage(messages.endpointUrl)} <span className="muted">({selectedProvider.base_url_env})</span>
+                  {intl.formatMessage(messages.endpointUrl)}{" "}
+                  <span className="muted">
+                    ({selectedProvider.base_url_env})
+                  </span>
                 </span>
                 <input
                   value={endpointUrl}
@@ -421,7 +566,9 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
               >
                 {selectedModels.length ? (
                   <>
-                    <option value="" disabled>{intl.formatMessage(messages.chooseModel)}</option>
+                    <option value="" disabled>
+                      {intl.formatMessage(messages.chooseModel)}
+                    </option>
                     {selectedModels.map((item) => (
                       <option key={item} value={item}>
                         {item}
@@ -429,15 +576,25 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
                     ))}
                   </>
                 ) : (
-                  <option value="">{selectedProvider ? "No discovered models" : "Select a provider"}</option>
+                  <option value="">
+                    {selectedProvider
+                      ? portalText("No discovered models")
+                      : portalText("Select a provider")}
+                  </option>
                 )}
-                <option value="__custom__">{intl.formatMessage(messages.customOption)}</option>
+                <option value="__custom__">
+                  {intl.formatMessage(messages.customOption)}
+                </option>
               </select>
             </label>
             {needsCustomModel || selectedModels.length === 0 ? (
               <label className="search">
                 <span>{intl.formatMessage(messages.customModel)}</span>
-                <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="qwen2.5-coder:latest" />
+                <input
+                  value={model}
+                  onChange={(event) => setModel(event.target.value)}
+                  placeholder="qwen2.5-coder:latest"
+                />
               </label>
             ) : null}
             <label className="search launch-full">
@@ -449,9 +606,17 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
                 placeholder={`{\n  "OPENAI_API_KEY": "...",\n  "ANTHROPIC_API_KEY": "...",\n  "LOCAL_LLM_BASE_URL": "http://192.168.1.40:8000",\n  "LOCAL_LLM_MODEL": "qwen2.5-coder:latest"\n}`}
               />
             </label>
-            <div className="muted launch-full">{intl.formatMessage(messages.providerHelp)}</div>
-            {selectedProvider?.base_url_env ? <div className="muted launch-full">{intl.formatMessage(messages.endpointHelp)}</div> : null}
-            <div className="muted launch-full">{intl.formatMessage(messages.envHelp)}</div>
+            <div className="muted launch-full">
+              {intl.formatMessage(messages.providerHelp)}
+            </div>
+            {selectedProvider?.base_url_env ? (
+              <div className="muted launch-full">
+                {intl.formatMessage(messages.endpointHelp)}
+              </div>
+            ) : null}
+            <div className="muted launch-full">
+              {intl.formatMessage(messages.envHelp)}
+            </div>
           </div>
 
           <div className="launch-actions">
@@ -461,7 +626,9 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
               onClick={() => void handleLaunch()}
               type="button"
             >
-              {submitting ? intl.formatMessage(messages.running) : intl.formatMessage(messages.run)}
+              {submitting
+                ? intl.formatMessage(messages.running)
+                : intl.formatMessage(messages.run)}
             </button>
             {error ? <div className="muted">{error}</div> : null}
           </div>
@@ -471,7 +638,9 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
       <section className="panel launch-history-panel">
         <div className="panel-subheader">
           <div>
-            <div className="eyebrow">{intl.formatMessage(messages.sectionRuns)}</div>
+            <div className="eyebrow">
+              {intl.formatMessage(messages.sectionRuns)}
+            </div>
             <h3>{intl.formatMessage(messages.jobs)}</h3>
           </div>
         </div>
@@ -481,28 +650,45 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
               <div className="artifact-item" key={job.id}>
                 <div className="row">
                   <strong>{job.target_label}</strong>
-                  <span className={`pill ${job.status === "failed" ? "failed" : job.status === "completed" ? "complete" : "running"}`}>
+                  <span
+                    className={`pill ${job.status === "failed" ? "failed" : job.status === "completed" ? "complete" : "running"}`}
+                  >
                     {job.status}
                   </span>
                 </div>
                 <div className="meta">
-                  {job.mode} • started {job.started_at}
-                  {job.exit_code != null ? ` • exit ${job.exit_code}` : ""}
+                  {portalText("{value0} • started {value1}{value2}", {
+                    value0: job.mode,
+                    value1: job.started_at,
+                    value2:
+                      job.exit_code != null
+                        ? portalText(" • exit {value0}", {
+                            value0: job.exit_code,
+                          })
+                        : "",
+                  })}
                 </div>
                 {job.workspace_dir ? (
                   <div className="meta">
-                    {intl.formatMessage(messages.workspaceDir)} • <code>{job.workspace_dir}</code>
+                    {intl.formatMessage(messages.workspaceDir)} •{" "}
+                    <code>{job.workspace_dir}</code>
                   </div>
                 ) : null}
                 {job.transcript_path ? (
                   <div className="meta">
-                    {intl.formatMessage(messages.transcriptPath)} • <code>{job.transcript_path}</code>
+                    {intl.formatMessage(messages.transcriptPath)} •{" "}
+                    <code>{job.transcript_path}</code>
                   </div>
                 ) : null}
                 {job.discovered_run_paths.length ? (
                   <div className="turn-chip-row">
                     {job.discovered_run_paths.map((path) => (
-                      <button className="run-card-link" key={path} onClick={() => onOpenRun(path)} type="button">
+                      <button
+                        className="run-card-link"
+                        key={path}
+                        onClick={() => onOpenRun(path)}
+                        type="button"
+                      >
                         {intl.formatMessage(messages.openRun)} {path}
                       </button>
                     ))}

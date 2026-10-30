@@ -1,7 +1,7 @@
 import React from "react"
 import ReactDOM from "react-dom/client"
 import { QueryClientProvider } from "@tanstack/react-query"
-import { IntlProvider } from "react-intl"
+import { PortalIntlProvider } from "./i18n/PortalIntlProvider"
 import { BrowserRouter } from "react-router"
 
 import { App } from "./App"
@@ -17,9 +17,9 @@ ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <IntlProvider locale="en">
+        <PortalIntlProvider>
           <App />
-        </IntlProvider>
+        </PortalIntlProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,

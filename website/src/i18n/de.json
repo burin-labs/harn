@@ -1,0 +1,232 @@
+{
+  "common": {
+    "siteName": "Harn",
+    "github": "GitHub",
+    "language": "Sprache"
+  },
+  "keywords": {
+    "pipeline": "Deklariert eine benannte Pipeline: eine oberste, erneut abspielbare Einheit der Agentenarbeit.",
+    "fn": "Definiert eine Funktion.",
+    "let": "Bindet einen lokalen Wert.",
+    "parallel": "Führt die Iterationen gleichzeitig aus und verbindet ihre Ergebnisse.",
+    "for": "Iteriert in Reihenfolge über eine Sammlung.",
+    "in": "Nennt die Sammlung, aus der eine Schleife ihre Elemente bezieht.",
+    "retry": "Führt den Block bei Fehler erneut aus, bis zur angegebenen Anzahl.",
+    "spawn": "Startet eine gleichzeitige Aufgabe, auf die Sie später warten können.",
+    "llm_call": "Ruft ein Modell auf. Das erste Argument ist der Prompt, das zweite der System-Prompt.",
+    "log": "Schreibt einen Wert in das Laufprotokoll.",
+    "read_file": "Liest eine Datei über das Harness, eine vor dem Lauf geprüfte Fähigkeit.",
+    "tool_select": "Wählt aus, welches Tool das Modell als Nächstes aufrufen soll.",
+    "if": "Führt den Block aus, wenn die Bedingung erfüllt ist.",
+    "else": "Wird ausgeführt, wenn die passende if-Bedingung falsch ist.",
+    "while": "Wiederholt den Block, solange die Bedingung erfüllt ist.",
+    "return": "Gibt einen Wert aus der Funktion oder Pipeline zurück.",
+    "break": "Beendet die nächstgelegene Schleife.",
+    "continue": "Springt zur nächsten Schleifeniteration."
+  },
+  "banner": {
+    "label": "Vorabversion",
+    "prerelease": "Harn ist vor 1.0 — die Sprache, die Standardbibliothek und die CLI können sich zwischen den Versionen ändern.",
+    "changelogLink": "Siehe die Release Notes"
+  },
+  "nav": {
+    "mainNavAria": "Hauptmenü",
+    "brandHomeAria": "Harn-Startseite",
+    "docs": "Dokumentation",
+    "reference": "Referenz",
+    "search": "Suche",
+    "searchAria": "Dokumentation durchsuchen",
+    "cmdK": "⌘K",
+    "githubAria": "Harn auf GitHub"
+  },
+  "theme": {
+    "toLight": "Zum Hellmodus wechseln",
+    "toDark": "Zum Dunkelmodus wechseln"
+  },
+  "search": {
+    "placeholder": "In den Docs suchen…",
+    "esc": "esc",
+    "loading": "Laden…",
+    "noResults": "Keine Ergebnisse."
+  },
+  "footer": {
+    "tagline": "Die pipeline-orientierte Sprache zum Erstellen und Betreiben von KI-Agenten.",
+    "docsTitle": "Dokumentation",
+    "projectTitle": "Projekt",
+    "communityTitle": "Community",
+    "introduction": "Einführung",
+    "gettingStarted": "Erste Schritte",
+    "languageReference": "Sprachreferenz",
+    "cookbook": "Kochbuch",
+    "llmsTxt": "llms.txt",
+    "github": "GitHub",
+    "releases": "Releases",
+    "playground": "Playground",
+    "issues": "Issues",
+    "discussions": "Diskussionen",
+    "contributing": "Mitwirken",
+    "copyright": "© {year} Burin Labs. Harn ist Open Source."
+  },
+  "notFound": {
+    "code": "404",
+    "title": "Seite nicht gefunden",
+    "body": "Diese Seite existiert nicht. Sie wurde möglicherweise verschoben, versuche daher zu suchen oder kehre zu den Docs zurück.",
+    "toDocs": "Zu den Docs",
+    "toHome": "Startseite"
+  },
+  "docs": {
+    "previous": "Zurück",
+    "next": "Weiter",
+    "pagerAria": "Vorherige und nächste Seite",
+    "onThisPage": "Auf dieser Seite",
+    "editOnGitHub": "Diese Seite auf GitHub bearbeiten",
+    "sectionsAria": "Dokumentationsabschnitte",
+    "sidebarAria": "Dokumentationsseiten",
+    "breadcrumbAria": "Breadcrumb",
+    "onThisPageAria": "Auf dieser Seite",
+    "skipToContent": "Zum Inhalt springen"
+  },
+  "diagram": {
+    "expand": "Diagramm erweitern",
+    "overlayAria": "Diagramm-Viewer",
+    "zoomIn": "Vergrößern",
+    "zoomOut": "Verkleinern",
+    "resetZoom": "Diagramm an den Bildschirm anpassen",
+    "resetZoomLabel": "Anpassen",
+    "close": "Den Diagramm-Viewer schließen"
+  },
+  "mockup": {
+    "aria": "Eine Harn-Pipeline-Definition, die als Live-Agent ausgeführt wird",
+    "fileLabel": "review.harn",
+    "runLabel": "harn run",
+    "thought": "Diff für crates/harn-vm wird gelesen…",
+    "toolCall": "llm_call · claude-opus-4-8 · 2 tools",
+    "findingPrefix": "3 Probleme gefunden: ein ungeschütztes unwrap in ",
+    "findingSymbol": "call_closure",
+    "findingSuffix": ", eine fehlende Bounds-Prüfung und ein veralteter Doc-Snippet.",
+    "spawn": "Agent starten · Frist 30s",
+    "replay": "deterministische Wiedergabe auf",
+    "findings": "3 Befunde"
+  },
+  "landing": {
+    "hero": {
+      "headline": "Agenten in einer Sprache bauen und betreiben.",
+      "subhead": "Harn ist eine pipeline-orientierte Sprache für KI-Agenten. LLM-Aufrufe, Tools, Capability-Prüfungen, dauerhafte Schritte und deterministische Wiedergabe sind Sprach- und Standardbibliotheksfunktionen, nicht SDKs, die Sie selbst zusammensetzen.",
+      "getStarted": "Loslegen",
+      "forAgents": "Für Agenten",
+      "readDocs": "Die Dokumentation lesen",
+      "github": "GitHub",
+      "facts": [
+        "Open Source, in Rust geschrieben",
+        "Deterministische Wiedergabe",
+        "Standardmäßig sicher bei Fähigkeiten",
+        "Spricht MCP, ACP & A2A"
+      ]
+    },
+    "examples": {
+      "sectionTitle": "Vollständige Programme, keine Snippets",
+      "sectionBody": "Lesen Sie diese wegen der Form, nicht wegen des Themas. In jedem davon ist die deterministische Arbeit gewöhnlicher Code, und das Programm entscheidet, wann ein Schritt einen Modellaufruf wert ist. Sie sind im CLI-Demo-Bundle enthalten und laufen offline gegen aufgezeichnete Fixtures.",
+      "tablistAria": "Ausführbare Harn-Beispiele",
+      "filesAria": "Szenariodateien",
+      "multiFileNote": "Dieses Szenario enthält mehr als eine Datei. Die Prompts befinden sich in benachbarten .harn.prompt-Vorlagen und werden mit render_prompt geladen, so wie ein echtes Harn-Projekt aufgebaut ist.",
+      "copy": "Kopieren",
+      "copied": "Kopiert",
+      "copyAria": "Quelldatei kopieren",
+      "viewSource": "Quelltext anzeigen",
+      "readDocs": "Die Dokumentation lesen",
+      "extendLabel": "Mach es zu deinem",
+      "scenarios": {
+        "review-captain": {
+          "tab": "Code-Review-Agent",
+          "title": "Verwenden Sie das Modell nur für die Beurteilungsentscheidung.",
+          "outcome": "Das Zusammenstellen des Diffs, das Zählen der geänderten Zeilen und das Erstellen der Belegzeile sind reiner Code. Zwei Schritte brauchen eine Einschätzung, also werden nur diese beiden zu Modellaufrufen. Die Prompts liegen in separaten Template-Dateien.",
+          "extend": "Tauschen Sie das fest verdrahtete Diff gegen einen Aufruf an Ihre Forge aus, und es prüft echte Pull Requests. Bearbeiten Sie die Prompts, ohne das Programm anzufassen, oder fügen Sie eine dritte Stufe hinzu, die den Merge blockiert, wenn das Urteil negativ ausfällt."
+        },
+        "merge-captain": {
+          "tab": "PR-Triage",
+          "title": "Verwandeln Sie eine Warteschlange in Entscheidungen, auf die Sie reagieren können.",
+          "outcome": "Jeder Pull Request wird in Zusammenführen, Übergabe oder Blockieren klassifiziert und kommt als strukturierte Daten statt als Prosa zurück, sodass der nächste Schritt Code ist und nicht noch ein weiterer Prompt.",
+          "extend": "Richten Sie es auf Ihre echte Warteschlange und erweitern Sie die Menge der Urteile. Da jede Entscheidung typisiert ist, können Sie darauf routen: die sicheren automatisch zusammenführen und den Rest eskalieren."
+        },
+        "mcp-host": {
+          "tab": "MCP-Server",
+          "title": "Überwachen Sie Tool-Server als Teil des Programms.",
+          "outcome": "Registrierung, Status-Snapshots und Herunterfahren sind gewöhnliche Anweisungen. Der Lebenszyklus eines Tool-Servers ist etwas, das dem Programm gehört, und nicht etwas, das das Deployment erledigt.",
+          "extend": "Registrieren Sie Ihre eigenen Server und schalten Sie sie hinter eine Fähigkeitsrichtlinie, damit eine autonome Schleife nicht auf ein Tool zugreifen kann, das Sie ihr nicht übergeben haben."
+        },
+        "stdlib-toolkit": {
+          "tab": "Prompt-Toolkit",
+          "title": "Erstellen Sie den Kontext deterministisch und fragen Sie dann einmal nach.",
+          "outcome": "Klonen, Zusammenführen, Deduplizieren, XML-Roundtrip, Umbruch und Einrückung sind Bibliotheksaufrufe. Der teure Teil eines Prompts ist meist das Zusammenstellen, und nichts davon braucht ein Modell.",
+          "extend": "Speisen Sie es mit Ihren eigenen Quellen und behalten Sie die Zusammenstellung im Code. Je weniger vom Kontext Sie ein Modell rekonstruieren lassen, desto günstiger und reproduzierbarer ist der Lauf."
+        }
+      }
+    },
+    "features": {
+      "sectionTitle": "Die Agentenlaufzeit, direkt in die Sprache eingebaut",
+      "sectionBody": "Orchestrierung, Sicherheit und Beobachtbarkeit sind Primitive in Harn und seiner Standardbibliothek, sodass sie sich ergänzen statt gegeneinander zu arbeiten.",
+      "pipelines": {
+        "title": "Pipelines sind erstklassig",
+        "description": "Verketten Sie Arbeit mit dem |> Operator. Daten- und Kontrollfluss sind von oben nach unten lesbar, und der Compiler verfolgt die Form jeder Stufe."
+      },
+      "llms": {
+        "title": "LLMs und Tools, eingebaut",
+        "description": "llm_call, agent_loop, Tool-Tresore, MCP, Reranking und Ensembles sind Sprachprimitive, nicht ein nachträglich angebrachtes SDK, das Sie von Hand zusammenstellen."
+      },
+      "capabilities": {
+        "title": "Fähigkeitssicherheit zur Kompilierzeit",
+        "description": "Dateisystem-, Netzwerk- und Prozesszugriff sind Fähigkeiten, die geprüft werden, bevor auch nur eine Zeile läuft. Keine überraschenden Seiteneffekte innerhalb einer autonomen Schleife."
+      },
+      "replay": {
+        "title": "Deterministisches Replay",
+        "description": "Jeder Lauf wird aufgezeichnet und wiedergegeben. Gehen Sie die Entscheidungen eines Agents Schritt für Schritt zurück, vergleichen Sie zwei Läufe und debuggen Sie Nichtdeterminismus aus dem System heraus."
+      },
+      "durable": {
+        "title": "Dauerhafte Schritte und Trigger",
+        "description": "Längerlaufende Arbeit per Checkpoint sichern und nach einem Absturz fortsetzen. Starten Sie Pipelines über Cron, Webhooks, GitHub, Slack und mehr."
+      },
+      "protocols": {
+        "title": "Protokolle nativ",
+        "description": "Sprechen Sie MCP, ACP und A2A direkt out of the box. Betten Sie Harn in Rust ein oder betreiben Sie es als Server mit harn serve."
+      }
+    },
+    "paths": {
+      "sectionTitle": "Finden Sie Ihren Weg",
+      "sectionBody": "Die Dokumentation ist danach gegliedert, was Sie erreichen möchten.",
+      "explore": "Entdecken",
+      "tutorials": {
+        "kicker": "Tutorials",
+        "title": "Lernen durch Bauen",
+        "description": "Beginnen Sie bei Null und bauen Sie Schritt für Schritt einen funktionsfähigen Agenten, MCP-Server oder Evaluierungs-Pipeline."
+      },
+      "guides": {
+        "kicker": "Anleitungen",
+        "title": "Erledigen Sie eine Aufgabe",
+        "description": "Rezepte für die Dinge, die Sie tatsächlich brauchen: Hooks, Channels, Pools, Refactorings und mehr."
+      },
+      "reference": {
+        "kicker": "Referenz",
+        "title": "Suchen Sie die Details nach",
+        "description": "Die vollständige Referenz für Sprache, Laufzeit, Standardbibliothek, Protokolle und CLI."
+      },
+      "explanation": {
+        "kicker": "Interna",
+        "title": "Verstehen Sie das Design",
+        "description": "Die Überlegungen hinter der Host-Grenze, dem Sandboxing und Harns architektonischen Entscheidungen."
+      }
+    },
+    "cta": {
+      "title": "Schreibe deine erste Pipeline",
+      "body": "Installiere die CLI, schreibe ein paar Zeilen Harn und starte in wenigen Minuten einen echten Agenten.",
+      "getStarted": "Los geht's",
+      "browseCookbook": "Im Kochbuch stöbern"
+    }
+  },
+  "meta": {
+    "landingTitle": "Harn: die pipeline-orientierte Sprache für die Orchestrierung von KI-Agenten",
+    "landingDescription": "Harn ist eine pipeline-orientierte Sprache zum Erstellen, Orchestrieren und Betreiben von KI-Agenten. Tutorials, Anleitungen und eine vollständige Referenz zu Sprache und Runtime.",
+    "notFoundTitle": "Seite nicht gefunden | {siteName}",
+    "notFoundDescription": "Die angeforderte Harn-Dokumentationsseite konnte nicht gefunden werden.",
+    "docTitle": "{title} | {siteName}"
+  }
+}

@@ -1,0 +1,232 @@
+{
+  "common": {
+    "siteName": "Harn",
+    "github": "GitHub",
+    "language": "언어"
+  },
+  "keywords": {
+    "pipeline": "이름이 지정된 파이프라인을 선언합니다: 에이전트 작업의 최상위 재실행 가능한 단위입니다.",
+    "fn": "함수를 정의합니다.",
+    "let": "로컬 값을 바인딩합니다.",
+    "parallel": "반복을 동시에 실행하고 그 결과를 결합합니다.",
+    "for": "컬렉션을 순서대로 반복합니다.",
+    "in": "루프가 값을 가져오는 컬렉션의 이름을 지정합니다.",
+    "retry": "지정된 횟수까지 실패 시 블록을 다시 실행합니다.",
+    "spawn": "나중에 await할 수 있는 동시 작업을 시작합니다.",
+    "llm_call": "모델을 호출합니다. 첫 번째 인수는 프롬프트이고, 두 번째는 시스템 프롬프트입니다.",
+    "log": "런 로그에 값을 기록합니다.",
+    "read_file": "실행 전에 확인되는 기능인 하네스를 통해 파일을 읽습니다.",
+    "tool_select": "모델이 다음에 호출해야 할 도구를 선택합니다.",
+    "if": "조건이 참일 때 블록을 실행합니다.",
+    "else": "일치하는 if 조건이 거짓일 때 실행됩니다.",
+    "while": "조건이 참인 동안 블록을 반복합니다.",
+    "return": "함수 또는 파이프라인에서 값을 반환합니다.",
+    "break": "가장 가까운 루프를 종료합니다.",
+    "continue": "다음 루프 반복으로 건너뜁니다."
+  },
+  "banner": {
+    "label": "사전 출시",
+    "prerelease": "Harn은 1.0 이전 버전입니다 — 언어, 표준 라이브러리, CLI는 릴리스 간에 변경될 수 있습니다.",
+    "changelogLink": "릴리스 노트를 보기"
+  },
+  "nav": {
+    "mainNavAria": "메인",
+    "brandHomeAria": "Harn 홈",
+    "docs": "문서",
+    "reference": "레퍼런스",
+    "search": "검색",
+    "searchAria": "문서 검색",
+    "cmdK": "⌘K",
+    "githubAria": "GitHub의 Harn"
+  },
+  "theme": {
+    "toLight": "라이트 모드로 전환",
+    "toDark": "다크 모드로 전환"
+  },
+  "search": {
+    "placeholder": "문서 검색…",
+    "esc": "esc",
+    "loading": "불러오는 중…",
+    "noResults": "결과가 없습니다."
+  },
+  "footer": {
+    "tagline": "AI 에이전트를 구축하고 운영하기 위한 파이프라인 지향 언어입니다.",
+    "docsTitle": "문서",
+    "projectTitle": "프로젝트",
+    "communityTitle": "커뮤니티",
+    "introduction": "소개",
+    "gettingStarted": "시작하기",
+    "languageReference": "언어 레퍼런스",
+    "cookbook": "요리책",
+    "llmsTxt": "llms.txt",
+    "github": "GitHub",
+    "releases": "릴리스",
+    "playground": "플레이그라운드",
+    "issues": "이슈",
+    "discussions": "토론",
+    "contributing": "기여하기",
+    "copyright": "© {year} Burin Labs. Harn은 오픈 소스입니다."
+  },
+  "notFound": {
+    "code": "404",
+    "title": "페이지를 찾을 수 없음",
+    "body": "해당 페이지가 존재하지 않습니다. 이동했을 수 있으니 검색해 보거나 문서로 돌아가세요.",
+    "toDocs": "문서로 이동",
+    "toHome": "홈"
+  },
+  "docs": {
+    "previous": "이전",
+    "next": "다음",
+    "pagerAria": "이전 및 다음 페이지",
+    "onThisPage": "이 페이지에서",
+    "editOnGitHub": "이 페이지를 GitHub에서 편집",
+    "sectionsAria": "문서 섹션",
+    "sidebarAria": "문서 페이지",
+    "breadcrumbAria": "브레드크럼",
+    "onThisPageAria": "이 페이지에서",
+    "skipToContent": "콘텐츠로 건너뛰기"
+  },
+  "diagram": {
+    "expand": "다이어그램 펼치기",
+    "overlayAria": "다이어그램 뷰어",
+    "zoomIn": "확대",
+    "zoomOut": "축소",
+    "resetZoom": "다이어그램을 화면에 맞추기",
+    "resetZoomLabel": "맞춤",
+    "close": "다이어그램 뷰어 닫기"
+  },
+  "mockup": {
+    "aria": "라이브 에이전트로 실행 중인 Harn 파이프라인 정의",
+    "fileLabel": "review.harn",
+    "runLabel": "harn run",
+    "thought": "crates/harn-vm의 diff를 읽는 중…",
+    "toolCall": "llm_call · claude-opus-4-8 · 2 tools",
+    "findingPrefix": "3개 문제를 발견함: 보호되지 않은 unwrap in ",
+    "findingSymbol": "call_closure",
+    "findingSuffix": "、경계 검사 누락 1개, 그리고 오래된 문서 스니펫 1개.",
+    "spawn": "에이전트 생성 · 마감 30초",
+    "replay": "결정론적 리플레이 켜짐",
+    "findings": "발견 사항 3개"
+  },
+  "landing": {
+    "hero": {
+      "headline": "하나의 언어로 AI 에이전트를 구축하고 운영하세요.",
+      "subhead": "Harn은 AI 에이전트를 위한 파이프라인 지향 언어입니다. LLM 호출, 도구, 기능 검사, 내구성 있는 단계, 그리고 결정론적 리플레이는 직접 조합해야 하는 SDK가 아니라 언어와 표준 라이브러리의 기능입니다.",
+      "getStarted": "시작하기",
+      "forAgents": "에이전트를 위한",
+      "readDocs": "문서 읽기",
+      "github": "GitHub",
+      "facts": [
+        "Rust로 작성된 오픈 소스",
+        "결정론적 리플레이",
+        "기본적으로 안전한 기능 사용",
+        "MCP, ACP 및 A2A 지원"
+      ]
+    },
+    "examples": {
+      "sectionTitle": "스니펫이 아닌 완전한 프로그램",
+      "sectionBody": "주제보다 형태에 주목해 읽어보세요. 각 예제에서 결정론적 작업은 평범한 코드이며, 프로그램이 언제 한 단계가 모델 호출의 가치가 있는지 결정합니다. 이들은 CLI 데모 번들에 포함되어 있으며 기록된 픽스처를 사용해 오프라인으로 실행됩니다.",
+      "tablistAria": "실행 가능한 Harn 예제",
+      "filesAria": "시나리오 파일",
+      "multiFileNote": "이 시나리오는 하나 이상의 파일로 제공됩니다. 프롬프트는 형제 .harn.prompt 템플릿에 있으며, 실제 Harn 프로젝트 구조처럼 render_prompt로 로드됩니다.",
+      "copy": "복사",
+      "copied": "복사됨",
+      "copyAria": "파일 소스 복사",
+      "viewSource": "소스 보기",
+      "readDocs": "문서 읽기",
+      "extendLabel": "나만의 것으로 만들기",
+      "scenarios": {
+        "review-captain": {
+          "tab": "코드 리뷰 에이전트",
+          "title": "판단이 필요한 부분에만 모델을 사용하세요.",
+          "outcome": "diff를 수집하고, 변경된 줄 수를 세고, 영수증을 조립하는 일은 일반 코드입니다. 두 단계만 의견이 필요하므로 그 두 단계만 모델 호출이 됩니다. 프롬프트는 별도의 템플릿 파일에 있습니다.",
+          "extend": "하드코딩된 diff를 여러분의 forge 호출로 바꾸면 실제 pull request를 리뷰합니다. 프로그램을 건드리지 않고 프롬프트를 수정하거나, 판정이 부정적으로 돌아오면 병합을 차단하는 세 번째 단계를 추가하세요."
+        },
+        "merge-captain": {
+          "tab": "PR 분류",
+          "title": "대기열을 실행 가능한 결정으로 바꾸세요.",
+          "outcome": "각 pull request는 merge, handoff, block 중 하나로 분류되며, 문장이 아니라 구조화된 데이터로 돌아오므로 다음 단계는 또 다른 프롬프트가 아니라 코드입니다.",
+          "extend": "실제 대기열에 연결하고 판정 집합을 확장하세요. 모든 결정이 타입이 지정되어 있으므로 이를 기준으로 라우팅할 수 있습니다: 안전한 것은 자동 병합하고 나머지는 에스컬레이션하세요."
+        },
+        "mcp-host": {
+          "tab": "MCP 서버",
+          "title": "도구 서버를 프로그램의 일부로 감독하세요.",
+          "outcome": "등록, 상태 스냅샷, 종료는 평범한 문장입니다. 도구 서버의 수명 주기는 배포가 아니라 프로그램이 소유하는 것입니다.",
+          "extend": "자신만의 서버를 등록하고 capability 정책 뒤에 두어, 자율 루프가 여러분이 넘겨주지 않은 도구에 접근하지 못하게 하세요."
+        },
+        "stdlib-toolkit": {
+          "tab": "프롬프트 툴킷",
+          "title": "컨텍스트를 결정적으로 구성한 다음, 한 번만 묻으세요.",
+          "outcome": "복제, 병합, 중복 제거, XML 왕복, 줄바꿈, 들여쓰기는 라이브러리 호출입니다. 프롬프트의 비용이 큰 부분은 보통 그것을 조립하는 일이며, 그 조립에는 모델이 필요하지 않습니다.",
+          "extend": "여러분만의 소스를 넣고 조립은 코드에 남겨두세요. 모델에게 재구성하게 하는 컨텍스트가 적을수록 실행은 더 저렴하고 더 반복 가능해집니다."
+        }
+      }
+    },
+    "features": {
+      "sectionTitle": "언어에 내장된 에이전트 런타임",
+      "sectionBody": "오케스트레이션, 안전성, 관찰 가능성은 Harn과 그 표준 라이브러리의 기본 요소이므로 서로 충돌하지 않고 조합됩니다.",
+      "pipelines": {
+        "title": "파이프라인은 1급 요소입니다",
+        "description": "|> 연산자로 작업을 조합하세요. 데이터와 제어 흐름은 위에서 아래로 읽히며, 컴파일러가 각 단계의 형태를 추적합니다."
+      },
+      "llms": {
+        "title": "LLM과 도구가 기본 내장",
+        "description": "llm_call, agent_loop, tool vaults, MCP, reranking, ensembles는 수작업으로 조립하는 볼트온 SDK가 아니라 언어의 기본 요소입니다."
+      },
+      "capabilities": {
+        "title": "컴파일 시 capability 안전성",
+        "description": "파일 시스템, 네트워크, 프로세스 접근은 한 줄도 실행되기 전에 검사되는 capability입니다. 자율 루프 안에서 예상치 못한 부작용은 없습니다."
+      },
+      "replay": {
+        "title": "결정적 재생",
+        "description": "모든 실행은 기록되고 재생됩니다. 에이전트의 결정을 단계별로 되짚고, 두 실행을 비교하고, 비결정성을 시스템에서 디버깅하세요."
+      },
+      "durable": {
+        "title": "내구성 있는 단계와 트리거",
+        "description": "장시간 실행 작업을 체크포인트하고 충돌 후 재개하세요. cron, 웹훅, GitHub, Slack 등으로 파이프라인을 실행할 수 있습니다."
+      },
+      "protocols": {
+        "title": "프로토콜을 네이티브로",
+        "description": "MCP, ACP, A2A를 기본으로 지원합니다. Harn을 Rust에 임베드하거나 harn serve로 서버로 실행하세요."
+      }
+    },
+    "paths": {
+      "sectionTitle": "자신에게 맞는 경로를 찾으세요",
+      "sectionBody": "문서는 여러분이 하려는 일에 맞춰 구성되어 있습니다.",
+      "explore": "탐색하기",
+      "tutorials": {
+        "kicker": "튜토리얼",
+        "title": "만들면서 배우기",
+        "description": "처음부터 시작해 작동하는 에이전트, MCP 서버, 또는 평가 파이프라인을 단계별로 만들어 보세요."
+      },
+      "guides": {
+        "kicker": "사용 방법 가이드",
+        "title": "작업을 완료하기",
+        "description": "hooks, channels, pools, refactors 등 실제로 필요한 것들을 위한 레시피입니다."
+      },
+      "reference": {
+        "kicker": "레퍼런스",
+        "title": "세부 사항 찾아보기",
+        "description": "언어, 런타임, 표준 라이브러리, 프로토콜, CLI 전체 레퍼런스입니다."
+      },
+      "explanation": {
+        "kicker": "내부 구조",
+        "title": "설계를 이해하기",
+        "description": "호스트 경계, 샌드박싱, 그리고 Harn의 아키텍처 결정 뒤에 있는 이유입니다."
+      }
+    },
+    "cta": {
+      "title": "첫 번째 파이프라인을 작성하세요",
+      "body": "CLI를 설치하고, Harn 몇 줄을 작성한 뒤, 몇 분 안에 실제 에이전트를 실행하세요.",
+      "getStarted": "시작하기",
+      "browseCookbook": "레시피 모음 살펴보기"
+    }
+  },
+  "meta": {
+    "landingTitle": "Harn: AI 에이전트 오케스트레이션을 위한 파이프라인 지향 언어",
+    "landingDescription": "Harn은 AI 에이전트를 구축하고, 오케스트레이션하고, 운영하기 위한 파이프라인 지향 언어입니다. 튜토리얼, 가이드, 그리고 완전한 언어 및 런타임 레퍼런스를 제공합니다.",
+    "notFoundTitle": "페이지를 찾을 수 없음 | {siteName}",
+    "notFoundDescription": "요청한 Harn 문서 페이지를 찾을 수 없습니다.",
+    "docTitle": "{title} | {siteName}"
+  }
+}
