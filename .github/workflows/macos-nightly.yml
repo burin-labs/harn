@@ -91,7 +91,7 @@ jobs:
     name: Workspace nextest (macos-latest)
     # Only trusted main workflow dispatches may execute on the restricted group.
     # PR and scheduled coverage retain the hosted route.
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && fromJSON('["self-hosted","harn-trusted-macos"]') || 'macos-latest' }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && fromJSON('["self-hosted","harn-trusted-macos"]') || 'macos-latest-xlarge' }}
     timeout-minutes: 75
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
