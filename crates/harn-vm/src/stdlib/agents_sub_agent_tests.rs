@@ -218,7 +218,9 @@ fn parse_sub_agent_request_inherits_parent_anchor_as_execution_cwd() {
     crate::agent_sessions::reset_session_store();
     let dir = tempfile::tempdir().expect("tempdir");
     let project = dir.path().join("project");
-    let project_text = path_string(&project);
+    let canonical_project = crate::workspace_anchor::WorkspaceAnchor::canonicalize_path(&project)
+        .expect("canonical project path");
+    let project_text = path_string(&canonical_project);
     let parent_id =
         crate::agent_sessions::open_or_create_for_test(Some("anchor-inherit-parent".to_string()));
     crate::agent_sessions::set_workspace_anchor(
@@ -240,7 +242,7 @@ fn parse_sub_agent_request_inherits_parent_anchor_as_execution_cwd() {
     );
     assert_eq!(
         parsed.spec.workspace_anchor.as_ref().unwrap().primary,
-        project
+        canonical_project
     );
     assert_eq!(
         parsed.execution.cwd.as_deref(),
@@ -257,6 +259,8 @@ fn parse_sub_agent_request_preserves_explicit_execution_cwd() {
     let child = project.join("child");
     let explicit_cwd = dir.path().join("explicit-cwd");
     let explicit_cwd_text = path_string(&explicit_cwd);
+    let canonical_child = crate::workspace_anchor::WorkspaceAnchor::canonicalize_path(&child)
+        .expect("canonical child path");
     let parent_id = crate::agent_sessions::open_or_create_for_test(Some(
         "anchor-explicit-cwd-parent".to_string(),
     ));
@@ -282,7 +286,7 @@ fn parse_sub_agent_request_preserves_explicit_execution_cwd() {
 
     assert_eq!(
         parsed.spec.workspace_anchor.as_ref().unwrap().primary,
-        child
+        canonical_child
     );
     assert_eq!(
         parsed.execution.cwd.as_deref(),
@@ -322,9 +326,13 @@ fn parse_sub_agent_request_accepts_anchor_in_parent_scope() {
         let request = normalized_request(vec![("anchor", anchor_dict(primary, Vec::new()))]);
         let parsed = parse_sub_agent_request(&[request])
             .unwrap_or_else(|err| panic!("anchor {primary} should be accepted: {err}"));
+        let canonical_primary = crate::workspace_anchor::WorkspaceAnchor::canonicalize_path(
+            std::path::Path::new(primary),
+        )
+        .expect("canonical child primary");
         assert_eq!(
             parsed.spec.workspace_anchor.as_ref().unwrap().primary,
-            std::path::PathBuf::from(primary)
+            canonical_primary
         );
     }
 }
